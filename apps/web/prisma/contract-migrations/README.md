@@ -4,6 +4,19 @@ Use this directory for destructive hosted web database cleanup that must run
 after the new Vercel production deployment is live and the prior production
 function window has drained.
 
+The requested `20261031190000_recover_missing_game_recap` is a narrow
+data-recovery exception: it inserts one normal lifecycle receipt for one opaque
+game id only after the older-settled recap readers, sealer and delivery validator
+are live. It uses this runner's existing deployment proof, drain, transaction,
+timeouts and checksum ledger; it adds no general recovery API. The ordinary
+minute sweep owns generation and delivery. Replays preserve any existing recap
+or receipt, including terminal receipts. Missing, departed, blocked, unbound or
+non-settled games are no-ops. A release operator may retry the existing **Hosted
+Web Contract Migrations** workflow with the exact current `deployed_sha` and
+`deployment_url`; no local production SQL or new workflow is required.
+Keep the compatible Web deployment in place until the receipt completes; older
+Web code rejects this historical game's pending recap read, seal and delivery.
+
 Each migration lives in a timestamped subdirectory with a `migration.sql` file:
 
 ```text

@@ -115,7 +115,7 @@ function validateScoreLine(
   const [a, b] = result;
   if (a.score === b.score) {
     if (/\b(?:owe|owes|owed|owing)\b/iu.test(scoreLine)) {
-      errors.push("scoreLine: the settled result is a tie; nobody owes.");
+      errors.push("scoreLine: the settled result is a tie; name the players and describe the tie without owe, owes, owed or owing.");
     }
     return;
   }

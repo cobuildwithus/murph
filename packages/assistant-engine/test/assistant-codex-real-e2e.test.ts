@@ -45676,13 +45676,14 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
 })
 
 describeRealCodex('real Codex game recap e2e', () => {
-  it('game recap notification writes one sealed story and queues its saved chat line exactly', async () => {
+  it.each([false, true])('game recap notification writes one sealed story and queues its saved chat line exactly; weekends off=%s', async (weekendsOff) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-recap-e2e-'))
     const permissionHome = await materializeRealCodexHostedPermissionHome(config)
     const { buildGameRecapInstructions } = await import('@murphai/hosted-execution/runtime-control')
     const calls: Array<import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest> = []
     const saved: Array<import('@murphai/hosted-execution/runtime-control').HostedGameRecap> = []
+    let rejectedWrites = 0
     try {
       await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
       await mkdir(path.join(workingDirectory, 'games'), { recursive: true })
@@ -45705,14 +45706,33 @@ describeRealCodex('real Codex game recap e2e', () => {
             calls.push(request)
             if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', recapGame: {
               id: 'game_recap_synthetic', players: [{ name: 'Ava', task: '10 minutes of abs' }, { name: 'Leo', task: '100 pushups' }],
-              lengthDays: 3, schedule: { days: [0, 1, 2] }, stakes: [{ kind: 'prize', item: 'breakfast in bed' }],
-              score: [{ name: 'Ava', score: 3 }, { name: 'Leo', score: 2 }], days: [
+              lengthDays: weekendsOff ? 8 : 3, schedule: { days: weekendsOff ? [0, 1, 2, 3, 4] : [0, 1, 2] }, stakes: [{ kind: 'prize', item: 'breakfast in bed' }],
+              score: weekendsOff ? [{ name: 'Ava', score: 6 }, { name: 'Leo', score: 6 }] : [{ name: 'Ava', score: 3 }, { name: 'Leo', score: 2 }], days: weekendsOff ? Array.from({ length: 8 }, (_, dayIndex) => ({
+                dayNumber: dayIndex + 1,
+                posts: dayIndex === 3 || dayIndex === 4 ? { Ava: 'off', Leo: 'off' } : {
+                  Ava: { entryId: `entry_ava_${dayIndex}`, kind: 'photo', text: 'purple mat, still here' },
+                  Leo: { entryId: `entry_leo_${dayIndex}`, kind: 'photo', text: 'pushups beside the laundry basket' },
+                },
+              })) : [
                 { dayNumber: 1, posts: { Ava: { entryId: 'entry_ava_1', kind: 'photo', text: 'purple mat' }, Leo: { entryId: 'entry_leo_1', kind: 'photo', text: 'sauna again' } } },
                 { dayNumber: 2, posts: { Ava: { entryId: 'entry_ava_2', kind: 'photo', text: 'leg raises' }, Leo: 'missed' } },
                 { dayNumber: 3, posts: { Ava: { entryId: 'entry_ava_3', kind: 'photo', text: 'crunches' }, Leo: { entryId: 'entry_leo_3', kind: 'words', text: 'I was spiritually doing pushups' } } },
               ],
             } } }
             if (request.action === 'write_recap') {
+              // Model the server's fixed corrections for this synthetic story;
+              // only an accepted write is a seal, and it is never overwritten.
+              const corrections: string[] = []
+              if (!['Ava', 'Leo'].some((name) => request.recap.scoreLine.includes(name))) corrections.push('scoreLine: name who owes whom.')
+              if (weekendsOff && /\b(?:owe|owes|owed|owing)\b/iu.test(request.recap.scoreLine)) corrections.push('scoreLine: the settled result is a tie; name the players and describe the tie without owe, owes, owed or owing.')
+              request.recap.pages.forEach((page, index) => {
+                if (page.blocks.length < 1 || page.blocks.length > 3) corrections.push(`page ${index + 1}: ${page.blocks.length} blocks; use 1 to 3.`)
+              })
+              if (corrections.length) {
+                rejectedWrites += 1
+                return { action: 'write_recap', result: { status: 'rejected', recapOutcome: `Not saved. Fix these and call write_recap again:\n- ${corrections.join('\n- ')}` } }
+              }
+              if (saved[0]) return { action: 'write_recap', result: { status: 'ok', recapOutcome: 'ok: saved. The players will see this recap.', recap: saved[0], chatLine: saved[0].chatLine } }
               saved.push(request.recap)
               return { action: 'write_recap', result: { status: 'ok', recapOutcome: 'ok: saved. The players will see this recap.', recap: request.recap, chatLine: request.recap.chatLine } }
             }
@@ -45720,17 +45740,24 @@ describeRealCodex('real Codex game recap e2e', () => {
           } },
           memberId: 'synthetic-group', userEnvKeys: [],
         } },
-        identityId: null, instructions: buildGameRecapInstructions([{ playerName: 'Leo', text: 'I was spiritually doing pushups.' }]), responsePolicy: { kind: 'require_game_recap', gameId: 'game_recap_synthetic', eventId: 'game-recap:game_recap_synthetic', pairFingerprint: '0123456789abcdef0123456789abcdef' },
+        identityId: null, instructions: buildGameRecapInstructions([{ playerName: 'Leo', text: weekendsOff ? 'The laundry basket is my personal trainer.' : 'I was spiritually doing pushups.' }]), responsePolicy: { kind: 'require_game_recap', gameId: 'game_recap_synthetic', eventId: 'game-recap:game_recap_synthetic', pairFingerprint: '0123456789abcdef0123456789abcdef' },
         threadId: 'synthetic-game-thread', threadIsDirect: false,
         turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
         turnTrigger: 'manual-deliver', vault: workingDirectory, workingDirectory,
       })
       const intents = await listAssistantOutboxIntents(workingDirectory)
-      process.stdout.write(`[game-recap notification] ${JSON.stringify({ reply: result.response, actions: calls.map((call) => call.action), intents: intents.length })}\n`)
+      process.stdout.write(`[game-recap notification] ${JSON.stringify({ weekendsOff, recap: saved[0], reply: result.response, actions: calls.map((call) => call.action), intents: intents.length })}\n`)
       expect(calls[0]?.action).toBe('read_game')
-      expect(calls.filter((call) => call.action === 'write_recap')).toHaveLength(1)
+      // Corrections may take separate attempts; exactly one write may succeed.
+      expect(calls.filter((call) => call.action === 'write_recap')).toHaveLength(rejectedWrites + 1)
+      expect(saved).toHaveLength(1)
+      expect(saved[0]?.scoreLine).toMatch(/Ava|Leo/u)
       expect(saved[0]?.pages.length).toBeGreaterThanOrEqual(3)
-      expect(saved[0]?.scoreLine).toMatch(/owes|breakfast/iu)
+      expect(saved[0]?.scoreLine).toMatch(weekendsOff ? /tie|draw|nobody|no one|neither|both/iu : /owes|breakfast/iu)
+      if (weekendsOff) {
+        expect(saved[0]?.scoreLine).not.toMatch(/\b(?:owe|owes|owed|owing)\b/iu)
+        expect(JSON.stringify(saved[0])).not.toMatch(/(?:weekend|saturday|sunday|days? (?:4|5|four|five)).{0,40}(?:missed|skipped|no.show)|(?:missed|skipped).{0,40}(?:weekend|saturday|sunday)/iu)
+      }
       expect(result.decision.kind).toBe('send_message')
       expect(result.deliveryOutcome?.kind).toBe('queued')
       expect(intents).toHaveLength(1)
@@ -45738,6 +45765,9 @@ describeRealCodex('real Codex game recap e2e', () => {
       expect(result.response).not.toMatch(/https?:\/\//iu)
       expect(result.response?.length).toBeLessThan(160)
       expect(await readFile(path.join(workingDirectory, 'games', 'lore-0123456789abcdef0123456789abcdef.md'), 'utf8')).toContain(`Chat line used: ${saved[0]?.chatLine}`)
+    } catch (error) {
+      process.stdout.write(`[game-recap failure] ${JSON.stringify({ weekendsOff, actions: calls.map((call) => call.action), scoreLines: calls.flatMap((call) => call.action === 'write_recap' ? [call.recap.scoreLine] : []), seals: saved.length })}\n`)
+      throw error
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
     }

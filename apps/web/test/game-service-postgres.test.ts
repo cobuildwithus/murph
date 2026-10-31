@@ -297,7 +297,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const nextId = randomUUID();
     const next = await ok(ava, { gameId: nextId, inviteeFirstName: "RecapLeo", previousGameId: gameId, terms: TERMS, type: "createGame" });
     await ok(leo, { termsVersion: 1, timeZone: "UTC", token: next!.inviteToken!, type: "join" });
-    expect(await sealGameRecap({ beforeMutationTx: authorize, containerMemberId: room, eventId, gameId, playerMemberIds: [ava, leo], recap: { ...recap, scoreLine: "Stale recap" } })).toBeNull();
+    expect(await sealGameRecap({ beforeMutationTx: authorize, containerMemberId: room, eventId, gameId, playerMemberIds: [ava, leo], recap: { ...recap, scoreLine: "Stale recap" } })).toEqual(canonical);
     expect((await readGame(gameId, ava))?.recap).toEqual(canonical);
   });
 
