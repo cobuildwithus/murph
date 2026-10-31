@@ -1828,6 +1828,12 @@ pnpm --dir apps/web release:production:migrate
 pnpm --dir apps/web release:production:contract-migrate
 ```
 
+Merged `prisma/migrations/*/migration.sql` files are immutable. The Pull Request
+Evidence workflow rejects edits, renames, and deletions of migration SQL already
+on the PR base branch; add a new forward migration instead. There is no bypass.
+It compares PR-authored changes from the merge base, so unrelated migrations
+added by an advancing base do not count as deletions.
+
 Use `prisma:validate` for focused schema verification. It checks the schema
 without rewriting it. The hosted-Web Prisma config rejects `prisma format` by
 default because Prisma formats the entire schema rather than one edited model.

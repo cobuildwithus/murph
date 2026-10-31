@@ -595,6 +595,38 @@ describe("hosted web production migration guard", () => {
     }
   });
 
+  test("phone-call notification enum matches schema for fresh and previously applied Telegram-only histories", async () => {
+    const enumName = "HostedPhoneCallResultNotificationChannel";
+    const schema = await readFile(path.join(appRoot, "prisma/schema.prisma"), "utf8");
+    const schemaBody = schema.match(new RegExp(`enum ${enumName}\\s*\\{([^}]+)\\}`, "u"))?.[1];
+    assert.ok(schemaBody);
+    const expected = schemaBody.trim().split(/\s+/u).sort();
+    const migrationsDir = path.join(appRoot, "prisma/migrations");
+    const fresh = new Set<string>();
+    const previouslyApplied = new Set(["telegram"]);
+    let created = false;
+    let forwardAdds = 0;
+    for (const entry of (await readdir(migrationsDir, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
+      const sql = await readFile(path.join(migrationsDir, entry.name, "migration.sql"), "utf8");
+      const create = sql.match(new RegExp(`CREATE TYPE "${enumName}"\\s+AS ENUM \\(([^)]+)\\)`, "u"));
+      if (create) {
+        created = true;
+        for (const value of create[1].matchAll(/'([^']+)'/gu)) fresh.add(value[1]);
+      }
+      for (const add of sql.matchAll(new RegExp(`ALTER TYPE "${enumName}" ADD VALUE IF NOT EXISTS '([^']+)'`, "gu"))) {
+        assert.ok(created, "enum extension must follow its creation migration");
+        fresh.add(add[1]);
+        previouslyApplied.add(add[1]);
+        forwardAdds += 1;
+      }
+    }
+    assert.ok(created);
+    assert.ok(forwardAdds > 0, "an applied Telegram-only history needs a forward migration");
+    assert.deepEqual([...fresh].sort(), expected);
+    assert.deepEqual([...previouslyApplied].sort(), expected);
+  });
+
   test("keeps existing hosted web Prisma migration history exempt", async () => {
     await assert.doesNotReject(() =>
       assertHostedWebPrismaPredeployMigrationsAreExpandOnly(
