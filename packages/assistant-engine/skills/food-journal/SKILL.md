@@ -69,6 +69,7 @@ code-mode `exec` script when available.
    optional introduction below applies.
 
 - A photo, voice note, or rough phrase can be a complete meal log.
+- A saved recipe lists one whole batch. For a portion, estimate the batch size from its ingredient amounts, scale to the amount the member describes, and save a marked estimate with all five metrics; never ask the member for the batch size or save the meal without nutrition. If their amount is unclear, use the likelier reading and name it in one short clause.
 - Preserve useful real-life context when the user volunteers it, such as eating out, alcohol, a late meal, stress, travel, illness, or social context.
 - Use existing canonical surfaces. Save meal facts to meal records, symptoms to their typed surface, and durable unstructured context to the best-fit existing journal or memory surface. Do not duplicate the same fact across stores.
 

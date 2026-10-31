@@ -80,6 +80,7 @@ import {
   upsertEvent,
   upsertGoal,
   upsertMemory,
+  upsertRecipe,
   upsertRegimen,
 } from '@murphai/core'
 import {
@@ -34959,6 +34960,50 @@ describeRealCodex('real Codex meal intake speed benchmark', () => {
       } finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
     },
   )
+})
+
+describeRealCodex('real Codex saved-recipe portion e2e', () => {
+  // A saved recipe lists one whole batch; a portion of it must still become a
+  // complete estimated meal and its card without asking the member for batch size.
+  it('logs a portion of a saved recipe with a complete estimate and card', {
+    timeout: 1_800_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    try {
+      const result = await runRealNutritionCardAuthorityScenario({
+        config, goalScenario: 'no-goals', seedMeals: false, allowMealWrites: true,
+        reasoningEffort: 'low',
+        initialPrompt: 'Had my berry mango smoothie just now, about a cup and a half of it.',
+        setupVault: async (vaultRoot) => {
+          await upsertRecipe({
+            vaultRoot, title: 'Berry mango protein smoothie', status: 'saved',
+            summary: 'One blender batch of the usual morning smoothie.',
+            ingredients: [
+              '1 cup frozen mixed berries', '1 cup frozen mango chunks',
+              '1 cup unsweetened almond milk', '1 scoop vanilla whey protein (30 g)',
+              '1 tbsp chia seeds',
+            ],
+          })
+        },
+      })
+      const commands = expandRecordedVaultCommands(result.commands)
+      process.stdout.write('[recipe-portion-e2e] ' + JSON.stringify({
+        model: config.model, commands, reply: result.finalMessage,
+        card: result.card ? renderAssistantResponseCardText(result.card) : null,
+      }) + '\n')
+      expect(result.finalMessage).not.toMatch(/\bbatch\b|fraction|how (?:much|big)/iu)
+      expect(result.attachCallCount).toBe(1)
+      const card = result.card
+      if (card?.kind !== 'daily_nutrition' || !('version' in card)) {
+        throw new Error('Expected a V2 daily nutrition card.')
+      }
+      expect(card.mealCount).toBe(1)
+      for (const metric of ['calories', 'proteinGrams', 'carbsGrams', 'fatGrams', 'fiberGrams'] as const) {
+        expect(card.totals[metric]).toMatchObject({ mealCount: 1 })
+        expect(card.totals[metric].total).toBeGreaterThan(0)
+      }
+    } finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
+  })
 })
 
 describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
