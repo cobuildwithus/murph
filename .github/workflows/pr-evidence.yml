@@ -34,6 +34,13 @@ jobs:
           scripts/check-pr-changelog.test.mjs
           scripts/check-pr-complexity-summary.test.mjs
           scripts/check-pr-deployment-concerns.test.mjs
+          scripts/check-pr-migration-history.test.mjs
+
+      - name: Protect merged migration history
+        run: node scripts/check-pr-migration-history.mjs
+        env:
+          MURPH_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MURPH_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
 
       - name: Require architecture and reuse summary
         run: node scripts/check-pr-architecture-summary.mjs

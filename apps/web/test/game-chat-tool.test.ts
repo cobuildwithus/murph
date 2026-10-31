@@ -142,7 +142,7 @@ describe("game chat tool authority", () => {
       entries: [], game: {}, players: ["Ava", "Leo"],
       validation: { playerNamesByMemberId: [{ memberId: actor, name: "Ava" }, { memberId: "other_synthetic", name: "Leo" }],
         result: [{ memberId: actor, name: "Ava", score: 3 }, { memberId: "other_synthetic", name: "Leo", score: 2 }],
-        startedAt: new Date("2030-03-01T00:00:00.000Z") },
+        startedAt: new Date("2030-03-01T00:00:00.000Z"), settledAt: new Date("2030-03-09T09:00:00.000Z") },
     });
     const request = { action: "write_recap" as const,
       origin: { kind: "game_recap" as const, gameId: "game_synthetic", eventId: "game-recap:game_synthetic" },
@@ -150,6 +150,9 @@ describe("game chat tool authority", () => {
 
     const rejected = await handleGameChatTool({ memberId: group, request, runtimeIdentity: null });
     expect(rejected.result).toMatchObject({ status: "rejected", recapOutcome: expect.stringContaining('chatLine: repeats "sauna citizenship held"') });
+    // A recap written after the game reads only that game's chat, never the next game's.
+    expect(m.mailbox).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
+      occurredAt: { gte: new Date("2030-03-01T00:00:00.000Z"), lte: new Date("2030-03-09T09:00:00.000Z") } }) }));
     expect(m.sealRecap).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ recap: null }));
 
     const saved = { ...recap, chatLine: "Purple mat court adjourned. The week has the receipts." };
