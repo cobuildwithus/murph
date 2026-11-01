@@ -22,8 +22,18 @@ import {
 } from "@/src/lib/hosted-onboarding/visible-secondary-webhooks";
 
 describe("visible secondary webhook outcomes", () => {
-  it("sends one setup reminder per member per UTC day, including concurrent inbounds and webhook retries", async () => {
-    const fixture = buildSignupReminderFixture();
+  it.each(["sms", "SMS", " sMs "])("skips setup reminders over %s without claiming the daily allowance", async (service) => {
+    const fixture = buildSignupReminderFixture(undefined, service);
+    for (const occurredAt of ["2026-07-25T12:00:00.000Z", "2026-07-26T12:00:00.000Z"]) {
+      await expect(fixture.receive("evt_sms_reminder", occurredAt))
+        .resolves.toEqual({ ignored: true, ok: true, reason: "signup-link-already-sent" });
+    }
+    expect(fixture.send).not.toHaveBeenCalled();
+    expect(fixture.updateDailyState).not.toHaveBeenCalled();
+  });
+
+  it.each(["iMessage", "RCS"])("sends one %s setup reminder per member per UTC day, including concurrent inbounds and webhook retries", async (service) => {
+    const fixture = buildSignupReminderFixture(undefined, service);
     const first = await fixture.receive("evt_reminder_first", "2026-07-25T23:59:00.000Z");
     expect(first).toMatchObject({ ignored: false, reason: "visible-secondary-reply:signup-link-already-sent" });
     const repeats = await Promise.all([
@@ -377,7 +387,7 @@ describe("visible secondary webhook outcomes", () => {
     );
   });
 
-  it("turns a repeated Linq signup message into an idempotent reply", async () => {
+  it("turns a repeated iMessage signup message into an idempotent reply", async () => {
     const event = requireHostedLinqMessageReceivedEvent({
       api_version: "v3",
       created_at: "2026-07-25T12:00:00.000Z",
@@ -389,7 +399,7 @@ describe("visible secondary webhook outcomes", () => {
             handle: "+15550000000",
             id: "handle_owner",
             is_me: true,
-            service: "sms",
+            service: "iMessage",
           },
         },
         direction: "inbound",
@@ -399,16 +409,16 @@ describe("visible secondary webhook outcomes", () => {
           handle: "+15550000000",
           id: "handle_recipient",
           is_me: true,
-          service: "sms",
+          service: "iMessage",
         },
         recipient_phone: "+15550000000",
         sender_handle: {
           handle: "+15551234567",
           id: "handle_sender",
-          service: "sms",
+          service: "iMessage",
         },
         sent_at: "2026-07-25T12:00:00.000Z",
-        service: "sms",
+        service: "iMessage",
       },
       event_id: "evt_visible_signup",
       event_type: "message.received",
@@ -767,11 +777,11 @@ describe("visible secondary webhook outcomes", () => {
       .not.toHaveBeenCalled();
   });
 
-  it("leaves unrelated silent outcomes unchanged", async () => {
+  it.each(["own-message", "blocked-first-contact-admission"])("keeps %s silent", async (reason) => {
     const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => ({
       ignored: true,
       ok: true as const,
-      reason: "own-message",
+      reason,
     }));
     const dependencies: HostedVisibleSecondaryLinqDependencies = {
       getPrisma: vi.fn(() => ({}) as never),
@@ -788,13 +798,13 @@ describe("visible secondary webhook outcomes", () => {
     })).resolves.toEqual({
       ignored: true,
       ok: true,
-      reason: "own-message",
+      reason,
     });
     expect(dependencies.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 });
 
-function buildSignupReminderFixture(missing?: "member" | "day") {
+function buildSignupReminderFixture(missing?: "member" | "day", service = "iMessage") {
   const claimedDays = new Set<string>();
   const prisma = {
     hostedLinqDailyState: {
@@ -831,10 +841,12 @@ function buildSignupReminderFixture(missing?: "member" | "day") {
   });
   return {
     send,
+    updateDailyState: prisma.hostedLinqDailyState.updateMany,
     receive: (eventId: string, occurredAt: string) => wrapped({
       rawBody: JSON.stringify(buildOperationalLinqEvent({
         eventId,
         messageId: `msg_${eventId}`,
+        messageService: service,
         occurredAt,
         senderHandle: "+12025550101",
         senderService: "sms",
@@ -849,6 +861,7 @@ function buildOperationalLinqEvent(input: {
   eventId: string;
   isFromMe?: boolean;
   messageId: string;
+  messageService?: string;
   occurredAt?: string;
   senderHandle: string;
   senderService: "email" | "sms";
@@ -884,7 +897,7 @@ function buildOperationalLinqEvent(input: {
         service: input.senderService,
       },
       sent_at: input.occurredAt ?? "2026-07-25T12:00:00.000Z",
-      service: "sms",
+      service: input.messageService ?? "sms",
     },
     event_id: input.eventId,
     event_type: "message.received",

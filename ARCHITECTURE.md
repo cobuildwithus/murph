@@ -4659,11 +4659,14 @@ when enforcement is enabled and the classifier explicitly blocks. OpenAI
 refusal and content-filter outcomes are terminal unsupported content blocks, and
 first-contact budget exhaustion also blocks before side effects.
 The classifier blocks clear automated replies from other assistants, bots, and
-autoresponders while defaulting to allow for real people and uncertain messages.
+autoresponders, plus requests for nude, sexual, or pornographic images or content,
+while defaulting to allow for real people, health questions, and uncertain messages.
 For inactive members whose signup link was already sent, the visible-secondary
-sender atomically claims one setup-link reminder per member and inbound UTC day
-in `HostedLinqDailyState`. Later matching inbounds stay silent. A failed send
-releases that claim; retries share a member/day provider idempotency key.
+sender skips setup-link reminders over SMS without claiming the daily allowance.
+Other services, including iMessage and RCS, atomically claim one reminder per
+member and inbound UTC day in `HostedLinqDailyState`. Later matching inbounds
+stay silent. A failed send releases that claim; retries share a member/day
+provider idempotency key.
 Reopening a failed signup-link projection preserves the reminder allowance;
 account deletion and canary reset delete the whole daily-state row.
 The legacy nullable rejected-message-text column is retained only as a

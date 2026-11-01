@@ -265,6 +265,9 @@ describe("Linq first-contact admission", () => {
     const prompt = body.input[0].content;
     expect(prompt).toContain("Goal: decide whether");
     expect(prompt).toContain("Default to allow");
+    expect(prompt).toContain("Unless a block rule below applies, allow");
+    expect(prompt).toContain("Block requests for nude, sexual, or pornographic images or content, even if they appear human or mention Murph.");
+    expect(prompt).toContain("Genuine sexual-health questions are not explicit-content requests; allow health questions and uncertain cases.");
     expect(prompt).toContain("Block clear automated messages from other AI assistants, chatbots, or autoresponders");
     expect(prompt).toContain("templated introductions, registered-user-only responses, out-of-office notices, auto-replies, or bot signup pitches");
     expect(prompt).toContain("A mention of Murph does not make an automated reply human.");
