@@ -146,11 +146,14 @@ export function validateGameRecap(input: { recap: HostedGameRecap; players: read
   if (quotePages.filter((count) => count >= 2).length > 1) errors.push("Only one page can stack several quotes (a back-and-forth). Let your headlines carry the other pages.");
   const pagesWithQuotes = quotePages.filter(Boolean).length;
   if (pages.length > 0 && pagesWithQuotes > Math.ceil(pages.length / 2)) errors.push(`Quotes on ${pagesWithQuotes} of ${pages.length} pages; keep them to about half and let your own lines carry the rest.`);
-  checkText("scoreLine", input.recap.scoreLine, 80, errors);
-  if (/\d+\s*[–-]\s*\d+/u.test(input.recap.scoreLine)) errors.push("scoreLine: the card already shows the score; land the result and who owes what instead.");
-  if (!input.players.some((player) => input.recap.scoreLine.includes(player))) errors.push("scoreLine: name who owes whom.");
-  if (SECOND_PERSON.test(input.recap.scoreLine)) errors.push("scoreLine: write about them by name, not you.");
-  if (input.result) validateScoreLine(input.recap.scoreLine, input.result, errors);
+  const { scoreLine } = input.recap;
+  if (scoreLine !== undefined) {
+    checkText("scoreLine", scoreLine, 80, errors);
+    if (/\d+\s*[–-]\s*\d+/u.test(scoreLine)) errors.push("scoreLine: the card already shows the score; land the result and who owes what instead.");
+    if (!input.players.some((player) => scoreLine.includes(player))) errors.push("scoreLine: name who owes whom.");
+    if (SECOND_PERSON.test(scoreLine)) errors.push("scoreLine: write about them by name, not you.");
+    if (input.result) validateScoreLine(scoreLine, input.result, errors);
+  }
   validateChatLine({ chatLine: input.recap.chatLine, players: input.players, priorChatLines: input.priorChatLines ?? [] }, errors);
   return errors;
 }

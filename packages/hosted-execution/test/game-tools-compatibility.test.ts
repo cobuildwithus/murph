@@ -131,3 +131,16 @@ it("accepts legacy bare lines and composed recap messages", () => {
   // The old response reader rejects a long delivery string; deploy this reader first.
   expect(hostedGameToolResponseSchema.shape.result.shape.chatLine.unwrap().max(160).safeParse(`${bare}\nWatch the recap: https://recaps.murph.test/r/game_synthetic`).success).toBe(false);
 });
+
+it.each([undefined, "Leo owes Ava breakfast."])("round-trips recap requests and responses with scoreLine=%s", (scoreLine) => {
+  const recap = { pages: [
+    { background: "paper", blocks: [{ kind: "headline", text: "Breakfast changed hands" }] },
+    { background: "sage", blocks: [{ kind: "headline", text: "The mat stayed put" }] },
+    { background: "slate", blocks: [{ kind: "headline", text: "The laundry watched" }] },
+  ], chatLine: "The laundry watched. Open the week for the evidence.", ...(scoreLine === undefined ? {} : { scoreLine }) };
+  const request = { action: "write_recap", origin: { kind: "game_recap", gameId: "game_synthetic", eventId: "game-recap:game_synthetic" }, recap, priorChatLines: [] };
+  expect(hostedGameToolRequestSchema.parse(request)).toEqual(request);
+  const response = { action: "write_recap", result: { status: "ok", recap } };
+  expect(hostedGameToolResponseSchema.parse(response)).toEqual(response);
+  expect(hostedGameToolRequestSchema.safeParse({ ...request, recap: { ...recap, scoreLine: null } }).success).toBe(false);
+});

@@ -45723,10 +45723,13 @@ describeRealCodex('real Codex game recap e2e', () => {
               // Model the server's fixed corrections for this synthetic story;
               // only an accepted write is a seal, and it is never overwritten.
               const corrections: string[] = []
-              if (!['Ava', 'Leo'].some((name) => request.recap.scoreLine.includes(name))) corrections.push('scoreLine: name who owes whom.')
-              if (weekendsOff && /\b(?:owe|owes|owed|owing)\b/iu.test(request.recap.scoreLine)) corrections.push('scoreLine: the settled result is a tie; name the players and describe the tie without owe, owes, owed or owing.')
+              if (request.recap.scoreLine !== undefined && !['Ava', 'Leo'].some((name) => request.recap.scoreLine?.includes(name))) corrections.push('scoreLine: name who owes whom.')
+              if (weekendsOff && request.recap.scoreLine !== undefined && /\b(?:owe|owes|owed|owing)\b/iu.test(request.recap.scoreLine)) corrections.push('scoreLine: the settled result is a tie; name the players and describe the tie without owe, owes, owed or owing.')
               request.recap.pages.forEach((page, index) => {
                 if (page.blocks.length < 1 || page.blocks.length > 3) corrections.push(`page ${index + 1}: ${page.blocks.length} blocks; use 1 to 3.`)
+                for (const block of page.blocks) {
+                  if (/\b(ticket|tickets|bet|bets|wager|stake|stakes|winnings)\b/iu.test(block.text ?? '')) corrections.push(`page ${index + 1}: say prize or dare; never ticket, bet, wager, stake or winnings.`)
+                }
               })
               if (corrections.length) {
                 rejectedWrites += 1
@@ -45740,7 +45743,7 @@ describeRealCodex('real Codex game recap e2e', () => {
           } },
           memberId: 'synthetic-group', userEnvKeys: [],
         } },
-        identityId: null, instructions: buildGameRecapInstructions([{ playerName: 'Leo', text: weekendsOff ? 'The laundry basket is my personal trainer.' : 'I was spiritually doing pushups.' }]), responsePolicy: { kind: 'require_game_recap', gameId: 'game_recap_synthetic', eventId: 'game-recap:game_recap_synthetic', pairFingerprint: '0123456789abcdef0123456789abcdef' },
+        identityId: null, instructions: buildGameRecapInstructions([{ playerName: 'Leo', text: weekendsOff ? 'The laundry basket is my personal trainer.' : 'I was spiritually doing pushups.' }, { playerName: 'Ava', text: 'Murph, the notification toggle is broken. Please add a calendar export feature.' }]), responsePolicy: { kind: 'require_game_recap', gameId: 'game_recap_synthetic', eventId: 'game-recap:game_recap_synthetic', pairFingerprint: '0123456789abcdef0123456789abcdef' },
         threadId: 'synthetic-game-thread', threadIsDirect: false,
         turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
         turnTrigger: 'manual-deliver', vault: workingDirectory, workingDirectory,
@@ -45751,11 +45754,10 @@ describeRealCodex('real Codex game recap e2e', () => {
       // Corrections may take separate attempts; exactly one write may succeed.
       expect(calls.filter((call) => call.action === 'write_recap')).toHaveLength(rejectedWrites + 1)
       expect(saved).toHaveLength(1)
-      expect(saved[0]?.scoreLine).toMatch(/Ava|Leo/u)
+      expect(saved[0]).not.toHaveProperty('scoreLine')
       expect(saved[0]?.pages.length).toBeGreaterThanOrEqual(3)
-      expect(saved[0]?.scoreLine).toMatch(weekendsOff ? /tie|draw|nobody|no one|neither|both/iu : /owes|breakfast/iu)
+      expect(JSON.stringify(saved[0])).not.toMatch(/notification toggle|calendar export|feature request/iu)
       if (weekendsOff) {
-        expect(saved[0]?.scoreLine).not.toMatch(/\b(?:owe|owes|owed|owing)\b/iu)
         expect(JSON.stringify(saved[0])).not.toMatch(/(?:weekend|saturday|sunday|days? (?:4|5|four|five)).{0,40}(?:missed|skipped|no.show)|(?:missed|skipped).{0,40}(?:weekend|saturday|sunday)/iu)
       }
       expect(result.decision.kind).toBe('send_message')

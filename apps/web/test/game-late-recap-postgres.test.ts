@@ -5,7 +5,7 @@ import { Prisma } from "@prisma/client";
 import pg from "pg";
 import { getPrisma } from "../src/lib/prisma";
 import { sealGameText } from "../src/lib/game/crypto";
-import { readGameRecapMaterial, sealGameRecap } from "../src/lib/game/service";
+import { readGameRecapMaterial, readGame, sealGameRecap } from "../src/lib/game/service";
 import { assertGameProposalDeliveryCurrentTx } from "../src/lib/game/chat-delivery-authority";
 import { gameChatLifecycleEventId, markGameChatGenerationQueuedTx, reserveGameChatLifecycleTx } from "../src/lib/game/chat-lifecycle-receipt";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../src/lib/hosted-onboarding/linq-observability-identifiers";
@@ -102,6 +102,18 @@ describe.skipIf(!enabled)("late settled-game recap PostgreSQL proof", () => {
     expect(await readGameRecapMaterial(gameId, room, players)).toBeNull();
     expect(await sealGameRecap(sealInput)).toBeNull();
     await expect(assertGameProposalDeliveryCurrentTx({ tx: db, containerMemberId: room, playerMemberIds: players, deliveryIdempotencyKey: eventId })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+  });
+
+  it.each([false, true])("saves, reads and replays the exact recap shape; legacy scoreLine=%s", async (legacy) => {
+    const { db, gameId, room, players, eventId, sealInput } = await fixture();
+    const candidate = legacy ? recap : { pages: recap.pages, chatLine: recap.chatLine };
+    await reserveGameChatLifecycleTx({ gameId, kind: "recap", now: new Date(), tx: db });
+    await markGameChatGenerationQueuedTx(eventId, db, room);
+    expect(await sealGameRecap({ ...sealInput, recap: candidate })).toEqual(candidate);
+    expect(await sealGameRecap({ ...sealInput, recap: null })).toEqual(candidate);
+    expect(await sealGameRecap({ ...sealInput, recap: { ...recap, chatLine: "Ignored retry" } })).toEqual(candidate);
+    const view = await readGame(gameId, players[0]!);
+    expect(view?.recap).toEqual(candidate);
   });
 
   it.each(["live", "negotiating", "void"])("does not admit %s games for recap reads, seals or delivery", async (status) => {

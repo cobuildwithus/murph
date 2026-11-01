@@ -43,7 +43,7 @@ export const hostedGameRecapSchema = z.object({
     background: z.enum(["night", "paper", "sage", "sienna", "slate"]),
     blocks: z.array(recapBlock),
   }).strict()),
-  scoreLine: z.string(),
+  scoreLine: z.string().optional(),
   chatLine: z.string(),
 }).strict();
 export type HostedGameRecap = z.infer<typeof hostedGameRecapSchema>;
