@@ -96,12 +96,18 @@ SMS/RCS cannot claim email-handle authority.
 Personal Starter accounts must start a subscription through the normal Pulse
 or eligible Group signup flow before hosted image generation or editing.
 A saved card alone grants no image access. Ordinary text chat remains available
-within the existing Starter allowance. Active paid plans, Family sponsorship,
-and group runtimes retain their existing allowance owners and limits.
+within the existing Starter allowance. Active paid plans and Family sponsorship
+retain their existing image access. Group image generation and editing require
+available usage plus either an active group sponsorship authorization or a
+fulfilled, paid usage-credit purchase for that group with credit remaining.
+House allowance and ops-granted credit alone do not qualify. The image access
+check reads at most one sponsorship and one purchase, sequentially, without
+loading payer details or changing ordinary text-chat usage admission.
 
 Web derives image permission from the canonical usage gate: denied usage stays
-denied; allowed direct Starter requires a subscription; other allowed sources
-retain image access. Subscription activation, cancellation, sponsorship,
+denied; allowed direct Starter requires a subscription; groups also require the
+paid funding described above. Other allowed sources retain image access.
+Subscription activation, cancellation, sponsorship,
 suspension, and exhaustion converge through those existing owners. There is no
 new Stripe read, card setup flow, account field, or cached entitlement.
 
