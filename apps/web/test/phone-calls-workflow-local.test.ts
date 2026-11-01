@@ -17,7 +17,10 @@ class HookTestBuilder extends BaseBuilder {
 
   async build(): Promise<void> {
     const result = await this.createCombinedBundle({
-      inputFiles: [path.join(appDir, "test/fixtures/workflow-v5/hook.ts")],
+      inputFiles: [
+        path.join(appDir, "test/fixtures/workflow-v5/hook.ts"),
+        path.join(appDir, "src/lib/hosted-operational-alert/heartbeat-workflow.ts"),
+      ],
       stepsOutfile: this.config.stepsBundlePath,
       flowOutfile: this.config.workflowsBundlePath,
       bundleFinalOutput: false,
@@ -45,8 +48,17 @@ it("v5 local world conflicts on the per-call token and resumes the same reusable
     const { POST } = await import(/* @vite-ignore */ pathToFileURL(path.join(directory, "flow.mjs")).href);
     world.registerHandler("__wkf_workflow_", POST);
     const workflows = Object.values(builder.manifest.workflows ?? {}).flatMap(Object.values);
-    expect(workflows).toHaveLength(1);
-    const workflow = workflows[0]!;
+    expect(workflows).toHaveLength(2);
+    const heartbeat = workflows.find(entry => entry.workflowId.includes("hostedOperationalHeartbeatWorkflow"))!;
+    expect(heartbeat).toBeDefined();
+    const heartbeatRun = await start(heartbeat, []);
+    await expect.poll(() => heartbeatRun.status, { timeout: 10_000 }).toBe("completed");
+    expect(await heartbeatRun.returnValue).toBe("heartbeat-ok");
+    expect(await heartbeatRun.completedAt).toBeInstanceOf(Date);
+    const heartbeatSteps = await world.steps.list({ runId: heartbeatRun.runId });
+    expect(heartbeatSteps.data).toHaveLength(1);
+    expect(heartbeatSteps.data[0]?.status).toBe("completed");
+    const workflow = workflows.find(entry => entry !== heartbeat)!;
     const token = buildHostedPhoneCallReconciliationHookToken("synthetic-call");
     const run = await start(workflow, ["synthetic-call"]);
     await expect.poll(async () => (await getHookByToken(token)).runId, { timeout: 10_000 })

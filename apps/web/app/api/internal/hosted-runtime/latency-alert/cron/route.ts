@@ -1,3 +1,5 @@
+import { runHostedToolFailureAlertMonitor } from "@/src/lib/hosted-operational-alert/tool-failure-monitor";
+import { runHostedWorkflowHeartbeatAlertMonitor } from "@/src/lib/hosted-operational-alert/workflow-heartbeat-monitor";
 import { runHostedStarterAbuseAlertMonitor } from "@/src/lib/hosted-execution/starter-abuse-alert-monitor";
 import { requireVercelCronRequest } from "@/src/lib/hosted-execution/vercel-cron";
 import { runHostedAiUsageOvershootAlertMonitor } from "@/src/lib/hosted-execution/usage-overshoot-alert-monitor";
@@ -13,7 +15,7 @@ import { runHostedRuntimeRunawayAlertMonitor } from "@/src/lib/hosted-runtime-lo
 export const GET = withJsonError(async (request: Request) => {
   requireVercelCronRequest(request);
 
-  const [typingResult, latencyResult, progressResult, usageOvershootResult, starterAbuseResult, deviceImportResult, runawayResult, automationLossResult, finalReplyDeliveryResult] = await Promise.allSettled([
+  const [typingResult, latencyResult, progressResult, usageOvershootResult, starterAbuseResult, deviceImportResult, runawayResult, automationLossResult, finalReplyDeliveryResult, toolFailureResult, workflowHeartbeatResult] = await Promise.allSettled([
     runHostedRuntimeTypingAlertMonitor(),
     runHostedRuntimeLatencyAlertMonitor({
       signal: request.signal,
@@ -29,6 +31,8 @@ export const GET = withJsonError(async (request: Request) => {
     runHostedRuntimeRunawayAlertMonitor({ signal: request.signal }),
     runHostedAutomationLossAlertMonitor({ signal: request.signal }),
     runHostedRuntimeFinalReplyDeliveryAlertMonitor(),
+    runHostedToolFailureAlertMonitor({ signal: request.signal }),
+    runHostedWorkflowHeartbeatAlertMonitor({ signal: request.signal }),
   ]);
 
   if (typingResult.status === "rejected") {
@@ -51,7 +55,12 @@ export const GET = withJsonError(async (request: Request) => {
   if (automationLossResult.status === "rejected") throw automationLossResult.reason;
   if (finalReplyDeliveryResult.status === "rejected") throw finalReplyDeliveryResult.reason;
 
+  if (toolFailureResult.status === "rejected") throw toolFailureResult.reason;
+  if (workflowHeartbeatResult.status === "rejected") throw workflowHeartbeatResult.reason;
+
   return jsonOk({
+    toolFailureAlert: toolFailureResult.value,
+    workflowHeartbeatAlert: workflowHeartbeatResult.value,
     automationLossAlert: automationLossResult.value,
     finalReplyDeliveryAlert: finalReplyDeliveryResult.value,
     runtimeRunawayAlert: runawayResult.value,

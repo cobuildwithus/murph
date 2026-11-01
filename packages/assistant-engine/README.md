@@ -332,10 +332,16 @@ These are **classifications, not another call denominator**.
 `diagnosticRole=completion` marks generic failed-action rows. A failed dynamic
 call may produce both: never add them as failed calls. Even completion rows are
 not a lossless ledger. Use existing action-diagnostics counts for rates over the
-same window and deployment cohort. The unchanged eight-issue per-turn cap,
-best-effort writes and export retries make coverage lossy; missing diagnostics
+same window and deployment cohort. Per-turn collection and best-effort persistence
+retain up to eight ordinary issues plus two `create-phone-call` dynamic-tool
+failure issues, so earlier tool failures cannot evict pre-row phone-start evidence.
+The fixed ten-issue maximum, best-effort writes and export retries still make
+coverage lossy; missing diagnostics
 never prove success or no traffic. There is no new queue, awaited tool-path I/O,
 state, schema, backend or dependency.
+The reserved phone slots take effect after the next Cloudflare-hosted runtime
+deploy; existing warm bundles retain the old cap until replaced. The issue
+schema is unchanged, so old and new Web readers accept both producer versions.
 
 For future natural-traffic verification, use read-only aggregate queries with
 bounded time parameters. This mixed-version recipe emits only finite labels

@@ -2385,6 +2385,80 @@ Upstream references:
 - [Next changelog](https://github.com/vercel/workflow/blob/main/packages/next/CHANGELOG.md)
 - [Vercel World changelog](https://github.com/vercel/workflow/blob/main/packages/world-vercel/CHANGELOG.md)
 
+### Tool backend and Workflow heartbeat email alerts
+
+The authenticated five-minute runtime latency cron also runs tool-failure and
+Workflow-heartbeat monitors through the existing operational incident email
+owner. Both use `HOSTED_LINQ_ALERT_EMAILS`, `HOSTED_LINQ_ALERT_EMAIL_FROM`,
+`RESEND_API_KEY`, and `HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE`; an unconfigured
+monitor does no work. Notifications bypass quiet hours so short failure windows
+do not age out overnight. Existing send leases, retries and idempotency apply;
+continuing incidents remind after six hours plus up to ten minutes of jitter.
+Recovery clears incident state without sending a recovery email.
+
+Tool failures have separate phone and backend incident identities. In a trailing
+hour, any `create-phone-call` dynamic-tool error or direct-member failed phone
+row without a provider call ID alerts. Group-container rows are excluded from
+the phone-row fallback; it uses the indexed `updated_at` as the available failure
+observation time. An issue and a phone row can describe the same attempt, so the
+email labels observation counts rather than unique calls. Other tools alert at
+four backend failures per operation per hour. Handler exceptions, unavailable
+backends, authority rejection and malformed backend results count. Only shared
+`diagnosticRole: classification` rows of kind `tool_error` or `timeout` count;
+completion-role and unclassified legacy tool rows do not. Generic tools keep
+their registered operation; specialized group-tool actions share `group-tool`
+and workout editor failures share `workout-card-editor`. Reported
+failures also count when their finite category is `unavailable`, `timeout`,
+`rate_limited`, or service HTTP `authority_rejected`. Schema rejections,
+validation-stage failures and routine invalid-input/not-found/conflict results
+do not; purely reported `unknown` results remain excluded. Unknown operations
+share a redacted `other_tool` bucket. SQL permits only
+registered operation labels, finite error categories and 40-character hex release
+SHAs; no member identifiers, summaries, private JSON or phone content leave SQL.
+
+Tool health uses one SQL statement with three independently capped samples of
+1,000 matching observations, using existing issue-kind/occurrence and
+phone-status/update indexes. Saturation alerts rather than returning healthy;
+counts then represent lower bounds. At most 3,000 aggregate groups return and
+40 appear in email, with an omission count. Pre-send health rechecks and the two
+serial incident evaluations require at most nine primary-database round trips
+(including at most three health queries), one concurrent query and two sequential
+email requests. No member-level fanout, decryption or transaction is added.
+
+The heartbeat is one pure Workflow step returning `heartbeat-ok`. Its cron owner
+persists intent before `workflow/api.start`, then polls `getRun().status` and
+`completedAt`; the step does not write the database or send email. A fixed
+`HostedLinqAlert` row (`hosted-workflow-heartbeat-state:v1`) holds versioned state:
+first/latest start intent, last verified completion, current run ID and finite
+status. A separate row holds the incident, so send transitions cannot erase the
+completion clock. No new table or migration is required. Compare-and-set claims
+prevent overlapping cron invocations from starting twice. Successful/terminal
+probes can restart after 15 minutes; pending probes stay tracked until 30 minutes.
+At 30 minutes since the last completion (or first intent when none completed),
+the cron alerts and can replace the stale probe. Start errors, SDK read errors,
+process loss and replacement starts never reset that deadline. A healthy new
+completion recovers the incident, even with zero product traffic.
+
+SDK start and metadata waits each have a ten-second local deadline. The SDK has
+no cancellation parameter here; a late start can leave a harmless untracked
+probe, but its late result cannot overwrite newer state. These are bounded
+observations, not cancellation or repair of product Workflows. At most ten
+primary-database round trips, one concurrent query, two sequential SDK operations
+(and one additional completion-metadata read), and one email request occur per
+heartbeat tick. External work never holds a database transaction. The two new
+monitors add at most two concurrent primary queries to the existing cron.
+
+The heartbeat targets the deployment starting it. Build proof expects four
+Workflows, including `hostedOperationalHeartbeatWorkflow`, and its `heartbeatStep`.
+Run the existing local Workflow test for real step/flow execution; set
+`MURPH_TEST_WORKFLOW_BUILD_MANIFEST=apps/web/.next-smoke/diagnostics/workflows-manifest.json`
+when running `next-config-workflow.test.ts` after a Vercel-target hosted-local
+build. Rollout needs only Web; older Web does not use these new fixed state IDs.
+Rollback stops probes and monitoring but has no product-state or schema effects.
+Post-deploy checks are a completed probe and healthy incident status after one
+cron interval. A dead cron, email provider or primary database is outside this
+in-process monitor's detection boundary and needs external monitoring.
+
 ## Production build memory guard
 
 The hosted web production build must keep fitting Vercel's Standard build

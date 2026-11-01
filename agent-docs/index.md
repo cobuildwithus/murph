@@ -1597,3 +1597,15 @@ are tracked in [the implementation plan](exec-plans/completed/2026-11-01-workflo
 The deploy-time schema presence gate is owned by `apps/web/README.md` under Prisma;
 implementation and local proof are recorded in
 [the schema contract plan](exec-plans/completed/2026-11-01-schema-contract-gate.md).
+
+Tool backend failure and Workflow heartbeat alert implementation and local proof
+are tracked in [the alert plan](exec-plans/completed/2026-11-01-tool-workflow-alerts.md).
+`../apps/web/README.md` owns thresholds, state, load bounds and rollout behavior.
+
+Accepted tool-alert review fixes, late phone issue retention and revised 14-day
+calibration are tracked in [the review-fix plan](exec-plans/completed/2026-11-01-tool-workflow-alert-review-fixes.md).
+The Web and Assistant Engine READMEs own the live filtering and capture contracts.
+
+Specialized tool classification admission, group-action normalization and 14-day
+calibration proof are tracked in [the specialized alert fix](exec-plans/completed/2026-11-01-specialized-tool-alerts.md).
+`../apps/web/README.md` owns the live alert contract.

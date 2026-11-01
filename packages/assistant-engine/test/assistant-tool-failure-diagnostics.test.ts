@@ -29,6 +29,7 @@ import type {
   AssistantHostedAutomationToolResponse,
 } from '../src/assistant/execution-context.js'
 import {
+  appendAssistantRuntimeIssueInput,
   flushPendingAssistantRuntimeIssueWrites,
   recordAssistantRuntimeIssueInputsBestEffort,
   type AssistantRuntimeIssueInput,
@@ -686,6 +687,42 @@ describe('opaque MCP and command failures', () => {
 })
 
 describe('existing diagnostic transport and denominator', () => {
+  it.each(['phone-first', 'phone-last', 'interleaved'])('bounds collection and persistence independently with reserved phone failures: %s', async order => {
+    const ordinary: AssistantRuntimeIssueInput = {
+      component: 'assistant.codex-dynamic-tool', operation: 'computer-open',
+      issueKind: 'tool_error', errorCode: 'ASSISTANT_DYNAMIC_TOOL_FAILED', phase: 'tool_call',
+      severity: 'warning', summary: 'Synthetic backend failure.',
+    }
+    const phone = { ...ordinary, operation: 'create-phone-call' }
+    const regularIssues = Array.from({ length: 12 }, () => ordinary)
+    const phoneIssues = Array.from({ length: 5 }, () => phone)
+    const issues = order === 'phone-first' ? [...phoneIssues, ...regularIssues]
+      : order === 'phone-last' ? [...regularIssues, ...phoneIssues]
+        : regularIssues.flatMap((issue, index) => index < 5 ? [issue, phone] : [issue])
+    const collected: AssistantRuntimeIssueInput[] = []
+    for (const issue of issues) appendAssistantRuntimeIssueInput(collected, issue)
+    expect(collected).toHaveLength(10)
+    expect(collected.filter(issue => issue.operation === 'create-phone-call')).toHaveLength(2)
+    writes.write.mockResolvedValue(undefined)
+    // Test the persistence cap with unbounded input too: it must not depend on
+    // callers already having applied the collection cap.
+    recordAssistantRuntimeIssueInputsBestEffort({ issues, vault: 'synthetic-vault',
+      policy: { environment: 'hosted', surface: null, privateIssueCaptureEnabled: true } })
+    await flushPendingAssistantRuntimeIssueWrites()
+    expect(writes.write).toHaveBeenCalledTimes(10)
+    expect(writes.write.mock.calls.filter(([input]) => input.record.operation === 'create-phone-call')).toHaveLength(2)
+  })
+
+  it('does not reserve phone slots for validation or unrelated issue producers', () => {
+    const ordinary: AssistantRuntimeIssueInput = { component: 'assistant.tool', operation: 'create-phone-call',
+      issueKind: 'tool_error', phase: 'tool_call', severity: 'warning', summary: 'Synthetic issue.' }
+    const collected: AssistantRuntimeIssueInput[] = []
+    for (let index = 0; index < 12; index++) appendAssistantRuntimeIssueInput(collected, ordinary)
+    appendAssistantRuntimeIssueInput(collected, { ...ordinary, component: 'assistant.codex-dynamic-tool',
+      issueKind: 'schema_rejection', errorCode: 'ASSISTANT_DYNAMIC_TOOL_FAILED' })
+    expect(collected).toHaveLength(8)
+  })
+
   it('keeps one generic failed action per completed call, separate from branch evidence', async () => {
     const result = await dispatch(requests[0])
     const rawEvent = { method: 'item/completed', params: { turnId: 'synthetic-turn', item: {
