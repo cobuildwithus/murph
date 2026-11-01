@@ -2390,7 +2390,11 @@ the phone-row fallback; it uses the indexed `updated_at` as the available failur
 observation time. An issue and a phone row can describe the same attempt, so the
 email labels observation counts rather than unique calls. Other tools alert at
 four backend failures per operation per hour. Handler exceptions, unavailable
-backends, authority rejection and malformed backend results count. Reported
+backends, authority rejection and malformed backend results count. Only shared
+`diagnosticRole: classification` rows of kind `tool_error` or `timeout` count;
+completion-role and unclassified legacy tool rows do not. Generic tools keep
+their registered operation; specialized group-tool actions share `group-tool`
+and workout editor failures share `workout-card-editor`. Reported
 failures also count when their finite category is `unavailable`, `timeout`,
 `rate_limited`, or service HTTP `authority_rejected`. Schema rejections,
 validation-stage failures and routine invalid-input/not-found/conflict results

@@ -1,14 +1,17 @@
-import type { Prisma } from "@prisma/client";
+import type { HostedLinqAlert, Prisma } from "@prisma/client";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { parseAssistantRuntimeIssueRecord } from "@murphai/runtime-state/node";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ query: vi.fn() }));
-vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({ $queryRaw: mocks.query }) }));
+const mocks = vi.hoisted(() => ({ query: vi.fn(), upsert: vi.fn(), updateMany: vi.fn() }));
+vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({
+  $queryRaw: mocks.query, hostedLinqAlert: { upsert: mocks.upsert, updateMany: mocks.updateMany },
+}) }));
 import { getPrisma } from "@/src/lib/prisma";
 import { readToolFailureHealth, TOOL_FAILURE_SAMPLE_LIMIT } from "@/src/lib/hosted-operational-alert/tool-failure-health";
+import { runHostedToolFailureAlertMonitor } from "@/src/lib/hosted-operational-alert/tool-failure-monitor";
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 const databaseUrl = process.env.DATABASE_URL ?? "";
@@ -38,14 +41,85 @@ describe.skipIf(!enabled)("tool failure indexed SQL", () => {
   });
   const read = () => readToolFailureHealth({ now, prisma: getPrisma() });
   async function seed(count: number, input: { operation?: string; reason?: string; stage?: string;
-    category?: string; release?: string; at?: Date; kind?: string } = {}) {
+    category?: string; release?: string; at?: Date; kind?: string;
+    component?: string; role?: string | null } = {}) {
     await client.query(`INSERT INTO hosted_assistant_runtime_issue
-      SELECT $1, $2::jsonb, $3, $4, 'assistant.codex-dynamic-tool', 'ASSISTANT_DYNAMIC_TOOL_FAILED', $5
+      SELECT $1, $2::jsonb, $3, $4, $7, 'ASSISTANT_DYNAMIC_TOOL_FAILED', $5
       FROM generate_series(1, $6::int)`, [input.operation ?? "automation", JSON.stringify({
       failureReason: input.reason ?? "handler_exception", failureStage: input.stage ?? "execution",
+      diagnosticRole: input.role === undefined ? "classification" : input.role,
       errorCategory: input.category ?? "unavailable", content: "synthetic private text",
-    }), input.release ?? "a".repeat(40), (input.at ?? now).toISOString(), input.kind ?? "tool_error", count]);
+    }), input.release ?? "a".repeat(40), (input.at ?? now).toISOString(), input.kind ?? "tool_error", count,
+    input.component ?? "assistant.codex-dynamic-tool"]);
   }
+
+  it.each(["503", "timeout"])("counts real group %s diagnostics across actions and sends one alert", async mode => {
+    const { stdout } = await promisify(execFile)("pnpm", ["exec", "tsx", "--tsconfig", "tsconfig.base.json",
+      "packages/assistant-engine/test/support/group-failure-producer.ts", mode]);
+    const records = (JSON.parse(stdout) as unknown[]).map(parseAssistantRuntimeIssueRecord);
+    expect(records).toHaveLength(4);
+    expect(new Set(records.map(record => record.operation)).size).toBe(2);
+    expect(JSON.stringify(records)).not.toContain("synthetic private upstream response");
+    const observedAt = new Date();
+    for (const [index, record] of records.entries()) {
+      expect(record).toMatchObject({ component: "assistant.group-tool",
+        issueKind: mode === "503" ? "tool_error" : "timeout",
+        errorCode: mode === "503" ? "HOSTED_GROUP_TOOL_HTTP_5XX" : "HOSTED_GROUP_TOOL_TIMEOUT",
+        details: { diagnosticRole: "classification", failureStage: "execution", failureReason: "handler_exception" },
+      });
+      await client.query("INSERT INTO hosted_assistant_runtime_issue VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7)", [
+        record.operation, JSON.stringify(record.details), record.releaseSha, record.occurredAt,
+        record.component, record.errorCode, record.issueKind,
+      ]);
+      const health = await readToolFailureHealth({ now: observedAt, prisma: getPrisma() });
+      expect(health.backend).toMatchObject({ anomalous: index === 3, count: index + 1,
+        groups: [expect.objectContaining({ operation: "group-tool", count: index + 1 })] });
+    }
+    // Keep real SQL for health and the incident owner; fake only its state port
+    // and email transport, so this test never sends an external notification.
+    const states = new Map<string, HostedLinqAlert>();
+    mocks.upsert.mockImplementation(async ({ create }: { create: HostedLinqAlert }) => {
+      if (!states.has(create.id)) states.set(create.id, { ...create, attemptCount: 0,
+        lastAttemptedAt: null, sentAt: null, updatedAt: observedAt, createdAt: observedAt });
+      return { ...states.get(create.id) };
+    });
+    mocks.updateMany.mockImplementation(async ({ where, data }: {
+      where: Partial<HostedLinqAlert>;
+      data: Omit<Partial<HostedLinqAlert>, "attemptCount"> & { attemptCount?: { increment: number } };
+    }) => {
+      const state = states.get(where.id!);
+      if (!state || (where.status && where.status !== state.status)
+        || (where.updatedAt && +where.updatedAt !== +state.updatedAt)) return { count: 0 };
+      const { attemptCount, ...fields } = data;
+      states.set(state.id, { ...state, ...fields, attemptCount: state.attemptCount + (attemptCount?.increment ?? 0) });
+      return { count: 1 };
+    });
+    const sendAlert = vi.fn(async () => ({ providerMessageId: "synthetic-message" }));
+    const env = { HOSTED_LINQ_ALERT_EMAIL_FROM: "alerts@example.test", HOSTED_LINQ_ALERT_EMAILS: "operator@example.test",
+      HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE: "UTC", RESEND_API_KEY: "re_test" };
+    const first = await runHostedToolFailureAlertMonitor({ now: observedAt, env, sendAlert });
+    expect(first.conditions.find(condition => condition.condition === "backend")?.outcome).toBe("alert_sent");
+    await runHostedToolFailureAlertMonitor({ now: new Date(+observedAt + 5 * 60_000), env, sendAlert });
+    expect(sendAlert).toHaveBeenCalledOnce();
+    const alert = JSON.stringify(sendAlert.mock.calls);
+    expect(alert).toContain("group-tool");
+    expect(alert).not.toMatch(/read_current|read_usage|synthetic private|memberId|details_json/);
+  });
+
+  it("counts classification once and excludes unclassified legacy tool events", async () => {
+    await seed(3);
+    await seed(3, { component: "assistant.codex-action", role: "completion" });
+    await seed(4, { component: "assistant.tool", role: null });
+    await seed(4, { role: null });
+    expect((await read()).backend).toMatchObject({ anomalous: false, count: 3 });
+  });
+
+  it("normalizes workout editor operations and retains arbitrary producer privacy", async () => {
+    await seed(2, { component: "assistant.workout-card-editor", operation: "attach_response_card", reason: "unavailable" });
+    await seed(2, { component: "assistant.workout-card-editor", operation: "synthetic-private-action", reason: "unavailable" });
+    expect((await read()).backend).toMatchObject({ anomalous: true, count: 4,
+      groups: [expect.objectContaining({ operation: "workout-card-editor", count: 4 })] });
+  });
 
   it.each([3, 4, 5])("uses per-operation threshold with %s failures", async count => {
     await seed(count);
@@ -58,8 +132,12 @@ describe.skipIf(!enabled)("tool failure indexed SQL", () => {
     await seed(20, { reason: "invalid_input", stage: "validation" });
     await seed(20, { reason: "handler_exception", stage: "validation" });
     await seed(20, { kind: "schema_rejection" });
+    await seed(20, { component: "assistant.group-tool", kind: "schema_rejection" });
+    await seed(20, { component: "assistant.group-tool", kind: "timeout", stage: "validation" });
+    await seed(20, { reason: "invalid_input" });
     await seed(20, { reason: "not_found" });
     await seed(20, { reason: "conflict" });
+    await seed(20, { reason: "unknown" });
     await seed(20, { at: new Date(+now - 3_600_000) });
     await seed(20, { at: new Date(+now + 1) });
     expect((await read()).backend).toMatchObject({ anomalous: false, count: 0 });

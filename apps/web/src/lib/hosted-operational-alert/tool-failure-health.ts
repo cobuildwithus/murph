@@ -3,7 +3,8 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 export const TOOL_FAILURE_WINDOW_MS = 60 * 60_000;
 export const TOOL_BACKEND_FAILURE_THRESHOLD = 4;
 export const TOOL_FAILURE_SAMPLE_LIMIT = 1_000;
-// Registered request kinds only. Never echo arbitrary operation/error strings.
+// Registered request kinds and finite specialized tool labels only.
+// Never echo arbitrary operation/error strings.
 export const TOOL_FAILURE_OPERATIONS = [
   "analyze-video", "ask-grok", "assistant-configuration", "assistant-style",
   "attach-group-challenge-response-card", "attach-response-card", "attach-response-media",
@@ -16,6 +17,7 @@ export const TOOL_FAILURE_OPERATIONS = [
   "pending-vault-files-list", "personalization", "plan-usage", "poll", "react-to-message",
   "resolve-physical-note", "select-reply-target", "send-physical-note", "send-progress-update",
   "send-vault-file", "stop-phone-call", "submit-product-feedback", "subscription", "usage-diagnostics",
+  "group-tool", "workout-card-editor",
 ];
 export const TOOL_BACKEND_FAILURE_REASONS = [
   "handler_exception", "unavailable", "authority_rejected", "invalid_result",
@@ -56,10 +58,14 @@ export async function readToolFailureHealth(input: { now: Date; prisma: ToolFail
         AND operation = 'create-phone-call'
       ORDER BY occurred_at DESC LIMIT ${TOOL_FAILURE_SAMPLE_LIMIT}
     ), backend_issues AS MATERIALIZED (
-      SELECT operation, details_json, release_sha, occurred_at AS at, 'dynamic_tool' AS source
+      SELECT CASE component
+          WHEN 'assistant.group-tool' THEN 'group-tool'
+          WHEN 'assistant.workout-card-editor' THEN 'workout-card-editor'
+          ELSE operation END AS operation,
+        details_json, release_sha, occurred_at AS at, 'dynamic_tool' AS source
       FROM hosted_assistant_runtime_issue
-      WHERE issue_kind = 'tool_error' AND occurred_at > ${start} AND occurred_at <= ${input.now}
-        AND component = 'assistant.codex-dynamic-tool' AND error_code = 'ASSISTANT_DYNAMIC_TOOL_FAILED'
+      WHERE issue_kind IN ('tool_error', 'timeout') AND occurred_at > ${start} AND occurred_at <= ${input.now}
+        AND details_json->>'diagnosticRole' = 'classification'
         AND operation IS DISTINCT FROM 'create-phone-call'
         AND coalesce(details_json->>'failureStage', '') <> 'validation'
         AND (details_json->>'failureReason' IN (${Prisma.join(TOOL_BACKEND_FAILURE_REASONS)})
