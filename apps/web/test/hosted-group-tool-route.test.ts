@@ -86,7 +86,7 @@ describe("hosted group tool route", () => {
 
   it("forwards the signed runtime identity for the recap write fence", async () => {
     const body = { action: "write_recap", origin: { kind: "game_recap", gameId: "synthetic-game", eventId: "game-recap:synthetic-game" },
-      recap: { pages: [], scoreLine: "Synthetic score line.", chatLine: "Synthetic chat line." }, priorChatLines: [] };
+      recap: { pages: [], chatLine: "Synthetic chat line." }, priorChatLines: [] };
     mocks.handleTool.mockResolvedValue({ action: "write_recap", result: { status: "ok", chatLine: "Synthetic chat line." } });
     const response = await route.POST(new Request(`https://web.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}?runtimeAuthority=1&runtimeAttempt=attempt-synthetic&runtimeGeneration=7&runtimeWorkspaceVersion=3`, {
       method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" },

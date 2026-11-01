@@ -128,14 +128,13 @@ describe("game chat tool authority", () => {
     m.read.mockResolvedValue({ games: [{ ...game, status: "settled" }] });
     expect((await handleGameChatTool(read)).result).not.toHaveProperty("loreGuidance");
   });
-  it("validates recap chat-line originality on the server before sealing", async () => {
+  it("validates, saves and replays a recap without scoreLine", async () => {
     const recap = {
       pages: [
         { background: "night" as const, blocks: [{ kind: "headline" as const, text: "Ava opened the week on the mat" }] },
         { background: "sage" as const, blocks: [{ kind: "headline" as const, text: "Leo found the sauna clause" }] },
         { background: "paper" as const, blocks: [{ kind: "headline" as const, text: "Breakfast changed hands" }] },
       ],
-      scoreLine: "Leo owes Ava breakfast in bed.",
       chatLine: "Sauna citizenship held. Open the week for the paperwork.",
     };
     m.recapMaterial.mockResolvedValue({

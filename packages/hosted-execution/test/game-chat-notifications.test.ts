@@ -65,6 +65,11 @@ describe("game v1 notification instructions", () => {
   it("snapshots the recap and missed-day prompt boundaries", () => {
     const recap = buildGameRecapInstructions([{ playerName: "Ava", text: "My alarm won." }]);
     expect(recap).not.toMatch(/\b(?:read_chat|read_lore|add_lore)\b/u);
+    expect(recap).toContain("- 3 to 6 pages with an arc: open on the stakes in plain words (who took which task, and what they were playing for), hit the turning point (a miss, an excuse, a comeback, a running joke paying off), and end on a page that lands the week with your verdict or punchline. When both of them hit the same kind of moment (both overslept, both blamed the weather), set the two side by side; the echo is the joke.");
+    expect(recap).toContain("Use a contact sheet when a pattern is the joke, and a stat only when the number itself is funny; a stat never restates the tasks, the prize, the days or the score.");
+    expect(recap).toContain("- Moments come from the game itself: their posts, misses, excuses and what they said to each other about it. Changing the game (terms, prize wording, schedule, invites) is bookkeeping, never a moment; leave it out, and the same goes for anything said to you about the app itself (feature requests, bugs, feedback). Everything you say happened did: never invent a lead, a comeback or a reason the game and chat don't show.");
+    expect(recap).toContain("- The app adds the score card and the result page after your pages; they show the score and who owes whom, so your pages don't need to. Call what the loser owes a prize, or a dare when it is one.");
+    expect(recap).not.toContain("scoreLine");
     const transcript = [{ playerName: "Ava", text: "My alarm won." }];
     const missed = buildGameMissedDayInstructions({ playerName: "Ava", firstMissedDate: "2030-03-04", missedDates: ["2030-03-04", "2030-03-05"], transcript });
     expect({

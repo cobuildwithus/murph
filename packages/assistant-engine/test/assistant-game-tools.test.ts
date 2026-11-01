@@ -97,6 +97,14 @@ describe('game recap dynamic contract', () => {
     { background: 'slate', blocks: [{ kind: 'stat', statValue: '5', text: 'days posted' }] },
     { background: 'sage', blocks: [{ kind: 'quote', quote: { who: 'Ava', text: 'verbatim words' } }] },
   ], scoreLine: 'Leo owes Ava breakfast.', chatLine: 'Sauna citizenship survived. Open the week for the paperwork.' }
+  it.each([false, true])('parses optional and legacy scoreLine unchanged; legacy=%s', (legacy) => {
+    const candidate = legacy ? recap : { pages: recap.pages, chatLine: recap.chatLine }
+    expect(MURPH_WRITE_RECAP_TOOL.inputSchema.required).toEqual(['pages', 'chatLine'])
+    const parsed = parse('write_recap', candidate)
+    expect(parsed).toMatchObject({ kind: 'game', request: { action: 'write_recap', recap: candidate } })
+    if (parsed?.kind !== 'game' || parsed.request.action !== 'write_recap') throw new Error('Expected recap request')
+    expect(parsed.request.recap).toEqual(candidate)
+  })
   it('gives isolated recap and check-in turns only their host-owned tools', () => {
     expect(resolveAssistantGameHostDynamicTools({ currentGameRecapScope: () => ({ gameId: 'game', eventId: 'game-recap:game', pairFingerprint: 'a'.repeat(32) }) }))
       .toEqual([MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL])

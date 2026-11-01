@@ -19,6 +19,15 @@ describe("game recap validation", () => {
     expect(validateGameRecap({ recap: valid, players, entries })).toEqual([]);
     expect(gameRecapToolResult([])).toBe("ok: saved. The players will see this recap.");
   });
+  it.each([3, 4])("accepts an absent scoreLine for a settled result with first score %s", (score) => {
+    const recap = { pages: valid.pages, chatLine: valid.chatLine };
+    const result = [{ memberId: "a", name: "Ava", score }, { memberId: "l", name: "Leo", score: 3 }];
+    expect(validateGameRecap({ recap, players, entries, result })).toEqual([]);
+  });
+  it("still validates an empty or overlong legacy scoreLine", () => {
+    expect(validateGameRecap({ recap: { ...valid, scoreLine: "" }, players, entries }).some((error) => error.startsWith("scoreLine:"))).toBe(true);
+    expect(validateGameRecap({ recap: { ...valid, scoreLine: "Ava " + "a".repeat(80) }, players, entries }).some((error) => error.startsWith("scoreLine:"))).toBe(true);
+  });
   it("returns fixable eval messages for authority, visual, copy and score failures", () => {
     const recap: HostedGameRecap = { pages: [
       { background: "night", blocks: [{ kind: "photo", entryIds: ["entry_hidden"] }] },

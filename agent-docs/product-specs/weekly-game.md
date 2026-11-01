@@ -196,8 +196,12 @@ this default without deleting other people's private contact choices.
 - **Hosted recap.** Settlement reserves one durable recap turn for the bound
   group. The turn reads the finished shared game, a bounded current-room
   transcript and the exact pair's lore, then calls `write_recap` with
-  three to seven story pages from the fixed page kit, `scoreLine` and
-  `chatLine`. The model never selects a game id: trusted notification authority
+  three to seven story pages from the fixed page kit and `chatLine`. The prompt
+  requests three to six pages, opening on the tasks and prize in plain words,
+  with stats only when the number itself is funny. App feedback and game
+  bookkeeping are not moments; every claimed event must have game/chat evidence.
+  Legacy `scoreLine` is optional and keeps its validation when present.
+  The model never selects a game id: trusted notification authority
   binds the tool to the exact settled game and room, even after a rematch starts.
   A finished game can receive its first recap late; a saved recap is never
   overwritten. Versioned schedules mark rest days as off, not missed. The server checks
@@ -207,7 +211,7 @@ this default without deleting other people's private contact choices.
   lines and three-word phrase reuse from earlier `Chat line used:` lore entries,
   returning the fixed correction messages for a retry. The accepted recap is
   sealed on the game row and both players receive
-  `recap: { pages, scoreLine, chatLine } | null` in `GameView`. After one
+  `recap: { pages, scoreLine?, chatLine } | null` in `GameView`. After one
   accepted `write_recap`, the runtime replaces any model-authored final copy
   with the server-returned delivery text: the sealed `chatLine`, a newline,
   then `Watch the recap: <public origin>/recap/<gameId>`. Web derives it on save
@@ -217,6 +221,12 @@ this default without deleting other people's private contact choices.
   ID shape and presents a generic, noindex app handoff (`<app scheme>://recap/<gameId>`)
   with an App Store fallback, without reading game data. Its app scheme shares
   the invite-page setting.
+  For optional score lines, deploy compatible Web before the runtime writer.
+  Web composes queued recap instructions; old runtimes still require the legacy
+  line in their tool schema until their deployment.
+  Existing recaps retain their score lines unchanged; new recaps may omit them.
+  Keep compatible Web and runtime readers after the first omitted-line recap
+  is stored, including on replay. This needs no database migration or split PR.
   Deploy the runtime response reader with the larger delivery-text bound before
   Web starts composing links; the old 160-character reader rejects long messages.
 - **Tickets.** A prize or dare makes the loser owe the winner one ticket; a tie

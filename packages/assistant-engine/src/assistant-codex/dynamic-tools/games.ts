@@ -17,7 +17,7 @@ export const MURPH_READ_GAME_RECAP_TOOL = {
 export const MURPH_WRITE_RECAP_TOOL = {
   namespace: 'murph', name: 'write_recap',
   description: 'Save the recap for this finished game. Returns ok, or a list of problems to fix (unknown entries, a quote that is not verbatim, text over its limit, banned words). Fix every problem and call it again; the last accepted call is what the players see.',
-  inputSchema: { type: 'object', additionalProperties: false, required: ['pages', 'scoreLine', 'chatLine'], properties: {
+  inputSchema: { type: 'object', additionalProperties: false, required: ['pages', 'chatLine'], properties: {
     pages: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['background', 'blocks'], properties: {
       background: { type: 'string', enum: ['night', 'paper', 'sage', 'sienna', 'slate'] },
       blocks: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['kind'], properties: {
