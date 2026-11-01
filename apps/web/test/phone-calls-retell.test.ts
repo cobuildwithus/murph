@@ -114,7 +114,7 @@ describe("Retell phone-call runtime", () => {
       agent_override: {
         retell_llm: {
           start_speaker: "agent",
-          begin_message: "Hi",
+          begin_message: "Hey",
         },
       },
       from_number: "+12125559999",
@@ -172,7 +172,7 @@ describe("Retell phone-call runtime", () => {
         },
         retell_llm: {
           start_speaker: "agent",
-          begin_message: "Hi",
+          begin_message: "Hey",
         },
       },
       from_number: "+12125559999",
@@ -246,7 +246,7 @@ describe("Retell phone-call runtime", () => {
   });
 
   it.each([undefined, "", "https://local-tunnel.example.test"])(
-    "opens member calls with Hi and no opening_line variable (webhook base: %s)",
+    "opens member calls with Hey and no opening_line variable (webhook base: %s)",
     async (publicBaseOrigin) => {
       vi.stubEnv("RETELL_API_KEY", "retell-api-key");
       vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
@@ -288,7 +288,7 @@ describe("Retell phone-call runtime", () => {
       const body = JSON.parse(String(fetchCalls[0]!.init?.body));
       expect(body.agent_override.retell_llm).toEqual({
         start_speaker: "agent",
-        begin_message: "Hi",
+        begin_message: "Hey",
       });
       expect(body).not.toHaveProperty("agent_override.agent.begin_message_delay_ms");
       expect(body.retell_llm_dynamic_variables).not.toHaveProperty("opening_line");

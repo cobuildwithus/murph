@@ -346,7 +346,7 @@ function buildRetellAgentOverride(publicBaseOrigin: string | null): RetellAgentO
   const override: RetellAgentOverride = {
     retell_llm: {
       start_speaker: "agent",
-      begin_message: "Hi",
+      begin_message: "Hey",
     },
   };
   if (publicBaseOrigin) {

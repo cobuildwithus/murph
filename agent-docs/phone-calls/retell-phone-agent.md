@@ -4,7 +4,7 @@ Use one published Retell LLM agent version tagged `prod`. The call behavior shou
 the `call_brief` dynamic variable, not by separate appointment/reservation/order agents.
 
 Code in `apps/web/src/lib/phone-calls/retell-runtime.ts` sets
-`agent_override.retell_llm = { start_speaker: "agent", begin_message: "Hi" }`
+`agent_override.retell_llm = { start_speaker: "agent", begin_message: "Hey" }`
 on every outbound call, to members and third parties alike, with or without a webhook
 base URL override. The greeting is static; `begin_message_delay_ms` is left unset.
 After the callee replies, continue from that reply without greeting them again.
@@ -51,7 +51,7 @@ All dates and times in the call brief use this timezone unless the brief says ot
 
 RULES
 
-1. The call has already opened with the static greeting "Hi". Wait for the callee's reply,
+1. The call has already opened with the static greeting "Hey". Wait for the callee's reply,
    then continue naturally from it without another greeting. Identify yourself as Murph
    once and, on third-party calls when `callerName` is present, say who you are calling for.
    Do not repeat the introduction unless asked.
