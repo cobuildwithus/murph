@@ -5105,6 +5105,32 @@ function createAllowanceTx(input: {
 }
 
 describe("image access through the canonical usage gate", () => {
+  it.each([
+    { funding: "house allowance only", sponsored: false, purchased: false, credit: 0n, allowed: false },
+    { funding: "ops credit only", sponsored: false, purchased: false, credit: 5_000_000n, allowed: false },
+    { funding: "active sponsorship", sponsored: true, purchased: false, credit: 0n, allowed: true },
+    { funding: "remaining paid credit", sponsored: false, purchased: true, credit: 5_000_000n, allowed: true },
+  ])("checks group image funding with $funding", async ({ sponsored, purchased, credit, allowed }) => {
+    const prisma = {
+      ...createGatePrisma({
+        threadContainerLimitUsdMicros: 4_500_000n,
+        stripeSubscriptionLookupKey: null,
+        spentUsdMicros: 0n,
+        usageCreditBalanceUsdMicros: credit,
+      }),
+      hostedGroupSponsorshipAuthorization: {
+        findFirst: vi.fn(async () => sponsored ? { id: "sponsorship_synthetic" } : null),
+      },
+      hostedUsageCreditPurchase: {
+        findFirst: vi.fn(async () => purchased ? { id: "purchase_synthetic" } : null),
+      },
+    };
+    await expect(readHostedAiUsageGate({ memberId: "member_123", prisma: prisma as never }))
+      .resolves.toMatchObject({ allowed: true, allowanceSource: "thread_container" });
+    await expect(readHostedImageGenerationAccess({ memberId: "member_123", prisma: prisma as never }))
+      .resolves.toEqual({ allowed, reason: allowed ? "allowed" : "subscription_required" });
+  });
+
   it.each(["launch_monthly", "launch_group_monthly"])("allows an active %s subscription", async (billingPlanCode) => {
     const prisma = createGatePrisma({ billingPhase: "paid", billingPlanCode, spentUsdMicros: 0n });
     await expect(readHostedImageGenerationAccess({ memberId: "member_123", prisma: prisma as never }))

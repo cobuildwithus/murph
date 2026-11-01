@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-01",
+  "order": 100,
+  "item": {
+    "id": "group-image-paid-funding",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Group images require paid funding",
+    "summary": "Image generation in group chats now requires an active sponsor or remaining purchased usage for the group.",
+    "details": "The group's free allowance still supports text conversations. Images also need available usage; personal paid plans and Family image access are unchanged.",
+    "relevanceTags": ["groups", "images", "usage"],
+    "sourcePullRequests": []
+  }
+}
