@@ -113,6 +113,7 @@
     "@murphai/vault-usecases": "workspace:*",
     "@next/eslint-plugin-next": "16.4.3",
     "@playwright/test": "^1.59.1",
+    "@prisma/get-dmmf": "7.8.0",
     "@spectrum-ts/core": "12.8.0",
     "@spectrum-ts/imessage": "12.8.0",
     "@tailwindcss/postcss": "^4.3.0",

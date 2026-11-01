@@ -1900,6 +1900,19 @@ deploy, then add validating constraints or clean up the old shape only after
 the replacement deployment is live and the prior production function window
 has drained.
 
+After `prisma migrate deploy` succeeds, the same runner parses the checked-in
+`prisma/schema.prisma` with Prisma DMMF and verifies all declared enums, enum
+values, model tables, and stored columns in the `public` schema. Database names
+from `@map` and `@@map` are authoritative; relation fields are not columns. Two
+catalog-only queries return at most one row per declared enum/table and only
+its expected values/columns, using one connection and ten-second statement
+limits. Missing objects fail the build with an explicit list before client
+regeneration or Linq sync, even if Prisma skipped an already-applied migration.
+Extra objects, constraints/index names, defaults, and timestamp precision do
+not fail this presence-only gate. It does not repair drift or undo migrations.
+`@prisma/get-dmmf` is pinned to the installed Prisma version to read the full
+schema DMMF without depending on a stale or pruned generated runtime client.
+
 The Linq provider-health rollout follows the same boundary. Predeploy adds the
 independent service/reputation columns and their per-dimension ordering
 metadata, but does not rewrite legacy `hosted_linq_line.health_status` while an

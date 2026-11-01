@@ -1593,3 +1593,7 @@ Phone-call enum forward repair and immutable migration history proof: [implement
 Workflow SDK v5 migration, omitted-run-field regression and hook compatibility proof
 are tracked in [the implementation plan](exec-plans/completed/2026-11-01-workflow-v5.md);
 `../apps/web/README.md` owns the SDK and deployment compatibility contract.
+
+The deploy-time schema presence gate is owned by `apps/web/README.md` under Prisma;
+implementation and local proof are recorded in
+[the schema contract plan](exec-plans/completed/2026-11-01-schema-contract-gate.md).
