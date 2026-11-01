@@ -74,18 +74,7 @@ export function areGameDevToolsAllowed(env: GameEnv = process.env): boolean {
   return deployment ? deployment !== "production" : env.NODE_ENV !== "production";
 }
 
-const MURPH_APP_URL_SCHEME = "ai.withmurph.app";
-
-/**
- * The Murph app link an invite page opens. `MURPH_GAME_APP_URL_SCHEME`
- * overrides the scheme (local stacks set the Debug app's `ai.withmurph.app.dev`);
- * anything that isn't a plain URL scheme falls back to the Murph app's own.
- */
-export function gameInviteAppUrl(token: string, env: GameEnv = process.env): string {
-  const configured = env.MURPH_GAME_APP_URL_SCHEME?.trim() ?? "";
-  const scheme = /^[a-z][a-z0-9+.-]*$/iu.test(configured) ? configured : MURPH_APP_URL_SCHEME;
-  return `${scheme}://invite/${encodeURIComponent(token)}`;
-}
+export { gameInviteAppUrl } from "./app-links";
 
 /** Every media key a member uploads starts with this; posts may only use their own. */
 export function mediaKeyPrefixFor(memberId: string): string {

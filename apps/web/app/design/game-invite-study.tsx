@@ -1,3 +1,4 @@
+import { GameRecapView } from "@/app/recap/[gameId]/game-recap-view";
 import { GameInviteView } from "@/app/g/[token]/game-invite-view";
 import { GameInviteShareCard } from "@/app/g/[token]/invite-share-card";
 import { gameInviteAppUrl } from "@/src/lib/game/access";
@@ -67,6 +68,9 @@ const LINK_PREVIEWS: ReadonlyArray<{ id: string; label: string; preview: GameInv
 export function GameInviteStudy() {
   return (
     <div className="flex flex-col gap-8" data-design-study="game-invite" id="game-invite">
+      <div id="game-recap" className="max-w-md bg-background px-6 py-7 text-foreground" inert>
+        <GameRecapView appUrl="ai.withmurph.app://recap/game_synthetic" />
+      </div>
       <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
         The production <code>/g/[token]</code> page a texted weekly-game challenge opens. It shows both
         tasks, the days, and the stake, then hands off to the app. Preview only; the buttons are inert here.

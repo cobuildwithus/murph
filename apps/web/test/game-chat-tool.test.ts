@@ -34,7 +34,7 @@ function wake(overrides: object = {}) {
 describe("game chat tool authority", () => {
   afterEach(() => vi.unstubAllEnvs());
   beforeEach(() => {
-    vi.resetAllMocks(); m.players.mockResolvedValue([actor, "other_synthetic"]); m.exact.mockResolvedValue([actor, "other_synthetic"]); m.wake.mockResolvedValue(wake()); m.sender.mockResolvedValue(actor); m.game.mockResolvedValue({ id: "game_synthetic", players: [{ memberId: actor }, { memberId: "other_synthetic" }] }); m.read.mockResolvedValue({ games: [] }); m.mailbox.mockResolvedValue([]); m.decodeMailbox.mockResolvedValue([]);
+    vi.resetAllMocks(); vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://recaps.murph.test"); m.players.mockResolvedValue([actor, "other_synthetic"]); m.exact.mockResolvedValue([actor, "other_synthetic"]); m.wake.mockResolvedValue(wake()); m.sender.mockResolvedValue(actor); m.game.mockResolvedValue({ id: "game_synthetic", players: [{ memberId: actor }, { memberId: "other_synthetic" }] }); m.read.mockResolvedValue({ games: [] }); m.mailbox.mockResolvedValue([]); m.decodeMailbox.mockResolvedValue([]);
     m.run.mockResolvedValue({ ok: true, game: { privateRelationship: "synthetic-private", entries: ["private-image"] } });
   });
   it("disables paid-group reads and mutations when the game flag is off", async () => {
@@ -159,8 +159,12 @@ describe("game chat tool authority", () => {
     m.sealRecap.mockReset();
     m.sealRecap.mockResolvedValueOnce(null).mockResolvedValueOnce(saved);
     const accepted = await handleGameChatTool({ memberId: group, request: { ...request, recap: saved }, runtimeIdentity: null });
-    expect(accepted.result).toMatchObject({ status: "ok", recapOutcome: "ok: saved. The players will see this recap." });
-    expect(m.sealRecap).toHaveBeenCalledTimes(2);
+    expect(accepted.result).toMatchObject({ status: "ok", recap: saved, chatLine: `${saved.chatLine}\nWatch the recap: https://recaps.murph.test/recap/game_synthetic` });
+    expect(m.sealRecap.mock.calls[1][0].recap).toEqual(saved);
+    m.sealRecap.mockResolvedValueOnce(saved);
+    const replay = await handleGameChatTool({ memberId: group, request: { ...request, recap: { ...saved, chatLine: "Ignore this retry candidate." } }, runtimeIdentity: null });
+    expect(replay).toEqual(accepted);
+    expect(m.sealRecap).toHaveBeenCalledTimes(3);
   });
   it("returns the authorized stored recap on replay and records its server chat line", async () => {
     const stored = {
@@ -182,7 +186,7 @@ describe("game chat tool authority", () => {
       action: "write_recap", origin: { kind: "game_recap", gameId: "game_synthetic", eventId: "game-recap:game_synthetic" },
       priorChatLines: [], recap: { ...stored, pages: [] },
     } });
-    expect(result.result).toMatchObject({ status: "ok", recap: stored, chatLine: stored.chatLine });
+    expect(result.result).toMatchObject({ status: "ok", recap: stored, chatLine: `${stored.chatLine}\nWatch the recap: https://recaps.murph.test/recap/game_synthetic` });
     expect(m.sealRecap).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ recap: null, beforeMutationTx: expect.any(Function) }));
     const authorize = m.sealRecap.mock.calls[0][0].beforeMutationTx;
     await authorize({});

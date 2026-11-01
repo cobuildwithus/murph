@@ -209,8 +209,16 @@ this default without deleting other people's private contact choices.
   sealed on the game row and both players receive
   `recap: { pages, scoreLine, chatLine } | null` in `GameView`. After one
   accepted `write_recap`, the runtime replaces any model-authored final copy
-  with the saved `chatLine`; the transcript and ordinary queued group delivery
-  therefore use that exact line.
+  with the server-returned delivery text: the sealed `chatLine`, a newline,
+  then `Watch the recap: <public origin>/recap/<gameId>`. Web derives it on save
+  and replay using the canonical public-origin config; the transcript and queued
+  group delivery use those exact bytes. The sealed recap, `Chat line used:` lore
+  and originality checks keep the bare line. `/recap/[gameId]` validates only the
+  ID shape and presents a generic, noindex app handoff (`<app scheme>://recap/<gameId>`)
+  with an App Store fallback, without reading game data. Its app scheme shares
+  the invite-page setting.
+  Deploy the runtime response reader with the larger delivery-text bound before
+  Web starts composing links; the old 160-character reader rejects long messages.
 - **Tickets.** A prize or dare makes the loser owe the winner one ticket; a tie
   or all-perfect game owes nothing. Each ticket carries its stake kind. The
   winner marks a dare done with the same redeem action, without proof. Legacy

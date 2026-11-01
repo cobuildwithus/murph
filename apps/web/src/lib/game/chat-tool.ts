@@ -12,6 +12,7 @@ import { resolveHostedGroupMessageSenderMemberId } from "../hosted-groups/group-
 import { assertHostedThreadRouteEgressAuthority } from "../hosted-routing/thread-route-store";
 import { getPrisma } from "../prisma";
 import { readGameChatState, readGameRecapMaterial, runGameCommand, sealGameRecap } from "./service";
+import { gameRecapMessage } from "./recap-message";
 import { gameRecapToolResult, validateGameRecap, type GameRecapChatMessage } from "./recap";
 import { gameChatLifecycleEventId } from "./chat-lifecycle-receipt";
 import { gamePairWhere, readGameChatPlayerIds, requireExactGameChat, sameGamePlayers } from "./chat-membership";
@@ -119,7 +120,7 @@ async function handleGameRecapTool(input: Input & { request: Extract<HostedGameT
   };
   const replay = await sealGameRecap({ beforeMutationTx: authorizeMutation, containerMemberId: input.memberId,
     eventId, gameId, playerMemberIds: players, recap: null });
-  if (replay) return { action: "write_recap", result: { status: "ok", recapOutcome: gameRecapToolResult([]), recap: replay, chatLine: replay.chatLine } };
+  if (replay) return { action: "write_recap", result: { status: "ok", recapOutcome: gameRecapToolResult([]), recap: replay, chatLine: gameRecapMessage(gameId, replay.chatLine) } };
   const chatMessages = await readGameRecapChatMessages({ containerMemberId: input.memberId, material });
   const errors = validateGameRecap({ recap: input.request.recap, players: material.players, entries: material.entries,
     chatMessages, priorChatLines: input.request.priorChatLines, result: material.validation.result });
@@ -127,7 +128,7 @@ async function handleGameRecapTool(input: Input & { request: Extract<HostedGameT
   if (!sameGamePlayers(await requireExactGameChat(input.memberId), players)) return { action: "write_recap", result: { status: "unavailable", error: "recap_authority_unavailable" } };
   const saved = await sealGameRecap({ beforeMutationTx: authorizeMutation, containerMemberId: input.memberId, eventId, gameId, playerMemberIds: players, recap: input.request.recap });
   return saved
-    ? { action: "write_recap", result: { status: "ok", recapOutcome: gameRecapToolResult([]), recap: saved, chatLine: saved.chatLine } }
+    ? { action: "write_recap", result: { status: "ok", recapOutcome: gameRecapToolResult([]), recap: saved, chatLine: gameRecapMessage(gameId, saved.chatLine) } }
     : { action: "write_recap", result: { status: "unavailable", error: "recap_authority_unavailable" } };
 }
 
