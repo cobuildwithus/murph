@@ -1006,7 +1006,8 @@ The hourly `vercel-machine-route-firewall.yml` scheduled check (also manually
 dispatchable from trusted main) reads active WAF configuration and project
 security with the same three `HOSTED_WEB_VERCEL_*` values; its token needs
 read access to both endpoints. Internal routes, provider ingress, Vercel cron
-targets and the runner-proxied data API paths (`HOSTED_RUNTIME_DATA_API_PATHS`)
+targets, Apple's `/.well-known/apple-app-site-association` fetch, and the
+runner-proxied data API paths (`HOSTED_RUNTIME_DATA_API_PATHS`)
 are derived from the route tree and shared route constants. Temporary firewall barriers on
 machine routes keep the scheduled check red until removed. Live firewall
 state is not a PR gate; GitHub's failed-run notification is the alert. Run
@@ -1014,6 +1015,27 @@ state is not a PR gate; GitHub's failed-run notification is the alert. Run
 from the repository root. IP blocks, managed mitigation and attack mode are
 conservative conflicts; earlier bypasses do not suppress them. Platform DDoS
 mitigation outside the project configuration is not observable by this check.
+
+The Apple association route serves public JSON with a one-hour cache and no
+session or redirect. Only `G9DJH2XUMK.ai.withmurph.app` claims `/recap/*` through
+`applinks.details[].appIDs` and `components`; invites, referrals and all other
+paths remain Web links. The proxy matcher excludes the route; Next's global
+security headers do not change its content type or cache policy. No i18n,
+redirect or trailing-slash override applies to its canonical URL.
+The existing `/recap/[gameId]` page remains the fallback. The iOS entitlement
+and recap routing ship separately.
+
+After deploy, check the origin without following redirects and Apple's cached
+copy:
+
+```sh
+curl -i -A "AASA-Bot/1.0.0" https://www.withmurph.ai/.well-known/apple-app-site-association
+curl -i https://app-site-association.cdn-apple.com/a/v1/www.withmurph.ai
+```
+
+Expect 200, `application/json`, the production recap-only body, and no `Location`
+or `Set-Cookie` from the origin. Then test a recap link from Messages with and
+without the compatible app installed.
 
 Provider-owned webhook-admin settings:
 
