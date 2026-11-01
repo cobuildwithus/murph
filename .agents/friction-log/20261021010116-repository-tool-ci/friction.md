@@ -1,6 +1,7 @@
 ---
 title: 'Repository-tool CI serializes independent subprocess fixtures'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4269'
 ---
 
 ## Expected Behavior

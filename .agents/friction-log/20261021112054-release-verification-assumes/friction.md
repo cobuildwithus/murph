@@ -1,6 +1,7 @@
 ---
 title: 'Release verification assumes the obsolete pipeline always receives SIGPIPE'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4277'
 ---
 
 ## Expected Behavior

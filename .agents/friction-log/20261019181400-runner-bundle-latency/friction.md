@@ -1,6 +1,7 @@
 ---
 title: 'Runner bundle latency CI cancels during native Codex compilation before samples'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4227'
 ---
 
 ## Expected Behavior

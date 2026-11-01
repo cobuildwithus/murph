@@ -1,6 +1,7 @@
 ---
 title: 'Game start-now PostgreSQL fixture assumes acceptance always starts tomorrow'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4328'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Idempotent snapshot locator setup fails on a local worker restart'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4268'
 ---
 
 ## Expected Behavior
