@@ -50,6 +50,13 @@ import {
   type HostedWebMigrationEnvironment,
 } from "../scripts/run-prisma-migrate-deploy";
 
+import {
+  assertHostedWebSchemaContract,
+  findMissingHostedWebSchemaObjects,
+  readHostedWebSchemaContract,
+  type HostedWebSchemaContract,
+} from "../scripts/hosted-web-schema-contract";
+
 const appTestDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(appTestDir, "..");
 const normalizeShellContinuations = (source: string): string =>
@@ -1318,13 +1325,17 @@ describe("hosted web production migration guard", () => {
           events.push("verify:complete");
           verifiedUrls.push(databaseUrl);
         },
+        async verifySchemaContract(databaseUrl) {
+          events.push("schema");
+          verifiedUrls.push(databaseUrl);
+        },
       },
     );
 
     const expectedOwnerUrl =
       "postgresql://direct.example.com:5432/app?sslmode=require&options=-c%20role%3Dpostgres";
-    assert.deepEqual(events, ["verify:start", "verify:complete", "run"]);
-    assert.deepEqual(verifiedUrls, [expectedOwnerUrl]);
+    assert.deepEqual(events, ["verify:start", "verify:complete", "run", "schema"]);
+    assert.deepEqual(verifiedUrls, [expectedOwnerUrl, expectedOwnerUrl]);
     assert.deepEqual(calls, [
       {
         command: hostedWebPrismaMigrateDeployCommand.command,
@@ -2898,3 +2909,135 @@ class FakeContractMigrationDatabase implements HostedWebContractMigrationClient 
     return { rows: [] };
   }
 }
+
+describe("hosted web schema presence contract", () => {
+  const contract: HostedWebSchemaContract = {
+    enums: [{ name: "HostedPhoneCallResultNotificationChannel", values: ["telegram", "linq"] }],
+    tables: [{ name: "phone_call", columns: ["id", "channel"] }],
+  };
+
+  test("passes a matching catalog and ignores extra database objects and cosmetic metadata", async () => {
+    const catalog = {
+      enums: [
+        { name: contract.enums[0]!.name, values: ["telegram", "linq", "future"] },
+        { name: "old_enum", values: ["old"] },
+      ],
+      tables: [
+        { name: "phone_call", columns: ["id", "channel", "old_column"],
+          defaults: { id: "different" }, indexes: ["different_name"],
+          constraints: ["different_pk"], timestampPrecision: 6 },
+        { name: "old_table", columns: ["id"] },
+      ],
+    };
+    assert.deepEqual(findMissingHostedWebSchemaObjects(contract, contract), []);
+    assert.deepEqual(findMissingHostedWebSchemaObjects(contract, catalog), []);
+    let queries = 0;
+    await assertHostedWebSchemaContract({
+      async query(sql, values) {
+        queries += 1;
+        assert.match(sql, /LIMIT \$2/u);
+        assert.equal(values?.[1], 1);
+        return { rows: sql.includes("pg_catalog.pg_enum") ? catalog.enums : catalog.tables };
+      },
+    }, contract);
+    assert.equal(queries, 2);
+  });
+
+  test("lists the missing enum value without catalog data or connection details", async () => {
+    const catalog = {
+      ...contract,
+      enums: [{ name: contract.enums[0]!.name, values: ["telegram"] }],
+    };
+    assert.deepEqual(findMissingHostedWebSchemaObjects(contract, catalog), [
+      'enum value "HostedPhoneCallResultNotificationChannel"."linq"',
+    ]);
+    await assert.rejects(() => assertHostedWebSchemaContract({
+      async query(sql) {
+        return { rows: sql.includes("pg_catalog.pg_enum") ? catalog.enums : catalog.tables };
+      },
+    }, contract), {
+      message: 'Hosted web schema contract failed; missing database objects:\n- enum value "HostedPhoneCallResultNotificationChannel"."linq"',
+    });
+  });
+
+  test("reports a missing enum or table once, and a missing column precisely", () => {
+    assert.deepEqual(findMissingHostedWebSchemaObjects(contract, { enums: [], tables: [] }), [
+      'enum "HostedPhoneCallResultNotificationChannel"',
+      'table "phone_call"',
+    ]);
+    assert.deepEqual(findMissingHostedWebSchemaObjects(contract, {
+      ...contract, tables: [{ name: "phone_call", columns: ["id"] }],
+    }), ['column "phone_call"."channel"']);
+  });
+
+  test("fails catalog verification for a missing table or column", async () => {
+    for (const tables of [[], [{ name: "phone_call", columns: ["id"] }]]) {
+      await assert.rejects(() => assertHostedWebSchemaContract({
+        async query(sql) {
+          return { rows: sql.includes("pg_catalog.pg_enum") ? contract.enums : tables };
+        },
+      }, contract), {
+        message: "Hosted web schema contract failed; missing database objects:\n- "
+          + (tables.length === 0 ? 'table "phone_call"' : 'column "phone_call"."channel"'),
+      });
+    }
+  });
+
+  test("derives all enum, table and stored column mappings from schema, excluding relations", async () => {
+    const expected = await readHostedWebSchemaContract(`
+      datasource db {
+        provider = "postgresql"
+      }
+      enum Channel {
+        TELEGRAM @map("telegram")
+        LINQ @map("linq")
+        @@map("delivery_channel")
+      }
+      enum Unused {
+        UNUSED
+      }
+      model Call {
+        id String @id
+        channel Channel @map("delivery_channel")
+        ownerId String @map("owner_id")
+        owner Owner @relation(fields: [ownerId], references: [id])
+        @@map("phone_call")
+      }
+      model Owner {
+        id String @id
+        calls Call[]
+      }
+    `);
+    assert.deepEqual(expected, {
+      enums: [
+        { name: "delivery_channel", values: ["telegram", "linq"] },
+        { name: "Unused", values: ["UNUSED"] },
+      ],
+      tables: [
+        { name: "phone_call", columns: ["id", "delivery_channel", "owner_id"] },
+        { name: "Owner", columns: ["id"] },
+      ],
+    });
+  });
+
+  test("propagates schema failure after migration success and skips verification after migration failure", async () => {
+    for (const migrationFails of [false, true]) {
+      const events: string[] = [];
+      await assert.rejects(() => runHostedWebPrismaMigrateDeploy(
+        { DATABASE_URL: "postgresql://local.example.test/app" },
+        async () => {
+          events.push("migrate");
+          if (migrationFails) throw new Error("migration failed");
+        },
+        {
+          async verifyMigrationOwner() { events.push("owner"); },
+          async verifySchemaContract() {
+            events.push("schema");
+            throw new Error("schema missing linq");
+          },
+        },
+      ), { message: migrationFails ? "migration failed" : "schema missing linq" });
+      assert.deepEqual(events, migrationFails ? ["owner", "migrate"] : ["owner", "migrate", "schema"]);
+    }
+  });
+});

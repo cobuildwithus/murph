@@ -8,6 +8,7 @@ import {
   verifyHostedWebMigrationOwner,
   withHostedWebMigrationOwner,
 } from "./hosted-web-migration-owner";
+import { verifyHostedWebSchemaContract } from "./hosted-web-schema-contract";
 
 const CONFIG_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HOSTED_WEB_PRISMA_MIGRATIONS_DIR = path.join(CONFIG_DIR, "prisma", "migrations");
@@ -310,6 +311,7 @@ export type HostedWebMigrationRunner = (
 export interface HostedWebPrismaMigrateDeployOptions {
   prismaMigrationsDir?: string;
   verifyMigrationOwner?: (databaseUrl: string) => Promise<void>;
+  verifySchemaContract?: (databaseUrl: string) => Promise<void>;
 }
 
 export interface HostedWebMigrationDatabaseUrl {
@@ -429,6 +431,7 @@ export async function runHostedWebPrismaMigrateDeploy(
     hostedWebPrismaMigrateDeployCommand.args,
     childEnvironment,
   );
+  await (options.verifySchemaContract ?? verifyHostedWebSchemaContract)(ownerDatabaseUrl);
 }
 
 export async function assertHostedWebPrismaPredeployMigrationsAreExpandOnly(
