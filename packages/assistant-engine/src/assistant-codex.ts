@@ -203,8 +203,9 @@ import type {
   AssistantProviderTurnExecutionResult,
   AssistantProviderUsageDraft,
 } from './assistant/providers/types.js'
-import type {
-  AssistantRuntimeIssueInput,
+import {
+  appendAssistantRuntimeIssueInput,
+  type AssistantRuntimeIssueInput,
 } from './assistant/issue-reporting.js'
 import type {
   SafeToolCallValidationDigest,
@@ -3801,11 +3802,7 @@ async function runCodexAppServerTurnOnProcess(
   }
 
   const pushRuntimeIssueInput = (issue: AssistantRuntimeIssueInput): void => {
-    if (runtimeIssueInputs.length >= 8) {
-      return
-    }
-
-    runtimeIssueInputs.push(issue)
+    appendAssistantRuntimeIssueInput(runtimeIssueInputs, issue)
   }
 
   cleanupAbortListener = attachCodexAbortListener({

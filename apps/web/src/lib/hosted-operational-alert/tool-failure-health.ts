@@ -21,6 +21,9 @@ export const TOOL_BACKEND_FAILURE_REASONS = [
   "handler_exception", "unavailable", "authority_rejected", "invalid_result",
   "result_serialization_failed", "empty_result", "oversized_result", "action_result_mismatch",
 ];
+export const TOOL_BACKEND_REPORTED_FAILURE_CATEGORIES = [
+  "unavailable", "timeout", "rate_limited", "authority_rejected",
+];
 const ERROR_CATEGORIES = [
   "unknown", "invalid_input", "not_found", "conflict", "unavailable", "authority_rejected",
   "invalid_result", "rate_limited", "timeout",
@@ -59,7 +62,9 @@ export async function readToolFailureHealth(input: { now: Date; prisma: ToolFail
         AND component = 'assistant.codex-dynamic-tool' AND error_code = 'ASSISTANT_DYNAMIC_TOOL_FAILED'
         AND operation IS DISTINCT FROM 'create-phone-call'
         AND coalesce(details_json->>'failureStage', '') <> 'validation'
-        AND details_json->>'failureReason' IN (${Prisma.join(TOOL_BACKEND_FAILURE_REASONS)})
+        AND (details_json->>'failureReason' IN (${Prisma.join(TOOL_BACKEND_FAILURE_REASONS)})
+          OR (details_json->>'failureReason' = 'reported_failure'
+            AND details_json->>'errorCategory' IN (${Prisma.join(TOOL_BACKEND_REPORTED_FAILURE_CATEGORIES)})))
       ORDER BY occurred_at DESC LIMIT ${TOOL_FAILURE_SAMPLE_LIMIT}
     ), phone_starts AS MATERIALIZED (
       SELECT 'create-phone-call' AS operation, '{}'::jsonb AS details_json,

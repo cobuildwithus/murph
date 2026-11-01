@@ -1597,3 +1597,7 @@ are tracked in [the implementation plan](exec-plans/completed/2026-11-01-workflo
 Tool backend failure and Workflow heartbeat alert implementation and local proof
 are tracked in [the alert plan](exec-plans/completed/2026-11-01-tool-workflow-alerts.md).
 `../apps/web/README.md` owns thresholds, state, load bounds and rollout behavior.
+
+Accepted tool-alert review fixes, late phone issue retention and revised 14-day
+calibration are tracked in [the review-fix plan](exec-plans/active/2026-11-01-tool-workflow-alert-review-fixes.md).
+The Web and Assistant Engine READMEs own the live filtering and capture contracts.

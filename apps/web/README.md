@@ -2390,9 +2390,12 @@ the phone-row fallback; it uses the indexed `updated_at` as the available failur
 observation time. An issue and a phone row can describe the same attempt, so the
 email labels observation counts rather than unique calls. Other tools alert at
 four backend failures per operation per hour. Handler exceptions, unavailable
-backends, authority rejection and malformed backend results count; schema
-rejections, validation-stage failures and routine not-found/conflict results do
-not. Unknown operations share a redacted `other_tool` bucket. SQL permits only
+backends, authority rejection and malformed backend results count. Reported
+failures also count when their finite category is `unavailable`, `timeout`,
+`rate_limited`, or service HTTP `authority_rejected`. Schema rejections,
+validation-stage failures and routine invalid-input/not-found/conflict results
+do not; purely reported `unknown` results remain excluded. Unknown operations
+share a redacted `other_tool` bucket. SQL permits only
 registered operation labels, finite error categories and 40-character hex release
 SHAs; no member identifiers, summaries, private JSON or phone content leave SQL.
 

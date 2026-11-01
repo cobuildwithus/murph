@@ -1,4 +1,7 @@
 import type { Prisma } from "@prisma/client";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { parseAssistantRuntimeIssueRecord } from "@murphai/runtime-state/node";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -67,6 +70,37 @@ describe.skipIf(!enabled)("tool failure indexed SQL", () => {
   it.each(["handler_exception", "unavailable", "authority_rejected", "result_serialization_failed"])("counts %s backend failures", async reason => {
     await seed(4, { reason });
     expect((await read()).backend.anomalous).toBe(true);
+  });
+
+  it.each(["unavailable", "timeout", "rate_limited", "authority_rejected"])("counts reported backend category %s", async category => {
+    await seed(4, { reason: "reported_failure", category });
+    expect((await read()).backend).toMatchObject({ anomalous: true, count: 4 });
+  });
+
+  it.each(["invalid_input", "not_found", "conflict", "unknown", "invalid_result", "private-category"])("excludes purely reported category %s", async category => {
+    await seed(20, { reason: "reported_failure", category });
+    await seed(20, { reason: "reported_failure", category: "unavailable", stage: "validation" });
+    expect((await read()).backend).toMatchObject({ anomalous: false, count: 0 });
+  });
+
+  it.each([403, 500])("alerts on a pre-row phone HTTP %s after eight earlier tool failures", async status => {
+    // Run the engine at its own package boundary; Next's environment typing
+    // must not become part of the hosted runtime producer's compilation.
+    const { stdout } = await promisify(execFile)("pnpm", ["exec", "tsx", "--tsconfig", "tsconfig.base.json",
+      "packages/assistant-engine/test/support/phone-failure-producer.ts", String(status)]);
+    const records = (JSON.parse(stdout) as unknown[]).map(parseAssistantRuntimeIssueRecord);
+    expect(records.some(record => record.operation === "create-phone-call")).toBe(true);
+    for (const record of records) {
+      await client.query(`INSERT INTO hosted_assistant_runtime_issue VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7)`, [
+        record.operation, JSON.stringify(record.details), record.releaseSha, record.occurredAt,
+        record.component, record.errorCode, record.issueKind,
+      ]);
+    }
+    // No phone row exists: the real persisted producer issue is the only signal.
+    const health = await readToolFailureHealth({ now: new Date(), prisma: getPrisma() });
+    expect(health.phone).toMatchObject({ anomalous: true, count: 1 });
+    expect(health.phone.groups[0]).toMatchObject({ source: "dynamic_tool", reason: "handler_exception",
+      category: status === 403 ? "authority_rejected" : "unavailable" });
   });
 
   it("one phone failure alerts, while schema rejection does not", async () => {
