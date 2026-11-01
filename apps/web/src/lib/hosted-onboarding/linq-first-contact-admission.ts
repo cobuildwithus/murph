@@ -653,7 +653,8 @@ function buildHostedLinqFirstContactAdmissionOpenAiBody(input: {
         content: [
           "Goal: decide whether this first inbound iMessage, SMS, or RCS message from an unknown sender should be admitted so Murph, a personal health assistant, can reply.",
           "Default to allow. Murph would rather reply to a stranger than turn one away.",
-          "Allow anything that reads like a real person reaching out — including bare greetings like \"hi\", \"hey\", \"yo\", \"sup\", emoji-only, single-word pings, any health/wellness/life question, any message that mentions Murph, and any genuine question or intent to use the product.",
+          "Unless a block rule below applies, allow anything that reads like a real person reaching out — including bare greetings like \"hi\", \"hey\", \"yo\", \"sup\", emoji-only, single-word pings, any health/wellness/life question, any message that mentions Murph, and any genuine question or intent to use the product.",
+          "Block requests for nude, sexual, or pornographic images or content, even if they appear human or mention Murph. Genuine sexual-health questions are not explicit-content requests; allow health questions and uncertain cases.",
           "Block clear automated messages from other AI assistants, chatbots, or autoresponders: templated introductions, registered-user-only responses, out-of-office notices, auto-replies, or bot signup pitches aimed at whoever contacted them. A mention of Murph does not make an automated reply human.",
           "Also block clearly automated marketing, sales, recruiting, SEO outreach, lead generation, promotional or coupon blasts, mass-template solicitations, or other obvious commercial spam aimed at an inbox rather than a person.",
           "When uncertain whether a message is a real human reaching out or an automated message, return allow.",

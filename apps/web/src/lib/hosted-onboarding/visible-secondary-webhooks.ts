@@ -284,6 +284,11 @@ async function sendHostedLinqVisibleSecondaryReply(input: {
   signal: AbortSignal | undefined;
 }): Promise<Awaited<ReturnType<HostedOnboardingLinqWebhookHandler>>> {
   const { context, dependencies, prisma, reason, recognizedSender, response } = input;
+  if (reason === "signup-link-already-sent"
+    && context.messageEvent.data.service?.trim().toLowerCase() === "sms") {
+    return response;
+  }
+
   const message = resolveHostedLinqVisibleSecondaryReply({
     reason,
     recognizedSender: Boolean(recognizedSender),
