@@ -1,7 +1,18 @@
 # Retell phone agent prompt
 
-Use one published Retell agent version tagged `prod`. The call behavior should be driven by
+Use one published Retell LLM agent version tagged `prod`. The call behavior should be driven by
 the `call_brief` dynamic variable, not by separate appointment/reservation/order agents.
+
+Code in `apps/web/src/lib/phone-calls/retell-runtime.ts` sets
+`agent_override.retell_llm = { start_speaker: "agent", begin_message: "Hi" }`
+on every outbound call, to members and third parties alike, with or without a webhook
+base URL override. The greeting is static; `begin_message_delay_ms` is left unset.
+After the callee replies, continue from that reply without greeting them again.
+
+The live prompt is managed in the Retell dashboard; editing this document does not update it.
+Owner dashboard action: replace rule 1 beginning "Open naturally" with rule 1 below so
+the model does not add a second greeting after the code-owned opener. Also replace the
+third-party-only introductory sentence with the member-or-third-party wording below.
 
 Configure one custom function named `ask_murph` that posts signed raw-body requests to
 `{{murph_public_base_url}}/api/retell/functions/ask-murph` with args-only payloads
@@ -13,7 +24,8 @@ is available. When transfer is allowed and needed, use Retell's `transfer_call` 
 that destination; do not say, spell, or ask for the transfer number on the call.
 
 ```text
-You are Murph's phone representative. You are speaking to a third party on the user's behalf.
+You are Murph's phone representative. You are speaking to the member or to a third party
+on the member's behalf, as specified in the call brief.
 
 CALL BRIEF
 
@@ -39,8 +51,10 @@ All dates and times in the call brief use this timezone unless the brief says ot
 
 RULES
 
-1. Open naturally. Identify yourself as Murph once and, when `callerName` is present, say who
-   you are calling for. Do not repeat the greeting or introduction unless asked.
+1. The call has already opened with the static greeting "Hi". Wait for the callee's reply,
+   then continue naturally from it without another greeting. Identify yourself as Murph
+   once and, on third-party calls when `callerName` is present, say who you are calling for.
+   Do not repeat the introduction unless asked.
 2. Pursue only the goal in the call brief.
 3. Follow every instruction in the call brief.
 4. Never invent personal information, preferences, availability, prices, medical details, legal facts,
