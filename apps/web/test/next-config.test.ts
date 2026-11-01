@@ -19,7 +19,6 @@ import {
 import {
   HOSTED_WEB_NEXT_TSCONFIG_PATH,
   HOSTED_WEB_PRODUCTION_BUILD_CPUS,
-  HOSTED_WEB_WORKFLOW_OPTIONS,
   WORKSPACE_SOURCE_PACKAGE_NAMES,
   assertHostedBrowserDeviceSyncCallbackHostnameConfiguration,
   buildHostedWebClientEnv,
@@ -295,7 +294,7 @@ test("next.config scopes Workflow local-world storage to the hosted web dist dir
 
   assert.equal(
     devEnvironment.WORKFLOW_LOCAL_DATA_DIR,
-    path.join(HOSTED_WEB_DEV_DIST_DIR, "workflow-data"),
+    path.join(HOSTED_WEB_DEV_DIST_DIR, "workflow-data-v5"),
   );
 
   const smokeEnvironment = createHostedWebSmokeEnvironment(createProcessEnv({
@@ -306,7 +305,7 @@ test("next.config scopes Workflow local-world storage to the hosted web dist dir
 
   assert.equal(
     smokeEnvironment.WORKFLOW_LOCAL_DATA_DIR,
-    path.join(HOSTED_WEB_SMOKE_DIST_DIR, "workflow-data"),
+    path.join(HOSTED_WEB_SMOKE_DIST_DIR, "workflow-data-v5"),
   );
 });
 
@@ -474,14 +473,6 @@ test("connect-link routes use the lightweight device-sync error entrypoint", () 
     assert.doesNotMatch(source, /from ["']@murphai\/device-syncd\/public-ingress["']/u);
     assert.match(source, /from ["']@murphai\/device-syncd\/errors["']/u);
   }
-});
-
-test("next.config uses Workflow lazy discovery to avoid eager dev rebuild loops", () => {
-  assert.deepEqual(HOSTED_WEB_WORKFLOW_OPTIONS, {
-    workflows: {
-      lazyDiscovery: true,
-    },
-  });
 });
 
 test("next.config traces generated Health Commons route files without the monolithic catalog", () => {

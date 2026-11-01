@@ -83,11 +83,6 @@ const require = createRequire(import.meta.url);
 export const WORKSPACE_SOURCE_PACKAGE_NAMES = HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES;
 export const HOSTED_WEB_NEXT_TSCONFIG_PATH = "./tsconfig.next.json";
 export const HOSTED_WEB_PRODUCTION_BUILD_CPUS = 2;
-export const HOSTED_WEB_WORKFLOW_OPTIONS = {
-  workflows: {
-    lazyDiscovery: true,
-  },
-} satisfies Parameters<typeof withWorkflow>[1];
 
 export function buildHostedWebContentSecurityPolicy(
   environment: NodeJS.ProcessEnv = process.env,
@@ -260,7 +255,9 @@ export function configureHostedWebWorkflowLocalDataDir(
 
   environment[WORKFLOW_LOCAL_DATA_DIR_ENV_KEY] = path.join(
     resolveHostedWebDistDir(phase, environment),
-    "workflow-data",
+    // v4 event logs cannot be replayed by the v5 local runtime. Preserve them
+    // separately rather than recovering old runs with the upgraded SDK.
+    "workflow-data-v5",
   );
 }
 
@@ -411,10 +408,7 @@ async function nextConfig(phase: string): Promise<NextConfig> {
   return buildHostedWebNextConfig(phase);
 }
 
-export const HOSTED_WEB_WORKFLOW_NEXT_CONFIG = withWorkflow(
-  nextConfig,
-  HOSTED_WEB_WORKFLOW_OPTIONS,
-);
+export const HOSTED_WEB_WORKFLOW_NEXT_CONFIG = withWorkflow(nextConfig);
 
 export default HOSTED_WEB_WORKFLOW_NEXT_CONFIG;
 

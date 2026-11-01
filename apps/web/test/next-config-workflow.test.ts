@@ -17,25 +17,17 @@ vi.mock("workflow/next", () => ({
   withWorkflow: workflowMock.withWorkflow,
 }));
 
-test("next.config passes lazy discovery options into Workflow", async () => {
+test("next.config uses the v5 Workflow defaults", async () => {
   vi.resetModules();
   workflowMock.withWorkflow.mockClear();
 
   const configModule = await import("../next.config");
 
   assert.equal(workflowMock.withWorkflow.mock.calls.length, 1);
-  assert.deepEqual(workflowMock.withWorkflow.mock.calls[0]?.[1], {
-    workflows: {
-      lazyDiscovery: true,
-    },
-  });
+  assert.equal(workflowMock.withWorkflow.mock.calls[0]?.[1], undefined);
   assert.deepEqual(configModule.default, {
     config: workflowMock.withWorkflow.mock.calls[0]?.[0],
-    options: {
-      workflows: {
-        lazyDiscovery: true,
-      },
-    },
+    options: undefined,
     wrapped: true,
   });
 });
@@ -60,7 +52,7 @@ test("next.config config callback re-roots Workflow local-world data for dev", a
 
     assert.equal(
       process.env.WORKFLOW_LOCAL_DATA_DIR,
-      path.join(".next-dev", "workflow-data"),
+      path.join(".next-dev", "workflow-data-v5"),
     );
   } finally {
     restoreEnvValue("WORKFLOW_TARGET_WORLD", previousTargetWorld);
