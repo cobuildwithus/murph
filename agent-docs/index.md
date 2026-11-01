@@ -1612,4 +1612,4 @@ calibration proof are tracked in [the specialized alert fix](exec-plans/complete
 
 Operator recap regeneration is specified in [Weekly Game](product-specs/weekly-game.md).
 Implementation and focused proof are tracked in
-[the regeneration plan](exec-plans/active/2026-11-01-recap-regenerate.md).
+[the regeneration plan](exec-plans/completed/2026-11-01-recap-regenerate.md).

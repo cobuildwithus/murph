@@ -1,6 +1,6 @@
 # Operator recap regeneration
 
-Status: active
+Status: completed
 Created: 2026-11-01
 Updated: 2026-11-01
 
@@ -80,6 +80,15 @@ No new complexity hotspot; existing runtime/protocol hotspots remain unchanged.
 Changelog: game-recap-refresh documents the support recovery outcome.
 
 Remaining delivery gates: the requested draft/no-message boundary leaves broad
-Ready-triggered CI and external ReviewGPT pending. Do not merge or deploy this
+CI and external ReviewGPT pending. GitHub CI reports explicit draft-admission
+failures ("Mark the pull request ready for review to run exact-head CI"); these
+are not test failures, and the PR remains draft as requested. Do not merge or deploy this
 candidate on the strength of local proof alone. No production access, real
 messaging, deployment, rollback, or merge was performed.
+
+## Handoff
+
+Draft PR: https://github.com/cobuildwithus/murph/pull/4425.
+Operator command, guards, rollout/rollback and focused evidence are in the PR
+and the weekly game spec. Keep the worktree for review. No production action.
+Completed: 2026-11-01
