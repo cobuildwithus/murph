@@ -1498,10 +1498,13 @@ goal, timezone, success criteria, and user-approved shareable facts. Cloudflare
 may call only the signed `web-control.worker` callback for
 `POST /api/internal/phone-calls` with the active runtime write fence; Retell API
 keys, from numbers, and agent ids/versions remain in `apps/web` env and never
-enter runner env, prompts, diagnostics, or workspace state. Transfer numbers are
-resolved server-side from verified hosted member identity when the brief allows a
-live transfer. `apps/web` stores one member-bound `HostedPhoneCall` row per real
-call for request-key idempotency, provider call id, status, bounded call brief,
+enter runner env, prompts, diagnostics, or workspace state. Web resolves the
+verified hosted member number once per new direct start, outside transactions, to classify the callee as `member` only on a normalized E.164 match;
+group/thread-container calls are always `third_party`. Retell receives that server-owned
+`call_audience` on every call. The same lookup supplies the transfer number only when
+the brief allows a live transfer. Replay and reconciliation never recreate provider
+calls, so the audience remains transient. `apps/web` stores one member-bound
+`HostedPhoneCall` row per real call for request-key idempotency, provider call id, status, bounded call brief,
 and final analysis. A direct Linq or Telegram call also stores only the bounded
 initiating channel enum, never a phone number or thread identifier. Web resolves
 that exact current direct route before provider dispatch and resolves the same

@@ -4,6 +4,7 @@ import type {
 
 export interface HostedPhoneCallRuntimeRecord {
   brief: HostedPhoneCallBrief;
+  callAudience: "member" | "third_party";
   id: string;
   memberId: string;
   transferNumber: string | null;

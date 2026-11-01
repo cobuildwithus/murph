@@ -1594,6 +1594,10 @@ Workflow SDK v5 migration, omitted-run-field regression and hook compatibility p
 are tracked in [the implementation plan](exec-plans/completed/2026-11-01-workflow-v5.md);
 `../apps/web/README.md` owns the SDK and deployment compatibility contract.
 
+The deploy-time schema presence gate is owned by `apps/web/README.md` under Prisma;
+implementation and local proof are recorded in
+[the schema contract plan](exec-plans/completed/2026-11-01-schema-contract-gate.md).
+
 Tool backend failure and Workflow heartbeat alert implementation and local proof
 are tracked in [the alert plan](exec-plans/completed/2026-11-01-tool-workflow-alerts.md).
 `../apps/web/README.md` owns thresholds, state, load bounds and rollout behavior.

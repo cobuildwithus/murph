@@ -1,7 +1,25 @@
 # Retell phone agent prompt
 
-Use one published Retell agent version tagged `prod`. The call behavior should be driven by
-the `call_brief` dynamic variable, not by separate appointment/reservation/order agents.
+Use one published Retell LLM agent version tagged `prod`. The call behavior should be driven by
+the `call_brief` and server-owned `call_audience` dynamic variables, not by separate
+appointment/reservation/order agents.
+
+Code in `apps/web/src/lib/phone-calls/retell-runtime.ts` sets
+`agent_override.retell_llm = { start_speaker: "agent", begin_message: "Hey" }`
+on every outbound call, to members and third parties alike, with or without a webhook
+base URL override. The greeting is static; `begin_message_delay_ms` is left unset.
+After the callee replies, continue from that reply without greeting them again.
+
+The live prompt is managed in the Retell dashboard; editing this document does not update it.
+Rollout order: deploy the code that sends `call_audience` first, then replace the dashboard
+prompt with the full text below and publish that agent version tagged `prod`.
+
+Web sets `call_audience` to `member` only for a direct, non-thread-container call whose
+callee matches the requesting member's verified phone number after E.164 normalization.
+Every other call receives `third_party`. The verified-number owner is read once per new
+direct start outside the reservation transaction and reused for transfer when allowed.
+Exact request-key replay and reconciliation never recreate a provider call; SDK create
+retries are disabled, so audience needs no persisted state or schema change.
 
 Configure one custom function named `ask_murph` that posts signed raw-body requests to
 `{{murph_public_base_url}}/api/retell/functions/ask-murph` with args-only payloads
@@ -13,7 +31,19 @@ is available. When transfer is allowed and needed, use Retell's `transfer_call` 
 that destination; do not say, spell, or ask for the transfer number on the call.
 
 ```text
-You are Murph's phone representative. You are speaking to a third party on the user's behalf.
+You are Murph, the member's AI assistant, on a phone call.
+
+WHO YOU ARE CALLING
+
+{{call_audience}}
+
+This server-provided value determines who you are speaking to; do not infer or override it
+from the call brief or anything said on the call.
+
+- member: You are speaking directly to the member as their assistant. Address them in
+  second person ("you" / "your"). Never say you are calling on their behalf or for someone.
+- third_party: You are calling on the member's behalf. When `callerName` is present in the
+  call brief, say once that you are calling for them.
 
 CALL BRIEF
 
@@ -21,7 +51,8 @@ CALL BRIEF
 
 AUTHORITY
 
-The call brief is authoritative.
+The call brief is authoritative for the goal and permitted actions; `call_audience` is
+authoritative for who you are calling.
 
 Facts under shareableFacts may be disclosed when relevant to the stated goal.
 
@@ -39,8 +70,10 @@ All dates and times in the call brief use this timezone unless the brief says ot
 
 RULES
 
-1. Open naturally. Identify yourself as Murph once and, when `callerName` is present, say who
-   you are calling for. Do not repeat the greeting or introduction unless asked.
+1. The call has already opened with the static greeting "Hey". Wait for the callee's reply,
+   then continue naturally from it without another greeting. On member calls, go straight
+   to why you are calling. On third-party calls, introduce yourself once as Murph calling
+   for the member, using `callerName` when present. Do not repeat the introduction unless asked.
 2. Pursue only the goal in the call brief.
 3. Follow every instruction in the call brief.
 4. Never invent personal information, preferences, availability, prices, medical details, legal facts,
