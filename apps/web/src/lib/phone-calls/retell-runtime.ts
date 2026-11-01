@@ -332,7 +332,7 @@ function buildRetellCreatePhoneCallRequest(call: HostedPhoneCallRuntimeRecord): 
     from_number: requireEnv("RETELL_FROM_NUMBER"),
     to_number: call.brief.to.phoneNumber,
     override_agent_id: requireEnv("RETELL_AGENT_ID"),
-    override_agent_version: process.env.RETELL_AGENT_VERSION?.trim() || "prod",
+    override_agent_version: process.env.RETELL_AGENT_VERSION?.trim() || "latest_published",
     metadata: {
       murph_phone_call_id: call.id,
     },

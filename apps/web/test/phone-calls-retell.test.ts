@@ -338,6 +338,33 @@ describe("Retell phone-call runtime", () => {
     },
   );
 
+  it.each([undefined, "", "  "])("defaults the agent version to latest_published when unset (%j)", async (version) => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
+    vi.stubEnv("RETELL_AGENT_ID", "agent_123");
+    vi.stubEnv("RETELL_AGENT_VERSION", version);
+    vi.stubEnv("RETELL_AGENT_DATA_STORAGE_SETTING", "basic_attributes_only");
+    vi.stubEnv("RETELL_WEBHOOK_PUBLIC_BASE_URL", undefined);
+    const bodies: unknown[] = [];
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({
+        call_id: "retell_call_default_version",
+        data_storage_setting: "basic_attributes_only",
+      }), { headers: { "content-type": "application/json" }, status: 200 });
+    };
+
+    await createRetellPhoneCallRuntime({ fetchImpl }).start({
+      callAudience: "third_party",
+      brief: VALID_BRIEF,
+      id: "hpc_123",
+      memberId: "member_123",
+      transferNumber: null,
+    });
+
+    expect(bodies[0]).toMatchObject({ override_agent_version: "latest_published" });
+  });
+
   it("rejects malformed Retell webhook public bases before creating a call", async () => {
     vi.stubEnv("RETELL_API_KEY", "retell-api-key");
     vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
