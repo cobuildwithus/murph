@@ -1,6 +1,7 @@
 ---
 title: 'Hosted workspace runner wake-interrupt test failed once in local acceptance'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4226'
 ---
 
 ## Expected Behavior

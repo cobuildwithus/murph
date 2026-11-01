@@ -1,6 +1,7 @@
 ---
 title: 'Web tsconfig makes tsx inline evaluation exit without executing code'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4408'
 ---
 
 ## Expected Behavior

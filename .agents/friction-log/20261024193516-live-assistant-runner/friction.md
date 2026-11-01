@@ -1,6 +1,7 @@
 ---
 title: 'Live assistant runner reports an unreadable focused-test list when pnpm prints engine warnings'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4355'
 ---
 
 ## Expected Behavior

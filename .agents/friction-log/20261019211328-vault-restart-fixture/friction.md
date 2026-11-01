@@ -1,6 +1,7 @@
 ---
 title: 'Vault restart fixture discards its encrypted object-store data'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4230'
 ---
 
 ## Expected Behavior

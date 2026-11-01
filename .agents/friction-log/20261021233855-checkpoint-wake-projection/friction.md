@@ -1,6 +1,7 @@
 ---
 title: 'Checkpoint wake projection fixture races a real timer'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4299'
 ---
 
 ## Expected Behavior
