@@ -124,6 +124,96 @@ const GROUP_NOTIFICATION_DESTINATION: HostedAssistantNotificationDestination = {
 };
 
 describe("createHostedPhoneCall", () => {
+  describe.each([false, true])("call audience with transfer allowed=%s", (allowTransferToUser) => {
+    it.each([
+      { name: "member self-call", phoneNumber: "+12125550123", verifiedNumber: "+12125550123", group: false, audience: "member" },
+      { name: "different number", phoneNumber: "+12125550123", verifiedNumber: "+12125550456", group: false, audience: "third_party" },
+      { name: "no verified number", phoneNumber: "+12125550123", verifiedNumber: null, group: false, audience: "third_party" },
+      { name: "international-prefix member number", phoneNumber: "+12125550123", verifiedNumber: "00 1 (212) 555-0123", group: false, audience: "member" },
+      { name: "formatted member number", phoneNumber: "+12125550123", verifiedNumber: "+1 (212) 555-0123", group: false, audience: "member" },
+      { name: "invalid member number", phoneNumber: "+12125550123", verifiedNumber: "invalid", group: false, audience: "third_party" },
+      { name: "group calling requester", phoneNumber: "+12125550123", verifiedNumber: "+12125550123", group: true, audience: "third_party" },
+    ])("classifies $name and preserves transfer permission", async ({
+      phoneNumber, verifiedNumber, group, audience,
+    }) => {
+      const transferNumberResolver = vi.fn(async () => verifiedNumber);
+      const store = createPhoneCallStore({
+        created: buildHostedPhoneCall(),
+        onReserve: () => {
+          expect(transferNumberResolver).toHaveBeenCalledTimes(group ? 0 : 1);
+        },
+      });
+      const runtime = createPhoneCallRuntime({ providerCallId: "retell_audience" });
+      const brief = {
+        ...VALID_BRIEF,
+        allowTransferToUser,
+        to: { label: "Callee", phoneNumber },
+      };
+
+      await createHostedPhoneCall({
+        brief,
+        ...(group ? {
+          groupRequester: GROUP_REQUESTER,
+          groupRequesterActivationAsserter: async () => undefined,
+        } : {}),
+        memberId: "member_1",
+        notificationDestinationResolver: async () => group
+          ? GROUP_NOTIFICATION_DESTINATION
+          : DIRECT_NOTIFICATION_DESTINATION,
+        prisma: store.prisma,
+        requestKey: "phone_call_audience",
+        runtime: runtime.runtime,
+        transferNumberResolver,
+      });
+
+      expect(transferNumberResolver).toHaveBeenCalledTimes(group ? 0 : 1);
+      if (!group) {
+        expect(transferNumberResolver).toHaveBeenCalledWith({ memberId: "member_1" });
+      }
+      expect(runtime.startCalls).toEqual([{
+        brief: { ...brief, allowTransferToUser: group ? false : allowTransferToUser },
+        callAudience: audience,
+        id: store.createCalls[0]!.data.id,
+        memberId: "member_1",
+        transferNumber: !group && allowTransferToUser ? verifiedNumber : null,
+      }]);
+    });
+  });
+
+  it.each(["starting", "calling"] as const)(
+    "does not reread member identity or restart an existing %s call",
+    async (status) => {
+      const existing = buildHostedPhoneCall({
+        briefEncrypted: await encryptHostedPhoneCallBrief({
+          callId: "hpc_existing",
+          memberId: "member_1",
+          value: VALID_BRIEF,
+        }),
+        id: "hpc_existing",
+        providerCallId: status === "calling" ? "retell_existing" : null,
+        resultNotificationChannel: "linq",
+        status,
+        updatedAt: new Date(),
+      });
+      const store = createPhoneCallStore({ existing });
+      const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+      const transferNumberResolver = vi.fn(async () => "+12125550456");
+
+      await createHostedPhoneCall({
+        brief: VALID_BRIEF,
+        memberId: existing.memberId,
+        prisma: store.prisma,
+        requestKey: existing.requestKey,
+        runtime: runtime.runtime,
+        transferNumberResolver,
+      });
+
+      expect(transferNumberResolver).not.toHaveBeenCalled();
+      expect(runtime.startCalls).toEqual([]);
+      expect(store.createCalls).toEqual([]);
+    },
+  );
+
   it("creates the local call row before starting Retell and stores the provider id", async () => {
     const created = buildHostedPhoneCall();
     const store = createPhoneCallStore({ created });
@@ -166,6 +256,7 @@ describe("createHostedPhoneCall", () => {
     expect(store.createCalls[0]!.data).not.toHaveProperty("briefJson");
     expect(JSON.stringify(store.createCalls[0]!.data)).not.toContain(VALID_BRIEF.goal);
     expect(runtime.startCalls).toEqual([{
+      callAudience: "third_party",
       brief: VALID_BRIEF,
       id: createdCallId,
       memberId: "member_1",
@@ -3310,6 +3401,7 @@ describe("createHostedPhoneCall", () => {
       status: "calling",
     });
     expect(runtime.startCalls).toEqual([{
+      callAudience: "third_party",
       brief: VALID_BRIEF,
       id: createdCallId,
       memberId: created.memberId,
@@ -3387,7 +3479,7 @@ describe("createHostedPhoneCall", () => {
     expect(reconciliationWorkflowStarter).toHaveBeenCalledOnce();
   });
 
-  it("does not resolve a transfer destination when the brief disallows transfer", async () => {
+  it("resolves audience without enabling transfer when the brief disallows transfer", async () => {
     const created = buildHostedPhoneCall();
     const store = createPhoneCallStore({ created });
     const runtime = createPhoneCallRuntime({ providerCallId: "retell_call_123" });
@@ -3409,8 +3501,9 @@ describe("createHostedPhoneCall", () => {
       },
     });
 
-    expect(resolverCalls).toBe(0);
+    expect(resolverCalls).toBe(1);
     expect(runtime.startCalls).toEqual([{
+      callAudience: "third_party",
       brief,
       id: store.createCalls[0]!.data.id,
       memberId: "member_1",
@@ -3465,6 +3558,7 @@ describe("createHostedPhoneCall", () => {
     });
     expect(transferNumberResolver).not.toHaveBeenCalled();
     expect(runtime.startCalls).toEqual([{
+      callAudience: "third_party",
       brief: effectiveBrief,
       id: store.createCalls[0]!.data.id,
       memberId: "member_1",
@@ -3614,7 +3708,7 @@ describe("createHostedPhoneCall", () => {
     expect(runtime.startCalls).toEqual([]);
   });
 
-  it("does not resolve a transfer destination when transfer permission is omitted", async () => {
+  it("resolves audience without enabling transfer when transfer permission is omitted", async () => {
     const created = buildHostedPhoneCall();
     const store = createPhoneCallStore({ created });
     const runtime = createPhoneCallRuntime({ providerCallId: "retell_call_123" });
@@ -3640,8 +3734,9 @@ describe("createHostedPhoneCall", () => {
       },
     });
 
-    expect(resolverCalls).toBe(0);
+    expect(resolverCalls).toBe(1);
     expect(runtime.startCalls).toEqual([{
+      callAudience: "third_party",
       brief,
       id: store.createCalls[0]!.data.id,
       memberId: "member_1",

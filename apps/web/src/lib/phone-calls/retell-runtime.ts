@@ -412,6 +412,7 @@ function buildRetellDynamicVariables(
 ): Record<string, string> {
   const brief = call.brief;
   return {
+    call_audience: call.callAudience,
     call_brief: JSON.stringify(brief),
     murph_timezone: brief.timeZone,
     ...(publicBaseOrigin

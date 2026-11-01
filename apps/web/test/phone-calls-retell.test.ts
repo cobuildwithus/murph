@@ -71,6 +71,42 @@ describe("Retell phone-call runtime", () => {
     vi.unstubAllEnvs();
   });
 
+  describe.each(["member", "third_party"] as const)("%s audience", (callAudience) => {
+    it.each([
+      { allowTransferToUser: true, transferNumber: "+12125550123", expected: "+12125550123" },
+      { allowTransferToUser: false, transferNumber: "+12125550123", expected: "" },
+      { allowTransferToUser: true, transferNumber: null, expected: "" },
+      { allowTransferToUser: false, transferNumber: null, expected: "" },
+    ])("sends audience with transfer allowed=$allowTransferToUser and number=$transferNumber", async ({
+      allowTransferToUser, transferNumber, expected,
+    }) => {
+      vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+      vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
+      vi.stubEnv("RETELL_AGENT_ID", "agent_123");
+      vi.stubEnv("RETELL_AGENT_DATA_STORAGE_SETTING", "basic_attributes_only");
+      vi.stubEnv("RETELL_WEBHOOK_PUBLIC_BASE_URL", undefined);
+      const fetchImpl = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+        call_id: "retell_audience",
+        data_storage_setting: "basic_attributes_only",
+      }), { headers: { "content-type": "application/json" } }));
+
+      await createRetellPhoneCallRuntime({ fetchImpl }).start({
+        brief: { ...VALID_BRIEF, allowTransferToUser },
+        callAudience,
+        id: "hpc_audience",
+        memberId: "member_1",
+        transferNumber,
+      });
+
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      const body = JSON.parse(String(fetchImpl.mock.calls[0]![1]?.body));
+      expect(body.retell_llm_dynamic_variables).toMatchObject({
+        call_audience: callAudience,
+        transfer_number: expected,
+      });
+    });
+  });
+
   it("creates calls with the current Retell override shape and server-owned transfer number", async () => {
     vi.stubEnv("RETELL_API_KEY", "retell-api-key");
     vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
@@ -96,6 +132,7 @@ describe("Retell phone-call runtime", () => {
     };
 
     const result = await createRetellPhoneCallRuntime({ fetchImpl }).start({
+      callAudience: "third_party",
       brief: VALID_BRIEF,
       id: "hpc_123",
       memberId: "member_123",
@@ -124,6 +161,7 @@ describe("Retell phone-call runtime", () => {
       override_agent_id: "agent_123",
       override_agent_version: "prod",
       retell_llm_dynamic_variables: {
+        call_audience: "third_party",
         call_brief: JSON.stringify(VALID_BRIEF),
         murph_timezone: "America/New_York",
         transfer_number: "+12125550000",
@@ -157,6 +195,7 @@ describe("Retell phone-call runtime", () => {
     };
 
     await createRetellPhoneCallRuntime({ fetchImpl }).start({
+      callAudience: "third_party",
       brief: VALID_BRIEF,
       id: "hpc_123",
       memberId: "member_123",
@@ -182,6 +221,7 @@ describe("Retell phone-call runtime", () => {
       override_agent_id: "agent_123",
       override_agent_version: "prod",
       retell_llm_dynamic_variables: {
+        call_audience: "third_party",
         call_brief: JSON.stringify(VALID_BRIEF),
         murph_public_base_url: "https://local-tunnel.example.test",
         murph_timezone: "America/New_York",
@@ -272,6 +312,7 @@ describe("Retell phone-call runtime", () => {
       };
 
       await createRetellPhoneCallRuntime({ fetchImpl }).start({
+        callAudience: "member",
         brief: {
           ...VALID_BRIEF,
           allowTransferToUser: false,
@@ -292,6 +333,8 @@ describe("Retell phone-call runtime", () => {
       });
       expect(body).not.toHaveProperty("agent_override.agent.begin_message_delay_ms");
       expect(body.retell_llm_dynamic_variables).not.toHaveProperty("opening_line");
+      expect(body.retell_llm_dynamic_variables.call_audience).toBe("member");
+      expect(body.retell_llm_dynamic_variables.transfer_number).toBe("");
     },
   );
 
@@ -305,6 +348,7 @@ describe("Retell phone-call runtime", () => {
     const fetchImpl = vi.fn<typeof fetch>();
 
     await expect(createRetellPhoneCallRuntime({ fetchImpl }).start({
+      callAudience: "third_party",
       brief: VALID_BRIEF,
       id: "hpc_123",
       memberId: "member_123",
@@ -338,6 +382,7 @@ describe("Retell phone-call runtime", () => {
     };
 
     await expect(createRetellPhoneCallRuntime({ fetchImpl }).start({
+      callAudience: "third_party",
       brief: VALID_BRIEF,
       id: "hpc_123",
       memberId: "member_123",
@@ -368,6 +413,7 @@ describe("Retell phone-call runtime", () => {
     }));
 
     const result = await createRetellPhoneCallRuntime({ fetchImpl }).start({
+      callAudience: "third_party",
       brief: VALID_BRIEF,
       id: "hpc_123",
       memberId: "member_123",
@@ -461,6 +507,7 @@ describe("Retell phone-call runtime", () => {
     };
 
     await expect(createRetellPhoneCallRuntime({ fetchImpl }).start({
+      callAudience: "third_party",
       brief: VALID_BRIEF,
       id: "hpc_123",
       memberId: "member_123",
@@ -480,6 +527,7 @@ describe("Retell phone-call runtime", () => {
     controller.abort();
 
     const error = await createRetellPhoneCallRuntime({ fetchImpl }).start({
+      callAudience: "third_party",
       brief: VALID_BRIEF,
       id: "hpc_123",
       memberId: "member_123",
@@ -501,6 +549,7 @@ describe("Retell phone-call runtime", () => {
     }));
 
     const error = await createRetellPhoneCallRuntime({ fetchImpl }).start({
+      callAudience: "third_party",
       brief: VALID_BRIEF,
       id: "hpc_123",
       memberId: "member_123",
