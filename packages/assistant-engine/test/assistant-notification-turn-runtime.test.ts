@@ -4300,7 +4300,7 @@ test('sendAssistantNotificationLocal rejects an empty context handoff response b
   expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
 })
 
-test('game recap notifications deliver and persist the accepted chat line exactly', async () => {
+test.each(['game-recap:game_synthetic', 'game-recap:game_synthetic:synthetic_request'])('game recap notifications deliver and persist the accepted chat line exactly: %s', async (eventId) => {
   const savedChatLine = '  Ava won the mat jurisdiction case, 3–2.  \nWatch the recap: https://recaps.murph.test/recap/game_synthetic'
   const beforeDelivery = vi.fn()
   const providerResult = createProviderResult({
@@ -4329,12 +4329,12 @@ test('game recap notifications deliver and persist the accepted chat line exactl
   const result = await sendAssistantNotificationLocal({
     beforeDelivery,
     channel: 'linq',
-    deliveryIdempotencyKey: 'game-recap:game_synthetic',
+    deliveryIdempotencyKey: eventId,
     deliveryTarget: 'synthetic-game-thread',
     executionContext: {
       hosted: {
         gameRecapScope: {
-          eventId: 'game-recap:game_synthetic',
+          eventId,
           gameId: 'game_synthetic',
           pairFingerprint: '0123456789abcdef0123456789abcdef',
         },
@@ -4343,7 +4343,7 @@ test('game recap notifications deliver and persist the accepted chat line exactl
       },
     },
     instructions: 'Write and announce the game recap.',
-    responsePolicy: { kind: 'require_game_recap', eventId: 'game-recap:game_synthetic', gameId: 'game_synthetic', pairFingerprint: '0123456789abcdef0123456789abcdef' },
+    responsePolicy: { kind: 'require_game_recap', eventId, gameId: 'game_synthetic', pairFingerprint: '0123456789abcdef0123456789abcdef' },
     threadId: 'synthetic-game-thread',
     threadIsDirect: false,
     vault: '/vaults/game-recap-exact-chat-line',

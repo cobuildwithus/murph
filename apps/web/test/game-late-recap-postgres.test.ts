@@ -1,3 +1,4 @@
+import { requestGameRecapRegeneration } from "../src/lib/game/recap-regeneration";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,7 +10,7 @@ import { readGameRecapMaterial, readGame, sealGameRecap } from "../src/lib/game/
 import { assertGameProposalDeliveryCurrentTx } from "../src/lib/game/chat-delivery-authority";
 import { gameChatLifecycleEventId, markGameChatGenerationQueuedTx, reserveGameChatLifecycleTx } from "../src/lib/game/chat-lifecycle-receipt";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../src/lib/hosted-onboarding/linq-observability-identifiers";
-import { buildHostedLinqDeliveryId } from "../src/lib/hosted-onboarding/linq-delivery-store";
+import { recordHostedLinqRuntimeProviderDispatchFenceTx, buildHostedLinqDeliveryId } from "../src/lib/hosted-onboarding/linq-delivery-store";
 import { applyHostedWebContractMigrations, listHostedWebContractMigrations } from "../scripts/run-production-contract-migrations";
 
 vi.mock("../src/lib/game/chat-lifecycle", () => ({ deliverGameChatLifecycle: async () => false }));
@@ -21,7 +22,7 @@ if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murp
 const migrationId = "20261031190000_recover_missing_game_recap";
 const migrationSql = readFileSync(new URL(`../prisma/contract-migrations/${migrationId}/migration.sql`, import.meta.url), "utf8");
 const targetId = "5325824e-9e5f-48a1-91b0-2fe954e616c7";
-const members: string[] = [], games: string[] = [];
+const members: string[] = [], games: string[] = [], deliveries: string[] = [];
 const recap = { pages: [
   { background: "paper" as const, blocks: [{ kind: "headline" as const, text: "A synthetic finished week" }] },
   { background: "sage" as const, blocks: [{ kind: "headline" as const, text: "The weekend was off" }] },
@@ -70,7 +71,8 @@ function withStatus(status: string) {
 
 describe.skipIf(!enabled)("late settled-game recap PostgreSQL proof", () => {
   afterEach(async () => {
-    await getPrisma().hostedLinqDelivery.deleteMany({ where: { source: "game_lifecycle", sourceRef: { in: games.splice(0) } } });
+    await getPrisma().hostedLinqDelivery.deleteMany({ where: { id: { in: deliveries.splice(0) } } });
+    await getPrisma().hostedLinqDelivery.deleteMany({ where: { source: "game_lifecycle", OR: games.splice(0).flatMap((gameId) => [{ sourceRef: gameId }, { sourceRef: { startsWith: `${gameId}:` } }]) } });
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: members.splice(0) } } });
   });
 
@@ -124,6 +126,100 @@ describe.skipIf(!enabled)("late settled-game recap PostgreSQL proof", () => {
     expect(await readGameRecapMaterial(gameId, room, players)).toBeNull();
     expect(await sealGameRecap(sealInput)).toBeNull();
     await expect(assertGameProposalDeliveryCurrentTx({ tx: db, containerMemberId: room, playerMemberIds: players, deliveryIdempotencyKey: eventId })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+  });
+
+  it("dry runs, admits concurrent retries once, and replaces only on acceptance without touching the rematch", async () => {
+    const { db, gameId, newerId, room, players, eventId, sealInput } = await fixture();
+    await reserveGameChatLifecycleTx({ gameId, kind: "recap", now: new Date(), tx: db });
+    await markGameChatGenerationQueuedTx(eventId, db, room);
+    await sealGameRecap(sealInput);
+    await db.hostedLinqDelivery.updateMany({ where: { sourceRef: gameId }, data: { status: "accepted" } });
+    const before = await db.game.findUniqueOrThrow({ where: { id: gameId } });
+    const newer = await db.game.findUniqueOrThrow({ where: { id: newerId } });
+    const request = { gameId, regenerationId: "synthetic_request", execute: false, operatorMemberId: "system" };
+    expect(await requestGameRecapRegeneration(request)).toMatchObject({ outcome: "would_regenerate", dryRun: true });
+    expect(await db.gameEvent.count({ where: { gameId } })).toBe(0);
+    expect(await db.hostedLinqDelivery.count({ where: { sourceRef: { startsWith: `${gameId}:` } } })).toBe(0);
+    const results = await Promise.all([1, 2].map(() => requestGameRecapRegeneration({ ...request, execute: true })));
+    expect(results.map((result) => result.outcome).sort()).toEqual(["already_requested", "reserved"]);
+    const regeneratedEventId = `${eventId}:${request.regenerationId}`;
+    expect(await db.hostedLinqDelivery.count({ where: { sourceRef: `${gameId}:${request.regenerationId}` } })).toBe(1);
+    expect(await requestGameRecapRegeneration({ ...request, regenerationId: "another_request", execute: true })).toMatchObject({ outcome: "delivery_pending" });
+    expect((await db.game.findUniqueOrThrow({ where: { id: gameId } })).recapEncrypted).toBe(before.recapEncrypted);
+    await markGameChatGenerationQueuedTx(regeneratedEventId, db, room);
+    const regenerate = { ...sealInput, eventId: regeneratedEventId };
+    expect(await sealGameRecap({ ...regenerate, recap: null })).toBeNull();
+    await expect(sealGameRecap({ ...regenerate, beforeMutationTx: async () => { throw new Error("synthetic turn failure"); } })).rejects.toThrow("synthetic turn failure");
+    expect((await readGame(gameId, players[0]!))?.recap).toEqual(recap);
+    await expect(assertGameProposalDeliveryCurrentTx({ tx: db, containerMemberId: room, playerMemberIds: players, deliveryIdempotencyKey: regeneratedEventId })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    const replacement = { ...recap, chatLine: "A fresh synthetic story from the same finished game." };
+    const accepted = await Promise.all([replacement, { ...replacement, chatLine: "Ignored second candidate" }].map((candidate) => sealGameRecap({ ...regenerate, recap: candidate })));
+    expect(accepted[0]).toEqual(accepted[1]);
+    expect((await readGame(gameId, players[0]!))?.recap).toEqual(accepted[0]);
+    expect(await sealGameRecap({ ...regenerate, recap: null })).toEqual(accepted[0]);
+    expect(await db.gameEvent.count({ where: { gameId, type: "recap_regeneration_accepted" } })).toBe(1);
+    await expect(assertGameProposalDeliveryCurrentTx({ tx: db, containerMemberId: room, playerMemberIds: players, deliveryIdempotencyKey: regeneratedEventId })).resolves.toBe(true);
+    expect(await db.game.findUniqueOrThrow({ where: { id: newerId } })).toEqual(newer);
+    const deliveryKey = createHostedLinqDeliveryIdempotencyLookupKey(regeneratedEventId)!;
+    const reserved = await db.hostedLinqDelivery.findUniqueOrThrow({ where: { idempotencyKey: deliveryKey } });
+    deliveries.push(reserved.id);
+    const postToGroup = vi.fn();
+    const dispatch = async () => {
+      const claim = await db.$transaction(async (tx) => {
+        await assertGameProposalDeliveryCurrentTx({ tx, containerMemberId: room, playerMemberIds: players, deliveryIdempotencyKey: regeneratedEventId });
+        return recordHostedLinqRuntimeProviderDispatchFenceTx({ idempotencyKey: regeneratedEventId, linqChatId: "synthetic-chat",
+          sourceRef: regeneratedEventId, targetKind: "thread", prisma: tx });
+      });
+      if (claim.claimed) postToGroup();
+    };
+    await Promise.all([dispatch(), dispatch()]);
+    expect(postToGroup).toHaveBeenCalledOnce();
+    expect((await db.hostedLinqDelivery.findUniqueOrThrow({ where: { idempotencyKey: deliveryKey } })).id).toBe(reserved.id);
+    await db.hostedLinqDelivery.update({ where: { idempotencyKey: deliveryKey }, data: { status: "accepted" } });
+    expect(await requestGameRecapRegeneration({ ...request, execute: true })).toMatchObject({ outcome: "already_requested" });
+    // Receipt retention cannot turn an operator retry into another send.
+    await db.hostedLinqDelivery.delete({ where: { idempotencyKey: deliveryKey } });
+    expect(await requestGameRecapRegeneration({ ...request, execute: true })).toMatchObject({ outcome: "already_requested" });
+  });
+
+  it.each(["live", "negotiating", "void", "departed", "blocked"])("refuses operator regeneration for %s games", async (condition) => {
+    const { db, gameId, players } = await fixture();
+    await db.game.update({ where: { id: gameId }, data: { recapEncrypted: "synthetic-old-ciphertext",
+      ...(condition === "departed" ? { departedPlayer: { seat: 1 } } : condition === "blocked" ? {} : withStatus(condition)) } });
+    if (condition === "blocked") await db.gameBlock.create({ data: { blockerMemberId: players[0]!, blockedMemberId: players[1]! } });
+    for (const execute of [false, true]) {
+      expect(await requestGameRecapRegeneration({ gameId, regenerationId: "synthetic_request", execute, operatorMemberId: "system" }))
+        .toMatchObject({ outcome: condition === "departed" ? "player_departed" : condition === "blocked" ? "players_blocked" : "not_settled" });
+    }
+    expect(await db.gameEvent.count({ where: { gameId } })).toBe(0);
+    expect(await db.hostedLinqDelivery.count({ where: { sourceRef: { startsWith: gameId } } })).toBe(0);
+  });
+
+  it("rechecks the roster under the deletion row lock before accepting a replacement", async () => {
+    const { db, gameId, room, players, eventId, sealInput } = await fixture();
+    await db.game.update({ where: { id: gameId }, data: { recapEncrypted: "old-ciphertext" } });
+    const request = { gameId, regenerationId: "synthetic_request", execute: true, operatorMemberId: "system" };
+    expect(await requestGameRecapRegeneration(request)).toMatchObject({ outcome: "reserved" });
+    const regeneratedEventId = `${eventId}:${request.regenerationId}`;
+    await markGameChatGenerationQueuedTx(regeneratedEventId, db, room);
+    let release!: () => void;
+    let acquired!: () => void;
+    const acquiredPromise = new Promise<void>((resolve) => { acquired = resolve; });
+    const releasePromise = new Promise<void>((resolve) => { release = resolve; });
+    const deletion = db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
+      acquired(); await releasePromise;
+      await tx.game.update({ where: { id: gameId }, data: { recapEncrypted: null, departedPlayer: { seat: 1 } } });
+      await tx.gamePlayer.deleteMany({ where: { gameId, memberId: players[1] } });
+    });
+    await acquiredPromise;
+    let entered!: () => void;
+    const entering = new Promise<void>((resolve) => { entered = resolve; });
+    const sealing = sealGameRecap({ ...sealInput, eventId: regeneratedEventId, beforeMutationTx: async () => { entered(); } });
+    await entering;
+    release(); await deletion;
+    expect(await sealing).toBeNull();
+    expect((await db.game.findUniqueOrThrow({ where: { id: gameId } })).recapEncrypted).toBeNull();
   });
 
   it("runs the fixed-target SQL through the existing ledger and never rearms a receipt on replay", async () => {

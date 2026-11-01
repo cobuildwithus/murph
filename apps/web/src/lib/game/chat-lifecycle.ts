@@ -1,7 +1,7 @@
 import "server-only";
 import type { Game, HostedLinqDelivery, Prisma, PrismaClient } from "@prisma/client";
 import { buildHostedExecutionAssistantNotificationRequestedWake } from "@murphai/hosted-execution";
-import { buildGameKickoffInstructions, buildGameRematchInstructions, buildGameChangeCancelledInstructions, buildGameChangeExpiredInstructions, buildGameInviteCancelledInstructions, buildGameMissedDayInstructions, buildGameRecapInstructions } from "@murphai/hosted-execution/runtime-control";
+import { parseGameRecapEventId, buildGameKickoffInstructions, buildGameRematchInstructions, buildGameChangeCancelledInstructions, buildGameChangeExpiredInstructions, buildGameInviteCancelledInstructions, buildGameMissedDayInstructions, buildGameRecapInstructions } from "@murphai/hosted-execution/runtime-control";
 import { isRecord } from "../primitives";
 import { getPrisma } from "../prisma";
 import { appendPreparedHostedMailboxEnvelopeTx, prepareHostedMailboxEnvelopeAppend, readHostedMailboxItemByDedupeKey } from "../hosted-mailbox/store";
@@ -104,13 +104,23 @@ async function processGameChatIntent(receipt: GameChatIntent, now: Date, prisma:
       ? recoverGameNotificationWake(receipt.id, gameId, eventId, now)
       : deliverGameChatLifecycle(gameId, kind, proposalId, now);
   }
+  if (receipt.template === "game_recap") return processGameRecapIntent(receipt, now);
   const gameId = receipt.sourceRef;
   if (!gameId) return false;
   if (receipt.template === "game_proposal") return processGameProposalIntent(receipt, gameId, now, prisma);
-  const kind = receipt.template === "game_cancelled" ? "cancelled" : receipt.template === "game_rematch" ? "rematch" : receipt.template === "game_recap" ? "recap" : "started";
+  const kind = receipt.template === "game_cancelled" ? "cancelled" : receipt.template === "game_rematch" ? "rematch" : "started";
   return receipt.status === "generation_queued"
     ? recoverGameNotificationWake(receipt.id, gameId, gameChatLifecycleEventId(gameId, kind), now)
     : deliverGameChatLifecycle(gameId, kind, undefined, now);
+}
+
+async function processGameRecapIntent(receipt: GameChatIntent, now: Date): Promise<boolean> {
+  const eventId = `game-recap:${receipt.sourceRef}`;
+  const scope = parseGameRecapEventId(eventId);
+  if (!scope) return false;
+  return receipt.status === "generation_queued"
+    ? recoverGameNotificationWake(receipt.id, scope.gameId, eventId, now)
+    : deliverGameChatLifecycle(scope.gameId, "recap", undefined, now, scope.regenerationId);
 }
 
 async function processGameProposalIntent(receipt: GameChatIntent, gameId: string, now: Date, prisma: PrismaClient): Promise<boolean> {
@@ -175,15 +185,15 @@ function isCurrentGameChatLifecycle(
     && players.length === 2 && new Set(players).size === 2);
 }
 
-export async function deliverGameChatLifecycle(gameId: string, kind: GameChatLifecycleKind, proposalId?: string, now = new Date()): Promise<boolean> {
+export async function deliverGameChatLifecycle(gameId: string, kind: GameChatLifecycleKind, proposalId?: string, now = new Date(), regenerationId?: string): Promise<boolean> {
   const prisma = getPrisma();
-  const eventId = gameChatLifecycleEventId(gameId, kind, proposalId);
+  const eventId = gameChatLifecycleEventId(gameId, kind, proposalId, regenerationId);
   const game = await prisma.game.findUnique({ where: { id: gameId }, include: { players: { select: { memberId: true }, take: 3 } } });
   const statuses = lifecycleStatuses(kind);
   const boundOnly = ["rematch", "cancelled", "change_expired", "recap"].includes(kind);
   const players = lifecyclePlayerMemberIds(game, kind);
   if (!isCurrentGameChatLifecycle(game, kind, statuses, players, now)) {
-    await prisma.hostedLinqDelivery.updateMany({ where: { source: "game_lifecycle", sourceRef: kind.startsWith("change_") ? `${gameId}:${proposalId}` : gameId, template: `game_${kind}`, status: "awaiting_generation" }, data: { status: "skipped", skippedAt: now, skipReason: "game_lifecycle_superseded", retryAfterAt: null } });
+    await prisma.hostedLinqDelivery.updateMany({ where: { source: "game_lifecycle", idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(eventId), template: `game_${kind}`, status: "awaiting_generation" }, data: { status: "skipped", skippedAt: now, skipReason: "game_lifecycle_superseded", retryAfterAt: null } });
     return false;
   }
   if (!isGameOn(game)) return false;

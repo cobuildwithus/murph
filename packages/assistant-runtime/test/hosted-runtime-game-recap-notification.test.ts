@@ -20,14 +20,14 @@ const GAME_ID = "game_synthetic";
 const EVENT_ID = `game-recap:${GAME_ID}`;
 const PAIR_FINGERPRINT = "0123456789abcdef0123456789abcdef";
 
-function recapWake() {
+function recapWake(eventId = EVENT_ID) {
   return buildHostedExecutionAssistantNotificationRequestedWake({
-    eventId: EVENT_ID,
+    eventId,
     memberId: "hbm_synthetic",
     occurredAt: "2036-08-25T18:00:00.000Z",
     notification: {
       instructions: "Compose the recap.",
-      responsePolicy: { kind: "require_game_recap", gameId: GAME_ID, eventId: EVENT_ID, pairFingerprint: PAIR_FINGERPRINT },
+      responsePolicy: { kind: "require_game_recap", gameId: GAME_ID, eventId, pairFingerprint: PAIR_FINGERPRINT },
       route: {
         actorId: null,
         channel: "linq",
@@ -45,7 +45,7 @@ beforeEach(() => {
 });
 
 describe("hosted game recap notification", () => {
-  it("hands the recap turn the platform group tool from the minimal mailbox context", async () => {
+  it.each([EVENT_ID, `${EVENT_ID}:synthetic_request`])("hands the recap turn the platform group tool from the minimal mailbox context: %s", async (eventId) => {
     const request = vi.fn(async () => ({ action: "read_game" as const, result: { status: "ok" as const, state: { games: [] } } }));
     const groupToolPort = { request };
     let received: AssistantNotificationInput | null = null;
@@ -60,12 +60,20 @@ describe("hosted game recap notification", () => {
       executionContext: { hosted: { memberId: "hbm_synthetic", userEnvKeys: [] } },
       groupToolPort,
       vaultRoot: "/synthetic-vault",
-      wake: recapWake(),
+      wake: recapWake(eventId),
     });
     const hosted = (received as AssistantNotificationInput | null)?.executionContext?.hosted;
     expect(hosted?.groupTool).toBe(groupToolPort);
-    expect(hosted?.gameRecapScope).toEqual({ gameId: GAME_ID, eventId: EVENT_ID, pairFingerprint: PAIR_FINGERPRINT });
-    expect(request).toHaveBeenCalledWith({ action: "read_game", origin: { kind: "game_recap", gameId: GAME_ID, eventId: EVENT_ID } });
+    expect(hosted?.gameRecapScope).toEqual({ gameId: GAME_ID, eventId, pairFingerprint: PAIR_FINGERPRINT });
+    expect(request).toHaveBeenCalledWith({ action: "read_game", origin: { kind: "game_recap", gameId: GAME_ID, eventId } });
+  });
+
+  it.each(["game-recap:another_game:synthetic_request", `${EVENT_ID}:short`, `${EVENT_ID}:synthetic_request:extra`])("rejects a malformed or differently bound recap identity: %s", async (eventId) => {
+    await expect(executeHostedAssistantNotificationWake({
+      executionContext: { hosted: { memberId: "hbm_synthetic", userEnvKeys: [] } },
+      groupToolPort: { request: vi.fn() }, vaultRoot: "/synthetic-vault", wake: recapWake(eventId),
+    })).rejects.toThrow("Game recap notification authority is invalid.");
+    expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
   });
 
   it("refuses a recap turn without the trusted group tool", async () => {

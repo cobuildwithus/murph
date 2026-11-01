@@ -203,8 +203,8 @@ this default without deleting other people's private contact choices.
   Legacy `scoreLine` is optional and keeps its validation when present.
   The model never selects a game id: trusted notification authority
   binds the tool to the exact settled game and room, even after a rematch starts.
-  A finished game can receive its first recap late; a saved recap is never
-  overwritten. Versioned schedules mark rest days as off, not missed. The server checks
+  A finished game can receive its first recap late. Ordinary turns preserve the
+  first saved recap; only the operator regeneration path below may replace it. Versioned schedules mark rest days as off, not missed. The server checks
   entry ownership and shared visibility, visual kinds and counts, text, quote,
   score and chat-line limits, banned language, third-person shared copy, quote
   density and verbatim player chat/post evidence. It also rejects stock chat
@@ -229,6 +229,36 @@ this default without deleting other people's private contact choices.
   is stored, including on replay. This needs no database migration or split PR.
   Deploy the runtime response reader with the larger delivery-text bound before
   Web starts composing links; the old 160-character reader rejects long messages.
+- **Operator recap regeneration.** An authenticated, allowlisted operator may
+  reserve one settled game's recap again through `POST /api/ops/game-recap`, with
+  same-origin mutation protection. `scripts/ops-game-recap --game-id <GAME_ID>
+  --regeneration-id <REQUEST_ID>` is a dry run; add `--execute` to reserve work.
+  Sign in through `scripts/ops-feedback login`. Use the same 8–32 character
+  regeneration id on every retry; a new id deliberately requests another story.
+  The preview and command return only opaque ids and outcomes. They never read
+  or print recap content or call a messaging provider.
+  Admission records a metadata-only `game_event` and an ordinary `game_lifecycle`
+  / `game_recap` receipt with `game-recap:<gameId>:<requestId>` identity. The
+  existing minute sweep builds today's recap instructions and queues the normal
+  hosted `read_game` / `write_recap` turn. No second queue or direct send exists.
+  The old recap is retained until validation accepts a replacement; acceptance
+  atomically replaces its ciphertext and records a once-only acceptance event.
+  A failed or rejected turn leaves the old story visible. The normal outbox sends
+  the accepted chat line plus `https://www.withmurph.ai/recap/<gameId>` to the
+  game's existing group. Game API readers see the replacement on their next read;
+  the public URL remains a generic app handoff.
+  Pair and game locks, the roster re-read, no departed player, no block, settled
+  status, rollout and room binding all apply. Runtime authority, fresh provider
+  roster checks, recap validation and normal egress guards still apply downstream.
+  A newer rematch is never changed. An unfinished or uncertain prior delivery
+  refuses another regeneration; diagnose it through its existing lifecycle owner
+  rather than changing the request id to force another send. Request events keep
+  retries idempotent even after delivery receipt retention.
+  Deploy and converge the compatible Cloudflare runtime event reader before Web
+  can emit regeneration requests. No database migration or client change is needed.
+  Before rollback, stop operator requests and drain all admitted regeneration work;
+  keep compatible Web and runtime readers while any remains. Accepted replacements
+  are canonical: old ciphertext is not retained, and sent messages cannot be undone.
 - **Tickets.** A prize or dare makes the loser owe the winner one ticket; a tie
   or all-perfect game owes nothing. Each ticket carries its stake kind. The
   winner marks a dare done with the same redeem action, without proof. Legacy

@@ -5438,6 +5438,13 @@ query bounds, receipt semantics, foreground limit and rollout order.
 
 ## Weekly Game
 
+Operator recap regeneration reuses the lifecycle receipt, minute sweep, hosted
+notification and recap validation/delivery owners. `game_event.command_key`
+records one request and acceptance per bounded regeneration id. The existing
+`game.recap_encrypted` remains visible until the accepted replacement commits
+under the pair and game locks. No alternate story store or queue exists. The Ops
+command and rollout/rollback contract live in the weekly game spec.
+
 `apps/web` owns the weekly game (product: `agent-docs/product-specs/weekly-game.md`).
 Postgres state tables are the truth: `game_profile`, `game_contact_label`,
 `game`, `game_player`, `game_entry`, `game_ticket`, plus `game_event`, an append-only history (one row per accepted change, ids and

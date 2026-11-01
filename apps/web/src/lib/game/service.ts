@@ -1,6 +1,6 @@
 import "server-only";
 
-import { hostedGameRecapSchema, type HostedGameChatState, type HostedGameRecap } from "@murphai/hosted-execution/runtime-control";
+import { parseGameRecapEventId, hostedGameRecapSchema, type HostedGameChatState, type HostedGameRecap } from "@murphai/hosted-execution/runtime-control";
 import { gameChatProgress } from "./chat-progress";
 import { randomBytes } from "node:crypto";
 
@@ -1509,17 +1509,33 @@ export async function sealGameRecap(input: {
   const recapEncrypted = input.recap === null
     ? null
     : await seal(gameTarget(row, "recap"), JSON.stringify(input.recap));
+  const scope = parseGameRecapEventId(input.eventId);
+  if (scope?.gameId !== input.gameId) return null;
+  const sourceRef = scope.regenerationId ? `${input.gameId}:${scope.regenerationId}` : input.gameId;
   const key = createHostedLinqDeliveryIdempotencyLookupKey(input.eventId);
   if (!key) return null;
   const stored = await prisma.$transaction(async (tx) => {
     await input.beforeMutationTx(tx);
     await lockGamePair(tx, input.playerMemberIds[0]!, input.playerMemberIds[1]!);
-    const receipts = await tx.hostedLinqDelivery.count({ where: { idempotencyKey: key, source: "game_lifecycle", sourceRef: input.gameId, template: "game_recap", status: "generation_queued", payloadOwnerMemberId: input.containerMemberId } });
+    const receipts = await tx.hostedLinqDelivery.count({ where: { idempotencyKey: key, source: "game_lifecycle", sourceRef, template: "game_recap", status: "generation_queued", payloadOwnerMemberId: input.containerMemberId } });
     if (receipts !== 1) return null;
     // Account deletion clears the recap under this row lock, so the roster is re-read after it.
     await tx.$queryRaw`SELECT id FROM game WHERE id = ${input.gameId} FOR UPDATE`;
     const current = await tx.game.findFirst({ where: { id: input.gameId, chatContainerMemberId: input.containerMemberId, status: "settled", departedPlayer: { equals: Prisma.DbNull } }, select: { id: true, recapEncrypted: true, players: { select: { memberId: true }, take: 3 } } });
     if (!current || !sameGamePlayers(current.players.map((player) => player.memberId), input.playerMemberIds)) return null;
+    if (scope.regenerationId) {
+      const requested = await tx.gameEvent.findUnique({ where: { commandKey: input.eventId }, select: { gameId: true, type: true } });
+      if (requested?.gameId !== input.gameId || requested.type !== "recap_regeneration_requested") return null;
+      const acceptedKey = `${input.eventId}:accepted`;
+      const accepted = await tx.gameEvent.findUnique({ where: { commandKey: acceptedKey }, select: { id: true } });
+      if (accepted) return current.recapEncrypted;
+      if (!recapEncrypted) return null;
+      // Keep the old story until validation accepts this replacement. The row
+      // lock makes replacement and its once-only acceptance one atomic change.
+      await tx.game.update({ where: { id: input.gameId }, data: { recapEncrypted } });
+      await tx.gameEvent.create({ data: { gameId: input.gameId, actor: "system", type: "recap_regeneration_accepted", commandKey: acceptedKey, payload: {} } });
+      return recapEncrypted;
+    }
     // A rematch cannot invalidate a finished game's first recap. The pair lock
     // still serializes joins/blocks; this row lock and null-only write preserve
     // the settled game's first seal, even if a newer game committed first.

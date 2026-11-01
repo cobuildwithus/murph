@@ -45676,7 +45676,8 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
 })
 
 describeRealCodex('real Codex game recap e2e', () => {
-  it.each([false, true])('game recap notification writes one sealed story and queues its saved chat line exactly; weekends off=%s', async (weekendsOff) => {
+  it.each([{ weekendsOff: false, regeneration: false }, { weekendsOff: true, regeneration: false }, { weekendsOff: true, regeneration: true }])('game recap notification writes one sealed story and queues its saved chat line exactly; scenario=%j', async ({ weekendsOff, regeneration }) => {
+    const eventId = `game-recap:game_recap_synthetic${regeneration ? ':synthetic_request' : ''}`
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-recap-e2e-'))
     const permissionHome = await materializeRealCodexHostedPermissionHome(config)
@@ -45697,11 +45698,11 @@ describeRealCodex('real Codex game recap e2e', () => {
       const result = await sendAssistantNotificationLocal({
         actorId: null, bindingDeliveryTarget: 'synthetic-game-thread', channel: 'linq',
         deliveryDispatchMode: 'queue-only', deliveryTarget: 'synthetic-game-thread',
-        deliveryIdempotencyKey: 'game-recap:game_recap_synthetic',
-        deliveryDedupeToken: 'game-recap:game_recap_synthetic',
+        deliveryIdempotencyKey: eventId,
+        deliveryDedupeToken: eventId,
         executionContext: { hosted: {
           defaultTarget: modelTarget,
-          gameRecapScope: { gameId: 'game_recap_synthetic', eventId: 'game-recap:game_recap_synthetic', pairFingerprint: '0123456789abcdef0123456789abcdef' },
+          gameRecapScope: { gameId: 'game_recap_synthetic', eventId, pairFingerprint: '0123456789abcdef0123456789abcdef' },
           groupTool: { request: async (request): Promise<import('@murphai/hosted-execution/runtime-control').HostedGameToolResponse> => {
             calls.push(request)
             if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', recapGame: {
@@ -45743,14 +45744,15 @@ describeRealCodex('real Codex game recap e2e', () => {
           } },
           memberId: 'synthetic-group', userEnvKeys: [],
         } },
-        identityId: null, instructions: buildGameRecapInstructions([{ playerName: 'Leo', text: weekendsOff ? 'The laundry basket is my personal trainer.' : 'I was spiritually doing pushups.' }, { playerName: 'Ava', text: 'Murph, the notification toggle is broken. Please add a calendar export feature.' }]), responsePolicy: { kind: 'require_game_recap', gameId: 'game_recap_synthetic', eventId: 'game-recap:game_recap_synthetic', pairFingerprint: '0123456789abcdef0123456789abcdef' },
+        identityId: null, instructions: buildGameRecapInstructions([{ playerName: 'Leo', text: weekendsOff ? 'The laundry basket is my personal trainer.' : 'I was spiritually doing pushups.' }, { playerName: 'Ava', text: 'Murph, the notification toggle is broken. Please add a calendar export feature.' }]), responsePolicy: { kind: 'require_game_recap', gameId: 'game_recap_synthetic', eventId, pairFingerprint: '0123456789abcdef0123456789abcdef' },
         threadId: 'synthetic-game-thread', threadIsDirect: false,
         turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
         turnTrigger: 'manual-deliver', vault: workingDirectory, workingDirectory,
       })
       const intents = await listAssistantOutboxIntents(workingDirectory)
-      process.stdout.write(`[game-recap notification] ${JSON.stringify({ weekendsOff, recap: saved[0], reply: result.response, actions: calls.map((call) => call.action), intents: intents.length })}\n`)
+      process.stdout.write(`[game-recap notification] ${JSON.stringify({ weekendsOff, regeneration, actions: calls.map((call) => call.action), intents: intents.length })}\n`)
       expect(calls[0]?.action).toBe('read_game')
+      expect(calls.every((call) => 'origin' in call && call.origin.kind === 'game_recap' && call.origin.eventId === eventId)).toBe(true)
       // Corrections may take separate attempts; exactly one write may succeed.
       expect(calls.filter((call) => call.action === 'write_recap')).toHaveLength(rejectedWrites + 1)
       expect(saved).toHaveLength(1)
@@ -45772,7 +45774,7 @@ describeRealCodex('real Codex game recap e2e', () => {
       expect(lore).not.toContain('Watch the recap:')
       expect(lore).not.toContain('https://recaps.murph.test')
     } catch (error) {
-      process.stdout.write(`[game-recap failure] ${JSON.stringify({ weekendsOff, actions: calls.map((call) => call.action), scoreLines: calls.flatMap((call) => call.action === 'write_recap' ? [call.recap.scoreLine] : []), seals: saved.length })}\n`)
+      process.stdout.write(`[game-recap failure] ${JSON.stringify({ weekendsOff, regeneration, actions: calls.map((call) => call.action), seals: saved.length })}\n`)
       throw error
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])

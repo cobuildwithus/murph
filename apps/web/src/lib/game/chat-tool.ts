@@ -3,7 +3,7 @@ import { handleGameChatPhoto } from "./chat-photo";
 import type { Prisma } from "@prisma/client";
 import { isHostedLinqConversationMessageWake, isHostedTelegramConversationMessageWake } from "@murphai/hosted-execution";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
-import { gameLiveLoreGuidanceForState, hostedGameChatStateSchema, type HostedGameToolRequest, type HostedGameToolResponse } from "@murphai/hosted-execution/runtime-control";
+import { parseGameRecapEventId, gameLiveLoreGuidanceForState, hostedGameChatStateSchema, type HostedGameToolRequest, type HostedGameToolResponse } from "@murphai/hosted-execution/runtime-control";
 import type { HostedExecutionExternalThreadRouteAuthority, HostedExecutionConversationMessageWake } from "@murphai/hosted-execution/contracts";
 import { requireHostedRuntimeCallbackTx, type HostedRuntimeIdentity } from "../hosted-execution/runtime-owner";
 import { buildHostedMailboxLiveItemWhere, decodeHostedMailboxStoredPayloads, readHostedMailboxConversationWakeByAssistantInputId } from "../hosted-mailbox/store";
@@ -14,7 +14,6 @@ import { getPrisma } from "../prisma";
 import { readGameChatState, readGameRecapMaterial, runGameCommand, sealGameRecap } from "./service";
 import { gameRecapMessage } from "./recap-message";
 import { gameRecapToolResult, validateGameRecap, type GameRecapChatMessage } from "./recap";
-import { gameChatLifecycleEventId } from "./chat-lifecycle-receipt";
 import { gamePairWhere, readGameChatPlayerIds, requireExactGameChat, sameGamePlayers } from "./chat-membership";
 import { isGameEnabled, isGameOn } from "./access";
 import { gamePairLoreFingerprint } from "./pair-fingerprint";
@@ -103,7 +102,7 @@ export async function authorizeGameChatActorTx(input: Input, tx: Prisma.Transact
 
 async function handleGameRecapTool(input: Input & { request: Extract<HostedGameToolRequest, { action: "read_game" | "write_recap" }> & { origin: { kind: "game_recap"; gameId: string; eventId: string } } }): Promise<HostedGameToolResponse> {
   const { gameId, eventId } = input.request.origin;
-  if (eventId !== gameChatLifecycleEventId(gameId, "recap")) return { action: input.request.action, result: { status: "unavailable", error: "recap_authority_unavailable" } };
+  if (parseGameRecapEventId(eventId)?.gameId !== gameId) return { action: input.request.action, result: { status: "unavailable", error: "recap_authority_unavailable" } };
   const prisma = getPrisma();
   await prisma.$transaction(async (tx) => {
     await requireHostedRuntimeCallbackTx(tx, input.memberId, input.runtimeIdentity);

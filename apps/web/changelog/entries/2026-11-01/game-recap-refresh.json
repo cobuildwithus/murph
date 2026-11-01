@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-01",
+  "order": 100,
+  "item": {
+    "id": "game-recap-refresh",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Finished game recaps can be refreshed",
+    "summary": "Support can refresh a finished game's story and share it in the same game chat.",
+    "details": "The previous recap stays available until its replacement is accepted. The recap link opens the updated story in Murph.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": []
+  }
+}

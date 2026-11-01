@@ -1,4 +1,5 @@
 import "server-only";
+import { parseGameRecapEventId } from "@murphai/hosted-execution/runtime-control";
 import { Prisma } from "@prisma/client";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { isGameChangeExpired, parsePendingGameChange } from "./changes";
@@ -14,8 +15,9 @@ export async function assertGameProposalDeliveryCurrentTx(input: {
   now?: Date;
 }): Promise<boolean> {
   const key = input.deliveryIdempotencyKey ?? "";
-  const recap = /^game-recap:([^:]+)$/u.exec(key);
-  if (recap) return assertGameRecapDeliveryCurrentTx(input, recap[1]);
+  const recap = parseGameRecapEventId(key);
+  if (recap) return assertGameRecapDeliveryCurrentTx(input, recap.gameId, recap.regenerationId);
+  if (key.startsWith("game-recap:")) return stale();
   const missed = /^game-missed:([^:]+):([^:]+):(\d{4}-\d{2}-\d{2})$/u.exec(key);
   if (missed) return assertGameMissedDeliveryCurrentTx(input, missed[1], missed[2]);
   if (key.startsWith("game-cancelled:")) return assertGameCancelledDeliveryCurrentTx(input);
@@ -29,11 +31,12 @@ export async function assertGameProposalDeliveryCurrentTx(input: {
 }
 
 async function assertGameRecapDeliveryCurrentTx(
-  input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], gameId: string,
+  input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], gameId: string, regenerationId?: string,
 ): Promise<true> {
   const players = input.playerMemberIds ?? [];
   const game = await input.tx.game.findFirst({
-    where: { id: gameId, chatContainerMemberId: input.containerMemberId, status: "settled", departedPlayer: { equals: Prisma.DbNull } },
+    where: { id: gameId, chatContainerMemberId: input.containerMemberId, status: "settled", departedPlayer: { equals: Prisma.DbNull },
+      ...(regenerationId ? { events: { some: { commandKey: `${input.deliveryIdempotencyKey}:accepted`, type: "recap_regeneration_accepted" } } } : {}) },
     include: { players: { take: 3 } },
   });
   if (!game || !sameGamePlayers(game.players.map((player) => player.memberId), players)) return stale();
