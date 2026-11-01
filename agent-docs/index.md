@@ -1593,3 +1593,7 @@ Phone-call enum forward repair and immutable migration history proof: [implement
 Workflow SDK v5 migration, omitted-run-field regression and hook compatibility proof
 are tracked in [the implementation plan](exec-plans/completed/2026-11-01-workflow-v5.md);
 `../apps/web/README.md` owns the SDK and deployment compatibility contract.
+
+Tool backend failure and Workflow heartbeat alert implementation and local proof
+are tracked in [the alert plan](exec-plans/completed/2026-11-01-tool-workflow-alerts.md).
+`../apps/web/README.md` owns thresholds, state, load bounds and rollout behavior.

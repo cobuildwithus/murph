@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  runHostedToolFailureAlertMonitor: vi.fn(),
+  runHostedWorkflowHeartbeatAlertMonitor: vi.fn(),
   runHostedAutomationLossAlertMonitor: vi.fn(),
   runHostedRuntimeFinalReplyDeliveryAlertMonitor: vi.fn(),
   runHostedRuntimeRunawayAlertMonitor: vi.fn(),
@@ -49,12 +51,21 @@ vi.mock("@/src/lib/hosted-runtime-progress/alert-monitor", () => ({
     mocks.runHostedRuntimeProgressAlertMonitor,
 }));
 
+vi.mock("@/src/lib/hosted-operational-alert/tool-failure-monitor", () => ({
+  runHostedToolFailureAlertMonitor: mocks.runHostedToolFailureAlertMonitor,
+}));
+vi.mock("@/src/lib/hosted-operational-alert/workflow-heartbeat-monitor", () => ({
+  runHostedWorkflowHeartbeatAlertMonitor: mocks.runHostedWorkflowHeartbeatAlertMonitor,
+}));
+
 import { GET } from "@/app/api/internal/hosted-runtime/latency-alert/cron/route";
 
 const originalCronSecret = process.env.CRON_SECRET;
 
 describe("hosted runtime latency alert cron", () => {
   beforeEach(() => {
+    mocks.runHostedToolFailureAlertMonitor.mockReset().mockResolvedValue({ configured: true, conditions: [] });
+    mocks.runHostedWorkflowHeartbeatAlertMonitor.mockReset().mockResolvedValue({ configured: true, outcome: "healthy" });
     mocks.runHostedAutomationLossAlertMonitor.mockReset();
     mocks.runHostedAutomationLossAlertMonitor.mockResolvedValue({ configured: true, health: { anomalous: false }, outcome: "healthy" });
     mocks.runHostedRuntimeRunawayAlertMonitor.mockReset();
@@ -117,9 +128,13 @@ describe("hosted runtime latency alert cron", () => {
     ));
 
     expect(response.status).toBe(200);
+    expect(mocks.runHostedToolFailureAlertMonitor).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) });
+    expect(mocks.runHostedWorkflowHeartbeatAlertMonitor).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) });
     expect(mocks.runHostedRuntimeRunawayAlertMonitor).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) });
     expect(mocks.runHostedAutomationLossAlertMonitor).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) });
     expect(await response.json()).toMatchObject({
+      toolFailureAlert: { conditions: [] },
+      workflowHeartbeatAlert: { outcome: "healthy" },
       automationLossAlert: { outcome: "healthy" },
       finalReplyDeliveryAlert: { queuedCount: 0, timingScan: "complete" },
       runtimeRunawayAlert: { outcome: "healthy" },
@@ -144,6 +159,8 @@ describe("hosted runtime latency alert cron", () => {
     ));
 
     expect(response.status).toBe(401);
+    expect(mocks.runHostedToolFailureAlertMonitor).not.toHaveBeenCalled();
+    expect(mocks.runHostedWorkflowHeartbeatAlertMonitor).not.toHaveBeenCalled();
     expect(mocks.runHostedAutomationLossAlertMonitor).not.toHaveBeenCalled();
     expect(mocks.runHostedRuntimeRunawayAlertMonitor).not.toHaveBeenCalled();
     expect(mocks.runHostedDeviceImportAlertMonitor).not.toHaveBeenCalled();
@@ -155,6 +172,8 @@ describe("hosted runtime latency alert cron", () => {
   });
 
   it.each([
+    { failing: "tool_failure" },
+    { failing: "workflow_heartbeat" },
     { failing: "automation_loss" },
     { failing: "runaway" },
     { failing: "device_import" },
@@ -185,6 +204,12 @@ describe("hosted runtime latency alert cron", () => {
       });
       const failedMonitor = Promise.reject(new Error(`${failing} failed`));
 
+      mocks.runHostedToolFailureAlertMonitor.mockReturnValue(
+        failing === "tool_failure" ? failedMonitor : heldMonitor,
+      );
+      mocks.runHostedWorkflowHeartbeatAlertMonitor.mockReturnValue(
+        failing === "workflow_heartbeat" ? failedMonitor : heldMonitor,
+      );
       mocks.runHostedAutomationLossAlertMonitor.mockReturnValue(
         failing === "automation_loss" ? failedMonitor : heldMonitor,
       );
