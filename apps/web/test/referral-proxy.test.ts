@@ -86,6 +86,7 @@ describe("encoded public path proxy", () => {
     "/about?next=%2Frefer%5C",
     "/compare",
     "/llms.txt",
+    "/.well-known/apple-app-site-association",
     "/unknown?next=%2F&value=%5C",
     "/api/internal/hosted-runtime/linq-egress/delivery?signature=synthetic%2F%5C",
     "/api/internal/synthetic%2Fpath?signature=synthetic%252F",
@@ -115,6 +116,19 @@ describe("encoded public path proxy", () => {
     assert.equal(response.headers.get("x-middleware-rewrite"), null);
     assert.equal(request.url, `https://example.test${pathname}`);
   });
+});
+
+it("leaves Apple's anonymous association request untouched", () => {
+  const request = new NextRequest("https://www.withmurph.ai/.well-known/apple-app-site-association", {
+    headers: { "User-Agent": "AASA-Bot/1.0.0", Accept: "*/*" },
+  });
+  assert.equal(matchesProxy(request), false);
+  const response = proxy(request);
+  assert.equal(response.headers.get("x-middleware-next"), "1");
+  assert.equal(response.headers.get("location"), null);
+  assert.equal(response.headers.get("x-middleware-rewrite"), null);
+  assert.equal(response.headers.get("set-cookie"), null);
+  assert.equal(response.headers.get("vary"), null);
 });
 
 describe("homepage proxy selection", () => {

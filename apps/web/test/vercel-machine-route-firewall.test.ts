@@ -42,6 +42,19 @@ describe("machine route inventory", () => {
     expect(paths).not.toContain("/api/device-sync/companion/auth-diagnostics");
   });
 
+  it("protects Apple's anonymous association fetch from firewall barriers", async () => {
+    const associationPath = "/.well-known/apple-app-site-association";
+    const inventory = await readProtectedMachineRoutes();
+    expect(inventory).toContainEqual({ path: associationPath, methods: ["GET", "HEAD", "OPTIONS"] });
+    expect(evaluateMachineRouteFirewall(PUBLIC_FIREWALL_V8, inventory)).toEqual([]);
+    for (const action of ["deny", "challenge", "redirect", "rate_limit"]) {
+      expect(evaluateMachineRouteFirewall(config([rule([
+        condition("path", "eq", associationPath),
+        condition("method", "eq", "GET"),
+      ], action)]), inventory)).toEqual([{ ruleId: "synthetic-rule", route: associationPath }]);
+    }
+  });
+
   it("derives exported methods including aliases, reexports and automatic HEAD/OPTIONS", () => {
     expect(routeMethods("export async function GET() {}; export const POST = handler;")).toEqual(["GET", "POST", "HEAD", "OPTIONS"]);
     expect(routeMethods('export { handler as PUT, DELETE } from "./owner";')).toEqual(["PUT", "DELETE", "OPTIONS"]);

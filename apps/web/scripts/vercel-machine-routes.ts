@@ -76,6 +76,8 @@ export async function readProtectedMachineRoutes(webRoot = WEB_ROOT): Promise<Pr
     }
   }
   const protectedRoutes = routes.filter((route) => route.path.startsWith(HOSTED_MACHINE_ROUTE_PREFIX)
+    // Apple's CDN fetches this association without a browser session.
+    || route.path === "/.well-known/apple-app-site-association"
     || cronPaths.has(route.path)
     || HOSTED_RUNTIME_DATA_API_PATHS.includes(route.path)
     || PROVIDER_PREFIXES.some((prefix) => route.path === prefix || route.path.startsWith(`${prefix}/`)));
