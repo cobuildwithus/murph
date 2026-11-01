@@ -1071,7 +1071,8 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS` for local `pnpm dev` or hosted-local runs only. Set this in local env when a development tunnel shares real Linq credentials so non-allowlisted inbound senders are accepted and ignored before mailbox append or assistant wake. Do not set it in production.
 - `RETELL_API_KEY`, `RETELL_FROM_NUMBER`, `RETELL_AGENT_ID`,
   `RETELL_AGENT_DATA_STORAGE_SETTING=basic_attributes_only`, and optional
-  `RETELL_AGENT_VERSION` enable hosted Retell phone calls, signed `ask_murph`
+  `RETELL_AGENT_VERSION` (default `latest_published`, so each dashboard publish goes live;
+  avoid pinning a number or tag) enable hosted Retell phone calls, signed `ask_murph`
   custom-function verification, and signed Retell lifecycle webhooks. Keep the
   published Retell agent configured for basic-attributes-only storage and point
   function/webhook URLs at the deployed `apps/web` routes.
