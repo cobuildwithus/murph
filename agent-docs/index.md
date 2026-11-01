@@ -929,6 +929,8 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/product-specs/experiment-adherence-confidence.md` | Read-time assumed adherence, confidence ladder, correction semantics, category-scoped activity evidence, and typed subjective session evidence for experiments. | Experiment adherence behavior | High | 2026-07-16 |
 | `agent-docs/product-specs/experiment-outcome-selection.md` | Experiment-only selection rules for member-valued and capturable outcomes, credible evidence, typed session metrics, timeframe integrity, and setup handoff. | Experiment outcome selection behavior | High | 2026-07-16 |
 | `agent-docs/product-specs/captures.md` | Capture behavior. | Capture behavior | High | 2026-08-10 |
+| `agent-docs/exec-plans/completed/2026-11-01-v2-meals-api-boundary.md` | v2 iOS Meals boundary investigation and existing endpoint verification. | Meals investigation evidence | Medium | 2026-11-01 |
+| `agent-docs/product-specs/ios-meals.md` | v2 iOS Meals architecture hold, existing contact/profile/Apple Health endpoint contracts, and deferred meal API requirements. | iOS Meals integration boundary | High | 2026-11-01 |
 | `agent-docs/product-specs/companion-app.md` | Companion app plan. | Companion app plan | High | 2026-08-13 |
 | `agent-docs/product-specs/query-metric-universality.md` | Universal metric queryability invariant: every metric-bearing canonical event yields a query metric point through the generic extraction rule. | Query metric product spec | High | 2026-07-22 |
 | `agent-docs/product-specs/companion-app-mvp.md` | Companion app build and authentication recovery telemetry contract. | Companion app build plan | High | 2026-09-05 |
