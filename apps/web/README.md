@@ -2299,6 +2299,57 @@ and retain that check as a predeploy guard. Keep readers and nullable columns
 throughout this capability rollout. Remove columns only after the later
 encrypted-only reader deployment and its complete prior-function/Workflow drain.
 
+## Workflow SDK v5
+
+Web uses `workflow@5.2.3`, including Core and Vercel World 5.2.3, Next
+5.0.6, World 5.0.5 and Local World 5.1.2. Keep the Zod 4.6.6 security
+override. Web also declares Zod 4.6.6 explicitly so removing the old SDK tree
+does not downgrade unrelated optional peers to Zod 3. The schema regression
+test resolves Zod from the installed World
+and accepts unfinished runs with omitted terminal fields.
+
+The Next wrapper uses v5 defaults; `workflows.lazyDiscovery` was removed.
+The generated flow route now handles steps as well as orchestration; there
+is no separate step route. `WORKFLOW_TARGET_WORLD` still selects the world
+at runtime in this release. The preliminary migration guide's claim about
+static world injection was reverted in the published implementation.
+
+Local dev and hosted-local builds default to `<distDir>/workflow-data-v5`.
+Old local logs stay untouched: v4 event IDs are incompatible with v5 replay.
+If `WORKFLOW_LOCAL_DATA_DIR` is explicitly configured, select a fresh directory
+for v5; the override remains authoritative. Tests use disposable local worlds.
+
+Vercel keeps existing runs on their originating deployment, including sleeps,
+hook waits and retries. Normal starts here do not request `deploymentId: "latest"`.
+A v5 deployment therefore does not replay v4 event logs. It can still read an
+old run's metadata when resuming its hook. The installed SDK preserves that
+run's protocol version and sends its wake to the original deployment; the
+compatibility test verifies those boundaries with synthetic v4 metadata.
+This is client-contract proof, not a live Vercel cross-deployment test.
+
+Deploying v5 does not repair runs pinned to a broken v4 deployment. Retain
+old deployments while their runs remain active; recovery of already-failed
+runs is a separate operator decision. No Worker or database migration is
+required by this SDK upgrade. Rollback cannot migrate v5 runs into v4, and
+must not restore the known-broken SDK/Zod combination for new starts.
+
+Phone reconciliation retains its registration-before-acknowledgement,
+deterministic hook token, 120-attempt active window, reusable dormant hook
+and durable rechecks. Stripe and Linq retain their existing start/replay
+owners. V5 adds a 25,000-event per-run ceiling, so an exceptionally long-lived
+or repeatedly signaled phone run is finite at the SDK layer; this upgrade
+does not redesign that recovery policy. Tracing defaults to linked invocation
+traces; correlate by `workflow.run.id`. No repository dashboards depend on
+the previous single-trace shape.
+
+Upstream references:
+- [v5 migration notes](https://github.com/vercel/workflow/blob/main/docs/content/docs/v5/whats-new.mdx)
+- [deployment versioning](https://github.com/vercel/workflow/blob/main/docs/content/docs/v5/foundations/versioning.mdx)
+- [Workflow changelog](https://github.com/vercel/workflow/blob/main/packages/workflow/CHANGELOG.md)
+- [Core changelog](https://github.com/vercel/workflow/blob/main/packages/core/CHANGELOG.md)
+- [Next changelog](https://github.com/vercel/workflow/blob/main/packages/next/CHANGELOG.md)
+- [Vercel World changelog](https://github.com/vercel/workflow/blob/main/packages/world-vercel/CHANGELOG.md)
+
 ## Production build memory guard
 
 The hosted web production build must keep fitting Vercel's Standard build

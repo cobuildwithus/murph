@@ -1589,3 +1589,7 @@ Game recap links and generic app handoff proof are recorded in
 `product-specs/weekly-game.md` owns the delivery and public-route contract.
 
 Phone-call enum forward repair and immutable migration history proof: [implementation plan](exec-plans/completed/2026-10-31-phone-call-linq-enum.md). The current Prisma contract remains in `../apps/web/README.md`.
+
+Workflow SDK v5 migration, omitted-run-field regression and hook compatibility proof
+are tracked in [the implementation plan](exec-plans/completed/2026-11-01-workflow-v5.md);
+`../apps/web/README.md` owns the SDK and deployment compatibility contract.
