@@ -1,5 +1,5 @@
 Game history read measurements and equivalence proof are tracked in
-[the performance plan](exec-plans/active/2026-11-01-game-history-speed.md).
+[the performance plan](exec-plans/completed/2026-11-01-game-history-speed.md).
 `../ARCHITECTURE.md` owns the bounded read and media authority contract.
 
 Legacy game photo recovery and history card delivery are tracked in
