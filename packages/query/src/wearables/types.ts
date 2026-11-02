@@ -66,7 +66,6 @@ export interface WearableMetricConfidence {
   conflictingProviders: string[];
   exactDuplicateCount: number;
   level: WearableConfidenceLevel;
-  reasons: string[];
 }
 
 export interface WearableResolvedMetric {

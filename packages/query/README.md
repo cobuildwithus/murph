@@ -331,3 +331,20 @@ the existing source string lists both providers. Canonical evidence and the
 source-record count stay unchanged. The existing 1,500-record bound limits this
 in-memory comparison. Existing projection refresh publishes the revised view;
 there is no new persisted state or client schema.
+
+## Wearable confidence storage
+
+Metric confidence retains level, candidate/duplicate counts and conflicting
+providers; selected values and source/provider fields keep their existing owners.
+Per-metric English `reasons` are neither built, stored nor projected. Readers
+ignore that field in older compact and full envelopes without a SQLite schema
+version bump, database reset or read-time reconstruction. Fresh legacy rows stay
+readable. The next canonical source change invalidates the existing wearable
+manifest; the next wearable read publishes only wearable summaries and their
+shape dictionary. Global entities, metrics and search are untouched.
+
+Activity candidate and session evidence remains necessary: provider-local winners
+and selected metric points cannot reconstruct cross-provider ranking or session
+overlap reduction. Publication uses secure deletion to clear retired payloads;
+freed pages remain reusable within SQLite. There is no foreground VACUUM or full
+rebuild for this storage change.

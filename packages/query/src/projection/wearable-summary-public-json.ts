@@ -30,7 +30,7 @@ export function stringifyPublicWearableProjectionSummary(summary: unknown): stri
       return [];
     }
 
-    if (WEARABLE_SUMMARY_PROVENANCE_KEYS.has(key)) {
+    if (key === "reasons" || WEARABLE_SUMMARY_PROVENANCE_KEYS.has(key)) {
       return undefined;
     }
 

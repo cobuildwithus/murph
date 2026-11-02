@@ -1440,6 +1440,7 @@ function expectFocusedActivityProjectionOutput(
       expect(steps[index]).toMatch(new RegExp(`^\\s*value: ${value}$`, 'mu'))
     })
   }
+  expect(output).not.toMatch(/\breasons\b|scored highest|daily cumulative lower-bound/iu)
   const absent = FOCUSED_ACTIVITY_STEP_VALUES.filter(value => !expected.some(day => day.value === value))
   expect(output).not.toMatch(new RegExp(absent.join('|'), 'u'))
 }
@@ -1614,7 +1615,7 @@ describeRealCodex('real Codex focused wearable activity projection e2e', () => {
     })
   }, 360_000)
 
-  it('answers composed multi-provider step days from one native read without other lookups or effects', async () => {
+  it('answers multi-provider step days without confidence prose or extra effects', async () => {
     await runFocusedActivityProjectionJourney({
       expected: FOCUSED_COMPOSED_ACTIVITY, label: 'composed-two-days',
       options: { '--from': '2026-01-02', '--to': '2026-01-03', '--limit': '2' },

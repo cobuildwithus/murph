@@ -174,7 +174,7 @@ test("public wearable projection equals the text projection for composed multi-p
   const night = projected.sleepNights[0]!;
   const paths: string[] = night.sleepScore.selection.paths;
   paths.push("private");
-  night.sleepScore.confidence.reasons.push("changed");
+  night.sleepScore.confidence.conflictingProviders.push("changed");
   assert.equal(JSON.stringify(bundle), before);
   assert.deepEqual(projected.sleepNights[1]!.sleepScore.selection.paths, []);
   assert.deepEqual(projectPublicWearableSummaryBundle(bundle), projectPublicWearableSummaryBundle(bundle));

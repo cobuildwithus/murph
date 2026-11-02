@@ -388,12 +388,6 @@ function mergeStoredMetricConfidence(
       ...stored.map((confidence) => confidence.exactDuplicateCount),
     ),
     level: mergeStoredMetricConfidenceLevel(current, stored, conflictingProviders.length > 0),
-    reasons: uniqueStringValues([
-      ...current.reasons,
-      ...stored.flatMap((confidence) =>
-        confidence.reasons.filter((reason) => reason.includes("after source reconciliation"))
-      ),
-    ]),
   };
 }
 
