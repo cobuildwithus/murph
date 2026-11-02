@@ -1,3 +1,5 @@
+Device-sync single-snapshot retirement and cold journal replay: [implementation plan](exec-plans/active/2026-11-02-device-sync-single-snapshot.md).
+
 Cold-history write and receipt-replay rollback floor: [completed plan](exec-plans/completed/2026-11-02-ingest-cold-write-floor.md).
 
 Private meal thumbnail delivery, capture-based retention and deletion are owned by

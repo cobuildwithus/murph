@@ -254,7 +254,10 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(secondDeviceSyncPort.fetchSnapshotCalls, 0);
       assert.equal(secondResult.status, futureConnectionRetry ? "scheduled" : "idle");
       assert.equal(secondResult.nextWakeAt, expectedWakeAt);
-      assert.deepEqual(secondCheckpointRequests, []);
+      // Settle the restored recording journal in the next ordinary save.
+      assert.equal(secondCheckpointRequests.length, 1);
+      assert.equal(secondCheckpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(secondCheckpointRequests[0]?.nextWakeAt, expectedWakeAt);
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);

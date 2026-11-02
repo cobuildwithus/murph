@@ -32,7 +32,7 @@ export function createHostedWorkspaceSystemWork(input: {
   >;
   runnerInput: HostedWorkspaceRunnerInput;
   onCompleted(
-    result: HostedWorkspaceRunnerAssistantPhasePostCheckpoint & { systemProgressed?: true },
+    result: HostedWorkspaceRunnerAssistantPhasePostCheckpoint & { systemProgressed?: true; alreadyCheckpointed?: true },
     notify: boolean,
   ): void;
   onFailure(error: unknown, notify: boolean): void;
@@ -48,6 +48,8 @@ export function createHostedWorkspaceSystemWork(input: {
       vaultRoot: input.preparation.vaultRoot,
     });
     input.onCompleted({
+      ...(preparation.status === "recording" && preparation.item.routeAction === "run-device-sync-wake"
+        ? { alreadyCheckpointed: true as const } : {}),
       checkpointReason: "system_mailbox_receipt",
       ...(preparation.status === "processed" && preparation.metrics.systemProgressed === true
         ? { systemProgressed: true as const } : {}),
@@ -77,10 +79,14 @@ export function createHostedWorkspaceSystemWork(input: {
                   preparation,
                 }),
               });
+              const requiresFollowUpCheckpoint = preparation.item.routeAction !== "run-device-sync-wake"
+                || preparation.status === "recording" || record.failed > 0;
               return {
                 nextWakeAt: record.nextWakeAt,
                 nextWakeReason: record.nextWakeReason ?? null,
-                requiresFollowUpCheckpoint: true,
+                // Fresh imports and their journal are already in the snapshot.
+                // Replay cleanup instead joins the next invocation's one save.
+                requiresFollowUpCheckpoint,
               };
             },
           }
