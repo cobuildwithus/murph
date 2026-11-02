@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-02",
+  "order": 300,
+  "item": {
+    "id": "confirmed-meals-refresh-sooner",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Confirmed meals refresh sooner",
+    "summary": "After you clarify a photo meal with Murph, Meals can show its updated dish name and nutrition sooner.",
+    "details": "The update keeps the original meal and photo, and no longer waits through the conversation's idle window before refreshing the saved view.",
+    "relevanceTags": ["nutrition", "meals"],
+    "sourcePullRequests": [4450]
+  }
+}

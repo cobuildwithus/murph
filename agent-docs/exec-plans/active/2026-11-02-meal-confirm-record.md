@@ -57,4 +57,12 @@ continuation suites passed (50 tests); publication follows reply then durable
 checkpoint without the ten-minute wait. Focused live journey passed on
 gpt-6.1-sol via local subscription: one edit, one meal, dish name and all five
 nutrition totals, with a nutrition card. Reply review: Ready.
-Final typechecks, review, exact-head CI and deployment remain pending.
+Both affected package typechecks pass. Runtime tests cover 63 import/publication/
+preemption/continuation cases and 22 focused canonical receipt cases. Complexity
+debt and maxima are unchanged. Initial provider instructions/tool descriptions
+are unchanged; only the on-demand food-journal skill body changed.
+The publication regression fails against the previous scheduler after reply
+delivery with no replica publication, and passes with the fix. The final
+production-derived live journey passed again after reconciling main. Changelog
+generation and archive rendering pass. Review, exact-head CI and deployment
+remain pending on PR #4450.
