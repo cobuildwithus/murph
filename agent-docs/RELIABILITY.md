@@ -2830,7 +2830,12 @@ to apply after cutover.
   months. Historical device imports remain writable when no cold reference exists.
   Explicitly referenced cold objects are immutable in the reader release; writes
   fail retryably with `HOSTED_COLD_HISTORY_UNAVAILABLE`, remain queued beyond the
-  retry ceiling, and acknowledge no unpublished payload IDs. Ship retry-aware
+  retry ceiling, and acknowledge no unpublished payload IDs. Each cold deferral
+  refreshes the existing five-attempt ordinary transport allowance, just like
+  retained validation failures; warm restart and hosted wake handoff preserve
+  its remaining budget. Subsequent ordinary failures consume that allowance;
+  permanent failures and account-authority changes keep their existing handling.
+  Ship retry-aware
   reader/preserver support fully
   before the separate producer commit. Once sparse checkpoints exist, rollback
   may reach that retry-aware reader commit, where writes wait for thaw support to

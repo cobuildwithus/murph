@@ -7,6 +7,8 @@ Codex conversation continuity across instruction-only deploys is recorded in
 and [the verification report](../codex-thread-continuity-report.md).
 `../ARCHITECTURE.md` owns the mutable instruction and immutable tool contract.
 
+Cold-history retry allowance and rollback proof: [implementation plan](exec-plans/active/2026-11-02-cold-history-retry-allowance.md).
+
 Historical exact meal-photo association is tracked in
 [the implementation plan](exec-plans/completed/2026-11-02-meal-photos-exact.md);
 `product-specs/ios-meals.md` owns the read-time recovery rule.
