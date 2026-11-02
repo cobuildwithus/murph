@@ -1,3 +1,4 @@
+import { mealNameViolation, MEAL_NAME_GUIDANCE } from "@murphai/contracts";
 import { createHash } from "node:crypto";
 import { normalizeOptionalText } from "./domains/shared.ts";
 import { createReadStream } from "node:fs";
@@ -6379,6 +6380,13 @@ function mealPhotoCaptureTime(photoPath: string | undefined, capturedAt: DateInp
   return photoPath ? new Date(capturedAt ?? new Date()).toISOString() : undefined;
 }
 
+function assertMealName(name: string | undefined): void {
+  // Unnamed raw attachment intake is reviewed later; named writes enforce policy.
+  if (name !== undefined && mealNameViolation(name) !== null) {
+    throw new VaultError("VAULT_INVALID_MEAL_NAME", MEAL_NAME_GUIDANCE);
+  }
+}
+
 export async function addMeal({
   photoCapturedAt,
   uploadId,
@@ -6396,6 +6404,7 @@ export async function addMeal({
   tags,
   externalRef,
 }: AddMealInput): Promise<AddMealResult> {
+  assertMealName(name);
   const vault = await loadVault({ vaultRoot });
   const normalizedNote = normalizeOptionalText(note) ?? undefined;
   const normalizedIngredients = normalizeUniqueTextList(ingredients, "ingredients");

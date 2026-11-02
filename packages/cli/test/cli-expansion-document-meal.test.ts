@@ -833,6 +833,7 @@ test.sequential(
         await runSourceCli<MealAddEnvelope>([
           'meal',
           'add',
+          '--name', 'Sample meal',
           '--photo',
           sampleDocumentPath,
           '--occurred-at',
@@ -1025,6 +1026,7 @@ test.sequential(
       const whitespaceOnlyMeal = await runSourceCli([
         'meal',
         'add',
+        '--name', 'Sample meal',
         '--note',
         '   ',
         '--vault',
@@ -1039,6 +1041,7 @@ test.sequential(
         await runSourceCli<MealAddEnvelope>([
           'meal',
           'add',
+          '--name', 'Sample meal',
           '--photo',
           sampleDocumentPath,
           '--occurred-at',
@@ -1055,6 +1058,7 @@ test.sequential(
         await runSourceCli<MealAddEnvelope>([
           'meal',
           'add',
+          '--name', 'Sample meal',
           '--photo',
           sampleDocumentPath,
           '--occurred-at',
@@ -1194,6 +1198,7 @@ test.sequential(
       const createdMeal = await runSourceCli<MealAddEnvelope>([
         'meal',
         'import-json',
+        '--name', 'Sample meal',
         '--input',
         `@${payloadPath}`,
         '--vault',
@@ -1315,6 +1320,7 @@ test.sequential(
         [
           'meal',
           'import-json',
+          '--name', 'Sample meal',
           '--input',
           '-',
           '--vault',
@@ -1354,6 +1360,7 @@ test.sequential(
         [
           'meal',
           'import-json',
+          '--name', 'Sample meal',
           '--input',
           '-',
           '--note',
@@ -1465,6 +1472,7 @@ test.sequential(
       const result = await runSourceCli([
         'meal',
         'import-json',
+        '--name', 'Sample meal',
         '--input',
         `@${payloadPath}`,
         '--vault',

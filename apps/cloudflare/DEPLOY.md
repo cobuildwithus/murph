@@ -266,6 +266,17 @@ rollback target: queued actions use the existing closed encrypted member-action
 union and cannot be read by the pre-Meals runtime. Complete the normal native
 image rollout and signed deploy checks before declaring the runtime deployed.
 
+### One-time meal name repair consumer floor
+
+Deploy Web's `meal.names.repair` action/result readers before the runtime consumer.
+Do not invoke the Ops repair route until the full native runtime distribution has
+converged and the signed deployment smoke proves the intended bundle. After the
+first batch is accepted, retain these closed-union readers on every rollback
+target until all queued batches and their outcomes have drained. The canonical
+meal schema does not change; old readers can display repaired titles and notes.
+Portable operation progress travels with ordinary encrypted snapshots. Verify the
+owner's companion Meals response before admitting the remaining member batches.
+
 ### Common-media secure file reader floor
 
 The common-media reader release broadens secure-file MIME validation and generated

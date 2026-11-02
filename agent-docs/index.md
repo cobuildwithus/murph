@@ -1665,3 +1665,7 @@ specific moment; the contract remains in `product-specs/weekly-game.md`. Proof:
 Meal dish naming and photo-retention investigation are tracked in
 [the meal naming plan](exec-plans/completed/2026-11-01-meals-short-names.md);
 `product-specs/ios-meals.md` owns the app naming contract.
+
+Legacy meal naming repair and shared write validation are tracked in
+[the active plan](exec-plans/active/2026-11-02-meal-legacy-names.md);
+`product-specs/ios-meals.md` owns its bounds, preservation and removal condition.

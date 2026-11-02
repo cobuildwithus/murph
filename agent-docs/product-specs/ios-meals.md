@@ -73,9 +73,11 @@ null, including calories. A real zero stays zero. `calorieMealCount` distinguish
 partial from complete calorie coverage. Values are approximate, not targets.
 `name` prefers the canonical event title written by `meal add/import-json/edit
 --name`: a sentence-case dish name, normally 2–5 words and at most 40 characters.
-Description, portions, places, and uncertainty stay in `note`. The CLI rejects
-long names and leading meal-type, estimation, confidence, or photo-review phrases
-before mutation, with a short-name retry hint. This uses the existing title
+Description, portions, places, and uncertainty stay in `note`. The CLI requires a name for add/import and rejects invalid title edits before
+mutation. A shared policy checks 2–5 words, 40 characters, lowercase starts, food
+lists, leading meal-type/uncertainty/photo phrases, and explicit venue syntax or
+multiword title-cased venue prefixes. Named culinary exceptions remain valid.
+Raw automatic photo intake may retain its unreviewed placeholder until clarification. This uses the existing title
 field, not a new canonical schema.
 
 For older meals, projection construction skips the generic `Meal` title, then
@@ -419,3 +421,29 @@ Error messages are display text, not enums.
 | Game profile | `400 INVALID_REQUEST`; missing initial profile: `409 PROFILE_REQUIRED` |
 
 Unexpected server failures remain errors, never an empty successful meal list.
+
+
+## One-time legacy naming repair
+
+The Ops-only `/api/ops/meal-name-repair` action uses the existing encrypted member
+mailbox, hosted Sol route, canonical event revision writer and checkpoint/projection
+publication. It is deliberately separate from reads and sends no member messages.
+Each invocation scans at most 100 eligible records and makes at most five tool-free
+name proposals. Each proposal receives only that meal's name and note; invalid or
+oversized evidence is skipped. Original name wording absent from the note is
+appended mechanically. Nutrition, source, times, IDs and attachments are preserved.
+
+Portable versioned progress under `.runtime/operations/meal-name-repair/v1.json`
+records the fixed scan boundary, cursor, pending revision-checked write and numeric
+batch receipts. Replaying a batch returns its original cumulative counts. A pending
+write is reconciled against the exact resulting revision before counting it; a
+concurrent edit is skipped. Foreground input preempts model work. Canonical reads
+reuse the existing vault event reader; provider/write work is bounded per batch.
+
+Deploy Web's compatible action/result readers first, converge the runtime consumer,
+then execute for the signed-in Ops owner and verify the companion Meals API before
+running paginated active member workspaces. `skipped` includes already-valid names;
+`invalid` and `changed` are its unresolved subsets. Inactive members and workspaces
+without a snapshot are outside existing runtime admission. Remove the temporary
+Ops action/job after the eligible population has terminal counts and verified
+projection publication; retain the shared naming policy.

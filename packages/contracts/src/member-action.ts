@@ -476,7 +476,16 @@ export type WorkoutLiveSnapshotMemberActionV1 = z.infer<
   typeof workoutLiveSnapshotMemberActionV1Schema
 >;
 
+export const mealNamesRepairResultSchema = z.object({
+  kind: z.literal("meal.names.repair"), version: z.literal(1),
+  batch: z.number().int().min(0), done: z.boolean(),
+  scanned: z.number().int().min(0), renamed: z.number().int().min(0), skipped: z.number().int().min(0),
+  invalid: z.number().int().min(0), changed: z.number().int().min(0),
+}).strict();
+export type MealNamesRepairResult = z.infer<typeof mealNamesRepairResultSchema>;
+
 export const memberActionV1Schema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("meal.names.repair"), version: z.literal(1), batch: z.number().int().min(0).max(100000) }).strict(),
   workoutLiveApplyMemberActionV1Schema,
   workoutLiveSnapshotMemberActionV1Schema,
   z.object({ kind: z.literal("meal.delete"), version: z.literal(1), mealId: companionMealIdSchema }).strict(),
@@ -552,6 +561,7 @@ export type WorkoutLiveApplyMemberActionResultV1 = z.infer<
 >;
 
 export const memberActionResultV1Schema = z.discriminatedUnion("kind", [
+  mealNamesRepairResultSchema,
   workoutLiveApplyMemberActionResultV1Schema,
   workoutLiveSnapshotMemberActionResultV1Schema,
 ]);

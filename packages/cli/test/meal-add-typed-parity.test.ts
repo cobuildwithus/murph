@@ -489,6 +489,7 @@ test.sequential(
         },
       }
       const payload = {
+        name: 'Berry oat bowl',
         occurredAt: '2026-03-14T08:30:00Z',
         source: 'manual',
         ingredients: ['rolled oats', 'blueberries', 'chia seeds'],
@@ -510,6 +511,7 @@ test.sequential(
       const typedResult = await runInProcessJsonCli<MealAddResult>(cli, [
         'meal',
         'add',
+        '--name', 'Berry oat bowl',
         '--occurred-at',
         payload.occurredAt,
         '--source',
@@ -805,6 +807,7 @@ test.sequential(
           `${JSON.stringify({
             audio: equalAudioPath,
             audioPath: equalAudioPath,
+            name: 'Bean bowl',
             note: 'Synthetic meal with matching media aliases.',
             photo: equalPhotoPath,
             photoPath: equalPhotoPath,
@@ -844,6 +847,7 @@ test.sequential(
       await writeFile(
         payloadPath,
         `${JSON.stringify({
+          name: 'Salmon rice bowl',
           occurredAt: '2026-03-15T08:00:00Z',
           source: 'import',
           ingredients: ['payload rice', 'payload salmon'],
@@ -942,6 +946,7 @@ test.sequential(
       await writeFile(
         payloadPath,
         `${JSON.stringify({
+          name: 'Oatmeal bowl',
           ingredients: ['payload oats'],
           nutrition: {
             provenance: {
@@ -990,7 +995,7 @@ test.sequential('meal save composes fresh totals and goals for its canonical loc
     await addMeal({ vaultRoot, occurredAt: '2026-04-10T18:00:00Z', note: 'Earlier synthetic meal',
       nutrition: { totals: { calories: 300, proteinGrams: 10, carbsGrams: 40, fatGrams: 11, fiberGrams: 5 } } })
     const result = await runInProcessJsonCli<MealAddWithTotalsResult>(createMealCli(services), [
-      'meal', 'add', '--note', 'Synthetic evening meal', '--occurred-at', '2026-04-11T02:00:00Z',
+      'meal', 'add', '--name', 'Bean bowl', '--note', 'Synthetic evening meal', '--occurred-at', '2026-04-11T02:00:00Z',
       '--nutrition-calories', '400', '--nutrition-protein-grams', '20', '--nutrition-carbs-grams', '50',
       '--nutrition-fat-grams', '13', '--nutrition-fiber-grams', '6', '--nutrition-source', 'estimated',
       '--with-daily-totals', '--vault', vaultRoot,
@@ -1030,7 +1035,7 @@ test.sequential.each(['unavailable', 'malformed'] as const)('a %s post-save tota
   try {
     await initializeVault({ vaultRoot, timezone: 'UTC' })
     const result = await runInProcessJsonCli<MealAddWithTotalsResult>(createMealCli(services), [
-      'meal', 'add', '--note', 'Synthetic meal without numeric estimates', '--occurred-at', '2026-04-10',
+      'meal', 'add', '--name', 'Bean bowl', '--note', 'Synthetic meal without numeric estimates', '--occurred-at', '2026-04-10',
       '--with-daily-totals', '--vault', vaultRoot,
     ])
     assert.equal(result.exitCode, null)
@@ -1059,7 +1064,7 @@ test.sequential('accepted goals leave the totals-only card to model-authored goa
   try {
     await initializeVault({ vaultRoot, timezone: 'UTC' })
     const saved = requireData((await runInProcessJsonCli<MealAddWithTotalsResult>(createMealCli(services), [
-      'meal', 'add', '--note', 'Synthetic goal-day meal', '--occurred-at', '2026-04-10T12:00:00Z',
+      'meal', 'add', '--name', 'Bean bowl', '--note', 'Synthetic goal-day meal', '--occurred-at', '2026-04-10T12:00:00Z',
       '--nutrition-calories', '400', '--nutrition-protein-grams', '20', '--nutrition-carbs-grams', '50',
       '--nutrition-fat-grams', '13', '--nutrition-fiber-grams', '6', '--nutrition-source', 'estimated',
       '--with-daily-totals', '--vault', vaultRoot,
@@ -1079,7 +1084,7 @@ test.sequential('ordinary and invalid meal saves never perform an optional total
     await initializeVault({ vaultRoot })
     const cli = createMealCli(services)
     const saved = requireData((await runInProcessJsonCli<MealAddWithTotalsResult>(cli, [
-      'meal', 'add', '--note', 'Synthetic nonnumeric meal', '--vault', vaultRoot,
+      'meal', 'add', '--name', 'Bean bowl', '--note', 'Synthetic nonnumeric meal', '--vault', vaultRoot,
     ])).envelope)
     assert.equal(saved.dailyTotals, undefined)
     const invalid = await runInProcessJsonCli(cli, ['meal', 'add', '--with-daily-totals', '--vault', vaultRoot])
@@ -1095,7 +1100,7 @@ test.sequential('structured meal save retains incomplete daily coverage in its c
     await initializeVault({ vaultRoot, timezone: 'Pacific/Auckland' })
     await addMeal({ vaultRoot, occurredAt: '2026-04-10T06:00:00Z', note: 'Synthetic earlier meal without estimates' })
     const inputFile = path.join(parentRoot, 'meal.json')
-    await writeFile(inputFile, JSON.stringify({ note: 'Synthetic recipe', occurredAt: '2026-04-09T23:00:00Z',
+    await writeFile(inputFile, JSON.stringify({ name: 'Chickpea rice bowl', note: 'Synthetic recipe', occurredAt: '2026-04-09T23:00:00Z',
       ingredients: ['chickpeas', 'rice'], nutrition: { totals: { calories: 560 } } }))
     const saved = requireData((await runInProcessJsonCli<MealAddWithTotalsResult>(createMealCli(), [
       'meal', 'import-json', '--input', '@' + inputFile, '--with-daily-totals', '--vault', vaultRoot,
@@ -1144,21 +1149,35 @@ test.sequential('invalid meal names return actionable validation before add impo
     const saved = await addMeal({ vaultRoot, name: 'Bean tacos', note: 'Two tacos', nutrition: { totals: { calories: 450 } } })
     const before = await runRawInProcessCli(cli, ['meal', 'show', saved.mealId, '--vault', vaultRoot, '--format', 'json'])
     const payloadPath = path.join(parentRoot, 'meal.json')
-    for (const name of ['x'.repeat(41), 'Estimated soup', 'Photo shows soup', 'Retained image reviewed: soup', 'Approximately soup', 'Lunch: soup', 'Breakfast: soup', 'Dinner: soup', 'Snack: soup', 'Probably soup']) {
+    for (const name of ['x'.repeat(41), 'Estimated soup', 'Photo shows soup', 'Retained image reviewed: soup', 'Approximately soup', 'Lunch: soup', 'Breakfast: soup', 'Dinner: soup', 'Snack: soup', 'Probably soup', 'beans, rice and peas', 'One two three four five six', 'lentil soup']) {
       await writeFile(payloadPath, JSON.stringify({ name, note: 'One bowl' }))
       for (const args of [
         ['add', '--name', name, '--note', 'One bowl'],
         ['import-json', '--input', `@${payloadPath}`],
         ['edit', saved.mealId, '--name', name],
+        ['edit', saved.mealId, '--title', name],
       ]) {
         const result = await runInProcessJsonCli(cli, ['meal', ...args, '--vault', vaultRoot])
         assert.equal(result.exitCode, 1)
         assert.equal(result.envelope.ok, false)
-        if (!result.envelope.ok) assert.match(JSON.stringify(result.envelope.error), /(?:40 characters|name the dish)/u)
+        if (!result.envelope.ok) assert.match(JSON.stringify(result.envelope.error), /(?:40 characters|dish name)/u)
       }
     }
     assert.equal(await runRawInProcessCli(cli, ['meal', 'show', saved.mealId, '--vault', vaultRoot, '--format', 'json']), before)
     const list = requireData((await runInProcessJsonCli<MealListResult>(cli, ['meal', 'list', '--vault', vaultRoot])).envelope)
     assert.equal(list.count, 1)
+  } finally { await rm(parentRoot, { recursive: true, force: true }) }
+})
+
+
+test.sequential('meal saves require a dish name instead of displaying an ingredient-list note', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-cli-meal-name-required-')
+  try {
+    await initializeVault({ vaultRoot })
+    const result = await runInProcessJsonCli(createMealCli(), ['meal', 'add', '--note', 'Beans, rice, peas and carrots', '--vault', vaultRoot])
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.envelope.ok, false)
+    const list = requireData((await runInProcessJsonCli<MealListResult>(createMealCli(), ['meal', 'list', '--vault', vaultRoot])).envelope)
+    assert.equal(list.count, 0)
   } finally { await rm(parentRoot, { recursive: true, force: true }) }
 })
