@@ -33,6 +33,7 @@ import {
 import {
   CURRENT_VAULT_FORMAT_VERSION,
   runIntegrationIngestMigration,
+  withIntegrationIngestMaterializer,
   VaultError,
 } from "@murphai/core";
 import {
@@ -1445,7 +1446,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   input: HostedAssistantWorkspaceRuntimeJobInput,
   options: HostedWorkspaceRuntimeJobOptions,
 ): Promise<HostedWorkspaceInvocationResult> {
-  const result = await runHostedWorkspaceRuntimeJobInProcessImpl(input, options);
+  // Restore preparation can precede this invocation and owns its receipt-replay
+  // scope. Once adopted, every invocation lane shares the restored materializer.
+  let materialize: HostedWorkspaceArtifactMaterializer | undefined;
+  const result = await withIntegrationIngestMaterializer(
+    options.vaultRoot,
+    async (paths) => { await materialize?.(paths); },
+    () => runHostedWorkspaceRuntimeJobInProcessImpl(input, options, (restoredMaterializer) => {
+      materialize = restoredMaterializer;
+    }),
+  );
   const runtimeReleaseSha = options.runtimeIssueProvenance?.releaseSha ?? null;
   void writeHostedRuntimeLogBestEffort({
     entry: {
@@ -1574,6 +1584,7 @@ function buildInvocationBaseRuntimeEnv(
 async function runHostedWorkspaceRuntimeJobInProcessImpl(
   input: HostedAssistantWorkspaceRuntimeJobInput,
   options: HostedWorkspaceRuntimeJobOptions,
+  adoptMaterializer: (materialize: HostedWorkspaceArtifactMaterializer) => void,
 ): Promise<HostedWorkspaceInvocationResult> {
   const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime, options.platform);
   const mailboxPort = runtime.platform.mailboxPort ?? null;
@@ -2012,6 +2023,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       workspaceRead,
       workspaceRestoreDoneAt,
     } = await workspaceRestorePreparation.promise;
+    adoptMaterializer(restored.materializeWorkspaceArtifacts);
     assertRuntimeNotAborted();
     initialAssistantInputLatencyMilestones.workspaceRestoreDoneAt = workspaceRestoreDoneAt;
     // Attach the in-memory cold-start phase breakdown to the SAME staged-milestone

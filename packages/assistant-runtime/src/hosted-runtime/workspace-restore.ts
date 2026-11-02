@@ -177,7 +177,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       ) {
         await clearHostedWorkspaceRuntimeLocalRoots(restored);
         await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
-        throw error.cause ?? error;
+        throw error instanceof HostedColdHistoryUnavailableError ? error : error.cause ?? error;
       }
       return {
         count: 0,

@@ -43,8 +43,8 @@ export async function materializeIntegrationIngestHistory(
       if (scope?.vaultRoot !== path.resolve(vaultRoot)) throw new HostedColdHistoryUnavailableError();
       await scope.materialize([reference.relativePath]);
       if (!await matches()) throw new HostedColdHistoryUnavailableError();
-    } catch {
-      throw new HostedColdHistoryUnavailableError();
+    } catch (cause) {
+      throw new HostedColdHistoryUnavailableError({ cause });
     }
   }
 }
@@ -65,7 +65,7 @@ export async function thawIntegrationIngestHistoryForAppend(
     await prepareFileAtomic(resolveHostedMediaReferenceCataloguePath(vaultRoot), async (tempPath) => {
       await writeFile(tempPath, `${JSON.stringify({ ...catalogue, entries }, null, 2)}\n`, { mode: 0o600, flag: "wx" });
     });
-  } catch {
-    throw new HostedColdHistoryUnavailableError();
+  } catch (cause) {
+    throw new HostedColdHistoryUnavailableError({ cause });
   }
 }
