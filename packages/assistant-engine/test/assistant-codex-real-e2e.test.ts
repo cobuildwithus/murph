@@ -45714,8 +45714,8 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
       expect(reply.length).toBeLessThan(350)
       if (shared) {
         // Named by its tasks, never confused with the squats game, and no other terms restated.
-        expect(reply).toMatch(/read|phone/iu)
-        expect(reply).not.toMatch(/squat|stretch|prize|dare|days? total/iu)
+        expect(reply).toMatch(/\b(?:read|reading|phone)\b/iu)
+        expect(reply).not.toMatch(/20 pages|squat|stretch|prize|dare|days? total/iu)
       }
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])

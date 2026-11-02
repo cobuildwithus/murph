@@ -136,7 +136,7 @@ describe("game v1 notification instructions", () => {
     for (const instructions of shared) {
       expect(instructions).toContain("Say which game this is by its tasks");
       // The cancellation notices otherwise forbid repeating tasks; the short game name is the one exception.
-      expect(instructions).toContain("allowed even where these instructions say not to repeat tasks; restate no other terms");
+      expect(instructions).toContain("Where these instructions say not to repeat tasks, this short name is the only exception; every other rule still applies.");
       expect(JSON.parse(instructions.split("\n").at(-1)!)).toEqual({ thisGameTasks: room.tasks, otherGames: room.otherGames });
     }
     const recap = buildGameRecapInstructions([], room);
