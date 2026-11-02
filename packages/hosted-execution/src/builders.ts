@@ -999,6 +999,7 @@ export function buildHostedExecutionDeviceSyncWake(input: {
 }
 
 export function buildHostedExecutionMealPhotoCapturedWake(input: {
+  uploadId?: string;
   byteLength: number;
   captureId: string;
   capturedAt: string;
@@ -1020,6 +1021,7 @@ export function buildHostedExecutionMealPhotoCapturedWake(input: {
     eventId: input.eventId,
     kind: "meal-photo.captured",
     mealPhoto: {
+      ...(input.uploadId === undefined ? {} : { uploadId: input.uploadId }),
       byteLength: input.byteLength,
       captureId: input.captureId,
       capturedAt: input.capturedAt,

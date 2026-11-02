@@ -15,6 +15,7 @@ import {
   normalizeStoredAssistantPersonaId,
   normalizeIanaTimeZone,
   parseMemberActionRequestV1,
+  companionMealUploadIdSchema,
   parseMemberActionOutcomeV1,
 } from "@murphai/contracts";
 
@@ -566,18 +567,14 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         );
       }
       return buildHostedExecutionMealPhotoCapturedWake({
-        byteLength: mealPhoto.byteLength,
-        captureId: mealPhoto.captureId,
-        capturedAt: mealPhoto.capturedAt,
+        ...mealPhoto,
         directRoute: parseHostedExecutionDirectRoute(
           record.directRoute,
           "Hosted execution wake meal-photo.captured directRoute",
         ),
         eventId,
-        mealPhotoKey: mealPhoto.mealPhotoKey,
         memberId: wireUserId,
         occurredAt,
-        sha256: mealPhoto.sha256,
       });
     }
     case "runtime.manual-requested":
@@ -675,6 +672,9 @@ export function parseHostedExecutionMealPhotoCapturedPayload(
   }
 
   return {
+    ...(record.uploadId === undefined ? {} : {
+      uploadId: companionMealUploadIdSchema.parse(record.uploadId),
+    }),
     byteLength,
     captureId,
     capturedAt,
@@ -2229,6 +2229,7 @@ function assertExactHostedExecutionKeys(
 
 function assertExactHostedMealPhotoKeys(record: Record<string, unknown>): void {
   const allowed = new Set([
+    "uploadId",
     "byteLength",
     "captureId",
     "capturedAt",

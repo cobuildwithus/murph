@@ -2,6 +2,7 @@ import * as z from "./zod-runtime.ts";
 import { normalizeIanaTimeZone } from "./time.ts";
 
 export const companionMealIdSchema = z.string().regex(/^(?:meal|evt)_[A-Za-z0-9]+$/u).max(160);
+export const companionMealUploadIdSchema = z.string().min(1).max(128);
 const amount = z.number().finite().nonnegative().nullable();
 export const companionMealSchema = z.object({
   id: companionMealIdSchema,
@@ -11,8 +12,7 @@ export const companionMealSchema = z.object({
   proteinGrams: amount,
   carbsGrams: amount,
   fatGrams: amount,
-  // The phone's original manual-upload UUID is not in canonical records.
-  uploadId: z.null(),
+  uploadId: companionMealUploadIdSchema.nullable(),
 }).strict();
 
 export const companionMealDaySchema = z.object({

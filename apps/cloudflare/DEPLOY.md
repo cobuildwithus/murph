@@ -244,6 +244,16 @@ does not stop an already accepted automatic rollout. Native manual progression
 needs separate hosted hold/retry proof before it can provide that additional
 control. No manual scheduler or automatic rollback is introduced here.
 
+### Meal upload-link reader floor
+
+Deploy and converge the optional canonical meal `uploadId`, encrypted
+`mealPhoto.uploadId`, and nullable Browser Vault projection readers before
+shipping the upload writer. This reader release does not populate IDs. The
+previous strict canonical/wake parsers reject the new fields, and previous Web
+rejects non-null projection IDs. After the writer ships, retain the reader
+release on every Web/runtime rollback target. Use the normal native distribution
+and signed deploy checks to prove reader convergence before writer admission.
+
 ### Meals action consumer floor
 
 The companion Meals routes ship in Web before the runtime. Web requires a

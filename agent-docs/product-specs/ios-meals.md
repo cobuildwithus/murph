@@ -166,20 +166,31 @@ precedence over meal lookup; do not interpret it as a missing meal.
 
 ## Local photo association
 
-`uploadId` is always null in this version. Manual upload UUIDs are hashed with
-the member ID before the encrypted wake is built. The vault's
-`externalRef.resourceId` holds the resulting capture digest, not that UUID.
-Automatic capture digests also reach this field, but canonical records do not
-retain a discriminator proving which digest was originally supplied by the
-phone. Do not return this ambiguous digest as the original phone upload ID.
+`uploadId` accepts a nullable opaque string (1–128 characters). This reader
+release accepts the optional field on canonical meals and encrypted photo wakes;
+production upload writers do not populate it yet. Existing meals remain null.
 
-The smallest future addition is an optional original phone upload identifier in
-the existing encrypted meal-photo wake, copied into canonical meal metadata
-at import and projected as `uploadId`. No image bytes or new store is needed.
-That addition is deliberately not implemented. iOS shows a plain tile for null;
-no `source`, `thumbnailUrl`, `photoUrl`, or full-size URL exists in this contract.
+The follow-up writer will preserve the already-sent `Idempotency-Key`: lowercase
+UUID for manual uploads, capture ID for automatic uploads. No upload-request
+change is needed. For manual thumbnails, iOS already stores the local key as
+lowercase hex SHA256 of UTF-8 `"manual:" + lowercase UUID`; use the existing
+`MealPhotoCaptureCrypto.manualCaptureID` conversion when joining that UUID.
+Automatic thumbnails use the returned ID directly. Treat these IDs as opaque;
+never derive an association from timestamps or image content.
+
+No backfill is planned. Typed meals, texted photos and older captures stay null;
+show a plain tile for null or a missing local thumbnail. No `source`,
+`thumbnailUrl`, `photoUrl`, or full-size URL exists in this contract.
 
 ## Release order and compatibility
+
+The upload-link reader release must converge in Web and all runtimes before
+shipping the writer. Pre-reader runtimes reject the new optional canonical and
+nested wake fields; pre-reader Web rejects non-null projection upload IDs.
+After writes begin, retain this reader release as the Web/runtime rollback floor.
+The reader release emits no new upload metadata, so it can safely coexist with
+the old runtime. The subsequent writer accepts both old and linked records.
+
 
 Web ships first and accepts only generation-17-or-newer replicas that contain
 the structured Meals section. Older or missing projections fail with

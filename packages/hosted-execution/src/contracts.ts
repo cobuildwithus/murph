@@ -963,6 +963,7 @@ export interface HostedExecutionGroupJournalFactRecordedWake
 export const HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES = 4 * 1024 * 1024;
 
 export interface HostedExecutionMealPhotoCapturedPayload {
+  uploadId?: string;
   byteLength: number;
   captureId: string;
   capturedAt: string;
