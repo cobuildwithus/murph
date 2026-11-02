@@ -1,6 +1,6 @@
 # Private meal thumbnails and full-photo retention
 
-Status: active
+Status: completed
 Created: 2026-11-02
 Updated: 2026-11-02
 
@@ -37,3 +37,20 @@ PR 1 (#4447) ships first. No iOS changes, member messages, local production muta
 ## Verification
 
 Use synthetic JPEG/PNG images with metadata to prove orientation, size, stripping, retention boundary, retry, deletion and model thumbnail reads. Run affected core/query/runtime/Web/Worker tests and typechecks. Verify protected deployment identities and aggregate maintenance results without inspecting member content.
+
+## Implementation and evidence
+
+- PR 1 merged before this work; Web and protected Cloudflare deployment succeeded.
+- Core owns thumbnail generation, bounded resumable backfill, 90-day full-image retirement, and cleanup of historical hide-only deletions. Metadata-only tombstones preserve immutable references; image bytes and encrypted media objects are retired.
+- Owner-only Meals reads mint five-minute bearer capabilities against existing encrypted media. No new service, store, table, or foreground model call.
+- Automatic closeout records review completion; a thumbnail maintenance revision cannot masquerade as same-occurrence retry evidence. Legacy retry evidence remains accepted.
+- Synthetic core, encrypted receipt replay, selected-page API, capability expiry/deletion, CLI, closeout selection and idle-maintenance proof passed. A real local-subscription gpt-6.1-sol journey viewed the surviving thumbnail, edited once, and created no duplicate; reply review Ready.
+- Core and hosted-execution emitted builds and affected typechecks passed. Complexity and log guards passed; new functions remain at or below the threshold.
+- Initial provider-input measurement: ordinary individual/group requests unchanged in bytes; scheduled meal closeout adds 105 bytes. Exact model-token counts unavailable because no matching tokenizer is configured.
+- The iOS contract and privacy policy describe at-rest encryption, five-minute bearer URLs, original-import fallback for historical capture metadata, and asynchronous retention/deletion targets. No end-to-end claim.
+- PR #4455 carries final exact-head CI, ReviewGPT and deployment evidence. Final external gates remain mandatory before merge/deploy; no production backfill-completion claim is made in this plan.
+
+## Operational limits
+
+Backfill runs in normal maintenance and resumes through existing retention wakes; inactive vaults wait for runtime work. Already-purged source images cannot be reconstructed. Production upload receipts alone cannot establish the denominator of surviving canonical meals; a full counts-only vault census remains unverified rather than reporting receipt counts as meal coverage.
+Completed: 2026-11-02
