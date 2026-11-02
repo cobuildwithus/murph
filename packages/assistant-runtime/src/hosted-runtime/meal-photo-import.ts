@@ -120,6 +120,7 @@ export async function importHostedMealPhotoCapturedMailboxItem(input: {
   try {
     await writeFile(temporaryPhotoPath, bytes);
     await addMeal({
+      uploadId: input.wake.mealPhoto.uploadId,
       eventId: deterministicContractId(
         ID_PREFIXES.event,
         `meal-photo-capture:event:${input.wake.mealPhoto.captureId}`,
