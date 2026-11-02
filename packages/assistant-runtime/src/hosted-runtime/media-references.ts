@@ -101,6 +101,7 @@ export async function publishHostedWorkspaceMediaReferencesForSnapshot(input: {
   const { existingCatalogue, entries, uploadedMediaCount } = await prepareHostedWorkspaceMediaReferences({
     ...input,
     mediaStore: input.mediaStore,
+    includeColdIngests: true,
   });
   await writeHostedMediaReferenceCatalogue({
     catalogue: {
@@ -149,6 +150,7 @@ export async function publishHostedWorkspaceMediaReferences(input: {
 }
 
 async function prepareHostedWorkspaceMediaReferences(input: {
+  includeColdIngests?: boolean;
   mediaStore: HostedRuntimeMediaStore;
   signal?: AbortSignal | null;
   vaultRoot: string;
@@ -165,6 +167,17 @@ async function prepareHostedWorkspaceMediaReferences(input: {
   );
   const candidates = await collectHostedMediaCandidates(input.vaultRoot, input.signal);
   const currentMonth = new Date().toISOString().slice(0, 7);
+  const ingestPaths = input.includeColdIngests
+    ? new Set(await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.integrationIngestLedgerDirectory))
+    : new Set<string>();
+  for (const relativePath of ingestPaths) {
+    const month = hostedColdIngestMonth(relativePath);
+    if (!month || month >= currentMonth || existingByPath.has(relativePath)) continue;
+    const logicalPath = relativePath.slice(0, -3);
+    if ([logicalPath, `${logicalPath}.gz`, `${logicalPath}.zip`].some((sibling) => ingestPaths.has(sibling))) continue;
+    candidates.push({ relativePath, mediaKind: "integration-ingest", expiresAt: null,
+      byteSize: null, sha256: null, mimeType: "application/octet-stream", recordedAt: `${month}-01T00:00:00.000Z` });
+  }
   const nextEntries: HostedMediaReference[] = existingCatalogue.entries.filter((entry) => entry.mediaKind === "integration-ingest");
   // A clock rollback must never externalize the current/future month.
   if (nextEntries.some((entry) => (hostedColdIngestMonth(entry.relativePath) ?? "") >= currentMonth)) {

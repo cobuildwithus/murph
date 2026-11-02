@@ -1776,6 +1776,8 @@ describe("hosted workspace runtime entrypoint", () => {
         version: "1",
       });
 
+      // Recovery can now save a failed projection's backoff before retirement.
+      if (retainedItem.nextAttemptAt) vi.setSystemTime(new Date(retainedItem.nextAttemptAt));
       await withRealTimeout(
         runHostedWorkspaceRuntimeJobInProcess(
           createRuntimeInput(
@@ -1819,7 +1821,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("checkpoint-reported foreground input defers system mailbox post-checkpoint recording", async () => {
+  test("checkpoint-reported foreground input follows already durable device recording replay", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -1837,7 +1839,7 @@ describe("hosted workspace runtime entrypoint", () => {
       ...baseDeviceSyncPort,
       async ackDirtyStateProcessed() {
         dirtyAckCalls += 1;
-        throw new Error("Foreground preemption must defer the device-sync dirty ack.");
+        throw new Error("Synthetic device-sync dirty acknowledgement failure.");
       },
     };
 
@@ -1931,11 +1933,12 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       assert.equal(result.immediateRecheckRequested, true);
-      assert.equal(dirtyAckCalls, 0);
-      assert.equal(checkpointRequests.length, 1);
+      assert.equal(dirtyAckCalls, 1);
+      assert.equal(checkpointRequests.length, 2);
       const state = await readHostedSystemMailboxState(vaultRoot);
       assert.ok(state.pending.some((item) =>
         item.itemId === deviceItem.id && item.status === "recording"
+          && item.nextAttemptAt !== null
       ));
     } finally {
       vi.useRealTimers();
@@ -2180,7 +2183,9 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.equal(result.immediateRecheckRequested, true);
       assert.equal(dirtyAckCalls, 1);
-      assert.equal(checkpointRequests.length, 2);
+      assert.equal(checkpointRequests.length, 3);
+      assert.equal(checkpointRequests.filter((request) => request.reason === "idle_shutdown").length, 1,
+        JSON.stringify(checkpointRequests.map(({ reason, nextWakeAt }) => ({ reason, nextWakeAt }))));
       assert.deepEqual(
         (await readHostedSystemMailboxState(vaultRoot)).pending,
         [],
@@ -2346,25 +2351,15 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(retainedItem?.status, "recording");
       assert.equal(retainedItem?.nextAttemptAt, null);
       assert.ok(retainedItem?.postCheckpointRecord);
-      assert.equal(checkpointRequests.length, 1);
-      const durableRecordingCheckpoint = checkpointRequests[0];
-      assert.ok(durableRecordingCheckpoint);
-      // The foreground owner consumes its input before the system retry.
+      assert.equal(checkpointRequests.length, 0);
+      // The interrupted replay needs no replacement for the original snapshot.
       conversationItems.length = 0;
-      const resumedWorkspace = createWorkspaceState({
-        inboxMediaRetentionWakeAt:
-          durableRecordingCheckpoint.inboxMediaRetentionWakeAt ?? null,
-        nextWakeAt: durableRecordingCheckpoint.nextWakeAt ?? null,
-        nextWakeReason: durableRecordingCheckpoint.nextWakeReason ?? null,
-        redactedStatus: durableRecordingCheckpoint.redactedStatus ?? null,
-        snapshotRef: durableRecordingCheckpoint.snapshotRef,
-        version: "1",
-      });
+      const resumedWorkspace = initialWorkspace;
 
       const resumedResult = await runHostedWorkspaceRuntimeJobInProcess(
         createRuntimeInput(
           "attempt_synthetic_system_mailbox_device_resume_recording",
-          "1",
+          "0",
         ),
         createRunOptions(createCoalescingRuntimeWakeSignal(), resumedWorkspace),
       );
@@ -2605,31 +2600,20 @@ describe("hosted workspace runtime entrypoint", () => {
       const retainedItem = interruptedState.pending.find((item) => item.itemId === deviceItem.id);
       assert.equal(retainedItem?.status, "recording");
       assert.ok(retainedItem?.postCheckpointRecord);
-      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests.length, 0);
       assert.equal(projectionCalls, 3);
       assert.equal(activeProjectionCalls, 0);
       assert.ok(
         events.includes("vault-share.deliver:done:1:delivered"),
         events.join(","),
       );
-      const durableRecordingCheckpoint = checkpointRequests[0];
-      assert.ok(durableRecordingCheckpoint);
-      // The foreground owner consumes its input before the system retry.
       conversationItems.length = 0;
-      const resumedWorkspace = createWorkspaceState({
-        inboxMediaRetentionWakeAt:
-          durableRecordingCheckpoint.inboxMediaRetentionWakeAt ?? null,
-        nextWakeAt: durableRecordingCheckpoint.nextWakeAt ?? null,
-        nextWakeReason: durableRecordingCheckpoint.nextWakeReason ?? null,
-        redactedStatus: durableRecordingCheckpoint.redactedStatus ?? null,
-        snapshotRef: durableRecordingCheckpoint.snapshotRef,
-        version: "1",
-      });
+      const resumedWorkspace = initialWorkspace;
 
       await runHostedWorkspaceRuntimeJobInProcess(
         createRuntimeInput(
           "attempt_synthetic_system_mailbox_projection_resume_recording",
-          "1",
+          "0",
         ),
         createRunOptions(createCoalescingRuntimeWakeSignal(), resumedWorkspace),
       );
@@ -2643,7 +2627,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "time-zone.v0",
         "sleep-times.v0",
       ]);
-      assert.deepEqual(projectedWorkspaceVersions, ["1", "1", "1", "2", "2", "2"]);
+      assert.deepEqual(projectedWorkspaceVersions, ["0", "0", "0", "0", "0", "0"]);
       assert.equal(peakActiveProjectionCalls, 1);
       assert.equal(dirtyAckCalls, 0);
       assert.ok(
@@ -2661,8 +2645,8 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(failedItem?.status, "recording");
       assert.equal(typeof failedItem?.nextAttemptAt, "string");
       assert.ok(failedItem?.postCheckpointRecord);
-      assert.equal(checkpointRequests.length, 3);
-      const failedRecordingCheckpoint = checkpointRequests[2];
+      assert.equal(checkpointRequests.length, 2);
+      const failedRecordingCheckpoint = checkpointRequests[1];
       assert.ok(failedRecordingCheckpoint);
       const recoveredWorkspace = createWorkspaceState({
         inboxMediaRetentionWakeAt:
@@ -2671,14 +2655,14 @@ describe("hosted workspace runtime entrypoint", () => {
         nextWakeReason: failedRecordingCheckpoint.nextWakeReason ?? null,
         redactedStatus: failedRecordingCheckpoint.redactedStatus ?? null,
         snapshotRef: failedRecordingCheckpoint.snapshotRef,
-        version: "3",
+        version: "2",
       });
 
       vi.setSystemTime(new Date(Date.parse(TEST_NOW) + 60_000));
       await runHostedWorkspaceRuntimeJobInProcess(
         createRuntimeInput(
           "attempt_synthetic_system_mailbox_projection_recovery_recording",
-          "3",
+          "2",
         ),
         createRunOptions(createCoalescingRuntimeWakeSignal(), recoveredWorkspace),
       );
@@ -2689,7 +2673,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "time-zone.v0",
         "sleep-times.v0",
       ]);
-      assert.deepEqual(projectedWorkspaceVersions.slice(6), ["4", "4", "4"]);
+      assert.deepEqual(projectedWorkspaceVersions.slice(6), ["2", "2", "2"]);
       assert.equal(peakActiveProjectionCalls, 1);
       assert.equal(dirtyAckCalls, 1);
       assert.ok(

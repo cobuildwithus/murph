@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import type { RuleEntry } from "@/src/lib/game/rules";
 import type { GameStakeKind } from "@/src/lib/game/contract";
-import { buildGameHistoryView, buildGameView, type GameViewInput } from "@/src/lib/game/views";
+import { GAME_HISTORY_PREVIEW_LIMIT, buildGameHistoryView, buildGameView, type GameViewInput } from "@/src/lib/game/views";
 
 function input(viewerSeat: number, sameTask: boolean, kind: GameStakeKind | null): GameViewInput {
   const tasks = [{ seat: 1, text: sameTask ? "30 lunges" : "15 min walking" }, { seat: 0, text: "30 lunges" }];
@@ -68,5 +69,36 @@ describe("game history terms", () => {
     expect(buildGameHistoryView({ ...fixture, viewerId: "outsider" })).toBeNull();
     fixture.state.game.status = "live";
     expect(buildGameHistoryView(fixture)).toBeNull();
+  });
+});
+
+
+describe("game history previews", () => {
+  it("includes words and photos in day, seat, receipt and id order before applying the cap", () => {
+    const fixture = input(0, false, null);
+    const entry = (id: string, dayIndex: number, seat: number, received: number, kind: "words" | "photo" = "words"): RuleEntry => ({
+      id, dayIndex, memberId: `player-${seat}`, receivedAt: new Date(received), kind,
+      attempt: 1, withdrawnAt: null, blurHash: null,
+      mediaKeys: kind === "photo" ? [`game/player-${seat}/${id}.jpg`] : [],
+    });
+    const ordered = [
+      entry("a", 0, 0, 100), entry("b", 0, 0, 100, "photo"),
+      entry("c", 0, 0, 200), entry("d", 0, 1, 0, "photo"),
+      entry("e", 1, 0, 0), entry("f", 1, 1, 0, "photo"),
+      entry("g", 2, 0, 0), entry("h", 2, 1, 0, "photo"),
+    ];
+    fixture.state.entries = [
+      ...[...ordered].reverse(),
+      { ...entry("withdrawn", 0, 0, 0), withdrawnAt: new Date(1) },
+      entry("reported", 0, 1, 0),
+      { ...entry("hidden", 0, 1, 0), attempt: 0, kind: "excuse" },
+    ];
+    fixture.hiddenEntryIds = new Set(["reported"]);
+    fixture.entryWords = new Map([["a", { text: "Finished my walk." }]]);
+    const previews = buildGameHistoryView(fixture)!.game.previews;
+    expect(previews.map(preview => preview.entryId)).toEqual(ordered.slice(0, GAME_HISTORY_PREVIEW_LIMIT).map(entry => entry.id));
+    expect(previews).toHaveLength(GAME_HISTORY_PREVIEW_LIMIT);
+    expect(previews[0]).toEqual({ entryId: "a", kind: "words", mediaUrls: [], text: "Finished my walk.", data: null, mine: true });
+    expect(previews[1]).toMatchObject({ kind: "photo", mediaUrls: ["/api/game/v1/media/game%2Fplayer-0%2Fb.jpg"] });
   });
 });

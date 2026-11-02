@@ -4238,7 +4238,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(checkpointRequests.length, 3);
       const checkpoint = checkpointRequests.at(-1);
       assert.ok(checkpoint);
-      assert.equal(checkpoint.reason, "idle_shutdown");
+      assert.equal(checkpoint.reason, "canonical_runtime_commit");
       assert.equal(checkpoint.expectedWorkspaceVersion, "2");
       assert.equal(checkpoint.nextWakeAt, null);
       assert.equal(checkpoint.nextWakeReason, null);
@@ -4338,7 +4338,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             lane: lane.lane,
           }))
         ),
-        [[{ importedSeq: "1", lane: "system" }]],
+        [[{ importedSeq: "1", lane: "system" }], [{ importedSeq: "1", lane: "system" }]],
       );
       assert.equal(systemResult.status, "scheduled");
       assert.equal(systemResult.nextWakeAt, recoveryWakeAt);
@@ -6798,14 +6798,15 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         attemptId: convergenceAttemptId,
         vaultRoot: coldVaultRoot,
       });
-      assert.equal(converged.status, "idle");
+      assert.equal(converged.status, "idle", JSON.stringify(converged));
       assert.equal(converged.nextWakeAt, null);
       assert.equal(converged.nextWakeReason, undefined);
       assert.equal(providerRequestClasses.length, providerRequestsBeforeConvergence);
-      assert.equal(checkpointAttempt, checkpointAttemptsBeforeConvergence);
-      assert.equal(checkpointRequests.at(-1)?.expectedWorkspaceVersion, "5");
+      // One cleanup snapshot settles the restored completion journal.
+      assert.equal(checkpointAttempt, checkpointAttemptsBeforeConvergence + 1);
+      assert.equal(checkpointRequests.at(-1)?.expectedWorkspaceVersion, "6");
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "6");
+      assert.equal(currentWorkspace.version, "7");
 
       const quiescentBucketAt = "2026-04-27T00:15:00.000Z";
       const quiescentAttemptId =
@@ -6823,17 +6824,17 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(providerRequestClasses.length, providerRequestsBeforeQuiescence);
       assert.equal(checkpointAttempt, checkpointAttemptsBeforeQuiescence);
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "6");
+      assert.equal(currentWorkspace.version, "7");
       assert.equal(
         providerRequestClasses.length,
         providerRequestClassesAfterSettlement,
       );
-      assert.equal(checkpointAttempt, checkpointAttemptsAfterSettlement);
-      assert.equal(checkpointAttempt, 6);
+      assert.equal(checkpointAttempt, checkpointAttemptsAfterSettlement + 1);
+      assert.equal(checkpointAttempt, 7);
       assert.equal(checkpointAttempt, checkpointRequests.length);
       assert.equal(
         events.filter((event) => event.startsWith("checkpoint.commit:")).length,
-        5,
+        6,
       );
       assert.deepEqual([...observedScheduleEventIds], [scheduleEventId]);
       assert.deepEqual([...observedMailboxItemIds], [mailboxItemId]);
@@ -8907,7 +8908,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(browserPublishCalls, 1);
       assert.ok(events.includes("vault-share.deliver"), JSON.stringify(events));
       assert.ok(
-        requireEventIndex(events, "workspace.checkpoint")
+        requireEventIndex(events, "workspace.read")
           < requireEventIndex(events, "browser-vault.publish"),
         JSON.stringify(events),
       );
@@ -8919,8 +8920,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         );
       }
       assert.ok(
-        requireEventIndex(events, "workspace.checkpoint")
-          < requireEventIndex(events, "vault-share.deliver"),
+        requireEventIndex(events, "device-sync.dirty-ack")
+          < events.lastIndexOf("workspace.checkpoint"),
         JSON.stringify(events),
       );
       assert.ok(

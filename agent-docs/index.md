@@ -1,3 +1,5 @@
+Device-sync single-snapshot retirement and cold journal replay: [implementation plan](exec-plans/active/2026-11-02-device-sync-single-snapshot.md).
+
 Cold-history write and receipt-replay rollback floor: [completed plan](exec-plans/completed/2026-11-02-ingest-cold-write-floor.md).
 
 Private meal thumbnail delivery, capture-based retention and deletion are owned by
@@ -1683,8 +1685,10 @@ Meal dish naming and photo-retention investigation are tracked in
 `product-specs/ios-meals.md` owns the app naming contract.
 
 Legacy meal naming repair and shared write validation are tracked in
-[the active plan](exec-plans/active/2026-11-02-meal-legacy-names.md);
+[the implementation plan](exec-plans/completed/2026-11-02-meal-legacy-names.md);
 `product-specs/ios-meals.md` owns its bounds, preservation and removal condition.
+Operator verification and member-admission handling are tracked in
+[the completion follow-up](exec-plans/completed/2026-11-02-meal-repair-operator-completion.md).
 
 Lazy closed-month integration-ingest storage, verification and rollout evidence are
 tracked in [the implementation report](exec-plans/completed/2026-11-02-ingest-cold-storage.md).

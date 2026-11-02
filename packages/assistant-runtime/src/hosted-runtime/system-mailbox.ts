@@ -1006,6 +1006,14 @@ export function resolveHostedDeviceSyncCompletionRecordInput(input: {
   item: HostedSystemMailboxPendingItem;
   preparation: HostedSystemMailboxCheckpointPreparation | null;
 }): { deviceSyncCompletionAcceptedInCurrentAdmission?: true } {
+  const checkpointedWake = resolveHostedDeviceSyncCheckpointedWake(input.item);
+  // A restored completion-only fence already proves all imported work durable.
+  // Publishing it rechecks the connection epoch/version and advances cadence
+  // monotonically; replay must not create another identical recording journal.
+  if (input.preparation?.status === "recording" && checkpointedWake
+    && isHostedDeviceSyncCompletionFenceWake(checkpointedWake)) {
+    return { deviceSyncCompletionAcceptedInCurrentAdmission: true };
+  }
   if (
     input.preparation?.status !== "processed"
     || input.preparation.metrics.backgroundMaintenanceYielded === true

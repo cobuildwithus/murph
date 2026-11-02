@@ -106,7 +106,6 @@ test.each([
   let runtimeCompletion: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
   let inputId: string | null = null;
   const repliedInputIds = new Set<string>();
-  let recordedRetainUntil: string | null = null;
   const deviceItem = createMailboxItem({
     id: "mailbox_item_synthetic_device_followup",
     dedupeKey: "device-sync.wake:synthetic-followup",
@@ -150,15 +149,19 @@ test.each([
       repliedInputIds.add(inputId);
       await input.onProviderRequestStarted?.({ assistantInputIds: [inputId], providerRequestOrdinal: 0, source: "linq", startedAt: TEST_NOW });
       const retained = (await readHostedSystemMailboxState(vaultRoot)).pending;
-      assert.equal(retained[0]?.status, "recording");
-      // A completed reconcile holds only its completion fence until recorded.
-      const record = retained[0]?.postCheckpointRecord;
-      assert.equal(record?.kind, "device-sync.dirty-processed-batch");
-      assert.deepEqual(record.records, []);
-      assert.equal(record.retainedWake?.eventId, deviceItem.dedupeKey);
-      recordedRetainUntil = record.retainMailboxItemUntil ?? null;
-      assert.equal(retained[0]?.lastErrorCode, null);
-      assert.equal(retained[0]?.nextAttemptAt, null);
+      if (scenario === "checkpoint-foreground" && repliedInputIds.size === 2) {
+        assert.equal(effectContexts.length, 1, "The original durable journal already replayed.");
+        assert.deepEqual(retained, []);
+      } else {
+        assert.equal(retained[0]?.status, "recording");
+        // A completed reconcile holds only its completion fence until recorded.
+        const record = retained[0]?.postCheckpointRecord;
+        assert.equal(record?.kind, "device-sync.dirty-processed-batch");
+        assert.deepEqual(record.records, []);
+        assert.equal(record.retainedWake?.eventId, deviceItem.dedupeKey);
+        assert.equal(retained[0]?.lastErrorCode, null);
+        assert.equal(retained[0]?.nextAttemptAt, null);
+      }
       events.push("foreground.provider");
       if (repliedInputIds.size === 2) projectionRelease.resolve();
       const intent = await createAssistantOutboxIntent({
@@ -311,7 +314,7 @@ test.each([
           && !initialSystemOwner && !checkpointHintInjected
           && snapshotInput.reason === "idle_shutdown") {
           assert.ok(events.includes("reply.sent"), "Checkpoint hint follows the foreground reply.");
-          assert.equal(effectContexts.length, 0, "Recording still awaits this checkpoint.");
+          assert.equal(effectContexts.length, 1, "Restored recording precedes its cleanup checkpoint.");
           checkpointHintInjected = true;
           expectationsAtCheckpointHint = checkpointExpectationCount();
           events.push("checkpoint.default-hint");
@@ -455,7 +458,7 @@ test.each([
     }
     // Cold restores record the checkpointed import; they never re-read the provider.
     assert.deepEqual(providerReads(), admittedProviderReads, facts());
-    assert.equal(deviceSyncPort.fetchSnapshotCalls, 1, facts());
+    assert.equal(deviceSyncPort.fetchSnapshotCalls, 2, "Restore rechecks Web cadence without provider credentials. " + facts());
     if (scenario === "scheduler-refresh" || scenario.startsWith("refresh-")) {
       assert.ok(refreshWakeSent, facts());
     }
@@ -475,17 +478,9 @@ test.each([
       assert.equal(events.filter((event) => event === "refresh.wake_hint").length, 3, facts());
       assert.equal(events.filter((event) => event === "refresh.mailbox_read").length, 3, facts());
     }
-    // The recording settled. A restored owner did not admit the pass, so it
-    // keeps the device owner pending behind its completion fence.
-    const pending = (await readHostedSystemMailboxState(vaultRoot)).pending;
-    assert.ok(recordedRetainUntil, facts());
-    assert.deepEqual(pending.map(({ itemId, status, postCheckpointRecord, lastErrorCode, nextAttemptAt }) =>
-      ({ itemId, status, postCheckpointRecord, lastErrorCode, nextAttemptAt })), [{
-      itemId: deviceItem.id, status: "pending", postCheckpointRecord: null, lastErrorCode: null,
-      nextAttemptAt: recordedRetainUntil,
-    }], facts());
-    const retainedWake = pending[0]?.wake;
-    assert.equal(retainedWake?.kind === "device-sync.wake" ? retainedWake.hint?.reason : null, "retained_completion_fence");
+    // The durable completion-only fence replays its guarded cadence publication
+    // and is removed; it must not force another device admission after restore.
+    assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, [], facts());
     assert.ok(events.includes("reply.sent"), facts());
     assert.equal(result.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "1", facts());
     assert.ok(events.includes("replica.publish"), facts());
@@ -499,8 +494,8 @@ test.each([
     }
     if (scenario === "checkpoint-foreground") {
       assert.ok(checkpointHintInjected, facts());
-      assert.ok(expectationsAtFirstEffect > expectationsAtCheckpointHint,
-        "Fresh foreground work still restarts its full idle window before recording completes.");
+      assert.ok(checkpointExpectationCount() > expectationsAtCheckpointHint,
+        "Fresh foreground work still restarts its full idle window before cleanup is saved.");
     }
   } finally {
     systemWorkObserver.mockRestore();
