@@ -948,9 +948,11 @@ test("meal thumbnail and full-photo deletion survives canonical receipt replay a
       async persistCanonicalWrite(persistence) { persisted.push(await externalizeHostedCanonicalWriteMediaPayloads({ persistence, mediaStore: store.mediaStore, vaultRoot })); },
     }, async () => {
       const meal = await addMeal({ vaultRoot, photoPath, photoCapturedAt: captureTime, occurredAt: captureTime });
+      expect(store.putCalls).toHaveLength(0);
       expect(await runMealPhotoMaintenance({ vaultRoot, now: new Date(captureTime) })).toMatchObject({ thumbnailCount: 1, blockedMealCount: 0 });
       const refs = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries;
       expect(refs).toHaveLength(2);
+      expect(store.putCalls).toHaveLength(2);
       expect(refs.filter(ref => ref.expiresAt === null)).toHaveLength(1);
       expect(refs.find(ref => ref.expiresAt !== null)?.expiresAt).toBe("2030-04-01T12:00:00.000Z");
       await deleteEvent({ vaultRoot, eventId: meal.event.id });

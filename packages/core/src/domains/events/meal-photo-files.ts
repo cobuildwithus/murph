@@ -41,7 +41,10 @@ export async function stageMealPhotoRetirement(
   const artifact = manifest.artifacts.find(value => value.relativePath === relativePath);
   if (!artifact) throw new VaultError("MEAL_PHOTO_RETENTION_MANIFEST_INVALID", "Meal photo manifest artifact is missing.");
   const content = `${JSON.stringify({ schemaVersion: "murph.meal-photo-retention-tombstone.v1", purgedAt: now.toISOString(), reason })}\n`;
-  await batch.stageTextWrite(relativePath, content, { allowRaw: true, overwrite: true });
+  // Delete then create is replayable whether an older snapshot contains the
+  // image bytes or only an external-media receipt. The batch owns rollback.
+  await batch.stageDelete(relativePath, { allowRaw: true });
+  await batch.stageTextWrite(relativePath, content, { allowRaw: true, overwrite: false });
   Object.assign(artifact, { byteSize: Buffer.byteLength(content), sha256: createHash("sha256").update(content).digest("hex"),
     mediaType: "application/json", originalFileName: "meal-photo-retention-tombstone.json", role: "privacy_tombstone" });
 }

@@ -389,6 +389,9 @@ function collectCaptureHostedMediaCandidates(
     if (record.lifecycle?.state === "deleted") {
       continue;
     }
+    // Legacy full photos stay in the encrypted vault until bounded maintenance
+    // creates their thumbnail. A foreground write must not upload the backlog.
+    if (record.kind === "meal" && !record.photoThumbnail) continue;
     for (const rawRef of collectEventRawReferencePaths(record)) {
       const normalized = normalizeHostedMediaVaultPath(rawRef, record.kind === "meal" ? RAW_MEALS_PREFIX : RAW_CAPTURES_PREFIX);
       const mediaKind = normalized ? readHostedMediaKindFromPath(normalized) : null;
