@@ -1,6 +1,9 @@
 import "server-only";
 
-import { HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES } from "@murphai/hosted-execution/runtime-control";
+import {
+  HOSTED_WORKSPACE_CHECKPOINT_REASONS,
+  HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
+} from "@murphai/hosted-execution/runtime-control";
 import {
   runHostedOperationalEmailIncident,
   type HostedOperationalAlertMonitorSpec,
@@ -21,6 +24,9 @@ export const HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD = 60;
 // 2026-10-07) every hour with 20+ retry_later rows was a retry storm, while
 // busy healthy members mostly see accepted attempts.
 export const HOSTED_RUNTIME_RUNAWAY_PROCESSING_RETRY_THRESHOLD = 20;
+// Seven-day calibration across 5,904 member-hours: p99.9 20, healthy max 21;
+// snapshot loops inside one invocation reached 123 and 379 per hour.
+export const HOSTED_RUNTIME_RUNAWAY_SNAPSHOT_THRESHOLD = 30;
 export const HOSTED_RUNTIME_RUNAWAY_WINDOW_MS = 60 * 60_000;
 export const HOSTED_RUNTIME_RUNAWAY_SUBJECT_LIMIT = 10;
 export const HOSTED_RUNTIME_RUNAWAY_REMINDER_INTERVAL_MS = 6 * 60 * 60_000;
@@ -44,6 +50,9 @@ type RunawaySubject = {
   invocationCount: number;
   processingAttemptCount: number;
   processingRetryCount: number;
+  snapshotCount: number;
+  snapshotSeconds: number;
+  checkpointReason: string;
   processingMode: string;
   nextWakeReason: string;
   processingOutcome: string;
@@ -53,10 +62,13 @@ type RunawayHealth = {
   runawaySubjectCount: number;
   subjects: RunawaySubject[];
 };
-type RunawayRow = Omit<RunawaySubject, "invocationCount" | "processingAttemptCount" | "processingRetryCount"> & {
+type RunawayRow = Omit<RunawaySubject,
+  "invocationCount" | "processingAttemptCount" | "processingRetryCount" | "snapshotCount" | "snapshotSeconds"> & {
   invocationCount: string;
   processingAttemptCount: string;
   processingRetryCount: string;
+  snapshotCount: string;
+  snapshotSeconds: string;
   runawaySubjectCount: string;
 };
 type LogDatabase = Pick<HostedRuntimeLogSqlDatabase, "query">;
@@ -77,12 +89,23 @@ export async function readHostedRuntimeRunawayHealth(input: {
       count(*) FILTER (WHERE event_code = 'runner.processing_finished')::text AS "processingAttemptCount",
       count(*) FILTER (WHERE event_code = 'runner.processing_finished'
         AND redacted_json->>'runtimeProcessingOutcome' = 'retry_later')::text AS "processingRetryCount",
+      count(*) FILTER (WHERE event_code = 'checkpoint.snapshot_finished')::text AS "snapshotCount",
+      round(coalesce(sum(CASE
+        WHEN jsonb_typeof(redacted_json->'snapshotElapsedMs') = 'number'
+        THEN (redacted_json->>'snapshotElapsedMs')::numeric ELSE 0 END)
+        FILTER (WHERE event_code = 'checkpoint.snapshot_finished'), 0) / 1000)::text AS "snapshotSeconds",
+      coalesce(mode() WITHIN GROUP (ORDER BY CASE
+        WHEN redacted_json->>'checkpointReason' = ANY($12::text[])
+        THEN redacted_json->>'checkpointReason' ELSE 'unknown' END)
+        FILTER (WHERE event_code = 'checkpoint.snapshot_finished'), 'none') AS "checkpointReason",
       count(*) OVER ()::text AS "runawaySubjectCount",
-      mode() WITHIN GROUP (ORDER BY CASE
+      coalesce(mode() WITHIN GROUP (ORDER BY CASE
         WHEN coalesce(redacted_json->>'processingMode',
           redacted_json->>'runtimeProcessingRequestedMode') = ANY($6::text[])
         THEN coalesce(redacted_json->>'processingMode',
-          redacted_json->>'runtimeProcessingRequestedMode') ELSE 'unknown' END) AS "processingMode",
+          redacted_json->>'runtimeProcessingRequestedMode') ELSE 'unknown' END)
+        FILTER (WHERE event_code IN ('runtime.invocation_finished', 'runner.processing_finished')),
+        'none') AS "processingMode",
       coalesce(mode() WITHIN GROUP (ORDER BY CASE
         WHEN redacted_json->>'nextWakeReason' = ANY($7::text[])
         THEN redacted_json->>'nextWakeReason' ELSE 'unknown' END)
@@ -96,23 +119,26 @@ export async function readHostedRuntimeRunawayHealth(input: {
         FILTER (WHERE event_code = 'runner.processing_finished'), 'none') AS "processingOutcome"
     FROM hosted_runtime_log
     WHERE at >= $1 AND at <= $2
-      AND event_code IN ('runtime.invocation_finished', 'runner.processing_finished')
+      AND event_code IN ('runtime.invocation_finished', 'runner.processing_finished', 'checkpoint.snapshot_finished')
     GROUP BY subject_key
     HAVING count(*) FILTER (WHERE event_code = 'runtime.invocation_finished') >= $3
       OR count(*) FILTER (WHERE event_code = 'runner.processing_finished') >= $4
       OR count(*) FILTER (WHERE event_code = 'runner.processing_finished'
         AND redacted_json->>'runtimeProcessingOutcome' = 'retry_later') >= $10
+      OR count(*) FILTER (WHERE event_code = 'checkpoint.snapshot_finished') >= $11
     ORDER BY greatest(
       count(*) FILTER (WHERE event_code = 'runtime.invocation_finished')::float8 / $3,
       count(*) FILTER (WHERE event_code = 'runner.processing_finished')::float8 / $4,
       count(*) FILTER (WHERE event_code = 'runner.processing_finished'
-        AND redacted_json->>'runtimeProcessingOutcome' = 'retry_later')::float8 / $10) DESC, subject_key
+        AND redacted_json->>'runtimeProcessingOutcome' = 'retry_later')::float8 / $10,
+      count(*) FILTER (WHERE event_code = 'checkpoint.snapshot_finished')::float8 / $11) DESC, subject_key
     LIMIT $5
   `, [new Date(input.now.getTime() - HOSTED_RUNTIME_RUNAWAY_WINDOW_MS), input.now,
     HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD, HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD,
     HOSTED_RUNTIME_RUNAWAY_SUBJECT_LIMIT, HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
     EMAIL_WAKE_REASONS, EMAIL_RETRY_REASONS, EMAIL_PROCESSING_OUTCOMES,
-    HOSTED_RUNTIME_RUNAWAY_PROCESSING_RETRY_THRESHOLD]);
+    HOSTED_RUNTIME_RUNAWAY_PROCESSING_RETRY_THRESHOLD, HOSTED_RUNTIME_RUNAWAY_SNAPSHOT_THRESHOLD,
+    HOSTED_WORKSPACE_CHECKPOINT_REASONS]);
   return {
     anomalous: result.rows.length > 0,
     runawaySubjectCount: Number(result.rows[0]?.runawaySubjectCount ?? 0),
@@ -121,6 +147,9 @@ export async function readHostedRuntimeRunawayHealth(input: {
       invocationCount: Number(row.invocationCount),
       processingAttemptCount: Number(row.processingAttemptCount),
       processingRetryCount: Number(row.processingRetryCount),
+      snapshotCount: Number(row.snapshotCount),
+      snapshotSeconds: Number(row.snapshotSeconds),
+      checkpointReason: row.checkpointReason,
       processingMode: row.processingMode,
       nextWakeReason: row.nextWakeReason,
       processingOutcome: row.processingOutcome,
@@ -168,9 +197,9 @@ export async function runHostedRuntimeRunawayAlertMonitor(input: {
     }),
     buildMessage: ({ health, now }) => [
       `Runaway subjects: ${health.runawaySubjectCount}.`,
-      `Threshold: at least ${HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD} runtime.invocation_finished or ${HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD} runner.processing_finished (or ${HOSTED_RUNTIME_RUNAWAY_PROCESSING_RETRY_THRESHOLD} of them retry_later) events in the trailing ${HOSTED_RUNTIME_RUNAWAY_WINDOW_MS / 60_000} minutes.`,
+      `Threshold: at least ${HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD} runtime.invocation_finished or ${HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD} runner.processing_finished (or ${HOSTED_RUNTIME_RUNAWAY_PROCESSING_RETRY_THRESHOLD} of them retry_later) events or ${HOSTED_RUNTIME_RUNAWAY_SNAPSHOT_THRESHOLD} checkpoint.snapshot_finished events in the trailing ${HOSTED_RUNTIME_RUNAWAY_WINDOW_MS / 60_000} minutes.`,
       `Top ${health.subjects.length} subjects (digest prefixes):`,
-      ...health.subjects.map(subject => `${subject.subjectPrefix}: ${subject.invocationCount} invocations; ${subject.processingAttemptCount} processing attempts (${subject.processingRetryCount} retries); dominant processingMode=${subject.processingMode}; dominant nextWakeReason=${subject.nextWakeReason}; dominant processing outcome=${subject.processingOutcome}.`),
+      ...health.subjects.map(subject => `${subject.subjectPrefix}: ${subject.invocationCount} invocations; ${subject.processingAttemptCount} processing attempts (${subject.processingRetryCount} retries); ${subject.snapshotCount} snapshots (${subject.snapshotSeconds} seconds); dominant checkpointReason=${subject.checkpointReason}; dominant processingMode=${subject.processingMode}; dominant nextWakeReason=${subject.nextWakeReason}; dominant processing outcome=${subject.processingOutcome}.`),
       `Checked ${now.toISOString()}.`,
     ].join("\n"),
   };

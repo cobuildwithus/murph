@@ -16,6 +16,7 @@ import {
   HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD,
   HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD,
   HOSTED_RUNTIME_RUNAWAY_PROCESSING_RETRY_THRESHOLD,
+  HOSTED_RUNTIME_RUNAWAY_SNAPSHOT_THRESHOLD,
   HOSTED_RUNTIME_RUNAWAY_WINDOW_MS,
   runHostedRuntimeRunawayAlertMonitor,
 } from "@/src/lib/hosted-runtime-log/runaway-alert-monitor";
@@ -50,9 +51,11 @@ beforeEach(() => {
   });
 });
 
-function alertRows(count = 40, processingAttempts = 0, processingRetries = processingAttempts) {
+function alertRows(count = 40, processingAttempts = 0, processingRetries = processingAttempts,
+  snapshotCount = 0, checkpointReason = "none", snapshotSeconds = 0) {
   return { rows: [{ subjectPrefix: "abcdef01", invocationCount: String(count),
     processingAttemptCount: String(processingAttempts), processingRetryCount: String(processingRetries),
+    snapshotCount: String(snapshotCount), checkpointReason, snapshotSeconds: String(snapshotSeconds),
     runawaySubjectCount: "1", processingMode: "system_mailbox",
     nextWakeReason: "device-sync.reconcile", processingOutcome: "retry_later:claim_blocked" }] };
 }
@@ -68,6 +71,7 @@ describe("runtime runaway incident monitor", () => {
       HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD, HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD, 10,
       expect.any(Array), expect.any(Array), expect.any(Array), expect.any(Array),
       HOSTED_RUNTIME_RUNAWAY_PROCESSING_RETRY_THRESHOLD,
+      HOSTED_RUNTIME_RUNAWAY_SNAPSHOT_THRESHOLD, expect.any(Array),
     ]);
   });
 
@@ -98,6 +102,23 @@ describe("runtime runaway incident monitor", () => {
     expect(details.message).toContain("dominant processing outcome=retry_later:claim_blocked");
     expect(details.message).toContain(
       `or ${HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD} runner.processing_finished (or ${HOSTED_RUNTIME_RUNAWAY_PROCESSING_RETRY_THRESHOLD} of them retry_later) events`);
+  });
+
+  it.each(["idle_shutdown", "unknown"])("emails snapshot-only activity with reason %s", async reason => {
+    mocks.query.mockResolvedValue(alertRows(0, 0, 0, 30, reason, 165.5));
+    const result = await runHostedRuntimeRunawayAlertMonitor({ now, env, sendAlert });
+    expect(result.outcome).toBe("alert_sent");
+    expect(result).toMatchObject({ health: { subjects: [{
+      snapshotCount: 30, snapshotSeconds: 165.5, checkpointReason: reason,
+    }] } });
+    expect(sendAlert).toHaveBeenCalledWith(expect.objectContaining({
+      text: expect.stringContaining(
+        `0 invocations; 0 processing attempts (0 retries); 30 snapshots (165.5 seconds); dominant checkpointReason=${reason}`),
+    }));
+    const details = state?.detailsJson as Prisma.JsonObject;
+    expect(details.schema).toBe("murph.runtime-runaway-alert.v1");
+    expect(details.message).toContain("30 checkpoint.snapshot_finished events in the trailing 60 minutes");
+    expect(state?.id).toBe("hosted-runtime-runaway-monitor:v1");
   });
 
   it("clears a recovered incident without sending a recovery email", async () => {
