@@ -1,6 +1,8 @@
 import "server-only";
 import type { Prisma } from "@prisma/client";
 import { getPrisma } from "../prisma";
+import { lockGamePair } from "./blocks";
+import { GAME_MAX_OPEN_PER_PAIR } from "./rules";
 import { isGameOn } from "./access";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { createHostedPhoneLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
@@ -40,11 +42,37 @@ export function gamePairWhere(playerMemberIds: readonly string[]): Prisma.GameWh
 /** Bounded canonical games for the pair, independent of their announcement room. */
 export async function readGameChatCandidateIds(playerMemberIds: readonly string[]): Promise<string[]> {
   if (!sameGamePlayers(playerMemberIds, playerMemberIds) || !isGamePairOn(playerMemberIds)) return [];
-  const rows = await getPrisma().game.findMany({
-    where: { ...gamePairWhere(playerMemberIds), status: { in: ["negotiating", "live", "settled"] } },
-    orderBy: [{ createdAt: "desc" }, { id: "asc" }], take: 5, select: { id: true },
+  const prisma = getPrisma();
+  const [active, settled] = await Promise.all([
+    prisma.game.findMany({ where: { ...gamePairWhere(playerMemberIds), status: { in: ["negotiating", "live"] } },
+      orderBy: [{ createdAt: "desc" }, { id: "asc" }], take: GAME_MAX_OPEN_PER_PAIR, select: { id: true } }),
+    prisma.game.findMany({ where: { ...gamePairWhere(playerMemberIds), status: "settled" },
+      orderBy: [{ settledAt: "desc" }, { id: "asc" }], take: 5, select: { id: true } }),
+  ]);
+  return [...active, ...settled.slice(0, GAME_MAX_OPEN_PER_PAIR - active.length)].map((row) => row.id);
+}
+
+/** Pair lock must precede every game lock that can establish a primary room. */
+export async function readPairGameChatTx(tx: Prisma.TransactionClient, players: readonly string[]): Promise<string | null> {
+  if (!sameGamePlayers(players, players)) throw new Error("Game chat requires two players.");
+  await lockGamePair(tx, players[0]!, players[1]!);
+  const bound = await tx.game.findFirst({
+    where: { ...gamePairWhere(players), status: { in: ["negotiating", "live", "settled"] }, chatContainerMemberId: { not: null } },
+    orderBy: [{ createdAt: "desc" }, { id: "asc" }], select: { chatContainerMemberId: true },
   });
-  return rows.map((row) => row.id);
+  return bound?.chatContainerMemberId ?? null;
+}
+
+/** Recheck discovery under the pair lock so simultaneous kickoffs share a room. */
+export async function bindPairGameChat(gameId: string, players: readonly string[], candidate: string | null): Promise<string | null> {
+  return getPrisma().$transaction(async (tx) => {
+    const room = await readPairGameChatTx(tx, players) ?? candidate;
+    if (!room) return null;
+    const changed = await tx.game.updateMany({ where: { id: gameId, ...gamePairWhere(players), status: { in: ["live", "negotiating"] }, chatContainerMemberId: null }, data: { chatContainerMemberId: room } });
+    if (changed.count === 1) return room;
+    const game = await tx.game.findUnique({ where: { id: gameId }, select: { chatContainerMemberId: true } });
+    return game?.chatContainerMemberId ?? null;
+  });
 }
 
 /** Game reads and writes require this room's current exact pair, never a chat binding. */

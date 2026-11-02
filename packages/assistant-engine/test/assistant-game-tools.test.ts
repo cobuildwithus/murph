@@ -71,6 +71,33 @@ describe('game dynamic tools', () => {
     expect(parseHostedRuntimeGroupToolResponse({ action: 'read_game', result: { status: 'ok', state: { games: [] } } })).toMatchObject({ action: 'read_game' })
     expect(() => parseHostedRuntimeGroupToolResponse({ action: 'read_game', result: { status: 'ok', state: { games: [], photos: [] } } })).toThrow()
   })
+  it('refuses a missing game selector without forwarding a mutation', async () => {
+    port.mockClear()
+    const ambiguous = { operation: approval.operation, proposalId: approval.proposalId }
+    const result = await execute(ambiguous)
+    expect(result.rpcResult.success).toBe(false)
+    expect(port).not.toHaveBeenCalled()
+    expect(JSON.stringify(result.rpcResult)).toMatch(/gameId|which task/)
+  })
+  it.each([1, 2])('adds selection guidance only when several games are active: %s', async (count) => {
+    const games = Array.from({ length: count }, (_, index) => ({
+      id: `game_synthetic_${index}`, status: 'live' as const, lengthDays: 7, startsOn: null,
+      terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: index ? 'Read' : 'Walk' }], schedule: { days: [0, 1] }, stakes: [] },
+      players: [], pendingChange: null, changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, editableFromDay: 1 },
+    }))
+    const response = { action: 'read_game' as const, result: { status: 'ok' as const, state: { games } } }
+    const request = parse('read_game', {})!
+    const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: { ...context(), groupTool: { request: async () => response } }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    const text = result.rpcResult.contentItems[0]?.text
+    if (count === 1) expect(text).toBe(JSON.stringify(response))
+    else {
+      expect(text).toContain('ask which task before making any move')
+      expect(text).toContain('game_synthetic_0')
+      expect(text).toContain('game_synthetic_1')
+      expect(text).toContain('Read')
+      expect(text).toContain('Walk')
+    }
+  })
   it('makes uncertainty truthful and does not retry a mutation', async () => {
     port.mockClear(); port.mockRejectedValueOnce(new Error('Synthetic interrupted response'))
     const result = await execute(approval)

@@ -47,11 +47,17 @@ export async function readGameChatFundingRooms(input: {
                 AND receipt.status IN ('awaiting_generation', 'generation_queued')
                 AND receipt.skipped_at IS NULL)
           ORDER BY rematch.created_at DESC, rematch.id LIMIT 1),
-        -- A live/negotiating pair is uniquely reserved. Resolve it directly;
-        -- repeated prior games do not add work to the active-game path.
-        (SELECT id FROM game WHERE live_roster_key = array_to_string(pair.player_ids, ':')
-          AND (status = 'live' OR (status = 'negotiating'
-            AND (invite_expires_at IS NULL OR invite_expires_at > ${input.now})))),
+        -- Derive the pair from the indexed seats. Select one established
+        -- primary room even when several games are live or still unbound.
+        (SELECT active.id FROM game_player first_player
+          JOIN game active ON active.id = first_player.game_id
+          WHERE first_player.member_id = pair.player_ids[1]
+            AND active.chat_container_member_id IS NOT NULL
+            AND (active.status = 'live' OR (active.status = 'negotiating'
+              AND (active.invite_expires_at IS NULL OR active.invite_expires_at > ${input.now})))
+            AND EXISTS (SELECT 1 FROM game_player second_player
+              WHERE second_player.game_id = active.id AND second_player.member_id = pair.player_ids[2])
+          ORDER BY active.created_at, active.id LIMIT 1),
         (SELECT recent.id FROM game_player first_player
           JOIN game recent ON recent.id = first_player.game_id
           WHERE first_player.member_id = pair.player_ids[1]
@@ -59,7 +65,7 @@ export async function readGameChatFundingRooms(input: {
             AND EXISTS (SELECT 1 FROM game_player second_player
               WHERE second_player.game_id = recent.id AND second_player.member_id = pair.player_ids[2])
           ORDER BY recent.settled_at DESC, recent.id LIMIT 1),
-        -- Cancellation releases the pair but keeps its already-bound room
+        -- Cancellation releases its slot but keeps its already-bound room
         -- available until the reserved notice reaches provider dispatch.
         (SELECT cancelled.id FROM game cancelled
           WHERE cancelled.chat_container_member_id = room.id AND cancelled.status = 'void'

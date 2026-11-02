@@ -8,7 +8,7 @@ const migration = readFileSync(
 );
 
 describe("weekly game schema", () => {
-  it("lets the database keep the same people to one live game together, and enforce the per-day caps", () => {
+  it("preserves the original migration and per-game daily caps", () => {
     expect(migration).toContain('CREATE UNIQUE INDEX "game_live_roster_key_key" ON "game"("live_roster_key");');
     expect(migration).toContain('CHECK (("live_roster_key" IS NULL) = ("status" <> \'live\'))');
     expect(migration).toContain(
@@ -48,3 +48,13 @@ it("prepares all v1 artifact storage and preserves legacy lengths and attempt ca
   expect(transactions[1]).toContain('VALIDATE CONSTRAINT "game_length_days_check"');
   expect(transactions[1]).toContain('VALIDATE CONSTRAINT "game_entry_attempt_check"');
 });
+
+ it("retires the roster constraints before dropping its unused column after convergence", () => {
+  const expand = readFileSync(new URL("../prisma/migrations/20261101230000_game_many_per_pair/migration.sql", import.meta.url), "utf8");
+  const cleanup = readFileSync(new URL("../prisma/contract-migrations/20261101230000_drop_game_live_roster_key/migration.sql", import.meta.url), "utf8");
+  expect(expand).toContain('DROP CONSTRAINT IF EXISTS "game_live_roster_check"');
+  expect(expand).toContain('DROP INDEX IF EXISTS "game_live_roster_key_key"');
+  expect(expand).toContain('ON "game"("previous_game_id")');
+  expect(expand).not.toContain('DROP COLUMN');
+  expect(cleanup).toContain('DROP COLUMN IF EXISTS "live_roster_key"');
+ });

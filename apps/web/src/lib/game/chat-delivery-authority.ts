@@ -4,7 +4,7 @@ import { Prisma } from "@prisma/client";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { isGameChangeExpired, parsePendingGameChange } from "./changes";
 import { isGameInviteExpired, parseStoredTerms } from "./rules";
-import { gamePairWhere, sameGamePlayers } from "./chat-membership";
+import { sameGamePlayers } from "./chat-membership";
 
 /** Returns true only for the current proposal and proven audience; stale outbox work cannot announce a replaced edit. */
 export async function assertGameProposalDeliveryCurrentTx(input: {
@@ -53,12 +53,6 @@ async function assertGameMissedDeliveryCurrentTx(
   });
   if (!game || !players.includes(addressedMemberId)
     || !sameGamePlayers(game.players.map((player) => player.memberId), players)) return stale();
-  const current = await input.tx.game.findFirst({
-    where: { ...gamePairWhere(players), status: { in: ["negotiating", "live", "settled"] } },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    select: { id: true },
-  });
-  if (current?.id !== gameId) return stale();
   return true;
 }
 

@@ -75,6 +75,9 @@ describe("game v1 notification instructions", () => {
     expect(recap).not.toMatch(/Don't restate the score|then nudge them|Lead with one specific thing/u);
     const transcript = [{ playerName: "Ava", text: "My alarm won." }];
     const missed = buildGameMissedDayInstructions({ playerName: "Ava", firstMissedDate: "2030-03-04", missedDates: ["2030-03-04", "2030-03-05"], transcript });
+    expect(missed).toContain('Return one notification decision JSON object and nothing else');
+    expect(missed).toContain('{"kind":"skip","privateSummary":"<why no message>"}');
+    expect(missed).toContain('{"kind":"send_message","text":"<the one message>","privateSummary":"<brief internal note>"}');
     expect({
       recapOpening: recap.split("\n")[0],
       recapToolOrder: recap.includes("Use murph.read_game first") && recap.includes("then use murph.write_recap"),

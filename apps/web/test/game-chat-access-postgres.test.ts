@@ -165,7 +165,7 @@ describe.skipIf(!enabled)("game chat access PostgreSQL", () => {
         memberId, firstNameEncrypted: "synthetic-sealed-name", timeZone: "America/New_York",
       })) });
       await prisma.game.create({ data: {
-        id: gameId, createdBy: first, status: "negotiating", liveRosterKey: `${first}:${second}`, chatContainerMemberId: room,
+        id: gameId, createdBy: first, status: "negotiating", chatContainerMemberId: room,
         inviteExpiresAt: new Date(now.getTime() + 60_000),
         terms: { v: 1, versions: [] }, termsWordsEncrypted: "synthetic-sealed-terms",
         players: { create: [first, second].map((memberId, seat) => ({
@@ -199,6 +199,10 @@ describe.skipIf(!enabled)("game chat access PostgreSQL", () => {
       await prisma.gamePlayer.createMany({ data: historicalIds.flatMap(gameId => [first, second].map((memberId, seat) => ({
         gameId, memberId, seat, timeZone: "UTC",
       }))) });
+      const extraGameIds = historicalIds.slice(0, 9);
+      await prisma.game.updateMany({ where: { id: { in: extraGameIds } }, data: { status: "live", chatContainerMemberId: room, settledAt: null } });
+      expect(await readGameChatFundingRooms({ memberIds: [room, alternate], now, prisma })).toEqual(new Map([[room, room], [alternate, room]]));
+      await prisma.game.updateMany({ where: { id: { in: extraGameIds } }, data: { status: "settled", chatContainerMemberId: null, settledAt: new Date("2029-01-01T00:00:00Z") } });
       const captured: { query?: Prisma.Sql } = {};
       await readGameChatFundingRooms({ memberIds: [alternate], now, prisma: {
         $queryRaw: <T>(query: TemplateStringsArray | Prisma.Sql, ...values: unknown[]): Prisma.PrismaPromise<T> => {
@@ -209,9 +213,8 @@ describe.skipIf(!enabled)("game chat access PostgreSQL", () => {
       if (!captured.query) throw new Error("Expected the canonical funding query.");
       const explained = await prisma.$queryRaw<Array<{ "QUERY PLAN": Array<{ Plan: unknown }> }>>(Prisma.sql`EXPLAIN (ANALYZE, FORMAT JSON) ${captured.query}`);
       const plan = JSON.stringify(explained);
-      expect(plan).toContain("game_live_roster_key_key");
-      // Historical-game membership is not traversed for an active reserved
-      // pair, even when both people have a thousand previous games.
+      expect(plan).toMatch(/game_player_(?:member_id_idx|pkey)/);
+      // Settled fallback is not executed while indexed player rows find an active pair.
       const nodes = planNodes(explained[0]["QUERY PLAN"][0].Plan);
       expect(nodes.some(node => typeof node.Filter === "string" && node.Filter.includes("settled") && node["Actual Loops"] === 0)).toBe(true);
       await expect(readHostedAiUsageGate(input)).resolves.toMatchObject({
@@ -246,11 +249,11 @@ describe.skipIf(!enabled)("game chat access PostgreSQL", () => {
       });
       // A room binding never activates either person's private assistant.
       expect((await readHostedRuntimeAiAccessDecision({ ...input, memberId: first })).allowed).toBe(false);
-      await prisma.game.update({ where: { id: gameId }, data: { status: "settled", liveRosterKey: null, result: { v: 1, scores: [], termsVersion: 1 }, settledAt: now } });
+      await prisma.game.update({ where: { id: gameId }, data: { status: "settled", result: { v: 1, scores: [], termsVersion: 1 }, settledAt: now } });
       await assertRoom(true);
       await prisma.game.update({ where: { id: gameId }, data: { settledAt: new Date(now.getTime() - 7 * 86_400_000) } });
       await assertRoom(false);
-      await prisma.game.update({ where: { id: gameId }, data: { status: "live", liveRosterKey: `${first}:${second}` } });
+      await prisma.game.update({ where: { id: gameId }, data: { status: "live", } });
       await prisma.hostedMember.update({ where: { id: second }, data: { suspendedAt: now } });
       await assertRoom(false);
       await prisma.hostedMember.update({ where: { id: second }, data: { suspendedAt: null } });

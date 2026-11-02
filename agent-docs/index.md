@@ -1,3 +1,5 @@
+Many concurrent games per pair are tracked in [the implementation plan](exec-plans/completed/2026-11-01-game-many-per-pair.md). The weekly game spec and architecture own the pair cap, chain and chat contracts.
+
 Provider-start typing, held group drafts, and Web-stamped group alert exclusion
 are recorded in [the implementation plan](exec-plans/completed/2026-11-01-group-typing-suppression.md).
 

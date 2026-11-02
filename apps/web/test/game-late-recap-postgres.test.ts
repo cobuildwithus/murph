@@ -66,7 +66,7 @@ async function fixture(gameId = randomUUID()) {
 
 /** The schema's roster check: only negotiating and live games hold a roster key, and keys are unique. */
 function withStatus(status: string) {
-  return { status, liveRosterKey: status === "live" || status === "negotiating" ? `test-late-recap-${randomUUID()}` : null };
+  return { status,  };
 }
 
 describe.skipIf(!enabled)("late settled-game recap PostgreSQL proof", () => {

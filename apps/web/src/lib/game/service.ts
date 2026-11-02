@@ -57,7 +57,7 @@ import {
   isGameDue,
   isGameInviteExpired,
   isTicketExpired,
-  liveRosterKey,
+  GAME_MAX_OPEN_PER_PAIR,
   needsPostToday,
   parseStoredResult,
   parseStoredTerms,
@@ -70,14 +70,14 @@ import {
   type StoredResult,
   type TermWords,
 } from "./rules";
-import { addDays, dayStartInstant, GAME_GRACE_MS, gameLocalDate } from "./time";
+import { addDays, gameLocalDate } from "./time";
 import { agreedDayOne, gameChangeCancellationNeedsNotice, decideApprovedGameChange, pendingGameChangeView, decideGameChange, gameChangeControls, gameChangeRefusal, isGameChangeExpired, isGameChangeOutdated, isSameGameChange, parsePendingGameChange, type StoredGamePendingChange } from "./changes";
 import { prepareGameChangeWords, readPendingGameChanges, type PreparedGameChangeWords } from "./change-words";
 import { deliverGameChangeProposal } from "./chat-delivery";
-import { readGameChatCandidateIds, sameGamePlayers } from "./chat-membership";
+import { gamePairWhere, readGameChatCandidateIds, sameGamePlayers } from "./chat-membership";
 import { reserveGameChatLifecycleTx, reserveGameChatProposalTx, skipGameChatLifecycleTx } from "./chat-lifecycle-receipt";
 import { reserveGameMissedDayTx } from "./chat-lifecycle-receipt";
-import { canScheduleMissedDayCheckIn, firstDatesOfMissRuns, isMissedCheckInDueNow, missedCheckInDueAt, visitGameMissedCheckInPages, type MissedCheckInDay } from "./missed-check-in";
+import { gameMissedCheckInRuns, isMissedCheckInDueNow, visitGameMissedCheckInPages } from "./missed-check-in";
 import { claimGamePostNotification, sendGamePostNotificationAfterResponse } from "./post-notification";
 import {
   buildGameHistoryView,
@@ -118,8 +118,8 @@ const HISTORY_GAMES_PER_PERSON_LIMIT = 50;
 const HOME_EXPIRED_SHOWN = 3;
 const HOME_EXPIRED_FOR_MS = 7 * 24 * 60 * 60 * 1000;
 const WALLET_LIMIT = 200;
-// Five games, each with at most three legacy per-miss stakes owed by one loser.
-const CHAT_TICKET_LIMIT = 5 * 3 * GAME_MAX_LENGTH_DAYS;
+// Every returned game can settle on read with three legacy per-miss stakes.
+const CHAT_TICKET_LIMIT = GAME_MAX_OPEN_PER_PAIR * 3 * GAME_MAX_LENGTH_DAYS;
 const ACTIVE_STATUSES = ["invited", "negotiating", "live"];
 // Open games a block ends per batch; it repeats until none is left.
 const BLOCK_GAME_LIMIT = 50;
@@ -451,7 +451,9 @@ async function revalidateRematchCreationTx(input: {
   if (!input.inviteeMemberId || !input.previousGameId) return null;
   await lockGamePair(input.tx, input.actor, input.inviteeMemberId);
   await rejectBlockedPair(input.tx, input.actor, input.inviteeMemberId, "You can't rematch this game.");
-  return assertLatestBetween(input.actor, input.inviteeMemberId, input.previousGameId, input.now, input.tx);
+  const pending = await assertLatestInChain(input.actor, input.inviteeMemberId, input.previousGameId, input.now, input.tx);
+  if (!pending) await assertPairCapacity(input.tx, input.actor, input.inviteeMemberId, input.now);
+  return pending;
 }
 
 /**
@@ -469,54 +471,65 @@ async function readRematch(
     include: { players: { select: { memberId: true } } },
     where: { id: previousGameId },
   });
-  const finished = previous?.status === "settled" || previous?.status === "void";
+  const finished = previous?.status === "settled";
   if (!previous || !finished || !previous.players.some((player) => player.memberId === actor)) {
-    reject("INVALID_REQUEST", "A rematch needs a finished game you played.");
+    reject("INVALID_REQUEST", "A rematch needs a settled game you played.");
   }
-  if (previous.status !== "settled") return { inviteeMemberId: null, chatContainerMemberId: null, round: 1 };
   const others = previous.players.filter((player) => player.memberId !== actor);
-  if (others.length !== 1) return { inviteeMemberId: null, chatContainerMemberId: null, round: previous.round + 1 };
+  if (others.length !== 1) reject("INVALID_REQUEST", "The other player is no longer available for a rematch.");
   await rejectBlockedPair(getPrisma(), actor, others[0].memberId, "You can't rematch this game.");
-  const answer = await assertLatestBetween(actor, others[0].memberId, previous.id, now);
+  await maintainPair(actor, others[0].memberId);
+  const answer = await assertLatestInChain(actor, others[0].memberId, previous.id, now);
   return { inviteeMemberId: others[0].memberId, chatContainerMemberId: previous.chatContainerMemberId, round: previous.round + 1, ...(answer ? { answer } : {}) };
 }
 
 type RematchAnswer = Pick<Game, "id" | "createdBy" | "terms">;
 
-/**
- * An addressed rematch only follows the pair's newest game: refuse it while
- * they have a game going or an open invite between them (it could never be
- * accepted), or when a later game between them has already settled.
- */
-async function assertLatestBetween(actor: string, otherId: string, previousGameId: string, now: Date, tx?: Tx): Promise<RematchAnswer | null> {
+/** Rematch ancestry, not unrelated games between the same people, owns the round. */
+async function assertLatestInChain(actor: string, otherId: string, previousGameId: string, now: Date, tx?: Tx): Promise<RematchAnswer | null> {
   const prisma = tx ?? getPrisma();
-  const bothPlayed = { AND: [{ players: { some: { memberId: actor } } }, { players: { some: { memberId: otherId } } }] };
+  const later = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    WITH RECURSIVE descendants AS (
+      SELECT id, status FROM game WHERE previous_game_id = ${previousGameId}
+      UNION ALL
+      SELECT child.id, child.status FROM game child JOIN descendants parent ON child.previous_game_id = parent.id
+    ) SELECT id FROM descendants WHERE status = 'settled' LIMIT 1`);
+  if (later.length) reject("REMATCH_OUTDATED", "A later game in this rematch chain has already finished.");
   const pending = await prisma.game.findFirst({
-    select: { createdBy: true, id: true, inviteeMemberId: true, previousGameId: true, terms: true },
-    where: {
-      OR: [
-        { liveRosterKey: liveRosterKey([actor, otherId]) },
-        {
-          inviteExpiresAt: { gt: now },
-          OR: [{ createdBy: actor, inviteeMemberId: otherId }, { createdBy: otherId, inviteeMemberId: actor }],
-          status: "invited",
-        },
-      ],
-    },
+    select: { createdBy: true, id: true, inviteeMemberId: true, terms: true, status: true },
+    where: { previousGameId, ...openPairWhere(actor, otherId, now) },
+    orderBy: { id: "asc" },
   });
-  // Both asked for a rematch of the same game: the second ask accepts the first (a retry finds it live).
-  if (pending?.createdBy === otherId && pending.inviteeMemberId === actor && pending.previousGameId === previousGameId) return pending;
-  if (pending) reject("ALREADY_IN_A_GAME", tx ? "These players already have a game going." : await alreadyPlayingMessage(otherId));
-  const latest = await prisma.game.findFirst({
-    orderBy: [{ settledAt: "desc" }, { id: "desc" }],
-    select: { id: true },
-    where: { ...bothPlayed, status: "settled" },
-  });
-  if (latest && latest.id !== previousGameId) {
-    const name = tx ? null : await firstNameOf(otherId);
-    reject("REMATCH_OUTDATED", name ? `There's a newer game with ${name}.` : "There's a newer game between you two.");
-  }
+  // Opposite asks accept the first invitation; a retry can find it already live.
+  if (pending?.createdBy === otherId && pending.inviteeMemberId === actor) return pending;
+  if (pending) reject("ALREADY_IN_A_GAME", "This game already has an open rematch.");
   return null;
+}
+
+/** An unaddressed link cannot occupy a pair's slot until someone joins it. */
+function openPairWhere(first: string, second: string, now: Date): Prisma.GameWhereInput {
+  const unexpired = { OR: [{ inviteExpiresAt: null }, { inviteExpiresAt: { gt: now } }] };
+  return { OR: [
+    { ...gamePairWhere([first, second]), OR: [{ status: "live" }, { status: "negotiating", ...unexpired }] },
+    { status: "invited", AND: [unexpired, { OR: [{ createdBy: first, inviteeMemberId: second }, { createdBy: second, inviteeMemberId: first }] }] },
+  ] };
+}
+
+/** Caller holds lockGamePair before the game lock; no persisted counter can drift. */
+async function assertPairCapacity(tx: Tx, first: string, second: string, now: Date, excludeId?: string): Promise<void> {
+  const games = await tx.game.findMany({
+    where: { ...openPairWhere(first, second, now), ...(excludeId ? { id: { not: excludeId } } : {}) },
+    select: { id: true }, take: GAME_MAX_OPEN_PER_PAIR,
+  });
+  if (games.length >= GAME_MAX_OPEN_PER_PAIR) reject("TOO_MANY_GAMES", `You two already have ${GAME_MAX_OPEN_PER_PAIR} open games. Finish or cancel one before starting another.`);
+}
+
+async function maintainPair(first: string, second: string): Promise<void> {
+  const games = await getPrisma().game.findMany({
+    where: { ...gamePairWhere([first, second]), status: { in: ["live", "negotiating"] } },
+    select: { id: true }, take: GAME_MAX_OPEN_PER_PAIR,
+  });
+  await loadCurrent(games.map((game) => game.id));
 }
 
 async function join(context: CommandContext, command: Extract<GameCommand, { type: "join" }>): Promise<string> {
@@ -534,36 +547,9 @@ async function joinGame(context: CommandContext, target: { id: string; createdBy
   const prisma = getPrisma();
   const profile = await prisma.gameProfile.findUnique({ select: { memberId: true }, where: { memberId: actor } });
   if (!profile) reject("PROFILE_REQUIRED", "Add your first name first.");
-  // A finished game between these same people that nobody opened must not block this one.
-  const sameRoster = await prisma.game.findMany({
-    select: { id: true },
-    where: { liveRosterKey: liveRosterKey([target.createdBy, actor]) },
-  });
-  await loadCurrent(sameRoster.map((game) => game.id));
-  try {
-    await accept(context, body, target.id, target.createdBy);
-  } catch (error) {
-    // Either the friendly check below or, when two of their games go live at once, the unique key.
-    const together = isUniqueViolation(error) || (error instanceof GameRuleError && error.error.code === "ALREADY_IN_A_GAME");
-    if (!together) throw error;
-    reject("ALREADY_IN_A_GAME", await alreadyPlayingMessage(target.createdBy));
-  }
+  await maintainPair(target.createdBy, actor);
+  await accept(context, body, target.id, target.createdBy);
   return target.id;
-}
-
-/** From the caller's side, naming the other player by their own first name. */
-async function alreadyPlayingMessage(otherId: string): Promise<string> {
-  const name = await firstNameOf(otherId);
-  return name ? `You and ${name} already have a game going.` : "You two already have a game going.";
-}
-
-/** A player's own first name, or null without a profile. */
-async function firstNameOf(memberId: string): Promise<string | null> {
-  const profile = await getPrisma().gameProfile.findUnique({ select: { firstNameEncrypted: true }, where: { memberId } });
-  const [name] = await openGameTexts(profile
-    ? [{ field: "first_name", memberId, rowId: memberId, table: "game_profile", value: profile.firstNameEncrypted }]
-    : []);
-  return name ?? null;
 }
 
 /** A join or negotiation takes the pair's lock before the game's, as a block does. */
@@ -572,6 +558,11 @@ function withPairLock(context: CommandContext, other: string): CommandContext {
     await context.beforeMutationTx?.(tx);
     await lockGamePair(tx, context.actor, other);
   } };
+}
+
+async function withGamePairLock(context: CommandContext, gameId: string): Promise<CommandContext> {
+  const other = await getPrisma().gamePlayer.findFirst({ where: { gameId, memberId: { not: context.actor } }, select: { memberId: true } });
+  return other ? withPairLock(context, other.memberId) : context;
 }
 
 /** Blocked either way: to the one who was blocked, the invite just closed. */
@@ -592,16 +583,12 @@ async function accept(context: CommandContext, command: AcceptInviteBody, gameId
       timeZone: command.timeZone,
     });
     if (decision.kind === "already-joined") return [];
-    // The unique live_roster_key is the real guard; this gives the friendly error.
-    const roster = liveRosterKey(decision.players.map((player) => player.memberId));
-    if (await tx.game.findFirst({ select: { id: true }, where: { liveRosterKey: roster, id: { not: gameId } } })) {
-      reject("ALREADY_IN_A_GAME", "These players already have a game going.");
-    }
+    await assertPairCapacity(tx, creator, actor, now, gameId);
     const claimed = playerFor(loaded.state, actor);
     if (!claimed) await tx.gamePlayer.create({ data: { gameId: row.id, memberId: actor, seat: decision.seat, timeZone: command.timeZone } });
     await writeSchedule(tx, row.id, decision);
     await tx.game.update({
-      data: { liveRosterKey: roster, startedAt: decision.startedAt, status: "live" },
+      data: { startedAt: decision.startedAt, status: "live" },
       where: { id: row.id },
     });
     await copyPendingLabel(tx, row, actor);
@@ -678,9 +665,9 @@ function needsChatLifecycleNotice(context: CommandContext, loaded: LoadedGame): 
   return Boolean(loaded.row.chatContainerMemberId) && !answeredInBoundChat(context, loaded);
 }
 
-/** Settled or void: the roster is free to start another game together. */
+/** Settlement and cancellation release this game's open slot. */
 async function endGame(tx: Tx, gameId: string, data: Prisma.GameUpdateInput): Promise<void> {
-  await tx.game.update({ data: { ...data, pendingChange: Prisma.DbNull, liveRosterKey: null }, where: { id: gameId } });
+  await tx.game.update({ data: { ...data, pendingChange: Prisma.DbNull }, where: { id: gameId } });
 }
 
 async function post(context: CommandContext, command: Extract<GameCommand, { type: "post" }>): Promise<string> {
@@ -1116,18 +1103,15 @@ async function negotiate(context: CommandContext, command: Extract<GameCommand, 
   if (creator === context.actor) reject("NOT_A_PLAYER", "Only the invited player can suggest changes here.");
   if (!await prisma.gameProfile.findUnique({ where: { memberId: context.actor }, select: { memberId: true } })) reject("PROFILE_REQUIRED", "Add your first name first.");
   const prepared = await prepareGameChangeWords(owner, command.change, command.termsVersion);
-  const roster = liveRosterKey([creator, context.actor]);
-  const existing = await prisma.game.findMany({ where: { liveRosterKey: roster }, select: { id: true } });
-  await loadCurrent(existing.map((game) => game.id));
-  try {
-    await runLocked(owner.id, withPairLock(context, creator), async ({ tx, loaded, now }) => {
+  await maintainPair(creator, context.actor);
+  await runLocked(owner.id, withPairLock(context, creator), async ({ tx, loaded, now }) => {
       await rejectBlockedJoin(tx, creator, context.actor);
       const key = `game-change:${owner.id}:${command.proposalId}`;
       const prior = await tx.gameEvent.findUnique({ where: { commandKey: key }, select: { actor: true } });
       if (prior?.actor === context.actor && playerFor(loaded.state, context.actor)) return [];
       const joined = decideJoin(await withCurrentTimeZones(tx, loaded.state), { memberId: context.actor, termsVersion: command.termsVersion, timeZone: command.timeZone, now });
       if (joined.kind !== "join") reject("INVITE_USED", "This invite was already used.");
-      if (await tx.game.findFirst({ where: { liveRosterKey: roster }, select: { id: true } })) reject("ALREADY_IN_A_GAME", "These players already have a game going.");
+      await assertPairCapacity(tx, creator, context.actor, now, owner.id);
       assertPreparedWords(loaded.row, prepared);
       const negotiation: RuleState = { ...loaded.state, game: { ...loaded.state.game, status: "negotiating" },
         players: [...loaded.state.players, { memberId: context.actor, seat: joined.seat, timeZone: command.timeZone, dayOne: null }] };
@@ -1135,7 +1119,7 @@ async function negotiate(context: CommandContext, command: Extract<GameCommand, 
       const pending = { v: prepared.termsWordsEncrypted ? 2 : 1, id: command.proposalId, proposedByMemberId: context.actor,
         expectedTermsVersion: command.termsVersion, origin: "app", deliveryStatus: "pending", ...decision, ...storedChangeWords(prepared, decision.change) };
       await tx.gamePlayer.create({ data: { gameId: owner.id, memberId: context.actor, seat: joined.seat, timeZone: command.timeZone } });
-      await tx.game.update({ where: { id: owner.id }, data: { status: "negotiating", liveRosterKey: roster,
+      await tx.game.update({ where: { id: owner.id }, data: { status: "negotiating",
         inviteeMemberId: context.actor, pendingChange: toPrismaJsonObject(pending) } });
       await copyPendingLabel(tx, loaded.row, context.actor);
       return [
@@ -1143,10 +1127,6 @@ async function negotiate(context: CommandContext, command: Extract<GameCommand, 
         { type: "change_proposed", commandKey: key, payload: { proposalId: command.proposalId, expectedTermsVersion: command.termsVersion, effectiveFromDay: 0 } },
       ];
     });
-  } catch (error) {
-    if (isUniqueViolation(error)) reject("ALREADY_IN_A_GAME", await alreadyPlayingMessage(creator));
-    throw error;
-  }
   return owner.id;
 }
 
@@ -1155,7 +1135,7 @@ async function proposeChange(context: CommandContext, command: Extract<GameComma
   const owner = await getPrisma().game.findFirst({ where: { id: command.gameId, players: { some: { memberId: context.actor } } } });
   if (!owner) reject("NOT_A_PLAYER", "This game belongs to its players.");
   const prepared = await prepareGameChangeWords(owner, command.change, command.expectedTermsVersion);
-  await runLocked(command.gameId, context, async ({ tx, loaded, now, clock }) => {
+  await runLocked(command.gameId, await withGamePairLock(context, command.gameId), async ({ tx, loaded, now, clock }) => {
     if (!playerFor(loaded.state, context.actor)) reject("NOT_A_PLAYER", "This game belongs to its players.");
     const key = `game-change:${command.gameId}:${command.proposalId}`;
     const prior = await tx.gameEvent.findUnique({ where: { commandKey: key }, select: { actor: true } });
@@ -1209,7 +1189,7 @@ async function agreeToDeclinedChange(locked: LockedStep, context: CommandContext
 async function respondChange(context: CommandContext, command: Extract<GameCommand, { type: "respondChange" }>): Promise<string> {
   if (command.decision !== "cancel" && (!context.chatContainerMemberId || !context.beforeMutationTx)) reject("NOT_A_PLAYER", "Agree to this change in the game's shared chat.");
   let refusal: string | null = null;
-  await runLocked(command.gameId, context, async ({ tx, loaded, now, clock }) => {
+  await runLocked(command.gameId, await withGamePairLock(context, command.gameId), async ({ tx, loaded, now, clock }) => {
     if (!playerFor(loaded.state, context.actor)) reject("NOT_A_PLAYER", "This game belongs to its players.");
     const proposal = parsePendingGameChange(loaded.row.pendingChange);
     const resolutionKey = `game-change-resolved:${command.gameId}:${command.proposalId}`;
@@ -1273,6 +1253,9 @@ async function applyApprovedChange(locked: LockedStep, gameId: string, proposal:
     ...(startsOn ? { startsOn: toDbDate(startsOn) } : proposal.change.kind === "edit" && proposal.change.startsOn === null ? { startsOn: null } : {}),
   } });
   if (loaded.state.game.status === "negotiating") {
+    const other = loaded.state.players.find((player) => player.memberId !== actor);
+    if (!other) reject("NOT_A_PLAYER", "This game needs both players.");
+    await assertPairCapacity(tx, actor, other.memberId, now, gameId);
     const agreedState: RuleState = { ...loaded.state, game: { ...loaded.state.game, terms, lengthDays: lengthDays ?? loaded.state.game.lengthDays,
       ...(proposal.change.kind === "edit" && proposal.change.startsOn === null ? { startsOn: null } : {}) } };
     const schedule = decideNegotiationStart(agreedState, actor, now, proposal.startsOn);
@@ -1344,7 +1327,7 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
   if (await areGamePlayersBlocked(prisma, playerMemberIds[0], playerMemberIds[1])) return { games: [] };
   const candidateIds = await readGameChatCandidateIds(playerMemberIds);
   const candidates = await prisma.game.findMany({ where: { id: { in: candidateIds } },
-    orderBy: { createdAt: "desc" }, take: 5, include: { players: true } });
+    orderBy: { createdAt: "desc" }, include: { players: true } });
   const current = await loadCurrent(candidates.filter((row) => row.players.length === 2 && isGameOn(row)).map((row) => row.id));
   const loadedById = new Map(current.games.map((game) => [game.row.id, game]));
   const rows = current.games.map((game) => game.row).filter((row) => row.players.length === 2 && isGameOn(row));
@@ -1398,35 +1381,33 @@ export async function reserveDueGameMissedDayCheckIns(now = new Date()): Promise
     readPage: async (cursor, limit) => (await prisma.$queryRaw<Array<{ id: string }>>`
       SELECT id FROM game
       WHERE status = 'live' AND chat_container_member_id IS NOT NULL
-        AND mod(abs(hashtext(id)::bigint), 60) = ${shard}
+        AND mod(abs(hashtext(chat_container_member_id)::bigint), 60) = ${shard}
         AND id > ${cursor}
       ORDER BY id LIMIT ${limit}`).map((row) => row.id),
     visit: async (ids) => {
       const loaded = await loadGames(prisma, [...ids]);
       for (const game of loaded) {
-        const schedule = currentTerms(game.state.game.terms).schedule;
-        if (!canScheduleMissedDayCheckIn({ boundRoomId: game.row.chatContainerMemberId, gameStatus: game.row.status, schedule })) continue;
-        for (const player of game.state.players) {
-          if (!player.dayOne) continue;
-          const days: MissedCheckInDay[] = Array.from({ length: game.row.lengthDays }, (_, dayIndex) => {
-            const date = addDays(player.dayOne!, dayIndex);
-            if (!isScheduledDay(game.state, dayIndex)) return { date, status: "off" as const };
-            const entry = liveEntry(game.state.entries, player.memberId, dayIndex);
-            if (entry) return { date, status: entry.incomplete ? "incomplete" as const : "posted" as const };
-            const closed = now.getTime() >= dayStartInstant(addDays(date, 1), player.timeZone).getTime() + GAME_GRACE_MS;
-            return { date, status: closed ? "missed" as const : "open" as const };
-          });
-          for (const run of firstDatesOfMissRuns(days)) {
-            const dueAt = missedCheckInDueAt(run.firstMissedDate, player.timeZone);
-            if (!dueAt || !isMissedCheckInDueNow({ dueAt, now })) continue;
-            await prisma.$transaction((tx) => reserveGameMissedDayTx({ gameId: game.row.id, memberId: player.memberId, firstMissedDate: run.firstMissedDate, dueAt, tx }));
-            reserved += 1;
-          }
+        for (const run of gameMissedCheckInRuns(game.state, now)) {
+          if (!run.dueAt || !isMissedCheckInDueNow({ dueAt: run.dueAt, now })) continue;
+          const dueAt = run.dueAt;
+          const added = await prisma.$transaction((tx) => reserveGameMissedDayTx({
+            gameId: game.row.id, memberId: run.memberId, playerMemberIds: game.state.players.map((candidate) => candidate.memberId),
+            firstMissedDate: run.firstMissedDate, dueAt, tx,
+          }));
+          if (added) reserved += 1;
         }
       }
     },
   });
   return reserved;
+}
+
+/** Same canonical miss rules as reservation; shared progress intentionally omits artifact flags. */
+export async function readGameMissedCheckInBatch(gameIds: string[], firstMissedDate: string, now = new Date()) {
+  const games = await loadGames(getPrisma(), gameIds.slice(0, GAME_MAX_OPEN_PER_PAIR));
+  return games.flatMap((game) => gameMissedCheckInRuns(game.state, now)
+    .filter((run) => run.firstMissedDate === firstMissedDate)
+    .map((run) => ({ gameId: game.row.id, memberId: run.memberId, missedDates: run.missedDates })));
 }
 
 export type GameRecapMaterial = {

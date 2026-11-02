@@ -66,7 +66,7 @@ Either seated player can cancel an invited or negotiating game with
 with the existing `GameView` in `void` status. Live or settled games refuse with
 `INVITE_USED`; outsiders receive `NOT_A_PLAYER` (or `GAME_NOT_FOUND` for a
 missing game). An already void game returns unchanged. The game lock covers
-clearing its pending change and roster key plus recording one `cancelled` event
+clearing its pending change and recording one `cancelled` event
 with its actor. The pair can immediately start another invite. Home excludes
 cancelled events, retaining ordinary expired invites; GameView adds no field.
 If a game chat is already attached, the existing durable lifecycle sends one
@@ -78,8 +78,13 @@ access or extra budget. Dispatch checks the cancelled event and original pair.
 An invite nobody accepts expires, and stays on the challenger's Home for a week
 marked expired. The invitee opens it, signs in, and shakes on the terms they saw; a
 changed version is refused with `TERMS_CHANGED`. Accepting makes the game live.
-A person can play several live games at once, one per opponent, but the same
-two people can't have two going together. Home lists the games waiting on you
+Two people can have up to ten open games together. Unexpired addressed rematch
+invites, unexpired negotiations and live games count; unclaimed link invites do
+not count until joined. An eleventh is refused with `TOO_MANY_GAMES` (409). Each
+game keeps its own schedule, days, posts, unlocks, prize, changes, recap and
+rematch chain. Starting another uses the same link invite flow. Home returns
+all games in its existing list; the client groups them by person and orders its
+pager. Home lists the games waiting on you
 today first, then your other live games, invites, and results.
 
 `GET /api/game/v1/history` supplies the You tab's Games section: it groups only
@@ -188,7 +193,9 @@ this default without deleting other people's private contact choices.
   after a scheduled day has closed without a post, Murph may address that player
   with one short line in the pair's already-bound group. Consecutive missed days
   share the first missed day's durable receipt, so they produce at most one turn
-  per miss run. Days off, still-open days, any-N open capacity and posts the
+  per miss run. With several live games, due misses for the same date share one
+  pair message naming the affected tasks and players. Repeated sweeps do not
+  produce one message per game. Days off, still-open days, any-N open capacity and posts the
   player marked incomplete do not trigger it. Murph reads bounded current-room
   history and the exact pair's lore first and stays quiet when the player already
   explained the miss. This path requires the exact two-player roster, never
@@ -281,8 +288,8 @@ this default without deleting other people's private contact choices.
   owes whom ("Ava owes you breakfast in bed") and never ticket, bet, wager,
   winnings or cash in, and Murph's texts also avoid stake. `ticket` stays the
   model and wire name.
-- **Rematch.** A new game can name the previous one. After a settled game with
-  the same two people, its round is the previous round plus one; otherwise 1.
+- **Rematch.** A new game can name a settled previous game with the same two
+  available people. Its round is the previous round plus one.
   A rematch of a settled 1v1 is addressed to the other player: it appears on
   their Home ready to accept, so nobody texts a second link. When the finished
   game has a linked group chat, the rematch keeps that room and Murph posts one
@@ -293,9 +300,10 @@ this default without deleting other people's private contact choices.
   can accept or negotiate it; anyone else holding the link is refused with
   `NOT_A_PLAYER`. When both players ask for a rematch of the same game, the
   second ask accepts the first on its terms. Otherwise it must follow the
-  pair's newest game: it's refused while they have a game going or an open
-  rematch between them (`ALREADY_IN_A_GAME`), and when a later game between
-  them has already settled (`REMATCH_OUTDATED`).
+  same rematch chain: an open rematch of that game is refused with
+  `ALREADY_IN_A_GAME`, and a settled descendant makes it `REMATCH_OUTDATED`.
+  Independent games and their rematches do not conflict. The pair's ten-open-game
+  cap still applies, including to addressed rematches.
 - **Retries.** Every action is safe to repeat: creating a game with the same id,
   posting the same entry, accepting an invite already accepted, or redeeming a
   ticket already redeemed returns the current game and changes nothing.
@@ -382,7 +390,9 @@ two players and Murph, or automatically creates one from their verified phone
 numbers. When several eligible rooms exist, it prefers the most recently active
 conversation, then a nonblank group name, then the newest room. Activity means
 the latest accepted conversation-message receipt, not a roster refresh or system
-notification. An already-bound game keeps that room for app announcements.
+notification. Concurrent games reuse the pair's established room, including a
+room whose first message is still being prepared. An already-bound game keeps
+that room for app announcements.
 Either exact same-pair room can read and discuss the same canonical game; Murph
 replies where the players are talking without asking them to relink it. Extra
 participants make that room ineligible. Proposal copy
@@ -397,7 +407,7 @@ as a separately delivered notification. New group creation uses that same first
 message, rather than a generic opener followed by another message. Initial
 invite negotiation likewise introduces the actual proposal once; the challenge
 kickoff follows only after agreement. The other player can decline, and the
-proposer can cancel in chat. Only one proposal waits at a time: a player who
+proposer can cancel in chat. Only one proposal per game waits at a time: a player who
 answers a pending proposal with a different one declines it and proposes theirs,
 and Murph says in that reply that the new ask replaces the earlier one. A player
 who declines and later proposes exactly the declined change in chat agrees to it:
@@ -418,6 +428,12 @@ be called off, so Murph
 says its stakes are locked and offers shortening, rescheduling or marking days
 incomplete. Chat refusals carry the server's plain rule (for example the 60-day
 start limit) so Murph can give the reason and the nearest valid option.
+
+When several games share a chat, Murph reads their IDs and task words and names
+one game ID for every photo, incomplete-day correction, proposal or response.
+If the request could mean more than one game, Murph asks which task before
+changing anything. Progress is described by task; lore stays pair-owned.
+Kickoffs, changes, cancellations and recaps remain per game.
 
 Until agreement, the current terms stay in force. Changes apply from the first
 day neither player has started. Existing check-ins and missed days keep their

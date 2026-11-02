@@ -1,5 +1,8 @@
+import { lockGamePair } from "./blocks";
+import { gamePairWhere } from "./chat-membership";
+import { GAME_MAX_OPEN_PER_PAIR } from "./rules";
 import "server-only";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { buildHostedLinqDeliveryId } from "../hosted-onboarding/linq-delivery-store";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 
@@ -38,13 +41,38 @@ export function gameMissedDayEventId(gameId: string, memberId: string, firstMiss
   return `game-missed:${gameId}:${memberId}:${firstMissedDate}`;
 }
 
-export async function reserveGameMissedDayTx(input: { gameId: string; memberId: string; firstMissedDate: string; dueAt: Date; tx: Pick<Prisma.TransactionClient, "hostedLinqDelivery"> }): Promise<void> {
+/** Existing receipts deduplicate one pair/day batch, including concurrent sweeps. */
+export async function reserveGameMissedDayTx(input: {
+  gameId: string; memberId: string; playerMemberIds: readonly string[]; firstMissedDate: string; dueAt: Date; tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const { tx, playerMemberIds: players } = input;
+  if (players.length !== 2) return false;
+  await lockGamePair(tx, players[0]!, players[1]!);
+  const active = await tx.game.findMany({ where: { ...gamePairWhere(players), status: "live" }, select: { id: true }, take: GAME_MAX_OPEN_PER_PAIR });
+  const current = await tx.game.findFirst({ where: { id: input.gameId, status: "live", chatContainerMemberId: { not: null } }, select: { chatContainerMemberId: true } });
+  if (!current?.chatContainerMemberId) return false;
+  // Read through the existing room-owner index, not all delivery history.
+  // Keep the single-game identity. With several games, either
+  // player's first due miss claims the pair's one daily message.
+  const prior = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT receipt.id FROM hosted_linq_delivery receipt
+    JOIN game_player first_player ON first_player.game_id = split_part(receipt.source_ref, ':', 1)
+    WHERE receipt.payload_owner_member_id = ${current.chatContainerMemberId}
+      AND receipt.source = 'game_lifecycle' AND receipt.template = 'game_missed'
+      AND first_player.member_id = ${players[0]}
+      AND EXISTS (SELECT 1 FROM game_player second_player
+        WHERE second_player.game_id = first_player.game_id AND second_player.member_id = ${players[1]})
+      AND split_part(receipt.source_ref, ':', 3) = ${input.firstMissedDate}
+      AND (${active.length > 1} OR split_part(receipt.source_ref, ':', 2) = ${input.memberId})
+    LIMIT 1`);
+  if (prior.length) return false;
   const eventId = gameMissedDayEventId(input.gameId, input.memberId, input.firstMissedDate);
   const key = createHostedLinqDeliveryIdempotencyLookupKey(eventId);
   if (!key) throw new Error("Game missed-day delivery identity is unavailable.");
-  await input.tx.hostedLinqDelivery.createMany({ data: [{ id: buildHostedLinqDeliveryId(key), idempotencyKey: key,
+  const created = await input.tx.hostedLinqDelivery.createMany({ data: [{ id: buildHostedLinqDeliveryId(key), idempotencyKey: key,
     source: "game_lifecycle", sourceRef: `${input.gameId}:${input.memberId}:${input.firstMissedDate}`, template: "game_missed",
-    status: "awaiting_generation", targetKind: "thread", attemptedAt: input.dueAt, retryAfterAt: input.dueAt }], skipDuplicates: true });
+    status: "awaiting_generation", targetKind: "thread", payloadOwnerMemberId: current.chatContainerMemberId, attemptedAt: input.dueAt, retryAfterAt: input.dueAt }], skipDuplicates: true });
+  return created.count === 1;
 }
 
 /** App proposals, including invite negotiation, own one ordinary proposal send. */

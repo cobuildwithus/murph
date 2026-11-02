@@ -5500,10 +5500,13 @@ fixes; runtime rollback alone cannot make old Web safe.
 later. It validates the command (`command.ts`), checks uploads, seals words,
 then locks the game row, reads the database clock, asks a pure rule, and writes
 state plus its history rows. There is no request-id dedupe: every command is
-keyed by its own ids or state, so a repeat writes nothing. The same people
-can't have two negotiating/live games at once: either phase holds `game.live_roster_key`
-(its players' sorted ids), a plain unique column set at go-live and cleared at
-settle, expiry or invite cancellation, which also fits groups later. There is
+keyed by its own ids or state, so a repeat writes nothing. Pairs derive from
+indexed `game_player` rows; there is no roster-key column,
+pair table or stored count. `GAME_MAX_OPEN_PER_PAIR` permits ten unexpired
+addressed invites, unexpired negotiations or live games. Admission takes the
+existing pair advisory lock before the game lock and counts other open games;
+joining an already counted invite or approving a negotiation consumes no extra
+slot. Unaddressed links acquire their pair only at join. There is
 no timer or cron: whether a game is over is computed from its state, and reads
 (and a player's next accept) settle it under the lock. A rematch of a settled
 1v1 records its addressed invitee (`game.invitee_member_id`), who alone besides
@@ -5513,8 +5516,12 @@ until the viewer has posted that day; media reads use the same rule. Media
 authorization applies participation, reveal, withdrawal, report and rollout
 predicates before its single-row existence limit; repeated content keys cannot
 hide an earlier visible use. Home prioritizes live games in SQL before its
-bounded candidate window. Rematch creation rechecks the latest pair state under
-the existing pair lock; an opposite simultaneous request joins the first invite
+bounded candidate window. Rematch creation rechecks `previous_game_id`
+descendants and pair capacity under
+the existing pair lock; the ancestry index avoids repeated whole-table scans.
+An open direct rematch conflicts, a settled descendant makes its ancestor
+outdated, and unrelated chains do not conflict; an opposite simultaneous request
+joins the first invite
 after releasing that transaction. Grace accepts captures only from the day
 that just ended, with the existing clock slack at both boundaries.
 
@@ -5702,15 +5709,23 @@ the updated app. Old route writers leave enrollment absent; old readers tolerate
 the extra column. Rolling back Web leaves inert enrollment metadata. No game
 claim or native session credential is replayed during rollback.
 
+The many-game predeploy migration removes only the redundant roster CHECK and
+unique index and adds the ancestry index, retaining the nullable unused column
+for old Web functions. Deploy and converge Web before the native multi-game
+experience. The postdeploy contract migration drops `live_roster_key` after the
+function drain; this derived-pair Web code is then the rollback floor. No data
+backfill or new state owner is needed.
+
 ### Weekly game chat changes
 
 Invitees may submit a concrete counterproposal through `negotiate` instead of
-accepting the original terms. The game enters `negotiating`, reserves its pair,
+accepting the original terms. The game enters `negotiating`, occupies one of the
+pair's ten open slots,
 and has no player Day 1 or posting obligations. Only the other player's approval
 activates it. Default Day 1 is calculated at approval, while an explicit later
 date remains honored. Cancelling or declining a proposal does not accept the
 original challenge. The original invite expiry bounds abandoned negotiation and
-releases the pair reservation.
+releases that game's slot.
 
 `game.pending_change` is one versioned structural proposal serialized with the
 existing game row lock. Day boundaries never expire it. Acceptance derives
@@ -5744,7 +5759,11 @@ bound room is never silently replaced. `chat-membership.ts` also admits a fresh
 exact same-pair room independently of that binding. Accepted-message actor proof,
 local pair revalidation and the canonical game lock still fence every mutation;
 the model cannot name another actor or move the primary destination. Discovery
-returns at most five negotiating, live or settled games for that exact pair.
+returns all ten possible negotiating/live games before filling remaining room
+with up to five recent settled games, within the existing ten-game transport
+limit. Shared reads expose IDs and task words; every mutation requires an ID.
+Multi-game responses instruct Murph to ask which task when selection is
+ambiguous. Single-game instructions and responses keep their existing form.
 
 Task and stake proposals prepare the next encrypted `terms_words` envelope outside the
 transaction, and compare the original envelope plus terms version under the
@@ -5763,7 +5782,7 @@ apply those fields. Native uses `supportsNegotiation` on an invite and additive
 `canEditTasks` / `canEditStakes` controls, preserving old-client acceptance.
 
 Whole-invite cancellation records `cancelled` under the game lock and uses
-`endGame` to clear pending changes and release the pair. Home derives its
+`endGame` to clear pending changes and release the slot. Home derives its
 exclusion from that event; ordinary expiry remains visible. An already bound
 chat gets a `game_cancelled` receipt keyed `game-cancelled:<gameId>` without
 bootstrap or discovery. The existing funding query admits only that bound room
@@ -5810,6 +5829,23 @@ Provider lookup and encryption stay outside database transactions. Existing-room
 delivery rechecks the primary route, exact pair and source before provider dispatch.
 Only that validated game notification bypasses iMessage inactivity; other route,
 runtime, health and dispatch fences remain authoritative.
+
+Primary-room binding and bootstrap creation take the pair advisory lock before
+the game lock. A concurrent game reuses the established room, even before its
+provider route attaches. Current per-game pending mailbox work and frozen
+receipts serialize that shared room's first provider create. Funding selects one
+bound eligible game through indexed player rows, preserving one allowance for
+primary and alternate rooms regardless of game count.
+
+The missed-day sweep shards by bound room so a pair's games become due together.
+Existing lifecycle receipts deduplicate the pair/date under the pair lock when
+several games are live. Canonical miss-run derivation excludes incomplete
+artifacts and any-days capacity for both reservation and the batched message.
+One bounded shared turn names the affected tasks and players. Single-game copy
+is preserved, with an explicit notification JSON decision instruction because
+this lore-enabled host turn uses the conversation prompt profile. Rare kickoff, proposal, cancellation, rematch and recap notices
+stay per game, as do the existing per-game daily push receipts. Lore remains
+owned by the sorted-pair fingerprint.
 
 For a new room, `chat-bootstrap.ts` prepares a real group container and mailbox
 without a provider thread ID. The group runtime generates one first message.

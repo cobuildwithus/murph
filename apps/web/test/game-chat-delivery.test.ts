@@ -5,7 +5,7 @@ const m = vi.hoisted(() => ({
 }));
 vi.mock("../src/lib/prisma", () => {
   const db = {
-    $executeRaw: m.updateStatus,
+    $executeRaw: (...args: unknown[]) => String(args[0]).includes("pg_advisory_xact_lock") ? Promise.resolve(0) : m.updateStatus(...args),
     game: { findFirst: m.game, findUnique: m.game, updateMany: m.updateGame, update: m.updateGame },
     hostedMember: { count: async () => 2 },
     gameProfile: { findMany: async () => [{ memberId: "person-a", firstNameEncrypted: "Alex" }, { memberId: "person-b", firstNameEncrypted: "Sam" }] },
@@ -69,7 +69,7 @@ describe("game proposal chat delivery", () => {
       candidate("room", null, "2030-03-05T12:00:00Z"),
     ]);
     await deliverGameChangeProposal("game", "proposal");
-    expect(m.routes).toHaveBeenCalledTimes(1);
+    expect(m.routes).toHaveBeenCalledTimes(2);
     expect(m.routes).toHaveBeenCalledWith(expect.objectContaining({ containerMemberIds: ["room"] }));
     expect(m.updateGame).toHaveBeenCalledWith(expect.objectContaining({ data: { chatContainerMemberId: "room" } }));
     expect(m.create).not.toHaveBeenCalled();
@@ -86,7 +86,7 @@ describe("game proposal chat delivery", () => {
       candidate("room", "Reading buddies", activity),
     ]);
     await deliverGameChangeProposal("game", "proposal");
-    expect(m.routes).toHaveBeenCalledTimes(1);
+    expect(m.routes).toHaveBeenCalledTimes(2);
     expect(m.routes).toHaveBeenCalledWith(expect.objectContaining({ containerMemberIds: ["room"] }));
     expect(m.create).not.toHaveBeenCalled();
   });
@@ -105,7 +105,7 @@ describe("game proposal chat delivery", () => {
       candidate("room", name, "2030-03-04T12:00:00Z", "2030-03-03T12:00:00Z"),
     ]);
     await deliverGameChangeProposal("game", "proposal");
-    expect(m.routes).toHaveBeenCalledTimes(1);
+    expect(m.routes).toHaveBeenCalledTimes(2);
     expect(m.routes).toHaveBeenCalledWith(expect.objectContaining({ containerMemberIds: ["room"] }));
     expect(m.create).not.toHaveBeenCalled();
   });
@@ -121,7 +121,7 @@ describe("game proposal chat delivery", () => {
     m.routes.mockResolvedValue({ authorities: new Map([["named-room", { threadId: "named-chat", channel: "linq" }], ["room", { threadId: "chat", channel: "linq" }]]) });
     m.chat.mockResolvedValueOnce({ ...chat, handles: [...chat.handles, { handle: "+15555550103", isMe: false, status: "active" }] }).mockResolvedValueOnce(chat);
     await deliverGameChangeProposal("game", "proposal");
-    expect(m.chat.mock.calls.map(([input]) => input.chatId)).toEqual(["named-chat", "chat"]);
+    expect(m.chat.mock.calls.map(([input]) => input.chatId)).toEqual(["named-chat", "chat", "chat"]);
     expect(m.updateGame).toHaveBeenCalledWith(expect.objectContaining({ data: { chatContainerMemberId: "room" } }));
     expect(m.create).not.toHaveBeenCalled();
   });

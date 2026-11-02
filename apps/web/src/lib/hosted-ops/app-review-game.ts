@@ -18,7 +18,6 @@ import { isGameMediaStorageAvailable, putGameMedia } from "../game/media";
 import {
   decideSettle,
   GAME_SEATS_1V1,
-  liveRosterKey,
   settleDueAt,
   ticketUseBy,
   type RuleEntry,
@@ -466,7 +465,6 @@ async function writeGame(tx: Prisma.TransactionClient, game: BuiltGame, members:
       id: game.id,
       inviteeMemberId: state.game.inviteeMemberId ?? null,
       lengthDays: seed.lengthDays,
-      liveRosterKey: settled ? null : liveRosterKey([members.partner, members.reviewer]),
       previousGameId,
       result: settled ? toPrismaJsonObject(settled.result) : Prisma.DbNull,
       round: seed.round,

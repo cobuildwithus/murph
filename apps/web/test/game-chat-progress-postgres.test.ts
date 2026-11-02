@@ -45,7 +45,7 @@ describe.skipIf(!enabled)("shared game progress canonical PostgreSQL proof", () 
           stakes: stakes.map((stake, index) => ({ key: stake.key, item: `Synthetic favor ${index}` })) }],
       }));
       await db.game.create({ data: {
-        id: gameId, createdBy: a, status: "live", liveRosterKey: [a, b].sort().join(":"), lengthDays: 365,
+        id: gameId, createdBy: a, status: "live", lengthDays: 365,
         terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes }] },
         termsWordsEncrypted: termsWordsEncrypted!,
         players: { create: [{ memberId: a, seat: 0, timeZone: "UTC", dayOne }, { memberId: b, seat: 1, timeZone: "UTC", dayOne }] },

@@ -61,6 +61,10 @@ async function preparePhotoTx(input: Input, tx: Prisma.TransactionClient): Promi
   const profile = await tx.gameProfile.findUnique({ where: { memberId: input.actor }, select: { chatPhotoIntroducedAt: true, chatPhotoOffer: true } });
   if (!profile) return { result: rejected("game_player_unavailable") };
   if (input.photo.operation === "dismiss") {
+    const pending = offerSchema.safeParse(profile.chatPhotoOffer);
+    if (pending.success && (pending.data.gameId !== input.photo.gameId || pending.data.containerMemberId !== input.containerMemberId)) {
+      return { result: rejected("That photo offer belongs to another game. Choose its gameId before dismissing it.") };
+    }
     await tx.gameProfile.update({ where: { memberId: input.actor }, data: { chatPhotoOffer: Prisma.DbNull } });
     return { result: { status: "ok", photoOutcome: "dismissed" } satisfies PhotoResult };
   }

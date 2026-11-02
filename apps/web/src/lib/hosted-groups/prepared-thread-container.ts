@@ -1,3 +1,5 @@
+import { GAME_MAX_OPEN_PER_PAIR } from "../game/rules";
+import { gamePairWhere } from "../game/chat-membership";
 import "server-only";
 
 import type { Prisma } from "@prisma/client";
@@ -209,16 +211,19 @@ export async function assertNoPendingGameChatBootstrapTx(input: {
 }): Promise<void> {
   const participants = [...new Set(input.participantMemberIds)];
   if (participants.length !== 2) return;
-  const game = await input.tx.game.findFirst({
+  const games = await input.tx.game.findMany({
     where: {
-      liveRosterKey: participants.sort().join(":"),
+      ...gamePairWhere(participants),
+      status: { in: ["live", "negotiating"] },
       chatContainerMember: { is: { threadContainer: { is: { routes: { none: {} } } } } },
     },
     select: { chatContainerMemberId: true },
+    take: GAME_MAX_OPEN_PER_PAIR,
   });
-  if (!game?.chatContainerMemberId) return;
+  const rooms = games.flatMap((game) => game.chatContainerMemberId ? [game.chatContainerMemberId] : []);
+  if (!rooms.length) return;
   const receipt = await input.tx.hostedLinqDelivery.findFirst({
-    where: { payloadOwnerMemberId: game.chatContainerMemberId, source: "game_lifecycle", payloadSchema: "game_chat_bootstrap_v1", bootstrapRouteAttachedAt: null, skippedAt: null, phoneNumberLookupKey: { in: [...input.incomingRecipientPhoneLookupKeys] } },
+    where: { payloadOwnerMemberId: { in: rooms }, source: "game_lifecycle", payloadSchema: "game_chat_bootstrap_v1", bootstrapRouteAttachedAt: null, skippedAt: null, phoneNumberLookupKey: { in: [...input.incomingRecipientPhoneLookupKeys] } },
     select: { id: true },
   });
   if (receipt) throw hostedOnboardingError({

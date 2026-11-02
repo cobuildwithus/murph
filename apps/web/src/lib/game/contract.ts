@@ -466,9 +466,11 @@ export type GameErrorCode =
   | "INVITE_USED"
   | "INVITE_EXPIRED"
   | "TERMS_CHANGED"
-  /** These same people already have a live game (or an open rematch) together. */
+  /** An open rematch of this same game already exists. */
   | "ALREADY_IN_A_GAME"
-  /** A rematch named an older game when the same people have a newer one. */
+  /** These two players already have ten open games together. */
+  | "TOO_MANY_GAMES"
+  /** A later game in this rematch chain has already settled. */
   | "REMATCH_OUTDATED"
   | "NOT_A_PLAYER"
   | "GAME_NOT_LIVE"

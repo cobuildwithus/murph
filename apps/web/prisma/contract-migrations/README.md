@@ -65,3 +65,11 @@ floor requires restoring or re-expanding the database shape first, or deploying
 a forward fix. Cloudflare `container_rollout=immediate` is not applicable to
 this Vercel-only lane; the bounded drain wait and final alias check own the
 old-function window.
+
+The `20261101230000_drop_game_live_roster_key` cleanup follows the derived-pair
+Web deployment. Its predeploy Prisma migration drops the obsolete roster CHECK
+and unique index while preserving the nullable column for old functions. New
+Web derives pairs from GamePlayer and serializes ten-slot admission under the
+pair advisory lock. Converge Web before enabling the multi-game native flow;
+then this runner drops the unused column after its ordinary drain. This Web
+version is the rollback floor after cleanup; use a compatible forward fix.

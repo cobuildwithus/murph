@@ -32,7 +32,7 @@ import {
   assertNoPendingGameChatBootstrapTx,
 } from "@/src/lib/hosted-groups/prepared-thread-container";
 
-const tx = { game: { findFirst: mocks.pendingGame }, hostedLinqDelivery: { findFirst: mocks.gameDelivery } } as never;
+const tx = { game: { findMany: mocks.pendingGame }, hostedLinqDelivery: { findFirst: mocks.gameDelivery } } as never;
 const pendingSetup = {
   armedAt: new Date("2026-07-29T18:00:00.000Z"),
   channel: "linq" as const,
@@ -51,7 +51,7 @@ const pendingSetup = {
 describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.pendingGame.mockResolvedValue(null);
+    mocks.pendingGame.mockResolvedValue([]);
     mocks.gameDelivery.mockResolvedValue(null);
     mocks.bindUsageReferral.mockResolvedValue({ referralId: null });
     mocks.consumePendingSetup.mockResolvedValue(true);
@@ -68,15 +68,15 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
   });
 
   it("retries a player reply that arrives before the generated game chat route attaches", async () => {
-    mocks.pendingGame.mockResolvedValue({ chatContainerMemberId: "pending_game_room" });
+    mocks.pendingGame.mockResolvedValue([{ chatContainerMemberId: "pending_game_room" }]);
     mocks.gameDelivery.mockResolvedValue({ id: "initial_delivery" });
     const input = { participantMemberIds: ["person_b", "person_a"], incomingRecipientPhoneLookupKeys: ["line_key"], tx };
     await expect(assertNoPendingGameChatBootstrapTx(input)).rejects.toMatchObject({ code: "HOSTED_GAME_CHAT_BOOTSTRAP_PENDING", httpStatus: 503, retryable: true });
-    expect(mocks.pendingGame).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ liveRosterKey: "person_a:person_b", chatContainerMember: { is: { threadContainer: { is: { routes: { none: {} } } } } } }) }));
-    expect(mocks.gameDelivery).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ payloadOwnerMemberId: "pending_game_room", phoneNumberLookupKey: { in: ["line_key"] } }) }));
+    expect(mocks.pendingGame).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ chatContainerMember: { is: { threadContainer: { is: { routes: { none: {} } } } } } }) }));
+    expect(mocks.gameDelivery).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ payloadOwnerMemberId: { in: ["pending_game_room"] }, phoneNumberLookupKey: { in: ["line_key"] } }) }));
     expect(mocks.ensureThreadContainer).not.toHaveBeenCalled();
     // The provider retry now resolves the attached canonical route instead.
-    mocks.pendingGame.mockResolvedValue(null);
+    mocks.pendingGame.mockResolvedValue([]);
     await expect(assertNoPendingGameChatBootstrapTx(input)).resolves.toBeUndefined();
   });
 

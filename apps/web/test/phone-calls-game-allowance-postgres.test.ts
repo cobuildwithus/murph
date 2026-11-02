@@ -101,7 +101,7 @@ describe.skipIf(!enabled)("game room phone-call allowance PostgreSQL", () => {
         memberId, firstNameEncrypted: "synthetic-name", timeZone: "UTC",
       })) });
       await db.game.create({ data: { id: gameId, createdBy: first, status: "live",
-        liveRosterKey: [first, second].sort().join(":"), chatContainerMemberId: primary,
+        chatContainerMemberId: primary,
         terms: { v: 1, versions: [] }, termsWordsEncrypted: "synthetic-terms",
         players: { create: [first, second].map((memberId, seat) => ({ memberId, seat, timeZone: "UTC", dayOne: now })) },
       } });

@@ -27,7 +27,7 @@ vi.mock("@/src/lib/game/crypto", () => ({ openGameTexts: async (values: unknown[
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
   readHostedMemberIdentity: async ({ memberId }: { memberId: string }) => ({ phoneNumber: memberId.startsWith("first_") ? "+15555550101" : "+15555550102", phoneNumberVerifiedAt: new Date() }),
 }));
-vi.mock("@/src/lib/game/chat-membership", () => ({ requireExactChat: vi.fn(async () => {}) }));
+vi.mock("@/src/lib/game/chat-membership", async (original) => ({ ...await original<typeof import("@/src/lib/game/chat-membership")>(), requireExactChat: vi.fn(async () => {}) }));
 vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", () => ({
   resolveHostedAssistantNotificationDestination: async () => ({ conversationShape: "thread-container", route: { channel: "linq" } }),
   bindHostedAssistantNotificationDestination: () => ({ route: { actorId: null, channel: "linq", identityId: m.room, threadId: "synthetic-chat", threadIsDirect: false, delivery: { kind: "thread", target: "synthetic-chat" } } }),
@@ -47,8 +47,7 @@ async function fixture() {
   await db.hostedThreadContainer.create({ data: { memberId: room, ownerMemberId: first,
     participants: { create: [first, second].map(participantMemberId => ({ participantMemberId, handleLookupKey: participantMemberId, firstSeenAt: now, lastSeenAt: now })) } } });
   await db.gameProfile.createMany({ data: [first, second].map(memberId => ({ memberId, firstNameEncrypted: "synthetic", timeZone: "UTC" })) });
-  await db.game.create({ data: { id: gameId, createdBy: first, status: "negotiating", liveRosterKey: `${first}:${second}`,
-    chatContainerMemberId: room, terms: { v: 1, versions: [] }, termsWordsEncrypted: "synthetic",
+  await db.game.create({ data: { id: gameId, createdBy: first, status: "negotiating", chatContainerMemberId: room, terms: { v: 1, versions: [] }, termsWordsEncrypted: "synthetic",
     players: { create: [first, second].map((memberId, seat) => ({ memberId, seat, timeZone: "UTC" })) } } });
   const oldProposal = randomUUID(), cancellation = `game-change-cancelled:${gameId}:${oldProposal}`;
   await reserveGameChatProposalTx({ gameId, proposalId: oldProposal, now, tx: db });

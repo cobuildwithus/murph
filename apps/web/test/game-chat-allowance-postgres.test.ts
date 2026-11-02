@@ -43,8 +43,7 @@ describe.skipIf(!enabled)("shared game allowance PostgreSQL", () => {
         memberId, firstNameEncrypted: "synthetic-sealed", timeZone: "UTC",
       })) });
       await prisma.game.create({ data: { id: gameId, createdBy: first, status: "live",
-        chatContainerMemberId: primary, liveRosterKey: [first, second].sort().join(":"),
-        terms: { v: 1, versions: [] }, termsWordsEncrypted: "synthetic-sealed",
+        chatContainerMemberId: primary, terms: { v: 1, versions: [] }, termsWordsEncrypted: "synthetic-sealed",
         players: { create: [first, second].map((memberId, seat) => ({ memberId, seat, timeZone: "UTC" })) },
       } });
       const claims = await Promise.all([primary, alternate].map(userId => claimHostedRuntime({ prisma, userId, now, processingMode: "default" })));
@@ -77,8 +76,7 @@ describe.skipIf(!enabled)("shared game allowance PostgreSQL", () => {
           allowed: false, reason: "ai_usage_limit_exceeded", spentUsdMicros: 7_500_077n, remainingUsdMicros: 0n,
         });
       }
-      await prisma.game.update({ where: { id: gameId }, data: { status: "settled", liveRosterKey: null,
-        settledAt: new Date(now.getTime() - 8 * 86_400_000), chatContainerMemberId: null } });
+      await prisma.game.update({ where: { id: gameId }, data: { status: "settled", settledAt: new Date(now.getTime() - 8 * 86_400_000), chatContainerMemberId: null } });
       await prisma.hostedThreadContainerParticipant.updateMany({ where: { containerMemberId: alternate }, data: { removedAt: now } });
       await expect(readHostedAiUsageGate({ memberId: alternate, now, prisma })).resolves.toMatchObject({ allowed: false });
       records[1] = usage(alternate, now);
