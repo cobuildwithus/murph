@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { appendFileSync, readdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -65,8 +65,14 @@ function discoverWorkspacePackages(repoRoot) {
       continue;
     }
 
+    // Like pnpm, ignore folders without a manifest, such as build output left behind by a deleted package.
+    const packageJsonPath = path.join(packagesRoot, entry.name, "package.json");
+    if (!existsSync(packageJsonPath)) {
+      continue;
+    }
+
     const dir = path.posix.join("packages", entry.name);
-    const packageJson = readJson(path.join(packagesRoot, entry.name, "package.json"));
+    const packageJson = readJson(packageJsonPath);
     const coverageScript = packageJson.scripts?.["test:coverage"];
     discovered.push({
       dir,

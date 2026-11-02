@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -114,13 +115,12 @@ function discoverCoveragePackageDirs(): string[] {
 
   return readdirSync(packagesRoot, { withFileTypes: true })
     .flatMap((entry) => {
-      if (!entry.isDirectory()) {
+      const packageJsonPath = path.join(packagesRoot, entry.name, "package.json");
+      if (!entry.isDirectory() || !existsSync(packageJsonPath)) {
         return [];
       }
 
-      const packageJson: unknown = JSON.parse(
-        readFileSync(path.join(packagesRoot, entry.name, "package.json"), "utf8"),
-      );
+      const packageJson: unknown = JSON.parse(readFileSync(packageJsonPath, "utf8"));
       if (!isRecord(packageJson) || !isRecord(packageJson.scripts)) {
         return [];
       }

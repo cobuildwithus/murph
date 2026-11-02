@@ -1675,4 +1675,4 @@ Legacy meal naming repair and shared write validation are tracked in
 [the active plan](exec-plans/active/2026-11-02-meal-legacy-names.md);
 `product-specs/ios-meals.md` owns its bounds, preservation and removal condition.
 
-Local product retirement: the CLI owns hosted onboarding; verification inventories exclude the retired setup and assistant wrapper packages. Inbox owners retain hosted normalization, storage, and repair without polling daemons.
+Local product retirement: the CLI owns hosted onboarding; verification inventories exclude the retired setup and assistant wrapper packages. Inbox owners retain hosted normalization, storage, and repair without polling daemons. Release verification package discovery skips leftover `packages/*` folders that have no manifest.
