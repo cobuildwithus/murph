@@ -1,3 +1,6 @@
+Recap link metadata and the approved static ticket preview are recorded in
+[the implementation plan](exec-plans/completed/2026-11-01-recap-link-preview.md).
+
 Recap desktop QR handoff and Apple mobile preservation are tracked in
 [the implementation plan](exec-plans/completed/2026-11-01-recap-desktop-handoff.md).
 `product-specs/weekly-game.md` owns the public-route contract.
