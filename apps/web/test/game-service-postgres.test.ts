@@ -776,9 +776,15 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(notice).not.toBeNull();
     expect(notice!.previous.tasksByMember).toEqual({ [challenger]: "100 pushups", [invitee]: "10 min abs" });
     expect(notice!.rematch.tasksByMember).toEqual(notice!.previous.tasksByMember);
+    expect(notice!.players).toEqual([{ memberId: invitee, name: "Invitee", requester: true }, { memberId: challenger, name: "Challenger", requester: false }]);
     const prompt = JSON.parse(buildGameRematchInstructions(notice!).split("\n").at(-1)!);
     expect(prompt.sameGame).toBe(true);
-    expect(prompt.rematch.tasksByMember).toEqual(prompt.previous.tasksByMember);
+    // Each task stays with its person by name, with no member key in the prompt.
+    expect(prompt.players).toEqual([
+      { name: "Invitee", requester: true, previousTask: "10 min abs", rematchTask: "10 min abs" },
+      { name: "Challenger", requester: false, previousTask: "100 pushups", rematchTask: "100 pushups" },
+    ]);
+    expect(JSON.stringify(prompt)).not.toContain(challenger);
   });
 
   it("starts invite negotiation delivery immediately after its write", async () => {

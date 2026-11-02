@@ -45456,13 +45456,13 @@ describeRealCodex('real Codex game chat adjustment e2e', () => {
 })
 
 describeRealCodex('real Codex game lifecycle messaging e2e', () => {
-  it('game lifecycle rematch notice names the requester, changed game and app choices', async () => {
+  it('game lifecycle rematch notice names the requester, who takes which task and app choices', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-rematch-notice-e2e-'))
     const permissionHome = await materializeRealCodexHostedPermissionHome(config)
     const { buildGameRematchInstructions } = await import('@murphai/hosted-execution/runtime-control')
     const previous = { checkInKind: 'photo' as const, lengthDays: 7, schedule: { days: [0, 1, 2, 3, 4] },
-      stakes: [{ kind: 'prize' as const, item: 'breakfast in bed' }], tasksByMember: { member_alex: 'Walk 20 minutes', member_sam: 'Walk 20 minutes' } }
+      stakes: [{ kind: 'prize' as const, item: 'breakfast in bed' }], tasksByMember: { member_alex: 'Walk 20 minutes', member_sam: '20 squats' } }
     try {
       await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
       const modelTarget = createAssistantModelTarget({
@@ -45478,8 +45478,8 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
         deliveryIdempotencyKey: 'game-rematch:game_synthetic', deliveryDedupeToken: 'game-rematch:game_synthetic',
         responsePolicy: { kind: 'require_send' },
         executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'synthetic-group', userEnvKeys: [] } },
-        identityId: null, instructions: buildGameRematchInstructions({ requesterName: 'Alex', previous,
-          rematch: { ...previous, lengthDays: 10 }, startsOn: null }),
+        identityId: null, instructions: buildGameRematchInstructions({ players: [{ memberId: 'member_alex', name: 'Alex', requester: true }, { memberId: 'member_sam', name: 'Sam', requester: false }],
+          previous, rematch: { ...previous, lengthDays: 10, tasksByMember: { member_alex: '20 squats', member_sam: 'Walk 20 minutes' } }, startsOn: null }),
         threadId: 'synthetic-game-thread', threadIsDirect: false,
         onTraceEvent: (event) => events.push(event.rawEvent),
         turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
@@ -45500,6 +45500,11 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
       expect(reply).toMatch(/Shake/iu)
       expect(reply).toMatch(/suggest.*change|change.*suggest/iu)
       expect(reply).not.toMatch(/same (?:game|challenge)|https?:\/\/|\binvite\b|\bround\b|\btoken\b|internal|notification|delivery/iu)
+      // The swap is told by name, with no emoji, and the game is a game.
+      // Each new task is tied to its player, in either word order, without crossing the other name.
+      expect(reply).toMatch(/\bAlex\b(?:(?!\bSam\b)[^.;])*squat|squat(?:(?!\bSam\b)[^.;])*\bAlex\b/iu)
+      expect(reply).toMatch(/\bSam\b(?:(?!\bAlex\b)[^.;])*walk|walk(?:(?!\bAlex\b)[^.;])*\bSam\b/iu)
+      expect(reply).not.toMatch(/whoever|member_|challenge|\p{Extended_Pictographic}|—|\s-\s/iu)
       expect(reply.length).toBeLessThan(350)
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
@@ -45550,6 +45555,7 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
       expect(reply).toMatch(/total/iu)
       expect(reply).toContain('?')
       expect(reply).not.toMatch(/starting|restart|tomorrow|3\s*a\.?m|already extended|now extended|has been extended|more days|additional days/iu)
+      expect(reply).not.toMatch(/\bpropos|challenge/iu)
       expect(reply.length).toBeLessThan(350)
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
@@ -45602,7 +45608,7 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
       // The member can tell which of the room's games this is about.
       expect(reply).toMatch(/squat|stretch/iu)
       expect(reply).not.toMatch(/read(?:ing)? 20|no phone/iu)
-      expect(reply).not.toMatch(/\bproposals?\b|game_shared_room|[^\s]\s[-–—]\s/iu)
+      expect(reply).not.toMatch(/\bpropos|challenge|game_shared_room|[^\s]\s[-–—]\s/iu)
       if (notice === 'kickoff') {
         // The room already had a reminder offer with its first game.
         expect(reply).not.toMatch(/remind|what time|how many days/iu)
@@ -45866,6 +45872,7 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
       expect(result.finalMessage).toMatch(/10|ten/iu)
       expect(result.finalMessage).toContain('?')
       expect(result.finalMessage).not.toMatch(/sent.*(?:another|other) chat|relink|linked to|starting tomorrow|now extended|has been extended|already extended/iu)
+      expect(result.finalMessage).not.toMatch(/\bpropos|challenge/iu)
       expect(result.finalMessage.length).toBeLessThan(400)
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
@@ -46221,7 +46228,13 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
       expect(result.response).toMatch(/Sam/iu)
       expect(result.response).toMatch(/walk/iu)
       expect(result.response).toMatch(/read|book|page/iu)
-      expect(result.response).not.toMatch(/score|game_walking|game_reading|why|\?/iu)
+      expect(result.response).not.toMatch(/score|game_walking|game_reading|why|\?|challenge/iu)
+      // Whose post is missing is said plainly before any joke.
+      const opening = (result.response ?? '').split(/[.!?;]/u)[0] ?? ''
+      expect(opening).toMatch(/Alex/u)
+      expect(opening).toMatch(/walk/iu)
+      expect(opening).toMatch(/\bno\b|\bmissed\b|\bmissing\b|didn['’]t (?:post|check in)|nothing (?:posted|in)/iu)
+      expect(opening).toMatch(/yesterday|march 4|monday|that day|2030-03-04/iu)
       expect((result.response ?? '').length).toBeLessThan(400)
     } catch (error) {
       process.stdout.write(JSON.stringify({ scenario: 'concurrent-games-daily-batch-failure', messages: readCompletedAgentMessages(events) }) + '\n')
@@ -46275,6 +46288,122 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
         expect(result.finalMessage).not.toMatch(/marked|updated|saved/iu)
       }
       expect(result.finalMessage).not.toMatch(/game_reading|game_walking|score|Sam.*incomplete/iu)
+    } finally { await rm(workingDirectory, { force: true, recursive: true }) }
+  }, 720_000)
+
+  it.each([
+    { name: 'game chat four games ambiguous length asks once without a proposal', kind: 'length' },
+    { name: 'game chat four games not done with one posted game acts on it', kind: 'one-post' },
+    { name: 'game chat four games not done with two posted games asks between them', kind: 'two-posts' },
+    { name: 'game chat four games restore picks the one day marked not done', kind: 'restore' },
+    { name: 'game chat locked prize change says so once and offers what can change', kind: 'locked' },
+  ] as const)('$name', async ({ kind }) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-four-games-e2e-'))
+    const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    type ChatGame = import('@murphai/hosted-execution/runtime-control').HostedGameChatState['games'][number]
+    const inputId = 'ain_' + 'e'.repeat(32)
+    const calls: Array<import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest> = []
+    const players = [{ memberId: 'player_maya', seat: 0, firstName: 'Maya', dayOne: '2030-03-04', timeZone: 'UTC' }, { memberId: 'player_sam', seat: 1, firstName: 'Sam', dayOne: '2030-03-04', timeZone: 'UTC' }]
+    // Maya's posts today decide which games a "not done" can mean.
+    const mayaPostedToday = kind === 'one-post' ? ['game_steps'] : kind === 'two-posts' ? ['game_steps', 'game_plank'] : []
+    const game = (id: string, maya: string, sam: string, lengthDays: number, item: string): ChatGame => ({
+      id, status: 'live', lengthDays, startsOn: '2030-03-04',
+      terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: maya }, { seat: 1, text: sam }], schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: 'prize', item }] },
+      players, pendingChange: null,
+      changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, canEditTasks: false, canEditStakes: false, editableFromDay: 2 },
+      progress: { checkedAt: '2030-03-05T15:00:00Z', players: players.map(({ memberId }) => ({ memberId, score: 1, target: lengthDays, currentDayIndex: 1,
+        currentEntryId: memberId === 'player_maya' && mayaPostedToday.includes(id) ? `entry_${id}` : null, attemptsRemaining: 2,
+        // A day the player marked not done reads as unposted, here only in the steps game.
+        days: [{ dayIndex: 0, date: '2030-03-04', status: kind === 'restore' && memberId === 'player_maya' && id === 'game_steps' ? 'missed' as const : 'posted' as const },
+          { dayIndex: 1, date: '2030-03-05', status: memberId === 'player_maya' && mayaPostedToday.includes(id) ? 'posted' as const : 'due' as const }] })) },
+    })
+    const games = kind === 'locked'
+      ? [game('game_plank', '1-minute plank', 'Drink 2L of water', 7, 'Choose the movie for movie night')]
+      : [game('game_plank', '1-minute plank', 'Drink 2L of water', 7, 'Choose the movie for movie night'),
+        game('game_steps', '10k steps', 'No soda', 7, 'Wear a silly hat to brunch'),
+        game('game_journal', 'Journal for 5 minutes', 'Cold shower', 7, 'Buy the winner smoothies'),
+        game('game_reading', 'No phone after 10pm', 'Read 20 pages', 14, 'Sing in this group chat')]
+    const speaker = kind === 'length' || kind === 'locked' ? 'Sam' : 'Maya'
+    const message = {
+      length: 'can we make it 14 days?',
+      'one-post': 'ugh mark mine as not done today, I fudged it',
+      'two-posts': 'ugh mark mine as not done today, I fudged it',
+      restore: 'wait I did finish yesterday after all, undo my not done',
+      locked: 'can we change the prize to the loser buys dinner? movie night is boring',
+    }[kind]
+    // The room last talked about the plank game, which must not decide an unnamed change.
+    const recent = kind === 'length'
+      ? 'Earlier in this chat:\n- Maya: nah keep the plank one at 7, I have a trip\n- Murph: Maya said no to the 10-day extension. The plank and water game stays at 7 days.\n\n'
+      : ''
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({ assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' }, conversationScope: 'group',
+          currentLocalDate: '2030-03-05', currentInstant: '2030-03-05T15:00:00.000Z', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null }),
+        dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL], env: config.env,
+        hostedToolContext: { computerToolsAvailable: false, vaultFileSendAvailable: false,
+          groupTool: { request: async (request) => {
+            calls.push(request)
+            if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', state: { games } } }
+            if (request.action !== 'update_game') throw new Error('Unexpected action')
+            if (request.update.operation === 'mark_incomplete') return { action: 'update_game', result: { status: 'ok', dayOutcome: { date: request.update.date ?? '2030-03-05', status: 'marked_incomplete' } } }
+            if (request.update.operation === 'restore_day') return { action: 'update_game', result: { status: 'ok', dayOutcome: { date: request.update.date ?? '2030-03-04', status: request.update.gameId === 'game_steps' ? 'restored' : 'already_complete' } } }
+            return { action: 'update_game', result: { status: 'rejected', error: 'SYNTHETIC_UNEXPECTED_WRITE' } }
+          } }, currentUserActionScope: () => ({ conversationId: 'synthetic-room', inboundMailboxItemIds: [], recipientKey: 'synthetic-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-session', conversationScope: 'group' }),
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send.') } },
+        model: config.model, modelProvider: config.modelProvider, reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        prompt: `${recent}Current accepted message from ${speaker} (Occurred at: 2030-03-05T15:00:00Z; Message ref: ${inputId}): ${message}`,
+      })
+      const reply = result.finalMessage
+      const writes = calls.filter((call) => call.action === 'update_game')
+      process.stdout.write(`[game-four-games ${kind}] ${JSON.stringify({ reply, actions: calls.map((call) => call.action) })}\n`)
+      expect(calls[0]?.action).toBe('read_game')
+      if (kind === 'restore') {
+        // Only the steps game shows yesterday unposted, so it is the one day the undo can mean.
+        expect(writes).toHaveLength(1)
+        expect(writes[0]).toMatchObject({ origin: { assistantInputId: inputId }, update: { operation: 'restore_day', gameId: 'game_steps', date: '2030-03-04' } })
+        expect(reply).toMatch(/steps/iu)
+        expect(reply).not.toContain('?')
+      } else if (kind === 'one-post') {
+        // Only the steps game has Maya's post today, so it is the one game the correction can mean.
+        expect(writes).toHaveLength(1)
+        expect(writes[0]).toMatchObject({ origin: { assistantInputId: inputId }, update: { operation: 'mark_incomplete', gameId: 'game_steps', date: '2030-03-05' } })
+        expect(reply).toMatch(/steps/iu)
+        expect(reply).toMatch(/not done|incomplete/iu)
+        expect(reply).not.toContain('?')
+      } else {
+        expect(writes).toEqual([])
+        // One short question at most, and never a claim that anything changed.
+        const questions = (reply.match(/\?/gu) ?? []).length
+        if (kind === 'locked') expect(questions).toBeLessThanOrEqual(1)
+        else expect(questions).toBe(1)
+        expect(reply).not.toMatch(/\b(?:marked|updated|saved)\b/iu)
+      }
+      if (kind === 'length') {
+        // The three seven-day games are the ones the change would actually change.
+        for (const candidate of [/plank|water/iu, /steps|soda/iu, /journal|cold shower/iu]) expect(reply).toMatch(candidate)
+        expect(reply).not.toMatch(/\bread|phone/iu)
+        // A question to Sam, never an ask put to Maya.
+        expect(reply).not.toMatch(/\bpropos|Maya,? (?:does|do you|okay|ok|are you)/iu)
+      }
+      if (kind === 'two-posts') {
+        expect(reply).toMatch(/steps/iu)
+        expect(reply).toMatch(/plank/iu)
+        expect(reply).not.toMatch(/journal|phone|\bread/iu)
+      }
+      if (kind === 'locked') {
+        // One plain refusal of the prize change plus a lever that can still change.
+        expect(reply).toMatch(/prize/iu)
+        expect(reply).toMatch(/stays|locked|fixed|set|can['’]?t|cannot|already started/iu)
+        expect(reply).toMatch(/length|longer|shorter|schedule|days|next game|rematch|new game/iu)
+        expect(reply).not.toMatch(/\bcannot\b.*\bcannot\b|loser buys dinner\?/isu)
+      }
+      expect(reply).not.toMatch(/challenge|game_(?:plank|steps|journal|reading)|entry_|[^\s]\s[-–—]\s/iu)
+      expect(reply.length).toBeLessThan(320)
     } finally { await rm(workingDirectory, { force: true, recursive: true }) }
   }, 720_000)
 

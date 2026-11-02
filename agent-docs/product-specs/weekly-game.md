@@ -479,14 +479,19 @@ announcement (Murph does not also reply), because that reserved notice is what
 keeps a game-funded room deliverable once the game is void. A live game cannot
 be called off, so Murph
 says its stakes are locked and offers shortening, rescheduling or marking days
-incomplete. Chat refusals carry the server's plain rule (for example the 60-day
+incomplete. A request to change a live game's tasks or prize gets the same
+answer once: they stay for this game, and Murph names what can still change. Chat refusals carry the server's plain rule (for example the 60-day
 start limit) so Murph can give the reason and the nearest valid option.
 
 When several games share a chat, Murph reads their IDs and task words and names
 one game ID for every photo, incomplete-day correction, proposal or response.
-If the request could mean more than one game, Murph asks which task before
-changing anything. Progress is described by task; lore stays pair-owned.
-Kickoffs, changes, cancellations and recaps remain per game.
+It first keeps only the games the move can apply to: for a day correction, the
+games where the speaker has a post that date; for a change, the games it would
+actually change. If exactly one fits, Murph acts on it. If several fit, Murph
+asks one short question naming only those games and changes nothing. Only the
+speaker's own words choose a game, never whichever game came up last. Progress
+is described by task; lore stays pair-owned. Kickoffs, changes, cancellations
+and recaps remain per game.
 
 Until agreement, the current terms stay in force. Changes apply from the first
 day neither player has started. Existing check-ins and missed days keep their

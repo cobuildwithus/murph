@@ -44,7 +44,7 @@ describe("durable game chat lifecycle", () => {
     m.recapMessages.mockResolvedValue([{ playerName: "Alex", text: "The bounded room transcript." }]);
     m.transcript.mockResolvedValue([{ playerName: "Alex", text: "The bounded room transcript." }]);
     const rules = { checkInKind: "photo", lengthDays: 7, schedule: { days: [0, 1, 2, 3, 4] }, stakes: [], tasksByMember: { "person-a": "Read a chapter", "person-b": "Read a chapter" } };
-    m.rematchNotice.mockResolvedValue({ requesterName: "Alex", previous: rules, rematch: rules, startsOn: null });
+    m.rematchNotice.mockResolvedValue({ players: [{ memberId: "person-a", name: "Alex", requester: true }, { memberId: "person-b", name: "Sam", requester: false }], previous: rules, rematch: rules, startsOn: null });
     m.identity.mockImplementation(async ({ memberId }: { memberId: string }) => ({ phoneNumber: memberId === players[0] ? "+15555550101" : "+15555550102", phoneNumberVerifiedAt: now }));
     m.discover.mockResolvedValue(null); m.bootstrap.mockResolvedValue("room"); m.proposal.mockResolvedValue(true);
     m.destination.mockResolvedValue({ conversationShape: "thread-container", route: { channel: "linq" } });
@@ -160,7 +160,7 @@ describe("durable game chat lifecycle", () => {
     m.receipts.mockResolvedValue([{ ...receipt, template: "game_cancelled" }]);
     await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });
     const notification = m.prepare.mock.calls[0][0].envelope.notification;
-    expect(notification.instructions).toContain("earlier challenge invite");
+    expect(notification.instructions).toContain("earlier game invite");
     expect(notification.instructions).toContain("one brief, plain line");
     expect(notification.deliveryIdempotencyKey).toBe("game-cancelled:game");
     expect(m.exact).toHaveBeenCalledExactlyOnceWith("room", ["+15555550101", "+15555550102"]);

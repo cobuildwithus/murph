@@ -1,0 +1,16 @@
+{
+  "publishedOn": "2026-11-02",
+  "order": 300,
+  "item": {
+    "id": "game-chat-clearer-replies",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Clearer game chat with Murph",
+    "summary": "With several games going, Murph checks which one you mean before changing anything.",
+    "details": "If only one game fits, Murph just does it. Rematch messages say who takes which task, missed-day messages say plainly whose post is missing, and asks for a locked change come with what can still change.",
+    "relevanceTags": [
+      "games"
+    ],
+    "sourcePullRequests": []
+  }
+}
