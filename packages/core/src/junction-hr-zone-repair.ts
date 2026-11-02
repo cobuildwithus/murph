@@ -1,5 +1,7 @@
 import fs from "node:fs/promises";
 
+import { HostedColdHistoryUnavailableError } from "@murphai/runtime-state/node";
+
 import type { ActivitySessionEventRecord, EventRecord } from "@murphai/contracts";
 import { eventRecordSchema, safeParseContract } from "@murphai/contracts";
 
@@ -356,7 +358,8 @@ async function readIntegrationEvidenceJsonPayloadsForEvent(
   let entries: Awaited<ReturnType<typeof listIntegrationIngestsForEvent>>;
   try {
     entries = await listIntegrationIngestsForEvent(vaultRoot, eventId);
-  } catch {
+  } catch (error) {
+    if (error instanceof HostedColdHistoryUnavailableError) throw error;
     return undefined;
   }
 

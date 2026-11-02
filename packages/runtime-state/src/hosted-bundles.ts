@@ -1,7 +1,9 @@
 import { createHash, createHmac } from "node:crypto";
-import { type Stats } from "node:fs";
+import { createReadStream, type Stats } from "node:fs";
 import path from "node:path";
 import { lstat, mkdir, readFile, readdir, rm } from "node:fs/promises";
+
+import { readHostedColdIngestReferences, HostedColdHistoryUnavailableError } from "./hosted-media-references.ts";
 
 import { ensureAssistantStateDirectory } from "./assistant-state-security.ts";
 import { resolveAssistantStatePaths } from "./assistant-state.ts";
@@ -1815,6 +1817,19 @@ export async function collectHostedWorkspaceSnapshotArchivePlan(input: {
     rootPath: vaultRoot,
     signal: input.signal,
   });
+  // A full archive/export must contain verified history. Only the checkpoint
+  // publisher may explicitly exclude objects already represented by its catalogue.
+  for (const reference of await readHostedColdIngestReferences(vaultRoot)) {
+    if (excludedVaultPaths.has(reference.relativePath)) continue;
+    const entry = entries.find((entry) => entry.root === "vault" && entry.relativePath === reference.relativePath);
+    if (!entry || entry.kind !== "file" || entry.size !== reference.byteSize) throw new HostedColdHistoryUnavailableError();
+    const hash = createHash("sha256");
+    for await (const chunk of createReadStream(entry.absolutePath)) {
+      assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
+      hash.update(chunk);
+    }
+    if (hash.digest("hex") !== reference.sha256) throw new HostedColdHistoryUnavailableError();
+  }
   assertHostedWorkspaceSnapshotArchivePlanLive(input.signal);
 
   const operatorHomeRoot = input.operatorHomeRoot ? path.resolve(input.operatorHomeRoot) : null;

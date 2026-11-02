@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-const m = vi.hoisted(() => ({ exact: vi.fn(), runtime: vi.fn(), access: vi.fn(), wake: vi.fn(), route: vi.fn(), sender: vi.fn(), game: vi.fn(), run: vi.fn(), read: vi.fn(), players: vi.fn(), photo: vi.fn(), recapMaterial: vi.fn(), sealRecap: vi.fn(), mailbox: vi.fn(), decodeMailbox: vi.fn() }));
+const m = vi.hoisted(() => ({ exact: vi.fn(), runtime: vi.fn(), access: vi.fn(), wake: vi.fn(), route: vi.fn(), sender: vi.fn(), game: vi.fn(), run: vi.fn(), read: vi.fn(), profiles: vi.fn(), players: vi.fn(), photo: vi.fn(), recapMaterial: vi.fn(), sealRecap: vi.fn(), mailbox: vi.fn(), decodeMailbox: vi.fn() }));
 vi.mock("../src/lib/prisma", () => ({ getPrisma: () => ({ $transaction: (fn: (tx: object) => unknown) => fn({ game: { findFirst: m.game } }), hostedMailboxItem: { findMany: m.mailbox } }) }));
 vi.mock("../src/lib/hosted-execution/runtime-owner", () => ({ requireHostedRuntimeCallbackTx: m.runtime }));
 vi.mock("../src/lib/hosted-mailbox/runtime-access", () => ({ requireHostedRuntimeActiveAccessForUpdateTx: m.access }));
@@ -10,15 +10,15 @@ vi.mock("../src/lib/hosted-mailbox/store", () => ({
 }));
 vi.mock("../src/lib/hosted-groups/group-message-sender", () => ({ resolveHostedGroupMessageSenderMemberId: m.sender }));
 vi.mock("../src/lib/hosted-routing/thread-route-store", () => ({ assertHostedThreadRouteEgressAuthority: m.route }));
-vi.mock("../src/lib/game/chat-membership", () => ({
-  requireExactGameChat: m.exact, readGameChatPlayerIds: m.players,
-  sameGamePlayers: (a: string[], b: string[]) => a.length === 2 && b.length === 2 && a.every((id) => b.includes(id)),
-  gamePairWhere: (ids: string[]) => ({ AND: ids.map((memberId) => ({ players: { some: { memberId } } })), players: { none: { memberId: { notIn: ids } } } }),
+vi.mock("../src/lib/game/chat-membership", async (importOriginal) => ({
+  ...await importOriginal<object>(), requireExactGameChat: m.exact, readGameChatPlayerIds: m.players,
 }));
 vi.mock("../src/lib/game/service", () => ({
   readGameRecapMaterial: m.recapMaterial,
   runGameCommand: m.run,
+  runGameChatUpdate: m.run,
   readGameChatState: m.read,
+  readGameChatProfiles: m.profiles,
   sealGameRecap: m.sealRecap,
 }));
 vi.mock("../src/lib/game/chat-photo", () => ({ handleGameChatPhoto: m.photo }));
@@ -45,21 +45,70 @@ describe("game chat tool authority", () => {
   });
   it("is unavailable when neither player is on the game list", async () => {
     vi.stubEnv("MURPH_GAME_ENABLED", "true"); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "third_synthetic");
-    expect((await handleGameChatTool(read)).result.status).toBe("unavailable");
+    expect((await handleGameChatTool(read)).result).toEqual({ status: "unavailable", error: "GAME_DISABLED: Games are invite-only for now." });
     expect((await handleGameChatTool(update)).result.status).toBe("unavailable");
-    expect(m.run).not.toHaveBeenCalled(); expect(m.read).not.toHaveBeenCalled();
+    const creation = { operation: "create" as const, gameId: "game_disabled", terms: {
+      tasks: [{ memberId: actor, text: "Walk" }, { memberId: "other_synthetic", text: "Read" }],
+      schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: "prize" as const, item: "Lunch" }],
+    } };
+    expect((await handleGameChatTool({ ...read, request: { action: "update_game", origin, update: creation } })).result).toEqual({ status: "unavailable", error: "GAME_DISABLED: Games are invite-only for now." });
+    expect(m.run).not.toHaveBeenCalled(); expect(m.read).not.toHaveBeenCalled(); expect(m.profiles).not.toHaveBeenCalled();
   });
   it.each([actor, "other_synthetic"])("lets either player act when one of them is listed (%s only)", async (allowed) => {
     vi.stubEnv("MURPH_GAME_ENABLED", "true"); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", allowed);
     expect((await handleGameChatTool(update)).result.status).toBe("ok");
     expect(m.run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ actorMemberId: actor }));
   });
+  it("returns player references only to marked reads, preserving old strict readers", async () => {
+    const players = [{ memberId: actor, firstName: "Ava", timeZone: "UTC" }, { memberId: "other_synthetic", firstName: null, timeZone: null }];
+    m.profiles.mockResolvedValue(players);
+    const legacy = await handleGameChatTool(read);
+    expect(legacy.result).not.toHaveProperty("state.players");
+    expect(m.profiles).not.toHaveBeenCalled();
+    const next = await handleGameChatTool({ ...read, request: { ...read.request, includePlayers: true } });
+    expect(next.result).toHaveProperty("state.players", players.map(p => ({ ...p, isSender: p.memberId === actor })));
+    expect(m.profiles).toHaveBeenCalledExactlyOnceWith([actor, "other_synthetic"]);
+  });
+  it("allows an exact-pair read and create before any game but no other write", async () => {
+    m.game.mockResolvedValue(null);
+    expect((await handleGameChatTool(read)).result.status).toBe("ok");
+    const creation = { operation: "create" as const, gameId: "game_new_chat", terms: {
+      tasks: [{ memberId: actor, text: "Walk" }, { memberId: "other_synthetic", text: "Read" }],
+      schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: "prize" as const, item: "Lunch" }],
+    } };
+    expect((await handleGameChatTool({ ...read, request: { action: "update_game", origin, update: creation } })).result.status).toBe("ok");
+    expect(m.run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ actorMemberId: actor, update: creation }));
+    expect((await handleGameChatTool(update)).result.status).toBe("unavailable");
+    expect(m.run).toHaveBeenCalledTimes(1);
+  });
+  it("authorizes an addressed rematch's signed invitee, never an unknown bearer or wrong pair", async () => {
+    m.game.mockResolvedValue({ id: "game_rematch", status: "invited", previousGameId: "game_previous", createdBy: "other_synthetic", inviteeMemberId: actor, players: [{ memberId: "other_synthetic" }] });
+    const request = { ...read, request: { action: "update_game" as const, origin, update: { operation: "approve" as const, gameId: "game_rematch", expectedTermsVersion: 1 } } };
+    expect((await handleGameChatTool(request)).result.status).toBe("ok");
+    expect(m.run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ actorMemberId: actor, update: request.request.update }));
+    for (const inviteeMemberId of [null, "third_synthetic"]) {
+      m.game.mockResolvedValue({ id: "game_rematch", status: "invited", previousGameId: "game_previous", createdBy: "other_synthetic", inviteeMemberId, players: [{ memberId: "other_synthetic" }] });
+      expect((await handleGameChatTool(request)).result.status).toBe("unavailable");
+    }
+    expect(m.run).toHaveBeenCalledTimes(1);
+  });
+  it("refuses create in a three-person room and when the signed sender is outside the pair", async () => {
+    const request = { ...read, request: { action: "update_game" as const, origin, update: { operation: "create" as const, gameId: "game_new_chat", terms: {
+      tasks: [{ memberId: actor, text: "Walk" }, { memberId: "other_synthetic", text: "Read" }], schedule: { days: [0] }, stakes: [{ kind: "dare" as const, item: "Sing" }],
+    } } } };
+    m.players.mockResolvedValue([actor, "other_synthetic", "third_synthetic"]);
+    expect((await handleGameChatTool(request)).result.status).toBe("unavailable");
+    m.players.mockResolvedValue([actor, "other_synthetic"]);
+    m.sender.mockResolvedValue("third_synthetic");
+    expect((await handleGameChatTool(request)).result.status).toBe("unavailable");
+    expect(m.run).not.toHaveBeenCalled();
+  });
   it("uses the authenticated sender and exact pair in any room; never forwards the private app view", async () => {
     const result = await handleGameChatTool(update);
     expect(result).toEqual({ action: "update_game", result: { status: "ok", state: { games: [] } } });
-    expect(m.run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ actorMemberId: actor, chatContainerMemberId: group, command: { type: "respondChange", gameId: "game_synthetic", proposalId: "proposal_synthetic", decision: "approve" } }));
+    expect(m.run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ actorMemberId: actor, chatContainerMemberId: group, update: { operation: "approve", gameId: "game_synthetic", proposalId: "proposal_synthetic" } }));
     expect(m.game).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
-      AND: [{ players: { some: { memberId: actor } } }, { players: { some: { memberId: "other_synthetic" } } }],
+      OR: expect.arrayContaining([expect.objectContaining({ AND: [{ players: { some: { memberId: actor } } }, { players: { some: { memberId: "other_synthetic" } } }] })]),
       id: "game_synthetic",
     }) }));
     expect(m.game.mock.calls[0][0].where).not.toHaveProperty("chatContainerMemberId");
@@ -93,8 +142,8 @@ describe("game chat tool authority", () => {
   });
   it("blocks shared reads and mutations when an extra human joins the provider chat", async () => {
     m.exact.mockRejectedValue(new Error("Game roster changed"));
-    await expect(handleGameChatTool(read)).rejects.toThrow("Game roster changed");
-    await expect(handleGameChatTool(update)).rejects.toThrow("Game roster changed");
+    expect((await handleGameChatTool(read)).result.status).toBe("unavailable");
+    expect((await handleGameChatTool(update)).result.status).toBe("unavailable");
     expect(m.run).not.toHaveBeenCalled(); expect(m.read).not.toHaveBeenCalled();
   });
   it("checks the provider roster again after mutation before returning shared words", async () => {
@@ -229,7 +278,7 @@ describe("game chat tool authority", () => {
   it("cancels a not-yet-started game through the app's cancel command", async () => {
     m.run.mockClear();
     await handleGameChatTool({ ...update, request: { action: "update_game", origin, update: { operation: "cancel_game", gameId: "game_synthetic" } } });
-    expect(m.run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ actorMemberId: actor, chatContainerMemberId: group, command: { type: "cancelInvite", gameId: "game_synthetic" } }));
+    expect(m.run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ actorMemberId: actor, chatContainerMemberId: group, update: { operation: "cancel_game", gameId: "game_synthetic" } }));
   });
 });
 
@@ -241,6 +290,6 @@ it("uses accepted speaker authority for day corrections and returns only the sha
   const dayOutcome = { date: "2030-04-01", status: "marked_incomplete" };
   m.run.mockResolvedValue({ ok: true, game: { private: "never shared" }, dayOutcome });
   const result = await handleGameChatTool({ ...read, request: { action: "update_game", origin, update: { gameId: "game_synthetic", operation: "mark_incomplete", date: "2030-04-01" } } });
-  expect(m.run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ actorMemberId: actor, chatContainerMemberId: group, command: { type: "setDayCompletion", gameId: "game_synthetic", date: "2030-04-01", incomplete: true } }));
+  expect(m.run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ actorMemberId: actor, chatContainerMemberId: group, update: { operation: "mark_incomplete", gameId: "game_synthetic", date: "2030-04-01" } }));
   expect(result).toEqual({ action: "update_game", result: { status: "ok", state: { games: [] }, dayOutcome } });
 });

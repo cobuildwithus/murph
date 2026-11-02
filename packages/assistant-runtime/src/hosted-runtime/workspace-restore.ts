@@ -1,3 +1,4 @@
+import { withIntegrationIngestMaterializer } from "@murphai/core";
 import { resolveWorkspaceDurableRoot } from "./workspace-paths.ts";
 import { randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
@@ -28,6 +29,7 @@ import {
   type HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import {
+  HostedColdHistoryUnavailableError,
   resolveAssistantStatePaths,
   pruneHostedCodexHomeToSessionReferencedRollouts,
 } from "@murphai/runtime-state/node";
@@ -170,8 +172,8 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
         throw input.signal.reason ?? error;
       }
       if (
-        error instanceof HostedRuntimeArtifactReadError
-        && error.retryable
+        (error instanceof HostedRuntimeArtifactReadError && error.retryable)
+        || error instanceof HostedColdHistoryUnavailableError
       ) {
         await clearHostedWorkspaceRuntimeLocalRoots(restored);
         await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
@@ -831,6 +833,14 @@ async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
   status: HostedWorkspaceState["redactedStatus"] | null | undefined;
   vaultRoot: string;
 }): Promise<number> {
+  return withIntegrationIngestMaterializer(input.vaultRoot, async (paths) => {
+    await input.materializeWorkspaceArtifacts?.(paths);
+  }, () => applyHostedCanonicalWriteReceiptsWithHistory(input));
+}
+
+async function applyHostedCanonicalWriteReceiptsWithHistory(
+  input: Parameters<typeof applyHostedCanonicalWriteReceiptsFromWorkspaceState>[0],
+): Promise<number> {
   const receiptLog = await readHostedCanonicalWriteReceiptLog({
     artifactStore: input.platform.artifactStore,
     status: input.status,

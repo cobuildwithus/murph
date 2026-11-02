@@ -69,7 +69,6 @@ const groupingMocks = vi.hoisted(() => ({
 }))
 
 const runLoopMocks = vi.hoisted(() => ({
-  acquireAssistantAutomationRunLock: vi.fn(),
   buildAssistantOutboxSummary: vi.fn(),
   createIntegratedInboxServices: vi.fn(),
   createIntegratedVaultServices: vi.fn(),
@@ -244,10 +243,6 @@ vi.mock('../src/assistant/store.ts', () => ({
   lookupAssistantSession: replyMocks.lookupAssistantSession,
   resolveAssistantStatePaths: runLoopMocks.resolveAssistantStatePaths,
   saveAssistantAutomationState: runLoopMocks.saveAssistantAutomationState,
-}))
-
-vi.mock('../src/assistant/automation/runtime-lock.ts', () => ({
-  acquireAssistantAutomationRunLock: runLoopMocks.acquireAssistantAutomationRunLock,
 }))
 
 vi.mock('../src/assistant/channel-adapters.ts', () => ({
@@ -1094,9 +1089,6 @@ beforeEach(() => {
     }),
   )
 
-  runLoopMocks.acquireAssistantAutomationRunLock.mockReset().mockResolvedValue({
-    release: vi.fn().mockResolvedValue(undefined),
-  })
   runLoopMocks.createIntegratedInboxServices.mockReset()
   runLoopMocks.createIntegratedVaultServices.mockReset().mockReturnValue({})
   runLoopMocks.drainAssistantOutbox.mockReset().mockResolvedValue({
