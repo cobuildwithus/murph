@@ -257,7 +257,6 @@ async function recordClinicalEnrichmentUsage({ input, attemptId, usages, usageRe
         routeId: null,
         schema: ASSISTANT_USAGE_SCHEMA,
         sessionId: attemptId,
-        stripeMeterSource: "murph",
         surface: "hosted-runtime",
         triggerKind: "clinical-records-enrichment",
         turnId,

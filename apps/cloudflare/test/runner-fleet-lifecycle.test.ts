@@ -258,7 +258,6 @@ describe("unified runner identity and binding", () => {
   });
 });
 
-
 describe("bound runner idle cleanup respects canonical runtime ownership", () => {
   function owner(phase: HostedRuntimeOwnerSnapshot["phase"], runnerContainerName = GLOBAL_SLOT): HostedRuntimeOwnerSnapshot {
     return {
@@ -495,11 +494,10 @@ describe("bound runner idle cleanup respects canonical runtime ownership", () =>
     assert.equal(calls.destroy, 1);
   });
 
-  it.each(["unavailable", "legacy", "draining"] as const)("keeps the scheduled retry when ownership is %s", async (outcome) => {
+  it.each(["unavailable"] as const)("keeps the scheduled retry when ownership is %s", async (outcome) => {
     const { container, calls } = runnerHarness({ running: true });
     await container.bindStandbySlot(claimInput());
-    if (outcome === "unavailable") vi.mocked(commandHostedRuntimeOwner).mockRejectedValue(new Error("synthetic control timeout"));
-    else vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover: outcome, status: "observed", owner: null });
+    vi.mocked(commandHostedRuntimeOwner).mockRejectedValue(new Error("synthetic control timeout"));
     await container.onActivityExpired();
     assert.equal(calls.destroy, 0);
     assert.equal((await container.listSchedules("onActivityExpired")).length, 1);

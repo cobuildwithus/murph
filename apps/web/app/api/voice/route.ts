@@ -52,8 +52,8 @@ export const POST = withJsonError(async (request: Request) => {
     userId, voiceCallId: callId, orchestrationAttemptId: `voice-${callId}`, commandTimeoutMs: 25_000,
   });
   if (!("kind" in result) || result.kind !== "runtime_processing_accepted") return jsonOk({ kind: "not_ready" });
-  const { owner, cutover } = await executeHostedRuntimeOwnerCommand({ prisma, userId, command: { operation: "reconcile" } });
-  if (cutover !== "postgres" || !owner || owner.attemptId !== result.runtimeAttemptId
+  const { owner } = await executeHostedRuntimeOwnerCommand({ prisma, userId, command: { operation: "reconcile" } });
+  if (!owner || owner.attemptId !== result.runtimeAttemptId
     || (owner.phase !== "starting" && owner.phase !== "active")) return jsonOk({ kind: "not_ready" });
   return jsonOk({ kind: "reserved", callId, attemptId: owner.attemptId, leaseGeneration: owner.generation });
 });

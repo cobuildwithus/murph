@@ -2,7 +2,7 @@ import { buildHostedExecutionMemberActivatedWake } from "@murphai/hosted-executi
 import { setTimeout as sleep } from "node:timers/promises";
 import { createHmac } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { initializeEmptyPostgresRuntimeForTest, readPostgresRuntimeIdentityForTest } from "#hosted-web-testing";
+import { readPostgresRuntimeIdentityForTest } from "#hosted-web-testing";
 import { startHostedLocalFullStackScenario, type HostedLocalFullStackScenario } from "./helpers/hosted-local-full-stack-scenario.js";
 import { buildHostedLinqInboundEvent, buildLinqHomePhoneNumber, buildLinqRecipientPhoneNumber,
   startHostedLocalLinqStub, type HostedLocalLinqStub } from "./helpers/hosted-local-linq-support.js";
@@ -45,7 +45,6 @@ describe("Postgres runtime: cold reply and warm typing", () => {
       scenarioLabel: "Postgres runtime cold and warm reply",
       streamLogs: process.env.MURPH_E2E_STREAM_DEV_LOGS === "1",
     });
-    await initializeEmptyPostgresRuntimeForTest(scenario.runtimeEnv);
   }, 300_000);
 
   it("processes consecutive foreground nudges through a warm runner", async () => {

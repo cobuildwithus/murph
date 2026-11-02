@@ -57,7 +57,6 @@ export function buildHostedRetellPhoneCallUsageRecord(input: {
     schema: ASSISTANT_USAGE_SCHEMA,
     servedModel: null,
     sessionId: turnId,
-    stripeMeterSource: "murph",
     surface: "hosted-web",
     tokenPricingBasis: "standard",
     totalTokens: null,

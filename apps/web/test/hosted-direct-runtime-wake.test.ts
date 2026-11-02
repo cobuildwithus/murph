@@ -17,7 +17,7 @@ const liveOwner = {
   startedAt: new Date("2026-01-01T00:00:00Z"), acceptedAt: null, completedAt: null,
   failureCount: 0, lastErrorCode: null,
 };
-const snapshot = (patch = {}) => ({ cutoverPhase: "postgres", memberExists: true, ...liveOwner, ...patch });
+const snapshot = (patch = {}) => ({ ...liveOwner, ...patch });
 const accepted = { kind: "runtime_processing_accepted", action: "woken", runtimeAttemptId: "runtime-attempt-test" };
 
 describe("Web direct runtime wake", () => {
@@ -25,7 +25,7 @@ describe("Web direct runtime wake", () => {
     vi.resetAllMocks();
     mocks.client.mockReturnValue({ ensureRuntimeProcessing: mocks.ensure });
     mocks.ensure.mockResolvedValue(accepted);
-    mocks.snapshot.mockResolvedValue([snapshot({ phase: "idle" })]);
+    mocks.snapshot.mockResolvedValue([]);
     mocks.member.mockResolvedValue({ id: input.userId });
     vi.spyOn(console, "info").mockImplementation(() => undefined);
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -63,12 +63,10 @@ describe("Web direct runtime wake", () => {
   it.each([
     ["idle", { phase: "idle" }], ["retiring", { phase: "retiring" }],
     ["untargeted", { runnerContainerName: null }], ["unprepared", { workspaceVersion: null }],
-    ["legacy", { cutoverPhase: "legacy" }], ["draining", { cutoverPhase: "draining" }],
-    ["rolling legacy", { cutoverPhase: "rolling", migrationPhase: "legacy" }],
     ["deleted", { memberExists: false }], ["absent", { userId: null }],
     ["retention", { processingMode: "inbox_media_retention" }],
   ])("omits admission for %s ownership", async (_name, patch) => {
-    mocks.snapshot.mockResolvedValue([snapshot(patch)]);
+    mocks.snapshot.mockResolvedValue(["idle", "retiring", "deleted", "absent"].includes(_name) ? [] : [snapshot(patch)]);
     await startHostedDirectRuntimeWakeBestEffort(input);
     expect(mocks.ensure).toHaveBeenCalledOnce();
     expect(mocks.ensure.mock.calls[0]?.[0]).not.toHaveProperty("admission");

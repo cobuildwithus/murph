@@ -76,7 +76,6 @@ async function ensureRuntimeProcessing(context: ReturnType<typeof createProcessi
   // One completed owner, one expired retained target, then its fresh successor.
   // Contention beyond these bounded transitions belongs to the existing retry owner.
   for (let admission = 0; admission < 3; admission += 1) {
-    if (claim.cutover !== "postgres") return retryProcessing(ctx, "cutover_blocked");
     const owner = claim.owner;
     if (claim.blockedReason === "admission") {
       return retryProcessing(ctx, "admission_blocked", Date.now() + HOSTED_RUNTIME_ADMISSION_BLOCKED_RETRY_MS);
@@ -148,7 +147,7 @@ function createProcessingContext(source: RuntimeProcessingSource, input: Runtime
 }
 
 function retryProcessing(ctx: { diagnostics: RuntimeProcessingDiagnostics }, reason:
-  | "cutover_blocked" | "missing_container_binding" | "admission_blocked"
+  | "missing_container_binding" | "admission_blocked"
   | "claim_blocked" | "retirement_pending" | "completion_unconfirmed" | "starting_fence_preserved"
   | "processing_mode_conflict" | "wake_unconfirmed" | "container_not_ready"
   | "command_budget_exhausted" | "container_rpc_timeout",

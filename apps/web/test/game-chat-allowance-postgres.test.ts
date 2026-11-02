@@ -120,7 +120,7 @@ function usage(memberId: string, now: Date): AssistantUsageRecord {
     usageExtractionVersion: "openai-responses-v1", usageExtractionSourcePath: "openai.responses.usage",
     apiKeyEnv: "OPENAI_API_KEY", baseUrl: "https://api.openai.com/v1", credentialSource: "platform",
     featureKey: null, surface: "linq", triggerKind: "conversation", reportingUserId: null,
-    gatewayTags: [], stripeMeterSource: "murph", tokenPricingBasis: "standard",
+    gatewayTags: [], tokenPricingBasis: "standard",
     inputTokens: 120, cachedInputTokens: 12, outputTokens: 45, reasoningTokens: 0,
     cacheWriteTokens: null, totalTokens: 165,
   };

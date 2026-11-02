@@ -48,7 +48,7 @@ export async function requireRunnerRuntimeWriteFence(input: {
   const result = await commandHostedRuntimeOwner({ source: input.env, userId: input.userId, command: {
     operation: "authorize_effect", attemptId: headers.attemptId, generation: headers.generation, runnerContainerName: null, managedAi: false,
   } });
-  if (result.cutover !== "postgres" || result.status !== "authorized") throw new RunnerRuntimeWriteFenceError();
+  if (result.status !== "authorized") throw new RunnerRuntimeWriteFenceError();
   return headers;
 }
 

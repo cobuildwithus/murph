@@ -233,7 +233,6 @@ const HOSTED_XAI_SEARCH_USAGE_WIRE_FIXTURE = {
     schema: "murph.assistant-usage.v1",
     servedModel: null,
     sessionId: "turn_xai_search_00000000000000000000000000000000",
-    stripeMeterSource: "murph",
     surface: "hosted-runner",
     tokenPricingBasis: "standard",
     totalTokens: null,

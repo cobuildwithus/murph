@@ -651,7 +651,6 @@ async function recordHostedDetachedAssistantAskUsageBestEffort(input: {
         schema: ASSISTANT_USAGE_SCHEMA,
         servedModel: usage.servedModel,
         sessionId: input.requestId,
-        stripeMeterSource: "murph",
         surface: "hosted-runtime",
         tokenPricingBasis: usage.tokenPricingBasis,
         totalTokens: usage.totalTokens,

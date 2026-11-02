@@ -2268,11 +2268,12 @@ Only four packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   group-room model, Temporal, and Cloudflare own no sponsorship state,
   financial fact, expiration scheduler, or second delivery queue.
 - `apps/cloudflare`: hosted execution plane for ensure-processing requests (callback-signed from the Temporal orchestrator, or Vercel OIDC-authenticated best-effort direct ingress wakes from `apps/web`) plus Vercel OIDC-authenticated browser-vault session, deletion, status, and web-owned Telegram usage-limit notice requests, plus signed memberless `bindings-v1` admission and deploy-smoke callbacks used to admit the versioned Temporal worker and verify the managed container image, with per-user coordination via container-enabled Durable Objects, active write-fence wake/replace behavior, encrypted hosted workspace snapshots, legacy encrypted artifact objects, encrypted runner-secret blobs, short-lived DO-local coordination metadata, derived gateway projections, and a native Cloudflare container image that runs one-shot inbox/parser/assistant/device-sync execution through `packages/assistant-runtime`; it owns execution coordination, configured env profile selection, user-secret allowlisting, image-owned native parser tool paths, Worker-owned provider credential injection through runner HTTPS egress interception, and adapter transport details such as local loopback URL rewriting, while runtime launch semantics and profile key sets come from `packages/assistant-runtime`. Web applies its hosted access-and-usage decision before exhausted runnable mailbox work reaches Temporal or the runner. Cloudflare receives no billing or credit projection, cannot grant usage, and performs no Stripe call. Web preserves hosted conversation input before admission, and allowance accounting runs after usage exists. Cloudflare/runner #587 or newer is the permanent rollback floor while Web omits the retired callback route. Cloudflare carries the signed plan-usage read as a transport-only runtime port and cannot select a member, billing action, or usage interpretation; it owns opaque runtime blobs only, not canonical hosted product facts outside the encrypted workspace snapshot, and it may verify signed ingress/runtime root envelopes and unwrap its P-256 recipient wrap without holding GCP KMS decrypt authority; foreground runtime work may defer intermediate checkpoints, the active invocation remains dirty until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds, RunnerContainer never records pending checkpoint intent, and activity expiry is cleanup-only
-- Runtime ownership is selected by a durable Web/Postgres cutover gate.
+- Runtime ownership is exclusively Web/Postgres. The finished migration gate,
+  discovery/import, legacy selection and materialization are removed.
   [Hosted Postgres runtime ownership](agent-docs/references/hosted-postgres-runtime.md)
-  owns the activated lifecycle, transaction boundaries, recoverable uploads, and
-  finite migration. The UserRunner ownership descriptions in this document apply
-  only to the legacy phase; the flag defaults off until the authorized cutover.
+  owns the exact attempt, target, workspace, provider authority, resource cleanup,
+  deploy-skew proof and deferred non-destructive schema contract. The terminal
+  `cutover: "postgres"` wire field remains for deployed readers.
 - Fresh member execution uses one globally eligible `RunnerContainer` fleet.
   Warm inventory is an allocation optimization within that fleet: the memberless
   coordinator maintains a configurable number of pristine current-release slots
@@ -2281,8 +2282,8 @@ Only four packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   image pair through both readiness gates. Deployment smoke separately proves
   the exact candidate image on a fresh serving slot before promotion. Warm and cold
   starts use the same opaque identity, immutable binding, invocation, retention,
-  and retirement lifecycle. `UserRunner` persists the exact target before binding
-  and remains the sole member execution, write-fence, and workspace owner.
+  and retirement lifecycle. `HostedRuntimeOwner` persists the exact target before
+  binding and remains the member execution and write-fence authority.
   Only fence-free `default` work from authenticated Web-direct ingress or an
   authenticated request with `conversationWorkPending: true` may claim ready
   inventory. Temporal derives that fact from fresh admitted conversation lag.
@@ -2938,11 +2939,10 @@ save or explicit retarget, before the canonical write, with no transport replay
 or alternate-destination fallback. It uses the existing commit timeout (30 seconds
 by default) and caller cancellation. Ordinary text turns and voice automation
 inspection or non-retargeting edits add zero routing calls. For one admitted
-private member, the source-derived database bound is 13 statements plus the
-authority transaction's begin/commit: one nonce insert, at most six authority
-statements during cutover, one container lookup, at most three member/identity/
-routing reads, and two envelope-metadata reads. Steady-state authority uses three
-statements instead of six. There is at most one authority transaction, completed
+private member, the source-derived database bound is 9 statements plus the
+authority transaction's begin/commit: one nonce insert, two authority
+statements, one container lookup, at most three member/identity/
+routing reads, and two envelope-metadata reads. There is at most one authority transaction, completed
 before crypto; the conservative connection bound is three for relation loading.
 Decryption covers at most seven private fields and seven distinct roots, with
 the existing crypto owner limiting concurrent unwraps to four. These bounds do
@@ -2982,15 +2982,15 @@ opening the transaction. The existing KMS owner permits two decrypt attempts
 within 25 seconds, with a 10-second per-attempt deadline; authentication is inside
 that deadline. No provider call occurs while the append transaction is open.
 
-The conservative per-attempt database bound is one preparation read plus 26
-transaction statements: six runtime-authority statements during cutover, one
+The conservative per-attempt database bound is one preparation read plus 22
+transaction statements: two runtime-authority statements, one
 sponsor lock, at most seven member/access relation reads, one consent read, two
 workspace-existence statements, two root-lock/revalidation statements, two dedupe
 statements, three causal/lane allocation statements, and two item/payload or
 conflict-resolution statements. This deliberately includes missing-workspace and
 relation-loading branches; ordinary steady-state private calls use fewer reads.
-Including both preparation attempts and nonce admission gives at most 55
-statements per Web request, or 110 across its single transport replay, excluding
+Including both preparation attempts and nonce admission gives at most 47
+statements per Web request, or 94 across its single transport replay, excluding
 transaction-control statements. Attempts within a request are serial and use one
 transaction connection; two replayed server requests can overlap. At most four
 root unwraps/eight KMS decrypt attempts and two application-level post-commit

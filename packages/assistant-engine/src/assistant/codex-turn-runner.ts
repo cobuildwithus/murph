@@ -454,7 +454,6 @@ function createAssistantProviderUsageAttribution(input: {
       messageInput: input.executionPlan.input,
       session: input.attemptPlan.session,
     }),
-    stripeMeterSource: 'murph',
     triggerKind: resolveAssistantUsageTriggerKind(
       input.executionPlan.input.turnTrigger ?? 'manual-ask',
     ),

@@ -1233,7 +1233,6 @@ function buildHostedLinqInstantFirstTurnUsageRecord(input: {
     schema: ASSISTANT_USAGE_SCHEMA,
     servedModel: input.response.model,
     sessionId: turnId,
-    stripeMeterSource: "murph",
     surface: "hosted-web",
     // Murph funds the onboarding priority premium.
     tokenPricingBasis: "standard",

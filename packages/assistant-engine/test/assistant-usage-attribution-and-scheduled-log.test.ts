@@ -136,7 +136,6 @@ describe("assistant usage attribution", () => {
       memberId: "member_123",
       reportingSecret: "reporting-secret",
       surface: " Hosted Web ",
-      stripeMeterSource: "murph",
       triggerKind: " Manual Ask ",
     });
     const expectedReportingUserId = `musr_${createHmac("sha256", "reporting-secret")
@@ -164,7 +163,6 @@ describe("assistant usage attribution", () => {
         "credential:platform",
       ],
       reportingUserId: expectedReportingUserId,
-      stripeMeterSource: "murph",
     });
     expect(expectedReportingUserId).not.toBe(legacyReportingUserId);
 
@@ -603,7 +601,6 @@ describe("assistant scheduled-log cron helpers", () => {
   });
 });
 
-
 describe('managed usage workflow attribution', () => {
   it.each([
     [MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID, 'assistant_cron_journal_context'],
@@ -618,9 +615,9 @@ describe('managed usage workflow attribution', () => {
     expect(resolveAssistantUsageFeatureKey({ ...input, deliverResponse: true,
       scheduledInvocationAuthority: { ...input.scheduledInvocationAuthority, automationId: 'automation_private_unknown' } })).toBe('assistant_cron')
     const base = { credentialSource: 'platform' as const, memberId: 'synthetic-member',
-      surface: 'telegram', triggerKind: 'automation_cron', stripeMeterSource: 'murph' as const }
+      surface: 'telegram', triggerKind: 'automation_cron' }
     const attribution = createAssistantUsageAttribution({ ...base, featureKey: expected })
-    expect(attribution).toMatchObject({ credentialSource: 'platform', stripeMeterSource: 'murph',
+    expect(attribution).toMatchObject({ credentialSource: 'platform',
       featureKey: expected, triggerKind: 'automation_cron' })
     expect(JSON.stringify(attribution)).not.toContain(automationId)
     expect(attribution).not.toHaveProperty('model')

@@ -276,8 +276,6 @@ describe("completion client, router, and native receipt composition", () => {
     { name: "negative generation", generation: "-1", reason: "owner_unconfirmed" },
     { name: "oversized generation", generation: "9".repeat(20), reason: "owner_unconfirmed" },
     { name: "missing owner", owner: null, reason: "owner_unconfirmed" },
-    { name: "legacy cutover with newer owner", cutover: "legacy", owner: { generation: "10" }, reason: "owner_unconfirmed" },
-    { name: "draining cutover with completed owner", cutover: "draining", owner: { attemptId: null, phase: "idle", completedAt: COMPLETED_AT }, reason: "owner_unconfirmed" },
     { name: "missing target", owner: { runnerContainerName: null }, reason: "owner_unconfirmed" },
   ];
   it.each(guardedCases)("classifies $name without crossing a fence", async ({ owner, cutover = "postgres", generation, reason }) => {

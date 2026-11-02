@@ -96,7 +96,6 @@ async function recordAssistantUsageEventToCompletion(
       gatewayTags: [...(usageAttribution?.gatewayTags ?? [])],
       reportingUserId: usageAttribution?.reportingUserId ?? null,
       surface: usageAttribution?.surface ?? null,
-      stripeMeterSource: usageAttribution?.stripeMeterSource ?? 'murph',
       triggerKind: usageAttribution?.triggerKind ?? null,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,

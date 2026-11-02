@@ -60,7 +60,7 @@ Hosted execution no longer flows through a web-owned acquire/commit/finalize run
 protocol; the restored local runtime imports mailbox items, pulls dirty
 device-sync state, and checkpoints its own workspace state.
 Status checkpoints retaining the same normalized snapshot skip cleanup bookkeeping
-entirely. New publication and migration own resource registration; unchanged status
+entirely. New publication owns resource registration; unchanged status
 updates introduce no new resource. Retirement validation and workspace CAS still
 run. Changed references record current and replaced resources, preserving recovery
 deadlines and metadata.
@@ -1228,7 +1228,7 @@ Hosted managed crypto:
   `HOSTED_CRYPTO_RECOVERY_KEY_ID`; configure the recovery pair together, and
   configure the TEE runtime public key, key ID, and policy ID together
 
-Hosted AI usage metering:
+Hosted AI usage accounting:
 
 - Hosted AI usage rows are recorded locally for allowance, audit, and future billing analysis. The hosted app no longer attaches Stripe usage prices at checkout or posts Stripe meter events.
 - GPT-6 Astra is an optional managed OpenAI model for active paid individual Edge/Max
@@ -1305,9 +1305,9 @@ Hosted AI usage metering:
 - Included-allowance accounting starts from the deployment that enables allowance accounting on imports. Existing current-period usage rows are not backfilled by default.
 
 `apps/web` records every hosted assistant usage row by member in `HostedAiUsage`.
-Hosted execution accepts Murph-owned usage rows with `stripeMeterSource=murph`.
-Recorded rows keep `stripeMeterStatus=skipped` so they cannot be backbilled by
-the removed Stripe meter path. The hosted allowance owner reads web-owned spend
+The retired Stripe meter metadata, normalization and retry writes are removed.
+Existing database defaults preserve dormant columns until the separate contract
+cleanup documented in [runtime ownership](../../agent-docs/references/hosted-postgres-runtime.md#deferred-schema-contract-cleanup). The hosted allowance owner reads web-owned spend
 and the local credit projection for admission, projection, and notices.
 
 Hosted sign-in uses the first-party email, phone and Telegram routes. Missing

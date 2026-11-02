@@ -113,14 +113,15 @@ Assistant group-tool and dynamic-context suites cover the model boundary; the
 focused real-Codex selected-source gap journey checks truthful source selection
 and unchanged schedules through the production tool and prompt builders.
 
-`apps/web/test/hosted-runtime-retirement-cardinality-postgres.test.ts` runs the
-actual retirement command against 100,000 synthetic terminal sources in an
-isolated loopback `murph_test_*` database. With
-`MURPH_TEST_POSTGRES_CONCURRENCY=1`, it proves one transaction, at most twelve
-PostgreSQL statements including setup, one narrow census read, no external calls,
-and completion within the production five-second transaction deadline. Existing
-member migration/cutover suites cover live authority revalidation and concurrent
-or post-signup repeats. Run these database suites with file parallelism disabled.
+Runtime-owner PostgreSQL suites retain exact claim/generation, provider authority,
+callback identity, deletion, workspace CAS and bounded resource cleanup proof.
+Finished census/import/activation tests are retired. The member-resource and
+account-cleanup cases preserve deleted-member ownership and ordinary cleanup
+without enrollment. Enable `MURPH_TEST_POSTGRES_CONCURRENCY=1` against an isolated
+loopback database; run database suites with file parallelism disabled. Full Web
+and Cloudflare Node suites plus hosted-execution, assistant-engine,
+assistant-runtime and hosted-local-harness coverage protect the removal of
+retired Stripe export metadata while retaining ledger and allowance accounting.
 
 Morning Journal and upcoming-context proof lives in
 `packages/assistant-engine/test/assistant-upcoming-context.test.ts`,

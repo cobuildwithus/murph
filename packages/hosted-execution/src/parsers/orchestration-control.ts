@@ -322,7 +322,7 @@ export function parseHostedRuntimeEnsureProcessingRequest(
 
 function parseRuntimeProcessingAdmission(value: unknown, processingMode: string) {
   const admission = parseHostedRuntimeOwnerResponse(value);
-  if (admission.cutover !== "postgres" || !admission.owner || admission.owner.phase === "idle") {
+  if (!admission.owner || admission.owner.phase === "idle") {
     throw new TypeError("Runtime admission requires a non-idle Postgres owner.");
   }
   if (admission.status === "existing") return admission;

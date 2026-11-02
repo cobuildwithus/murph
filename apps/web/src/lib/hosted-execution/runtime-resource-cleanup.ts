@@ -8,7 +8,6 @@ import { parseHostedBrowserVaultReplicaRef, parseHostedExecutionSnapshotRef } fr
 import { HOSTED_RUNTIME_ORPHAN_GRACE_MS } from "@murphai/hosted-execution/runtime-resources";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import { lockHostedRuntimeOwnerRowTx } from "./runtime-owner";
-import { hostedRuntimePostgresResourceScopeSql, lockHostedRuntimeMemberCutoverTx } from "./runtime-cutover";
 import { snapshotOrphanCandidates, replicaOrphanCandidate } from "./runtime-orphans";
 import { executeHostedRuntimeMediaCommand, hasPendingRuntimeMediaPutTx, lockHostedRuntimeMediaTx, purgeReceipt } from "./runtime-media";
 import type { HostedRuntimeMediaPurge } from "@murphai/hosted-execution/runtime-media";
@@ -92,14 +91,12 @@ export async function claimHostedRuntimeResourceCleanup(input: { prisma: PrismaC
     SELECT resource.user_id AS "userId", resource.kind, resource.resource_id AS "resourceId"
     FROM hosted_runtime_orphan AS resource
     WHERE resource.purged_at IS NULL AND resource.cleanup_at <= ${input.now}
-      AND ${hostedRuntimePostgresResourceScopeSql(Prisma.sql`resource.user_id`)}
     ORDER BY resource.cleanup_at, resource.user_id, resource.kind, resource.resource_id
     LIMIT ${RESOURCE_CLEANUP_BATCH_SIZE}
   `;
   for (const candidate of candidates) {
     if (Date.now() >= (input.deadlineAtMs ?? Infinity)) break;
     const row = await input.prisma.$transaction(async tx => {
-      if (await lockHostedRuntimeMemberCutoverTx(tx, candidate.userId) !== "postgres") return null;
       await lockHostedMemberRow(tx, candidate.userId);
       await lockHostedRuntimeOwnerRowTx(tx, candidate.userId);
       const where = { userId_kind_resourceId: candidate };
@@ -128,14 +125,12 @@ export async function claimHostedRuntimeResourceCleanup(input: { prisma: PrismaC
     FROM hosted_runtime_media AS resource
     WHERE resource.purged_at IS NULL AND resource.expires_at <= ${input.now}
       AND (resource.retired_at IS NULL OR resource.updated_at <= ${new Date(input.now.getTime() - 60_000)})
-      AND ${hostedRuntimePostgresResourceScopeSql(Prisma.sql`resource.user_id`)}
     ORDER BY resource.expires_at, resource.user_id, resource.media_id
     LIMIT ${RESOURCE_CLEANUP_BATCH_SIZE}
   `;
   for (const candidate of expiredMedia) {
     if (Date.now() >= (input.deadlineAtMs ?? Infinity)) break;
     const row = await input.prisma.$transaction(async tx => {
-      if (await lockHostedRuntimeMemberCutoverTx(tx, candidate.userId) !== "postgres") return null;
       await lockHostedRuntimeMediaTx(tx, candidate.userId, candidate.mediaId);
       const where = { userId_mediaId: candidate };
       const current = await tx.hostedRuntimeMedia.findUnique({ where });

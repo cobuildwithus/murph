@@ -1342,7 +1342,7 @@ model HostedUserCryptoAudit {
 /// No expiry grants replacement authority; retirement requires adapter proof.
 model HostedRuntimeOwner {
   userId                    String   @id @map("user_id")
-  // Temporary backend selection. An imported idle owner is not yet runnable.
+  // Retired migration metadata; retained for a later contract migration.
   migrationPhase            String   @default("legacy") @map("migration_phase")
   migrationId               String?  @map("migration_id")
   generation                BigInt   @default(0)
@@ -1367,8 +1367,7 @@ model HostedRuntimeOwner {
   @@map("hosted_runtime_owner")
 }
 
-/// Finite migration gate. A shared row lock fences legacy publication and
-/// admission against the exclusive legacy -> draining -> postgres transition.
+/// Retired campaign record, retained only for schema compatibility and inert triggers.
 model HostedRuntimeCutover {
   id              String    @id
   phase           String    @default("legacy")
@@ -1388,8 +1387,7 @@ model HostedRuntimeCutover {
   @@map("hosted_runtime_cutover")
 }
 
-/// Temporary inventory and exact-page receipt, retained through the rollback
-/// window. No member FK: dormant and deleted-member objects must be covered.
+/// Retired import inventory and page receipts; drop only in the contract cleanup.
 model HostedRuntimeLegacyImport {
   objectId     String    @id @map("object_id")
   inventoryClass String @default("baseline") @map("inventory_class")
@@ -1791,6 +1789,7 @@ model HostedAccountDeletionCleanup {
   runtimeLogsCompletedAt DateTime? @map("runtime_logs_completed_at")
   temporalCompletedAt   DateTime? @map("temporal_completed_at")
   temporalNextRuntimeIndex Int     @default(0) @map("temporal_next_runtime_index")
+  // Retired census cursor; retained for a later contract migration.
   runtimeMigrationNextIndex Int?   @default(0) @map("runtime_migration_next_index")
   attemptCount          Int       @default(0) @map("attempt_count")
   nextAttemptAt         DateTime  @map("next_attempt_at")
@@ -2542,6 +2541,7 @@ model HostedAiUsage {
   triggerKind                String?      @map("trigger_kind")
   reportingUserId            String?      @map("reporting_user_id")
   gatewayTagsJson            Json?        @map("gateway_tags_json")
+  // Retired export columns: no application reads/writes; contract cleanup is deferred.
   stripeMeterSource          String       @default("murph") @map("stripe_meter_source")
   inputTokens                Int?         @map("input_tokens")
   outputTokens               Int?         @map("output_tokens")

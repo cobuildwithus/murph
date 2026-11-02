@@ -1551,7 +1551,6 @@ function createAssistantUsageRecord(): AssistantUsageRecord {
     schema: ASSISTANT_USAGE_SCHEMA,
     servedModel: "gpt-6.1-sol",
     sessionId: "asst_direct_usage",
-    stripeMeterSource: "murph",
     surface: null,
     tokenPricingBasis: "standard",
     totalTokens: 15,

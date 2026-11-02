@@ -1,6 +1,5 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { readHostedExecutionControlClientIfConfigured } from "./control";
-import { hostedRuntimePostgresResourceScopeSql, lockHostedRuntimeMemberCutoverTx } from "./runtime-cutover";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 
 /** The clock schedules recovery; only the exact R2 abort/NoSuchUpload receipt
@@ -12,7 +11,6 @@ export async function reconcileHostedRuntimeUploads(input: {
   if (!client) return { recovered: 0, failed: 0 };
   const rows = await input.prisma.$transaction(async tx => {
     if (input.deletedUserId) {
-      if (await lockHostedRuntimeMemberCutoverTx(tx, input.deletedUserId) !== "postgres") return [];
       await lockHostedMemberRow(tx, input.deletedUserId);
       if (await tx.hostedMember.findUnique({ where: { id: input.deletedUserId }, select: { id: true } })) return [];
     }
@@ -21,7 +19,6 @@ export async function reconcileHostedRuntimeUploads(input: {
       FROM hosted_runtime_put_drain AS resource
       WHERE resource.completed_at IS NULL AND resource.upload_id IS NOT NULL AND resource.object_key IS NOT NULL
         AND ${input.deletedUserId ? Prisma.sql`resource.user_id = ${input.deletedUserId}` : Prisma.sql`resource.reconcile_after <= ${input.now}`}
-        AND ${hostedRuntimePostgresResourceScopeSql(Prisma.sql`resource.user_id`)}
       ORDER BY resource.reconcile_after, resource.user_id, resource.write_id
       LIMIT 50
     `;

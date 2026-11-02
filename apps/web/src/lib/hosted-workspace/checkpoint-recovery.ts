@@ -4,7 +4,6 @@ import { fingerprintRecoveryReplica, parseHostedCheckpointRecoveryRequest, type 
 import { HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS } from "@murphai/hosted-execution/runtime-control";
 import { buildHostedWorkspaceSnapshotV2FingerprintSha256 as fingerprint } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import { hostedWorkspaceSnapshotObjectKey } from "@murphai/hosted-execution/storage-paths";
-import { lockHostedRuntimeMemberCutoverTx } from "../hosted-execution/runtime-cutover";
 import { lockHostedRuntimeOwnerRowTx, retireHostedRuntimeTx } from "../hosted-execution/runtime-owner";
 import { recordRuntimeOrphansTx, requireRuntimeResourcesPublishableTx, snapshotOrphanCandidates } from "../hosted-execution/runtime-orphans";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
@@ -21,7 +20,6 @@ function conflict(): never {
 }
 
 async function lockRecoveryWorkspaceTx(tx: Prisma.TransactionClient, userId: string) {
-  if (await lockHostedRuntimeMemberCutoverTx(tx, userId) !== "postgres") conflict();
   await lockHostedMemberRow(tx, userId);
   const member = await tx.hostedMember.findUnique({ where: { id: userId }, select: { suspendedAt: true } });
   if (!member || member.suspendedAt || await readHostedHealthDataConsentState({ prisma: tx, memberId: userId }) === "revoked"
