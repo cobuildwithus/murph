@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { brotliCompressSync } from "node:zlib";
 import { expect, test, vi } from "vitest";
-import { archiveClosedIntegrationIngestShards, buildIntegrationEvidencePart, buildIntegrationIngestRecord, initializeVault, readIntegrationIngestEntries, listIntegrationIngestsForEvent, withIntegrationIngestMaterializer } from "@murphai/core";
+import { archiveClosedIntegrationIngestShards, buildIntegrationEvidencePart, buildIntegrationIngestRecord, importDeviceBatch, initializeVault, readIntegrationIngestEntries, listIntegrationIngestsForEvent, withIntegrationIngestMaterializer } from "@murphai/core";
 import type { HostedRuntimeMediaStore } from "../src/hosted-runtime/platform.ts";
 import {
   type HostedMediaReferenceCatalogue,
@@ -21,25 +21,108 @@ import { createHostedArtifactMaterializer } from "../src/hosted-runtime/artifact
 
 const closedPath = "ledger/integration-ingests/2020/2020-01.jsonl.br";
 
-test("reader expansion keeps unreferenced closed and current months inline", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "cold-reader-inline-"));
-  const put = vi.fn(async () => {});
+test("snapshot excludes closed ingest months, retains current month and sparse references", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "cold-ingests-"));
+  const objects = new Map<string, Uint8Array>();
+  const mediaStore: HostedRuntimeMediaStore = {
+    put: async (entry) => { objects.set(entry.mediaId, entry.bytes); },
+    get: async (entry) => objects.get(entry.mediaId) ?? null,
+  };
   try {
-    await initializeVault({ vaultRoot });
+    await initializeVault({ vaultRoot, title: "Synthetic cold history", timezone: "UTC" });
     const month = new Date().toISOString().slice(0, 7);
     const currentPath = `ledger/integration-ingests/${month.slice(0, 4)}/${month}.jsonl.br`;
+    const bytes = brotliCompressSync(Buffer.from('{"synthetic":true}\n'));
     for (const relativePath of [closedPath, currentPath]) {
       await mkdir(path.dirname(path.join(vaultRoot, relativePath)), { recursive: true });
-      await writeFile(path.join(vaultRoot, relativePath), brotliCompressSync(Buffer.from('{"synthetic":true}\n')));
+      await writeFile(path.join(vaultRoot, relativePath), bytes);
     }
-    const result = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore: { put, get: async () => null } });
-    expect(result.excludedVaultPaths).toEqual([]);
-    expect(put).not.toHaveBeenCalled();
+    const result = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore });
+    expect(result.excludedVaultPaths).toEqual([closedPath]);
     const plan = await collectHostedWorkspaceSnapshotArchivePlan({ durableRoot: vaultRoot, vaultRoot, excludedVaultPaths: result.excludedVaultPaths });
-    for (const relativePath of [closedPath, currentPath]) {
-      expect(plan.entries).toContainEqual(expect.objectContaining({ relativePath }));
-    }
-  } finally { await rm(vaultRoot, { recursive: true, force: true }); }
+    expect(plan.entries.some((entry) => entry.relativePath === closedPath)).toBe(false);
+    expect(plan.entries.some((entry) => entry.relativePath === currentPath)).toBe(true);
+    expect(plan.entries.some((entry) => entry.relativePath === HOSTED_MEDIA_REFS_RELATIVE_PATH)).toBe(true);
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toEqual([
+      expect.objectContaining({
+        relativePath: closedPath, mediaKind: "integration-ingest", expiresAt: null,
+        byteSize: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"),
+      }),
+    ]);
+    await rm(path.join(vaultRoot, closedPath));
+    expect((await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).excludedVaultPaths)
+      .toEqual([closedPath]);
+    expect(objects.size).toBe(1);
+    expect(await readFile(path.join(vaultRoot, currentPath))).toEqual(bytes);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("idle-compressed current month stays inline and appendable, then externalizes after rollover", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2030-11-15T12:00:00.000Z"));
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "active-cold-ingest-"));
+  const objects = new Map<string, Uint8Array>();
+  const mediaStore: HostedRuntimeMediaStore = {
+    put: vi.fn(async (entry) => { objects.set(entry.mediaId, entry.bytes); }),
+    get: vi.fn(async (entry) => objects.get(entry.mediaId) ?? null),
+  };
+  const importedAt = new Date().toISOString();
+  const logicalPath = "ledger/integration-ingests/2030/2030-11.jsonl";
+  const archivePath = `${logicalPath}.br`;
+  const batch = { vaultRoot, provider: "synthetic", importedAt,
+    evidenceParts: [{ role: "payload", fileName: "payload.json", content: { value: 1 } }],
+    events: [], samples: [] };
+  try {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const record = buildIntegrationIngestRecord({
+      id: "xfm_ActiveLarge", provider: "synthetic", source: "device", importedAt,
+      parts: [buildIntegrationEvidencePart({ role: "payload", fileName: "payload.json",
+        mediaType: "application/json", content: JSON.stringify({ evidence: "x".repeat(4 * 1024 * 1024) }) })],
+      eventOutputs: [], eventIdsComplete: true, sampleIds: [], sampleIdsComplete: true,
+      eventCount: 0, sampleCount: 0,
+    });
+    await mkdir(path.dirname(path.join(vaultRoot, logicalPath)), { recursive: true });
+    await writeFile(path.join(vaultRoot, logicalPath), `${JSON.stringify(record)}\n`);
+    expect((await archiveClosedIntegrationIngestShards({ vaultRoot, archiveCurrentMonth: true })).archivedShardCount).toBe(1);
+    await expect(readFile(path.join(vaultRoot, logicalPath))).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).excludedVaultPaths).toEqual([]);
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toEqual([]);
+    const first = await importDeviceBatch(batch);
+    expect(first.applied).toBe(true);
+    expect((await importDeviceBatch(batch)).applied).toBe(false);
+    expect((await readIntegrationIngestEntries(vaultRoot)).map((entry) => entry.record.id))
+      .toEqual([record.id, first.ingestId]);
+    const activeBytes = await readFile(path.join(vaultRoot, archivePath));
+    const publication = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore });
+    expect(publication.excludedVaultPaths).toEqual([]);
+    const plan = await collectHostedWorkspaceSnapshotArchivePlan({ vaultRoot, durableRoot: vaultRoot,
+      excludedVaultPaths: publication.excludedVaultPaths });
+    expect(plan.entries).toContainEqual(expect.objectContaining({ relativePath: archivePath, size: activeBytes.length }));
+    expect(mediaStore.put).not.toHaveBeenCalled();
+    expect(mediaStore.get).not.toHaveBeenCalled();
+
+    vi.setSystemTime(new Date("2030-12-01T00:00:00.000Z"));
+    expect((await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).excludedVaultPaths).toEqual([archivePath]);
+    const [cold] = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries;
+    expect(cold).toBeDefined();
+    await rm(path.join(vaultRoot, archivePath));
+    const materialize = createHostedArtifactMaterializer({ mediaStore, vaultRoot, operatorHomeRoot: vaultRoot });
+    const historical = await withIntegrationIngestMaterializer(vaultRoot, materialize, () => importDeviceBatch({
+      ...batch, evidenceParts: [{ role: "payload", fileName: "payload.json", content: { value: 2 } }],
+    }));
+    expect(historical.applied).toBe(true);
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toEqual([]);
+    expect((await readIntegrationIngestEntries(vaultRoot)).map((entry) => entry.record.id))
+      .toEqual([record.id, first.ingestId, historical.ingestId]);
+    expect((await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).excludedVaultPaths).toEqual([archivePath]);
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]?.sha256).not.toBe(cold!.sha256);
+    expect(Buffer.from(objects.get(cold!.mediaId)!)).toEqual(activeBytes);
+  } finally {
+    vi.useRealTimers();
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
 });
 
 for (const failure of [null, "missing", "hash", "size"] as const) {
