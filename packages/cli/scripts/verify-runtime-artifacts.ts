@@ -14,19 +14,14 @@ interface PackageJsonShape {
   dependencies?: Record<string, string | undefined>
   devDependencies?: Record<string, string | undefined>
   optionalDependencies?: Record<string, string | undefined>
-  bundleDependencies?: string[]
   main?: string
   types?: string
-  files?: string[]
   bin?: Record<string, string>
   exports?: Record<string, {
     default?: string
     import?: string
     types?: string
   }>
-  publishConfig?: {
-    access?: string
-  }
   repository?: string | {
     type?: string
     url?: string
@@ -69,31 +64,31 @@ const packageLocalRelativePaths = packageLocalTsFiles.map((filePath) =>
 
 assert(
   packageJson.name === '@murphai/murph',
-  'package.json must keep the published package name @murphai/murph.',
+  'package.json must keep the workspace package name @murphai/murph.',
 )
 assert(
-  packageJson.private === false,
-  'package.json must be marked publishable (private: false).',
+  packageJson.private === true,
+  'package.json must remain private for hosted-only runtime use.',
 )
 assert(
   packageJson.dependencies?.['@murphai/device-syncd'] === 'workspace:*',
-  'package.json must depend on @murphai/device-syncd so the published @murphai/murph package installs the managed device daemon.',
+  'package.json must depend on @murphai/device-syncd so the hosted CLI imports the device runtime.',
 )
 assert(
   packageJson.dependencies?.['@murphai/operator-config'] === 'workspace:*',
-  'package.json must depend on @murphai/operator-config so the published @murphai/murph package installs the operator-config owner directly.',
+  'package.json must depend on @murphai/operator-config so the hosted @murphai/murph package installs the operator-config owner directly.',
 )
 assert(
   packageJson.dependencies?.['@murphai/assistant-engine'] === 'workspace:*',
-  'package.json must depend on @murphai/assistant-engine so the published @murphai/murph package installs the vault and inbox owner directly.',
+  'package.json must depend on @murphai/assistant-engine so the hosted @murphai/murph package installs the vault and inbox owner directly.',
 )
 assert(
   packageJson.dependencies?.['@murphai/health-commons'] === 'workspace:*',
-  'package.json must depend on @murphai/health-commons so the published @murphai/murph package ships the public Health Commons catalog.',
+  'package.json must depend on @murphai/health-commons so the hosted @murphai/murph package ships the public Health Commons catalog.',
 )
 assert(
   packageJson.dependencies?.['@murphai/exercise-library'] === 'workspace:*',
-  'package.json must depend on @murphai/exercise-library so the published @murphai/murph package ships the public exercise catalog.',
+  'package.json must depend on @murphai/exercise-library so the hosted @murphai/murph package ships the public exercise catalog.',
 )
 
 assert(
@@ -104,55 +99,19 @@ assert(
   packageJson.types === './dist/index.d.ts',
   'package.json must expose ./dist/index.d.ts as types.',
 )
-assert(
-  packageJson.files?.includes('CHANGELOG.md') === true,
-  'package.json files must include CHANGELOG.md for package-scoped releases.',
-)
-assert(
-  packageJson.files?.includes('config.schema.json') === true,
-  'package.json files must include config.schema.json so published installs ship incur config-schema autocomplete.',
-)
-assert(
-  packageJson.bundleDependencies?.includes('@murphai/health-commons') === true,
-  'package.json bundleDependencies must include @murphai/health-commons so published installs ship the generated Health Commons catalog.',
-)
-assert(
-  packageJson.bundleDependencies?.includes('@murphai/exercise-library') === true,
-  'package.json bundleDependencies must include @murphai/exercise-library so published installs ship the generated exercise catalog.',
-)
+
 assert(
   packageJson.dependencies?.incur === '0.5.1',
   'package.json must keep incur pinned to the reviewed runtime with Murph error-envelope and canonical skill-hash patches.',
 )
 assert(
   packageJson.dependencies?.zod === '^4.5.4',
-  'package.json must install Zod because the published CLI bundles private declarations that name zod/v4.',
+  'package.json must install Zod because the hosted CLI bundles private declarations that name zod/v4.',
 )
 assert(
   packageJson.devDependencies?.zod === undefined,
-  'package.json must not classify Zod as dev-only while published bundled declarations require it.',
+  'package.json must not classify Zod as dev-only while hosted bundled declarations require it.',
 )
-const bundledIncurRuntimeDependencies: Record<string, string> = {
-  '@cfworker/json-schema': '^4.1.1',
-  '@modelcontextprotocol/server': '2.0.0-alpha.4',
-  '@scalar/openapi-types': '^0.8.0',
-  '@toon-format/toon': '^2.1.0',
-  tokenx: '^1.3.0',
-  yaml: '^2.8.2',
-}
-for (const [dependencyName, expectedSpecifier] of Object.entries(bundledIncurRuntimeDependencies)) {
-  assert(
-    packageJson.dependencies?.[dependencyName] === expectedSpecifier,
-    `package.json must declare ${dependencyName}@${expectedSpecifier} while incur is bundled, because npm does not install dependencies declared only by bundled dependency payloads.`,
-  )
-}
-
-
-assert(
-  packageJson.bundleDependencies?.includes('incur') === true,
-  'package.json bundleDependencies must include incur so published installs ship the reviewed error-envelope and canonical skill-hash patches.',
-)
-
 assert(
   packageJson.bin?.['vault-cli'] === 'dist/bin.js',
   'package.json must expose vault-cli from dist/bin.js.',
@@ -184,7 +143,7 @@ assert(
 )
 assert(
   packageJson.dependencies?.['@murphai/gateway-core'] === 'workspace:*',
-  'package.json must depend on @murphai/gateway-core so the published CLI installs the required gateway contract package.',
+  'package.json must depend on @murphai/gateway-core so the hosted CLI installs the required gateway contract package.',
 )
 assert(
   packageJson.optionalDependencies?.['@murphai/gateway-core'] === undefined,
@@ -208,25 +167,24 @@ assert(
       'pnpm --dir ../.. exercise-library:generate && pnpm --dir ../.. health-commons:generate && pnpm --dir ../.. build:test-runtime:prepared' &&
     packageJson.scripts?.build ===
       'node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.build.json' &&
-    packageJson.scripts?.['verify:package-shape'] ===
-      'pnpm build && node --import=tsx ./scripts/verify-package-shape.ts' &&
+    packageJson.scripts?.['verify:runtime-artifacts'] ===
+      'pnpm build && node --import=tsx ./scripts/verify-runtime-artifacts.ts' &&
     packageJson.scripts?.['test:built-runtime'] ===
-      'MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_CLI_RELEASE_TARBALL_TEST=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage' &&
+      'MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage' &&
     packageJson.scripts?.['test:built-runtime:coverage'] ===
-      'MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_CLI_RELEASE_TARBALL_TEST=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --coverage' &&
+      'MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --coverage' &&
     packageJson.scripts?.verify ===
-      'pnpm verify:prepared-runtime && pnpm verify:package-shape && pnpm test:built-runtime' &&
+      'pnpm verify:prepared-runtime && pnpm verify:runtime-artifacts && pnpm test:built-runtime' &&
     packageJson.scripts?.['verify:coverage'] ===
-      'pnpm verify:prepared-runtime && pnpm verify:package-shape && pnpm test:built-runtime:coverage' &&
-    packageJson.scripts?.prepack === 'pnpm build',
-  'package.json must keep source-local test scripts separate from explicit built-runtime/package-shape verification scripts.',
+      'pnpm verify:prepared-runtime && pnpm verify:runtime-artifacts && pnpm test:built-runtime:coverage',
+  'package.json must keep source-local test scripts separate from explicit built-runtime/runtime-artifact verification scripts.',
 )
 assert(
   !packageJson.scripts?.test?.includes('build:test-runtime:prepared') &&
-    !packageJson.scripts?.test?.includes('verify-package-shape') &&
+    !packageJson.scripts?.test?.includes('verify-runtime-artifacts') &&
     !packageJson.scripts?.['test:coverage']?.includes('build:test-runtime:prepared') &&
-    !packageJson.scripts?.['test:coverage']?.includes('verify-package-shape'),
-  'package.json local test scripts must not block on prepared-runtime or package-shape acceptance gates.',
+    !packageJson.scripts?.['test:coverage']?.includes('verify-runtime-artifacts'),
+  'package.json local test scripts must not block on prepared-runtime or runtime-artifact acceptance gates.',
 )
 assert(
   !packageJson.scripts?.['verify:release-target'] &&
@@ -241,9 +199,9 @@ assert(
 assert(
   Object.entries(packageJson.scripts ?? {}).every(
     ([name, script]) =>
-      name === 'verify:package-shape' || script?.includes('node --import=tsx') !== true,
+      name === 'verify:runtime-artifacts' || script?.includes('node --import=tsx') !== true,
   ),
-  'package.json must reserve node --import=tsx for the verify:package-shape acceptance script only.',
+  'package.json must reserve node --import=tsx for the verify:runtime-artifacts acceptance script only.',
 )
 assert(
   tsconfig.extends === '../../tsconfig.base.json',
@@ -324,7 +282,7 @@ assertImportSafeLibraryEntry(libraryEntry)
 assertConfigSchemaSmoke(configSchema)
 await assertGeneratedArtifactsFresh(configSchema)
 
-console.log('packages/cli package shape verified.')
+console.log('packages/cli runtime artifacts verified.')
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {

@@ -12,7 +12,6 @@ export interface HostedRunnerBundleContractOptions {
 }
 
 interface RunnerBundlePackageManifest {
-  bundleDependencies?: unknown;
   dependencies?: Record<string, string>;
   engines?: Record<string, string>;
   exports?: Record<string, unknown> | string;
@@ -31,22 +30,41 @@ const workspacePackageManifestByName = readWorkspacePackageManifestByName(repoRo
 const hostedRunnerRuntimePackageManifest = readRequiredWorkspacePackageManifest(
   hostedRunnerRuntimePackageName,
 );
-const publishedMurphBundleDependencyNames = readBundleDependencyNames("@murphai/murph");
-export const publishedMurphBundledWorkspacePackageNames =
-  publishedMurphBundleDependencyNames.filter((dependencyName) =>
+// Explicit CLI dependency closure used by the hosted runner bundle.
+const runnerCliBundleDependencyNames = [
+  "@murphai/assistant-engine",
+  "@murphai/clinical-records",
+  "@murphai/core",
+  "@murphai/device-syncd",
+  "@murphai/exercise-library",
+  "@murphai/health-commons",
+  "@murphai/health-metrics",
+  "@murphai/importers",
+  "@murphai/inbox-services",
+  "@murphai/inboxd",
+  "@murphai/messaging-ingress",
+  "@murphai/operator-config",
+  "@murphai/parsers",
+  "@murphai/query",
+  "@murphai/runtime-state",
+  "@murphai/vault-usecases",
+  "incur"
+] as const;
+export const runnerCliBundledWorkspacePackageNames =
+  runnerCliBundleDependencyNames.filter((dependencyName) =>
     workspacePackageManifestByName.has(dependencyName),
   );
-export const publishedMurphBundledExternalPackageNames =
-  publishedMurphBundleDependencyNames.filter(
+export const runnerCliBundledExternalPackageNames =
+  runnerCliBundleDependencyNames.filter(
     (dependencyName) => !workspacePackageManifestByName.has(dependencyName),
   );
 export const hostedRunnerBundleOnlyDependencyNames = [
   "@murphai/murph",
-  ...publishedMurphBundledWorkspacePackageNames,
+  ...runnerCliBundledWorkspacePackageNames,
 ] as const;
 const murphNonBundledWorkspaceDependencyNames = listNonBundledWorkspaceDependencyNames(
   "@murphai/murph",
-  publishedMurphBundledWorkspacePackageNames,
+  runnerCliBundledWorkspacePackageNames,
 );
 
 export const hostedRunnerWorkspacePackageNames =
@@ -168,26 +186,6 @@ function readRequiredWorkspacePackageManifest(
   }
 
   return packageJson;
-}
-
-function readBundleDependencyNames(
-  packageName: string,
-): readonly string[] {
-  const packageJson = readRequiredWorkspacePackageManifest(packageName);
-
-  if (
-    !Array.isArray(packageJson.bundleDependencies) ||
-    packageJson.bundleDependencies.some(
-      (dependencyName) =>
-        typeof dependencyName !== "string" || dependencyName.length === 0,
-    )
-  ) {
-    throw new Error(
-      `${packageName} must declare a string-only bundleDependencies array.`,
-    );
-  }
-
-  return sortPackageNames(packageJson.bundleDependencies);
 }
 
 function listNonBundledWorkspaceDependencyNames(

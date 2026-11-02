@@ -5946,3 +5946,5 @@ Web emits bootstrap notifications or expanded game responses. Do not roll
 back the compatible consumers while those writers remain active.
 
 Device transport retirement: Junction is the only configured hosted device provider. WHOOP, Oura, Strava, and Garmin source descriptors, normalizers, stored record labels, and wearable query filters remain. The local daemon and direct WHOOP/Oura/Strava OAuth/API transports are retired; companion ingestion and Fitbit migration are unchanged.
+
+All workspace packages are private. npm publishing and tag release automation are retired. Hosted runner distribution owns its explicit CLI dependency closure; package file lists remain runtime assembly inputs. Host Support retains the protected Release checks (ubuntu) status and existing coverage matrices.

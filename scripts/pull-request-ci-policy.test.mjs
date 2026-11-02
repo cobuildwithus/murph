@@ -216,7 +216,7 @@ function inspectHostSupportReleaseGraph(source) {
   assert.match(packageCoverage, /if \[\[ -z "\$package_dirs" \]\]/u);
   assert.match(
     packageCoverage,
-    /if: \$\{\{ matrix\.shard == 'cli' \}\}\n        run: pnpm --dir packages\/cli exec tsx scripts\/verify-package-shape\.ts/u,
+    /if: \$\{\{ matrix\.shard == 'cli' \}\}\n        run: pnpm --dir packages\/cli exec tsx scripts\/verify-runtime-artifacts\.ts/u,
   );
   assert.equal(
     countOccurrences(packageCoverage, "if: ${{ matrix.shard == 'cli' }}"),
@@ -530,11 +530,11 @@ test("Host Support graph drift cannot skip, duplicate, overlap, or de-aggregate 
       "run: pnpm build:test-runtime:prepared",
       "run: swapped-runtime-command",
     ).replace(
-      "run: pnpm --dir packages/cli exec tsx scripts/verify-package-shape.ts",
+      "run: pnpm --dir packages/cli exec tsx scripts/verify-runtime-artifacts.ts",
       "run: pnpm build:test-runtime:prepared",
     ).replace(
       "run: swapped-runtime-command",
-      "run: pnpm --dir packages/cli exec tsx scripts/verify-package-shape.ts",
+      "run: pnpm --dir packages/cli exec tsx scripts/verify-runtime-artifacts.ts",
     ),
     host.replace(
       "needs.release-verification-plan-linux.outputs.package_matrix",

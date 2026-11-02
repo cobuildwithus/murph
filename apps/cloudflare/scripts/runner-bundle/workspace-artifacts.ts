@@ -326,7 +326,6 @@ async function prepareRunnerCliPackagePackRoot(
   await copyPackageEntries(sourcePackageDir, packRoot, [
     "dist",
     "README.md",
-    "CHANGELOG.md",
     "config.schema.json",
     "LICENSE",
   ]);

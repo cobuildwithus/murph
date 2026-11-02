@@ -76,7 +76,7 @@ describe('host support workflow guards', () => {
       'tsx e2e/smoke/verify-scenario-integrity.ts --coverage',
     )
     expect(workflow).toContain(
-      'MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_CLI_RELEASE_TARBALL_TEST=1 MURPH_VITEST_MAX_WORKERS=50%',
+      'MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS=50%',
     )
     expect(workflow).not.toContain('run: pnpm release:check')
   })

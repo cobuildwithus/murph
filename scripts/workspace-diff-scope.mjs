@@ -29,7 +29,7 @@ const ROOT_GLOBAL_FILES = new Set([
 const CLI_ARTIFACT_SENSITIVE_FILES = new Set([
   "packages/cli/config.schema.json",
   "packages/cli/package.json",
-  "packages/cli/scripts/verify-package-shape.ts",
+  "packages/cli/scripts/verify-runtime-artifacts.ts",
   "packages/cli/tsconfig.build.json",
   "packages/cli/vitest.config.ts",
   "packages/cli/vitest.workspace.ts",

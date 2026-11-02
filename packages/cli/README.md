@@ -175,45 +175,15 @@ The package exports only the root CLI runtime entrypoint and exposes the `vault-
 
 Machine-facing callers should rely on incur's native envelope via `--full-output --format json` instead of a Murph-specific wrapper contract.
 
-Current repo-local package responsibilities include:
+The CLI owns the hosted command graph, routing, and built `vault-cli` launcher.
+Assistant and shared usecase APIs live in workspace-private owner packages.
 
-- the published command graph and install surface
-- CLI-owned command routing, hosted onboarding commands, and the built binary launcher
-- device command surfaces that delegate to headless owner packages
-- release ownership for the public `@murphai/murph` package and bins
+## Hosted distribution
 
-Programmatic assistant and shared usecase APIs now stay in workspace-private owner packages such as `@murphai/assistant-engine`, and `@murphai/operator-config`. The public npm install story is still `@murphai/murph`; the release flow bundles those private owners into the CLI tarball instead of publishing them as separate npm products.
-
-## Release flow
-
-Release and publish actions remain user-operated. The monorepo release source of truth is `scripts/release-manifest.json`, and the normal entrypoints are:
-
-```bash
-pnpm release:check
-pnpm release:patch
-```
-
-Pre-release and exact-version flows use the same root script:
-
-```bash
-bash scripts/release.sh preminor --preid alpha
-bash scripts/release.sh 0.1.0-rc.1 --dry-run
-```
-
-The release flow bumps the five public packages in the manifest to one shared version, updates `packages/cli/CHANGELOG.md`, writes `packages/cli/release-notes/v<version>.md`, and then creates a repository tag so `.github/workflows/release.yml` can pack and publish the public tarballs in dependency order. Workspace-private runtime packages remain in the monorepo and are bundled into the public tarballs when a public package still depends on them at runtime.
-
-Release `1.3.0` intentionally includes the breaking removal of the
-`@murphai/contracts` progress-card URL codec. Do not restore that public
-health-data URL representation as a compatibility shim; private attachment
-media is the supported path.
-
-npm trusted publishing is configured per package on npm, not once per repository. Because this monorepo still publishes a small set of `@murphai/*` packages, maintainers should bootstrap those package-level trust bindings before relying on tag-driven release publication:
-
-```bash
-pnpm release:trust:github -- --dry-run
-pnpm release:trust:github -- --yes
-```
-
-Those commands target the current publishable package set in `scripts/release-manifest.json` and bind each package to `cobuildwithus/murph` via `.github/workflows/release.yml`.
-
-If a package is already bound to the wrong workflow or repository in npm, revoke that package's existing trust entry with `npm trust list` and `npm trust revoke`, then rerun `pnpm release:trust:github -- --yes`.
+All workspace packages are private. npm publication, package release notes, and
+version/tag release scripts are retired. The public repository and Apache-2.0
+license remain. The Cloudflare runner assembles its CLI from the workspace with
+an explicit dependency closure in `apps/cloudflare/scripts/runner-bundle-contract.ts`.
+Package `files` lists remain inputs to that local runtime assembly. The runtime
+artifact verifier checks generated schemas, CLI entrypoints, and dependency
+boundaries without publishing or contacting the npm registry.

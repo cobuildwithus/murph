@@ -509,7 +509,7 @@ export async function rebuildCliRuntimeArtifacts(): Promise<void> {
     'exec',
     'node',
     '--import=tsx',
-    'packages/cli/scripts/verify-package-shape.ts',
+    'packages/cli/scripts/verify-runtime-artifacts.ts',
   ])
 }
 

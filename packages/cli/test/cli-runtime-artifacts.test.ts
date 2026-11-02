@@ -55,7 +55,7 @@ vi.mock('node:child_process', async (importOriginal) => {
           writeFileSync(path.join(fixture.root, 'dist/commands/assistant-onboarding.js'), readFileSync(path.join(fixture.root, 'src/commands/assistant-onboarding.ts')))
           writeFileSync(path.join(fixture.root, 'dist/commands/assistant-onboarding.d.ts'), 'export declare const result: string\n')
         } else {
-          assert.deepEqual(args, ['exec', 'node', '--import=tsx', 'packages/cli/scripts/verify-package-shape.ts'])
+          assert.deepEqual(args, ['exec', 'node', '--import=tsx', 'packages/cli/scripts/verify-runtime-artifacts.ts'])
         }
         callback(null)
         return

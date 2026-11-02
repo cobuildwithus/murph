@@ -269,20 +269,14 @@ jobs:
           pnpm --dir packages/assistant-runtime test
           test/hosted-runtime-promoted-foreground-priority.test.ts
 
-      - name: Validate release metadata
+      - name: Validate runtime artifact guards
         run: |
-          bash -n scripts/release-check.sh scripts/release.sh scripts/update-changelog.sh scripts/generate-release-notes.sh
           node --check scripts/release-artifact-secret-guard.mjs
-          node --check scripts/release-helpers.mjs
-          node --check scripts/verify-release-target.mjs
-          node --check scripts/pack-publishables.mjs
-          node --check scripts/publish-publishables.mjs
           node --test scripts/release-artifact-secret-guard.test.mjs
           node --test scripts/check-runner-bundle-budget-ci.test.mjs
           node --test scripts/benchmark-event-list.test.mjs
           node --test scripts/benchmark-event-read-import.test.mjs
           node scripts/check-runner-bundle-budget-ci.mjs
-          node scripts/verify-release-target.mjs
 
       - name: Clean workspace build
         run: pnpm build:workspace:clean
@@ -371,9 +365,9 @@ jobs:
         if: ${{ matrix.shard == 'cli' || matrix.shard == 'assistant-engine' }}
         run: pnpm build:test-runtime:prepared
 
-      - name: Verify CLI package shape
+      - name: Verify CLI runtime artifacts
         if: ${{ matrix.shard == 'cli' }}
-        run: pnpm --dir packages/cli exec tsx scripts/verify-package-shape.ts
+        run: pnpm --dir packages/cli exec tsx scripts/verify-runtime-artifacts.ts
 
       - name: Run package coverage shard
         shell: bash
@@ -388,7 +382,7 @@ jobs:
           while IFS= read -r package_dir; do
             [[ -n "$package_dir" ]] || continue
             if [[ "$package_dir" == "packages/cli" ]]; then
-              env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_CLI_RELEASE_TARBALL_TEST=1 MURPH_VITEST_MAX_WORKERS=50% pnpm exec vitest run --config packages/cli/vitest.workspace.ts --coverage
+              env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS=50% pnpm exec vitest run --config packages/cli/vitest.workspace.ts --coverage
             elif [[ "$package_dir" == "packages/assistant-engine" ]]; then
               env MURPH_VITEST_FILE_PARALLELISM=1 MURPH_VITEST_MAX_WORKERS=2 pnpm --dir "$package_dir" test:coverage
             else

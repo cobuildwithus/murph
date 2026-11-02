@@ -1,3 +1,5 @@
+Npm publication is retired; the protected CI coverage matrix and hosted runtime artifact checks remain owned by `operations/verification-and-runtime.md` and `references/testing-ci-map.md`. The [deletion plan](exec-plans/active/2026-11-02-remove-device-npm-jobs.md) records the unchanged runner package closure.
+
 Private meal thumbnail delivery, capture-based retention and deletion are owned by
 [`ios-meals.md`](product-specs/ios-meals.md); implementation is tracked in
 [the thumbnail plan](exec-plans/completed/2026-11-02-meal-photo-thumbnails.md).
