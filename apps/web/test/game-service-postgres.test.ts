@@ -1251,10 +1251,11 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       expect(await reserveDueGameMissedDayCheckIns(now)).toBe(0);
     } finally {
       await getPrisma().hostedLinqDelivery.deleteMany({ where: { template: "game_missed", OR: ids.map(id => ({ sourceRef: { startsWith: `${id}:` } })) } });
+      await getPrisma().game.updateMany({ where: { id: { in: ids } }, data: { status: "settled", settledAt: now } });
     }
   });
 
-  it("keeps the pair's one daily missed-game message after it is sent", async () => {
+  it.each([{ settleClaimant: false }, { settleClaimant: true }])("keeps the pair's one daily missed-game message after it is sent (claiming game settles: $settleClaimant)", async ({ settleClaimant }) => {
     const a = await member("Ava", "UTC"), b = await member("Leo", "UTC");
     const room = `synthetic_room_${randomUUID()}`;
     await getPrisma().hostedMember.create({ data: { id: room, billingStatus: "not_started" } }); memberIds.push(room);
@@ -1264,18 +1265,25 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await getPrisma().gamePlayer.updateMany({ where: { gameId: { in: ids } }, data: { dayOne: new Date("2030-03-04T00:00:00Z"), timeZone: "UTC" } });
     const [row] = await getPrisma().$queryRaw<Array<{ shard: bigint }>>`SELECT mod(abs(hashtext(${room})::bigint), 60) AS shard`;
     const now = new Date(Date.parse("2030-03-05T09:00:00Z") + Number(row.shard) * 60_000);
-    const sent = await getPrisma().hostedLinqDelivery.findMany({ where: { template: "game_missed", OR: ids.map(id => ({ sourceRef: { startsWith: `${id}:` } })) }, select: { id: true } });
+    // Count only this pair's receipts: other tests' rooms can share the shard.
+    const pending = () => getPrisma().hostedLinqDelivery.findMany({ where: { template: "game_missed", OR: ids.map(id => ({ sourceRef: { startsWith: `${id}:` } })) }, select: { id: true, sourceRef: true } });
+    const sent: string[] = [];
     try {
-      expect(await reserveDueGameMissedDayCheckIns(now)).toBe(1);
-      const [first] = await getPrisma().hostedLinqDelivery.findMany({ where: { template: "game_missed", OR: ids.map(id => ({ sourceRef: { startsWith: `${id}:` } })) }, select: { id: true } });
-      sent.push(first!);
+      await reserveDueGameMissedDayCheckIns(now);
+      const [first, ...rest] = await pending();
+      expect(rest).toEqual([]);
+      sent.push(first!.id);
       // Sending rewrites the receipt as a runtime delivery with a blinded source, as the provider dispatch does.
       await getPrisma().hostedLinqDelivery.update({ where: { id: first!.id }, data: { source: "hosted_runtime_linq_delivery", template: null, sourceRef: `hbid:synthetic:${randomUUID()}`, status: "sent_no_receipt_expected" } });
+      if (settleClaimant) {
+        await getPrisma().game.update({ where: { id: first!.sourceRef!.split(":")[0] }, data: { status: "settled", settledAt: new Date(now.getTime() + 30 * 60_000) } });
+      }
       // The room's shard comes round again an hour later, still inside the two-hour window.
-      expect(await reserveDueGameMissedDayCheckIns(new Date(now.getTime() + 60 * 60_000))).toBe(0);
-      expect(await getPrisma().hostedLinqDelivery.count({ where: { template: "game_missed", OR: ids.map(id => ({ sourceRef: { startsWith: `${id}:` } })) } })).toBe(0);
+      await reserveDueGameMissedDayCheckIns(new Date(now.getTime() + 60 * 60_000));
+      expect(await pending()).toEqual([]);
     } finally {
-      await getPrisma().hostedLinqDelivery.deleteMany({ where: { OR: [{ id: { in: sent.map(receipt => receipt.id) } }, { template: "game_missed", OR: ids.map(id => ({ sourceRef: { startsWith: `${id}:` } })) }] } });
+      await getPrisma().hostedLinqDelivery.deleteMany({ where: { OR: [{ id: { in: sent } }, { template: "game_missed", OR: ids.map(id => ({ sourceRef: { startsWith: `${id}:` } })) }] } });
+      await getPrisma().game.updateMany({ where: { id: { in: ids } }, data: { status: "settled", settledAt: now } });
     }
   });
 

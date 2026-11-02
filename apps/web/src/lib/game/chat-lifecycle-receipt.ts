@@ -41,6 +41,9 @@ export function gameMissedDayEventId(gameId: string, memberId: string, firstMiss
   return `game-missed:${gameId}:${memberId}:${firstMissedDate}`;
 }
 
+/** One date's due times span every player time zone plus the late window. */
+const MISSED_DATE_CLAIM_LOOKBACK_MS = 2 * 24 * 60 * 60 * 1000;
+
 /** Existing receipts deduplicate one pair/day batch, including concurrent sweeps. */
 export async function reserveGameMissedDayTx(input: {
   gameId: string; memberId: string; playerMemberIds: readonly string[]; firstMissedDate: string; dueAt: Date; tx: Prisma.TransactionClient;
@@ -52,10 +55,16 @@ export async function reserveGameMissedDayTx(input: {
   const current = await tx.game.findFirst({ where: { id: input.gameId, status: "live", chatContainerMemberId: { not: null } }, select: { chatContainerMemberId: true } });
   if (!current?.chatContainerMemberId) return false;
   // Keep the single-game identity. With several games, either player's first
-  // due miss claims the pair's one daily message. Look it up by delivery key:
-  // sending rewrites a receipt's source and template, but never its key.
-  const [gameIds, memberIds] = active.length > 1 ? [active.map((game) => game.id), players] : [[input.gameId], [input.memberId]];
-  const keys = gameIds.flatMap((gameId) => memberIds.map((memberId) => createHostedLinqDeliveryIdempotencyLookupKey(gameMissedDayEventId(gameId, memberId, input.firstMissedDate))))
+  // due miss claims the pair's one daily message for both players, and a game
+  // that settles afterwards keeps holding that claim. Look it up by delivery
+  // key: sending rewrites a receipt's source and template, but never its key.
+  const settled = await tx.game.findMany({ where: { ...gamePairWhere(players), status: "settled", settledAt: { gte: new Date(input.dueAt.getTime() - MISSED_DATE_CLAIM_LOOKBACK_MS) } },
+    select: { id: true }, take: GAME_MAX_OPEN_PER_PAIR });
+  const claims = [
+    ...(active.length > 1 ? active.flatMap((game) => players.map((memberId) => [game.id, memberId] as const)) : [[input.gameId, input.memberId] as const]),
+    ...settled.flatMap((game) => players.map((memberId) => [game.id, memberId] as const)),
+  ];
+  const keys = claims.map(([gameId, memberId]) => createHostedLinqDeliveryIdempotencyLookupKey(gameMissedDayEventId(gameId, memberId, input.firstMissedDate)))
     .filter((key): key is string => key !== null);
   if (await tx.hostedLinqDelivery.findFirst({ where: { idempotencyKey: { in: keys } }, select: { id: true } })) return false;
   const eventId = gameMissedDayEventId(input.gameId, input.memberId, input.firstMissedDate);
