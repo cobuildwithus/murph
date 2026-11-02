@@ -119,8 +119,6 @@ describe("parseHostedExecutionEvent", () => {
     ).toThrow(/unsupported field/u);
   });
 
-
-
   it("parses explicit member channel sync events", () => {
     expect(
       parseHostedExecutionEvent({

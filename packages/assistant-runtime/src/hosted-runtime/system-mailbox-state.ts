@@ -1535,7 +1535,6 @@ function parseHostedSystemMailboxRecordRequest(
     };
   }
 
-
   if (record.kind === "member-action.outcome-recorded") {
     assertHostedSystemMailboxRecordKeys(
       record,

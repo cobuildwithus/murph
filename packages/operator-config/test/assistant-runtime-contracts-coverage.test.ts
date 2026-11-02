@@ -89,7 +89,6 @@ test('assistant session parsing resolves Codex modelProvider and status automati
   assert.equal(parsedSession.providerOptions.executionDriver, 'codex-app-server')
   assert.equal(parsedSession.providerOptions.modelProvider, 'openai')
   assert.equal(parsedSession.providerOptions.resumeKind, 'codex-thread')
-
 })
 
 test('assistant session parsing fails closed for unsupported persisted sessions', () => {

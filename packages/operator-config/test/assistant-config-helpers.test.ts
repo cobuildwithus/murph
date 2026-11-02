@@ -70,7 +70,6 @@ test('assistant header helpers redact persistence-unsafe values', () => {
     mergeAssistantHeaders(split.persistedHeaders, split.secretHeaders),
     normalizedHeaders,
   )
-
 })
 
 test('assistant provider config helpers merge, compact, and serialize Codex targets only', () => {

@@ -178,7 +178,6 @@ test('default vault reads validate the root without coupling to unrelated nested
     )
 
     assert.equal(await resolveDefaultVault(homeDirectory, {}), configuredVault)
-
   }
 
   const malformedRoot = JSON.stringify({
@@ -295,7 +294,6 @@ test('operator config resolves default vaults without owning command argv mutati
 
   await rm(cwdVault, { force: true, recursive: true })
   assert.equal(await resolveDefaultVault(homeDirectory, {}), null)
-
 })
 
 test('operator config reads, sorts, and resolves assistant self-delivery targets', async () => {
@@ -366,7 +364,6 @@ test('operator config reads, sorts, and resolves assistant self-delivery targets
       threadId: null,
     },
   )
-
 })
 
 test('operator config trims explicit self-target defaults and normalizes legacy assistant records', async () => {
@@ -394,7 +391,6 @@ test('operator config trims explicit self-target defaults and normalizes legacy 
       threadId: 'source-2',
     },
   )
-
 })
 
 test('assistant self delivery targets treat iMessage as the linq route alias', async () => {

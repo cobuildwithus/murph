@@ -446,7 +446,6 @@ describe('assistant infra final coverage', () => {
       vault: vaultRoot,
     })
   })
-
 })
 
 async function createAssistantPaths(prefix: string) {

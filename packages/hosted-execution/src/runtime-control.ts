@@ -1059,7 +1059,6 @@ export function isHostedUsageOptimizationAuditFeedback(
     && (feedback.summary.slice(HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX.length).trim().length > 0 || reject("empty_report"));
 }
 
-
 export function isHostedProductSupportEscalationSummary(
   value: string | null | undefined,
 ): value is string {
@@ -2337,7 +2336,6 @@ export type HostedRuntimeAssistantConfigurationToolResponse =
         status: HostedRuntimeAssistantConfigurationUpdateStatus;
       };
     };
-
 
 export interface HostedRuntimeIssueExportRequest {
   issues: AssistantRuntimeIssueRecord[];

@@ -36,7 +36,6 @@ import {
   resolveAssistantGeneratedImageDelivery,
 } from './response-media.js'
 import { recordAssistantDiagnosticEvent } from './diagnostics.js'
-
 import {
   resolveAssistantTurnSharedPlan as buildAssistantTurnSharedPlan,
 } from './turn-plan.js'
@@ -2722,7 +2721,6 @@ export async function sendAssistantMessageLocal(
         await stopAssistantChannelTypingIndicator(typingIndicator, {
           providerStop: !deliverySupersededTypingIndicator,
         })
-
       }
     },
   })

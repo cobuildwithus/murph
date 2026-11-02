@@ -1852,7 +1852,6 @@ describe('assistant product small seams', () => {
     await expect(stat(metadataPath)).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(readFile(victimPath, 'utf8')).resolves.toBe('{"keep":true}')
   })
-
 })
 
 async function loadPromptAttemptsModule(input: {

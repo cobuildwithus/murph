@@ -28,5 +28,4 @@ test('assistant runtime state service exposes runtime-only helpers and omits pro
   assert.equal('memory' in state, false)
   assert.equal(typeof state.sessions.resolve, 'function')
   assert.equal(typeof state.outbox.listIntents, 'function')
-
 })

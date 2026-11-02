@@ -386,7 +386,6 @@ describe("hosted runtime event coverage", () => {
     });
   });
 
-
   it("fails closed on unexpected wake kinds", async () => {
     await expect(
       executeHostedMailboxEvent({

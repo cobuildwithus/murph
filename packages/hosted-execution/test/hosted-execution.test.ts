@@ -938,7 +938,6 @@ describe("hosted execution coverage gaps", () => {
       "function",
     );
 
-
     expect("getDashboardReplicaFreshness" in rootModule).toBe(false);
     expect("shouldScheduleDashboardReplicaRefresh" in rootModule).toBe(false);
     expect("HOSTED_MAILBOX_LANES" in rootModule).toBe(false);
