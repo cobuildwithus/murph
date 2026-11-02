@@ -1616,7 +1616,7 @@ function createStatefulThreadRoutePrisma() {
     $executeRaw: executeRaw,
     $queryRaw: vi.fn().mockResolvedValue([]),
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
-    game: { findFirst: vi.fn().mockResolvedValue(null) },
+    game: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) },
     hostedLinqLine,
     hostedLinqDelivery,
     hostedLinqFirstContactAdmissionDecision: {
