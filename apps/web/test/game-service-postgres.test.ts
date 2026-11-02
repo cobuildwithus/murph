@@ -1255,7 +1255,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     }
   });
 
-  it.each([{ settleClaimant: false }, { settleClaimant: true }])("keeps the pair's one daily missed-game message after it is sent (claiming game settles: $settleClaimant)", async ({ settleClaimant }) => {
+  it.each([{ settles: "neither" }, { settles: "claimant" }, { settles: "other" }])("keeps the pair's one daily missed-game message after it is sent (settles: $settles)", async ({ settles }) => {
     const a = await member("Ava", "UTC"), b = await member("Leo", "UTC");
     const room = `synthetic_room_${randomUUID()}`;
     await getPrisma().hostedMember.create({ data: { id: room, billingStatus: "not_started" } }); memberIds.push(room);
@@ -1275,9 +1275,10 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       sent.push(first!.id);
       // Sending rewrites the receipt as a runtime delivery with a blinded source, as the provider dispatch does.
       await getPrisma().hostedLinqDelivery.update({ where: { id: first!.id }, data: { source: "hosted_runtime_linq_delivery", template: null, sourceRef: `hbid:synthetic:${randomUUID()}`, status: "sent_no_receipt_expected" } });
-      if (settleClaimant) {
-        await getPrisma().game.update({ where: { id: first!.sourceRef!.split(":")[0] }, data: { status: "settled", settledAt: new Date(now.getTime() + 30 * 60_000) } });
-      }
+      // Either game may settle before the room's next shard sweep.
+      const claimant = first!.sourceRef!.split(":")[0];
+      const settling = settles === "claimant" ? claimant : settles === "other" ? ids.find(id => id !== claimant) : undefined;
+      if (settling) await getPrisma().game.update({ where: { id: settling }, data: { status: "settled", settledAt: new Date(now.getTime() + 30 * 60_000) } });
       // The room's shard comes round again an hour later, still inside the two-hour window.
       await reserveDueGameMissedDayCheckIns(new Date(now.getTime() + 60 * 60_000));
       expect(await pending()).toEqual([]);
