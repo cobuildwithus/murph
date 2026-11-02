@@ -1,13 +1,13 @@
 # iOS Meals API
 
-Last verified: 2026-11-01
+Last verified: 2026-11-02
 
 ## Scope and ownership
 
 The v2 game app opens Meals from You. This contract adds list, detail and
 accepted removal for meals Murph logged. It changes the iOS-facing contract
-proposed in #4420: no image URLs or provenance; `uploadId` is currently null;
-reads include `savedAt` and the vault's canonical `timeZone`.
+proposed in #4420: no image URLs or provenance; `uploadId` is an exact nullable
+phone upload identifier. Reads include `savedAt` and the vault's canonical `timeZone`.
 
 Canonical meal events and lifecycle tombstones remain in the encrypted member
 vault. Structured meals are derived into generation 17 of the existing encrypted
@@ -205,9 +205,19 @@ before looking up that thumbnail. The selection's separate UI UUID is not this
 upload identifier. iOS must decode `uploadId` as an optional string and join it
 to its local history while keeping the server meal ID for detail and removal.
 
-No backfill: texted photos, typed meals, older captures and imports completed by
-a runtime predating the writer stay null. A retry never attaches a new ID to an
-already imported meal. Show a plain tile for null or missing local thumbnails.
+Historical automatic captures can recover `uploadId` at read time. The saved
+encrypted core entity must identify the same meal, device source and exact
+`meal-photo-capture` / `photo` external reference, and the member-bound mailbox
+metadata must contain an automatic-upload dedupe key with that capture ID.
+The API reads only those receipt identifiers in one set query; no image bytes,
+mailbox ciphertext, timestamps or nearest-photo inference are used. Explicit
+canonical upload IDs take precedence.
+
+Existing snapshots gain this provenance at their next ordinary runtime
+publication. Reads never wake the runtime or rewrite vaults. Missing receipts,
+older snapshots, typed/texted meals and legacy manual-only captures stay null.
+The historical manual capture hash cannot recover the phone UUID. A retry does
+not rewrite the canonical meal. Show a plain tile for null or missing local thumbnails.
 No `source`, `thumbnailUrl`, `photoUrl`, or full-size URL exists in this contract.
 
 ## Release order and compatibility
@@ -220,8 +230,8 @@ After writes begin, retain this reader release as the Web/runtime rollback floor
 The reader release emits no new upload metadata, so it can safely coexist with
 the old runtime. The writer accepts both old and linked records. Web can deploy
 the writer before the writer runtime: the converged reader accepts its wake and
-imports it without the link. Such rollout-window meals remain null; there is no
-backfill or forced wake. After the writer runtime deploy, new imports retain the
+imports it without the link. Such rollout-window meals remain canonically unlinked; historical read-time
+recovery above can still supply their ID. There is no vault backfill or forced wake. After the writer runtime deploy, new imports retain the
 link. Both runtime versions can read linked canonical records during rollout.
 
 

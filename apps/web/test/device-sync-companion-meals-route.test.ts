@@ -4,14 +4,15 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { addMeal, initializeVault } from "@murphai/core";
+import { createBrowserVaultCoreQueryClient, splitBrowserVaultReplica } from "@murphai/query/browser-replica-client";
 import { createBrowserVaultReplica, readVault } from "@murphai/query/browser-replica-server";
 import { NodeNextRequest } from "next/dist/server/base-http/node";
 import { NextRequestAdapter } from "next/dist/server/web/spec-extension/adapters/next-request";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 vi.mock("server-only", () => ({}));
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), current: vi.fn(), authority: vi.fn(), workspace: vi.fn(), control: vi.fn(), decode: vi.fn(), submit: vi.fn() }));
-vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({}) }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), current: vi.fn(), authority: vi.fn(), workspace: vi.fn(), control: vi.fn(), decode: vi.fn(), submit: vi.fn(), uploadLinks: vi.fn() }));
+vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({ $queryRaw: mocks.uploadLinks }) }));
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({ requireActiveHostedMemberAuthFromBearerToken: mocks.auth }));
 vi.mock("@/src/lib/better-auth/native-auth", () => ({ assertHostedNativeMemberAuthCurrentTx: mocks.current }));
 vi.mock("@/src/lib/browser-vault/authority", () => ({ assertBrowserVaultMemberAuthority: mocks.authority }));
@@ -40,7 +41,7 @@ beforeEach(() => {
   mocks.auth.mockResolvedValue({ member: { id: "member_native" } });
   mocks.workspace.mockResolvedValue({ browserVaultReplicaRef: replicaRef, version: "v1" });
   mocks.control.mockResolvedValue({ state: "ready" });
-  mocks.decode.mockResolvedValue({ client: { replica: { generation: 17, generatedAt: savedAt, meals: projection, privateNotes: ["must not leave reader"] } } });
+  mocks.decode.mockResolvedValue({ client: { replica: { generation: 17, generatedAt: savedAt, meals: projection, entities: [], privateNotes: ["must not leave reader"] } } });
   mocks.submit.mockResolvedValue({ accepted: true, actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243" });
 });
 
@@ -87,7 +88,7 @@ it.each([null, { ...replicaRef, generation: 16 }])("fails closed on missing/old 
 });
 
 it("distinguishes a valid empty snapshot from a missing meals payload or decryption failure", async () => {
-  mocks.decode.mockResolvedValueOnce({ client: { replica: { generation: 17, generatedAt: savedAt, meals: { ...projection, days: [] } } } });
+  mocks.decode.mockResolvedValueOnce({ client: { replica: { generation: 17, generatedAt: savedAt, entities: [], meals: { ...projection, days: [] } } } });
   expect(await (await GET(request())).json()).toEqual({ timeZone: "Asia/Tokyo", savedAt, days: [], nextCursor: null });
   mocks.decode.mockResolvedValueOnce({ client: { replica: { generation: 17 } } });
   expect((await GET(request())).status).toBe(503);
@@ -178,7 +179,7 @@ it("withholds health data if session or consent is revoked during decryption", a
 
 it.each(["2f1c1fdc-c7b0-4d90-b902-8e6295959243", "a".repeat(64), null])("returns the saved upload ID in list and detail (%s)", async uploadId => {
   const linkedMeal = { ...meal, uploadId };
-  mocks.decode.mockResolvedValue({ client: { replica: { generation: 17, generatedAt: savedAt, meals: { ...projection, days: [{ ...days[0], meals: [linkedMeal] }] } } } });
+  mocks.decode.mockResolvedValue({ client: { replica: { entities: [], generation: 17, generatedAt: savedAt, meals: { ...projection, days: [{ ...days[0], meals: [linkedMeal] }] } } } });
   expect(await (await GET(request())).json()).toMatchObject({ days: [{ meals: [linkedMeal] }] });
   expect(await (await detail(request(), context())).json()).toEqual({ timeZone: "Asia/Tokyo", savedAt, meal: linkedMeal });
   expect((await DELETE(request("", { method: "DELETE" }), context())).status).toBe(202);
@@ -206,5 +207,55 @@ it("serves upload IDs from real canonical projection records and keeps typed/tex
       expect(listing.days[0].meals).toContainEqual(expect.objectContaining({ id, uploadId }));
       expect(await (await detail(request(), context(id))).json()).toMatchObject({ meal: { id, uploadId } });
     }
+  } finally { await rm(vaultRoot, { recursive: true, force: true }); }
+});
+
+it("recovers legacy exact automatic upload links in list and detail, then rechecks authority", async () => {
+  const captureId = "a".repeat(64);
+  const oldProjection = structuredClone(projection);
+  const entities = [{ family: "event", kind: "meal", attributes: {
+    mealId: meal.id, source: "device",
+    externalRef: { system: "meal-photo-capture", resourceType: "photo", resourceId: captureId },
+  } }];
+  mocks.decode.mockImplementation(async () => ({ client: { replica: {
+    generation: 17, generatedAt: savedAt, meals: structuredClone(oldProjection), entities,
+  } } }));
+  mocks.uploadLinks.mockResolvedValue([{ captureId }]);
+  const list = await (await GET(request())).json();
+  expect(list.days[0].meals[0]).toEqual({ ...meal, uploadId: captureId });
+  expect(await (await detail(request(), context())).json()).toEqual({ timeZone: projection.timeZone, savedAt, meal: { ...meal, uploadId: captureId } });
+  expect(mocks.uploadLinks).toHaveBeenCalledTimes(2);
+  expect(mocks.uploadLinks.mock.calls[0]![0].values).toEqual(["member_native", [captureId]]);
+  expect(mocks.current.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.uploadLinks.mock.invocationCallOrder[0]!);
+  expect(JSON.stringify(list)).not.toContain("externalRef");
+  mocks.uploadLinks.mockResolvedValue([]);
+  expect((await (await detail(request(), context())).json()).meal.uploadId).toBeNull();
+  mocks.uploadLinks.mockClear();
+  expect((await DELETE(request(), context())).status).toBe(202);
+  expect(mocks.uploadLinks).not.toHaveBeenCalled();
+  mocks.uploadLinks.mockResolvedValue([{ captureId }]);
+  mocks.current.mockRejectedValueOnce(hostedOnboardingError({ code: "AUTH_REQUIRED", httpStatus: 401, message: "Sign in again." }));
+  expect((await GET(request())).status).toBe(401);
+});
+
+it("recovers a real legacy import from the frozen production core client without changing its snapshot", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "synthetic-meals-frozen-"));
+  try {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const captureId = "b".repeat(64);
+    const imported = await addMeal({ vaultRoot, occurredAt: savedAt, source: "device", note: "Synthetic imported meal",
+      externalRef: { system: "meal-photo-capture", resourceType: "photo", resourceId: captureId } });
+    const typed = await addMeal({ vaultRoot, occurredAt: "2026-10-31T12:00:00Z", note: "Synthetic typed meal" });
+    const replica = await createBrowserVaultReplica({ vault: await readVault(vaultRoot), metricPoints: [], generatedAt: savedAt, sourceBundleHash: "a".repeat(64) });
+    const shards = await splitBrowserVaultReplica(replica);
+    const client = createBrowserVaultCoreQueryClient(shards.core);
+    mocks.decode.mockResolvedValue({ client });
+    mocks.uploadLinks.mockResolvedValue([{ captureId }]);
+    expect(Object.isFrozen(client.replica.meals!.days[0]!.meals[0])).toBe(true);
+    expect(await (await GET(request())).json()).toMatchObject({ days: [{ meals: [{ id: imported.mealId, uploadId: captureId }] }, { meals: [{ id: typed.mealId, uploadId: null }] }] });
+    expect(await (await detail(request(), context(imported.mealId))).json()).toMatchObject({ meal: { uploadId: captureId } });
+    expect(await (await GET(request("?cursor=2026-11-01"))).json()).toMatchObject({ days: [{ meals: [{ id: typed.mealId, uploadId: null }] }] });
+    expect(await (await detail(request(), context(typed.mealId))).json()).toMatchObject({ meal: { uploadId: null } });
+    expect(client.replica.meals!.days[0]!.meals[0]!.uploadId).toBeNull();
   } finally { await rm(vaultRoot, { recursive: true, force: true }); }
 });

@@ -1,3 +1,7 @@
+Historical exact meal-photo association is tracked in
+[the implementation plan](exec-plans/active/2026-11-02-meal-photos-exact.md);
+`product-specs/ios-meals.md` owns the read-time recovery rule.
+
 Game history task/stake API fields and bounded hydration proof are tracked in
 [the implementation plan](exec-plans/completed/2026-11-02-game-history-terms.md).
 The weekly game spec owns the iOS response contract.

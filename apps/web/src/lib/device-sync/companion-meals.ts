@@ -15,6 +15,7 @@ import { readHostedWorkspace } from "../hosted-workspace/store";
 import { submitMemberAction } from "../member-actions/submit";
 import { getPrisma } from "../prisma";
 import { readRawBodyBuffer } from "../http";
+import { recoverCompanionMealUploadIds } from "./companion-meal-upload-links";
 
 export function mealApiError(code: string, httpStatus: number, message: string) {
   return hostedOnboardingError({ code, httpStatus, message, retryable: httpStatus === 503 });
@@ -24,20 +25,24 @@ function projectionUnavailable() {
   return mealApiError("MEALS_PROJECTION_UNAVAILABLE", 503, "Saved meals are temporarily unavailable.");
 }
 
-export async function readCompanionMeals(request: Request) {
+export async function readCompanionMeals(request: Request, recoverUploadIds = true) {
   const prisma = getPrisma();
   const auth = await requireActiveHostedMemberAuthFromBearerToken(request, prisma);
   await assertBrowserVaultMemberAuthority({ memberId: auth.member.id, prisma });
   const snapshot = await loadSavedMeals(auth.member.id, request.signal);
+  if (recoverUploadIds) await recoverCompanionMealUploadIds({
+    memberId: auth.member.id, prisma, projection: snapshot.projection, entities: snapshot.entities,
+  });
   // External ciphertext loading cannot preserve access after consent/session loss.
   await assertHostedNativeMemberAuthCurrentTx(auth, prisma);
   await assertBrowserVaultMemberAuthority({ memberId: auth.member.id, prisma });
-  return { auth, prisma, ...snapshot };
+  return { auth, prisma, savedAt: snapshot.savedAt, projection: snapshot.projection };
 }
 
 async function loadSavedMeals(memberId: string, signal: AbortSignal): Promise<{
   savedAt: string;
   projection: CompanionMealsProjection;
+  entities: Array<{ family: string; kind: string; attributes: Record<string, unknown> }>;
 }> {
   try {
     const workspace = await readHostedWorkspace({ userId: memberId });
@@ -60,7 +65,7 @@ async function loadSavedMeals(memberId: string, signal: AbortSignal): Promise<{
     const loaded = await decodeReadyBrowserVaultSession({ session, privateKeyJwk: keys.privateKeyJwk, expectedMemberId: memberId, signal });
     const replica = loaded.client.replica;
     if (!replica.meals || (replica.generation ?? 0) < 17) throw projectionUnavailable();
-    return { savedAt: replica.generatedAt, projection: replica.meals };
+    return { savedAt: replica.generatedAt, projection: structuredClone(replica.meals), entities: replica.entities };
   } catch {
     // Do not log decrypt errors, meal contents, signed URLs, or private paths.
     throw projectionUnavailable();
@@ -95,7 +100,7 @@ export function requireProjectedMeal(projection: CompanionMealsProjection, id: s
 }
 
 export async function queueCompanionMealRemoval(request: Request, id: string) {
-  const { auth, prisma, projection } = await readCompanionMeals(request);
+  const { auth, prisma, projection } = await readCompanionMeals(request, false);
   requireProjectedMeal(projection, id);
   try {
     await readRawBodyBuffer(request, { limitBytes: 0 });
