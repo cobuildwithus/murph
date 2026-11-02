@@ -54,6 +54,16 @@ function validPresentation() {
 }
 
 describe("member action contract", () => {
+  it("admits only the closed meal deletion payload", () => {
+    const request = { ...validRequest(), action: { kind: "meal.delete", version: 1, mealId: "meal_fixture" } };
+    expect(parseMemberActionRequestV1(request)).toEqual(request);
+    for (const action of [
+      { ...request.action, memberId: "member_other" },
+      { ...request.action, mealId: "../../other" },
+      { ...request.action, version: 2 },
+    ]) expect(memberActionRequestV1Schema.safeParse({ ...request, action }).success).toBe(false);
+  });
+
   it("parses a closed, versioned workout action", () => {
     const request = validRequest();
 

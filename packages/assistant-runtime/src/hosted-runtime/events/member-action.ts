@@ -1,6 +1,8 @@
 import type {
   HostedExecutionMemberActionRequestedWake,
 } from "@murphai/hosted-execution";
+import { deleteMealRecord } from "@murphai/vault-usecases/records";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import {
   applyLiveWorkoutMemberAction,
   readLiveWorkoutCardSnapshot,
@@ -17,6 +19,31 @@ export async function executeHostedMemberActionWake(input: {
   wake: HostedExecutionMemberActionRequestedWake;
 }): Promise<HostedMailboxOutcome> {
   switch (input.wake.request.action.kind) {
+    case "meal.delete": {
+      let reason: "meal_not_found" | "meal_changed" | null = null;
+      try {
+        await deleteMealRecord({ vault: input.vaultRoot, lookup: input.wake.request.action.mealId });
+      } catch (error) {
+        if (!(error instanceof VaultCliError)) throw error;
+        if (error.code === "not_found") reason = "meal_not_found";
+        else if (error.code === "conflict") reason = "meal_changed";
+        else throw error;
+      }
+      return createNoopMailboxEffect({
+        conversationMetrics: null,
+        mailboxLane: "member-action",
+        postCheckpointRecord: {
+          kind: "member-action.outcome-recorded",
+          outcome: {
+            actionId: input.wake.request.actionId,
+            completedAt: new Date().toISOString(),
+            schemaVersion: 1,
+            status: reason === null ? "applied" : "rejected",
+            reason,
+          },
+        },
+      });
+    }
     case "workout.live.apply": {
       const action = input.wake.request.action;
       const result = await applyLiveWorkoutMemberAction({

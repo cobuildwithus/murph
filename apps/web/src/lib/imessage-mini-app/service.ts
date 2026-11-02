@@ -478,6 +478,10 @@ export function validateIMessageMiniAppMemberAction(
   if (!parsed.success) {
     throw miniAppRequestInvalid("Member action request is invalid.");
   }
+  // A Messages extension credential remains workout-only.
+  if (parsed.data.action.kind === "meal.delete") {
+    throw miniAppRequestInvalid("Member action is not supported by this client.");
+  }
 
   const requestedAt = Date.parse(parsed.data.requestedAt);
   if (

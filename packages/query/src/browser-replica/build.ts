@@ -2,6 +2,7 @@ import type { CanonicalEntity } from "../canonical-entities.ts";
 import { experimentOutcomeSchema } from "@murphai/contracts";
 import { metricPointRecordIds } from "../metrics/index.ts";
 import { buildJournalView } from "../journal-view.ts";
+import { buildCompanionMealsProjection } from "./meals.ts";
 import { isDefaultProjectedQueryEntity } from "../query-visibility.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
 import { summarizeDailySamples, type DailySampleSummary } from "../summaries.ts";
@@ -116,6 +117,7 @@ export async function createBrowserVaultReplica(
     ),
     generatedAt,
     generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
+    meals: buildCompanionMealsProjection(input.vault),
     hasLabBiomarkers: metricRows.some((row) =>
       row.sourceKind === "test-result" &&
       row.biomarkerKey !== null &&

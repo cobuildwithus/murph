@@ -1,6 +1,7 @@
 import type { CanonicalRecordClass } from "../canonical-entities.ts";
 import type {
   ExperimentOutcome,
+  CompanionMealsProjection,
 } from "@murphai/contracts";
 import {
   BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
@@ -250,6 +251,8 @@ export interface BrowserVaultReplica {
   labResultRows: BrowserVaultLabResultRow[];
   /** Absent only on replicas produced before the derived Journal view shipped. */
   journal?: JournalView;
+  /** Absent on older replicas or when canonical timezone is unavailable. */
+  meals?: CompanionMealsProjection;
   metricGoalProgressRows: BrowserVaultMetricGoalProgressRow[];
   metricRows: BrowserVaultMetricRow[];
   metricSelectionRows: BrowserVaultMetricSelectionRow[];
@@ -272,6 +275,7 @@ type BrowserVaultLegacyCompatibleCoreReplica = Pick<
   | "generation"
   | "hasLabBiomarkers"
   | "journal"
+  | "meals"
   | "policy"
   | "schema"
   | "searchRows"

@@ -204,6 +204,11 @@ describe("iMessage mini-app service", () => {
     expect(store.authenticateAgentSessionByTokenHash).not.toHaveBeenCalled();
   });
 
+  it("rejects meal deletion under workout-scoped Messages credentials", () => {
+    const request = { ...nativeWorkoutRequest, action: { kind: "meal.delete", version: 1, mealId: "meal_fixture" } };
+    expect(() => validateIMessageMiniAppMemberAction(request, new Date(request.requestedAt))).toThrow("not supported");
+  });
+
   it("normalizes the sparse presentation emitted by the native Swift workout encoder", () => {
     // Synthetic output from WorkoutEntryDraft and MessagesMiniAppAPIClient.makeEncoder.
     const request = structuredClone(nativeWorkoutRequest);

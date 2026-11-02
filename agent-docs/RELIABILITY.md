@@ -3756,6 +3756,16 @@ it does not decrypt a retired payload or create a second handoff owner.
 
 ## Deterministic member action delivery
 
+The companion Meals API uses this same owner for `meal.delete`: native session,
+current launch consent and active access are revalidated under admission locks.
+It requires a saved generation-17 Meals projection before sending the new action;
+old runtimes cannot produce that projection. Runtime calls `deleteMealRecord`
+and the canonical event lifecycle tombstone, so removal changes nutrition truth.
+The API returns accepted after durable append, not completion. Bounded best-effort
+signaling leaves failed handoff to the existing sweeper. iOS can optimistically
+hide a meal and later show it again from a stale projection or rejected action.
+See [iOS Meals](product-specs/ios-meals.md) for the wire contract and rollback floor.
+
 Direct editors reuse the existing encrypted system mailbox rather than adding a
 queue or result table. Admission deduplicates the exact action id, body, and
 client timestamp and re-signals an exact duplicate. Admission and terminal

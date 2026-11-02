@@ -1,17 +1,198 @@
-# iOS Meals page: integration boundary
+# iOS Meals API
 
 Last verified: 2026-11-01
 
-## Status
+## Scope and ownership
 
-The v2 game app opens Meals from You. The intended page shows meals Murph
-actually logged, rather than the old companion's local pending/sent photos.
-**Hold: meal list, detail, and removal need an architecture decision.** This
-document records the existing contracts and the decision needed before adding
-those routes. No runtime or iOS-facing wire contract changes in this work.
+The v2 game app opens Meals from You. This contract adds list, detail and
+accepted removal for meals Murph logged. It changes the iOS-facing contract
+proposed in #4420: no image URLs or provenance; `uploadId` is currently null;
+reads include `savedAt` and the vault's canonical `timeZone`.
 
-First name, Apple Health receipt freshness, and the private Murph contact link
-already have endpoints. Do not add duplicate companion endpoints for them.
+Canonical meal events and lifecycle tombstones remain in the encrypted member
+vault. Structured meals are derived into generation 17 of the existing encrypted
+Browser Vault core shard. Companion reads unwrap that saved shard through the
+same member-bound authority as Journal. They never start, wake, refresh or wait
+for the runtime. No new health table or durable plaintext copy is created.
+
+All Meals requests use `Authorization: Bearer <native-session-token>`, no cookies,
+and no member selector. Responses, including errors, use `Cache-Control: no-store`.
+Active hosted access and current launch consent are required. Game-only members
+receive the existing 403; the app may show its own photos without server names.
+Session, access and consent are checked again after decryption; removal repeats
+those checks under the mailbox admission locks.
+
+## List
+
+`GET /api/device-sync/companion/meals?limit=7&cursor=2026-11-02`
+
+No body. `limit` is optional, defaults to 7 and accepts 1–31 **days**. `cursor`
+is optional and is the exclusive local day boundary returned as `nextCursor`.
+Only these query parameters are accepted, each at most once. Dates must be real
+`YYYY-MM-DD` dates. There is no client timezone parameter or game timezone fallback.
+
+Exact synthetic 200 response (one populated day):
+
+```json
+{
+  "timeZone": "America/New_York",
+  "savedAt": "2026-11-01T18:00:00.000Z",
+  "days": [
+    {
+      "date": "2026-11-01",
+      "calories": 520,
+      "proteinGrams": 32,
+      "carbsGrams": 58,
+      "fatGrams": null,
+      "mealCount": 1,
+      "calorieMealCount": 1,
+      "meals": [
+        {
+          "id": "meal_01JNV42NP0KH6JQXMZM1G0V6SE",
+          "eatenAt": "2026-11-01T17:30:00.000Z",
+          "name": "Chicken grain bowl",
+          "calories": 520,
+          "proteinGrams": 32,
+          "carbsGrams": 58,
+          "fatGrams": null,
+          "uploadId": null
+        }
+      ]
+    }
+  ],
+  "nextCursor": null
+}
+```
+
+Days and meals within each day are newest first, with ID as the deterministic
+same-instant tie-breaker. Days without meals are omitted. A day is never split:
+its totals and counts cover all canonical selected meals on that local day.
+Nutrients sum only known estimates; if no meal supplies a nutrient its total is
+null, including calories. A real zero stays zero. `calorieMealCount` distinguishes
+partial from complete calorie coverage. Values are approximate, not targets.
+`name` is a saved short label or shortened note (at most 120 characters); it is
+null when no useful name was recorded. It is never generated during a read.
+`eatenAt` is an ISO instant and `id` is an opaque stable meal/event lookup ID.
+
+`nextCursor` is the last returned day when older days remain, otherwise null.
+A valid empty projection returns `days: []`, `nextCursor: null`, with its actual
+`timeZone` and `savedAt`. An unavailable projection never becomes an empty list.
+Each page uses the latest saved snapshot, not an anchored multi-request snapshot;
+refresh the first page when `savedAt` changes if the app needs consistent paging.
+
+## Detail
+
+`GET /api/device-sync/companion/meals/{mealId}` has no body.
+Exact synthetic 200 response:
+
+```json
+{
+  "timeZone": "America/New_York",
+  "savedAt": "2026-11-01T18:00:00.000Z",
+  "meal": {
+    "id": "meal_01JNV42NP0KH6JQXMZM1G0V6SE",
+    "eatenAt": "2026-11-01T17:30:00.000Z",
+    "name": "Chicken grain bowl",
+    "calories": 520,
+    "proteinGrams": 32,
+    "carbsGrams": 58,
+    "fatGrams": null,
+    "uploadId": null
+  }
+}
+```
+
+This reads the same saved projection as the list. Unknown, removed and another
+member's IDs all return `MEAL_NOT_FOUND` without disclosing ownership.
+
+## Removal
+
+`DELETE /api/device-sync/companion/meals/{mealId}` accepts **no request body**.
+The ID must exist in this member's available saved projection. Exact synthetic
+202 response:
+
+```json
+{"accepted":true,"actionId":"2f1c1fdc-c7b0-4d90-b902-8e6295959243"}
+```
+
+This means the typed `meal.delete` action was durably queued in the existing
+encrypted member mailbox, never that deletion completed. A failed or timed-out
+post-commit wake does not undo acceptance; the existing handoff sweeper retries.
+The runtime applies `deleteMealRecord` → `deleteEvent`, appending the canonical
+lifecycle tombstone. The meal then disappears from subsequent projections and
+stops contributing to Murph's nutrition reads. Upload metadata is not the owner.
+No photo is delivered, copied or retained by this API.
+
+Hide the meal optimistically after acceptance. Until a new projection is saved,
+or if the runtime rejects removal, it may reappear on a read. Missing canonical
+records and revision conflicts yield existing post-checkpoint rejected outcomes
+(`meal_not_found`, `meal_changed`); unexpected failures follow mailbox retry.
+The iOS page does not need a new action-status endpoint. Repeated HTTP requests
+can enqueue separate actions; canonical deletion cannot double-count a tombstone.
+
+## Errors
+
+All new domain errors use exactly this envelope shape:
+
+```json
+{"error":{"code":"MEALS_PROJECTION_UNAVAILABLE","message":"Saved meals are temporarily unavailable.","retryable":true}}
+```
+
+| HTTP | Code | Meaning / message |
+| --- | --- | --- |
+| 400 | `MEALS_INVALID_CURSOR` | `The meals cursor is invalid.` |
+| 400 | `MEALS_INVALID_REQUEST` | `Use one cursor and limit.`, `Limit must be between 1 and 31 days.`, or `Meal removal does not accept a body.` |
+| 404 | `MEAL_NOT_FOUND` | `That meal is not available.` Malformed, missing, removed or foreign ID. |
+| 503 | `MEALS_PROJECTION_UNAVAILABLE` | `Saved meals are temporarily unavailable.` Missing/old replica, missing canonical timezone/Meals section, unavailable session/control, malformed or undecryptable snapshot. |
+| 503 | `MEAL_REMOVAL_UNAVAILABLE` | `Meal removal is temporarily unavailable.` Mailbox admission could not be confirmed. |
+
+The 400 and 404 errors have `retryable: false`; the new 503 errors have
+`retryable: true`. Authentication and authorization run before data is returned.
+Shared errors remain unchanged:
+
+| HTTP | Code | Meaning |
+| --- | --- | --- |
+| 401 | `AUTH_REQUIRED` | Missing, malformed, expired or revoked native session; cookies also rejected. |
+| 403 | `HOSTED_ACCESS_REQUIRED` | No active hosted access, including game-only members. |
+| 403 | `HOSTED_MEMBER_SUSPENDED` | Suspended hosted account. |
+| 403 | `HOSTED_CONSENT_REQUIRED` | Current launch consent missing; may include `details.missingScopes`. |
+| 426 | `AUTH_CLIENT_UPGRADE_REQUIRED` | Retired credential format; update the client. |
+| 503 | `AUTH_UNAVAILABLE` | Authentication service configuration unavailable. |
+| 500 | `INTERNAL_ERROR` | Unexpected shared infrastructure error; generic message, `retryable` can be omitted. |
+
+Shared domain errors normally include `retryable: false` and may include
+`details`. Branch on code/status, not message text. A projection error takes
+precedence over meal lookup; do not interpret it as a missing meal.
+
+## Local photo association
+
+`uploadId` is always null in this version. Manual upload UUIDs are hashed with
+the member ID before the encrypted wake is built. The vault's
+`externalRef.resourceId` holds the resulting capture digest, not that UUID.
+Automatic capture digests also reach this field, but canonical records do not
+retain a discriminator proving which digest was originally supplied by the
+phone. Do not return this ambiguous digest as the original phone upload ID.
+
+The smallest future addition is an optional original phone upload identifier in
+the existing encrypted meal-photo wake, copied into canonical meal metadata
+at import and projected as `uploadId`. No image bytes or new store is needed.
+That addition is deliberately not implemented. iOS shows a plain tile for null;
+no `source`, `thumbnailUrl`, `photoUrl`, or full-size URL exists in this contract.
+
+## Release order and compatibility
+
+Web ships first and accepts only generation-17-or-newer replicas that contain
+the structured Meals section. Older or missing projections fail with
+`MEALS_PROJECTION_UNAVAILABLE`, including DELETE, without sending the new action
+to the old runtime. Reads do not trigger upgrades. The runtime that publishes
+that member's new projection contains the typed consumer. Ordinary later runtime
+work publishes it; inactive members can remain unavailable until then.
+
+Deploy the runtime from main after Web. Once new actions are admitted, retain
+the meal.delete consumer as a runtime rollback floor. Do not roll back to a
+runtime that cannot parse admitted actions. New readers accept legacy replicas
+for existing Browser Vault uses; only Meals requires its new section. Follow
+the hosted deployment workflow's image-pair admission and convergence checks.
 
 ## Existing endpoints the app can use
 
@@ -139,114 +320,3 @@ Error messages are display text, not enums.
 | Game profile | `400 INVALID_REQUEST`; missing initial profile: `409 PROFILE_REQUIRED` |
 
 Unexpected server failures remain errors, never an empty successful meal list.
-
-## Where meal truth lives
-
-- `packages/core/src/mutations.ts` (`addMeal`) writes the canonical meal event
-  and raw attachment manifest inside the member vault. Hosted runtime checkpoints
-  encrypt that workspace. Web's upload enrollment, staging objects, and mailbox
-  receipts are not a meal database.
-- `packages/vault-usecases/src/usecases/document-meal-read.ts` owns meal
-  list/show/edit/delete; `packages/query/src/meal-nutrition.ts` reads stored
-  nutrition and coverage. The assistant food-journal skill and vault CLI use
-  these owners. Recent recall uses the descending timeline; `meal list` itself
-  is oldest first. Do not take its first page and reverse it for latest meals.
-- `apps/web/src/lib/foods.ts` queries the shared food-label catalog, not member
-  meals. The iMessage card route renders a validated presentation payload;
-  neither it nor `nutrition-card-image.tsx` queries current meal truth.
-- The companion Journal endpoint already decrypts a saved Browser Vault core
-  shard with member authority checks before and after the external read. It
-  does not wake the runtime. Meal entities currently have no structured meal
-  attributes in `projectSafeEventAttributes`; Journal's display strings are not
-  an API for nutrition. The replica does not carry raw meal photos.
-- `deleteMealRecord` delegates to the revision-checked canonical `deleteEvent`.
-  It appends a lifecycle tombstone and audit record. **Reuse soft deletion**;
-  do not delete an upload receipt or hide a row only on the phone. Retained raw
-  paths are separate from excluding a meal from active nutrition reads.
-- Hosted photo import writes `source: "device"` and a `meal-photo-capture`
-  external reference. Manual camera and picker submissions share one upload
-  shape. Historical records cannot reliably distinguish camera, picker, text,
-  automatic library capture, and other imports using the requested three-way
-  enum. Absence of a photo does not prove text origin.
-- Staged encrypted photos are deleted after the successful runtime checkpoint.
-  Automatic-capture closeout also removes retained canonical photos while
-  keeping the structured meal. Existing privacy cleanup must remain intact.
-
-See [Architecture](../../ARCHITECTURE.md#meal-photo-capture),
-[Journal](journal.md#read-model), and
-[nutrition cards](nutrition-totals-card.md) for the current owners.
-
-## Architecture decision
-
-| Option | Cost | Privacy impact |
-| --- | --- | --- |
-| Extend the encrypted Browser Vault projection and reuse a typed encrypted mailbox action for deletion (recommended) | Moderate: structured meal projection/generation change, bounded pagination, refresh and deletion receipt semantics, and a private photo-delivery path. Reuses Journal authority and canonical runtime writes; reads can be stale. | Keeps canonical health truth in the vault and derived data in the existing encrypted replica. Photos need separately authorized, expiring delivery and the existing removal lifecycle. |
-| Add a live runtime meal read/write RPC | High: restore/wake latency, availability, bounded runtime admission, authorization, cancellation, and write fencing for app requests. | Avoids another durable meal projection, but introduces a new route into the decrypted workspace. |
-| Maintain an encrypted Web-owned meal read model and image store | Highest: new schema, publish/reconcile/backfill/delete protocol, and consistency proof with canonical writes. | Adds another durable copy of health data and new retention, key, revocation, and account-deletion obligations. |
-
-The first option is a recommendation, not an approved implementation. A signed
-game-image URL pattern exists in `apps/web/src/lib/game/media.ts`, but raw vault
-meal attachments are not game images. Reusing signing does not authorize copying
-them into that store or changing their retention.
-
-Resolve the projection and mutation transport, stale-read/removal behavior,
-photo availability/retention, and a truthful unknown/other provenance value before
-implementing meal routes. Select the canonical member timezone explicitly; the
-game profile timezone is not automatically the vault timezone. Game-only members
-also need a deliberate access decision rather than bypassing health-data gates.
-
-## Deferred meal API requirements
-
-No meal list, detail, or DELETE route is shipped here. The following paths and
-JSON are a **proposal only**, so the iOS app must not call them yet:
-
-- `GET /api/device-sync/companion/meals`: bounded newest-first results grouped
-  by local date, with a stable cursor and declared timezone. Complete-day totals
-  must not be calculated from only the visible page of meals.
-- `GET /api/device-sync/companion/meals/{id}`: same meal fields plus nullable
-  `photoUrl` for a retained full-size photo.
-- `DELETE /api/device-sync/companion/meals/{id}`: no body; invoke canonical
-  tombstoning. A queued `202` must not mean removal has completed. The chosen
-  transport must specify completion/retry and projection convergence first.
-
-Illustrative list payload (all nutrition fields independently nullable):
-
-```json
-{
-  "timeZone": "America/New_York",
-  "freshness": "fresh",
-  "nextCursor": null,
-  "days": [{
-    "date": "2026-11-01",
-    "calories": 520,
-    "calorieMealCount": 1,
-    "mealCount": 1,
-    "meals": [{
-      "id": "meal_example",
-      "eatenAt": "2026-11-01T17:00:00.000Z",
-      "name": "Chicken grain bowl",
-      "calories": 520,
-      "proteinGrams": 35,
-      "carbsGrams": 58,
-      "fatGrams": 17,
-      "thumbnailUrl": null,
-      "source": "unknown"
-    }]
-  }]
-}
-```
-
-The proposed `unknown` value requires agreement because legacy provenance cannot
-satisfy only camera/picker/text. Missing meal names and uncertain eating times
-likewise need truthful display fallbacks, not fabricated labels or timestamps.
-An all-unknown calorie day has `calories: null`; a partially estimated day must
-retain coverage, not imply a complete daily intake. No estimate means null, not
-zero. Stable IDs, local-day/DST ordering, deleted meals, cursor/day boundaries,
-expired image links, and cross-member access all need synthetic tests.
-
-Future errors must distinguish unauthorized access, inaccessible/missing meals,
-invalid cursors, stale revisions, and unavailable runtime/replica state. Exact
-codes and delete success JSON are deferred with the transport decision. Never
-return an empty list to conceal unavailable data. Never log meal text, image
-URLs, or raw input; bind safe metadata locals before any logging. Photos must
-use member-authorized signed URLs and return null after privacy removal.

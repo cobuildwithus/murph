@@ -38,6 +38,7 @@ export interface BrowserVaultCoreShard extends Pick<
   | "assistantSummary"
   | "entities"
   | "journal"
+  | "meals"
   | "policy"
   | "timelineRows"
   | "weeklySampleSummaries"
@@ -167,6 +168,7 @@ export async function splitBrowserVaultReplica(
       hasLabBiomarkers: replica.hasLabBiomarkers ?? false,
       identity,
       ...(replica.journal === undefined ? {} : { journal: replica.journal }),
+      ...(replica.meals === undefined ? {} : { meals: replica.meals }),
       policy: replica.policy,
       schema: BROWSER_VAULT_CORE_SHARD_SCHEMA,
       timelineRows: replica.timelineRows,
@@ -207,6 +209,7 @@ export function assembleBrowserVaultCoreReplica(core: BrowserVaultCoreShard): Br
     ...(identity.generation === undefined ? {} : { generation: identity.generation }),
     hasLabBiomarkers: core.hasLabBiomarkers,
     ...(core.journal === undefined ? {} : { journal: core.journal }),
+    ...(core.meals === undefined ? {} : { meals: core.meals }),
     policy: core.policy,
     schema: BROWSER_VAULT_REPLICA_SCHEMA,
     searchRows: core.entities.map(projectBrowserVaultSearchRow),
