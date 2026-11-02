@@ -1,7 +1,7 @@
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
-import { assertIntegrationIngestHistoryWritable } from "./integration-ingest-cold-storage.ts";
+import { materializeIntegrationIngestHistory } from "./integration-ingest-cold-storage.ts";
 
 import {
   classifyExperimentStorageFile,
@@ -138,7 +138,7 @@ async function assertIntegrationIngestTargetHasNoArchiveSibling(
   if (!isIntegrationIngestJsonlAppendTarget(target.relativePath, options)) {
     return;
   }
-  await assertIntegrationIngestHistoryWritable(target.vaultRoot, target.relativePath);
+  await materializeIntegrationIngestHistory(target.vaultRoot, [target.relativePath]);
   for (const suffix of INTEGRATION_INGEST_ARCHIVE_SUFFIXES) {
     const archivedAbsolutePath = `${target.absolutePath}${suffix}`;
     if (await pathExists(archivedAbsolutePath)) {

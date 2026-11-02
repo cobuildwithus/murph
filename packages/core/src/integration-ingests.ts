@@ -11,7 +11,7 @@ import {
 } from "node:zlib";
 
 import { HostedColdHistoryUnavailableError } from "@murphai/runtime-state/node";
-import { materializeIntegrationIngestHistory, assertIntegrationIngestHistoryWritable } from "./integration-ingest-cold-storage.ts";
+import { materializeIntegrationIngestHistory, thawIntegrationIngestHistoryForAppend } from "./integration-ingest-cold-storage.ts";
 
 import {
   integrationIngestReceiptSchema,
@@ -1295,7 +1295,7 @@ export async function prepareLiveIntegrationIngestAppendPayload(
   targetRelativePath: string,
   payload: string,
 ): Promise<string> {
-  await assertIntegrationIngestHistoryWritable(vaultRoot, targetRelativePath);
+  await materializeIntegrationIngestHistory(vaultRoot, [targetRelativePath]);
   const target = resolveVaultPath(vaultRoot, targetRelativePath);
   if (!(await pathExists(target.absolutePath))) {
     return payload;
@@ -1955,7 +1955,7 @@ export async function appendArchivedIntegrationIngestShard({
   targetRelativePath,
   vaultRoot,
 }: AppendArchivedIntegrationIngestShardInput): Promise<AppendArchivedIntegrationIngestShardResult> {
-  await assertIntegrationIngestHistoryWritable(vaultRoot, targetRelativePath);
+  await thawIntegrationIngestHistoryForAppend(vaultRoot, targetRelativePath);
   const source = await readArchivedIntegrationIngestShardSource(vaultRoot, targetRelativePath);
   const payloadBytes = Buffer.from(payload, "utf8");
   const records = await parseIntegrationIngestAppendPayload(payload, targetRelativePath);
@@ -2062,7 +2062,7 @@ export async function truncateArchivedIntegrationIngestShard({
   targetRelativePath,
   vaultRoot,
 }: TruncateArchivedIntegrationIngestShardInput): Promise<void> {
-  await assertIntegrationIngestHistoryWritable(vaultRoot, targetRelativePath);
+  await materializeIntegrationIngestHistory(vaultRoot, [targetRelativePath]);
   const source = await readArchivedIntegrationIngestShardSource(vaultRoot, targetRelativePath);
   const inspection = await inspectIntegrationIngestSourceBytes(vaultRoot, source, {
     prefixByteLength: expectedBaseByteLength,
