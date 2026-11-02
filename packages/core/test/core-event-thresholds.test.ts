@@ -1,3 +1,4 @@
+import { observeWriteOperations } from "./helpers/observed-write-operations.ts";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
@@ -28,12 +29,10 @@ import {
   deleteEvent,
   importDocument,
   initializeVault,
-  listWriteOperationMetadataPaths,
   parseFrontmatterDocument,
   promoteInboxExperimentNote,
   promoteInboxJournal,
   readJsonlRecords,
-  readStoredWriteOperation,
   stopExperiment,
   updateExperiment,
   upsertEvent,
@@ -90,6 +89,8 @@ afterEach(async () => {
   );
 });
 
+const { listObservedWriteOperationPaths, readObservedWriteOperation } = observeWriteOperations();
+
 test("applyCanonicalWriteBatch records raw contents without receipts and protected deletes with receipts", async () => {
   const vaultRoot = await makeTempDirectory("murph-core-batch");
   const receiptRoot = await makeTempDirectory("murph-core-batch-receipts");
@@ -145,8 +146,8 @@ test("applyCanonicalWriteBatch records raw contents without receipts and protect
   await assert.rejects(() => fs.access(deleteAbsolutePath));
 
   const operations = await Promise.all(
-    (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
-      readStoredWriteOperation(vaultRoot, relativePath),
+    (await listObservedWriteOperationPaths(vaultRoot)).map((relativePath) =>
+      readObservedWriteOperation(vaultRoot, relativePath),
     ),
   );
   const operation = operations.find(
