@@ -52,7 +52,9 @@ async function prepareGameChatPlayers(game: Game & { players: GamePlayer[] }, pr
   const names = await openGameTexts(profiles.map((profile) => ({ table: "game_profile" as const, field: "first_name", rowId: profile.memberId, memberId: profile.memberId, value: profile.firstNameEncrypted })));
   const nameFor = (memberId: string) => names[profiles.findIndex((profile) => profile.memberId === memberId)] ?? "Your opponent";
   const other = players.find((player) => player.memberId !== proposal.proposedByMemberId)!;
-  const message = buildGameProposalInstructions(proposal, { proposerName: nameFor(proposal.proposedByMemberId), recipientName: nameFor(other.memberId), lengthDays: game.lengthDays });
+  const { readGameNoticeRoom } = await import("./service");
+  const room = await readGameNoticeRoom(game.id, players.map((player) => player.memberId));
+  const message = buildGameProposalInstructions(proposal, { proposerName: nameFor(proposal.proposedByMemberId), recipientName: nameFor(other.memberId), lengthDays: game.lengthDays, room });
   return { phones, message };
 }
 

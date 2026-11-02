@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GameChange, GamePendingChange } from "../src/lib/game/contract";
 const m = vi.hoisted(() => ({
-  bootstrap: vi.fn(), updateStatus: vi.fn(), game: vi.fn(), updateGame: vi.fn(), candidates: vi.fn(), identities: vi.fn(), routes: vi.fn(), chat: vi.fn(), create: vi.fn(), claim: vi.fn(), receipt: vi.fn(), saveReceipt: vi.fn(), accepted: vi.fn(), prepare: vi.fn(), ensure: vi.fn(), reconcile: vi.fn(), enqueue: vi.fn(), mailbox: vi.fn(), wake: vi.fn(), prepareMailbox: vi.fn(), routeCheck: vi.fn(), lines: vi.fn(), line: vi.fn(), capacity: vi.fn(), decode: vi.fn(), encode: vi.fn(),
+  bootstrap: vi.fn(), updateStatus: vi.fn(), game: vi.fn(), updateGame: vi.fn(), candidates: vi.fn(), identities: vi.fn(), routes: vi.fn(), chat: vi.fn(), create: vi.fn(), claim: vi.fn(), receipt: vi.fn(), saveReceipt: vi.fn(), accepted: vi.fn(), prepare: vi.fn(), ensure: vi.fn(), reconcile: vi.fn(), enqueue: vi.fn(), mailbox: vi.fn(), wake: vi.fn(), prepareMailbox: vi.fn(), routeCheck: vi.fn(), lines: vi.fn(), line: vi.fn(), capacity: vi.fn(), decode: vi.fn(), encode: vi.fn(), room: vi.fn(),
 }));
 vi.mock("../src/lib/prisma", () => {
   const db = {
@@ -25,6 +25,7 @@ vi.mock("../src/lib/hosted-onboarding/linq-delivery-store", () => ({ buildHosted
 vi.mock("../src/lib/hosted-onboarding/linq-line-store", () => ({ claimHostedLinqProactiveConversationCapacityTx: m.capacity, listHostedLinqHealthyProactiveLines: m.lines, readHostedLinqIncomingLineState: m.line }));
 vi.mock("../src/lib/hosted-routing/thread-container-service", () => ({ prepareHostedThreadContainerCreation: m.prepare, ensureHostedThreadContainerRouteTx: m.ensure }));
 vi.mock("../src/lib/hosted-groups/thread-container-participants", () => ({ reconcileHostedThreadContainerParticipants: m.reconcile }));
+vi.mock("../src/lib/game/service", () => ({ readGameNoticeRoom: m.room }));
 vi.mock("../src/lib/hosted-mailbox/store", () => ({ appendPreparedHostedMailboxEnvelopeTx: m.enqueue, prepareHostedMailboxEnvelopeAppend: m.prepareMailbox, readHostedMailboxItemByDedupeKey: m.mailbox }));
 vi.mock("../src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: m.wake }));
 vi.mock("../src/lib/hosted-routing/assistant-notification-destination", () => ({ readHostedThreadContainerLinqRouteAuthorities: m.routes, assertHostedAssistantNotificationRouteAuthority: m.routeCheck, resolveHostedAssistantNotificationDestination: async () => ({ conversationShape: "thread-container", route: { channel: "linq" } }), bindHostedAssistantNotificationDestination: () => ({ route: { channel: "linq", delivery: { kind: "thread", target: "chat" }, accountId: "line" }, externalThreadRouteAuthority: { channel: "linq", containerMemberId: "room", threadId: "chat", accountLookupKey: "line-key" } }) }));
@@ -176,6 +177,16 @@ describe("game proposal chat delivery", () => {
     const data = JSON.parse(notification.instructions.split("\n").at(-1));
     expect(data).toEqual({ proposer: "Alex", recipient: "Sam", currentLengthDays: 7, change: proposal.change, proposedStartDate: null });
     expect(data).not.toHaveProperty("effectiveFromDay");
+    expect(m.room).toHaveBeenCalledWith("game", ["person-a", "person-b"]);
+  });
+  it("names the game by its tasks when the pair has other open games", async () => {
+    m.game.mockResolvedValue(game("room"));
+    const room = { tasks: ["20 squats", "10 minute stretch"], otherGames: [{ status: "live", tasks: ["Read 20 pages", "No phone after 10pm"] }] };
+    m.room.mockResolvedValue(room);
+    await deliverGameChangeProposal("game", "proposal");
+    const { instructions } = m.prepareMailbox.mock.calls[0]![0].envelope.notification;
+    expect(instructions).toContain("Say which game this is by its tasks");
+    expect(JSON.parse(instructions.split("\n").at(-1))).toEqual({ thisGameTasks: room.tasks, otherGames: room.otherGames });
   });
   it("hydrates sealed task and stake proposals without rewriting their stored words", async () => {
     const words = JSON.stringify({ v: 1, versions: [{ n: 2,

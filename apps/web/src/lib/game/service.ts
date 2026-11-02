@@ -1,6 +1,6 @@
 import "server-only";
 
-import { parseGameRecapEventId, hostedGameRecapSchema, type HostedGameChatState, type HostedGameRecap } from "@murphai/hosted-execution/runtime-control";
+import { parseGameRecapEventId, hostedGameRecapSchema, type GameNoticeRoom, type HostedGameChatState, type HostedGameRecap } from "@murphai/hosted-execution/runtime-control";
 import { gameChatProgress } from "./chat-progress";
 import { randomBytes } from "node:crypto";
 
@@ -1317,6 +1317,15 @@ export async function readGameRematchNotice(gameId: string, playerMemberIds: rea
     rematch: rematchRules,
     startsOn: fromDbDate(rematch.row.startsOn),
   };
+}
+
+/** Which game a room notice means, only when the pair has other open games to confuse it with. */
+export async function readGameNoticeRoom(gameId: string, playerMemberIds: readonly string[]): Promise<GameNoticeRoom | undefined> {
+  const { games } = await readGameChatState("", playerMemberIds);
+  const shared = games.find((game) => game.id === gameId);
+  const otherGames = games.filter((game) => game.id !== gameId && (game.status === "live" || game.status === "negotiating"))
+    .map((game) => ({ status: game.status, tasks: game.terms.tasks.map((task) => task.text) }));
+  return shared && otherGames.length > 0 ? { tasks: shared.terms.tasks.map((task) => task.text), otherGames } : undefined;
 }
 
 /** Shared-chat projection intentionally never calls the viewer-private app view. */

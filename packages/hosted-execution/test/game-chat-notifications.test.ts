@@ -117,6 +117,43 @@ describe("game v1 notification instructions", () => {
       }
     `);
   });
+  it("names the game by its tasks when other games share the room, and offers reminders once", () => {
+    const room = { tasks: ["20 squats", "10 minute stretch"], otherGames: [{ status: "live", tasks: ["Read 20 pages", "No phone after 10pm"] }] };
+    const [game] = hostedGameChatStateSchema.parse({ games: [{
+      id: "game_synthetic", status: "live", startsOn: null, lengthDays: 7,
+      terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: "20 squats" }, { seat: 1, text: "10 minute stretch" }], schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: "prize", item: "coffee run" }] },
+      players: [{ memberId: "member_sam", seat: 0, firstName: "Sam", dayOne: "2030-03-04", timeZone: "UTC" }, { memberId: "member_maya", seat: 1, firstName: "Maya", dayOne: "2030-03-04", timeZone: "UTC" }],
+      pendingChange: null, changeControls: { canStartNow: false, canEdit: false, canEditSchedule: false, canEditStartDate: false, editableFromDay: null },
+    }] }).games;
+    const proposal = { change: { kind: "edit" as const, lengthDays: 10 }, startsOn: null };
+    const names = { proposerName: "Sam", recipientName: "Maya", lengthDays: 7 };
+    const shared = [
+      buildGameProposalInstructions(proposal, { ...names, room }),
+      buildGameKickoffInstructions({ kind: "started", game: game!, room }),
+      buildGameChangeCancelledInstructions(room),
+      buildGameChangeExpiredInstructions("The schedule changed first.", room),
+    ];
+    for (const instructions of shared) {
+      expect(instructions).toContain("Say which game this is by its tasks");
+      expect(JSON.parse(instructions.split("\n").at(-1)!)).toEqual({ thisGameTasks: room.tasks, otherGames: room.otherGames });
+    }
+    const recap = buildGameRecapInstructions([], room);
+    expect(recap).toContain("the chatLine names this game by its tasks");
+    expect(recap).toContain(JSON.stringify(room.tasks));
+    // A second live game in the room gets its own introduction, never a second reminder offer.
+    expect(shared[1]).toContain("Skip the reminder offer");
+    expect(shared[1]).not.toContain("Briefly offer reminders");
+    const besideInvite = buildGameKickoffInstructions({ kind: "started", game: game!, room: { ...room, otherGames: [{ status: "negotiating", tasks: ["Plank"] }] } });
+    expect(besideInvite).toContain("Briefly offer reminders");
+    expect(besideInvite).toContain("Say which game this is by its tasks");
+    // A room with one game reads exactly as before.
+    for (const single of [buildGameProposalInstructions(proposal, names), buildGameKickoffInstructions({ kind: "started", game: game! }), buildGameChangeCancelledInstructions(),
+      buildGameChangeExpiredInstructions("The schedule changed first."), buildGameRecapInstructions([])]) {
+      expect(single).not.toContain("Other games");
+      expect(single).not.toContain("thisGameTasks");
+    }
+    expect(buildGameKickoffInstructions({ kind: "started", game: game! })).toContain("Briefly offer reminders");
+  });
   it("adds lore guidance only when the bound shared state has a live game", () => {
     const live = hostedGameChatStateSchema.parse({ games: [{
       id: "game_synthetic", status: "live", startsOn: null, lengthDays: 7, terms: { n: 1, fromDay: 0, tasks: [], schedule: { count: 3 }, stakes: [] }, players: [], pendingChange: null,
