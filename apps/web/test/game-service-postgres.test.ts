@@ -6,6 +6,28 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Prisma } from "@prisma/client";
 
+// Real roots and sealing for the crypto case; only KMS is the local provider.
+vi.mock("@/src/lib/hosted-crypto/env", async () => {
+  const { generateKeyPairSync } = await import("node:crypto");
+  const { createHostedAuthorityVerifyKeyring } = await vi.importActual<typeof import("@murphai/runtime-state")>("@murphai/runtime-state");
+  const { createHostedGcpKmsClientFromEnv } = await vi.importActual<typeof import("@/src/lib/hosted-crypto/gcp-kms")>("@/src/lib/hosted-crypto/gcp-kms");
+  const authoritySignKeyVersionName = "projects/example/locations/global/keyRings/hosted/cryptoKeys/authority/cryptoKeyVersions/1";
+  const authorityKey = generateKeyPairSync("ec", { namedCurve: "prime256v1", privateKeyEncoding: { format: "jwk" }, publicKeyEncoding: { format: "pem", type: "spki" } });
+  const gcpKms = createHostedGcpKmsClientFromEnv({
+    HOSTED_CRYPTO_ENV: "test", HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
+    HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: JSON.stringify(authorityKey.privateKey),
+    HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: Buffer.alloc(32, 7).toString("base64"), NODE_ENV: "test",
+  });
+  return {
+    getHostedWebCryptoConfig: () => ({
+      authoritySignKeyVersionName, authoritySignPublicKeyPem: authorityKey.publicKey,
+      authorityVerifyKeyring: createHostedAuthorityVerifyKeyring({ activeKeyVersionName: authoritySignKeyVersionName, activePublicKeyPem: authorityKey.publicKey }),
+      env: "test", gcpKms, webWrapKmsKeyName: "projects/example/locations/global/keyRings/hosted/cryptoKeys/history-benchmark",
+    }),
+  };
+});
+
+
 const push = vi.hoisted(() => vi.fn().mockResolvedValue("sent"));
 const lifecycleDelivery = vi.hoisted(() => vi.fn().mockResolvedValue(true));
 const proposalDelivery = vi.hoisted(() => vi.fn().mockResolvedValue(true));
@@ -32,6 +54,7 @@ import {
   devStartNow,
   mediaKeyPrefixFor,
   authorizeMediaRead,
+  authorizeMediaReads,
   readGame,
   readGameRematchNotice,
   readHistory,
@@ -65,10 +88,18 @@ const TERMS: GameTermsInput = {
 const memberIds: string[] = [];
 let mediaDir = "";
 
-async function member(firstName: string, timeZone: string): Promise<string> {
+async function member(firstName: string, timeZone: string, realCrypto = false): Promise<string> {
   const id = `hbm_gametest_${firstName.toLowerCase()}_${randomUUID().slice(0, 8)}`;
   await getPrisma().hostedMember.create({ data: { billingStatus: "active", id } });
   memberIds.push(id);
+  if (realCrypto) {
+    const { prepareHostedDomainRootForWeb, revalidatePreparedHostedDomainRootForWebTx } = await import("../src/lib/hosted-crypto/domain-root-store");
+    const { runWithHostedDomainRootUnwrapCache } = await import("../src/lib/hosted-crypto/domain-root-unwrap-cache");
+    await runWithHostedDomainRootUnwrapCache(async () => {
+      const prepared = await prepareHostedDomainRootForWeb({ domain: "control", reason: "test", userId: id });
+      await getPrisma().$transaction(tx => revalidatePreparedHostedDomainRootForWebTx({ prepared, tx }));
+    });
+  }
   await ok(id, { firstName, timeZone, type: "setProfile" });
   return id;
 }
@@ -1172,6 +1203,122 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(home.games.map((game) => game.id).sort()).toEqual([open!.id, ...settledIds.slice(1)].sort());
   });
 
+  it("bounds populated history round trips through native auth and signing", async () => {
+    const { performance } = await import("node:perf_hooks");
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    const { runWithPrismaOperationTimings } = await import("../src/lib/prisma-operation-timing");
+    const { hostedAuthAdapter } = await import("../src/lib/better-auth/adapter");
+    const { serializeHostedNativeSessionToken } = await import("../src/lib/better-auth/transport");
+    const { runWithHostedDomainRootUnwrapCache, getHostedDomainRootUnwrapCache } = await import("../src/lib/hosted-crypto/domain-root-unwrap-cache");
+    const { GET } = await import("../app/api/game/v1/history/route");
+    const { requireGameMember } = await import("../src/lib/game/http/auth");
+    const crypto = await import("../src/lib/game/crypto");
+    vi.stubEnv("MURPH_GAME_ENABLED", "true");
+    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
+    vi.stubEnv("HOSTED_AUTH_STORAGE_KEY", Buffer.alloc(32, 17).toString("base64url"));
+    vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", Buffer.alloc(32, 9).toString("base64url"));
+    vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "http://localhost:3237");
+    const { setHostedSecureBoxStringTestCodecForTests } = await import("../src/lib/hosted-crypto/secure-box");
+    const holder = globalThis as typeof globalThis & { __murphHostedSecureBoxStringTestCodec?: Parameters<typeof setHostedSecureBoxStringTestCodecForTests>[0] };
+    const codec = holder.__murphHostedSecureBoxStringTestCodec ?? null;
+    setHostedSecureBoxStringTestCodecForTests(null);
+    try {
+      const { getHostedWebCryptoConfig } = await import("../src/lib/hosted-crypto/env");
+      const kmsClient = getHostedWebCryptoConfig().gcpKms;
+      const decrypt = kmsClient.decrypt.bind(kmsClient);
+      const kms = vi.spyOn(kmsClient, "decrypt").mockImplementation(async input => {
+        if (process.env.MURPH_GAME_HISTORY_BENCH_LATENCY === "1") await new Promise(resolve => setTimeout(resolve, 53));
+        return decrypt(input);
+      });
+      const viewer = await member("BenchmarkViewer", "UTC", true);
+      const token = randomUUID().replaceAll("-", "");
+      const adapter = hostedAuthAdapter(getPrisma())({});
+      const dates = { createdAt: new Date(), updatedAt: new Date() };
+      await adapter.create({ model: "user", forceAllowId: true,
+        data: { id: viewer, email: `${viewer}@example.test`, emailVerified: true, name: "", ...dates } });
+      await adapter.create({ model: "session", forceAllowId: true, data: {
+        id: `session-${viewer}`, userId: viewer, token, expiresAt: new Date(Date.now() + 3_600_000), ...dates,
+      } });
+      for (let person = 0; person < 4; person++) {
+        const opponent = await member(`BenchmarkOpponent${person}`, "UTC", true);
+        for (let round = 0; round < 3; round++) {
+          await seedSettledGame({ challenger: viewer, opponent, mediaDays: 3,
+            settledAt: new Date(Date.UTC(2030, 1, person + 1, round)), scores: [5, 3] });
+        }
+      }
+      vi.spyOn(gameMedia, "servesSignedGameMedia").mockReturnValue(true);
+      const sign = vi.spyOn(gameMedia, "gameMediaDelivery").mockImplementation(async () => {
+        if (process.env.MURPH_GAME_HISTORY_BENCH_LATENCY === "1") await new Promise(resolve => setTimeout(resolve, 128));
+        return { url: "https://imagedelivery.net/account/image/gameavatar?exp=9999999999&sig=synthetic",
+          expiresAt: "2030-01-01T00:00:00.000Z" };
+      });
+      const open = vi.spyOn(crypto, "openGameTexts");
+      const request = new Request("http://localhost/api/game/v1/history", {
+        headers: { authorization: `Bearer ${serializeHostedNativeSessionToken(token)}` },
+      });
+      const samples: unknown[] = [];
+      const benchmark = process.env.MURPH_GAME_HISTORY_BENCH === "1";
+      for (let run = 0; run < (benchmark ? 11 : 2); run++) {
+        performance.clearMeasures(); open.mockClear(); sign.mockClear(); kms.mockClear();
+        const operations: import("../src/lib/prisma-operation-timing").PrismaOperationTiming[] = [];
+        const queries: import("../src/lib/prisma-operation-timing").PrismaQueryTiming[] = [];
+        const sample: Record<string, unknown> = {};
+        const started = performance.now();
+        await runWithPrismaOperationTimings(operations, async () => {
+          const history = await runWithHostedDomainRootUnwrapCache(async () => {
+            let at = performance.now();
+            expect(await requireGameMember(request)).toBe(viewer);
+            sample.auth = performance.now() - at;
+            sample.authQueries = queries.length;
+            at = performance.now();
+            const history = await readHistory(viewer);
+            sample.read = performance.now() - at;
+            sample.readQueries = queries.length - Number(sample.authQueries);
+            return history;
+          });
+          expect(getHostedDomainRootUnwrapCache()).toBeUndefined();
+          const at = performance.now();
+          const signed = await withHistoryPhotoDeliveries(history, viewer);
+          sample.signing = performance.now() - at;
+          sample.signingQueries = queries.length - Number(sample.authQueries) - Number(sample.readQueries);
+          expect(signed.people).toHaveLength(4);
+          expect(signed.people.every(person => person.games.length === 3)).toBe(true);
+          expect(sign).toHaveBeenCalledTimes(24);
+        }, undefined, queries);
+        sample.total = performance.now() - started;
+        sample.steps = Object.fromEntries(performance.getEntriesByType("measure")
+          .filter(entry => entry.name.startsWith("history-bench:"))
+          .map(entry => [entry.name.replace("history-bench:", ""), entry.duration]));
+        sample.operations = operations;
+        sample.queries = queries.length;
+        sample.kmsCalls = kms.mock.calls.length;
+        expect(sample.authQueries).toBe(5);
+        expect(sample.readQueries).toBe(9);
+        expect(sample.signingQueries).toBe(4);
+        expect(sample.kmsCalls).toBe(5);
+        sample.decryptFields = open.mock.calls.flatMap(([entries]) => entries.filter(entry => entry.value)).length;
+        if (run > 0) samples.push(sample);
+      }
+      kms.mockClear();
+      const response = await GET(request);
+      expect(response.status).toBe(200);
+      expect((await response.json()).people).toHaveLength(4);
+      expect(kms).toHaveBeenCalledTimes(5);
+      expect(getHostedDomainRootUnwrapCache()).toBeUndefined();
+      // A later request must re-read revocation, never reuse an authenticated session.
+      await getPrisma().hostedAuthRecord.deleteMany({ where: { model: "session", memberId: viewer } });
+      expect((await GET(request)).status).toBe(401);
+      expect(getHostedDomainRootUnwrapCache()).toBeUndefined();
+      if (benchmark) {
+        await mkdir(".tmp/game-history-speed", { recursive: true });
+        await writeFile(".tmp/game-history-speed/benchmark.json", JSON.stringify(samples, null, 2));
+      }
+    } finally {
+      setHostedSecureBoxStringTestCodecForTests(codec);
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("orders settled history, counts each side's record, and keeps previews viewer-scoped to their game", async () => {
     const viewer = await member("HistoryViewer", "UTC");
     const ava = await member("HistoryAva", "UTC");
@@ -1225,6 +1372,24 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(otherSide.people[0]).toMatchObject({ memberId: viewer, record: { won: 1, lost: 2, tied: 1 } });
   });
 
+  it("keeps history JSON identical without opening unused terms, recaps or relationships", async () => {
+    const viewer = await member("ProjectionViewer", "UTC");
+    const opponent = await member("ProjectionOpponent", "UTC");
+    const seeded = await seedSettledGame({ challenger: viewer, opponent, settledAt: new Date(), mediaDays: 3 });
+    const before = await readHistory(viewer);
+    // These encrypted fields belong to the live/detail view, never history JSON.
+    await getPrisma().game.update({ where: { id: seeded.gameId }, data: {
+      termsWordsEncrypted: "not-opened-by-history", recapEncrypted: "not-opened-by-history",
+    } });
+    await getPrisma().gameContactLabel.create({ data: { ownerMemberId: viewer,
+      subjectMemberId: opponent, relationshipEncrypted: "not-opened-by-history" } });
+    const crypto = await import("../src/lib/game/crypto");
+    const open = vi.spyOn(crypto, "openGameTexts");
+    expect(await readHistory(viewer)).toEqual(before);
+    const fields = open.mock.calls.flatMap(([requests]) => requests).map(request => request.field);
+    for (const unused of ["terms_words", "recap", "relationship"]) expect(fields).not.toContain(unused);
+  });
+
   it("signs only authorized history previews, excluding reported, withdrawn, blocked and non-player content", async () => {
     const viewer = await member("DeliveryViewer", "UTC");
     const opponent = await member("DeliveryOpponent", "UTC");
@@ -1239,6 +1404,8 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const delivery = { url: "https://imagedelivery.net/account/image/gameavatar?exp=9999999999&sig=synthetic", expiresAt: "2030-01-01T00:00:00.000Z" };
     const sign = vi.spyOn(gameMedia, "gameMediaDelivery").mockResolvedValue(delivery);
     const history = await readHistory(viewer);
+    const previewKeys = history.people[0].games[0].previews.map(preview => decodeURIComponent(preview.mediaUrls[0].split("/media/")[1]));
+    expect(await authorizeMediaReads(viewer, [...previewKeys, previewKeys[0], "invalid"])).toEqual(new Set(previewKeys));
     const signed = await withHistoryPhotoDeliveries(history, viewer);
     expect(signed.people[0].games[0].previews).toHaveLength(6);
     expect(signed.people[0].games[0].previews.every((preview) => preview.delivery?.url === delivery.url)).toBe(true);
@@ -1249,6 +1416,15 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(await withHistoryPhotoDeliveries(await readHistory(outsider), outsider)).toEqual({ people: [] });
     await withHistoryPhotoDeliveries(history, outsider);
     expect(sign).not.toHaveBeenCalled();
+
+    const visibleOther = history.people[0].games[0].previews.find(preview => !preview.mine)!;
+    await getPrisma().gameReport.create({ data: {
+      id: randomUUID(), reporterMemberId: viewer, reportedMemberId: opponent,
+      gameId: game.gameId, entryId: visibleOther.entryId, about: "post", reason: "other",
+    } });
+    const reportedLater = await withHistoryPhotoDeliveries(history, viewer);
+    expect(reportedLater.people[0].games[0].previews.find(preview => preview.entryId === visibleOther.entryId)?.delivery).toBeUndefined();
+    sign.mockClear();
 
     await ok(opponent, { memberId: viewer, type: "block" });
     expect(await withHistoryPhotoDeliveries(await readHistory(viewer), viewer)).toEqual({ people: [] });

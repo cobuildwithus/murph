@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-01",
+  "order": 200,
+  "item": {
+    "id": "faster-game-history",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less waiting for game history",
+    "summary": "Finished games and their photo previews load with less waiting in the Games tab.",
+    "details": "Your scores, opponent records and photo visibility stay the same.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": []
+  }
+}
