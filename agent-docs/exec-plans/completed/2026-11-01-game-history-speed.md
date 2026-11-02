@@ -1,6 +1,6 @@
 # Speed up game history reads
 
-Status: active
+Status: completed
 Created: 2026-11-01
 Updated: 2026-11-01
 
@@ -81,7 +81,8 @@ maximum-size signing concurrency and own-image fallback on database failure.
 
 Focused checks: 272 game/auth/crypto tests plus four changelog rendering tests;
 Web typecheck, scoped Oxlint and complexity guard pass (no hotspots above 20).
-Final review, exact-head CI, merge and live follow-up remain delivery gates.
+Implementation and local proof are complete in PR #4427. ReviewGPT, exact-head
+CI, merge and live follow-up remain delivery gates owned by the original session.
 
 
 ## Reproduce focused proof
@@ -94,3 +95,4 @@ warm samples in `.tmp/game-history-speed/benchmark.json`;
 Normal CI runs the same fixture without delays and asserts SQL/unwrap counts.
 The per-step table used temporary spans around the four private service helpers;
 no production logging or timing hooks are added.
+Completed: 2026-11-01
