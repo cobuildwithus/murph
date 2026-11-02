@@ -231,6 +231,7 @@ interface RecordInboxDocumentDefaultPromotionInput
 
 interface AddMealInput {
   name?: string;
+  uploadId?: string;
   vaultRoot: string;
   mealId?: string;
   eventId?: string;
@@ -6374,6 +6375,7 @@ export async function importDocument({
 }
 
 export async function addMeal({
+  uploadId,
   vaultRoot,
   mealId: requestedMealId,
   eventId: requestedEventId,
@@ -6460,6 +6462,7 @@ export async function addMeal({
     rawRefs: pendingAttachmentState.rawRefs,
     fields: {
       mealId,
+      uploadId,
       ingredients: normalizedIngredients,
       nutrition: normalizedNutrition,
     },

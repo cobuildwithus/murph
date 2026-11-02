@@ -178,30 +178,51 @@ precedence over meal lookup; do not interpret it as a missing meal.
 
 ## Local photo association
 
-`uploadId` accepts a nullable opaque string (1–128 characters). This reader
-release accepts the optional field on canonical meals and encrypted photo wakes;
-production upload writers do not populate it yet. Existing meals remain null.
+`uploadId` is the phone's existing `Idempotency-Key` for a meal-photo upload:
 
-The follow-up writer will preserve the already-sent `Idempotency-Key`: lowercase
-UUID for manual uploads, capture ID for automatic uploads. No upload-request
-change is needed. For manual thumbnails, iOS already stores the local key as
-lowercase hex SHA256 of UTF-8 `"manual:" + lowercase UUID`; use the existing
-`MealPhotoCaptureCrypto.manualCaptureID` conversion when joining that UUID.
-Automatic thumbnails use the returned ID directly. Treat these IDs as opaque;
-never derive an association from timestamps or image content.
+- Manual `POST /api/device-sync/companion/meal-photos`: the lowercase UUID already
+  sent by `CompanionAPI` from `ManualMealPhotoSelection.idempotencyKey`.
+- Automatic `POST /api/device-sync/companion/meal-photo-capture/photos`: the
+  existing 64-character capture ID already sent by the capture uploader.
 
-No backfill is planned. Typed meals, texted photos and older captures stay null;
-show a plain tile for null or a missing local thumbnail. No `source`,
-`thumbnailUrl`, `photoUrl`, or full-size URL exists in this contract.
+Both list and detail return the same nullable opaque string (1–128 characters).
+For example, an uploaded meal has `"uploadId":"2f1c1fdc-c7b0-4d90-b902-8e6295959243"`;
+a typed meal has `"uploadId":null`. No upload-request field or header change is
+needed. Existing member-bound server capture IDs, deduplication and accepted
+upload responses are unchanged.
+
+The identifier travels in the existing encrypted photo wake, then one optional
+canonical meal field on the exact record created by photo import. Murph enriches
+that existing record. Browser Vault projects the field directly. No image bytes,
+new image retention, new store, or timestamp association is added. IDs are not
+logged. Normal snapshot publication determines when the link becomes readable.
+
+For the existing iOS local history, look up the returned ID directly for automatic
+captures. Manual thumbnails are stored under lowercase hex SHA256 of UTF-8
+`"manual:" + lowercase UUID`; use the existing
+`MealPhotoCaptureCrypto.manualCaptureID(idempotencyKey:)` conversion for a UUID
+before looking up that thumbnail. The selection's separate UI UUID is not this
+upload identifier. iOS must decode `uploadId` as an optional string and join it
+to its local history while keeping the server meal ID for detail and removal.
+
+No backfill: texted photos, typed meals, older captures and imports completed by
+a runtime predating the writer stay null. A retry never attaches a new ID to an
+already imported meal. Show a plain tile for null or missing local thumbnails.
+No `source`, `thumbnailUrl`, `photoUrl`, or full-size URL exists in this contract.
 
 ## Release order and compatibility
 
-The upload-link reader release must converge in Web and all runtimes before
-shipping the writer. Pre-reader runtimes reject the new optional canonical and
+The upload-link reader release (#4435, merge
+`21f806eb67f01b1c346846b9eea2ab31f4f6e4e3`) must converge in Web and all runtimes
+before shipping the writer. Pre-reader runtimes reject the new optional canonical and
 nested wake fields; pre-reader Web rejects non-null projection upload IDs.
 After writes begin, retain this reader release as the Web/runtime rollback floor.
 The reader release emits no new upload metadata, so it can safely coexist with
-the old runtime. The subsequent writer accepts both old and linked records.
+the old runtime. The writer accepts both old and linked records. Web can deploy
+the writer before the writer runtime: the converged reader accepts its wake and
+imports it without the link. Such rollout-window meals remain null; there is no
+backfill or forced wake. After the writer runtime deploy, new imports retain the
+link. Both runtime versions can read linked canonical records during rollout.
 
 
 Web ships first and accepts only generation-17-or-newer replicas that contain
