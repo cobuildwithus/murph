@@ -578,10 +578,12 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
         recordEvent: vi.fn(async () => undefined),
       },
     })),
-    executeCodexTurnWithRecovery: vi.fn(async () => ({
-      kind: 'succeeded',
-      providerTurn: providerResult,
-    })),
+    executeCodexTurnWithRecovery: vi.fn(async (providerInput: Parameters<typeof executeCodexTurnWithRecovery>[0]) => {
+      expect(startTypingIndicator).not.toHaveBeenCalled()
+      await providerInput.onProviderRequestStarted?.({ startedAt: new Date().toISOString(), providerRequestOrdinal: 0 })
+      await providerInput.onProviderRequestStarted?.({ startedAt: new Date().toISOString(), providerRequestOrdinal: 1 })
+      return { kind: 'succeeded', providerTurn: providerResult }
+    }),
     normalizeAssistantExecutionContext: vi.fn((value) => value),
     resolveAssistantExecutionDefaultTarget: vi.fn((input) =>
       input.executionContext?.hosted?.defaultTarget ?? input.fallbackTarget,
@@ -2435,6 +2437,7 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
       assert.equal(input.input.serviceTier, 'flex')
       assert.equal(input.input.workingDirectory, undefined)
       assert.equal(input.progressDelivery, null)
+      await input.onProviderRequestStarted?.({ startedAt: new Date().toISOString(), providerRequestOrdinal: 0 })
       return {
         kind: 'succeeded',
         providerTurn: providerResult,
@@ -6398,13 +6401,16 @@ async function loadNotificationTurnHarness(input: {
       },
     })),
     executeCodexTurnWithRecovery: vi.fn(
-      async (providerInput: NotificationTurnProviderInput) =>
-        input.onExecuteCodexTurnWithRecovery
-          ? await input.onExecuteCodexTurnWithRecovery(providerInput)
-          : input.providerOutcome ?? {
-              kind: 'succeeded' as const,
-              providerTurn: input.providerResult,
-            },
+      async (providerInput: NotificationTurnProviderInput) => {
+        if (input.onExecuteCodexTurnWithRecovery) {
+          return await input.onExecuteCodexTurnWithRecovery(providerInput)
+        }
+        await providerInput.onProviderRequestStarted?.({ startedAt: new Date().toISOString(), providerRequestOrdinal: 0 })
+        return input.providerOutcome ?? {
+          kind: 'succeeded' as const,
+          providerTurn: input.providerResult,
+        }
+      },
     ),
     clearAssistantSessionCodexResumeState: vi.fn(
       async (clearInput: { session: AssistantSession }) => clearInput.session,

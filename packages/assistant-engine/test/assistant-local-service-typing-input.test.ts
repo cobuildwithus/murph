@@ -14,7 +14,7 @@ import {
 
 test.each((['linq', 'telegram'] as const).flatMap((channel) =>
   [false, true].map((pending) => ({ channel, pending })),
-))('records $channel typing for input staged during receipt preparation (pending: $pending)', async ({ channel, pending }) => {
+))('starts $channel typing at the provider request and records earlier inputs (pending: $pending)', async ({ channel, pending }) => {
   const context = await createTempVaultContext('assistant-typing-admission-')
   tempRoots.push(context.parentRoot)
   const session = createAssistantSession({ binding: {
@@ -41,13 +41,13 @@ test.each((['linq', 'telegram'] as const).flatMap((channel) =>
   })
   const onTypingAccepted = vi.fn()
   let followup: Awaited<ReturnType<typeof upsertAssistantInputEvent>> | null = null
-  // Typing starts before receipt preparation; input-controller registration follows.
+  // Receipt and pre-provider admission must not start typing.
   mocks.createAssistantTurnReceipt.mockImplementationOnce(async () => {
     followup = await upsertAssistantInputEvent({ vault: context.vaultRoot, event: {
       content: { text: 'Synthetic follow-up' }, occurredAt: '2026-09-11T00:00:00.000Z',
       sourceRef: createHostedMailboxSourceRef({ eventId: 'evt_pre_typing_followup', laneSeq: '2' }),
     } })
-    await vi.waitFor(() => expect(startTyping).toHaveBeenCalledOnce())
+    expect(startTyping).not.toHaveBeenCalled()
     return { turnId: 'turn-1' }
   })
   const activeTurnInput = vi.fn().mockImplementationOnce(async () => {
@@ -63,13 +63,17 @@ test.each((['linq', 'telegram'] as const).flatMap((channel) =>
   const execute = mocks.executeCodexTurnWithRecovery.getMockImplementation()!
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (input) => {
     expect(activeTurnInput).toHaveBeenCalled()
-    expect(startTyping).toHaveBeenCalledOnce()
+    expect(startTyping).not.toHaveBeenCalled()
+    const outcome = await execute(input)
+    await vi.waitFor(() => expect(startTyping).toHaveBeenCalledOnce())
+    // Retries/recovery share the handle, including while provider acceptance is pending.
+    await input.onProviderRequestStarted?.({ startedAt: new Date().toISOString(), providerRequestOrdinal: 1 })
     if (pending) expect(onTypingAccepted).not.toHaveBeenCalled()
     providerReady.resolve()
     await vi.waitFor(() => expect(onTypingAccepted).toHaveBeenCalledWith({
-      acceptedInputIds: [followup!.inputId], at: expect.any(String), channel,
+      acceptedInputIds: ['initial', followup!.inputId], at: expect.any(String), channel,
     }))
-    return execute(input)
+    return outcome
   })
   try {
     await sendAssistantMessageLocal({
@@ -161,7 +165,7 @@ test.each([
   expect(onTypingAccepted).not.toHaveBeenCalled()
 })
 
-test('stops early direct typing when receipt creation fails', async () => {
+test('receipt failure never starts direct typing', async () => {
   const context = await createTempVaultContext('assistant-typing-receipt-failure-')
   tempRoots.push(context.parentRoot)
   const session = createAssistantSession({ binding: {
@@ -178,7 +182,7 @@ test('stops early direct typing when receipt creation fails', async () => {
   const stop = vi.fn(async () => undefined)
   const startLinqTyping = vi.fn(async () => ({ stop }))
   mocks.createAssistantTurnReceipt.mockImplementationOnce(async () => {
-    await vi.waitFor(() => expect(startLinqTyping).toHaveBeenCalledOnce())
+    expect(startLinqTyping).not.toHaveBeenCalled()
     throw new Error('Synthetic receipt failure')
   })
   await expect(sendAssistantMessageLocal({
@@ -187,7 +191,8 @@ test('stops early direct typing when receipt creation fails', async () => {
       channelTypingDependencies: { startLinqTyping },
     } },
   })).rejects.toThrow('Synthetic receipt failure')
-  await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce())
+  expect(startLinqTyping).not.toHaveBeenCalled()
+  expect(stop).not.toHaveBeenCalled()
   expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
 })
 
@@ -332,5 +337,39 @@ test.each([{ channel: 'linq' }, { channel: 'telegram' }] as const)('scheduled $c
     } },
   })
   expect(mocks.dispatchAssistantReply).toHaveBeenCalledOnce()
+  expect(startTyping).not.toHaveBeenCalled()
+})
+
+test.each(['setup failure', 'terminal no-reply'] as const)('direct %s before turn/start never types', async (outcome) => {
+  const plan = createSharedPlan()
+  plan.conversationPolicy.audience.threadIsDirect = true
+  const session = createAssistantSession()
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({ plan, session })
+  const adapters = await vi.importActual<typeof import('../src/assistant/channel-adapters.ts')>(
+    '../src/assistant/channel-adapters.ts',
+  )
+  mocks.getAssistantChannelAdapter.mockImplementation(adapters.getAssistantChannelAdapter)
+  const startTyping = vi.fn(async () => ({ stop: vi.fn() }))
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.onProviderRequestPlanned?.({
+      providerAttemptId: 'synthetic-setup', codexContinuation: { kind: 'explicit-structured-history' },
+    })
+    expect(startTyping).not.toHaveBeenCalled()
+    if (outcome === 'setup failure') throw new Error('Synthetic pre-provider setup failure')
+    return { kind: 'succeeded', providerTurn: {
+      onboardingGuidanceInjected: false, codexContinuation: { kind: 'explicit-structured-history' },
+      finalAction: { kind: 'none' }, response: '', responseDeliveryContextOrdinal: 0,
+      transcriptResponse: null, session,
+    } }
+  })
+  const turn = sendAssistantMessageLocal({
+    channel: 'telegram', deliverResponse: true, prompt: 'Synthetic input', vault: '/vaults/test',
+    executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [],
+      channelTypingDependencies: { startTelegramTyping: startTyping },
+    } },
+  })
+  if (outcome === 'setup failure') await expect(turn).rejects.toThrow('Synthetic pre-provider setup failure')
+  else await turn
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
   expect(startTyping).not.toHaveBeenCalled()
 })

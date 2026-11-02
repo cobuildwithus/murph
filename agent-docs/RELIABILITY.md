@@ -2463,23 +2463,24 @@ to apply after cutover.
   the requested checkpoint; only the finished event's `webCheckpointAccepted`
   establishes Web acceptance. Malformed timestamps and raw wake reasons are
   never copied into these fields.
-- Direct message turns start Linq and Telegram typing once the canonical audience
-  is resolved, before receipt creation and prompt preparation. Groups start typing
-  only when a finished message draft enters the reply hold; no-reply and
+- Direct turns start Linq and Telegram typing when the model request fires, at
+  the existing local Codex `turn/start` notification after thread setup. One
+  handle covers retries and records inputs admitted before and after that start.
+  Groups start typing only when a finished message draft enters the reply hold; no-reply and
   reaction-only drafts stay silent. Reconsideration that drops the message stops
   typing immediately; one that retains it keeps the session. Non-held group
   notifications and scheduled turns stay silent. Only direct Linq
   media requiring attachment evidence may start during import; its preparation
   handle passes to the turn without another start. Text, reactions, and edits
-  wait for the turn. Per-chat claims, refresh, cooldown, and cleanup are unchanged.
+  wait for the model request. Per-chat claims, refresh, cooldown, and cleanup are unchanged.
 - Web records `orchestration.ingressConversationIsGroup` on the existing ingress
   trace with the deferred webhook receipt, using the wake's resolved directness.
   The typing monitor excludes boolean `true`, including queued groups and
   no-reply outcomes. Missing or malformed facts retain existing alert behavior;
   reply-latency and progress monitors are unchanged.
 - Per-message typing alerts independently measure the direct member's wait through the
-  earliest accepted typing indicator: strictly over 2.5 seconds for a warm
-  workspace and over 7 seconds for a cold workspace. Linq waits start at the
+  earliest accepted typing indicator: strictly over 3 seconds for a warm
+  workspace and over 8 seconds for a cold workspace. Linq waits start at the
   exact provider event bound by the member's mailbox dedupe identity, never
   after the Web route's receipt instant, so
   time before the route runs, such as a fresh Web instance boot, counts.
@@ -2510,7 +2511,7 @@ to apply after cutover.
   or delivery operation waits for this diagnostic persistence.
   A restore completed before the message arrived, or an explicit reused restore,
   identifies warmth. This includes later messages within an invocation that
-  originally started cold. Missing warmth evidence uses the 7-second cutoff and
+  originally started cold. Missing warmth evidence uses the 8-second cutoff and
   is labeled unconfirmed; deployment version, rollout convergence, canary identity,
   access changes, other incidents, and quiet hours do not suppress these alerts.
   An exact member-bound mailbox item with recorded `ai_usage_denied_at` is
@@ -2546,7 +2547,7 @@ to apply after cutover.
   Cleanup identity is independent of optional latency telemetry. Provider acceptance,
   never staging or a claimed target alone, supplies the retained timestamp.
   Its readiness promise covers admission before or after typing starts without
-  a foreground telemetry wait. Telegram keeps turn-owned start. Failed
+  a foreground telemetry wait. Telegram uses the same provider-start boundary. Failed
   starts and stopped, aborted, expired or failed provider handles supply no new
   evidence. Linq's existing provider cooldown is unchanged. Signup's
   direct-only early Web typing hint is also retained, so neither produces a missing-typing

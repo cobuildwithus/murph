@@ -5,8 +5,8 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { sendPendingHostedLinqAlertsBestEffort } from "../hosted-onboarding/linq-alert-email";
 import { getPrisma } from "../prisma";
 
-export const HOSTED_WARM_TYPING_ALERT_THRESHOLD_MS = 2_500;
-export const HOSTED_COLD_TYPING_ALERT_THRESHOLD_MS = 7_000;
+export const HOSTED_WARM_TYPING_ALERT_THRESHOLD_MS = 3_000;
+export const HOSTED_COLD_TYPING_ALERT_THRESHOLD_MS = 8_000;
 const ALERT_READ_LIMIT = 1_000;
 const ALERT_SEND_LIMIT = 50;
 // Allow delayed telemetry to arrive before calling an absent indicator slow.

@@ -27,17 +27,17 @@ const env = {
 describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
   it("uses strict webhook-to-first-typing thresholds across warm, cold, rollout, and missing observations", async () => {
     await withTables(async (tx) => {
-      await insertTrace(tx, "warm-below", { elapsed: 2499 });
-      await insertTrace(tx, "warm-boundary", { elapsed: 2500 });
-      await insertTrace(tx, "warm-slow", { elapsed: 2501 });
-      await insertTrace(tx, "warm-former-boundary", { elapsed: 3000 });
-      await insertTrace(tx, "cold-below", { cold: true, elapsed: 6999 });
-      await insertTrace(tx, "cold-boundary", { cold: true, elapsed: 7000 });
-      await insertTrace(tx, "cold-slow", { cold: true, elapsed: 7001 });
-      await insertTrace(tx, "cold-former-boundary", { cold: true, elapsed: 8000 });
-      await insertTrace(tx, "retained-after-cold", { cold: true, restoredBeforeReceipt: true, elapsed: 2501 });
+      await insertTrace(tx, "warm-below", { elapsed: 2999 });
+      await insertTrace(tx, "warm-boundary", { elapsed: 3000 });
+      await insertTrace(tx, "warm-slow", { elapsed: 3001 });
+      await insertTrace(tx, "warm-former-boundary", { elapsed: 2501 });
+      await insertTrace(tx, "cold-below", { cold: true, elapsed: 7999 });
+      await insertTrace(tx, "cold-boundary", { cold: true, elapsed: 8000 });
+      await insertTrace(tx, "cold-slow", { cold: true, elapsed: 8001 });
+      await insertTrace(tx, "cold-former-boundary", { cold: true, elapsed: 7001 });
+      await insertTrace(tx, "retained-after-cold", { cold: true, restoredBeforeReceipt: true, elapsed: 3001 });
       await insertTrace(tx, "cold-fast", { cold: true, elapsed: 5000 });
-      await insertTrace(tx, "rollout-slow", { cold: true, elapsed: 7001,
+      await insertTrace(tx, "rollout-slow", { cold: true, elapsed: 8001,
         extra: { orchestration: { activeFenceTargetWasPriorVersion: true, replacedStaleFence: true } } });
       await insertTrace(tx, "missing-warm", { elapsed: null });
       await insertTrace(tx, "missing-cold", { cold: true, elapsed: null });
@@ -49,24 +49,28 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
       await insertTrace(tx, "negative", { elapsed: -1 });
       await insertTrace(tx, "future", { elapsed: 100_000 });
       await insertTrace(tx, "legacy-no-receipt", { elapsed: 50_000, receivedAt: null });
-      await insertTrace(tx, "telegram-slow", { source: "telegram", elapsed: 2501 });
-      await insertTrace(tx, "telegram-fast", { source: "telegram", elapsed: 2500 });
+      await insertTrace(tx, "telegram-slow", { source: "telegram", elapsed: 3001 });
+      await insertTrace(tx, "telegram-fast", { source: "telegram", elapsed: 3000 });
+      await insertTrace(tx, "telegram-below", { source: "telegram", elapsed: 2999 });
+      await insertTrace(tx, "telegram-former-boundary", { source: "telegram", elapsed: 2501 });
+      await insertTrace(tx, "telegram-cold-below", { source: "telegram", cold: true, elapsed: 7999 });
+      await insertTrace(tx, "telegram-cold-former-boundary", { source: "telegram", cold: true, elapsed: 7001 });
       await insertTrace(tx, "telegram-active-followup", { source: "telegram", elapsed: -1000 });
       await insertTrace(tx, "telegram-missing", { source: "telegram", elapsed: null });
-      await insertTrace(tx, "telegram-cold-fast", { source: "telegram", cold: true, elapsed: 7000 });
-      await insertTrace(tx, "telegram-cold-slow", { source: "telegram", cold: true, elapsed: 7001 });
+      await insertTrace(tx, "telegram-cold-fast", { source: "telegram", cold: true, elapsed: 8000 });
+      await insertTrace(tx, "telegram-cold-slow", { source: "telegram", cold: true, elapsed: 8001 });
       await insertTrace(tx, "telemetry-in-flight", { elapsed: null, receivedAt: new Date(now.getTime() - 5000) });
       const rows = await tx.$queryRaw<Array<{ id: string; workspaceState: string; elapsedMs: bigint }>>(
         buildHostedRuntimeTypingAlertQuery({ now }),
       );
       expect(rows.map((row) => row.id).sort()).toEqual([
-        "cold-former-boundary", "cold-slow", "missing-cold", "missing-warm", "retained-after-cold",
+        "cold-slow", "missing-cold", "missing-warm", "retained-after-cold",
         "rollout-slow", "telegram-slow", "telegram-cold-slow", "telegram-missing", "unconfirmed",
-        "warm-former-boundary", "warm-slow",
+        "warm-slow",
       ].map((id) => `runtime-typing/${id}`).sort());
       expect(rows.find((row) => row.id.endsWith("retained-after-cold"))?.workspaceState).toBe("warm");
       // Acceptance happens two seconds after webhook receipt; those seconds count.
-      expect(rows.find((row) => row.id.endsWith("warm-slow"))?.elapsedMs).toBe(2501n);
+      expect(rows.find((row) => row.id.endsWith("warm-slow"))?.elapsedMs).toBe(3001n);
       const scoped = await tx.$queryRaw<Array<{ id: string }>>(buildHostedRuntimeTypingAlertQuery({
         now, userId: "synthetic-member", assistantInputIds: ["input-warm-slow"],
       }));
@@ -80,12 +84,12 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
       });
       expect(alerts.map(({ id, subject, detailsJson }) => [id, subject,
         (detailsJson as { thresholdMs: number }).thresholdMs]).sort()).toEqual([
-        ["runtime-typing/cold-slow", "Murph cold workspace typing exceeded 7 seconds", 7000],
-        ["runtime-typing/unconfirmed", "Murph cold workspace typing exceeded 7 seconds", 7000],
-        ["runtime-typing/warm-slow", "Murph warm workspace typing exceeded 2.5 seconds", 2500],
+        ["runtime-typing/cold-slow", "Murph cold workspace typing exceeded 8 seconds", 8000],
+        ["runtime-typing/unconfirmed", "Murph cold workspace typing exceeded 8 seconds", 8000],
+        ["runtime-typing/warm-slow", "Murph warm workspace typing exceeded 3 seconds", 3000],
       ]);
       expect(fetchImpl.mock.calls.map((call) => String(call[1]?.body)).join("\n")).toContain(
-        "Workspace warmth was not confirmed; the 7000 ms cold-start cutoff applies.");
+        "Workspace warmth was not confirmed; the 8000 ms cold-start cutoff applies.");
     });
   });
 
@@ -141,7 +145,7 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
           expect(stored).toEqual({ group: true, cold: false });
         }
         await insertTrace(tx, `${source}-direct-missing`, { source, elapsed: null });
-        await insertTrace(tx, `${source}-direct-slow`, { source, elapsed: 2501 });
+        await insertTrace(tx, `${source}-direct-slow`, { source, elapsed: 3001 });
         for (const suffix of ["missing", "slow"]) {
           await recordHostedIngressAcceptedFromMailboxItem({
             mailboxItemId: `mailbox-${source}-direct-${suffix}`,
@@ -171,13 +175,13 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
         terminalReplyCommittedAtEpochMs: typeof replyMs === "number" ? received.getTime() + replyMs : replyMs,
       } });
       const telegram = { source: "telegram" as const, cold: true, elapsed: null };
-      await insertTrace(tx, "reply-within-threshold", { ...telegram, extra: assistant(null, 7000) });
+      await insertTrace(tx, "reply-within-threshold", { ...telegram, extra: assistant(null, 8000) });
       await insertTrace(tx, "reply-slow", { ...telegram, extra: assistant(null, 35_900) });
       await insertTrace(tx, "reply-before-receipt", { ...telegram, extra: assistant(null, -1) });
       await insertTrace(tx, "reply-after-now", { ...telegram, extra: assistant(null, 60_001) });
       await insertTrace(tx, "reply-malformed", { ...telegram, extra: assistant(null, "7000") });
-      await insertTrace(tx, "typing-before-reply", { ...telegram, extra: assistant(7001, 9000) });
-      await insertTrace(tx, "reply-before-typing", { ...telegram, extra: assistant(9000, 7000) });
+      await insertTrace(tx, "typing-before-reply", { ...telegram, extra: assistant(8001, 9000) });
+      await insertTrace(tx, "reply-before-typing", { ...telegram, extra: assistant(9000, 8000) });
       // Linq answers keep their own delivery suppression and reply-latency monitor.
       await insertTrace(tx, "linq-reply-leaf", { cold: true, elapsed: null, extra: { assistant: {
         terminalReplyCommittedAtEpochMs: received.getTime() + 5_000,
@@ -192,7 +196,7 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
           "reply-before-receipt": 60_000n,
           "reply-malformed": 60_000n,
           "reply-slow": 35_900n,
-          "typing-before-reply": 7001n,
+          "typing-before-reply": 8001n,
         });
     });
   });
@@ -402,7 +406,7 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
       await insertTrace(tx, "original", { elapsed: 2000 });
       await insertProviderEvent(tx, "original", -2000);
       await insertProviderEvent(tx, "original", 1000, "later-delivery-receipt");
-      await insertTrace(tx, "reaction", { elapsed: 2000 });
+      await insertTrace(tx, "reaction", { elapsed: 2001 });
       await insertProviderEvent(tx, "reaction", -1000);
       await tx.$executeRaw`UPDATE hosted_linq_provider_event
         SET message_lookup_key = 'reacted-to-message'
@@ -416,7 +420,7 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
       );
       expect(rows.map(({ id, elapsedMs }) => [id, elapsedMs]).sort()).toEqual([
         ["runtime-typing/original", 4000n],
-        ["runtime-typing/reaction", 3000n],
+        ["runtime-typing/reaction", 3001n],
       ]);
     });
   });
@@ -433,7 +437,7 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
         await bindConversation(tx, id, `chat-${id}`);
       }
       await insertDelivery(tx, "gap-reply", "chat-gap", 2000);
-      await insertDelivery(tx, "boundary-reply", "chat-boundary", 6500);
+      await insertDelivery(tx, "boundary-reply", "chat-boundary", 6000);
       await insertDelivery(tx, "repeated-first", "chat-repeated", 2000);
       await insertDelivery(tx, "repeated-last", "chat-repeated", 7000);
       await insertDelivery(tx, "missing-reply", "chat-missing", 2000);
@@ -445,7 +449,7 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
       await tx.$executeRaw`UPDATE hosted_ingress_latency_trace
         SET linq_delivery_id = 'typed-answer' WHERE id = 'answered-typed'`;
       await insertDelivery(tx, "cold-gap-reply", "chat-cold-gap", 2000);
-      await insertDelivery(tx, "cold-boundary-reply", "chat-cold-boundary", 4000);
+      await insertDelivery(tx, "cold-boundary-reply", "chat-cold-boundary", 3000);
       for (const [id, age] of [["prior-ended", 2000], ["prior-expired", 298_000]] as const) {
         await insertTrace(tx, `${id}-earlier`, {
           elapsed: -age, receivedAt: new Date(received.getTime() - age - 1000),
@@ -491,7 +495,7 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
       await insertProviderEvent(tx, "edited", -400);
       // A reply delivered after the provider event but before receipt restarts silence.
       await insertProviderEvent(tx, "reply-before-receipt", -3000);
-      await insertDelivery(tx, "between-reply", "chat-reply-before-receipt", -1000);
+      await insertDelivery(tx, "between-reply", "chat-reply-before-receipt", -1001);
       // Another member's mailbox cannot supply an earlier start.
       await insertTrace(tx, "other-member", { elapsed: 2000 });
       await insertProviderEvent(tx, "other-member", -1500);
@@ -504,7 +508,7 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
       );
       expect(rows.map(({ id, elapsedMs }) => [id, elapsedMs]).sort()).toEqual([
         ["runtime-typing/early-event", 3500n],
-        ["runtime-typing/reply-before-receipt", 3000n],
+        ["runtime-typing/reply-before-receipt", 3001n],
       ]);
 
       const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async () =>

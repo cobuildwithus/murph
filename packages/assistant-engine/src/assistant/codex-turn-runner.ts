@@ -1067,10 +1067,10 @@ function notifyProviderRequestStartedBestEffort(input: {
 
   try {
     void Promise.resolve(input.hook(input.event)).catch(() => {
-      // Provider-start hooks are diagnostic-only and must not block turns.
+      // Provider-start observers are best-effort and must not block turns.
     })
   } catch {
-    // Provider-start hooks are diagnostic-only and must not block turns.
+    // Provider-start observers are best-effort and must not block turns.
   }
 }
 

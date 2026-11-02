@@ -2348,8 +2348,9 @@ means the runtime observed a local Codex `turn/start`; it is not evidence of an
 upstream OpenAI request or first token. The runtime may also emit metadata-only
 `assistant_milestone` events for Linq typing request start, Linq/Telegram typing
 acceptance and the first locally observed Codex output/text.
-Channel typing begins at direct turn start; direct Linq attachment preparation
-may start earlier and hand off the same session. Groups start typing only for
+Direct typing begins when the model request fires: the existing provider-start
+hook runs at the local Codex `turn/start` write, after thread setup. Direct Linq
+attachment preparation may start earlier and hand off the same session then. Groups start typing only for
 a held message draft, never for a no-reply or reaction-only draft. The engine
 owns that exception and stops the session if reconsideration drops the message.
 Web writes the schema-versioned boolean `orchestration.ingressConversationIsGroup`

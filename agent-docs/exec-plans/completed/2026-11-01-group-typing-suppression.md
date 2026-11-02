@@ -1,4 +1,4 @@
-# Turn-start typing, held group drafts, and alert exclusion
+# Provider-start typing, held group drafts, and alert exclusion
 
 Status: completed
 Created: 2026-11-01
@@ -7,7 +7,7 @@ Completed: 2026-11-01
 
 ## Outcome and ownership
 
-Direct conversations type when the AI turn starts. Only direct Linq media
+Direct conversations type when the model request fires. Only direct Linq media
 requiring attachment evidence may type during import. Groups start typing only
 when a finished message draft is held for sending. No-reply and reaction-only
 drafts, non-held notifications, and scheduled turns stay silent. The Web first-contact
@@ -41,13 +41,16 @@ false`; the turn dependency defers group policy to the engine. Low-level provide
 chat-action functions have no production typing-start caller; the only runtime
 caller sends `typing_stop` during cleanup.
 
-Direct message typing now starts after session and shared-plan resolution, before
-receipt creation. The session-resolved diagnostic retains its HEAD position
-immediately after session resolution. Receipt failure
-stops the early handle. The shared plan owns audience resolution and performs
-synchronous environment/policy work plus an optional onboarding-state read; no
-prompt assembly or provider execution is moved ahead of typing. Starting before
-the turn lock, session, or audience resolves would violate turn ownership.
+Direct message and notification typing starts through the existing
+`onProviderRequestStarted` hook. `assistant-codex.ts` fires it synchronously at
+the `turn/start` write, after thread start/resume and restore, before waiting for
+acknowledgement. This preserves the provider-start failure barrier and adds no
+parallel callback or telemetry wait. Receipt creation is back before typing
+state initialization; receipt/setup failures no longer need indicator cleanup.
+The first event creates or takes one handle and records all currently accepted
+input IDs. Subsequent requests retain it; live-steered inputs use the existing
+live binding. Media preparation remains owned across admission and setup until
+that event takes the same provider session. The first-contact hint is unchanged.
 
 Import uses `attachmentEvidenceRequired`, exactly the eligibility fact from
 60a7b8826d, instead of the generalized text eligibility in 20edcf3606. It combines
@@ -76,13 +79,15 @@ suppression milestone, callback, timestamp leaf, or special lock remains.
   phase data. Pending or failed telemetry never blocks the wake handoff.
 - The typing query excludes only boolean true. Direct and unstamped traces retain
   the existing thresholds, conversation-activity cover, and missing-observation
-  grace. All other cron monitors were checked; none treats absent typing as a
+  grace. Thresholds are strictly over 3 seconds warm and 8 seconds cold (including
+  unknown warmth). Former 2,501/7,001 ms alert boundaries are non-alerting controls.
+  All other cron monitors were checked; none treats absent typing as a
   failure, and none changed.
 
 ## Tests and changed expectations
 
 New proofs cover group message/reaction/edit/coalesced inputs, both channels'
-notifications, direct typing before receipt preparation, receipt-failure cleanup,
+notifications, direct typing at provider start, quiet receipt/setup failures,
 direct message/reaction/edit imports, held text/media drafts on both channels,
 quiet/reaction-only drafts, reply-to-quiet and reply-to-reply reconsideration,
 quiet-to-reply without a last-moment typing pulse, scheduled group silence,
@@ -111,8 +116,10 @@ Existing expectations changed only for the final product rule:
 - The importer lifecycle matrix's text cases start and stop no preparation handle.
 - `admitted typing survives import cancellation until turn handoff`: changed its
   fixture to media, the only remaining preparation-typing case.
-- Direct accepted-input tests now assert typing already started during receipt
-  preparation; acceptance still attaches to joined inputs even if provider start is pending.
+- Direct accepted-input tests now assert typing has not started during receipt
+  preparation and starts at the model request; initial and joined input IDs are
+  batched at late start,
+  including pending provider acceptance.
 - Web exact handoff expectation includes directness; the SQL fixture accounts for
   the added JSON insert argument. Invalid phase parsing keeps the existing lenient
   behavior of dropping malformed phase data without rejecting the milestone.
@@ -125,6 +132,7 @@ removed. The new Web fact replaces those assertions, not the mechanism itself.
 ```sh
 pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/assistant-local-service-typing-input.test.ts test/assistant-local-service-live-input.test.ts test/assistant-local-service-delivery.test.ts test/assistant-notification-turn-runtime.test.ts test/assistant-delivery-service.test.ts test/assistant-channels-runtime.test.ts
 pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/assistant-notification-turn-runtime.test.ts
+pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/assistant-codex-runtime-config.test.ts --testNamePattern "starts cold and warm App Server turns before any lazy shared-data read"
 pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --isolate=true --no-coverage test/hosted-runtime-channel-activity.test.ts test/hosted-runtime-attachment-typing.test.ts test/hosted-runtime-typing-handoff.test.ts test/hosted-runtime-attachment-typing-composed.test.ts test/hosted-runtime-mailbox-conversation-import.test.ts
 pnpm --dir packages/hosted-execution exec vitest run --config vitest.config.ts --no-coverage test/hosted-runtime-control.test.ts
 DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/murph_test MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-runtime-typing-alert-postgres.test.ts
@@ -188,6 +196,41 @@ Old unstamped traces with receipts retain ordinary alert behavior. No receipt
 trace write is awaited on ingress. No live provider or production messages were
 sent. Deterministic provider-boundary tests supply the Product UX proof; prompt/model behavior is unchanged. Parent review and exact-head CI remain.
 
-The parent reset HEAD to f7024b89f6 while preserving the worktree. Review this
-change against HEAD. This revision neither fetches nor copies newer origin/main
-content and leaves all edits uncommitted.
+Review the current refinement against HEAD `76e38a553e`. This revision neither
+fetches nor copies newer origin/main content and leaves all edits uncommitted.
+
+## Provider-start and threshold refinement
+
+The parent committed the held-draft change as `76e38a553e`; this refinement is
+uncommitted on that HEAD, with no fetch or branch movement. Group hold behavior
+and Web ingress audience stamps remain unchanged. The engine mocks now emit the
+existing provider-start event instead of implying it by returning a result.
+Tests cover initial and pre-request joined telemetry, later live steering,
+one session across repeated start events, receipt/setup/no-reply silence,
+and preparation retention until delayed request start. The existing cold/warm
+App Server wire test proves hook ordering after thread setup and at the request
+write before acknowledgement.
+
+PostgreSQL fixtures explicitly cover 2,999/3,000/3,001 and 7,999/8,000/8,001 ms
+for both providers. Retained-cold workspace and rollout cases use the applicable
+new slow boundary; Telegram reply-capped cases use 8,000/8,001 ms. Same-chat
+silence-reset boundaries now measure exactly 3,000/8,000 ms, and exact-event
+origin tests use 3,001 ms where a slow alert is the purpose. Unrelated 7,000 ms
+waits and reply timestamps remain unchanged. Subjects, threshold details, and
+unknown-warmth email copy are checked against 3,000/8,000 ms.
+
+Current refinement verification: engine 342 passed; runtime/import 149 passed;
+hosted-execution 67 passed; five Web webhook/store files 539 passed; PostgreSQL
+monitor 22 passed; focused cold/warm App Server ordering test 1 passed (51
+unrelated cases skipped). All four package typechecks, complexity diff,
+documentation drift, whitespace, and added-content privacy checks passed.
+The commands are listed above. No live provider or production calls were made.
+
+During verification, an obsolete initial-admission typing call was removed
+because the binding is necessarily null before provider start. New telemetry
+expectations now include both `initial` and the earlier joined input in the
+single late-start batch. Notification test doubles now emit the provider-start
+hook; existing delivery/stop assertions remain intact. A PostgreSQL fixture's
+3,000 ms silence was adjusted to 3,001 ms to preserve its slow-alert proof under
+the new strict threshold. These were implementation/fixture corrections, not
+repository friction; no Frog entry was needed.

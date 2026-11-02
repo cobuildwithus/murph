@@ -1,4 +1,4 @@
-Turn-start typing, held group drafts, and Web-stamped group alert exclusion
+Provider-start typing, held group drafts, and Web-stamped group alert exclusion
 are recorded in [the implementation plan](exec-plans/completed/2026-11-01-group-typing-suppression.md).
 
 The desktop recap ticket presentation and responsive scan proof are tracked in

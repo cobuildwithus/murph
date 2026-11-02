@@ -73,6 +73,7 @@ test.each([
   const prepared = deferred<void>();
   const response = deferred<Response>();
   const assistantEntered = deferred<void>();
+  const providerRequestReady = deferred<void>();
   evidence.ready = prepared.promise;
   evidence.admitted = false;
   const target = `synthetic_composed_${group ? "group" : "private"}_${pendingAcceptance ? "pending" : "accepted"}_${text ? "text" : "audio"}`;
@@ -164,6 +165,8 @@ test.each([
           assert.equal(calls.length, 0, "group admission must never start HTTP typing");
           return { progressed: false };
         }
+        // Model setup may pause after admission; preparation retains ownership.
+        await providerRequestReady.promise;
         const handoff = typing.startLinqTyping?.({ target });
         if (pendingAcceptance || text) {
           assert.equal(milestones.some(isAccepted), false);
@@ -201,6 +204,9 @@ test.each([
     }
     prepared.resolve();
     await Promise.race([assistantEntered.promise, running.then(() => { throw new Error("Runtime ended before admitted reply"); })]);
+    assert.equal(calls.length, group || text ? 0 : 1, "admission must not start or stop typing before turn/start");
+    vi.setSystemTime(Date.now() + 1_200);
+    providerRequestReady.resolve();
     await running;
     assert.equal(checked, true);
     if (group) {
@@ -209,6 +215,7 @@ test.each([
     }
     assert.ok(calls.every(call => call.pathname.endsWith("/typing")));
   } finally {
+    providerRequestReady.resolve();
     response.resolve(new Response(null, { status: 204 }));
     prepared.resolve();
     abort.abort();

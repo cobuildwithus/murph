@@ -172,8 +172,8 @@ sibling's local raw/derived result remains reusable on replay, but its assistant
 evidence, pending visibility, and notification stay withheld behind that input.
 This does not add a retry owner or strengthen the existing checkpoint/crash boundary.
 Only direct Linq inputs requiring attachment evidence start best-effort typing
-during preparation after durable staging. Other direct inputs wait for the AI
-turn. Group preparation stays silent; the engine may request typing only for
+during preparation after durable staging. Other direct inputs wait until the
+model request fires; preparation stays owned until that provider-start handoff. Group preparation stays silent; the engine may request typing only for
 a held reply draft. The existing per-chat claim and refresh
 loop pass to the admitted turn without another start request, even while initial
 provider acceptance is pending. Typing never blocks admission. Failed staging,

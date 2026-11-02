@@ -451,6 +451,10 @@ export async function loadLocalServiceModule(input?: {
               ? providerOutcome.providerTurn.codexContinuation
               : providerOutcome.codexContinuation,
         })
+        await providerInput.onProviderRequestStarted?.({
+          startedAt: new Date().toISOString(),
+          providerRequestOrdinal: providerInput.providerRequestOrdinal ?? 0,
+        })
         return providerOutcome
       },
     ),

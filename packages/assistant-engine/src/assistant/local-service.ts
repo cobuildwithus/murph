@@ -707,6 +707,16 @@ export async function sendAssistantMessageLocal(
       const promptBuildMs = elapsedSince(promptBuildStartedAt)
       const route = resolveAssistantTurnRoute(input, defaults, resolved)
 
+      const receipt = await createAssistantTurnReceipt({
+        vault: input.vault,
+        sessionId: resolved.session.sessionId,
+        provider: route.provider,
+        providerModel: route.providerOptions.model ?? null,
+        metadata: input.receiptMetadata ?? null,
+        prompt: input.prompt,
+        deliveryRequested: input.deliverResponse === true,
+      })
+
       let responseText: string | null = null
       let userTurn: PersistedUserTurn | null = null
       const typingIndicatorDeliveryFields =
@@ -718,25 +728,7 @@ export async function sendAssistantMessageLocal(
             })
           : null
       const hostedExecutionContext = executionContext?.hosted ?? null
-      let typingIndicator = startAssistantChannelTypingIndicator({
-        channelDependencies:
-          hostedExecutionContext?.channelTypingDependencies ?? null,
-        input,
-        session: resolved.session,
-        sharedPlan,
-      })
-      const receipt = await createAssistantTurnReceipt({
-        vault: input.vault,
-        sessionId: resolved.session.sessionId,
-        provider: route.provider,
-        providerModel: route.providerOptions.model ?? null,
-        metadata: input.receiptMetadata ?? null,
-        prompt: input.prompt,
-        deliveryRequested: input.deliverResponse === true,
-      }).catch(async (error) => {
-        await stopAssistantChannelTypingIndicator(typingIndicator)
-        throw error
-      })
+      let typingIndicator: ReturnType<typeof startAssistantChannelTypingIndicator> = null
       let activeTurnInputController: ReturnType<
         typeof createAssistantActiveTurnInputController
       > | null = null
@@ -901,7 +893,6 @@ export async function sendAssistantMessageLocal(
           isHostedComputerToolTransportAvailable({
             executionContext,
           }) && currentAudienceReplyDeliveryAvailable
-        typingIndicator?.recordAcceptedInputs(initialAcceptedInputJournal.inputIds)
         let acceptedInputIdsForProviderRequest: readonly string[] =
           initialAcceptedInputJournal.inputIds
         let acceptedInputItemsForProviderRequest: readonly AssistantAcceptedTurnInputItemInput[] =
@@ -1825,6 +1816,15 @@ export async function sendAssistantMessageLocal(
               })
             },
             onProviderRequestStarted: (event) => {
+              if (!typingIndicator) {
+                typingIndicator = startAssistantChannelTypingIndicator({
+                  channelDependencies: hostedExecutionContext?.channelTypingDependencies ?? null,
+                  input,
+                  session: resolved.session,
+                  sharedPlan,
+                })
+                typingIndicator?.recordAcceptedInputs(providerRequestAcceptedInputIds)
+              }
               const startedAtMs = Date.parse(event.startedAt)
               if (Number.isFinite(startedAtMs)) {
                 providerRequestStartedAtMs = startedAtMs
