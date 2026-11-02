@@ -2757,7 +2757,9 @@ application code.
   Sparse checkpoints retain
   cold references even when no local bytes exist, including after a lazy read.
   Core history readers verify size and SHA-256 before enumeration, using an
-  invocation-scoped artifact materializer when available; otherwise missing or
+  invocation-scoped artifact materializer shared by system-mailbox, background,
+  and assistant work after restore; independently prepared receipt replay owns
+  its restore scope. Neither scope survives its invocation. Otherwise missing or
   invalid bytes return retryable `HOSTED_COLD_HISTORY_UNAVAILABLE`. Repairs and
   migrations cannot interpret that failure as empty history. Full v2 archive/export
   planning requires verified local cold bytes unless the checkpoint publisher

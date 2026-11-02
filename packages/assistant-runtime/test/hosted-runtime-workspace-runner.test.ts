@@ -86,6 +86,7 @@ import {
   initializeVault,
   isActiveCanonicalWriteLockError,
   readIntegrationIngestEntries,
+  withIntegrationIngestMaterializer,
   buildIntegrationIngestRecord,
   readEvent,
 } from "@murphai/core";
@@ -200,7 +201,10 @@ async function runHostedWorkspaceUntilIdleOrBudget(
   ...args: Parameters<typeof runHostedWorkspaceUntilIdleOrBudgetWithoutDrain>
 ) {
   try {
-    return await runHostedWorkspaceUntilIdleOrBudgetWithoutDrain(...args);
+    // Production installs this scope at invocation entry, outside the runner.
+    return await withIntegrationIngestMaterializer(args[0].vaultRoot,
+      async (paths) => { await args[0].materializeWorkspaceArtifacts?.(paths); },
+      () => runHostedWorkspaceUntilIdleOrBudgetWithoutDrain(...args));
   } finally {
     await drainHostedRuntimeLogWritesBestEffort();
   }

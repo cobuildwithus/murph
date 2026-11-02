@@ -25,6 +25,11 @@ test("missing cold shards cannot become empty history or new append targets", as
     await expect(withIntegrationIngestMaterializer(`${root}/other`, materialize, () => readIntegrationIngestEntries(root)))
       .rejects.toMatchObject({ retryable: true });
     expect(materialize).not.toHaveBeenCalled();
+    const cause = new Error("Synthetic media outage");
+    await expect(withIntegrationIngestMaterializer(root, async () => { throw cause; }, () => readIntegrationIngestEntries(root)))
+      .rejects.toMatchObject({ code: "HOSTED_COLD_HISTORY_UNAVAILABLE", retryable: true, cause });
+    // Scope authority ends with the invocation, including failed invocations.
+    await expect(readIntegrationIngestEntries(root)).rejects.toMatchObject({ code: "HOSTED_COLD_HISTORY_UNAVAILABLE" });
     await expect(appendJsonlRecord({ vaultRoot: root, relativePath: logicalPath, record: record("2020-01-01T00:00:00.000Z") }))
       .rejects.toMatchObject({ code: "HOSTED_COLD_HISTORY_UNAVAILABLE", retryable: true });
   } finally { await rm(root, { recursive: true, force: true }); }
