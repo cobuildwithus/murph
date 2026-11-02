@@ -209,7 +209,7 @@ async function executeHostedSystemWake(input: {
   preferenceCausalSeq?: string;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "commitTimeoutMs" | "platform" | "platformEnv" | "resolvedConfig"
+    "commitTimeoutMs" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
   > & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
   runtimeEnv: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
@@ -261,6 +261,8 @@ async function executeHostedSystemWake(input: {
       return executeHostedMemberActionWake({
         vaultRoot: input.vaultRoot,
         wake: input.wake,
+        shouldYield: input.shouldYieldBackgroundMaintenance,
+        mealNameRepair: buildMealNameRepairRuntimeInput(input),
       });
     }
     case "member.action.completed":
@@ -519,4 +521,14 @@ function emitHostedDeviceSyncMaintenanceModuleLoadFailureLog(input: {
     phase: "wake.running",
     wake: input.wake,
   });
+}
+
+function buildMealNameRepairRuntimeInput(input: Parameters<typeof executeHostedSystemWake>[0]) {
+  return {
+    env: input.runtimeEnv,
+    modelProvider: input.executionContext.hosted?.defaultTarget?.modelProvider,
+    signal: input.signal ?? undefined,
+    usageRecordPort: input.runtime.platform?.usageRecordPort,
+    userEnvKeys: Object.keys(input.runtime.userEnv ?? {}),
+  };
 }

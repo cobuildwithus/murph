@@ -1,3 +1,5 @@
+import type { MealNameRepairInput } from "../meal-name-repair.ts";
+import { createHostedBackgroundMaintenanceCancellation } from "../background-maintenance-cancellation.ts";
 import type {
   HostedExecutionMemberActionRequestedWake,
 } from "@murphai/hosted-execution";
@@ -16,9 +18,14 @@ import {
 
 export async function executeHostedMemberActionWake(input: {
   vaultRoot: string;
+  mealNameRepair?: Omit<MealNameRepairInput, "vaultRoot" | "batch" | "memberId">;
+  shouldYield?: (() => boolean) | null;
   wake: HostedExecutionMemberActionRequestedWake;
 }): Promise<HostedMailboxOutcome> {
   switch (input.wake.request.action.kind) {
+    case "meal.names.repair": {
+      return executeMealNameRepairWake(input);
+    }
     case "meal.delete": {
       let reason: "meal_not_found" | "meal_changed" | null = null;
       try {
@@ -103,5 +110,30 @@ export async function executeHostedMemberActionWake(input: {
         },
       });
     }
+  }
+}
+
+async function executeMealNameRepairWake(input: Parameters<typeof executeHostedMemberActionWake>[0]): Promise<HostedMailboxOutcome> {
+  const action = input.wake.request.action;
+  if (action.kind !== "meal.names.repair") throw new Error("Invalid repair action.");
+  if (!input.mealNameRepair) throw new Error("Meal name repair runtime is unavailable.");
+  const cancellation = createHostedBackgroundMaintenanceCancellation({
+    signal: input.mealNameRepair.signal ?? null, shouldYield: input.shouldYield ?? null, timeoutMs: 180_000,
+  });
+  try {
+    const { repairLegacyMealNames } = await import("../meal-name-repair.ts");
+    const result = await repairLegacyMealNames({ ...input.mealNameRepair,
+      signal: cancellation.signal ?? undefined, vaultRoot: input.vaultRoot,
+      memberId: input.wake.userId, batch: action.batch });
+    return createNoopMailboxEffect({ conversationMetrics: null, mailboxLane: "member-action",
+      postCheckpointRecord: { kind: "member-action.outcome-recorded", outcome: {
+        actionId: input.wake.request.actionId, completedAt: new Date().toISOString(),
+        schemaVersion: 1, status: "applied", reason: null, result,
+      } },
+    });
+  } finally {
+    // Abort/failure must reach the mailbox owner, which retains the request and
+    // retry deadline. A successful no-op would consume the accepted action.
+    cancellation.dispose();
   }
 }

@@ -314,6 +314,7 @@ test('document and meal commands exercise import, read, edit, list, manifest, an
         'meal',
         'add',
         'Green smoothie after training.',
+        '--name', 'Green smoothie',
         '--photo',
         mealPhoto,
         '--audio',
@@ -340,6 +341,7 @@ test('document and meal commands exercise import, read, edit, list, manifest, an
         'meal',
         'add',
         'Eggs and avocado.',
+        '--name', 'Eggs and avocado',
         '--note',
         'Simple recovery breakfast.',
         '--occurred-at',
@@ -641,6 +643,7 @@ test('document and meal command handlers exercise nullish fallbacks directly', a
 
   const mealAdd = await getGroupCommandRun<{
     options: {
+      name?: string
       vault?: string
       photo?: string
       audio?: string
@@ -752,6 +755,7 @@ test('document and meal command handlers exercise nullish fallbacks directly', a
   const mealResult = await mealAdd({
     options: {
       vault: undefined,
+      name: 'Sample meal',
       photo: await writeFixtureFile(parentRoot, 'meal-direct-photo.jpg', 'meal-direct-photo-bytes'),
       audio: await writeFixtureFile(parentRoot, 'meal-direct-audio.m4a', 'meal-direct-audio-bytes'),
     },
@@ -762,6 +766,7 @@ test('document and meal command handlers exercise nullish fallbacks directly', a
     parentRoot,
     'meal.json',
     JSON.stringify({
+      name: 'Salmon rice bowl',
       note: 'Structured payload note',
       source: 'manual',
       ingredients: ['salmon', 'rice'],
@@ -793,7 +798,7 @@ test('document and meal command handlers exercise nullish fallbacks directly', a
     photoPath: null,
     audioPath: null,
     manifestFile: 'raw/meals/meal_01JNV422Y2M5ZBV64ZP4N1DRB1/manifest.json',
-    name: null,
+    name: 'Salmon rice bowl',
     note: 'Normalized direct meal note',
     source: 'derived',
     ingredients: ['salmon', 'rice'],
@@ -810,7 +815,7 @@ test('document and meal command handlers exercise nullish fallbacks directly', a
     vaultRoot,
     audioPath: undefined,
     photoPath: undefined,
-    name: undefined,
+    name: 'Salmon rice bowl',
     note: 'Flag override note',
     source: 'derived',
     ingredients: ['salmon', 'rice'],

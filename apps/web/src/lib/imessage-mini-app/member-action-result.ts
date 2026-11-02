@@ -11,7 +11,7 @@ export function projectIMessageMemberActionStatus(
   status: MemberActionStatusV1,
   cardFormat: string | null,
 ): MemberActionStatusV1 {
-  if (cardFormat === "envelope-v6" || status.status === "pending" || !status.result?.card) {
+  if (cardFormat === "envelope-v6" || status.status === "pending" || !status.result || !("card" in status.result) || !status.result.card) {
     return status;
   }
   const { result, ...outcome } = status;

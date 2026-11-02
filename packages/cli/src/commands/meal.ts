@@ -1,6 +1,8 @@
 import { Cli, z } from 'incur'
 import {
   MEAL_MICRONUTRIENT_KEYS,
+  MEAL_NAME_GUIDANCE,
+  mealNameViolation,
   NUTRITION_CONFIDENCE_LEVELS,
   NUTRITION_PROVENANCE_SOURCES,
   type DailyNutritionResponseCardV2,
@@ -54,13 +56,18 @@ import {
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 import { publicValidationIssue } from './public-validation-issue.js'
 
-const mealNameGuidance = 'Use a sentence-case dish name, 2–5 words and at most 40 characters. No meal-type prefix, place/brand (unless part of the dish), uncertainty, or photo-review wording. Put portions, places, descriptions, and uncertainty in note.'
+const mealNameGuidance = MEAL_NAME_GUIDANCE
 const mealNameSchema = z.string().trim().describe(mealNameGuidance)
 
-function validateMealName(name: string | undefined): string | undefined {
-  if (name === undefined) return undefined
-  if (!name || name.length > 40 || /^(?:(?:breakfast|lunch|dinner|snack)\s*:|estimated\b|photo shows\b|retained image\b|approximately\b|(?:about|roughly|likely|probably|possibly|maybe|uncertain|confidence)\b)/iu.test(name)) {
-    throw new VaultCliError('invalid_option', 'Meal name must name the dish in at most 40 characters.', {
+function validateMealName(name: string | undefined, required = false): string | undefined {
+  if (name === undefined) {
+    if (!required) return undefined
+    throw new VaultCliError('invalid_option', 'Supply a short dish name with --name; no meal was written.', {
+      hint: mealNameGuidance, retryable: false, stage: 'validation',
+    })
+  }
+  if (mealNameViolation(name) !== null) {
+    throw new VaultCliError('invalid_option', 'Meal name must be a short sentence-case dish name.', {
       hint: `${mealNameGuidance} Retry with a short name; no meal was written.`,
       issues: [publicValidationIssue({ code: 'custom' }, ['name'])],
       retryable: false,
@@ -551,7 +558,7 @@ async function runMealAdd(
     stringOption(options.photo) ?? payload?.photo
   const audioPath =
     stringOption(options.audio) ?? payload?.audio
-  const name = validateMealName(stringOption(options.name) ?? payload?.name)
+  const name = stringOption(options.name) ?? payload?.name
   const note =
     stringOption(options.note) ?? payload?.note
   const occurredAtInput =
@@ -588,12 +595,14 @@ async function runMealAdd(
     nutrition,
   })
 
+  const validatedName = validateMealName(name, true)
+
   const importers = (await loadImportersRuntimeModule()).createImporters()
   const mealInput = {
     vaultRoot,
     photoPath,
     audioPath,
-    name,
+    name: validatedName,
     note,
     source,
     ingredients,

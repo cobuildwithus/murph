@@ -101,6 +101,7 @@ async function makeFixtureVault(): Promise<FixtureVault> {
     }>([
       'meal',
       'add',
+      '--name', 'Sample meal',
       '--photo',
       sampleDocumentPath,
       '--vault',
@@ -249,6 +250,7 @@ test(
       }>([
         'meal',
         'add',
+        '--name', 'Sample meal',
         '--photo',
         sampleDocumentPath,
         '--vault',
@@ -275,6 +277,7 @@ test(
       }>([
         'meal',
         'add',
+        '--name', 'Sample meal',
         '--note',
         'Coffee and toast.',
         '--vault',
@@ -324,6 +327,7 @@ test(
       }>([
         'meal',
         'import-json',
+        '--name', 'Sample meal',
         '--input',
         `@${mealPayloadPath}`,
         '--note',

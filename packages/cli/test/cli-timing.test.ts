@@ -822,7 +822,7 @@ test('real meal validation preserves output and mutation boundaries while admitt
     assert.equal((await records.listMealRecords({ vault: root })).count, 0)
 
     // Follow the unchanged validation recovery with one real save of each kind.
-    const saved = await collect(() => invoke(['meal', 'add', '--note', 'PRIVATE_SENTINEL',
+    const saved = await collect(() => invoke(['meal', 'add', '--name', 'Bean bowl', '--note', 'PRIVATE_SENTINEL',
       '--nutrition-calories', '420', '--nutrition-source', 'estimated',
       '--occurred-at', '2030-01-15T10:00:00.000Z', '--vault', root, '--format', 'json']))
     assert.equal(saved.result.thrown, null)

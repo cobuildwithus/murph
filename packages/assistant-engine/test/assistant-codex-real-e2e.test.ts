@@ -170,6 +170,7 @@ import {
 } from '../src/assistant-codex/command-family.ts'
 import {
   executeOperatorDiagnostic,
+  proposeLegacyMealName,
   executeReadOnlyAssistantAsk,
 } from '../src/assistant-ask.ts'
 import {
@@ -1973,6 +1974,42 @@ describeRealCodex('real model canonical production journeys', () => {
       process.stdout.write(`[exact-meal-read] ${JSON.stringify({ providerRequests, reads: reads.length, canonicalUnchanged: true, reply: result.finalMessage })}\n`)
     } finally {
       await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths])
+    }
+  }, 600_000)
+  it('real model legacy meal rename produces five natural dish names', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    const nativeExecute = clinicalExtractionCodex.executeCodexAppServerTurn
+    const observer = vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn').mockImplementation(nativeExecute)
+    const examples = [
+      { name: 'turkey, couscous, peas, squash and peppers', note: 'One mixed bowl.', main: /turkey.*bowl/iu },
+      { name: 'Apple peach almond butter protein smoothie', note: 'One glass with protein powder.', main: /smoothie/iu },
+      { name: 'Harbor Kitchen falafel wrap and Corner Bakery iced tea', note: 'The wrap was the main dish; tea was a side drink.', main: /falafel.*wrap/iu },
+      { name: 'estimated roasted trout with lemon, potatoes and green beans', note: 'One plate.', main: /trout/iu },
+      { name: 'Photo shows lentil curry with rice and chutney', note: 'One bowl of curry.', main: /lentil.*curry/iu },
+    ]
+    try {
+      for (const example of examples) {
+        const name = await proposeLegacyMealName({ ...config, codexHome: permissionHome.codexHome, name: example.name, note: example.note, reasoningEffort: 'low',
+          onProviderUsage: ({ usage }) => { recordRealCodexProviderUsage(usage.usage) },
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined })
+        expect(name).not.toBeNull()
+        expect(name).toMatch(example.main)
+        expect(name).not.toMatch(/Harbor|Kitchen|Corner|Bakery|estimated|photo shows|[,;]/iu)
+        expect(name!.length).toBeLessThanOrEqual(40)
+        expect(name!.split(/\s+/u).length).toBeGreaterThanOrEqual(2)
+        expect(name!.split(/\s+/u).length).toBeLessThanOrEqual(5)
+        process.stdout.write(`[legacy-meal-name-proof] ${JSON.stringify({ before: example.name, after: name })}\n`)
+      }
+      expect(observer).toHaveBeenCalledTimes(5)
+      for (const [turn] of observer.mock.calls) {
+        expect(turn.dynamicTools).toEqual([])
+        expect(turn.environments).toEqual([])
+        expect(turn.ephemeral).toBe(true)
+      }
+    } finally {
+      observer.mockRestore()
+      await removeRealCodexTemporaryPaths([...permissionHome.temporaryPaths, ...config.temporaryPaths])
     }
   }, 600_000)
   it('real model meal dish names separate notes and exclude non-food observations', async () => {
