@@ -1,6 +1,6 @@
 Private meal thumbnail delivery, capture-based retention and deletion are owned by
 [`ios-meals.md`](product-specs/ios-meals.md); implementation is tracked in
-[the thumbnail plan](exec-plans/active/2026-11-02-meal-photo-thumbnails.md).
+[the thumbnail plan](exec-plans/completed/2026-11-02-meal-photo-thumbnails.md).
 
 Historical exact meal-photo association is tracked in
 [the implementation plan](exec-plans/completed/2026-11-02-meal-photos-exact.md);
