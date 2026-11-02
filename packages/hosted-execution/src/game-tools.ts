@@ -107,3 +107,9 @@ export const hostedGameToolResponseSchema = z.object({
   }).strict(),
 }).strict();
 export type HostedGameToolResponse = z.infer<typeof hostedGameToolResponseSchema>;
+
+/** A regeneration keeps the game binding but gets its own turn and delivery key. */
+export function parseGameRecapEventId(eventId: string): { gameId: string; regenerationId?: string } | null {
+  const match = /^game-recap:([A-Za-z0-9_-]{1,64})(?::([A-Za-z0-9_-]{8,32}))?$/u.exec(eventId);
+  return match ? { gameId: match[1], ...(match[2] ? { regenerationId: match[2] } : {}) } : null;
+}

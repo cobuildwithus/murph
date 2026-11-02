@@ -62,13 +62,15 @@ describe("durable game chat lifecycle", () => {
     expect(m.current).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "game", status: { in: ["invited"] }, chatContainerMemberId: "room" } }));
     expect(m.discover).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
   });
-  it("queues recap authority only for the settled game already bound to this room", async () => {
+  it.each([undefined, "synthetic_request"])("queues recap authority only for the settled game already bound to this room; regeneration=%s", async (regenerationId) => {
+    const eventId = `game-recap:game${regenerationId ? `:${regenerationId}` : ""}`;
     m.game.mockResolvedValue({ ...game, status: "settled" });
-    m.receipts.mockResolvedValue([{ ...receipt, template: "game_recap", idempotencyKey: "hash:game-recap:game" }]);
+    m.receipts.mockResolvedValue([{ ...receipt, template: "game_recap", sourceRef: `game${regenerationId ? `:${regenerationId}` : ""}`, idempotencyKey: `hash:${eventId}` }]);
     await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });
     const notification = m.prepare.mock.calls[0][0].envelope.notification;
     expect(notification).not.toHaveProperty("gameRecap");
-    expect(notification.responsePolicy).toMatchObject({ kind: "require_game_recap", gameId: "game", eventId: "game-recap:game", pairFingerprint: expect.stringMatching(/^[a-f0-9]{32}$/u) });
+    expect(notification.deliveryIdempotencyKey).toBe(eventId);
+    expect(notification.responsePolicy).toMatchObject({ kind: "require_game_recap", gameId: "game", eventId, pairFingerprint: expect.stringMatching(/^[a-f0-9]{32}$/u) });
     expect(notification.instructions).toContain("murph.write_recap");
     expect(notification.instructions).toContain("The bounded room transcript.");
     expect(m.discover).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();

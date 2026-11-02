@@ -1609,3 +1609,7 @@ The Web and Assistant Engine READMEs own the live filtering and capture contract
 Specialized tool classification admission, group-action normalization and 14-day
 calibration proof are tracked in [the specialized alert fix](exec-plans/completed/2026-11-01-specialized-tool-alerts.md).
 `../apps/web/README.md` owns the live alert contract.
+
+Operator recap regeneration and its execution-gated rollout are specified in [Weekly Game](product-specs/weekly-game.md).
+Implementation and focused proof are tracked in
+[the regeneration plan](exec-plans/completed/2026-11-01-recap-regenerate.md).

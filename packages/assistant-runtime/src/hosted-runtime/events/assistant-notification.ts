@@ -1,3 +1,4 @@
+import { parseGameRecapEventId } from "@murphai/hosted-execution/runtime-control";
 import { buildHostedGameChatBootstrapPolicy, isHostedGameBootstrapUnavailable } from "./game-chat-bootstrap.ts";
 import type { HostedRuntimeGroupToolPort } from "../platform.ts";
 import { resolveHostedOperatorModelProvider } from "../codex-runtime-env.ts";
@@ -801,7 +802,7 @@ function gameRecapHostedScope(
   policy: GameHostResponsePolicy<"require_game_recap">,
   groupToolPort: HostedRuntimeGroupToolPort | null | undefined,
 ) {
-  if (eventId !== `game-recap:${policy.gameId}`) {
+  if (eventId !== policy.eventId || parseGameRecapEventId(eventId)?.gameId !== policy.gameId) {
     throw new TypeError("Game recap notification authority is invalid.");
   }
   if (!groupToolPort) {

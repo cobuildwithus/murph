@@ -1988,7 +1988,7 @@ describe("hosted Linq egress authority", () => {
     },
   );
 
-  it.each(["current", "recap", "refusal", "cancelled", "replaced", "expired", "other-audience", "unrelated", "line-blocked", "inactive-runtime"])(
+  it.each(["current", "recap", "regenerated-recap", "refusal", "cancelled", "replaced", "expired", "other-audience", "unrelated", "line-blocked", "inactive-runtime"])(
     "requires canonical game proposal authority before exempting an inactive group: %s",
     async (scenario) => {
       const prisma = createPrismaStub({ threadRouteContainerMemberId: "member-1", activeMemberAccess: scenario !== "inactive-runtime" });
@@ -1997,7 +1997,7 @@ describe("hosted Linq egress authority", () => {
       const proposal = { v: 1, id: scenario === "replaced" ? "replacement" : "proposal", proposedByMemberId: "person-a", expectedTermsVersion: 1,
         change: { kind: "edit", lengthDays: 14 }, effectiveFromDay: 0, startsOn: null, deliveryStatus: "queued" };
       prisma.game.findFirst.mockResolvedValue({
-        id: "game", createdBy: "person-a", status: scenario === "recap" ? "settled" : "live", lengthDays: 7, inviteExpiresAt: null, startsOn: null,
+        id: "game", createdBy: "person-a", status: ["recap", "regenerated-recap"].includes(scenario) ? "settled" : "live", lengthDays: 7, inviteExpiresAt: null, startsOn: null,
         pendingChange: ["cancelled", "refusal"].includes(scenario) ? null : proposal,
         terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: [0, 1, 2, 3, 4] }, stakes: [] }] },
         players: ["person-a", "person-b"].map((memberId, seat) => ({ memberId, seat, timeZone: "UTC",
@@ -2009,22 +2009,27 @@ describe("hosted Linq egress authority", () => {
         prisma.hostedLinqLine.findFirst.mockResolvedValue({ ...line, providerServiceStatus: "FLAGGED" });
       }
       mocks.getPrisma.mockReturnValue(prisma);
-      const idempotencyKey = scenario === "recap" ? "game-recap:game" : scenario === "unrelated" ? "assistant-outbox:scheduled" : scenario === "refusal" ? "game-change-expired:game:proposal" : "game-change:game:proposal";
+      const idempotencyKey = scenario === "regenerated-recap" ? "game-recap:game:synthetic_request" : scenario === "recap" ? "game-recap:game" : scenario === "unrelated" ? "assistant-outbox:scheduled" : scenario === "refusal" ? "game-change-expired:game:proposal" : "game-change:game:proposal";
       const dispatch = () => postHostedLinqEgressEngagement(new Request("https://internal.example.test/engagement", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ authorityCheckOnly: false, answeredMailboxItemIds: [], idempotencyKey, target: "chat-authorized-group", targetKind: "thread" }),
       }));
       const response = await dispatch();
-      if (scenario === "current" || scenario === "refusal" || scenario === "recap") {
+      if (scenario === "current" || scenario === "refusal" || ["recap", "regenerated-recap"].includes(scenario)) {
         expect(response.status).toBe(200);
         await expect(response.json()).resolves.toMatchObject({ providerDispatchClaimed: true });
         expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledOnce();
         expect(prisma.hostedLinqDailyState.findFirst).not.toHaveBeenCalled();
-        if (scenario === "recap") {
+        if (["recap", "regenerated-recap"].includes(scenario)) {
           // No newest-game lookup: an already-live rematch cannot revoke this recap.
           expect(prisma.game.findFirst).toHaveBeenCalledTimes(1);
           expect(prisma.game.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
             id: "game", chatContainerMemberId: "member-1", status: "settled", departedPlayer: expect.anything(),
+          }) }));
+        }
+        if (scenario === "regenerated-recap") {
+          expect(prisma.game.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
+            events: { some: { commandKey: `${idempotencyKey}:accepted`, type: "recap_regeneration_accepted" } },
           }) }));
         }
         // The same canonical dispatch fence prevents a second provider send.

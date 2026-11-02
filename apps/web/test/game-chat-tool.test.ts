@@ -128,7 +128,7 @@ describe("game chat tool authority", () => {
     m.read.mockResolvedValue({ games: [{ ...game, status: "settled" }] });
     expect((await handleGameChatTool(read)).result).not.toHaveProperty("loreGuidance");
   });
-  it("validates, saves and replays a recap without scoreLine", async () => {
+  it.each(["", ":synthetic_request"])("validates, saves and replays a recap without scoreLine", async (suffix) => {
     const recap = {
       pages: [
         { background: "night" as const, blocks: [{ kind: "headline" as const, text: "Ava opened the week on the mat" }] },
@@ -144,7 +144,7 @@ describe("game chat tool authority", () => {
         startedAt: new Date("2030-03-01T00:00:00.000Z"), settledAt: new Date("2030-03-09T09:00:00.000Z") },
     });
     const request = { action: "write_recap" as const,
-      origin: { kind: "game_recap" as const, gameId: "game_synthetic", eventId: "game-recap:game_synthetic" },
+      origin: { kind: "game_recap" as const, gameId: "game_synthetic", eventId: `game-recap:game_synthetic${suffix}` },
       priorChatLines: ["Sauna citizenship held. Earlier evidence arrived."], recap };
 
     const rejected = await handleGameChatTool({ memberId: group, request, runtimeIdentity: null });
