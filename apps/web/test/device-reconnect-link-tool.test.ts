@@ -51,6 +51,37 @@ describe("hosted device reconnect link tool", () => {
     });
   });
 
+  it.each([
+    { connectSourceId: null, connectTarget: null, sourceProviderSlug: null },
+    { connectSourceId: " ", connectTarget: "!!!", sourceProviderSlug: " " },
+    { connectSourceId: "oura", connectTarget: "whoop", sourceProviderSlug: "whoop_v2" },
+    { connectSourceId: "whoop", connectTarget: "oura", sourceProviderSlug: "whoop_v2" },
+    { connectSourceId: "whoop", connectTarget: "whoop", sourceProviderSlug: "oura" },
+    { connectSourceId: null, connectTarget: null, sourceProviderSlug: "unknown" },
+  ])("rejects missing or mismatched reconnect selectors: %j", async (selectors) => {
+    const { resolveHostedDeviceReconnectLinkTarget } = await import(
+      "@/src/lib/device-sync/reconnect-link-tool"
+    );
+    expect(resolveHostedDeviceReconnectLinkTarget(configuredWhoopEnv, selectors))
+      .toEqual({ status: "missing" });
+  });
+
+  it("matches all supplied normalized selectors against the same target", async () => {
+    const { resolveHostedDeviceReconnectLinkTarget } = await import(
+      "@/src/lib/device-sync/reconnect-link-tool"
+    );
+    expect(resolveHostedDeviceReconnectLinkTarget(configuredWhoopEnv, {
+      connectSourceId: " WHOOP ",
+      connectTarget: " WHOOP ",
+      sourceProviderSlug: " WHOOP_V2 ",
+    })).toMatchObject({ status: "found", target: {
+      connectSourceId: "whoop", connectTarget: "whoop", sourceProviderSlug: "whoop_v2",
+    } });
+    expect(resolveHostedDeviceReconnectLinkTarget({}, {
+      connectSourceId: "whoop", connectTarget: null, sourceProviderSlug: null,
+    })).toEqual({ status: "missing" });
+  });
+
   it("does not issue a hosted reconnect target for configured Strava routes", async () => {
     const { resolveHostedDeviceReconnectLinkTarget } = await import(
       "@/src/lib/device-sync/reconnect-link-tool"

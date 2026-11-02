@@ -45,24 +45,6 @@ export function isDeviceConnectSourceAvailableForConnection(
 export function listConfiguredDeviceSyncConnectTargets(
   providerConfigs: DeviceSyncConnectTargetProviderConfigs,
 ): DeviceSyncConnectTarget[] {
-  return collectConfiguredDeviceSyncConnectTargets(providerConfigs, {
-    dedupeBySourceId: true,
-  });
-}
-
-export function listConfiguredDeviceSyncReconnectTargets(
-  providerConfigs: DeviceSyncConnectTargetProviderConfigs,
-): DeviceSyncConnectTarget[] {
-  return collectConfiguredDeviceSyncConnectTargets(providerConfigs, {
-    dedupeBySourceId: false,
-  });
-}
-
-function collectConfiguredDeviceSyncConnectTargets(
-  providerConfigs: DeviceSyncConnectTargetProviderConfigs,
-  options: { dedupeBySourceId: boolean },
-): DeviceSyncConnectTarget[] {
-  const targetsBySourceId = new Map<string, DeviceSyncConnectTarget>();
   const targets: DeviceSyncConnectTarget[] = [];
   const junctionConfig = providerConfigs.junction;
   const junctionSourceProviderSlugs = junctionConfig
@@ -75,13 +57,13 @@ function collectConfiguredDeviceSyncConnectTargets(
         continue;
       }
 
-      addDeviceSyncConnectTarget(targets, targetsBySourceId, {
+      addDeviceSyncConnectTarget(targets, {
         connectSourceId: junctionRoute.source.connectSourceId,
         connectTarget: junctionRoute.route.connectTarget,
         label: junctionRoute.source.label,
         provider: "junction",
         sourceProviderSlug: junctionRoute.route.sourceProviderSlug,
-      }, options);
+      });
     }
   }
 
@@ -118,17 +100,11 @@ export function resolveConfiguredDeviceSyncConnectTargetBySourceId(
 
 function addDeviceSyncConnectTarget(
   targets: DeviceSyncConnectTarget[],
-  targetsBySourceId: Map<string, DeviceSyncConnectTarget>,
   target: DeviceSyncConnectTarget,
-  options: { dedupeBySourceId: boolean },
 ): void {
   const connectSourceId = normalizeDeviceConnectSourceId(target.connectSourceId);
   const connectTarget = normalizeDeviceSyncConnectTargetKey(target.connectTarget);
-  if (
-    !connectSourceId
-    || !connectTarget
-    || (options.dedupeBySourceId && targetsBySourceId.has(connectSourceId))
-  ) {
+  if (!connectSourceId || !connectTarget) {
     return;
   }
 
@@ -145,5 +121,4 @@ function addDeviceSyncConnectTarget(
   };
 
   targets.push(normalizedTarget);
-  targetsBySourceId.set(connectSourceId, normalizedTarget);
 }

@@ -101,7 +101,6 @@ import {
 import {
   isDeviceConnectSourceAvailableForConnection,
   listConfiguredDeviceSyncConnectTargets,
-  listConfiguredDeviceSyncReconnectTargets,
 } from "@murphai/device-syncd/connect-config";
 import {
   type AssistantCurrentDeliveryRoute,
@@ -8786,59 +8785,17 @@ function resolveHostedWorkspaceDeviceReconnectTargets(
     return [];
   }
 
-  const targets = listConfiguredDeviceSyncReconnectTargets(providerConfigs);
-  const publicTargetsByConnectTarget = new Map(
-    listConfiguredDeviceSyncConnectTargets(providerConfigs)
-      .filter((target) =>
-        isDeviceConnectSourceAvailableForConnection(target.connectSourceId)
-      )
-      .map((target) => [
-        target.connectTarget,
-        target,
-      ]),
-  );
-  const connectTargetCounts = new Map<string, number>();
-  for (const target of targets) {
-    connectTargetCounts.set(
-      target.connectTarget,
-      (connectTargetCounts.get(target.connectTarget) ?? 0) + 1,
-    );
-  }
-
-  return targets.map((target) => ({
+  return listConfiguredDeviceSyncConnectTargets(providerConfigs).map((target) => ({
     connectionAvailable: isDeviceConnectSourceAvailableForConnection(
       target.connectSourceId,
     ),
     connectTarget: target.connectTarget,
-    connectTargetAmbiguous: (connectTargetCounts.get(target.connectTarget) ?? 0) > 1,
-    connectTargetCommandSafe: sameHostedDeviceSyncConnectTarget(
-      target,
-      publicTargetsByConnectTarget.get(target.connectTarget) ?? null,
-    ),
     label: target.label,
     provider: target.provider,
     ...(target.sourceProviderSlug
       ? { sourceProviderSlug: target.sourceProviderSlug }
       : {}),
   }));
-}
-
-type HostedDeviceSyncConnectTarget = ReturnType<
-  typeof listConfiguredDeviceSyncConnectTargets
->[number];
-
-function sameHostedDeviceSyncConnectTarget(
-  left: HostedDeviceSyncConnectTarget,
-  right: HostedDeviceSyncConnectTarget | null,
-): boolean {
-  if (!right) {
-    return false;
-  }
-
-  return normalizeHostedDeviceSyncConnectTargetKey(left.provider)
-      === normalizeHostedDeviceSyncConnectTargetKey(right.provider)
-    && normalizeHostedDeviceSyncConnectTargetKey(left.sourceProviderSlug)
-      === normalizeHostedDeviceSyncConnectTargetKey(right.sourceProviderSlug);
 }
 
 function normalizeHostedDeviceSyncConnectTargetKey(

@@ -4,8 +4,8 @@ import { test } from "vitest";
 import {
   isDeviceConnectSourceAvailableForConnection,
   listJunctionDeviceConnectRouteEntries,
+  listJunctionLinkDeviceConnectRouteEntries,
   listConfiguredDeviceSyncConnectTargets,
-  listConfiguredDeviceSyncReconnectTargets,
   readConfiguredDeviceSyncProviderConfigs,
   resolveConfiguredDeviceSyncConnectTarget,
   resolveConfiguredDeviceSyncConnectTargetBySourceId,
@@ -58,7 +58,6 @@ test("Junction source labels remain connectable without direct OAuth providers",
     assert.equal(target?.provider, "junction");
     assert.equal(target?.sourceProviderSlug, slug);
   }
-  assert.deepEqual(listConfiguredDeviceSyncReconnectTargets(configs), listConfiguredDeviceSyncConnectTargets(configs));
   assert.equal(isDeviceConnectSourceAvailableForConnection("strava"), false);
   assert.equal(isDeviceConnectSourceAvailableForConnection("garmin"), true);
   assert.equal(resolveConfiguredDeviceSyncConnectTarget({ junction: { providerFilter: ["garmin"] } }, "whoop"), null);
@@ -128,7 +127,7 @@ test("reconnect targets retain the exact Junction route for recovery", () => {
   });
 
   assert.deepEqual(
-    listConfiguredDeviceSyncReconnectTargets(configs).map((target) => ({
+    listConfiguredDeviceSyncConnectTargets(configs).map((target) => ({
       connectSourceId: target.connectSourceId,
       connectTarget: target.connectTarget,
       provider: target.provider,
@@ -164,10 +163,6 @@ test("disabled offers remain configured for status and ingestion while fresh sta
     label: "Strava",
     provider: "junction",
     sourceProviderSlug: "strava",
-  }]);
-  assert.deepEqual(listConfiguredDeviceSyncReconnectTargets(configs), [{
-    connectSourceId: "strava", connectTarget: "strava", label: "Strava",
-    provider: "junction", sourceProviderSlug: "strava",
   }]);
   assert.deepEqual(resolveConfiguredDeviceSyncConnectTargetBySourceId(configs, "strava"), {
     connectSourceId: "strava",
@@ -232,4 +227,75 @@ test("connect targets keep Oura and WHOOP available with the default Junction so
     provider: "junction",
     sourceProviderSlug: "whoop_v2",
   });
+});
+
+// Exact ordered catalog output captured before the connect/reconnect collapse.
+const expectedDefaultTargets = [
+  { connectSourceId: "whoop", connectTarget: "whoop", label: "WHOOP", provider: "junction", sourceProviderSlug: "whoop_v2" },
+  { connectSourceId: "mapmyfitness", connectTarget: "map_my_fitness", label: "MapMyFitness", provider: "junction", sourceProviderSlug: "map_my_fitness" },
+  { connectSourceId: "ultrahuman", connectTarget: "ultrahuman", label: "Ultrahuman", provider: "junction", sourceProviderSlug: "ultrahuman" },
+  { connectSourceId: "dexcom-g6-and-older", connectTarget: "dexcom", label: "Dexcom (G6 and older)", provider: "junction", sourceProviderSlug: "dexcom" },
+  { connectSourceId: "renpho", connectTarget: "renpho", label: "Renpho", provider: "junction", sourceProviderSlug: "renpho" },
+  { connectSourceId: "runkeeper", connectTarget: "runkeeper", label: "Runkeeper", provider: "junction", sourceProviderSlug: "runkeeper" },
+  { connectSourceId: "tandem-source", connectTarget: "tandem_source", label: "Tandem Source", provider: "junction", sourceProviderSlug: "tandem_source" },
+  { connectSourceId: "beurer", connectTarget: "beurer_api", label: "Beurer", provider: "junction", sourceProviderSlug: "beurer_api" },
+  { connectSourceId: "strava", connectTarget: "strava", label: "Strava", provider: "junction", sourceProviderSlug: "strava" },
+  { connectSourceId: "omron", connectTarget: "omron", label: "Omron", provider: "junction", sourceProviderSlug: "omron" },
+  { connectSourceId: "eight-sleep", connectTarget: "eight_sleep", label: "Eight Sleep", provider: "junction", sourceProviderSlug: "eight_sleep" },
+  { connectSourceId: "fitbit", connectTarget: "fitbit", label: "Fitbit", provider: "junction", sourceProviderSlug: "google_health" },
+  { connectSourceId: "freestyle-libre", connectTarget: "freestyle_libre", label: "Freestyle Libre", provider: "junction", sourceProviderSlug: "freestyle_libre" },
+  { connectSourceId: "garmin", connectTarget: "garmin", label: "Garmin", provider: "junction", sourceProviderSlug: "garmin" },
+  { connectSourceId: "hammerhead", connectTarget: "hammerhead", label: "Hammerhead", provider: "junction", sourceProviderSlug: "hammerhead" },
+  { connectSourceId: "ihealth", connectTarget: "ihealth", label: "iHealth", provider: "junction", sourceProviderSlug: "ihealth" },
+  { connectSourceId: "oura", connectTarget: "oura", label: "Oura", provider: "junction", sourceProviderSlug: "oura" },
+  { connectSourceId: "peloton", connectTarget: "peloton", label: "Peloton", provider: "junction", sourceProviderSlug: "peloton" },
+  { connectSourceId: "wahoo", connectTarget: "wahoo", label: "Wahoo", provider: "junction", sourceProviderSlug: "wahoo" },
+  { connectSourceId: "withings", connectTarget: "withings", label: "Withings", provider: "junction", sourceProviderSlug: "withings" },
+  { connectSourceId: "google-fit", connectTarget: "google_fit", label: "Google Fit", provider: "junction", sourceProviderSlug: "google_fit" },
+  { connectSourceId: "zwift", connectTarget: "zwift", label: "Zwift", provider: "junction", sourceProviderSlug: "zwift" },
+  { connectSourceId: "abbott-libreview", connectTarget: "abbott_libreview", label: "Abbott LibreView", provider: "junction", sourceProviderSlug: "abbott_libreview" },
+  { connectSourceId: "dexcom", connectTarget: "dexcom_v3", label: "Dexcom", provider: "junction", sourceProviderSlug: "dexcom_v3" },
+  { connectSourceId: "kardia", connectTarget: "kardia", label: "Kardia", provider: "junction", sourceProviderSlug: "kardia" },
+  { connectSourceId: "cronometer", connectTarget: "cronometer", label: "Cronometer", provider: "junction", sourceProviderSlug: "cronometer" },
+  { connectSourceId: "polar", connectTarget: "polar", label: "Polar", provider: "junction", sourceProviderSlug: "polar" },
+];
+
+test("normalized targets preserve the full ordered catalog and empty configuration", () => {
+  assert.deepEqual(listConfiguredDeviceSyncConnectTargets({}), []);
+  assert.deepEqual(listConfiguredDeviceSyncConnectTargets({ junction: {} }), expectedDefaultTargets);
+  assert.deepEqual(listConfiguredDeviceSyncConnectTargets({ junction: { providerFilter: [] } }), expectedDefaultTargets);
+});
+
+test("normalized targets are unique and retain first-occurrence order for every Link singleton and pair", () => {
+  const slugs = listJunctionLinkDeviceConnectRouteEntries().map(({ route }) => route.sourceProviderSlug);
+  const filters = [slugs, [...slugs].reverse(), [...slugs, ...slugs]];
+  for (const first of slugs) {
+    filters.push([first], [first, first], [` ${first.toUpperCase()} `]);
+    for (const second of slugs) filters.push([first, second], [first, second, first, second]);
+  }
+  for (const providerFilter of filters) {
+    const expectedSlugs = [...new Set(providerFilter.map(slug => {
+      const normalized = slug.trim().toLowerCase();
+      return normalized === "fitbit" ? "google_health" : normalized;
+    }))];
+    const expected = expectedSlugs.map(slug => {
+      const target = expectedDefaultTargets.find(entry => entry.sourceProviderSlug === slug);
+      assert.ok(target, `Missing expected target for ${slug}`);
+      return target;
+    });
+    const targets = listConfiguredDeviceSyncConnectTargets({ junction: { providerFilter } });
+    assert.deepEqual(targets, expected, JSON.stringify(providerFilter));
+    for (const key of ["connectSourceId", "connectTarget", "sourceProviderSlug"] as const) {
+      assert.equal(new Set(targets.map(target => target[key])).size, targets.length, key);
+    }
+  }
+});
+
+test("target enumeration rejects unsupported and SDK-only filters even beside a valid Link slug", () => {
+  for (const providerFilter of [["unknown"], ["apple_health_kit"], ["whoop_v2", "unknown"]]) {
+    assert.throws(
+      () => listConfiguredDeviceSyncConnectTargets({ junction: { providerFilter } }),
+      /unsupported Junction Link provider slugs/,
+    );
+  }
 });

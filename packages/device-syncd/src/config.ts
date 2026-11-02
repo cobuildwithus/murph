@@ -65,7 +65,6 @@ export {
 export {
   isDeviceConnectSourceAvailableForConnection,
   listConfiguredDeviceSyncConnectTargets,
-  listConfiguredDeviceSyncReconnectTargets,
   normalizeDeviceSyncConnectTargetKey,
   resolveConfiguredDeviceSyncConnectTarget,
   resolveConfiguredDeviceSyncConnectTargetBySourceId,

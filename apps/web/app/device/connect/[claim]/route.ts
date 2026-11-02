@@ -1,7 +1,7 @@
 import { isDeviceSyncError } from "@murphai/device-syncd/errors";
 import {
   isDeviceConnectSourceAvailableForConnection,
-  listConfiguredDeviceSyncReconnectTargets,
+  listConfiguredDeviceSyncConnectTargets,
   readConfiguredDeviceSyncConnectTargetConfigs,
 } from "@murphai/device-syncd/connect-config";
 
@@ -127,7 +127,7 @@ export async function POST(
 }
 
 function resolveHostedDeviceConnectIntentTarget(intent: HostedDeviceConnectIntentRecord) {
-  return listConfiguredDeviceSyncReconnectTargets(
+  return listConfiguredDeviceSyncConnectTargets(
     readConfiguredDeviceSyncConnectTargetConfigs(process.env),
   ).find((target) =>
     isDeviceConnectSourceAvailableForConnection(target.connectSourceId)

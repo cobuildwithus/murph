@@ -1241,3 +1241,131 @@ are relative to `apps/web/test/`. `*.db.test.ts` files are outside this CI suite
 | `supplements-search-live.test.ts` | 10 | live labels database opt-in |
 | `supplements-search-postgres.test.ts` | 142 | PostgreSQL opt-in |
 | `terra-model-reset-postgres.test.ts` | 1 | PostgreSQL opt-in |
+
+## Round 3 accepted Complexity Collapse: one connect target enumeration
+
+Owner-authorized amendment at starting head `e5e58c1d9e`. Implements only the
+accepted obsolete connect/reconnect arbitration finding. Work stays in the
+assigned deletion branch; the parent owns pushing, CI and subsequent ReviewGPT.
+No production access, deployment, persistence migration or changelog is needed:
+this removes unreachable process-local distinctions without changing behavior.
+
+### Independent pre-deletion proof
+
+A source-module probe ran before deletion: 1,662 configurations over all 28 Link
+slugs produced deeply identical ordered connect/reconnect arrays, unique in each
+of `connectSourceId`, `connectTarget`, and `sourceProviderSlug`. Cases include
+absent configuration, undefined/empty defaults, the complete catalog forward and
+reversed, doubled catalog, every singleton, repeated singleton, uppercase/trimmed
+singleton, every ordered pair and repeated pair, and both Fitbit/successor orders.
+Six rejection checks (three invalid filters through both APIs) passed.
+
+The structural argument covers arbitrary-length admissible filters: normalization
+rejects non-Link slugs, rewrites `fitbit` to `google_health`, and keeps first
+occurrences. The resulting 27-entry catalog is injective in all three selector
+dimensions. Every admitted filter therefore selects an ordered subset of that
+catalog; there is no competing route to arbitrate. The retained regression checks
+freeze the complete ordered tuples and sweep singleton/pair/repetition inputs.
+
+### Implementation and protected boundaries
+
+- `device-syncd/src/config/connect-targets.ts`: sole enumeration, with duplicate
+  options/map and collector removed. Existing key normalization remains.
+- `device-syncd/src/config.ts` and `src/connect-config.ts`: remove the retired
+  export; migrate all consumers to `listConfiguredDeviceSyncConnectTargets`.
+- `assistant-runtime/src/hosted-runtime/workspace-assistant-phase.ts`: remove
+  the second enumeration, two maps, tuple-safety helper and derived flags.
+  Keep source availability and `normalizeHostedDeviceSyncConnectTargetKey`,
+  which still serves device-command lookup.
+- `assistant-runtime/src/hosted-runtime/device-sync-status-prompt.ts`: remove
+  ambiguity/safety fields, derived notice flag, helper and unreachable text.
+  Disabled-source, missing-target and historical-reset guidance remain intact.
+- Web `reconnect-link-tool.ts`: find the single target, remove the ambiguous
+  variant and error; retain every selector comparison and availability gate.
+- Web claim route, source-start route, settings service and the PostgreSQL
+  resilience fixture: enumeration rename only. Claim-time provider/source ID/
+  connect target/source slug tuple comparison and member authorization remain.
+
+### Prompt and test disposition
+
+Reachable prompt text is unchanged. Before editing, captured rendered output
+from the original builder; after editing, compared exact strings for 314,118
+combinations (1,662 configurations × nine source identities × seven error states
+× three account states). Included ordinary reconnect errors, historical-reset,
+disabled sources, missing target, account reauthorization, disconnection, and
+both persisted Fitbit identities. Every output matched byte-for-byte. The same
+probe also checked every resulting target tuple against the pre-edit capture.
+No digest or inline snapshot was regenerated. Because provider-visible text,
+tools and behavior are unchanged, no new stochastic model journey is required.
+
+Deleted exactly two prompt test declarations:
+
+1. `does not render ambiguous generic commands for duplicate WHOOP reconnect targets`:
+   only tests retired direct/Junction competition and an impossible ambiguity flag.
+2. `does not render a source-specific Junction command when the public target resolves elsewhere`:
+   only tests retired direct Oura preference over the Junction route.
+
+Retained `renders source-specific Junction WHOOP commands` by removing its
+retired direct-route competitor and obsolete flags; every output assertion stays.
+Other prompt fixtures lose only removed flags. All ordinary reconnect, disabled
+source, historical-reset and member-bound intent cases remain. Removed two
+redundant connect/reconnect equality assertions after deleting the second API;
+these were assertions inside retained tests, not deleted test cases.
+
+Added three device-syncd tests: exact ordered defaults/absent configuration;
+all Link singleton/pair/repetition order and uniqueness (including both Fitbit
+inputs); unsupported/SDK-only rejection. Added seven Web cases: six missing or
+mismatched selector variants, plus normalized conjunctive selection and absent
+configuration. Existing WHOOP source-slug and disabled Strava cases remain.
+
+### Verification for this amendment
+
+All commands below passed on the final code. Full suites were used, with no test
+name or file filters. Cloudflare inherited `MURPH_VITEST_MAX_WORKERS=2` as a
+resource cap. Commands were captured through a `bash -o pipefail` wrapper with
+home/worktree paths redacted before writing local logs.
+
+| Command | Result / counts |
+| --- | --- |
+| `pnpm build` | PASS; 23 package builds plus CLI surface assembly |
+| `pnpm verify:workspace-boundaries` | PASS |
+| `pnpm deps:guard` | PASS; 26 manifests |
+| `pnpm --dir packages/device-syncd typecheck` | PASS; zero errors |
+| `pnpm --dir packages/assistant-runtime typecheck` | PASS; zero errors |
+| `pnpm --dir apps/web typecheck` | PASS; zero errors |
+| `pnpm --dir apps/cloudflare typecheck` | PASS; zero errors |
+| `env MURPH_VITEST_MAX_WORKERS=2 pnpm --dir packages/device-syncd test:coverage` | 1,459 passed / 0 failed / 0 skipped; 61 passing files |
+| `env MURPH_VITEST_MAX_WORKERS=2 pnpm --dir packages/assistant-runtime test:coverage` | 3,899 passed / 0 failed / 7 skipped; 177 passing / 1 skipped files |
+| `env MURPH_VITEST_FILE_PARALLELISM=1 MURPH_VITEST_MAX_WORKERS=2 pnpm --dir packages/assistant-engine test:coverage` | 5,928 passed / 0 failed / 710 skipped; 304 passing / 8 skipped files |
+| `env MURPH_VITEST_MAX_WORKERS=2 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage` | 13,727 passed / 0 failed / 1,534 skipped; 848 passing / 132 skipped files |
+| `pnpm --dir apps/cloudflare test:node` | workspace 4,583 passed / 0 failed / 5 skipped (213 passing / 1 skipped files); container helper 20 passed / 0 failed / 0 skipped (1 file) |
+| `pnpm docs:drift` | PASS |
+| `pnpm complexity:diff` | PASS; 98 branch-changed source files, 45 existing hotspots |
+| `pnpm complexity:diff --base e5e58c1d9e` | PASS; 9 task-changed source files, 10 unchanged hotspots in the workspace phase owner |
+| `git diff --check` | PASS |
+
+Coverage statements / branches / functions / lines:
+
+- device-syncd: 90.51% / 83.92% / 94.65% / 90.65%.
+- assistant-runtime: 91.22% / 86.67% / 94.50% / 91.69%.
+- assistant-engine: 91.36% / 85.84% / 95.29% / 91.55%.
+
+The runtime suite includes the prompt and workspace device-sync tests; the engine
+suite includes turn planning and prompt digest checks. No snapshots or digest
+expectations changed. Existing opt-in/skipped cases are reported above, not
+counted as passing; no PostgreSQL or live-provider proof opt-ins were enabled.
+
+Candidate review: 9 production files, 16 added / 126 deleted lines, **110 net
+production lines removed**. Four test files, 109 added / 118 deleted lines;
+only two declarations removed, both inventoried above. The plan amendment is
+append-only. No casts, dependency changes, schema changes, new abstractions,
+provider-visible text changes or added network/database work. Touched functions
+have no new complexity debt; connect-targets maximum complexity drops 7 to 5.
+All selectors, claim tuple comparisons and source-availability gates remain.
+Privacy scan and diff whitespace checks passed. No new actionable repository
+friction was encountered. The generated `.swc` test cache is removed before the
+scoped commit; local probe/check captures remain ignored under `.tmp`.
+
+Commit through `scripts/committer` with the requested subject and co-author
+trailer. No push, remote PR mutation or production action was performed; the
+parent owns exact-head CI and ReviewGPT after pushing.
