@@ -80,6 +80,7 @@ export interface GameViewInput {
   viewerId: string;
   now: Date;
   round: number;
+  previousGameId: string | null;
   startedAt: Date | null;
   words: TermWords;
   /** Per member: the viewer's private label name, else their own first name. */
@@ -256,6 +257,7 @@ export function buildGameView(input: GameViewInput): GameView {
     recap: input.recap,
     retakeAvailable: retakeAvailable(state, viewerId, input.now),
     round: input.round,
+    previousGameId: input.previousGameId,
     settlesAt: settlesAt(state, viewerId, input.now),
     startedAt: input.startedAt?.toISOString() ?? null,
     status: game.status,

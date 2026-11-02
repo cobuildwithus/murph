@@ -352,8 +352,10 @@ export interface GameView {
   pendingChange: GamePendingChange | null;
   id: string;
   status: GameStatus;
-  /** 1 for the first game between these people, then 2, 3… */
+  /** 1 for a new game, then 2, 3… along its rematch chain. */
   round: number;
+  /** The settled game this one rematches; null for a new game. */
+  previousGameId: string | null;
   terms: GameTermsVersion;
   /** The picked Day 1, if the challenger chose one. */
   startsOn: string | null;

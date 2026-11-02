@@ -721,7 +721,8 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(rematch!.players[1].profileAvatarUrl).toBe(rematch!.players[1].avatarUrl);
     const avaHome = await readHome(ava);
     const addressed = avaHome.games.find((game) => game.id === rematch!.id);
-    expect(addressed).toMatchObject({ inviteToken: rematch!.inviteToken, round: 2, status: "invited" });
+    expect(addressed).toMatchObject({ inviteToken: rematch!.inviteToken, previousGameId: first.gameId, round: 2, status: "invited" });
+    expect(avaHome.games.find((game) => game.id === first.gameId)).toMatchObject({ previousGameId: null, round: 1 });
     // She sees herself by her own name, never the challenger's private one for her.
     expect(addressed!.players.map((player) => [player.firstName, player.isMe])).toEqual([["Leo", false], ["Ava", true]]);
     expect(addressed!.players[1].profileAvatarUrl).toBe(avaHome.me.avatarUrl);

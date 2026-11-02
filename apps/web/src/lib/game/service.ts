@@ -2255,6 +2255,7 @@ async function buildViewInputs(
       result,
       recap: recapAt[index] === null ? null : hostedGameRecapSchema.parse(JSON.parse(plain[recapAt[index]!] ?? "null")),
       round: game.row.round,
+      previousGameId: game.row.previousGameId,
       startedAt: game.row.startedAt,
       state: states[index],
       tickets: tickets.filter((ticket) => ticket.gameId === game.row.id).map((ticket) => withoutHidden(toTicketRow(ticket), blocks)),

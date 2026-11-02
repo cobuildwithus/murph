@@ -76,6 +76,7 @@ function view(state: RuleState, viewerId: string, now: Date, overrides: Partial<
     recap: null,
     result: null,
     round: 1,
+    previousGameId: null,
     startedAt: JOIN_AT,
     state,
     tickets: [],
