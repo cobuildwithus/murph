@@ -49,3 +49,6 @@ native changes. Existing universal-link handling stays with the native app.
   both Playwright tests pass. Task-owned Frog entry records the stale assertion.
 - Preview build, ReviewGPT, exact-head CI, merge, and production check remain
   delivery gates owned by this session.
+Status: completed
+Updated: 2026-11-01
+Completed: 2026-11-01
