@@ -10,7 +10,17 @@ import { ScaledSharePreview } from "./scaled-share-preview";
 
 import "./share-preview-fonts.css";
 
+// Show the shipped PNG directly so catalog proof preserves its exact pixels.
+/* oxlint-disable next/no-img-element */
+
 const PREVIEWS = [
+  {
+    frameId: "recap",
+    route: "/recap/[gameId]",
+    note: "The same recap ticket for every game, with no names, scores, photos, or game lookup.",
+    alt: "Murph recap",
+    card: <img src="/recap-preview.png" width={1200} height={630} alt="Murph recap" />,
+  },
   {
     frameId: "calendar",
     route: "/calendar/[payload]",
@@ -66,6 +76,7 @@ export function ShareLinkPreviewsStudy() {
   return (
     <div
       className="rounded-2xl border border-border bg-card p-4 sm:p-8"
+      id="share-link-previews"
       data-design-component="share-link-previews"
     >
       <div className="mb-6">
@@ -80,7 +91,7 @@ export function ShareLinkPreviewsStudy() {
           approvals, referral invites, device connect nudges, and group
           sponsorship. Biomarker and experiment pages ship the same frame
           with subject-specific headlines. Each study renders the exact
-          production card component, so the previews cannot drift. None of
+          production card component or static image, so the previews cannot drift. None of
           the cards imitates a tappable control, none promises a capability
           the landing page has not yet verified, and none exposes member
           details: link previews are fetched without authentication. Card

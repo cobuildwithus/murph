@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-01",
+  "order": 100,
+  "item": {
+    "id": "recap-link-preview",
+    "kind": "improvement",
+    "priority": 1,
+    "title": "A preview for your recap",
+    "summary": "Recap links in your group chat now show a gold recap ticket instead of the homepage preview.",
+    "details": "The preview is the same for every game. Names, scores and photos stay out of the link preview.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": []
+  }
+}

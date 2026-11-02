@@ -26,9 +26,20 @@ describe("public recap handoff", () => {
     const unknown = renderToStaticMarkup(await GameRecapPage({ params: Promise.resolve({ gameId: "unknown_game" }) }));
     expect(unknown).toBe(html.replaceAll(id, "unknown_game"));
     expect(recapMetadata).toMatchObject({
-      title: "Your recap is in Murph", description: "Open Murph to watch your recap.",
+      title: "Watch your recap in Murph", description: "Who won, who owes, and the best of it.",
       robots: { index: false, follow: false }, referrer: "no-referrer",
-      openGraph: { title: "Your recap is in Murph", type: "website", images: [expect.objectContaining({ url: "/opengraph-image" })] },
+      openGraph: {
+        title: "Watch your recap in Murph",
+        description: "Who won, who owes, and the best of it.",
+        type: "website",
+        images: [{ url: "/recap-preview.png", width: 1200, height: 630, alt: "Murph recap", type: "image/png" }],
+      },
+      twitter: {
+        card: "summary_large_image",
+        title: "Watch your recap in Murph",
+        description: "Who won, who owes, and the best of it.",
+        images: [{ url: "/recap-preview.png", width: 1200, height: 630, alt: "Murph recap", type: "image/png" }],
+      },
     });
     expect(JSON.stringify(recapMetadata)).not.toContain(id);
   });
