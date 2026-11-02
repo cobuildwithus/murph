@@ -356,6 +356,7 @@ vi.mock("../src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured: vi.fn(() => null),
 }));
 
+const latencyStore = await import("../src/lib/hosted-runtime-latency/store");
 const mailboxStore = await import("../src/lib/hosted-mailbox/store");
 const memberIdentityStore = await import("../src/lib/hosted-onboarding/hosted-member-identity-store");
 const memberRoutingStore = await import("../src/lib/hosted-onboarding/hosted-member-routing-store");
@@ -6872,6 +6873,7 @@ describe("Linq group chat auto-provision", () => {
 
     try {
       const response = await handleHostedOnboardingLinqWebhook({
+        webhookReceivedAt: new Date("2026-09-01T00:00:00.000Z"),
         rawBody: "{}",
         signature: null,
         timestamp: null,
@@ -6882,6 +6884,9 @@ describe("Linq group chat auto-provision", () => {
         ok: true,
         reason: "wake-appended-thread-route",
       });
+      expect(latencyStore.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalledWith(
+        expect.objectContaining({ conversationIsGroup: true, source: "linq", webhookReceivedAt: expect.any(Date) }),
+      );
       expect(linqClient.getHostedLinqChatSummary).toHaveBeenCalledWith({
         chatId: "chat_group_123",
         timeoutMs: 1_500,

@@ -2347,7 +2347,15 @@ The web-owned `provider_started` field
 means the runtime observed a local Codex `turn/start`; it is not evidence of an
 upstream OpenAI request or first token. The runtime may also emit metadata-only
 `assistant_milestone` events for Linq typing request start, Linq/Telegram typing
-acceptance, and the first locally observed Codex output/text. The engine's turn
+acceptance and the first locally observed Codex output/text.
+Channel typing begins at direct turn start; direct Linq attachment preparation
+may start earlier and hand off the same session. Groups start typing only for
+a held message draft, never for a no-reply or reaction-only draft. The engine
+owns that exception and stops the session if reconsideration drops the message.
+Web writes the schema-versioned boolean `orchestration.ingressConversationIsGroup`
+with the deferred webhook receipt, from the directness used in the wake.
+The typing monitor excludes stamped groups without runtime suppression callbacks
+or milestones. Missing stamps keep existing behavior. The engine's turn
 handle reports typing acceptance for the initial accepted-input journal and each
 subsequent admitted input, including pre-provider probes and live steering.
 Admission observes the same provider readiness promise regardless of import

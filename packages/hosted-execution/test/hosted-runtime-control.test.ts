@@ -3220,3 +3220,15 @@ it("keeps bounded milestone batches additive to the deployed singleton wire cont
     expect(() => parseHostedRuntimeLatencyTraceBatchResponse({ results })).toThrow();
   }
 });
+
+it.each([true, false])("parses the Web ingress group fact (%s)", (ingressConversationIsGroup) => {
+  const event = {
+    type: "provider_started", source: "linq", assistantInputIds: ["synthetic-input"],
+    at: "2026-09-01T00:00:00.000Z", providerRequestOrdinal: 0,
+    phaseBreakdown: { schemaVersion: 1, orchestration: { ingressConversationIsGroup } },
+  };
+  expect(parseHostedRuntimeLatencyTraceRequest({ event })).toEqual({ event });
+  expect(parseHostedRuntimeLatencyTraceRequest({ event: {
+    ...event, phaseBreakdown: { schemaVersion: 1, orchestration: { ingressConversationIsGroup: "true" } },
+  } }).event).not.toHaveProperty("phaseBreakdown");
+});

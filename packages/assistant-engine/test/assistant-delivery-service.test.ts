@@ -454,7 +454,7 @@ test('current audience delivery fields prefer actor id over legacy participant i
   })
 })
 
-test('typing indicators use the current audience route', async () => {
+test('group notification audiences never start or refresh typing', async () => {
   const session = createAssistantSession({
     binding: {
       actorId: 'linq-participant',
@@ -500,17 +500,13 @@ test('typing indicators use the current audience route', async () => {
     }),
   })
 
-  expect(indicator).not.toBeNull()
-  await vi.waitFor(() => {
-    expect(startLinqTyping).toHaveBeenCalledWith({
-      replyToMessageId: null,
-      target: 'linq-thread',
-      targetKind: 'thread',
-    })
-  })
+  expect(indicator).toBeNull()
+  expect(startLinqTyping).not.toHaveBeenCalled()
   await indicator?.refreshAfterMessage?.()
-  expect(refreshNow).toHaveBeenCalledTimes(1)
+  expect(refreshNow).not.toHaveBeenCalled()
+  await indicator?.refreshNow?.()
   await indicator?.stop()
+  expect(startLinqTyping).not.toHaveBeenCalled()
 })
 
 test('typing indicators forward explicit Linq targets with reply-to proof', async () => {
@@ -588,7 +584,7 @@ test('typing indicator stop waits for underlying stop and blocks later refreshes
       },
       identityId: null,
       threadId: 'linq-thread',
-      threadIsDirect: false,
+      threadIsDirect: true,
     },
   })
   const input: AssistantMessageInput = {
@@ -626,7 +622,7 @@ test('typing indicator stop waits for underlying stop and blocks later refreshes
         actorId: 'linq-participant',
         channel: 'linq',
         threadId: 'linq-thread',
-        threadIsDirect: false,
+        threadIsDirect: true,
       },
     }),
   })
@@ -669,7 +665,7 @@ test('typing indicator stop does not wait for a pending start', async () => {
       },
       identityId: null,
       threadId: 'linq-thread',
-      threadIsDirect: false,
+      threadIsDirect: true,
     },
   })
   const input: AssistantMessageInput = {
@@ -699,7 +695,7 @@ test('typing indicator stop does not wait for a pending start', async () => {
         actorId: 'linq-participant',
         channel: 'linq',
         threadId: 'linq-thread',
-        threadIsDirect: false,
+        threadIsDirect: true,
       },
     }),
   })
@@ -739,7 +735,7 @@ test('typing indicator stop is bounded when the underlying stop stalls', async (
         },
         identityId: null,
         threadId: 'linq-thread',
-        threadIsDirect: false,
+        threadIsDirect: true,
       },
     })
     const input: AssistantMessageInput = {
@@ -774,7 +770,7 @@ test('typing indicator stop is bounded when the underlying stop stalls', async (
           actorId: 'linq-participant',
           channel: 'linq',
           threadId: 'linq-thread',
-          threadIsDirect: false,
+          threadIsDirect: true,
         },
       }),
     })

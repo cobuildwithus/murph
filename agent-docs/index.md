@@ -1,3 +1,6 @@
+Turn-start typing, held group drafts, and Web-stamped group alert exclusion
+are recorded in [the implementation plan](exec-plans/completed/2026-11-01-group-typing-suppression.md).
+
 The desktop recap ticket presentation and responsive scan proof are tracked in
 [the design plan](exec-plans/completed/2026-11-01-recap-desktop-design.md).
 The public recap route retains the contract in `product-specs/weekly-game.md`.
@@ -1312,8 +1315,8 @@ Explicit reviewed clinical image omission is owned by the Clinical Records Intak
 storage contract; proof is recorded in
 [`clinical image storage`](exec-plans/completed/2026-09-28-clinical-image-storage.md).
 
-Early Linq text typing reuses the existing staging-to-turn handoff owned by
-`packages/assistant-runtime/README.md`; implementation and synthetic proof are
+The Linq staging-to-turn typing handoff is owned by
+`packages/assistant-runtime/README.md`; historical implementation proof is
 tracked in [`warm typing latency`](exec-plans/completed/2026-09-25-warm-typing-latency.md).
 
 Actual message-processing latency reductions in checkpoint wake discovery and

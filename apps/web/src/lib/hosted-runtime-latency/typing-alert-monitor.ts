@@ -174,6 +174,10 @@ export function buildHostedRuntimeTypingAlertQuery(input: {
         AND trace.webhook_received_at <= ${input.now}
         ${scope}
         AND mailbox.ai_usage_denied_at IS NULL
+        -- Web stamps the wake's resolved directness with the deferred receipt.
+        -- Groups have no typing obligation; traces without receipts are excluded.
+        AND (trace.phase_breakdown_json #> '{orchestration,ingressConversationIsGroup}')
+          IS DISTINCT FROM 'true'::jsonb
         AND NOT EXISTS (
           SELECT 1 FROM hosted_linq_alert AS alert
           WHERE alert.id = 'runtime-typing/' || trace.id

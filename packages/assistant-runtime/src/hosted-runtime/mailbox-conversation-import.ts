@@ -530,7 +530,8 @@ async function stageHostedConversationMailboxItem(
     metrics: createEmptyHostedConversationWakeMetrics(),
     status: "imported" as const,
   };
-  const cancelInputTyping = startHostedConversationInputTyping({
+  const cancelInputTyping = startHostedConversationAttachmentTyping({
+    stagedInput,
     foregroundAssistantInputId,
     linqDeliveryContext,
     runtime: input.runtime,
@@ -608,7 +609,8 @@ async function stageHostedConversationMailboxItem(
   };
 }
 
-function startHostedConversationInputTyping(input: {
+function startHostedConversationAttachmentTyping(input: {
+  stagedInput: HostedConversationMailboxAssistantInputStageResult;
   foregroundAssistantInputId: string | null;
   linqDeliveryContext: HostedAssistantLinqDeliveryContext | null;
   runtime: HostedConversationMailboxRuntime;
@@ -616,7 +618,7 @@ function startHostedConversationInputTyping(input: {
   signal?: AbortSignal | null;
   typingSignal?: AbortSignal | null;
 }): ReturnType<typeof startHostedLinqInputTyping> {
-  if (!input.foregroundAssistantInputId) {
+  if (!input.foregroundAssistantInputId || !input.stagedInput.attachmentEvidenceRequired) {
     return null;
   }
   return startHostedLinqInputTyping({

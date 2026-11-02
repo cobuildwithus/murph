@@ -6,7 +6,7 @@ import {
   buildHostedRuntimeTypingAlertQuery,
   runHostedRuntimeTypingAlertMonitor,
 } from "@/src/lib/hosted-runtime-latency/typing-alert-monitor";
-import { linkHostedIngressLatencyTracesToAcceptedLinqDelivery } from "@/src/lib/hosted-runtime-latency/store";
+import { recordHostedIngressTemporalSignalAccepted, recordHostedIngressAcceptedFromMailboxItem, recordHostedIngressAssistantMilestone, linkHostedIngressLatencyTracesToAcceptedLinqDelivery } from "@/src/lib/hosted-runtime-latency/store";
 import { deleteExpiredTypingAlerts } from "@/src/lib/hosted-retention/cleanup";
 import { sendRecoverableHostedLinqAlertsBestEffort } from "@/src/lib/hosted-onboarding/linq-alert-email";
 import { createHostedLinqProviderEventLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
@@ -86,6 +86,81 @@ describe.skipIf(!enabled)("per-message typing alert PostgreSQL proof", () => {
       ]);
       expect(fetchImpl.mock.calls.map((call) => String(call[1]?.body)).join("\n")).toContain(
         "Workspace warmth was not confirmed; the 7000 ms cold-start cutoff applies.");
+    });
+  });
+
+  it.each((["linq", "telegram"] as const).flatMap(source =>
+    [false, true].map(signalAccepted => ({ source, signalAccepted })),
+  ))("stamps $source audience with its deferred receipt (signalAccepted=$signalAccepted), preserving it on later writes", async ({ source, signalAccepted }) => {
+    const writeReceipt = signalAccepted ? recordHostedIngressTemporalSignalAccepted : recordHostedIngressAcceptedFromMailboxItem;
+    await withTables(async (tx) => {
+      for (const conversationIsGroup of [false, true]) {
+        const mailboxItemId = `synthetic-${source}-${conversationIsGroup}`;
+        await tx.$executeRaw`INSERT INTO hosted_mailbox_item (id, user_id)
+          VALUES (${mailboxItemId}, 'synthetic-member')`;
+        await writeReceipt({
+          mailboxItemId, source, conversationIsGroup, webhookReceivedAt: received, prisma: tx,
+        });
+        // A later receipt with no audience fact cannot erase the immutable fact.
+        await recordHostedIngressAcceptedFromMailboxItem({
+          mailboxItemId, source, webhookReceivedAt: new Date(received.getTime() - 1), prisma: tx,
+        });
+        const trace = await tx.hostedIngressLatencyTrace.findUniqueOrThrow({ where: { mailboxItemId } });
+        expect(trace.phaseBreakdownJson).toEqual({ schemaVersion: 1, orchestration: { ingressConversationIsGroup: conversationIsGroup } });
+        expect(trace.webhookReceivedAt).toEqual(new Date(received.getTime() - 1));
+        expect(trace.assistantInputId).toBeNull();
+      }
+    });
+  });
+
+  it("excludes group inputs during provider work, after no-reply, and after a slow Telegram reply", async () => {
+    await withTables(async (tx) => {
+      for (const source of ["linq", "telegram"] as const) {
+        for (const outcome of ["running", "no-reply", "reply"] as const) {
+          await insertTrace(tx, `${source}-group-${outcome}`, { source, elapsed: null, extra: {
+            assistant: {
+              ...(outcome === "no-reply" ? { terminalNonReplyCommittedAtEpochMs: received.getTime() + 35_000 } : {}),
+              ...(outcome === "reply" ? { terminalReplyCommittedAtEpochMs: received.getTime() + 35_000 } : {}),
+            },
+          } });
+          if (outcome === "running") {
+            // Queued ingress has no engine admission or assistant input binding.
+            await tx.$executeRaw`UPDATE hosted_ingress_latency_trace
+              SET assistant_input_id = NULL WHERE id = ${`${source}-group-${outcome}`}`;
+          }
+          for (const conversationIsGroup of [true, false]) {
+            await expect(recordHostedIngressAcceptedFromMailboxItem({
+              mailboxItemId: `mailbox-${source}-group-${outcome}`,
+              webhookReceivedAt: received, conversationIsGroup, prisma: tx, source,
+            })).resolves.toMatchObject({ matchedCount: 1, recorded: true });
+          }
+          const [stored] = await tx.$queryRaw<Array<{ group: boolean; cold: boolean }>>`SELECT
+            phase_breakdown_json #> '{orchestration,ingressConversationIsGroup}' AS "group",
+            phase_breakdown_json #> '{boot,restoreWasCold}' AS cold
+            FROM hosted_ingress_latency_trace WHERE id = ${`${source}-group-${outcome}`}`;
+          expect(stored).toEqual({ group: true, cold: false });
+        }
+        await insertTrace(tx, `${source}-direct-missing`, { source, elapsed: null });
+        await insertTrace(tx, `${source}-direct-slow`, { source, elapsed: 2501 });
+        for (const suffix of ["missing", "slow"]) {
+          await recordHostedIngressAcceptedFromMailboxItem({
+            mailboxItemId: `mailbox-${source}-direct-${suffix}`,
+            webhookReceivedAt: received, conversationIsGroup: false, prisma: tx, source,
+          });
+        }
+        await insertTrace(tx, `${source}-unstamped`, { source, elapsed: null });
+        await insertTrace(tx, `${source}-malformed`, { source, elapsed: null, extra: {
+          orchestration: { ingressConversationIsGroup: "true" },
+        } });
+      }
+      await tx.$executeRaw`UPDATE hosted_ingress_latency_trace SET provider_start_at = ${received}`;
+      const result = await runHostedRuntimeTypingAlertMonitor({ now, prisma: tx, env: {} });
+      expect(result).toEqual({ queuedCount: 8, scanTruncated: false });
+      const alerts = await tx.hostedLinqAlert.findMany({ select: { id: true }, orderBy: { id: "asc" } });
+      expect(alerts.map(({ id }) => id)).toEqual([
+        "linq-direct-missing", "linq-direct-slow", "linq-malformed", "linq-unstamped",
+        "telegram-direct-missing", "telegram-direct-slow", "telegram-malformed", "telegram-unstamped",
+      ].map(id => `runtime-typing/${id}`));
     });
   });
 
@@ -542,10 +617,13 @@ async function withTables(run: (tx: Prisma.TransactionClient) => Promise<void>) 
       ) ON COMMIT DROP`;
       await tx.$executeRaw`CREATE TEMP TABLE hosted_ingress_latency_trace (
         id TEXT PRIMARY KEY, user_id TEXT NOT NULL, source TEXT NOT NULL, mailbox_item_id TEXT UNIQUE,
-        mailbox_lane TEXT, mailbox_lane_seq BIGINT, runtime_attempt_id TEXT, reply_runtime_attempt_id TEXT,
+        mailbox_lane TEXT DEFAULT 'conversation', mailbox_lane_seq BIGINT DEFAULT 1, runtime_attempt_id TEXT, reply_runtime_attempt_id TEXT,
         created_at TIMESTAMP(3), updated_at TIMESTAMP(3),
         assistant_input_id TEXT, linq_delivery_id TEXT, accepted_at TIMESTAMP(3), webhook_received_at TIMESTAMP(3),
         workspace_restore_done_at TIMESTAMP(3), ingress_typing_accepted_at TIMESTAMP(3),
+        temporal_signal_accepted_at TIMESTAMP(3), runner_job_accepted_at TIMESTAMP(3),
+        runtime_phase_started_at TIMESTAMP(3), mailbox_import_done_at TIMESTAMP(3),
+        provider_request_ordinal INTEGER,
         assistant_input_staged_at TIMESTAMP(3), provider_start_at TIMESTAMP(3), phase_breakdown_json JSONB
       ) ON COMMIT DROP`;
       await tx.$executeRaw`CREATE TEMP TABLE hosted_linq_provider_event (

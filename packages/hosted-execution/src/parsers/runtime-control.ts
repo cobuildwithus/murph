@@ -6602,6 +6602,7 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       orchestrationLabel,
     );
     breakdown.orchestration = {
+      ...requireOptionalBoolean(orchestration, "ingressConversationIsGroup", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(
         orchestration,
         "temporalActivityStartedAtEpochMs",

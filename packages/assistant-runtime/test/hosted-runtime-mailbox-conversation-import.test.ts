@@ -864,9 +864,9 @@ describe("hosted mailbox conversation import adapter", () => {
       }
       const shouldAdmit = ["pending-start", "failed-start", "enqueue-failed"].includes(scenario);
       expect(enqueuePendingReply).toHaveBeenCalledTimes(shouldAdmit ? 1 : 0);
-      const shouldStart = !["failed-stage", "self-authored", "consumed-replay"].includes(scenario);
+      const shouldStart = !text && !["failed-stage", "self-authored", "consumed-replay"].includes(scenario);
       expect(start).toHaveBeenCalledTimes(shouldStart ? 1 : 0);
-      if (["parser-retry", "unsettled", "abort", "enqueue-failed"].includes(scenario)) {
+      if (shouldStart && ["parser-retry", "unsettled", "abort", "enqueue-failed"].includes(scenario)) {
         await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
       }
     } finally {
@@ -875,11 +875,35 @@ describe("hosted mailbox conversation import adapter", () => {
       typingLifetime.abort();
       providerReady.resolve(handle);
       await importing.catch(() => undefined);
-      if (scenario === "pending-start") await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
+      if (!text && scenario === "pending-start") await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
     }
   });
 
-  test("admitted typing survives import cancellation until turn handoff", async () => {
+  test.each(["message", "reaction", "edit"] as const)("direct %s import waits for the turn to start typing", async (kind) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-text-typing-"));
+    tempRoots.push(vaultRoot);
+    const start = vi.spyOn(channelAdapters, "startLinqTypingIndicator");
+    const wake = createConversationWake({ message: {
+      channel: "linq", phoneLookupKey: "synthetic_lookup",
+      linqMessage: {
+        chatId: `synthetic_${kind}`, from: "synthetic_sender", isFromMe: false,
+        messageId: "synthetic_message", threadIsDirect: true,
+        ...(kind === "reaction" ? { affirmativeReaction: true } : {}),
+        ...(kind === "edit" ? { editedSourceInputId: "ain_11111111111111111111111111111111", editedTextPartIndex: 0 } : {}),
+        parts: [{ type: "text", value: "Synthetic input" }],
+      },
+    } });
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(wake), item: createResolvedConversationMailboxItem(),
+      runtime: createRuntime({ platform: { providerFetch: vi.fn<typeof fetch>() } }), vaultRoot,
+      async prepareWakeContext() {},
+      async importConversationWake() { return { captureId: "synthetic_capture", metrics: { nextWakeAt: null, parserProcessed: 0 } }; },
+    });
+    expect(outcome.status).toBe("imported");
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  test("admitted media typing survives import cancellation until turn handoff", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-typing-import-lifetime-"));
     tempRoots.push(vaultRoot);
     const importController = new AbortController();
@@ -897,7 +921,7 @@ describe("hosted mailbox conversation import adapter", () => {
       linqMessage: {
         chatId: "synthetic_import_handoff_chat", from: "synthetic_sender",
         isFromMe: false, messageId: "synthetic_import_handoff_message",
-        parts: [{ type: "text", value: "Help me plan tomorrow." }], threadIsDirect: true,
+        parts: [{ type: "media", attachmentId: "synthetic_image", url: "synthetic_attachment", mimeType: "image/png" }], threadIsDirect: true,
       },
     } });
     const importInput = {
@@ -906,7 +930,13 @@ describe("hosted mailbox conversation import adapter", () => {
       runtimeAttemptId: "synthetic_import_handoff_attempt",
       signal: importController.signal, typingSignal: runtimeController.signal,
       async prepareWakeContext() {},
-      stageAssistantInputEvent: createAssistantInputEventStager({ attachmentDescriptorCount: 0 }),
+      async stageAssistantInputEvent(input: Parameters<ReturnType<typeof createAssistantInputEventStager>>[0]) {
+        return { ...await createAssistantInputEventStager({ attachmentDescriptorCount: 1 })(input),
+          async recordAttachmentEvidence() { return true; },
+        };
+      },
+      async importConversationWake() { return { captureId: "synthetic_capture", metrics: { nextWakeAt: null, parserProcessed: 1 } }; },
+      async loadAttachmentEvidenceCapture() { return { captureId: "synthetic_capture", attachments: [] }; },
     };
     let turnTyping: AssistantChannelActivityHandle | undefined;
     try {

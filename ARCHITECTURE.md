@@ -2439,6 +2439,10 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   Web route receipt time and optional early ingress typing acceptance on the
   existing ingress trace, compares first accepted typing against the warm
   2.5-second or cold 7-second cutoff, and creates one immutable alert per trace.
+  Direct turns start typing once their audience is resolved; direct Linq media
+  may start during preparation. Groups type only while a finished message draft
+  is held for sending; no-reply and reaction-only drafts stay silent. Web stamps ingress group
+  directness with the deferred webhook receipt so the typing monitor excludes queued groups.
   Runtime typing/restore callbacks and the existing alert cron trigger bounded
   asynchronous evaluation. The detailed classification, missing-evidence,
   recovery, and retention rules live in `agent-docs/RELIABILITY.md`. The progress

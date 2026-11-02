@@ -172,18 +172,22 @@ test("ineligible, mismatched, aborted and unconfigured preparation never starts 
   expect(mocks.startLinqTypingIndicator).not.toHaveBeenCalled();
 });
 
-test("authenticated group preparation uses the existing auto-reply authority rule", async () => {
+test("group preparation stays silent and engine-requested turn typing is allowed", async () => {
   const fixture = createFixture("group");
   fixture.context.threadIsDirect = false;
   fixture.context.routeAuthority = {
     accountLookupKey: "synthetic_account", channel: "linq",
     containerMemberId: "synthetic_member", threadId: fixture.context.target!,
   };
-  const cancel = startHostedLinqInputTyping(fixture.input);
-  assert.ok(cancel);
-  cleanups.push(cancel);
+  assert.equal(startHostedLinqInputTyping(fixture.input), null);
   await drainMicrotasks();
-  assert.equal(fixture.events.filter(isAcceptance).length, 1);
+  expect(mocks.startLinqTypingIndicator).not.toHaveBeenCalled();
+  assert.equal(fixture.events.filter(isAcceptance).length, 0);
+  const handle = await fixture.typing().startLinqTyping?.({ target: fixture.context.target! });
+  assert.ok(handle);
+  expect(mocks.startLinqTypingIndicator).toHaveBeenCalledOnce();
+  await handle.stop();
+  expect(fixture.stop).toHaveBeenCalledOnce();
 });
 
 test("an active turn suppresses preparation and a full session retains the existing cooldown", async () => {

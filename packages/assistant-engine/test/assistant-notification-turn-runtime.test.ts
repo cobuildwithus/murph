@@ -455,6 +455,31 @@ test.each([
   expect(providerPrompt).not.toContain('2026-07-30T14:00:00.000Z')
 })
 
+test.each(['linq', 'telegram'] as const)('group %s notifications deliver with a null typing indicator', async (channel) => {
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience = {
+    ...sharedPlan.conversationPolicy.audience, channel, threadIsDirect: false,
+    threadId: 'synthetic-group', bindingDelivery: { kind: 'thread', target: 'synthetic-group' },
+  }
+  const { mocks, deliverMessage, sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+    realChannelTyping: true, sharedPlan, turnId: 'synthetic-group-notification',
+    providerResult: createProviderResult({ response: JSON.stringify({
+      kind: 'send_message', privateSummary: 'Synthetic summary.', text: 'Synthetic reminder.',
+    }) }),
+  })
+  const startTyping = vi.fn(async () => undefined)
+  await sendAssistantNotificationLocal({
+    instructions: 'Send the scheduled group reminder.', vault: '/vaults/test',
+    deliveryIdempotencyKey: 'synthetic-group-notification',
+    executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [],
+      channelTypingDependencies: { startLinqTyping: startTyping, startTelegramTyping: startTyping },
+    } },
+  })
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
+  expect(deliverMessage).toHaveBeenCalledOnce()
+  expect(startTyping).not.toHaveBeenCalled()
+})
+
 test('sendAssistantNotificationLocal persists the turn before outbound delivery and forwards the dedupe token', async () => {
   const persistedBeforeOutbound: string[] = []
   const traceEvents: unknown[] = []
@@ -6317,6 +6342,7 @@ function createSharedPlan(): AssistantTurnSharedPlan {
 }
 
 async function loadNotificationTurnHarness(input: {
+  realChannelTyping?: boolean
   onExecuteCodexTurnWithRecovery?: (
     providerInput: NotificationTurnProviderInput,
   ) => Promise<AssistantCodexTurnRecoveryOutcome>
@@ -6475,7 +6501,9 @@ async function loadNotificationTurnHarness(input: {
       createAssistantTurnId: () => input.turnId,
     }
   })
-  vi.doMock('../src/assistant/channel-typing.js', () => ({
+  vi.doMock('../src/assistant/channel-typing.js', async (importOriginal) => input.realChannelTyping
+    ? await importOriginal<typeof import('../src/assistant/channel-typing.ts')>()
+    : ({
     assistantDeliveryOutcomeSupersedesTypingIndicator: (kind: string | null) =>
       kind === 'sent' || kind === 'queued',
     startAssistantChannelTypingIndicator:

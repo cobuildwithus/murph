@@ -60,7 +60,7 @@ import {
 import { executeCodexAssistantTurnAttempt } from '../src/assistant/codex-runtime.ts'
 import { ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION } from '../src/assistant/group-reply-reconsideration.ts'
 
-test('sendAssistantMessageLocal live-steers same-conversation input without provider replay', async () => {
+test('sendAssistantMessageLocal live-steers same-conversation input without provider replay or group typing', async () => {
   const progressDeliveryDependencies = {
     sendLinq: vi.fn(async () => ({
       providerMessageId: 'linq-progress-message',
@@ -209,10 +209,8 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
     expect(liveSteeredPrompts).toEqual(['Late follow up'])
   })
   expect(providerBoundInputIds).toEqual([['manual-1']])
-  await vi.waitFor(() => expect(onTypingAccepted).toHaveBeenCalledWith({
-    acceptedInputIds: ['manual-1'], at: expect.any(String), channel: 'telegram',
-  }))
-  expect(startTelegramTyping).toHaveBeenCalledOnce()
+  expect(startTelegramTyping).not.toHaveBeenCalled()
+  expect(onTypingAccepted).not.toHaveBeenCalled()
   expect(releaseProviderAcceptedInputs).toHaveBeenCalledOnce()
   providerProgressRequested.resolve()
   await providerProgressDelivered.promise

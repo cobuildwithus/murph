@@ -42,7 +42,7 @@ import {
   tempRoots,
 } from './assistant-local-service-runtime.harness.ts'
 
-test('sendAssistantMessageLocal completes a successful turn, persists usage, and stops typing indicators', async () => {
+test('sendAssistantMessageLocal completes a successful group turn and persists usage without typing', async () => {
   const stopTyping = vi.fn(async () => undefined)
   const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule({
     adapter: {
@@ -91,9 +91,8 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
   assert.equal(mocks.finalizeDeliveredAssistantTurn.mock.calls.length, 1)
   assert.equal(mocks.recordAssistantDiagnosticEvent.mock.calls.length, 0)
   assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 1)
-  assert.equal(mocks.getAssistantChannelAdapter.mock.calls[0]?.[0], 'telegram')
-  assert.equal(stopTyping.mock.calls.length, 1)
-  assert.deepEqual(stopTyping.mock.calls[0], [{ providerStop: false }])
+  expect(mocks.getAssistantChannelAdapter).not.toHaveBeenCalled()
+  expect(stopTyping).not.toHaveBeenCalled()
   assert.deepEqual(mocks.maybeRunAssistantRuntimeMaintenance.mock.calls[0]?.[0], {
     signal: null,
     vault: '/vaults/test',

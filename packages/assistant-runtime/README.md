@@ -171,9 +171,10 @@ forwarded into a claimed parse attempt. If an earlier input needs retry, a compl
 sibling's local raw/derived result remains reusable on replay, but its assistant
 evidence, pending visibility, and notification stay withheld behind that input.
 This does not add a retry owner or strengthen the existing checkpoint/crash boundary.
-Eligible Linq text and attachment inputs start best-effort typing immediately
-following durable staging, before pending-reply notification, mailbox progress
-publication, or assistant preparation. The existing per-chat claim and refresh
+Only direct Linq inputs requiring attachment evidence start best-effort typing
+during preparation after durable staging. Other direct inputs wait for the AI
+turn. Group preparation stays silent; the engine may request typing only for
+a held reply draft. The existing per-chat claim and refresh
 loop pass to the admitted turn without another start request, even while initial
 provider acceptance is pending. Typing never blocks admission. Failed staging,
 self-authored input, consumed replay, disabled auto-replies, and unbound routes do

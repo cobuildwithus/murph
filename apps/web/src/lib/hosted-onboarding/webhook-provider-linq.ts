@@ -1020,6 +1020,7 @@ export async function planHostedLinqMessageEditedWebhook(input: {
           : "message-edit-event-conflict",
       },
       wakeHandoffs: [{
+        conversationIsGroup: correctionWake.message.linqMessage.threadIsDirect === false,
         eventId: event.event_id,
         linqChatId: event.data.chat.id,
         mailboxItemId: replayEntry.itemId,
@@ -1201,6 +1202,7 @@ export async function planHostedLinqMessageEditedWebhook(input: {
         : "wake-appended-message-edit",
     },
     wakeHandoffs: [{
+      conversationIsGroup: correctionWake.message.linqMessage.threadIsDirect === false,
       eventId: event.event_id,
       linqChatId: event.data.chat.id,
       mailboxItemId: mailboxAppend.item.id,
@@ -1858,6 +1860,7 @@ async function admitHostedLinqExistingDirectMemberTx(admission: {
         // the append-path workspace ensure, so the retry keeps the legacy
         // signal path that repairs a missing workspace row.
         wakeHandoffs: [{
+          conversationIsGroup: resolveHostedLinqThreadIsDirect(messageEvent) === false,
           eventId: input.event.event_id,
           linqChatId: summary.chatId,
           mailboxItemId: existingMailboxItem.id,
@@ -2655,6 +2658,7 @@ async function planHostedLinqActiveMemberDirectWebhook(input: {
         reason: "wake-appended-active-member",
       },
       wakeHandoffs: [{
+        conversationIsGroup: mailboxWake.message.linqMessage.threadIsDirect === false,
         eventId: plannerInput.event.event_id,
         linqChatId: summary.chatId,
         mailboxItemId: mailboxAppend.item.id,
@@ -3564,6 +3568,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
         // the append-path workspace upsert, so the retry keeps the legacy
         // signal path that repairs a missing workspace row.
         wakeHandoffs: [{
+          conversationIsGroup: true,
           eventId: input.event.event_id, linqChatId: summary.chatId, mailboxItemId: existingMailboxItem.id, source: "linq", userId: input.route.containerMemberId,
         }],
         linqReadReceiptRouteAuthority: routeAuthority,
@@ -3687,6 +3692,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
         reason: "wake-appended-thread-route",
       },
       wakeHandoffs: [{
+        conversationIsGroup: true,
         eventId: input.event.event_id, linqChatId: summary.chatId, mailboxItemId: mailboxAppend.item.id, source: "linq", userId: input.route.containerMemberId,
         wakeMailboxCheckpoint: { lane: mailboxAppend.item.lane, laneSeq: mailboxAppend.item.laneSeq },
       }],

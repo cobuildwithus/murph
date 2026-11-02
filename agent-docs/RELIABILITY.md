@@ -2463,7 +2463,21 @@ to apply after cutover.
   the requested checkpoint; only the finished event's `webCheckpointAccepted`
   establishes Web acceptance. Malformed timestamps and raw wake reasons are
   never copied into these fields.
-- Per-message typing alerts independently measure the member's wait through the
+- Direct message turns start Linq and Telegram typing once the canonical audience
+  is resolved, before receipt creation and prompt preparation. Groups start typing
+  only when a finished message draft enters the reply hold; no-reply and
+  reaction-only drafts stay silent. Reconsideration that drops the message stops
+  typing immediately; one that retains it keeps the session. Non-held group
+  notifications and scheduled turns stay silent. Only direct Linq
+  media requiring attachment evidence may start during import; its preparation
+  handle passes to the turn without another start. Text, reactions, and edits
+  wait for the turn. Per-chat claims, refresh, cooldown, and cleanup are unchanged.
+- Web records `orchestration.ingressConversationIsGroup` on the existing ingress
+  trace with the deferred webhook receipt, using the wake's resolved directness.
+  The typing monitor excludes boolean `true`, including queued groups and
+  no-reply outcomes. Missing or malformed facts retain existing alert behavior;
+  reply-latency and progress monitors are unchanged.
+- Per-message typing alerts independently measure the direct member's wait through the
   earliest accepted typing indicator: strictly over 2.5 seconds for a warm
   workspace and over 7 seconds for a cold workspace. Linq waits start at the
   exact provider event bound by the member's mailbox dedupe identity, never
@@ -2515,7 +2529,7 @@ to apply after cutover.
   Linq and Telegram acceptance milestones stay asynchronous. The engine's
   existing turn handle retains the original provider acceptance timestamp for
   the initial accepted-input journal and subsequent pre-provider or live-steered
-  admissions. Eligible, unconsumed Linq attachments may start that same session
+  admissions. Eligible, unconsumed direct Linq attachments may start that same session
   after durable input staging, while model admission still waits for settled
   evidence. The existing per-chat claim retains one preparation handle; the
   validated turn takes it only through the same provider-fetch authority,
@@ -2535,7 +2549,7 @@ to apply after cutover.
   a foreground telemetry wait. Telegram keeps turn-owned start. Failed
   starts and stopped, aborted, expired or failed provider handles supply no new
   evidence. Linq's existing provider cooldown is unchanged. Signup's
-  early Web typing hint is also retained, so neither produces a missing-typing
+  direct-only early Web typing hint is also retained, so neither produces a missing-typing
   false positive. Provider-accepted Web instant replies carry their existing
   delivery identity and original inbound mailbox ID as in-memory telemetry
   context into the post-response trace writer, including completed webhook
