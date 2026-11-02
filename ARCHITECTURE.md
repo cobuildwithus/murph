@@ -4993,6 +4993,19 @@ new assistant input locally, that real dirty state is checkpointed with a due
 `assistant` wake so the restored runtime cannot strand it. This is an ordinary
 dirty-state checkpoint, not a synthetic wake-handoff snapshot.
 
+Successful device-sync post-checkpoint acknowledgements and mailbox cleanup do
+not require a second idle snapshot. The published archive retains canonical
+imports and the recording journal; Web acknowledgements are idempotent and
+remain strictly after that durability barrier. On restore, the existing
+ready checkpoint-effect queue replays durable recording items after foreground
+admission and projection, before new device work. Cleanup and the next bounded
+pass share one idle save; completion wake hints remain qualified before they
+can cancel it. The runtime does not restart device work after that checkpoint. A completion-only fence replays monotonic cadence publication
+with the existing connection epoch/version checks. The existing metadata
+checkpoint publishes final wake/progress using the first archive reference.
+Failed recording, genuinely new mailbox input, and other non-replayable effects
+retain their follow-up saves.
+
 After a parsed successful runtime result settles, the container entrypoint
 clears the invocation's wake and abort pointers, decrements its active-job
 count, and cleans request transport before sending the Worker one best-effort
