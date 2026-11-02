@@ -111,10 +111,6 @@
       "types": "./dist/subscription.d.ts",
       "default": "./dist/subscription.js"
     },
-    "./dashboard-replica": {
-      "types": "./dist/dashboard-replica.d.ts",
-      "default": "./dist/dashboard-replica.js"
-    },
     "./bundles": {
       "types": "./dist/bundles.d.ts",
       "default": "./dist/bundles.js"
@@ -134,10 +130,6 @@
     "./hosted-codex-subscription-auth": {
       "types": "./dist/hosted-codex-subscription-auth.d.ts",
       "default": "./dist/hosted-codex-subscription-auth.js"
-    },
-    "./legacy-dashboard-replica": {
-      "types": "./dist/legacy-dashboard-replica.d.ts",
-      "default": "./dist/legacy-dashboard-replica.js"
     },
     "./orchestration-control": {
       "types": "./dist/orchestration-control.d.ts",

@@ -1132,7 +1132,7 @@ Package verifier worker-exit result preservation is tracked in
 | `packages/device-syncd/README.md` | Local wearable sync runtime boundary and env contract. | `packages/device-syncd/**` | Medium | 2026-04-02 |
 | `packages/clinical-records/README.md` | Pure Clinical Records Intake contracts for raw FHIR retrieval manifests, deterministic source references, import-plan decisions, and bounded document-extraction proposals. | `packages/clinical-records/**` | Medium | 2026-09-11 |
 | `packages/health-metrics/README.md` | Neutral metric contracts, wearable catalogs, sample summaries, reviewed lab ranges, normalization, display formatting, and selection policy. | `packages/health-metrics/**` | Medium | 2026-09-10 |
-| `packages/hosted-execution/README.md` | Shared hosted execution contracts, auth, env, and client seam. | `packages/hosted-execution/**` | Medium | 2026-03-28 |
+| `packages/hosted-execution/README.md` | Shared hosted execution contracts, auth, env, and client seam; browser-vault owns replica contracts without legacy dashboard wrappers. | `packages/hosted-execution/**` | Medium | 2026-03-28 |
 | `packages/messaging-ingress/README.md` | Shared stateless messaging ingress boundary. | `packages/messaging-ingress/**` | Medium | 2026-04-02 |
 | `packages/query/README.md` | Query projection ownership, strict source-health snapshot capture, provider-projected parity and no-publication fast paths. | `packages/query/**` | Medium | 2026-09-13 |
 | `packages/runtime-state/README.md` | `.runtime` taxonomy, portability, generated-delivery ref ownership, hosted state rules, and hosted Codex rollout snapshot scope without ChatGPT auth portability or retired assistant status projection. | `packages/runtime-state/**` | Medium | 2026-07-16 |
@@ -1707,3 +1707,5 @@ Local product retirement: the CLI owns hosted onboarding; verification inventori
 | `agent-docs/exec-plans/active/2026-11-02-remove-dead-local-residue.md` | Four-slice deletion of unsupported APIs, status projection, stale support material, and retired ChatGPT linking consumers. | Task execution plan | High | 2026-11-02 |
 | `packages/gateway-core/README.md` | Transport-neutral reply-route inference and shared route vocabulary. | Gateway API boundary | Medium | 2026-11-02 |
 | `packages/operator-config/README.md` | Operator configuration reads, hosted writes, provider normalization and channel contracts. | Operator configuration boundary | Medium | 2026-11-02 |
+| `agent-docs/prompts/seam-audits/17-inbox-services.md` | Current initialization, read, promotion and storage-repair audit scope. | Inbox services audit | Medium | 2026-11-02 |
+| `agent-docs/prompts/seam-audits/19-gateway-core.md` | Current reply-route inference and vocabulary audit scope. | Gateway audit | Medium | 2026-11-02 |

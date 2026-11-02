@@ -815,12 +815,10 @@ describe("hosted execution coverage gaps", () => {
       "./connected-apps",
       "./contracts",
       "./conversation-polls",
-      "./dashboard-replica",
       "./env",
       "./hosted-codex-subscription-auth",
       "./hosted-email",
       "./labs",
-      "./legacy-dashboard-replica",
       "./observability",
       "./orchestration-control",
       "./parsers",
@@ -868,12 +866,7 @@ describe("hosted execution coverage gaps", () => {
     const clinicalRecordsModule = (await import(
       "@murphai/hosted-execution/clinical-records"
     )) as Record<string, unknown>;
-    const legacyDashboardReplicaModule = await import(
-      "@murphai/hosted-execution/legacy-dashboard-replica"
-    );
-    const legacyDashboardReplicaCompatibilityModule = await import(
-      "@murphai/hosted-execution/dashboard-replica"
-    );
+
     const routeModule = (await import(
       "@murphai/hosted-execution/routes"
     )) as Record<string, unknown>;
@@ -945,27 +938,8 @@ describe("hosted execution coverage gaps", () => {
     expect(typeof browserVaultModule.shouldScheduleBrowserVaultRefresh).toBe(
       "function",
     );
-    expect(
-      typeof legacyDashboardReplicaModule.getDashboardReplicaFreshness,
-    ).toBe("function");
-    expect(
-      legacyDashboardReplicaModule.getDashboardReplicaFreshness({
-        replicaRef: null,
-        snapshotRef: null,
-      }),
-    ).toBe("stale");
-    expect(
-      legacyDashboardReplicaModule.shouldScheduleDashboardReplicaRefresh({
-        currentReplicaRef: null,
-        currentSnapshotRef: null,
-      }),
-    ).toBeNull();
-    expect(
-      legacyDashboardReplicaModule.readDashboardReplicaSourceStateHash(null),
-    ).toBeNull();
-    expect(
-      typeof legacyDashboardReplicaCompatibilityModule.getDashboardReplicaFreshness,
-    ).toBe("function");
+
+
     expect("getDashboardReplicaFreshness" in rootModule).toBe(false);
     expect("shouldScheduleDashboardReplicaRefresh" in rootModule).toBe(false);
     expect("HOSTED_MAILBOX_LANES" in rootModule).toBe(false);

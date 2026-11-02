@@ -62,3 +62,10 @@ Updated: 2026-11-02
 - Automation lock has no producer after the stacked removal; runtime-write lock remains the sole maintained lock. Generic process identity/kill helpers, polling wait and old auto-reply reconciliation have no production callers.
 - Full snapshots also used a broad assistant continuity copy; added the retired file to its existing exclusion list and proved omission on restore. Portability and warning assertions initially failed because they expected the deleted behavior, confirmed against the base assertions.
 - Slice 2 build and five touched-owner typechecks passed. Runtime-state (297 passed, 21 skipped), inboxd (194 passed, 3 skipped), operator-config, 13 focused engine files (519 tests after targeted correction), and two focused CLI files (34 tests) passed.
+
+## Slice 3 evidence
+
+- Removed the legacy dashboard replica wrapper and package/TypeScript aliases after finding no production importer. Removed unused inbox read-test daemon/connector mocks, preserving current read behavior.
+- Corrected only the live direct-conversation navigation sentence. Other non-hosted prompt branches are not certified dead and remain. Updated stale seam-audit scopes and feature ledger rows against the current routes and files.
+- `gpt-tokenizer` 3.4.0 with `o200k_base`: the sentence changes from 19 to 14 tokens and 95 to 64 UTF-8 bytes. Full hosted direct prompt changes from 19,723 to 19,718 tokens and 98,603 to 98,572 bytes; retained non-hosted direct changes from 20,687 to 20,682 tokens and 103,772 to 103,741 bytes. Group prompts are unchanged. Navigation is in the stable route-capability layer; static-core hashes are unchanged. Vitest regenerated hash snapshots.
+- Build, three owner typechecks, hosted-execution and inbox-services suites, and 57 prompt tests passed. The focused real-Codex event-list journey passed with subscription auth and the configured gpt-6.1-sol; its production prompt assertions prove navigation remains and the obsolete wording is absent.
