@@ -3,15 +3,21 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 
 import { gameRecapAppUrl } from "@/src/lib/game/app-links";
-import { createMurphPageMetadata, MURPH_NOINDEX_PAGE_ROBOTS } from "@/src/lib/site-metadata";
+import { createMurphOgImageRef, createMurphPageMetadata, MURPH_NOINDEX_PAGE_ROBOTS } from "@/src/lib/site-metadata";
 
 import { GameRecapView } from "./game-recap-view";
 
 export const metadata: Metadata = {
   ...createMurphPageMetadata({
-    title: "Your recap is in Murph",
-    description: "Open Murph to watch your recap.",
-    openGraph: { type: "website" },
+    title: "Watch your recap in Murph",
+    description: "Who won, who owes, and the best of it.",
+    openGraph: {
+      type: "website",
+      images: [createMurphOgImageRef({ url: "/recap-preview.png", alt: "Murph recap" })],
+    },
+    twitter: {
+      images: [createMurphOgImageRef({ url: "/recap-preview.png", alt: "Murph recap" })],
+    },
     robots: MURPH_NOINDEX_PAGE_ROBOTS,
   }),
   referrer: "no-referrer",
