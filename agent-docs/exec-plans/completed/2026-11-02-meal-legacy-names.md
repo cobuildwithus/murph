@@ -1,6 +1,6 @@
 # Rename legacy meal dish names through hosted vault writes
 
-Status: active
+Status: completed
 Created: 2026-11-02
 Updated: 2026-11-02
 
@@ -61,4 +61,9 @@ Preserve the shared naming policy. No force pushes or unrelated photo edits.
   five tool-free proposals, five valid natural dish names. Product UX: Ready.
 - Relevant typechecks and complexity guard passed. Candidate review found no
   unaddressed state-owner or privacy changes. Existing auth preflight succeeded.
-- External review, exact-head CI, merge, deploy and count-only execution pending.
+- Rebased onto the latest photo-retention work on main, preserving its independent
+  meal photo capture helper; post-rebase naming/canonical tests pass.
+- Implementation and parent review complete in PR #4457. External review,
+  exact-head CI and release execution remain tracked by the PR/completion owner;
+  production counts will be reported only after verified deployment and execution.
+Completed: 2026-11-02
