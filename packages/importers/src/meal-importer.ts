@@ -19,6 +19,7 @@ import {
 } from "./shared.ts";
 
 export interface MealImportInput {
+  name?: string;
   photoPath?: string;
   audioPath?: string;
   vaultRoot?: string;
@@ -50,6 +51,7 @@ const mealImportInputSchema = z
     audioPath: optionalTrimmedStringSchema("audioPath"),
     vaultRoot: optionalTrimmedStringSchema("vaultRoot"),
     occurredAt: optionalTimestampSchema("occurredAt"),
+    name: optionalTrimmedStringSchema("name"),
     note: optionalTrimmedStringSchema("note"),
     source: optionalEventSourceSchema("source"),
     ingredients: optionalStringListSchema("ingredients"),
@@ -97,6 +99,7 @@ export async function prepareMealImport(input: unknown): Promise<MealImportPaylo
     photoPath: photo?.sourcePath,
     audioPath: audio?.sourcePath,
     occurredAt: request.occurredAt,
+    name: request.name,
     note: request.note,
     source: request.source,
     ingredients: hasIngredients ? request.ingredients : undefined,

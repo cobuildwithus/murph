@@ -196,10 +196,16 @@ ingredients, or serving is uncertain. If the photo cannot support a meaningful
 numeric estimate, do not leave a model-reviewed capture blank. When its note is
 empty, save a concise `--note` describing only the visible meal or food form and
 material uncertainty; never replace a member-written note. Add `--ingredient`
-values only for identities the photo supports. If even a broad food observation
-is not defensible and the note is empty, record only that the retained image was
-reviewed and the meal could not be identified. Read the preserved or new
-observation back. Clarification is a last resort, not a confidence check: ask
+values only for identities the photo supports. An imported photo stub is not
+evidence of consumption. If inspection shows a
+non-food image or food/drink the member did not consume, do not add a meal,
+assign a dish name, or invent ingredients or nutrition. Do not use a generic
+image-review note as a meal description. For an already-imported stub with an
+empty note, record only the supported non-food or non-consumption fact, without
+a dish name, ingredients, or nutrition. Preserve member-written notes. This
+corrects an existing record; it never authorizes adding a meal. Read the factual
+observation back, then follow the existing photo cleanup below. Clarification is a last resort,
+not a confidence check: ask
 one narrow identity or portion question only when actual attachment inspection
 leaves identity or amount too indeterminate for any meaningful bounded estimate
 and the answer would materially help.
@@ -260,11 +266,12 @@ On a scheduled run:
    fails the run. On retry, combine photos that remain with same-occurrence
    removal revisions so a provider or partial-cleanup failure loses no meal.
 
-After all selected cleanup, stop before any presentation work when no selected
-capture has the occurrence local date. Return
+After all selected cleanup, exclude identified non-food or unconsumed-food
+records from presentation and questions. Stop before any presentation work when
+no remaining selected capture has the occurrence local date. Return
 `{"kind":"skip","privateSummary":"Historical meal cleanup completed."}` and
 run no Goal, totals, card, or clarification work. When current and historical
-captures were selected together, continue with current-date captures only.
+captures were selected together, continue with current-date food captures only.
 
 Before step 6, apply the estimation-eligibility rule above to those current-date
 captures. When estimation is skipped, complete photo cleanup and stop with the

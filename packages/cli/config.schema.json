@@ -4646,6 +4646,10 @@
                           "minLength": 1,
                           "maxLength": 128
                         },
+                        "name": {
+                          "type": "string",
+                          "description": "Use a sentence-case dish name, 2–5 words and at most 40 characters. No meal-type prefix, place/brand (unless part of the dish), uncertainty, or photo-review wording. Put portions, places, descriptions, and uncertainty in note."
+                        },
                         "withDailyTotals": {
                           "description": "After saving, return fresh totals and goal context for the saved meal local date. Replaces a separate meal totals --resolve-goals read; does not attach a card or approve numeric suitability. If the read fails the meal is still saved: retry only meal totals, never meal add.",
                           "type": "boolean"
@@ -4661,7 +4665,7 @@
                           "minLength": 1
                         },
                         "note": {
-                          "description": "Optional freeform meal description when no media is available.",
+                          "description": "Meal description and notes: portions, places, brands, and uncertainty. Keep the short dish name in name.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -4895,7 +4899,11 @@
                         },
                         "input": {
                           "type": "string",
-                          "description": "Structured meal payload in @file.json form or - for stdin. Structured payload object keys: `photo` or `photoPath` for an optional meal photo path; `audio` or `audioPath` for an optional audio note path; `note`, `occurredAt`, and `source` for the saved event fields; `ingredients` as a string array; `nutrition` as `{ totals?: { calories?, proteinGrams?, carbsGrams?, fatGrams?, fiberGrams?, waterGrams? }, micros?: { <supported bounded nutrient keys> }, provenance?: { source, confidence?, sourceDetail? } }`."
+                          "description": "Structured meal payload in @file.json form or - for stdin. Structured payload object keys: `photo` or `photoPath` for an optional meal photo path; `audio` or `audioPath` for an optional audio note path; `name` for the short dish name; `note` for description, portions, places, and uncertainty; `occurredAt` and `source` for the saved event fields; `ingredients` as a string array; `nutrition` as `{ totals?: { calories?, proteinGrams?, carbsGrams?, fatGrams?, fiberGrams?, waterGrams? }, micros?: { <supported bounded nutrient keys> }, provenance?: { source, confidence?, sourceDetail? } }`."
+                        },
+                        "name": {
+                          "type": "string",
+                          "description": "Use a sentence-case dish name, 2–5 words and at most 40 characters. No meal-type prefix, place/brand (unless part of the dish), uncertainty, or photo-review wording. Put portions, places, descriptions, and uncertainty in note."
                         },
                         "withDailyTotals": {
                           "description": "After saving, return fresh totals and goal context for the saved meal local date. Replaces a separate meal totals --resolve-goals read; does not attach a card or approve numeric suitability. If the read fails the meal is still saved: retry only meal totals, never meal add.",
@@ -4912,7 +4920,7 @@
                           "minLength": 1
                         },
                         "note": {
-                          "description": "Optional freeform meal description when no media is available.",
+                          "description": "Meal description and notes: portions, places, brands, and uncertainty. Keep the short dish name in name.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -5203,6 +5211,10 @@
                             "recompute"
                           ],
                           "description": "Required for event-backed edits when occurredAt or timeZone changes and dayKey is not patched directly. `keep` preserves the saved dayKey; `recompute` drops it so core recalculates from the explicit event timeZone."
+                        },
+                        "name": {
+                          "type": "string",
+                          "description": "Use a sentence-case dish name, 2–5 words and at most 40 characters. No meal-type prefix, place/brand (unless part of the dish), uncertainty, or photo-review wording. Put portions, places, descriptions, and uncertainty in note."
                         },
                         "ingredient": {
                           "description": "Replace saved ingredients. Repeat --ingredient for each item.",

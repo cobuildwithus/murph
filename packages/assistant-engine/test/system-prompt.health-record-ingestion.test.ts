@@ -8,6 +8,7 @@ import {
   resolveAssistantSkillsRoot,
 } from '../src/assistant-skill-assets.js'
 import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
+import { MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION } from '../src/assistant/managed-automations.js'
 
 function buildPrompt(): string {
   return buildAssistantSystemPrompt({
@@ -26,6 +27,29 @@ function buildPrompt(): string {
 }
 
 describe('assistant system prompt health record ingestion invariant', () => {
+  it('separates dish names from notes and excludes non-food photos across loaded guidance', async () => {
+    const prompt = buildPrompt()
+    expect(prompt).toContain('2–5 words, at most 40 characters, sentence case')
+    expect(prompt).toContain('Keep descriptions, portions, places, brands, and uncertainty in note')
+    expect(prompt).toContain('non-food images are not meals')
+    const food = await readFile(path.join(resolveAssistantSkillsRoot(), 'food-journal', 'SKILL.md'), 'utf8')
+    const automatic = await readFile(path.join(resolveAssistantSkillsRoot(), 'automatic-meal-capture', 'SKILL.md'), 'utf8')
+    expect(food).toContain('--name "<short dish name>"')
+    expect(food).toContain('meal edit --name')
+    expect(automatic).toMatch(/An imported photo stub is not\s+evidence of consumption/u)
+    expect(automatic).not.toContain('record only that the retained image was')
+    const closeout = automatic.replace(/\s+/gu, ' ')
+    expect(closeout).toContain('record only the supported non-food or non-consumption fact')
+    expect(closeout).toContain('without a dish name, ingredients, or nutrition')
+    expect(closeout).toContain('it never authorizes adding a meal')
+    expect(closeout).toContain('Read the factual observation back, then follow the existing photo cleanup below')
+    expect(closeout).toContain('exclude identified non-food or unconsumed-food records from presentation and questions')
+    expect(closeout).toContain('Any removal failure fails the run')
+    const managed = MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions
+    expect(managed).toContain('A removal failure or any selected photo remaining fails the run')
+    expect(closeout).not.toContain('defer')
+  })
+
   it('requires uploaded medical records to be structured or durably preserved instead of becoming memory-only notes', () => {
     const prompt = buildPrompt()
 

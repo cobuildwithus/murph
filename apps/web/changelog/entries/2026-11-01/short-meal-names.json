@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-11-01",
+  "order": 100,
+  "item": {
+    "id": "short-meal-names",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Shorter, clearer meal names",
+    "summary": "New meal logs use short dish names, making Meals easier to scan.",
+    "details": "Portions, places, and uncertainty stay in the notes. Older labels lose common prefixes and trailing notes when Meals next refreshes, while the original records and nutrition estimates stay intact.",
+    "relevanceTags": [
+      "nutrition",
+      "food-journal"
+    ],
+    "sourcePullRequests": [
+      4437
+    ]
+  }
+}

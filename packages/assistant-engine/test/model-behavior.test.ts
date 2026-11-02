@@ -1289,7 +1289,10 @@ describe('assistant system prompt cache stability', () => {
     // later, and the ready totals-only card exception adds 37 so a routine meal
     // save attaches it without tool discovery. The live meal intake speed
     // benchmark measures the removed rounds.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(78_952)
+    // Dish-name and consumed-food guidance adds 478 characters. Complete
+    // provider input grows 487 UTF-8 bytes for direct turns and zero for groups;
+    // focused live naming and non-food closeout journeys cover the behavior.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(79_430)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {

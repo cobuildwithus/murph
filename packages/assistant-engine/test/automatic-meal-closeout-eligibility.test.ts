@@ -2,6 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { addMeal, initializeVault, removeAutomaticMealPhoto } from '@murphai/core'
+import { listAutomaticMealPhotoCloseoutWorkRecords } from '@murphai/vault-usecases/records'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { canSkipManagedAutomaticMealCloseout } from '../src/assistant/automatic-meal-closeout-eligibility.js'
 import { MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID } from '../src/assistant/managed-automations.js'
@@ -53,6 +54,28 @@ describe('automatic meal closeout eligibility', () => {
     await removeAutomaticMealPhoto({ vaultRoot, eventId: meal.event.id, now: new Date(occurrenceAt) })
     expect(await check()).toBe(false)
     expect(await check({ occurrenceAt: '2030-05-10T01:00:00.000Z' })).toBe(true)
+  })
+
+  it('drains a full corrected non-food batch instead of selecting it forever', async () => {
+    const photoPath = path.join(root, 'nonfood.jpg')
+    await writeFile(photoPath, 'synthetic non-food image')
+    const stubs = []
+    for (let index = 0; index < 20; index += 1) {
+      stubs.push(await addMeal({ vaultRoot, source: 'device', photoPath,
+        occurredAt: '2030-05-02T16:00:00.000Z', note: 'Non-food image; no food or drink consumed.',
+        externalRef: { system: 'meal-photo-capture', resourceType: 'photo', resourceId: `nonfood-${index}` },
+      }))
+    }
+    const genuine = await capture()
+    const first = await listAutomaticMealPhotoCloseoutWorkRecords({ vault: vaultRoot, occurrenceAt, to: '2030-05-08', limit: 20 })
+    expect(first.items.map(item => item.id).sort()).toEqual(stubs.map(meal => meal.mealId).sort())
+    for (const meal of stubs) {
+      await removeAutomaticMealPhoto({ vaultRoot, eventId: meal.event.id, now: new Date(occurrenceAt) })
+    }
+    const next = await capture('2030-05-09T16:00:00.000Z')
+    const second = await listAutomaticMealPhotoCloseoutWorkRecords({ vault: vaultRoot,
+      occurrenceAt: '2030-05-10T01:00:00.000Z', to: '2030-05-09', limit: 20 })
+    expect(second.items.map(item => item.id).sort()).toEqual([genuine.mealId, next.mealId].sort())
   })
 
   it('uses the occurrence local date even when delayed past midnight', async () => {

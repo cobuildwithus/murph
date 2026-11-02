@@ -259,6 +259,7 @@ export const documentImportResultSchema = z.object({
 })
 
 export const mealAddResultSchema = z.object({
+  name: z.string().nullable(),
   vault: pathSchema,
   mealId: z.string().min(1),
   eventId: z.string().min(1),
