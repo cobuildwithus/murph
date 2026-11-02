@@ -87,7 +87,7 @@ const ACTION_BY_KIND = {
   "member.action.requested": "apply-member-action",
   "member.action.completed": "apply-member-action",
   "runtime.browser-vault-refresh-requested": "apply-runtime-control-request",
-  "runtime.codex-auth-requested": "apply-runtime-control-request",
+  "runtime.codex-auth-requested": "skip-retired-mailbox-item",
   "runtime.device-sync-recovery-requested": "apply-runtime-control-request",
   "runtime.mailbox-lag-observed": "apply-runtime-control-request",
   "runtime.maintenance-requested": "apply-runtime-control-request",

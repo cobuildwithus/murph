@@ -27,7 +27,6 @@ import {
   buildHostedExecutionAssistantAskCompletedWake,
   buildHostedExecutionAssistantAskRequestedWake,
   buildHostedExecutionAssistantNotificationRequestedWake,
-  buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDailyMetricReportedWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionGroupJournalFactRecordedWake,
@@ -3234,13 +3233,6 @@ function buildEverySystemWake(
     buildHostedExecutionPendingEffectsReconcileRequestedWake({
       effectId: `effect_priority_${runId}`,
       eventId: `runtime.pending-effects-reconcile-requested:priority:${runId}`,
-      occurredAt: requestedAt,
-      userId: identity.userId,
-    }),
-    buildHostedExecutionCodexAuthRequestedWake({
-      action: "disconnect",
-      attemptId: `hca_priority_${runId}`,
-      eventId: `runtime.codex-auth-requested:priority:${runId}`,
       occurredAt: requestedAt,
       userId: identity.userId,
     }),

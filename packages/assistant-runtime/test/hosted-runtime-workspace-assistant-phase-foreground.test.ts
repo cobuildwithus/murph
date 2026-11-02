@@ -2,7 +2,6 @@ import {
   createAssistantAskCompletionSystemMailboxItem,
   createAssistantUsageRecord,
   createBrowserVaultRefreshSystemMailboxItem,
-  createCodexAuthSystemMailboxItem,
   createDeliveryEffect,
   createDueAssistantWorkspace,
   createExternalCompletionSystemMailboxItem,
@@ -1795,7 +1794,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       "vault-file-send:effect_durable_approval_a",
       "vault-file-send:effect_durable_approval_b",
     ];
-    const codexRetryAt = "2026-04-27T00:01:00.000Z";
+    const memberActionRetryAt = "2026-04-27T00:01:00.000Z";
     const events: string[] = [];
 
     try {
@@ -1843,18 +1842,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           vaultRoot,
         })).toEqual(expect.objectContaining({ status: "imported" }));
       }
-      const codexRetryItem = {
-        ...createCodexAuthSystemMailboxItem(),
+      const memberActionRetryItem = {
+        ...createMemberActionSystemMailboxItem(),
         attemptCount: 1,
         lastAttemptAt: now,
-        lastErrorCode: "codex_auth_update_failed",
+        lastErrorCode: "member_action_outcome_failed",
         lastErrorMessage: "redacted",
         mailboxLaneSeq: "1",
-        nextAttemptAt: codexRetryAt,
+        nextAttemptAt: memberActionRetryAt,
         status: "recording" as const,
       };
       await updateHostedSystemMailboxState(vaultRoot, (state) => ({
-        pending: [codexRetryItem, ...state.pending],
+        pending: [memberActionRetryItem, ...state.pending],
       }));
 
       mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementation(
@@ -1938,8 +1937,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect(await readHostedSystemMailboxState(vaultRoot)).toEqual({
         pending: [
           expect.objectContaining({
-            itemId: codexRetryItem.itemId,
-            nextAttemptAt: codexRetryAt,
+            itemId: memberActionRetryItem.itemId,
+            nextAttemptAt: memberActionRetryAt,
             status: "recording",
           }),
           expect.objectContaining({
@@ -1983,8 +1982,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       await deviceResult.afterCheckpoint?.();
       expect((await readHostedSystemMailboxState(vaultRoot)).pending).toEqual([
         expect.objectContaining({
-          itemId: codexRetryItem.itemId,
-          nextAttemptAt: codexRetryAt,
+          itemId: memberActionRetryItem.itemId,
+          nextAttemptAt: memberActionRetryAt,
           status: "recording",
         }),
         expect.objectContaining({
@@ -2419,54 +2418,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     } finally {
       await scenario.cleanup();
     }
-  });
-
-  it("defers Codex auth terminal receipts until after the durable checkpoint", async () => {
-    const codexAuthItem = createCodexAuthSystemMailboxItem();
-    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
-      item: codexAuthItem,
-      itemId: "system_mailbox_item_codex_auth",
-      metrics: {
-        bootstrapResult: null,
-        conversationMetrics: null,
-        mailboxLane: "runtime-control",
-        redactedLogEntries: [],
-      },
-      status: "processed",
-    });
-
-    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      now: () => "2026-04-27T00:00:00.000Z",
-    }));
-    const postCheckpoint = await result.afterCheckpoint?.();
-
-    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
-    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).not.toHaveBeenCalled();
-    expect(postCheckpoint).toEqual(expect.objectContaining({
-      afterDurableCheckpoint: expect.any(Function),
-      checkpointReason: "system_mailbox_receipt",
-      redactedStatus: expect.objectContaining({
-        hostedSystemMailboxRecordDeferred: true,
-        hostedSystemMailboxRecorded: 0,
-      }),
-    }));
-
-    const effects = postCheckpoint?.afterDurableCheckpoint;
-    const effect = typeof effects === "function" ? effects : effects?.[0];
-    if (!effect) {
-      throw new Error("Expected deferred Codex auth durable checkpoint effect.");
-    }
-    await expect(effect()).resolves.toEqual({
-      nextWakeAt: "2026-04-27T00:00:00.000Z",
-      nextWakeReason: "assistant",
-      requiresFollowUpCheckpoint: true,
-    });
-    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
-      item: codexAuthItem,
-      operatorHomeRoot: "/tmp/murph-operator-home",
-      runtime: expect.any(Object),
-      vaultRoot: "/tmp/murph-vault",
-    });
   });
 
   it("defers vault-share projection work until after the durable checkpoint", async () => {
@@ -5007,7 +4958,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("processes a due default-owned mailbox item before due provider cleanup", async () => {
     const now = "2026-04-27T00:09:00.000Z";
-    const defaultOwnedItem = createCodexAuthSystemMailboxItem();
+    const defaultOwnedItem = createMemberActionSystemMailboxItem();
     mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(now);
     mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(
       async (input) =>

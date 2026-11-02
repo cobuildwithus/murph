@@ -1128,7 +1128,7 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/exec-plans/completed/2026-09-28-terminal-log-metadata.md` | Bounded hosted-local failure metadata and closed-enum diagnostic regression proof. | Historical harness evidence | Low | 2026-09-28 |
 | `apps/cloudflare/scripts/benchmark-workspace-restore.md` | Synthetic encrypted restore benchmark, measurement controls, and local/Linux limitations. | Cloudflare workspace restore | Medium | 2026-09-04 |
 | `apps/cloudflare/DEPLOY.md` | Current deployment procedure for hosted execution, consumer-first Web runtime admission, single-pool capacity, isolated artifact smoke, compatible native gradual rollout, and member shell-hint transport retirement. | Hosted deploy flow | Medium | 2026-09-10 |
-| `packages/assistant-runtime/README.md` | Headless hosted runtime, durable completion, Browser Vault wake qualification, and compiled-worker prerequisites for focused entrypoint tests. | `packages/assistant-runtime/**` | Medium | 2026-09-11 |
+| `packages/assistant-runtime/README.md` | Headless hosted runtime, retired member-linking mailbox handling, durable completion, Browser Vault wake qualification, and compiled-worker prerequisites for focused entrypoint tests. | `packages/assistant-runtime/**` | Medium | 2026-09-11 |
 | `packages/device-syncd/README.md` | Local wearable sync runtime boundary and env contract. | `packages/device-syncd/**` | Medium | 2026-04-02 |
 | `packages/clinical-records/README.md` | Pure Clinical Records Intake contracts for raw FHIR retrieval manifests, deterministic source references, import-plan decisions, and bounded document-extraction proposals. | `packages/clinical-records/**` | Medium | 2026-09-11 |
 | `packages/health-metrics/README.md` | Neutral metric contracts, wearable catalogs, sample summaries, reviewed lab ranges, normalization, display formatting, and selection policy. | `packages/health-metrics/**` | Medium | 2026-09-10 |
@@ -1704,8 +1704,12 @@ earlier device-ingestion rollback restriction.
 
 Local product retirement: the CLI owns hosted onboarding; verification inventories exclude the retired setup and assistant wrapper packages. Inbox owners retain hosted normalization, storage, and repair without polling daemons. Release verification package discovery skips leftover `packages/*` folders that have no manifest.
 
-| `agent-docs/exec-plans/active/2026-11-02-remove-dead-local-residue.md` | Four-slice deletion of unsupported APIs, status projection, stale support material, and retired ChatGPT linking consumers. | Task execution plan | High | 2026-11-02 |
+| `agent-docs/exec-plans/completed/2026-11-02-remove-dead-local-residue.md` | Four-slice deletion of unsupported APIs, status projection, stale support material, and retired ChatGPT linking consumers. | Task execution plan | High | 2026-11-02 |
 | `packages/gateway-core/README.md` | Transport-neutral reply-route inference and shared route vocabulary. | Gateway API boundary | Medium | 2026-11-02 |
 | `packages/operator-config/README.md` | Operator configuration reads, hosted writes, provider normalization and channel contracts. | Operator configuration boundary | Medium | 2026-11-02 |
 | `agent-docs/prompts/seam-audits/17-inbox-services.md` | Current initialization, read, promotion and storage-repair audit scope. | Inbox services audit | Medium | 2026-11-02 |
 | `agent-docs/prompts/seam-audits/19-gateway-core.md` | Current reply-route inference and vocabulary audit scope. | Gateway audit | Medium | 2026-11-02 |
+
+Member ChatGPT-linking callback retirement and mixed-version behavior are owned by
+[`references/hosted-runtime-protocol.md`](references/hosted-runtime-protocol.md).
+The retained database schema remains available to account export/deletion.

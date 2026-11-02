@@ -132,3 +132,6 @@ from tokens. Unknown response fields are rejected at the runtime boundary.
 
 Browser-vault replica contracts use the `browser-vault` entrypoint. Retired
 `dashboard-replica` and `legacy-dashboard-replica` aliases are no longer exported.
+
+Retired member ChatGPT-linking requests remain only in retired mailbox-kind
+metadata. They have no executable wake, callback, or callback validator.
