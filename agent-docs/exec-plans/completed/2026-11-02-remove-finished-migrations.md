@@ -1,6 +1,6 @@
 # Remove finished runtime migration and Stripe meter export
 
-Status: active
+Status: completed
 Created: 2026-11-02
 Updated: 2026-11-02
 
@@ -22,6 +22,8 @@ Only this task checkout and branch. No push, PR, production access, stash, other
 
 ## Tasks / commit slices
 
+All three slices complete; final documentation is closed through finish-task.
+
 1. Remove Stripe export metadata and normalization throughout producers/readers; preserve ledger and allowance tests.
 2. Remove runtime migration implementation, contracts, dispatch branches and obsolete initialization; preserve live owner/resource tests and deploy skew.
 3. Update durable docs and index; complete full verification and parent diff review; close through finish-task.
@@ -31,7 +33,7 @@ Only this task checkout and branch. No push, PR, production access, stash, other
 - Initial `pnpm install`: pass, lockfile unchanged.
 - Initial `pnpm build`: pass.
 - Baseline scripts full suite: 880 passed, 27 failed, zero skipped. Final failure headings and privacy-hook causes match exactly.
-- Required final lanes: build; boundaries; cycles; dependencies; no-js; CLI; touched-package and Web/Cloudflare typechecks; full Web; hermetic Stripe lane; full Cloudflare Node and runner bundle; touched-package coverage; scripts; docs drift; complexity; provider guard.
+- All required final lanes completed below. The scripts suite retains only its 27 independently reproduced baseline failures; opt-in/live skips and the unavailable protected Stripe lane are explicit.
 
 ## Deploy skew proof
 
@@ -283,3 +285,257 @@ retained. They verify replayable schema history, not executable exporter logic.
 - Complexity guard passed across 50 source files. Twelve existing hotspots remain; no debt increased. The account-cleanup and usage-service hotspots each fell by two. Their retained provider/retry logic is outside this deletion; splitting it would add unrelated change.
 - Schema and historical SQL are unchanged except comments. Lockfile remains unchanged after frozen installation. Privacy inspection found no new identifiers or home paths.
 - No changelog: internal retirement with unchanged member-visible runtime and accounting behavior. No remote CI, ReviewGPT, PR or deployment was invoked because this task explicitly forbids pushing/opening PRs and touching production.
+
+## Final local verification results
+
+Counts below are tests, not assertions; zero failures/skips are explicit for
+completed test lanes. A dash means the command is a guard/build/typecheck with
+no test-count summary. All required code checks ran on the final code; later
+edits only rename a test description, remove empty lines and update documentation.
+
+| Command | Result | Passed | Failed | Skipped |
+| --- | --- | ---: | ---: | ---: |
+| `pnpm install` (before editing) | PASS; no lock change | — | — | — |
+| `pnpm build` (before editing) | PASS | — | — | — |
+| `pnpm --dir apps/web prisma:generate` | PASS; real generator, repeated inside Web typecheck | — | — | — |
+| `pnpm install --frozen-lockfile` | PASS | — | — | — |
+| `pnpm build` | PASS | — | — | — |
+| `pnpm verify:workspace-boundaries` | PASS | — | — | — |
+| `pnpm verify:workspace-package-cycles` | PASS | — | — | — |
+| `pnpm deps:guard` | PASS | — | — | — |
+| `pnpm no-js` | PASS | — | — | — |
+| `pnpm verify:cli` | PASS | 348 | 0 | 0 |
+| `pnpm --dir apps/web typecheck` | PASS | — | — | — |
+| `pnpm --dir apps/cloudflare typecheck` | PASS | — | — | — |
+| `pnpm --filter @murphai/assistant-engine --filter @murphai/assistant-runtime --filter @murphai/hosted-execution --filter @murphai/hosted-local-harness typecheck` | PASS | — | — | — |
+| `env MURPH_VITEST_MAX_WORKERS=2 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage` | PASS | 13723 | 0 | 1473 |
+| `pnpm hosted-billing:ci-guard` | PASS | — | — | — |
+| `pnpm --dir packages/hosted-local-harness exec vitest run --config vitest.config.ts --no-coverage test/stripe-billing-live-config.test.ts test/dev-hosted-local/stack.test.ts` | PASS | 102 | 0 | 0 |
+| `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-billing-checkout-route.test.ts apps/web/test/hosted-billing-live-support.test.ts apps/web/test/hosted-billing-projection-waiter.test.ts` | PASS | 119 | 0 | 0 |
+| `pnpm exec vitest run --config scripts/vitest.config.ts --no-coverage scripts/check-hosted-stripe-billing-ci.test.ts` | PASS | 39 | 0 | 0 |
+| `scripts/install-playwright-chromium.sh` | UNAVAILABLE: Ubuntu sudo/apt installer | — | — | — |
+| `pnpm --dir apps/web exec playwright install chromium` | PASS | — | — | — |
+| `env MURPH_E2E_BILLING_BROWSER_SMOKE=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-billing-browser-hydration.test.ts` | PASS | 3 | 0 | 0 |
+| `pnpm --dir apps/cloudflare test:node` | PASS | 4663 | 0 | 5 |
+| `pnpm --dir apps/cloudflare runner:bundle` | PASS | — | — | — |
+| `pnpm --dir packages/hosted-execution test:coverage` | PASS | 890 | 0 | 3 |
+| `pnpm --dir packages/hosted-local-harness test:coverage` | PASS | 512 | 0 | 1 |
+| `env MURPH_VITEST_FILE_PARALLELISM=1 MURPH_VITEST_MAX_WORKERS=2 pnpm --dir packages/assistant-engine test:coverage` | PASS | 5965 | 0 | 713 |
+| `env MURPH_VITEST_MAX_WORKERS=2 pnpm --dir packages/assistant-runtime test:coverage` | PASS | 3906 | 0 | 7 |
+| `pnpm exec vitest run --config scripts/vitest.config.ts --no-coverage` | BASELINE FAILURE (identical) | 880 | 27 | 0 |
+| `pnpm docs:drift` | PASS | — | — | — |
+| `pnpm complexity:diff` | PASS | — | — | — |
+| `pnpm provider-requests:guard` | PASS | — | — | — |
+| `pnpm --dir apps/web lint` | PASS | — | — | — |
+| `pnpm --dir packages/hosted-local-harness verify:package-boundary` | PASS | 1 | 0 | 0 |
+| `pnpm test:scenario-integrity` | PASS | — | — | — |
+| `env DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/murph_test_remove_migrations pnpm --dir apps/web exec prisma migrate deploy` | PASS | — | — | — |
+| `env DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/murph_test_remove_migrations MURPH_TEST_POSTGRES_CONCURRENCY=1 MURPH_VITEST_FILE_PARALLELISM=0 MURPH_VITEST_MAX_WORKERS=2 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-runtime-owner-postgres.test.ts apps/web/test/hosted-runtime-member-cutover-postgres.test.ts apps/web/test/hosted-runtime-cleanup-enrollment-postgres.test.ts apps/web/test/hosted-local-runtime-initialization-postgres.test.ts apps/web/test/hosted-execution-usage-postgres-concurrency.test.ts` | PASS | 93 | 0 | 0 |
+| `node .tmp/remove-finished-migrations/skew-proof.mjs` | PASS | — | — | — |
+
+Web full workspace: 849 passing files, 128 skipped files; 13,723 passed and
+1,473 skipped tests. PostgreSQL-concurrency suites are gated by the unset
+`MURPH_TEST_POSTGRES_CONCURRENCY`; other opt-in E2E/live gates also contribute
+to those skips. A separate isolated loopback database replayed the actual
+historical Prisma migrations, then ran the five affected owner, retained-resource,
+account-cleanup, local-fault-control and usage-concurrency suites with the gate
+set and file parallelism off: 93 passed, zero skipped. The task-created database
+was dropped normally after clients disconnected; no shared database was changed.
+
+Cloudflare full Node: 215 passing files, one skipped file, 4,643 passed/five
+skipped tests; the command's separate container-helper phase adds 20 passed,
+zero skipped. CLI: 20 files/348 tests passed. Scenario integrity: 194 scenarios,
+12 sample inputs and 28 golden-output directories passed. The extra base/new
+wire proof passed 11 assertions, as described above.
+
+The scheduled live Stripe browser matrix requires its protected
+`hosted-stripe-billing-sandbox` environment and credentials. It was not run or
+fetched locally. Every hermetic step in that workflow passed, with one platform
+substitution: the Ubuntu-only installer failed at `sudo`/apt setup on macOS;
+`pnpm --dir apps/web exec playwright install chromium` succeeded and the exact
+billing browser hydration command passed all three cases. This is no claim of
+live Stripe/production verification.
+
+| Coverage package | Statements | Branches | Functions | Lines |
+| --- | ---: | ---: | ---: | ---: |
+| hosted-execution | 84.12% | 78.57% | 86.61% | 84.74% |
+| hosted-local-harness | 86.00% | 78.24% | 86.13% | 85.94% |
+| assistant-engine | 91.38% | 85.84% | 95.25% | 91.57% |
+| assistant-runtime | 91.19% | 86.65% | 94.43% | 91.67% |
+
+All configured thresholds passed unchanged: 80% statements/functions/lines,
+70% branches (`config/vitest-coverage.ts`). No guard or threshold was weakened.
+
+Runner bundle: entry 77,854 bytes (76,589 baseline + 12,000 tolerance), static
+boot closure 2,017,938 bytes (2,047,343 baseline + 96,000 tolerance), 22 chunks
+of 24 maximum, total 12,407,399 bytes. Vault CLI startup closure 19,814 bytes
+of 33,200 maximum, entry 805 bytes of 20,000 maximum. Real bundle generators,
+startup laziness checks and parity checks passed; no generated artifact was
+hand-edited. Remote exact-base CI's relative total-size check is not claimed.
+
+### Failed attempts and disposition
+
+- Scripts baseline and final both have exactly 27 failures (20 dependency-context,
+  seven native-context), 880 passes and no skips. Compared all 27 full test
+  headings and exception/privacy lines: identical. Fixture `git commit` is
+  rejected by the existing noreply privacy hook. Existing Frog entry
+  `20261101192002-worktree-fixture-setup` owns this; no hook bypass or fix.
+- Early billing-focused proof: one stale skipped-export write expectation failed;
+  removed only the retired normalization assertion. Full Web and billing lanes
+  subsequently passed.
+- Early Cloudflare typecheck: a test fixture still supplied removed cutover phases.
+  Retained its unavailable-control retry proof and removed only migration rows.
+- Early full Cloudflare Node: 16 failures/4,627 passes/five skips from the callback
+  mock expecting the deleted gate query and assuming the member was raw parameter
+  zero. The new composed SQL inserts a column expression first. Adapted the mock
+  to the real join/phase filter; all 27 focused old-runtime callback cases and
+  all 4,643 full Node cases then passed.
+- First harness coverage: one failure/511 passes/one skip from an obsolete
+  initialization matcher left empty after removal. Removed that one obsolete
+  assertion; rerun passed 512 tests with one skip.
+- First PostgreSQL run: five failures/88 passes from expected retired projection
+  fields and old query counts. Kept full stored-row invariance, compared the live
+  projection without migration metadata, and tightened admission/replica counts
+  for the removed campaign reads. Final 93/93 passed.
+- Web typecheck caught a test destructuring retired properties from the narrowed
+  live type. Read the full stored row for that assertion instead; final typecheck
+  and PostgreSQL run passed. No type cast was added.
+- The temporary skew-check script initially resolved esbuild from the root rather
+  than its declared Cloudflare package. Corrected that script's resolution only;
+  eleven bidirectional assertions passed. No project dependency was added.
+
+## Remaining objects and limits
+
+Terminal wire fields remain for deployed parsers. Retained schema objects,
+member-trigger reads and owner creation's constant remain until the documented
+contract migration. Historical Prisma and Wrangler migrations remain immutable.
+Live snapshot-format, native receipt/provider-context and unrelated device/vault
+compatibility remain because their subjects are still supported; this task only
+retires the completed runtime-ownership campaign and Stripe meter export.
+There was no remaining Stripe exporter cron/job to remove at the base.
+
+The proof supports the owner-supplied terminal production state and the fixed
+base fleet. It does not permit deploying to an unfinished migration environment
+or rolling back to one. External CI/ReviewGPT and live production rollout are
+unperformed under the task's explicit local-only boundary. Existing scripts
+failures and gated live suites remain reported evidence gaps, not passing checks.
+
+## Commit slices and file ledger
+
+The final documentation slice closes this plan with `scripts/finish-task`.
+Every commit carries the requested coauthor trailer. The code slices below use
+`git show --numstat`; additions/deletions include plan text in the first slice.
+
+### `c2f63722f5ef` — Remove retired Stripe usage meter metadata
+
+30 files; +293 / -286 lines.
+
+| File | Added | Deleted |
+| --- | ---: | ---: |
+| `agent-docs/exec-plans/active/2026-11-02-remove-finished-migrations.md` | 285 | 0 |
+| `apps/cloudflare/test/runner-egress-intercept.test.ts` | 0 | 1 |
+| `apps/cloudflare/test/runner-outbound.test.ts` | 1 | 1 |
+| `apps/cloudflare/test/runner-platform.test.ts` | 0 | 1 |
+| `apps/cloudflare/test/usage-record-port.test.ts` | 1 | 1 |
+| `apps/web/src/lib/hosted-execution/usage-lob.ts` | 0 | 1 |
+| `apps/web/src/lib/hosted-execution/usage-retell.ts` | 0 | 1 |
+| `apps/web/src/lib/hosted-execution/usage.ts` | 0 | 36 |
+| `apps/web/src/lib/hosted-onboarding/linq-instant-first-turn.ts` | 0 | 1 |
+| `apps/web/test/game-chat-allowance-postgres.test.ts` | 1 | 1 |
+| `apps/web/test/hosted-execution-usage-allowance.test.ts` | 0 | 3 |
+| `apps/web/test/hosted-execution-usage-postgres-concurrency.test.ts` | 0 | 77 |
+| `apps/web/test/hosted-execution-usage-route.test.ts` | 0 | 3 |
+| `apps/web/test/hosted-execution-usage.test.ts` | 2 | 70 |
+| `apps/web/test/hosted-ops-usage-reset-postgres.test.ts` | 0 | 1 |
+| `apps/web/test/hosted-usage-plan-reset-postgres.test.ts` | 0 | 1 |
+| `packages/assistant-engine/src/assistant/codex-turn-runner.ts` | 0 | 1 |
+| `packages/assistant-engine/src/assistant/service-usage.ts` | 0 | 1 |
+| `packages/assistant-engine/src/assistant/usage-attribution.ts` | 0 | 5 |
+| `packages/assistant-engine/test/assistant-service-runtime.test.ts` | 0 | 3 |
+| `packages/assistant-engine/test/assistant-usage-attribution-and-scheduled-log.test.ts` | 2 | 5 |
+| `packages/assistant-runtime/src/hosted-runtime/clinical-enrichment.ts` | 0 | 1 |
+| `packages/assistant-runtime/src/hosted-runtime/detached-assistant-ask.ts` | 0 | 1 |
+| `packages/assistant-runtime/src/hosted-runtime/meal-name-repair.ts` | 1 | 1 |
+| `packages/assistant-runtime/test/hosted-runtime-workspace-assistant-phase.harness.ts` | 0 | 5 |
+| `packages/assistant-runtime/test/hosted-runtime-workspace-entrypoint.harness.ts` | 0 | 3 |
+| `packages/assistant-runtime/test/hosted-runtime-workspace-runner.test.ts` | 0 | 1 |
+| `packages/hosted-execution/src/assistant-usage.ts` | 0 | 21 |
+| `packages/hosted-execution/test/assistant-usage.test.ts` | 0 | 37 |
+| `packages/hosted-execution/test/hosted-runtime-control.test.ts` | 0 | 2 |
+
+### `6ba0ef91df` — Remove finished runtime migration paths
+
+67 files; +155 / -2871 lines.
+
+| File | Added | Deleted |
+| --- | ---: | ---: |
+| `apps/cloudflare/src/runner-container.ts` | 2 | 2 |
+| `apps/cloudflare/src/runner-outbound/runtime-completion.ts` | 2 | 2 |
+| `apps/cloudflare/src/runner-outbound/write-fence.ts` | 1 | 1 |
+| `apps/cloudflare/src/runtime-processing.ts` | 1 | 2 |
+| `apps/cloudflare/src/runtime-resource-client.ts` | 0 | 1 |
+| `apps/cloudflare/src/runtime-user-control.ts` | 4 | 6 |
+| `apps/cloudflare/src/worker/route-handlers/test-runner.ts` | 2 | 3 |
+| `apps/cloudflare/test/container-runtime-completion.test.ts` | 0 | 2 |
+| `apps/cloudflare/test/hosted-local-postgres-runtime-e2e.test.ts` | 1 | 2 |
+| `apps/cloudflare/test/index-backpressure.test.ts` | 1 | 1 |
+| `apps/cloudflare/test/index.test.ts` | 1 | 1 |
+| `apps/cloudflare/test/legacy-codex-auth-callback.test.ts` | 5 | 6 |
+| `apps/cloudflare/test/runner-fleet-lifecycle.test.ts` | 2 | 4 |
+| `apps/cloudflare/test/runtime-processing-postgres.test.ts` | 1 | 15 |
+| `apps/web/app/api/internal/hosted-runtime/migration/route.ts` | 0 | 27 |
+| `apps/web/app/api/voice/route.ts` | 2 | 2 |
+| `apps/web/prisma/schema.prisma` | 5 | 5 |
+| `apps/web/scripts/initialize-local-runtime-cutover.sql` | 0 | 11 |
+| `apps/web/src/lib/hosted-execution/runtime-cutover.ts` | 0 | 65 |
+| `apps/web/src/lib/hosted-execution/runtime-materialization.ts` | 0 | 53 |
+| `apps/web/src/lib/hosted-execution/runtime-media.ts` | 0 | 4 |
+| `apps/web/src/lib/hosted-execution/runtime-member-creation.ts` | 0 | 21 |
+| `apps/web/src/lib/hosted-execution/runtime-member-migration.ts` | 0 | 123 |
+| `apps/web/src/lib/hosted-execution/runtime-migration-cleanup.ts` | 0 | 48 |
+| `apps/web/src/lib/hosted-execution/runtime-migration-compatibility.ts` | 0 | 11 |
+| `apps/web/src/lib/hosted-execution/runtime-migration-enrollment.ts` | 0 | 84 |
+| `apps/web/src/lib/hosted-execution/runtime-migration-inventory.ts` | 0 | 137 |
+| `apps/web/src/lib/hosted-execution/runtime-migration-resources.ts` | 0 | 99 |
+| `apps/web/src/lib/hosted-execution/runtime-migration-unmaterialized.ts` | 0 | 73 |
+| `apps/web/src/lib/hosted-execution/runtime-migration.ts` | 0 | 239 |
+| `apps/web/src/lib/hosted-execution/runtime-orphans.ts` | 0 | 2 |
+| `apps/web/src/lib/hosted-execution/runtime-owner-control.ts` | 4 | 9 |
+| `apps/web/src/lib/hosted-execution/runtime-owner-snapshot.ts` | 1 | 1 |
+| `apps/web/src/lib/hosted-execution/runtime-owner.ts` | 44 | 67 |
+| `apps/web/src/lib/hosted-execution/runtime-replica-puts.ts` | 0 | 2 |
+| `apps/web/src/lib/hosted-execution/runtime-resource-cleanup.ts` | 0 | 5 |
+| `apps/web/src/lib/hosted-execution/runtime-snapshots.ts` | 1 | 3 |
+| `apps/web/src/lib/hosted-execution/runtime-upload-recovery.ts` | 0 | 3 |
+| `apps/web/src/lib/hosted-execution/usage.ts` | 0 | 1 |
+| `apps/web/src/lib/hosted-onboarding/hosted-member-store.ts` | 0 | 2 |
+| `apps/web/src/lib/hosted-privacy/account-deletion-cleanup.ts` | 2 | 56 |
+| `apps/web/src/lib/hosted-runtime-log/runaway-alert-monitor.ts` | 1 | 1 |
+| `apps/web/src/lib/hosted-workspace/checkpoint-recovery.ts` | 0 | 2 |
+| `apps/web/test/hosted-direct-runtime-wake.test.ts` | 3 | 5 |
+| `apps/web/test/hosted-local-runtime-initialization-postgres.test.ts` | 0 | 11 |
+| `apps/web/test/hosted-runtime-cleanup-enrollment-postgres.test.ts` | 9 | 136 |
+| `apps/web/test/hosted-runtime-materialization-postgres.test.ts` | 0 | 355 |
+| `apps/web/test/hosted-runtime-member-cutover-postgres.test.ts` | 26 | 225 |
+| `apps/web/test/hosted-runtime-member-migration-postgres.test.ts` | 0 | 288 |
+| `apps/web/test/hosted-runtime-migration-postgres.test.ts` | 0 | 81 |
+| `apps/web/test/hosted-runtime-owner-postgres.test.ts` | 18 | 86 |
+| `apps/web/test/hosted-runtime-owner-route.test.ts` | 4 | 22 |
+| `apps/web/test/hosted-runtime-resource-cleanup-diagnostics.test.ts` | 1 | 7 |
+| `apps/web/test/hosted-runtime-retirement-cardinality-postgres.test.ts` | 0 | 81 |
+| `apps/web/test/support/hosted-runtime-migration-testkit.ts` | 0 | 65 |
+| `apps/web/test/support/hosted-runtime-owner-testkit.ts` | 1 | 19 |
+| `apps/web/test/support/hosted-web-testkit.ts` | 1 | 2 |
+| `apps/web/tsconfig.json` | 0 | 3 |
+| `packages/hosted-execution/package.json` | 0 | 4 |
+| `packages/hosted-execution/src/parsers/orchestration-control.ts` | 1 | 1 |
+| `packages/hosted-execution/src/runtime-media.ts` | 2 | 2 |
+| `packages/hosted-execution/src/runtime-migration.ts` | 0 | 221 |
+| `packages/hosted-execution/src/runtime-owner.ts` | 3 | 36 |
+| `packages/hosted-execution/src/runtime-resources.ts` | 2 | 2 |
+| `packages/hosted-execution/test/hosted-execution.test.ts` | 0 | 1 |
+| `packages/hosted-local-harness/src/dev-hosted-local/stack.ts` | 1 | 9 |
+| `packages/hosted-local-harness/test/dev-hosted-local/stack.test.ts` | 0 | 5 |
+
+Final parent review: complete. All 53 deleted test templates have removed subjects; six renamed/migrated templates and all narrowed parameter tables retain their live assertions as enumerated above. The later callback-query title rename is also retained. No unexplained deleted test title remains in the base-to-candidate audit.
+Completed: 2026-11-02
