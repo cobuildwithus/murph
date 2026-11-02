@@ -397,9 +397,11 @@ the Portal boundary, Edge to Pulse at renewal, Family Checkout plus invite
 activation, and paid individual-to-Family conversion in place. Synchronize on
 bounded Stripe object/event state and Murph's PostgreSQL projection; do not
 replace those assertions with a fixed sleep. Diagnostics may state only opaque
-run correlation, object type/status, and browser step/surface/status. Do not
-capture or upload screenshots, traces, raw webhook payloads, URLs, identities,
-or full Playwright reports. Cleanup must verify exact run ownership, remain
+run correlation, object type/status, and browser step/surface/status. Local
+billing projection timeouts additionally include allowlisted enums, presence
+flags, and bounded counts from the last value already read; unrecognized values
+appear as `unknown`. Do not capture or upload screenshots, traces, raw webhook
+payloads, URLs, identities, or full Playwright reports. Cleanup must verify exact run ownership, remain
 idempotent, avoid shared catalog objects, and run even after a scenario
 failure. Use the standalone cleanup command with the same run id after an
 interrupted process.

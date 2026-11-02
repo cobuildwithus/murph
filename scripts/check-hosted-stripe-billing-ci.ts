@@ -77,6 +77,11 @@ export function inspectHostedStripeBillingWorkflow(
     "Hermetic proof must retain browser and provider-boundary support tests.",
   );
   requireText(
+    "missing-projection-diagnostic-proof",
+    "apps/web/test/hosted-billing-projection-waiter.test.ts",
+    "Hermetic proof must retain bounded projection timeout diagnostics.",
+  );
+  requireText(
     "missing-hydration-proof",
     "apps/web/test/hosted-billing-browser-hydration.test.ts",
     "Hermetic proof must exercise real React control hydration in Chromium.",
