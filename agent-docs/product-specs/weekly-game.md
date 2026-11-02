@@ -254,8 +254,10 @@ this default without deleting other people's private contact choices.
   refuses another regeneration; diagnose it through its existing lifecycle owner
   rather than changing the request id to force another send. Request events keep
   retries idempotent even after delivery receipt retention.
-  Deploy and converge the compatible Cloudflare runtime event reader before Web
-  can emit regeneration requests. No database migration or client change is needed.
+  Web may deploy on merge before the compatible Cloudflare runtime event reader:
+  only an explicit operator execute emits the new identity. Keep operator execution
+  paused until Web and the Cloudflare runtime have converged on the release.
+  Ordinary recap identities remain compatible. No migration or client change is needed.
   Before rollback, stop operator requests and drain all admitted regeneration work;
   keep compatible Web and runtime readers while any remains. Accepted replacements
   are canonical: old ciphertext is not retained, and sent messages cannot be undone.
