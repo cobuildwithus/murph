@@ -1,3 +1,7 @@
+Game history task/stake API fields and bounded hydration proof are tracked in
+[the implementation plan](exec-plans/completed/2026-11-02-game-history-terms.md).
+The weekly game spec owns the iOS response contract.
+
 Many concurrent games per pair are tracked in [the implementation plan](exec-plans/completed/2026-11-01-game-many-per-pair.md). The weekly game spec and architecture own the pair cap, chain and chat contracts.
 
 Provider-start typing, held group drafts, and Web-stamped group alert exclusion

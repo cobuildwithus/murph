@@ -1,6 +1,6 @@
 # Game history tasks and stake
 
-Status: active
+Status: completed
 Created: 2026-11-02
 Updated: 2026-11-02
 
@@ -35,5 +35,20 @@ Rollback removes these fields and restores the previous card fallback.
 
 ## Verification
 
-Pending implementation and focused proof. Native rendering is owned by the
-separate iOS app; this task proves the API values it consumes.
+- Ready: both seats, equal/different tasks, prize/dare/none, latest terms, and
+  non-player denial pass in 15 pure projection cases.
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage
+  apps/web/test/game-history-views.test.ts apps/web/test/game-views.test.ts
+  apps/web/test/game-routes.test.ts`: 91 passed.
+- Isolated local PostgreSQL history slice (`game-service-postgres.test.ts -t
+  history` with `MURPH_TEST_POSTGRES_CONCURRENCY=1`): 6 passed, including the
+  populated native-auth/read/signing query and KMS bounds, 50-by-50 cap,
+  viewer orientation, block/report filters and existing batch decryption.
+- `pnpm --dir apps/web typecheck`: passed.
+- `pnpm complexity:diff`: passed; no changed source hotspots above 20.
+- Native rendering is owned by the separate iOS app; this task proves the API
+  values it consumes. No production member data or messages were accessed.
+- Legacy kinds map to prize/dare and the first legacy stake supplies the chip;
+  original wording and settlement remain unchanged.
+- PR #4443 owns final ReviewGPT, exact-head CI and deployment evidence.
+Completed: 2026-11-02
