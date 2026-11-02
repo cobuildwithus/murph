@@ -473,7 +473,7 @@ function createHostedRuntimeMediaStoreStub(): {
   putCalls: Array<{
     byteSize: number;
     mediaId: string;
-    mediaKind: "image" | "video";
+    mediaKind: "image" | "video" | "integration-ingest";
     sha256: string;
   }>;
   storedBytesByMediaId: Map<string, Uint8Array>;
@@ -486,7 +486,7 @@ function createHostedRuntimeMediaStoreStub(): {
   const putCalls: Array<{
     byteSize: number;
     mediaId: string;
-    mediaKind: "image" | "video";
+    mediaKind: "image" | "video" | "integration-ingest";
     sha256: string;
   }> = [];
   const deleteCalls: string[] = [];

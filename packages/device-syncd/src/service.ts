@@ -2464,7 +2464,7 @@ function resolveDeviceSyncFailureRetryPolicy(input: {
     preservesAcceptedCompanionHrv && failure.code !== JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE
   ) || (
     retainsAcceptedCalendarRefresh && !isJunctionSparseCalendarRefreshTerminalFailureCode(failure.code)
-  ) || retainValidation;
+  ) || retainValidation || (failure.retryable && failure.code === "HOSTED_COLD_HISTORY_UNAVAILABLE");
   const validationRetryDelayMs = retainValidation ? 30 * 60_000 : null;
   if (validationRetryDelayMs !== null) failure.details.validationRetryDelayMs = validationRetryDelayMs;
   return {

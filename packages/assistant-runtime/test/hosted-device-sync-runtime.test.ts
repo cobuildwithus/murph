@@ -13246,6 +13246,116 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test("cold history deferrals preserve transport retries and payload acknowledgement across hosted handoff", async () => {
+    const occurredAt = "2026-04-04T09:00:00.000Z";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(occurredAt));
+    const first = await createHostedRuntimeWorkspace("hosted-cold-budget-first-");
+    const restored = await createHostedRuntimeWorkspace("hosted-cold-budget-restored-");
+    let outcome: "cold" | "transport" | "valid" = "cold";
+    const base = createFakeProvider();
+    const provider = createFakeProvider({
+      provider: "whoop", descriptor: { ...base.descriptor, provider: "whoop" },
+      jobExecutor: { async executeJob(context) {
+        if (outcome !== "valid") {
+          throw deviceSyncError({
+            code: outcome === "cold" ? "HOSTED_COLD_HISTORY_UNAVAILABLE" : "WHOOP_TOKEN_REQUEST_FAILED",
+            message: "Synthetic retryable failure.", retryable: true, httpStatus: 503,
+          });
+        }
+        await context.importSnapshot({
+          accountId: context.account.externalAccountId, importedAt: context.now,
+          sleeps: [{ id: "synthetic-sleep", start: "2026-04-03T22:00:00.000Z",
+            end: "2026-04-04T06:00:00.000Z", updated_at: occurredAt }],
+        });
+        return {};
+      } },
+    });
+    let service = createDeviceSyncServiceForVault(first.vaultRoot, [provider]);
+    const coldService = createDeviceSyncServiceForVault(restored.vaultRoot, [provider]);
+    const connectionId = "hosted_cold_budget";
+    const dirtyPayloadId = "dsp_cold_budget";
+    const snapshot = buildRuntimeSnapshot({ connectionId, provider: "whoop",
+      connectedAt: occurredAt, externalAccountId: "synthetic-cold-budget" });
+    const dirty = buildDirtyState({ connectionId, provider: "whoop", dirtyResources: [{
+      count: 1, dirtyPayloadId, jobKind: "resource", resource: "sleep", resourceCategory: "summary",
+      sourceProviderSlug: "whoop", windowStart: null, windowEnd: null,
+      payload: { resourceId: "synthetic-sleep", resourceType: "sleep" },
+    }] });
+    const acknowledgements: string[] = [];
+    const port: HostedRuntimeDeviceSyncPort = {
+      async fetchSnapshot() { return snapshot; },
+      async fetchDirtyStates() { return { hasMore: false, items: [dirty], nextWakeAt: null, userId: "member_123" }; },
+      async ackDirtyStateProcessed(input) {
+        acknowledgements.push(...(input.processedDirtyPayloadIds ?? []));
+        return { connectionId, processedRevision: input.processedRevision, dirtyRevision: "1",
+          nextWakeAt: null, recorded: true, stillDirty: false, userId: "member_123" };
+      },
+      async applyUpdates() { throw new Error("No control mutation expected."); },
+      async createConnectLink() { throw new Error("No connection request expected."); },
+    };
+    const wake = buildDirtyDeviceSyncWake(connectionId, occurredAt, "whoop");
+    try {
+      await initializeVault({ vaultRoot: restored.vaultRoot, timezone: "UTC" });
+      let state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service, wake,
+      });
+      const accountId = state.hostedToLocalAccountIds.get(connectionId)!;
+      const [job] = getStore(service).listPendingJobsForAccount(accountId, 10);
+      assert.ok(job);
+      for (let attempt = 1; attempt <= 6; attempt += 1) {
+        await service.runWorkerOnce(accountId);
+        const pending = getStore(service).getJobById(job.id)!;
+        assert.equal(pending.status, "queued");
+        vi.setSystemTime(new Date(pending.availableAt));
+      }
+      promoteHostedCompletedDirtyPayloadAcks({ service, state });
+      assert.deepEqual(state.pendingDirtyAcks.flatMap((ack) => ack.processedDirtyPayloadIds ?? []), []);
+      // Reopening the same SQLite store must retain the budget before cold handoff.
+      closeHostedRuntimeDeviceSyncService(service);
+      service = createDeviceSyncServiceForVault(first.vaultRoot, [provider]);
+      const recovery = resolveHostedDeviceSyncWakeRecovery({ service, state, wake });
+      assert.ok(recovery);
+      assert.deepEqual(parseHostedExecutionWake(recovery.wake), recovery.wake);
+      state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service: coldService, wake: recovery.wake,
+      });
+      const coldAccountId = state.hostedToLocalAccountIds.get(connectionId)!;
+      const [coldJob] = getStore(coldService).listPendingJobsForAccount(coldAccountId, 10);
+      assert.ok(coldJob);
+      outcome = "transport";
+      await coldService.runWorkerOnce(coldAccountId);
+      const pending = getStore(coldService).getJobById(coldJob.id)!;
+      promoteHostedCompletedDirtyPayloadAcks({ service: coldService, state });
+      assert.deepEqual(state.pendingDirtyAcks.flatMap((ack) => ack.processedDirtyPayloadIds ?? []), []);
+      assert.equal(pending.status, "queued");
+      assert.equal(pending.lastErrorCode, "WHOOP_TOKEN_REQUEST_FAILED");
+      assert.equal(recovery.wake.hint?.jobs?.[0]?.maxAttempts, 5);
+      assert.equal(pending.maxAttempts - pending.attempts, 4);
+      outcome = "valid";
+      vi.setSystemTime(new Date(pending.availableAt));
+      await coldService.runWorkerOnce(coldAccountId);
+      assert.equal(getStore(coldService).getJobById(coldJob.id)?.status, "succeeded");
+      assert.ok((await readJsonlRecords({ vaultRoot: restored.vaultRoot,
+        relativePath: "ledger/events/2026/2026-04.jsonl" })).length > 0);
+      assert.deepEqual(acknowledgements, []);
+      promoteHostedCompletedDirtyPayloadAcks({ service: coldService, state });
+      const ack = state.pendingDirtyAcks[0]!;
+      assert.deepEqual(ack.processedDirtyPayloadIds, [dirtyPayloadId]);
+      await recordHostedDeviceSyncDirtyPostCheckpointRecord({
+        record: { kind: "device-sync.dirty-processed", ...ack },
+        runtime: createDeviceSyncPostCheckpointRuntime(port),
+      });
+      assert.deepEqual(acknowledgements, [dirtyPayloadId]);
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      closeHostedRuntimeDeviceSyncService(coldService);
+      await first.cleanup();
+      await restored.cleanup();
+      vi.useRealTimers();
+    }
+  });
+
   test.each(["blood_oxygen", "electrocardiogram_voltage"])(
     "retained Junction %s validation restores from a hosted continuation with its delay, payload, and transport budget",
     async (resource) => {

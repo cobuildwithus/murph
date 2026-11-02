@@ -806,7 +806,7 @@ function readHostedRunnerMediaDescriptor(
 ): {
   byteSize: number;
   mediaId: string;
-  mediaKind: "image" | "video";
+  mediaKind: "image" | "video" | "integration-ingest";
   sha256: string;
   expiresAt: string | null;
 } | null {
@@ -816,7 +816,7 @@ function readHostedRunnerMediaDescriptor(
   const expiresAt = readHostedRunnerMediaExpiresAt(headers);
   const byteSize = rawByteSize ? Number(rawByteSize) : Number.NaN;
   if (
-    (mediaKind !== "image" && mediaKind !== "video")
+    (mediaKind !== "image" && mediaKind !== "video" && mediaKind !== "integration-ingest")
     || !sha256
     || !/^[a-f0-9]{64}$/u.test(sha256)
     || !Number.isSafeInteger(byteSize)

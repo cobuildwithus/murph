@@ -186,7 +186,7 @@ export interface HostedRuntimeArtifactReader {
   ): Promise<Uint8Array | null>;
 }
 
-export type HostedRuntimeMediaKind = "image" | "video";
+export type HostedRuntimeMediaKind = "image" | "video" | "integration-ingest";
 
 export interface HostedRuntimeMediaDescriptor {
   byteSize: number;

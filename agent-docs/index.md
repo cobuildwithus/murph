@@ -7,6 +7,8 @@ Codex conversation continuity across instruction-only deploys is recorded in
 and [the verification report](../codex-thread-continuity-report.md).
 `../ARCHITECTURE.md` owns the mutable instruction and immutable tool contract.
 
+Cold-history retry allowance and rollback proof: [implementation plan](exec-plans/active/2026-11-02-cold-history-retry-allowance.md).
+
 Historical exact meal-photo association is tracked in
 [the implementation plan](exec-plans/completed/2026-11-02-meal-photos-exact.md);
 `product-specs/ios-meals.md` owns the read-time recovery rule.
@@ -1674,3 +1676,19 @@ Meal dish naming and photo-retention investigation are tracked in
 Legacy meal naming repair and shared write validation are tracked in
 [the active plan](exec-plans/active/2026-11-02-meal-legacy-names.md);
 `product-specs/ios-meals.md` owns its bounds, preservation and removal condition.
+
+Lazy closed-month integration-ingest storage, verification and rollout evidence are
+tracked in [the implementation report](exec-plans/completed/2026-11-02-ingest-cold-storage.md).
+`../ARCHITECTURE.md` and `../docs/hosted-account-data-deletion-export.md` own the
+reader, checkpoint and privacy contracts.
+
+The [reader-first split follow-up](exec-plans/active/2026-11-02-ingest-cold-storage-split.md)
+supersedes the original cold-storage report's deployment guidance and records the
+independent reader and producer commit verification.
+
+The [historical ingest write correction](exec-plans/active/2026-11-02-ingest-historical-write-fix.md)
+tracks the reader backfill regression and producer thaw/retry proof.
+
+The [retry-safe reader floor follow-up](exec-plans/active/2026-11-02-ingest-reader-retry-floor.md)
+records the retry plumbing moved into the reader release and supersedes the
+earlier device-ingestion rollback restriction.

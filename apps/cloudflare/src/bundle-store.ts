@@ -59,7 +59,7 @@ export interface HostedArtifactStore {
   }): Promise<void>;
 }
 
-export type HostedMediaKind = "image" | "video";
+export type HostedMediaKind = "image" | "video" | "integration-ingest";
 
 export interface HostedMediaDescriptor {
   byteSize: number;
@@ -425,7 +425,7 @@ function normalizeHostedMediaDescriptor(input: HostedMediaDescriptor): HostedMed
   if (!/^[a-f0-9]{64}$/u.test(input.sha256)) {
     throw new Error("Hosted media sha256 is invalid.");
   }
-  if (input.mediaKind !== "image" && input.mediaKind !== "video") {
+  if (input.mediaKind !== "image" && input.mediaKind !== "video" && input.mediaKind !== "integration-ingest") {
     throw new Error("Hosted media kind is invalid.");
   }
   if (!Number.isSafeInteger(input.byteSize) || input.byteSize < 0) {

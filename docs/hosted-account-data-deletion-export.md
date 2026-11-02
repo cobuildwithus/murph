@@ -63,6 +63,13 @@ The export includes:
 - All-history lab-result rows for each measured analyte, including dated numeric or qualitative results, original and normalized units, comparator, flag, reference-range context, and safe lab and source labels.
 - Browser-vault policy metadata, generated timestamp, data version, and source bundle hash already used by the browser-vault freshness contract.
 
+Closed integration-ingest months retain their raw provider evidence in encrypted,
+non-expiring objects under the existing member media prefix. Account deletion's
+prefix sweep and upload-drain checks cover these objects without decrypting them.
+A complete workspace archive must first materialize and verify every cold history
+reference, or fail retryably; the v2 archive planner enforces this. This does not
+expand the Settings dashboard export into a raw-workspace export.
+
 The Settings vault export does not include:
 
 - Raw local vault files or a full hosted workspace archive.

@@ -846,16 +846,17 @@ export function failDeviceSyncJobIfOwned(
     const replacementPayloadJson = input.replacementPayload === undefined
       ? null
       : stringifyJson(input.replacementPayload);
-    // A matching validation retry leaves at least the default job budget from
+    // A matching validation or cold-history retry leaves the default job budget from
     // this attempt, so a later transport failure keeps bounded ordinary retries.
-    // Only another matching validation failure refreshes it; warm restart keeps
+    // Only another matching retained failure refreshes it; warm restart keeps
     // the count and hosted cold handoff carries the remaining attempts.
     const retryResult = database.prepare(`
       update device_job
       set status = 'queued',
           available_at = ?,
           max_attempts = case
-            when ? = 1 and (${retainedJunctionValidationSql("?")})
+            when ? = 1 and ((${retainedJunctionValidationSql("?")})
+              or ? = 'HOSTED_COLD_HISTORY_UNAVAILABLE')
               then max(max_attempts, attempts + ${DEFAULT_DEVICE_SYNC_JOB_MAX_ATTEMPTS})
             when ? = 1 then max(max_attempts, attempts + 1)
             else max_attempts end,
@@ -875,6 +876,7 @@ export function failDeviceSyncJobIfOwned(
     `).get(
       input.retryAt ?? input.now,
       input.retainUntilSuccess ? 1 : 0,
+      input.code,
       input.code,
       input.code,
       input.retainUntilSuccess ? 1 : 0,

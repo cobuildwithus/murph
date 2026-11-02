@@ -5845,7 +5845,7 @@ test.each([
     const vaultRoot = await makeTempDirectory("murph-junction-validation-transport-retry");
     let now = new Date("2026-04-03T12:00:00.000Z");
     let stateDatabaseName = "state.sqlite";
-    let outcome: "validation" | "transport" | "valid" = "validation";
+    let outcome: "validation" | "cold" | "transport" | "valid" = "validation";
     const createFixture = () => createServiceFixture({
       secret: "secret-for-tests",
       clock: { now: () => now },
@@ -5856,6 +5856,10 @@ test.each([
         descriptor: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
         async executeJob() {
           if (outcome === "valid") return {};
+          if (outcome === "cold") {
+            throw deviceSyncError({ code: "HOSTED_COLD_HISTORY_UNAVAILABLE",
+              message: "Synthetic cold outage.", retryable: true });
+          }
           if (outcome === "transport") {
             throw deviceSyncError({ code: "JUNCTION_API_REQUEST_FAILED",
               message: "Synthetic Junction request failure.", retryable: true, httpStatus: 500 });
@@ -5898,9 +5902,16 @@ test.each([
         assert.equal(retained.status, "queued");
         now = new Date(retained.availableAt);
       }
+      for (const retainedFailure of ["cold", "validation", "cold"] as const) {
+        outcome = retainedFailure;
+        await fixture.service.runWorkerOnce();
+        const retained = fixture.store.getJobById(job.id)!;
+        assert.equal(retained.status, "queued");
+        now = new Date(retained.availableAt);
+      }
       const pastAllowance = fixture.store.getJobById(job.id);
       assert.ok(pastAllowance);
-      assert.equal(pastAllowance.attempts, 3);
+      assert.equal(pastAllowance.attempts, 6);
       // Hosted cold handoff carries remaining attempts as maxAttempts and
       // rehydrates the job with zero attempts in fresh local state.
       const remainingAttempts = Math.max(1, pastAllowance.maxAttempts - pastAllowance.attempts);
@@ -16148,3 +16159,33 @@ test.each(["preparation", "wrapped", "publication", "download", "gate", "job-yie
     }
   },
 );
+
+
+test("cold history unavailability retains accepted resource work beyond its retry ceiling", async () => {
+  const vaultRoot = await makeTempDirectory("cold-history-retry-");
+  let now = new Date("2030-01-01T12:00:00.000Z");
+  let failureCode = "HOSTED_COLD_HISTORY_UNAVAILABLE";
+  const fixture = await createCanonicalContentionServiceFixture({ vaultRoot, now: () => now,
+    importer: { async importDeviceProviderSnapshot() {
+      throw deviceSyncError({ code: failureCode, message: "Synthetic retryable outage", retryable: true });
+    } },
+  });
+  try {
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      await fixture.service.runWorkerOnce();
+      const job = fixture.store.getJobById(fixture.jobId)!;
+      assert.equal(job.attempts, attempt);
+      assert.equal(job.status, "queued");
+      assert.ok(job.maxAttempts > attempt);
+      assert.equal(job.lastErrorCode, "HOSTED_COLD_HISTORY_UNAVAILABLE");
+      now = new Date(job.availableAt);
+    }
+    failureCode = "WHOOP_TOKEN_REQUEST_FAILED";
+    await fixture.service.runWorkerOnce();
+    const transportRetry = fixture.store.getJobById(fixture.jobId)!;
+    assert.equal(transportRetry.status, "queued");
+    assert.equal(transportRetry.lastErrorCode, failureCode);
+    assert.equal(transportRetry.maxAttempts - transportRetry.attempts, 4);
+    assert.ok(fixture.service.listJobFailureDiagnostics().every((entry) => entry.retryable && entry.jobDisposition === "queued"));
+  } finally { fixture.close(); await rm(vaultRoot, { recursive: true, force: true }); }
+});
