@@ -1628,7 +1628,7 @@ Implementation and verification are recorded in
 
 Direct-ensure failure categories are owned by
 [hosted runtime telemetry](references/hosted-runtime-protocol.md); implementation
-and proof are tracked in [the diagnostic plan](exec-plans/active/2026-11-02-direct-wake-failure-diagnostics.md).
+and proof are tracked in [the diagnostic plan](exec-plans/completed/2026-11-02-direct-wake-failure-diagnostics.md).
 
 Mailbox handoff recovery's age eligibility before per-user selection and
 same-sweep duplicate suppression are owned by `references/hosted-temporal-orchestration.md`; implementation proof
