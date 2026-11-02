@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises"
+import { MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION } from "../src/assistant/managed-automations.ts"
 import { describe, expect, it } from 'vitest'
 import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
 
@@ -42,4 +44,14 @@ describe('scheduled meal occurrence date', () => {
       "Use the local date as the anchor for this automation's relevant action window.",
     )
   })
+})
+
+it('keeps closeout review separate from retention and teaches the real thumbnail fallback', async () => {
+  const skill = await readFile(new URL('../skills/automatic-meal-capture/SKILL.md', import.meta.url), 'utf8')
+  expect(skill).toContain('photo_thumbnail')
+  expect(skill).toContain('Full photos expire 90 days after capture')
+  expect(skill).toContain('photoReviewedAt')
+  expect(skill).not.toContain('replaces retained image bytes with a privacy tombstone')
+  expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).toContain('mark their pending photos reviewed')
+  expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).not.toContain('remove their retained photos after using them')
 })

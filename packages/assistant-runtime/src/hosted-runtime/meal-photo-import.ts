@@ -132,6 +132,7 @@ export async function importHostedMealPhotoCapturedMailboxItem(input: {
       ),
       occurredAt: input.wake.mealPhoto.capturedAt,
       photoPath: temporaryPhotoPath,
+      photoCapturedAt: input.wake.mealPhoto.capturedAt,
       source: "device",
       vaultRoot: input.vaultRoot,
     });

@@ -998,7 +998,7 @@ test.sequential(
       assert.equal(requireData(deletedMeal).entityId, mealRecord.mealId)
       assert.equal(requireData(deletedMeal).kind, 'meal')
       assert.equal(requireData(deletedMeal).deleted, true)
-      assert.equal(requireData(deletedMeal).retainedPaths.length > 0, true)
+      assert.deepEqual(requireData(deletedMeal).retainedPaths, [])
       await access(path.join(vaultRoot, mealManifest.manifestFile))
 
       const missingMeal = await runSourceCli([

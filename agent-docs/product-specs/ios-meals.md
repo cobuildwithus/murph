@@ -6,8 +6,8 @@ Last verified: 2026-11-02
 
 The v2 game app opens Meals from You. This contract adds list, detail and
 accepted removal for meals Murph logged. It changes the iOS-facing contract
-proposed in #4420: no image URLs or provenance; `uploadId` is an exact nullable
-phone upload identifier. Reads include `savedAt` and the vault's canonical `timeZone`.
+proposed in #4420: `photo` is a nullable private thumbnail delivery, and
+`uploadId` is an exact nullable phone upload identifier. Reads include `savedAt` and the vault's canonical `timeZone`.
 
 Canonical meal events and lifecycle tombstones remain in the encrypted member
 vault. Structured meals are derived into generation 17 of the existing encrypted
@@ -55,7 +55,8 @@ Exact synthetic 200 response (one populated day):
           "proteinGrams": 32,
           "carbsGrams": 58,
           "fatGrams": null,
-          "uploadId": null
+          "uploadId": null,
+          "photo": null
         }
       ]
     }
@@ -109,7 +110,8 @@ Exact synthetic 200 response:
     "proteinGrams": 32,
     "carbsGrams": 58,
     "fatGrams": null,
-    "uploadId": null
+    "uploadId": null,
+          "photo": null
   }
 }
 ```
@@ -133,7 +135,10 @@ post-commit wake does not undo acceptance; the existing handoff sweeper retries.
 The runtime applies `deleteMealRecord` → `deleteEvent`, appending the canonical
 lifecycle tombstone. The meal then disappears from subsequent projections and
 stops contributing to Murph's nutrition reads. Upload metadata is not the owner.
-No photo is delivered, copied or retained by this API.
+Deletion also retires the canonical thumbnail and any remaining full photo.
+Encrypted media objects are removed by the existing runtime snapshot cleanup;
+metadata-only privacy tombstones preserve append-only history references.
+Account deletion uses the existing encrypted-object cleanup for both copies.
 
 Hide the meal optimistically after acceptance. Until a new projection is saved,
 or if the runtime rejects removal, it may reappear on a read. Missing canonical
@@ -193,8 +198,7 @@ upload responses are unchanged.
 
 The identifier travels in the existing encrypted photo wake, then one optional
 canonical meal field on the exact record created by photo import. Murph enriches
-that existing record. Browser Vault projects the field directly. No image bytes,
-new image retention, new store, or timestamp association is added. IDs are not
+that existing record. Browser Vault projects the field directly. The upload link adds no image bytes, store, or timestamp association. IDs are not
 logged. Normal snapshot publication determines when the link becomes readable.
 
 For the existing iOS local history, look up the returned ID directly for automatic
@@ -219,6 +223,47 @@ older snapshots, typed/texted meals and legacy manual-only captures stay null.
 The historical manual capture hash cannot recover the phone UUID. A retry does
 not rewrite the canonical meal. Show a plain tile for null or missing local thumbnails.
 No `source`, `thumbnailUrl`, `photoUrl`, or full-size URL exists in this contract.
+
+## Private thumbnail
+
+List and detail always include `photo: { url: string; width: number; height: number } | null`.
+For example (synthetic capability, not a working URL):
+
+```json
+{"photo":{"url":"https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/opaque-capability/meal-thumbnail.jpg?exp=1793635500","width":640,"height":427}}
+```
+
+The JPEG is at most 640 pixels on its long edge, oriented and stripped of EXIF
+and location metadata. It is encrypted at rest using the member's existing
+vault-media keys. The owner-authorized meal response mints an opaque bearer URL
+valid for five minutes using the existing private-media capability pattern.
+Treat the URL as private: possession permits delivery until expiry; do not log
+or share it. Both API and image responses disable caching. Refresh the meal to
+obtain a new URL. Width and height describe the oriented thumbnail.
+
+`photo` is independent of `uploadId`: texted photos can have a thumbnail and a
+null upload ID. Missing source images, older saved projections and unfinished
+backfill return null. An expired or deleted image URL returns 404. The API never
+wakes a runtime to generate a thumbnail and never exposes full-photo URLs.
+
+Canonical maintenance creates thumbnails from remaining full photos in batches
+of at most ten, resumes through ordinary runtime retention wakes, and retries
+unavailable input. Thumbnails remain while the meal exists. Full-photo bytes
+are retired after `INBOX_IMAGE_RETENTION_DAYS` (90) from immutable capture time.
+For historical images without capture metadata, the original import time is
+used; editable `eatenAt` never resets retention. Already-purged full photos cannot
+be recovered. The existing retention jobs and encrypted-object cleanup apply;
+this is not a synchronous deletion guarantee for inactive vaults or backups.
+Murph can inspect the retained `photo_thumbnail` attachment after full-photo
+expiry. Automatic closeout marks a full photo `reviewed_photo` and stamps
+`photoReviewedAt`; it no longer destroys the photo immediately or requeues a
+reviewed meal just because a thumbnail was generated.
+
+Web readers deploy before runtime writers. New canonical fields are optional;
+old saved records remain readable. Once thumbnail maintenance writes them,
+retain this release as the Web/runtime rollback floor. The hosted rollout must
+evacuate old member runtimes before resuming their canonical workspace on the
+new image. Older Workers return no thumbnail deliveries during Web-first skew.
 
 ## Release order and compatibility
 

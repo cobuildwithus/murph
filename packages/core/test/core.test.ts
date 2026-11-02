@@ -1206,7 +1206,7 @@ test("photo-only meals keep canonical attachments without legacy audio path proj
   assert.equal(meal.audio, null);
 });
 
-test("automatic meal photo removal preserves the meal and tombstones retained bytes", async () => {
+test("automatic meal photo closeout preserves bytes and marks the meal reviewed", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   const sourceRoot = await makeTempDirectory("murph-source");
   await initializeVault({ vaultRoot });
@@ -1264,43 +1264,13 @@ test("automatic meal photo removal preserves the meal and tombstones retained by
   if (latest?.kind !== "meal") {
     throw new Error("Expected the automatic meal to remain canonical.");
   }
-  assert.deepEqual(latest.attachments ?? [], []);
-  assert.deepEqual(latest.rawRefs ?? [], []);
+  assert.equal(latest.attachments?.[0]?.role, "reviewed_photo");
+  assert.deepEqual(latest.rawRefs, meal.event.rawRefs);
   assert.deepEqual(latest.ingredients, ["rice", "salmon"]);
   assert.equal(latest.nutrition?.totals?.calories, 640);
   assert.equal(latest.lifecycle?.revision, 2);
-
-  const tombstoneText = await fs.readFile(
-    path.join(vaultRoot, meal.photo.relativePath),
-    "utf8",
-  );
-  assert.notEqual(tombstoneText, originalPhoto);
-  assert.deepEqual(JSON.parse(tombstoneText), {
-    schemaVersion: "murph.automatic-meal-photo-tombstone.v1",
-    reason: "automatic_meal_closeout",
-    purgedAt: "2026-07-22T21:00:00.000Z",
-  });
-  const manifest = JSON.parse(
-    await fs.readFile(path.join(vaultRoot, meal.manifestPath), "utf8"),
-  ) as {
-    artifacts: Array<{
-      byteSize: number;
-      mediaType: string;
-      originalFileName: string;
-      relativePath: string;
-      role: string;
-      sha256: string;
-    }>;
-  };
-  assert.deepEqual(manifest.artifacts[0], {
-    ...manifest.artifacts[0],
-    byteSize: Buffer.byteLength(tombstoneText),
-    mediaType: "application/json",
-    originalFileName: "meal-photo-retention-tombstone.json",
-    relativePath: meal.photo.relativePath,
-    role: "privacy_tombstone",
-    sha256: createHash("sha256").update(tombstoneText).digest("hex"),
-  });
+  assert.equal(latest.photoReviewedAt, "2026-07-22T21:00:00.000Z");
+  assert.equal(await fs.readFile(path.join(vaultRoot, meal.photo.relativePath), "utf8"), originalPhoto);
 
   const beforeReplay = await readJsonlRecords({
     vaultRoot,

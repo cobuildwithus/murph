@@ -1,3 +1,4 @@
+import { stageMealPhotoDeletion } from "./meal-photo-files.ts";
 import type { EventRecord } from "@murphai/contracts";
 import {
   collectEventRawReferencePaths,
@@ -888,6 +889,12 @@ async function deleteEventLocked(
   });
   const now = new Date();
   const tombstoneRecord = buildDeletedEventTombstone(latestMatchedEvent.record, now);
+  if (tombstoneRecord.kind === "meal") {
+    const photos = new Set(tombstoneRecord.attachments?.filter(a => a.kind === "photo").map(a => a.relativePath));
+    tombstoneRecord.attachments = tombstoneRecord.attachments?.filter(a => a.kind !== "photo");
+    tombstoneRecord.rawRefs = tombstoneRecord.rawRefs?.filter(ref => !photos.has(ref));
+    delete tombstoneRecord.photoThumbnail;
+  }
   const tombstoneLedgerFile = toEventLedgerFile(tombstoneRecord.occurredAt);
 
   return runLoadedCanonicalWrite<DeleteEventResult>({
@@ -896,6 +903,7 @@ async function deleteEventLocked(
     summary: `Delete event ${input.eventId}`,
     occurredAt: now,
     mutate: async ({ batch }) => {
+      await stageMealPhotoDeletion(input.vaultRoot, batch, latestMatchedEvent.record, now);
       await batch.stageJsonlAppend(tombstoneLedgerFile, `${JSON.stringify(tombstoneRecord)}\n`);
       await emitAuditRecord({
         vaultRoot: input.vaultRoot,
@@ -911,7 +919,7 @@ async function deleteEventLocked(
       return {
         eventId: input.eventId,
         kind: latestMatchedEvent.record.kind,
-        retainedPaths: extractRetainedPaths(latestMatchedEvent.record),
+        retainedPaths: extractRetainedPaths(tombstoneRecord),
         deleted: true,
       };
     },

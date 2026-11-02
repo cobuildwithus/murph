@@ -2387,6 +2387,51 @@
           "minLength": 1,
           "maxLength": 128
         },
+        "photoCapturedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "photoReviewedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "photoThumbnail": {
+          "type": "object",
+          "properties": {
+            "relativePath": {
+              "type": "string",
+              "maxLength": 1024,
+              "pattern": "^raw\\/meals\\/[A-Za-z0-9_./-]+$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "byteSize": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 1048576
+            },
+            "width": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 640
+            },
+            "height": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 640
+            }
+          },
+          "required": [
+            "relativePath",
+            "sha256",
+            "byteSize",
+            "width",
+            "height"
+          ],
+          "additionalProperties": false
+        },
         "ingredients": {
           "maxItems": 100,
           "type": "array",

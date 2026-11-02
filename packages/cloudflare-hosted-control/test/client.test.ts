@@ -42,6 +42,22 @@ describe("createCloudflareHostedControlClient", () => {
     expect(new Headers(init?.headers).get("authorization")).toBe("Bearer token-synthetic");
     expect(new Headers(init?.headers).get("x-hosted-execution-user-id")).toBe("member-synthetic");
   });
+  it("binds thumbnail delivery to the owner and tolerates an older Worker", async () => {
+    const photo = { mediaId: "a".repeat(64), sha256: "b".repeat(64), byteSize: 123 };
+    const delivery = { mediaId: photo.mediaId, url: "https://runner.example.test/private-thumbnail" };
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValueOnce(createJsonResponse([delivery]))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }));
+    const client = createCloudflareHostedControlClient({ baseUrl: "https://runner.example.test", fetchImpl,
+      getBearerToken: async () => "synthetic-token" });
+    expect(await client.mealThumbnailDeliveries({ userId: "member-synthetic", photos: [photo] })).toEqual([delivery]);
+    const [url, init] = fetchImpl.mock.calls[0]!;
+    expect(url).toBe("https://runner.example.test/internal/users/member-synthetic/meal-photos/thumbnails");
+    expect(init?.method).toBe("POST");
+    expect(new Headers(init?.headers).get("x-hosted-execution-user-id")).toBe("member-synthetic");
+    expect(JSON.parse(String(init?.body))).toEqual({ photos: [photo] });
+    expect(await client.mealThumbnailDeliveries({ userId: "member-synthetic", photos: [photo] })).toBeNull();
+  });
+
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -63,6 +79,7 @@ describe("createCloudflareHostedControlClient", () => {
       "ensureRuntimeProcessing",
       "gameImageDelivery",
       "getRunnerStatus",
+      "mealThumbnailDeliveries",
       "purgeRuntimeResource",
       "putGameImage",
       "putGameMedia",

@@ -910,7 +910,7 @@ test('real meal validation preserves output and mutation boundaries while admitt
     assert.equal(removed.result.thrown, null)
     assert.deepEqual(removed.result.exits, [])
     const entity = JSON.parse(removed.result.stdout).entity
-    assert.deepEqual(entity.data.attachments ?? [], [])
+    assert.deepEqual(entity.data.attachments.map((attachment: { role: string }) => attachment.role), ['reviewed_photo'])
     assert.equal(entity.data.nutrition.totals.proteinGrams, 25)
     const idempotentBaseline = await invoke(automaticArgs)
     const idempotent = await collect(() => invoke(automaticArgs))
@@ -985,8 +985,8 @@ test('real meal lock, ledger and reference errors separate previously identical 
     { label: 'contract', actions: both, code: 'contract_invalid', stage: 'read', vaultCode: 'EVENT_CONTRACT_INVALID', writes: 0,
       prepare: () => rewrite({ title: null }), restore: restoreLedger },
     { label: 'reference', actions: ['remove-photo'] as const, code: 'vault_error', stage: 'unknown',
-      vaultCode: 'MEAL_PHOTO_RETENTION_REFERENCE_INVALID', writes: 1,
-      prepare: () => rewrite({ evidence: [{ rawRef: meal.photo!.relativePath }] }), restore: restoreLedger },
+      vaultCode: 'MEAL_PHOTO_RETENTION_PRECONDITION_FAILED', writes: 1,
+      prepare: () => rewrite({ attachments: meal.event.attachments!.map(attachment => ({ ...attachment, sha256: 'f'.repeat(64) })) }), restore: restoreLedger },
   ] as const
   const initialFiles = await vaultFiles(root, true)
   const observations = new Map<string, unknown>()
@@ -1190,7 +1190,7 @@ test('real source-cause meal errors preserve output, original bridge errors and 
     const removeArgs = ['meal', 'remove-photo', integrity.mealId, '--vault', root, '--format', 'json']
     const removed = await collect(() => invoke(removeArgs))
     assert.deepEqual(removed.result.exits, [])
-    assert.deepEqual(JSON.parse(removed.result.stdout).entity.data.attachments ?? [], [])
+    assert.equal(JSON.parse(removed.result.stdout).entity.data.attachments[0]?.role, 'reviewed_photo')
     for (const argv of [removeArgs, ['meal', 'show', meal.mealId, '--vault', root, '--format', 'json']]) {
       const before = await vaultFiles(root, true)
       const quietBaseline = await invoke(argv)

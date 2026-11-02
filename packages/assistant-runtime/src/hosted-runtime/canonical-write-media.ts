@@ -44,7 +44,7 @@ export async function externalizeHostedCanonicalWriteMediaPayloads(input: {
   );
   let omittedPayloadCount = 0;
   const actions: HostedCanonicalWriteReceiptAction[] = input.persistence.receipt.actions.map((action) => {
-    if (action.kind !== "raw_upsert" || !action.contentRef) {
+    if (action.kind !== "raw_upsert" || !action.contentRef || action.targetRelativePath.startsWith("raw/meals/")) {
       return action;
     }
     const mediaRef = mediaRefsByPath.get(action.targetRelativePath);
@@ -68,7 +68,9 @@ export async function externalizeHostedCanonicalWriteMediaPayloads(input: {
   const actionPaths = new Set(actions.map((action) => action.targetRelativePath));
   for (const relativePath of referencedPaths) {
     const entry = mediaRefsByPath.get(relativePath);
-    if (entry && !actionPaths.has(relativePath)) {
+    // Keep meal bytes in the receipt for cold CLI/native image reads, and also
+    // retain the delivery-object pointer for cleanup after receipt-only recovery.
+    if (entry && (!actionPaths.has(relativePath) || relativePath.startsWith("raw/meals/"))) {
       actions.push(toHostedMediaReceiptAction(entry));
     }
   }
@@ -128,6 +130,7 @@ function readCanonicalEventMediaReferencePaths(
         if (
           normalized.startsWith(`${VAULT_LAYOUT.rawInboxDirectory}/`)
           || normalized.startsWith(`${VAULT_LAYOUT.rawCapturesDirectory}/`)
+          || normalized.startsWith(`${VAULT_LAYOUT.rawMealsDirectory}/`)
         ) {
           paths.add(normalized);
         }
@@ -203,11 +206,12 @@ async function restoreHostedCanonicalWriteMediaReferences(input: {
         sha256: action.sha256,
       });
       changed = true;
-    } else {
+    } else if (action.kind !== "delete" && action.kind !== "delete_if_match" && !action.targetRelativePath.startsWith("raw/meals/")) {
+      // Keep deleted media receipts until final snapshot reconciliation. Removing
+      // the only catalogue pointer here would orphan the encrypted object; eager
+      // deletion during replay could destroy media reused by a later receipt.
       const existing = entries.get(action.targetRelativePath);
-      if (existing && (action.kind !== "delete_if_match" || (
-        existing.sha256 === action.expectedSha256 && existing.byteSize === action.expectedByteLength
-      ))) {
+      if (existing) {
         changed = entries.delete(action.targetRelativePath) || changed;
       }
     }

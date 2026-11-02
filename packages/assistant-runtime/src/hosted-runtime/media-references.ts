@@ -1,3 +1,4 @@
+import { createHostedMediaReferenceId } from "@murphai/hosted-execution";
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -43,6 +44,7 @@ export const HOSTED_MEDIA_REFS_RELATIVE_PATH =
 export const HOSTED_MEDIA_REFS_SCHEMA = "murph.hosted-media-refs.v1";
 
 const RAW_INBOX_PREFIX = `${VAULT_LAYOUT.rawInboxDirectory}/`;
+const RAW_MEALS_PREFIX = `${VAULT_LAYOUT.rawMealsDirectory}/`;
 const RAW_CAPTURES_PREFIX = `${VAULT_LAYOUT.rawCapturesDirectory}/`;
 
 export interface HostedMediaReference {
@@ -116,7 +118,9 @@ export async function publishHostedWorkspaceMediaReferencesForSnapshot(input: {
   }
 
   return {
-    excludedVaultPaths: entries.map((entry) => entry.relativePath),
+    // Meal CLI/native image tools read local paths. Keep their canonical bytes
+    // in encrypted snapshots; the media store serves only thumbnail delivery.
+    excludedVaultPaths: entries.filter(entry => !entry.relativePath.startsWith(RAW_MEALS_PREFIX)).map(entry => entry.relativePath),
     prunedMediaCount,
     referenceCount: entries.length,
     uploadedMediaCount,
@@ -387,9 +391,13 @@ function collectCaptureHostedMediaCandidates(
     if (record.lifecycle?.state === "deleted") {
       continue;
     }
+    // Legacy full photos stay in the encrypted vault until bounded maintenance
+    // creates their thumbnail. A foreground write must not upload the backlog.
+    if (record.kind === "meal" && !record.photoThumbnail) continue;
     for (const rawRef of collectEventRawReferencePaths(record)) {
-      const normalized = normalizeHostedMediaVaultPath(rawRef, RAW_CAPTURES_PREFIX);
+      const normalized = normalizeHostedMediaVaultPath(rawRef, record.kind === "meal" ? RAW_MEALS_PREFIX : RAW_CAPTURES_PREFIX);
       const mediaKind = normalized ? readHostedMediaKindFromPath(normalized) : null;
+      if (record.kind === "meal" && normalized !== record.photoThumbnail?.relativePath) continue;
       if (!mediaKind || !normalized) {
         continue;
       }
@@ -558,24 +566,6 @@ async function prepareHostedMediaReferenceFromLocalFile(input: {
   return { entry, uploaded: true };
 }
 
-function createHostedMediaReferenceId(input: {
-  byteSize: number;
-  mediaKind: HostedRuntimeMediaKind;
-  relativePath: string;
-  sha256: string;
-}): string {
-  return createHash("sha256")
-    .update("murph.hosted-media-ref.v1")
-    .update("\0")
-    .update(input.mediaKind)
-    .update("\0")
-    .update(input.relativePath)
-    .update("\0")
-    .update(input.sha256)
-    .update("\0")
-    .update(String(input.byteSize))
-    .digest("hex");
-}
 
 async function localHostedMediaReferenceIsValid(input: {
   entry: HostedMediaReference;
@@ -840,6 +830,7 @@ function normalizeHostedMediaCataloguePath(value: unknown): string | null {
     if (
       normalized.startsWith(RAW_INBOX_PREFIX)
       || normalized.startsWith(RAW_CAPTURES_PREFIX)
+      || normalized.startsWith(RAW_MEALS_PREFIX)
     ) {
       return normalized;
     }

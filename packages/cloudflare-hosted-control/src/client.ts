@@ -57,6 +57,7 @@ import {
   buildCloudflareHostedControlGameMediaPath,
   buildCloudflareHostedControlMealPhotoDeletePath,
   buildCloudflareHostedControlMealPhotoStagePath,
+  buildCloudflareHostedControlMealThumbnailDeliveryPath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
   buildCloudflareHostedControlRuntimeHealthDataConsentPath,
   buildCloudflareHostedControlTelegramUsageLimitNoticePath,
@@ -250,6 +251,7 @@ export interface CloudflareHostedControlClient {
     userId: string;
   }): Promise<void>;
   putGameImage(input: { bytes: Uint8Array; contentType: "image/jpeg" | "image/heic"; mediaId: string; userId: string }): Promise<void>;
+  mealThumbnailDeliveries(input: { userId: string; photos: Array<{ mediaId: string; sha256: string; byteSize: number }> }): Promise<Array<{ mediaId: string; url: string }> | null>;
   gameImageDelivery(input: { mediaId: string; userId: string; variant: "avatar" | "photo" }): Promise<{ url: string; expiresAt: string } | null>;
   statGameImage(input: { mediaId: string; userId: string }): Promise<{ byteLength: number } | null>;
   /** Legacy weekly game photos: Web seals them; the Worker stores the sealed envelope. */
@@ -585,6 +587,22 @@ export function createCloudflareHostedControlClient(
           headers: { ...gameMediaHeaders(input.mediaId), "content-type": input.contentType } },
         timeoutMs: options.timeoutMs,
       });
+    },
+    async mealThumbnailDeliveries(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      return await nullWhenNotFound(requestHostedExecutionAuthorizedJson({
+        baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
+        label: "meal thumbnail delivery",
+        path: buildCloudflareHostedControlMealThumbnailDeliveryPath(userId),
+        request: { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ photos: input.photos }) },
+        parse: (value) => {
+          if (!Array.isArray(value) || value.length !== input.photos.length) throw new TypeError("Meal thumbnail delivery is invalid.");
+          return value.map(item => {
+            const row = requireRecord(item, "Meal thumbnail delivery");
+            return { mediaId: requireString(row.mediaId, "Meal thumbnail id"), url: requireString(row.url, "Meal thumbnail URL") };
+          });
+        }, timeoutMs: options.timeoutMs,
+      }));
     },
     async gameImageDelivery(input) {
       const userId = requireCloudflareHostedControlUserId(input.userId);

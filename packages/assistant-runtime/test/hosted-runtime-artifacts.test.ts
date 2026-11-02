@@ -1,3 +1,4 @@
+import { showMealRecord, removeAutomaticMealPhotoRecord } from "@murphai/vault-usecases/records";
 import * as pendingInputIndex from "../src/hosted-runtime/pending-input-index.ts";
 import { parseHostedCanonicalWriteReceiptArtifact } from "../src/hosted-runtime/canonical-write-receipt.ts";
 import assert from "node:assert/strict";
@@ -9,6 +10,9 @@ import path from "node:path";
 import { expect, test, vi } from "vitest";
 import {
   addCapture,
+  addMeal,
+  deleteEvent,
+  runMealPhotoMaintenance,
   addCaptureWithLookup,
   applyCanonicalWriteBatch,
   appendJsonlRecord,
@@ -928,4 +932,90 @@ test.each([
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("meal thumbnail and full-photo deletion survives canonical receipt replay and prunes encrypted objects", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "murph-meal-media-replay-"));
+  const vaultRoot = path.join(root, "live"), restoredRoot = path.join(root, "restored");
+  const store = createHostedRuntimeMediaStoreStub();
+  const persisted: HostedCanonicalWritePersistenceInput[] = [];
+  try {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    await initializeVault({ vaultRoot: restoredRoot, timezone: "UTC" });
+    const photoPath = path.join(root, "fixture.png");
+    await writeFile(photoPath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==", "base64"));
+    const captureTime = "2030-01-01T12:00:00.000Z";
+    await withHostedCanonicalWritePort({
+      async persistCanonicalWrite(persistence) { persisted.push(await externalizeHostedCanonicalWriteMediaPayloads({ persistence, mediaStore: store.mediaStore, vaultRoot })); },
+    }, async () => {
+      const meal = await addMeal({ vaultRoot, photoPath, photoCapturedAt: captureTime, occurredAt: captureTime });
+      expect(store.putCalls).toHaveLength(0);
+      expect(await runMealPhotoMaintenance({ vaultRoot, now: new Date(captureTime) })).toMatchObject({ thumbnailCount: 1, blockedMealCount: 0 });
+      const refs = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries;
+      expect(refs).toHaveLength(1);
+      expect(store.putCalls).toHaveLength(1);
+      expect(refs.filter(ref => ref.expiresAt === null)).toHaveLength(1);
+      await deleteEvent({ vaultRoot, eventId: meal.event.id });
+    });
+    expect(store.storedBytesByMediaId.size).toBe(1);
+    for (const persistence of persisted) {
+      const input = { receipt: persistence.receipt, vaultRoot: restoredRoot,
+        readPayload: async (ref: { sha256: string }) => persistence.payloads.find(payload => payload.sha256 === ref.sha256)?.bytes ?? null };
+      await applyHostedCanonicalWriteReceiptWithMedia(input);
+      await applyHostedCanonicalWriteReceiptWithMedia(input);
+    }
+    // Replay does not erase the cleanup pointers or eagerly delete objects.
+    expect(store.storedBytesByMediaId.size).toBe(1);
+    const cleaned = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot: restoredRoot, mediaStore: store.mediaStore });
+    expect(cleaned.prunedMediaCount).toBe(1);
+    expect(store.storedBytesByMediaId.size).toBe(0);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test.each([false, true])("cold-restored meal reads retain inspectable bytes after expiry=%s", async (expired) => {
+  const root = await mkdtemp(path.join(tmpdir(), "murph-meal-cold-read-"));
+  const vaultRoot = path.join(root, "live"), restoredRoot = path.join(root, "restored");
+  const store = createHostedRuntimeMediaStoreStub();
+  const { artifactStore } = createHostedRuntimeArtifactStoreStub();
+  const receipts: HostedCanonicalWritePersistenceInput[] = [];
+  const captureTime = "2030-01-01T12:00:00.000Z";
+  try {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const photoPath = path.join(root, "fixture.png");
+    await writeFile(photoPath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==", "base64"));
+    const meal = await withHostedCanonicalWritePort({
+      async persistCanonicalWrite(persistence) { receipts.push(await externalizeHostedCanonicalWriteMediaPayloads({ persistence, mediaStore: store.mediaStore, vaultRoot })); },
+    }, async () => {
+      const meal = await addMeal({ vaultRoot, photoPath, photoCapturedAt: captureTime, occurredAt: captureTime, source: "device",
+        externalRef: { system: "meal-photo-capture", resourceType: "photo", resourceId: "a".repeat(64) } });
+      await runMealPhotoMaintenance({ vaultRoot, now: new Date(expired ? "2030-04-02T12:00:00Z" : captureTime) });
+      return meal;
+    });
+    const published = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore: store.mediaStore });
+    expect(published.excludedVaultPaths).toEqual([]);
+    const snapshot = await snapshotHostedBundleRoots({ kind: "vault", roots: [{ root: vaultRoot, rootKey: "vault" }] });
+    assert.ok(snapshot);
+    const hash = sha256HostedBundleHex(snapshot);
+    await artifactStore.put({ bytes: snapshot, sha256: hash });
+    await restoreHostedWorkspaceRuntimeJobWorkspace({ vaultRoot: restoredRoot,
+      platform: { ...createPlatform({ artifactBytesByHash: new Map([[hash, snapshot]]), mailboxPort: null, workspacePort: null }), artifactStore, logPort: null, mediaStore: store.mediaStore },
+      workspace: createWorkspaceState({ snapshotRef: createSnapshotFixtureRef({ hash, size: snapshot.byteLength }) }) });
+    for (const target of [restoredRoot, path.join(root, "receipt-only")]) {
+      if (target !== restoredRoot) {
+        await initializeVault({ vaultRoot: target, timezone: "UTC" });
+        for (const persistence of receipts) await applyHostedCanonicalWriteReceiptWithMedia({ receipt: persistence.receipt, vaultRoot: target,
+          readPayload: async ref => persistence.payloads.find(payload => payload.sha256 === ref.sha256)?.bytes ?? null });
+      }
+      const shown = await showMealRecord(target, meal.mealId);
+      const attachments = shown.entity.data.attachments;
+      assert.ok(Array.isArray(attachments));
+      const selected = attachments.find(attachment => attachment.role === (expired ? "photo_thumbnail" : "photo"));
+      assert.ok(selected && typeof selected.relativePath === "string");
+      const bytes = await readFile(path.join(target, selected.relativePath));
+      expect(createHash("sha256").update(bytes).digest("hex")).toBe(selected.sha256);
+      expect([...bytes.subarray(0, expired ? 2 : 4)]).toEqual(expired ? [255, 216] : [137, 80, 78, 71]);
+      if (!expired) await expect(removeAutomaticMealPhotoRecord({ vault: target, lookup: meal.mealId })).resolves.toBeDefined();
+    }
+    expect(store.getCalls).toEqual([]);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

@@ -30,6 +30,7 @@ import {
   archiveClosedEventLedgerShards,
   archiveClosedIntegrationIngestShards,
   runGeneratedImageCaptureRetention,
+  runMealPhotoMaintenance,
   type ArchiveClosedEventLedgerShardsResult,
   type ArchiveClosedIntegrationIngestShardsResult,
   type RunGeneratedImageCaptureRetentionResult,
@@ -75,7 +76,7 @@ export const HOSTED_INBOX_RETENTION_FAILURE_RETRY_DELAY_MS = 60 * 60 * 1000;
 const HOSTED_INBOX_RETENTION_BLOCKED_RECHECK_MS = 24 * 60 * 60 * 1000;
 
 export interface HostedInboxRetentionIssue {
-  stage: "pending_inputs" | "transcripts" | "media" | "generated_images" | "envelope_migration" | "text";
+  stage: "pending_inputs" | "transcripts" | "media" | "generated_images" | "meal_photos" | "envelope_migration" | "text";
   outcome: "failed" | "blocked";
   errorCode?: string;
   legacyCapturesSkipped?: number;
@@ -194,6 +195,9 @@ export async function runHostedIdleCheckpointMaintenance(input: {
           retentionWake,
           resolveInboxMediaRetentionWake(retentionResult),
         );
+        retentionStage = "meal_photos";
+        retentionWake = mergeInboxRetentionWakes(retentionWake,
+          await maintainMealPhotos(input, vaultRoot, abortController.signal));
         retentionStage = "generated_images";
         const generatedImageRetentionMaxCaptures =
           input.generatedImageRetentionMaxCaptures === undefined
@@ -502,6 +506,23 @@ async function recordIdleCompactionUsage(input: {
     // A failed telemetry write must not discard later measured operations.
     await recordUsage(record).catch(() => undefined);
   }
+}
+
+async function maintainMealPhotos(
+  input: Parameters<typeof runHostedIdleCheckpointMaintenance>[0], vaultRoot: string, signal: AbortSignal,
+): Promise<HostedIdleMaintenanceWake> {
+  if (input.generatedImageRetentionMaxCaptures === 0) return {};
+  const maintain = () => runMealPhotoMaintenance({ vaultRoot, signal, maxMeals: input.pendingWork ? 1 : 10,
+    materializeCandidatePaths: input.materializeRetentionCandidatePaths, protectedStoredPaths: input.protectedStoredPaths });
+  const meals = input.persistGeneratedImageRetention
+    ? await input.persistGeneratedImageRetention(maintain) : await maintain();
+  if (meals.thumbnailCount || meals.retiredPhotoCount || meals.blockedMealCount) {
+    emitHostedExecutionStructuredLog({ component: "runtime", phase: "checkpoint", level: "info", userId: input.memberId,
+      message: "Meal photo maintenance completed.",
+      details: { mealPhotoThumbnailsCreated: meals.thumbnailCount, mealFullPhotosRetired: meals.retiredPhotoCount,
+        mealPhotoBackfillBlocked: meals.blockedMealCount, mealPhotoBackfillHasMore: meals.hasMore } });
+  }
+  return meals.hasMore ? resolveInboxMediaRetentionImmediateWake() : resolveAssistantTranscriptRetentionWake(meals.nextEligibleAt);
 }
 
 function emitGeneratedImageRetentionBlockedLog(input: {

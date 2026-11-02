@@ -230,6 +230,7 @@ interface RecordInboxDocumentDefaultPromotionInput
 }
 
 interface AddMealInput {
+  photoCapturedAt?: DateInput;
   name?: string;
   uploadId?: string;
   vaultRoot: string;
@@ -6374,7 +6375,12 @@ export async function importDocument({
   });
 }
 
+function mealPhotoCaptureTime(photoPath: string | undefined, capturedAt: DateInput | undefined): string | undefined {
+  return photoPath ? new Date(capturedAt ?? new Date()).toISOString() : undefined;
+}
+
 export async function addMeal({
+  photoCapturedAt,
   uploadId,
   vaultRoot,
   mealId: requestedMealId,
@@ -6463,6 +6469,7 @@ export async function addMeal({
     fields: {
       mealId,
       uploadId,
+      photoCapturedAt: mealPhotoCaptureTime(photoPath, photoCapturedAt),
       ingredients: normalizedIngredients,
       nutrition: normalizedNutrition,
     },
@@ -6487,6 +6494,7 @@ export async function addMeal({
         provenance: {
           eventId,
           lookupId: mealId,
+          photoCapturedAt: eventSeed.fields?.photoCapturedAt ?? null,
           occurredAt: eventSeed.occurredAt,
           note: eventSeed.note ?? null,
         },

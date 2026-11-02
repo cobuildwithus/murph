@@ -67,3 +67,5 @@ export * from "./operator-task-control.ts";
 export * from "./routes.ts";
 export * from "./return-contact.ts";
 export * from "./side-effects.ts";
+
+export { createHostedMediaReferenceId } from "./media-reference.ts";
