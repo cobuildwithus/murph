@@ -61,3 +61,11 @@ The repository-tool full run passed 880 tests and failed 28: one obsolete packag
 Product UX: retired local install links and instructions are removed; hosted signup and account routes remain. Hosted channel/onboarding behavior is covered by the preserved runtime contracts. Source readback confirms hosted sections remain; rendered readback and focused real-Codex proof remain pending.
 
 Full runner assembly passed: CLI total 9,532,087 bytes, startup closure 19,857 bytes (33,200 budget); runner entry 77,854 bytes, static boot closure 2,014,162 bytes versus recorded 2,047,343 baseline (-33,181 bytes), 22 chunks, total 12,430,391 bytes. Exact origin/main bundle delta is deferred to final measurement.
+
+### Slice 3 in progress
+
+Moved the four hosted onboarding handlers and their tests into the CLI owner. Removed local assistant wrappers, root aliases, and continuous polling loop. Retained the single-pass implementation verbatim and converted shared maintenance/cron tests to exercise it directly.
+
+Slice 3 checks: pnpm install, CLI generators, pnpm build, CLI/engine/runtime/Cloudflare typechecks, workspace boundaries/cycles, dependency guard and no-js passed. Automation tests passed 177 before removing two loop-only signal tests; subsequent pass coverage passed. CLI onboarding handler and built resume-context tests passed. Compact-surface tests passed 24; artifact/routing focused tests passed 12; repo workspace/release checks passed 61. Full CLI tests continue, with obsolete root-route assertions corrected. docs:drift passed after the index update.
+
+Real-Codex proof passed: one provider request and one exact meal read through the built CLI, no retired command, canonical vault unchanged, no outbox intent; reply accurately reported the synthetic meal and recorded 347 calories / 19 grams protein.

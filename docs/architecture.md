@@ -41,7 +41,6 @@ repo/
     health-commons/
     assistant-engine/
     operator-config/
-    assistant-cli/
     assistant-runtime/
     gateway-core/
     cloudflare-hosted-control/
@@ -79,7 +78,6 @@ repo/
 - `packages/health-commons` owns the public Health Commons for biomarker, Goal guide, measurement-method, source, and source-person pages, plus build-time catalog generation and scoped runtime artifacts consumed by local and hosted surfaces.
 - `packages/assistant-engine` owns headless assistant execution, provider-turn runtime, assistant state/outbox/status/store surfaces, automation, the assistant input spine, and assistant-specific vault/inbox/knowledge tools.
 - `packages/operator-config` owns persisted operator defaults, hosted assistant config, assistant backend target normalization, hosted provider/config helpers, setup/runtime-env helpers, device/channel readiness helpers, and shared CLI/setup contracts.
-- `packages/assistant-cli` owns CLI-only assistant wrappers, assistant commands, foreground terminal logging.
 - `packages/assistant-runtime` owns the headless hosted runtime surface that runs bounded hosted inbox/bootstrap/assistant/outbox/device-sync workspace invocations behind an injected hosted platform context.
 - `packages/gateway-core` owns the published transport-neutral gateway contracts, route helpers, and opaque ids.
 - `packages/cloudflare-hosted-control` owns private Cloudflare processing/status/browser-vault control contracts shared between hosted web and Cloudflare without widening `packages/hosted-execution`.

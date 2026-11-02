@@ -210,7 +210,6 @@ describe("release verification executable lanes", () => {
         ],
         "platform-b": [
           "packages/core",
-          "packages/assistant-cli",
           "packages/contracts",
           "packages/clinical-records",
           "packages/device-syncd",

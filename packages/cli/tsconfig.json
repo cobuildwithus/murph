@@ -26,9 +26,6 @@
       "path": "../operator-config"
     },
     {
-      "path": "../assistant-cli"
-    },
-    {
       "path": "../core/tsconfig.build.json"
     },
     {

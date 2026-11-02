@@ -95,10 +95,6 @@ assert(
   packageJson.dependencies?.['@murphai/exercise-library'] === 'workspace:*',
   'package.json must depend on @murphai/exercise-library so the published @murphai/murph package ships the public exercise catalog.',
 )
-assert(
-  packageJson.dependencies?.['@murphai/assistant-cli'] === 'workspace:*',
-  'package.json must depend on @murphai/assistant-cli so the published @murphai/murph shell can delegate assistant UI and daemon-aware wrappers cleanly.',
-)
 
 assert(
   packageJson.main === './dist/index.js',
@@ -281,10 +277,6 @@ assert(
 assert(
   tsconfig.references?.some((reference) => reference.path === '../vault-inbox') !== true,
   'tsconfig.json must not keep a ../vault-inbox reference after collapsing to the assistant-engine owner.',
-)
-assert(
-  tsconfig.references?.some((reference) => reference.path === '../assistant-cli') === true,
-  'tsconfig.json must reference ../assistant-cli so the published shell can build against the assistant transport package.',
 )
 
 assert(

@@ -21,7 +21,7 @@ import type {
   DeviceSyncServices,
 } from './device-services.js'
 import { ensureCliVaultServices } from './device-services.js'
-import { registerAssistantCommands } from '@murphai/assistant-cli/commands/assistant'
+import { registerAssistantOnboardingCommands } from './commands/assistant-onboarding.js'
 import { registerAuditCommands } from './commands/audit.js'
 import { registerAutomationCommands } from './commands/automation.js'
 import {
@@ -527,9 +527,9 @@ export const vaultCliCommandDescriptors = [
   {
     id: 'assistant',
     bindingMode: 'indirect',
-    rootCommandNames: ['assistant', 'run', 'status', 'doctor', 'stop'],
-    register({ cli, services, inboxServices }) {
-      registerAssistantCommands(cli, inboxServices, services)
+    rootCommandNames: ['assistant'],
+    register({ cli, services }) {
+      registerAssistantOnboardingCommands(cli, services)
     },
   },
   {

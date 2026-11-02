@@ -74,7 +74,6 @@ Only four packages are published to npm: `@murphai/murph`, `@murphai/contracts`,
 | `packages/device-syncd`      | Workspace-private local wearable/device OAuth, webhook, and reconcile daemon.                                                              |
 | `packages/assistant-engine`  | Workspace-private headless assistant execution/runtime owner.                                                                              |
 | `packages/operator-config`   | Workspace-private operator config, setup/runtime-env, and hosted assistant config owner.                                                   |
-| `packages/assistant-cli`     | Workspace-private CLI-only assistant wrappers, commands, and terminal logging.                                                |
 | `packages/gateway-core`      | Headless transport-neutral gateway boundary.                                                                                               |
 | `packages/assistant-runtime` | Workspace-private headless hosted execution surface used by Cloudflare runner paths.                                                       |
 | `packages/cli`               | The published `@murphai/murph` package, exposing the `vault-cli` binary and the main operator surface.                         |

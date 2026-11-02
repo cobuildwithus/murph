@@ -171,7 +171,7 @@ pnpm --dir packages/cli gen:config-schema
 
 ## Maintainer notes
 
-The package exports only the root CLI runtime entrypoint and exposes the `vault-cli` binary. Assistant helper APIs stay in workspace-private owner packages such as `@murphai/assistant-cli` and are bundled into the public tarball when the CLI runtime needs them.
+The package exports only the root CLI runtime entrypoint and exposes the `vault-cli` binary. Assistant helper APIs stay in workspace-private owner packages such as `@murphai/assistant-engine` and are bundled into the public tarball when the CLI runtime needs them.
 
 Machine-facing callers should rely on incur's native envelope via `--full-output --format json` instead of a Murph-specific wrapper contract.
 
@@ -182,7 +182,7 @@ Current repo-local package responsibilities include:
 - device command surfaces that delegate to headless owner packages
 - release ownership for the public `@murphai/murph` package and bins
 
-Programmatic assistant and shared usecase APIs now stay in workspace-private owner packages such as `@murphai/assistant-cli`, `@murphai/assistant-engine`, and `@murphai/operator-config`. The public npm install story is still `@murphai/murph`; the release flow bundles those private owners into the CLI tarball instead of publishing them as separate npm products.
+Programmatic assistant and shared usecase APIs now stay in workspace-private owner packages such as `@murphai/assistant-engine`, and `@murphai/operator-config`. The public npm install story is still `@murphai/murph`; the release flow bundles those private owners into the CLI tarball instead of publishing them as separate npm products.
 
 ## Release flow
 

@@ -23,7 +23,6 @@ export const PACKAGE_COVERAGE_PLAN = Object.freeze([
   // Core, Device Sync, Query, and Vault dominate platform-b; the smaller owners
   // fill platform-a.
   { dir: "packages/core", shard: "platform-b" },
-  { dir: "packages/assistant-cli", shard: "platform-b" },
   { dir: "packages/cloudflare-hosted-control", shard: "platform-a" },
   { dir: "packages/contracts", shard: "platform-b" },
   { dir: "packages/clinical-records", shard: "platform-b" },

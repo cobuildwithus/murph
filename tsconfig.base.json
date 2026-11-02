@@ -333,15 +333,6 @@
       "@murphai/parsers/*": [
         "./packages/parsers/src/*.ts"
       ],
-      "@murphai/assistant-cli/commands/assistant": [
-        "./packages/assistant-cli/src/commands/assistant.ts"
-      ],
-      "@murphai/assistant-cli/run-terminal-logging": [
-        "./packages/assistant-cli/src/run-terminal-logging.ts"
-      ],
-      "@murphai/assistant-cli/*": [
-        "./packages/assistant-cli/src/*.ts"
-      ],
         "@murphai/assistant-runtime": [
         "./packages/assistant-runtime/src/index.ts"
       ],

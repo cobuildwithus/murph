@@ -1674,3 +1674,5 @@ Meal dish naming and photo-retention investigation are tracked in
 Legacy meal naming repair and shared write validation are tracked in
 [the active plan](exec-plans/active/2026-11-02-meal-legacy-names.md);
 `product-specs/ios-meals.md` owns its bounds, preservation and removal condition.
+
+Local product retirement: the CLI owns hosted onboarding; verification inventories exclude the retired setup and assistant wrapper packages.

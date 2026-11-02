@@ -62,7 +62,7 @@ test('lazy route table accounts for every full manifest root command', async () 
 
   assert.deepEqual(unaccountedRootCommands, [])
 
-  for (const root of ['assistant', 'run', 'status', 'doctor', 'stop'] as const) {
+  for (const root of ['assistant'] as const) {
     assert.deepEqual(classifyVaultCliInvocation([root]), {
       kind: 'scoped',
       root,

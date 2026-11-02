@@ -62,7 +62,6 @@
     "@junction-api/sdk": "1.2.0",
     "@linqapp/sdk": "0.34.0",
     "@modelcontextprotocol/server": "2.0.0-alpha.4",
-    "@murphai/assistant-cli": "workspace:*",
     "@murphai/assistant-engine": "workspace:*",
     "@murphai/clinical-records": "workspace:*",
     "@murphai/contracts": "workspace:*",
@@ -100,7 +99,6 @@
     "typescript": "^7.0.2"
   },
   "bundleDependencies": [
-    "@murphai/assistant-cli",
     "@murphai/assistant-engine",
     "@murphai/clinical-records",
     "@murphai/core",

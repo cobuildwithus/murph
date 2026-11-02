@@ -62,9 +62,6 @@
       "path": "./packages/parsers"
     },
     {
-      "path": "./packages/assistant-cli"
-    },
-    {
       "path": "./packages/cli"
     },
     {

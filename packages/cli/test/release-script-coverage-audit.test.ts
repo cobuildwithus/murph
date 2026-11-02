@@ -43,14 +43,6 @@ const cliPackageJson = JSON.parse(
   scripts?: Record<string, string>
   version?: string
 }
-const assistantCliPackageJson = JSON.parse(
-  readFileSync(
-    path.join(repoRoot, 'packages', 'assistant-cli', 'package.json'),
-    'utf8',
-  ),
-) as {
-  dependencies?: Record<string, string>
-}
 const auditOutputMaxBufferBytes = 16 * 1024 * 1024
 
 type BrowserCommand = {
@@ -4722,7 +4714,6 @@ exit 1
     expect(summary.packages).toContainEqual(expect.objectContaining({
       bundledExternalDependencies: ['incur'],
       bundledWorkspaceDependencies: expect.arrayContaining([
-        '@murphai/assistant-cli',
         '@murphai/assistant-engine',
         '@murphai/clinical-records',
         '@murphai/core',
@@ -4853,7 +4844,6 @@ exit 1
     expect(cliPackageJson.bundleDependencies).toContain('@murphai/vault-usecases')
     expect(cliPackageJson.bundleDependencies).toContain('@murphai/messaging-ingress')
     expect(cliPackageJson.dependencies?.incur).toBe('0.5.1')
-    expect(assistantCliPackageJson.dependencies?.incur).toBe('0.5.1')
     expect(cliPackageJson.dependencies?.['@cfworker/json-schema']).toBe('^4.1.1')
     expect(cliPackageJson.dependencies?.['@modelcontextprotocol/server']).toBe('2.0.0-alpha.4')
     expect(cliPackageJson.dependencies?.['@scalar/openapi-types']).toBe('^0.8.0')

@@ -482,40 +482,6 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
-  packages/assistant-cli:
-    dependencies:
-      '@murphai/assistant-engine':
-        specifier: workspace:*
-        version: link:../assistant-engine
-      '@murphai/contracts':
-        specifier: workspace:*
-        version: link:../contracts
-      '@murphai/hosted-execution':
-        specifier: workspace:*
-        version: link:../hosted-execution
-      '@murphai/inbox-services':
-        specifier: workspace:*
-        version: link:../inbox-services
-      '@murphai/operator-config':
-        specifier: workspace:*
-        version: link:../operator-config
-      '@murphai/runtime-state':
-        specifier: workspace:*
-        version: link:../runtime-state
-      '@murphai/vault-usecases':
-        specifier: workspace:*
-        version: link:../vault-usecases
-      incur:
-        specifier: 0.5.1
-        version: 0.5.1(patch_hash=176de4224f3882268de92c7a86ff6ae0b56834d12bb90bf72dedeeef22e682d9)
-    devDependencies:
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-      vitest:
-        specifier: ^4.1.6
-        version: 4.1.6(@opentelemetry/api@1.9.1)(@types/node@25.6.2)(@vitest/coverage-v8@4.1.6)(msw@2.14.6(@types/node@25.6.2)(typescript@7.0.2))(vite@8.1.6(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))
-
   packages/assistant-engine:
     dependencies:
       '@murphai/clinical-records':
@@ -639,9 +605,6 @@ importers:
       '@modelcontextprotocol/server':
         specifier: 2.0.0-alpha.4
         version: 2.0.0-alpha.4
-      '@murphai/assistant-cli':
-        specifier: workspace:*
-        version: link:../assistant-cli
       '@murphai/assistant-engine':
         specifier: workspace:*
         version: link:../assistant-engine

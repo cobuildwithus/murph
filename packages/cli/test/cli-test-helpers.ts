@@ -90,15 +90,15 @@ const forwardedCliEnvKeys = [
 ] as const
 const assistantCommandSourcePath = path.join(
   repoRoot,
-  'packages/assistant-cli/src/commands/assistant.ts',
+  'packages/cli/src/commands/assistant-onboarding.ts',
 )
 const assistantCommandJavaScriptPath = path.join(
   repoRoot,
-  'packages/assistant-cli/dist/commands/assistant.js',
+  'packages/cli/dist/commands/assistant-onboarding.js',
 )
 const assistantCommandDeclarationPath = path.join(
   repoRoot,
-  'packages/assistant-cli/dist/commands/assistant.d.ts',
+  'packages/cli/dist/commands/assistant-onboarding.d.ts',
 )
 const requiredRuntimeArtifactPaths = [
   path.join(repoRoot, 'packages/contracts/dist/index.js'),

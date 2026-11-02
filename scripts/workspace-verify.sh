@@ -103,7 +103,6 @@ readonly typecheck_package_dirs=(
   "packages/cloudflare-hosted-control"
   "packages/operator-config"
   "packages/assistant-engine"
-  "packages/assistant-cli"
   "packages/core"
   "packages/importers"
   "packages/device-syncd"
@@ -1737,7 +1736,6 @@ run_test_diff() {
 }
 
 run_verify_cli() {
-  run_timed_step "Assistant CLI typecheck" pnpm --dir "packages/assistant-cli" typecheck || return $?
   run_timed_step "CLI package typecheck" pnpm --dir "packages/cli" typecheck || return $?
   run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts || return $?
   run_timed_step \

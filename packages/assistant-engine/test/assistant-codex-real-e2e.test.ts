@@ -1992,6 +1992,7 @@ describeRealCodex('real model canonical production journeys', () => {
       })
       expect(providerRequests).toBeGreaterThan(0)
       const commands = (await readFile(commandLogPath, 'utf8')).trim().split('\n').filter(Boolean)
+      expect(commands.some((command) => /^(?:onboard|use|model|run|status|doctor|stop|assistant (?:ask|chat|deliver|run|status|doctor|stop|session|self-target))\b/u.test(command))).toBe(false)
       expect(commands.filter((command) => command.startsWith(`meal show ${meal.mealId}`)
         && !isRecordedVaultHelpCommand(command))).toHaveLength(1)
       const reads = readCapabilityRoutingActions(result.jsonEvents).filter((action) =>

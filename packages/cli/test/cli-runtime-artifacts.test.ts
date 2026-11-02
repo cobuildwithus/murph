@@ -7,11 +7,13 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, test, vi } from 'vitest'
 
 const fixture = vi.hoisted(() => ({ root: '', builds: 0, failBuild: false }))
-const commandSuffix = '/packages/assistant-cli/'
+const commandSuffix = '/packages/cli/'
 
 function fixturePath(value: string): string | undefined {
   const offset = value.indexOf(commandSuffix)
-  return offset < 0 ? undefined : path.join(fixture.root, value.slice(offset + commandSuffix.length))
+  if (offset < 0) return undefined
+  const relative = value.slice(offset + commandSuffix.length)
+  return (relative.includes('commands/assistant-onboarding.') || relative === 'dist/commands') ? path.join(fixture.root, relative) : undefined
 }
 
 vi.mock('node:fs', async (importOriginal) => {
@@ -50,8 +52,8 @@ vi.mock('node:child_process', async (importOriginal) => {
             callback(new Error('Synthetic compiler failure'))
             return
           }
-          writeFileSync(path.join(fixture.root, 'dist/commands/assistant.js'), readFileSync(path.join(fixture.root, 'src/commands/assistant.ts')))
-          writeFileSync(path.join(fixture.root, 'dist/commands/assistant.d.ts'), 'export declare const result: string\n')
+          writeFileSync(path.join(fixture.root, 'dist/commands/assistant-onboarding.js'), readFileSync(path.join(fixture.root, 'src/commands/assistant-onboarding.ts')))
+          writeFileSync(path.join(fixture.root, 'dist/commands/assistant-onboarding.d.ts'), 'export declare const result: string\n')
         } else {
           assert.deepEqual(args, ['exec', 'node', '--import=tsx', 'packages/cli/scripts/verify-package-shape.ts'])
         }
@@ -73,15 +75,15 @@ async function writeCommand(source: string, built: string) {
     mkdirSync(path.join(fixture.root, directory), { recursive: true })
   }
   writeFileSync(path.join(fixture.root, 'package.json'), '{"type":"module"}')
-  writeFileSync(path.join(fixture.root, 'src/commands/assistant.ts'), `export const result = ${JSON.stringify(source)}\n`)
-  writeFileSync(path.join(fixture.root, 'dist/commands/assistant.js'), `export const result = ${JSON.stringify(built)}\n`)
-  writeFileSync(path.join(fixture.root, 'dist/commands/assistant.d.ts'), 'export declare const result: string\n')
-  await utimes(path.join(fixture.root, 'dist/commands/assistant.js'), 100, 100)
-  await utimes(path.join(fixture.root, 'src/commands/assistant.ts'), 200, 200)
+  writeFileSync(path.join(fixture.root, 'src/commands/assistant-onboarding.ts'), `export const result = ${JSON.stringify(source)}\n`)
+  writeFileSync(path.join(fixture.root, 'dist/commands/assistant-onboarding.js'), `export const result = ${JSON.stringify(built)}\n`)
+  writeFileSync(path.join(fixture.root, 'dist/commands/assistant-onboarding.d.ts'), 'export declare const result: string\n')
+  await utimes(path.join(fixture.root, 'dist/commands/assistant-onboarding.js'), 100, 100)
+  await utimes(path.join(fixture.root, 'src/commands/assistant-onboarding.ts'), 200, 200)
 }
 
 function builtResult(): string {
-  return execFileSync(process.execPath, ['--input-type=module', '-e', 'import { result } from "./dist/commands/assistant.js"; process.stdout.write(result)'], { cwd: fixture.root, encoding: 'utf8' })
+  return execFileSync(process.execPath, ['--input-type=module', '-e', 'import { result } from "./dist/commands/assistant-onboarding.js"; process.stdout.write(result)'], { cwd: fixture.root, encoding: 'utf8' })
 }
 
 describe.sequential('built assistant command artifacts', () => {
@@ -111,7 +113,7 @@ describe.sequential('built assistant command artifacts', () => {
 
   test('reuses an importable current command without rebuilding', async () => {
     await writeCommand('current', 'current')
-    await utimes(path.join(fixture.root, 'dist/commands/assistant.js'), 300, 300)
+    await utimes(path.join(fixture.root, 'dist/commands/assistant-onboarding.js'), 300, 300)
     const { ensureCliRuntimeArtifacts } = await import('./cli-test-helpers.js')
     await ensureCliRuntimeArtifacts()
     await ensureCliRuntimeArtifacts()
@@ -119,7 +121,7 @@ describe.sequential('built assistant command artifacts', () => {
     assert.equal(fixture.builds, 0)
   })
 
-  test.each(['assistant.js', 'assistant.d.ts'])('repairs missing %s even in a prepared runtime', async (file) => {
+  test.each(['assistant-onboarding.js', 'assistant-onboarding.d.ts'])('repairs missing %s even in a prepared runtime', async (file) => {
     vi.stubEnv('MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS', '1')
     const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
     await actual.rm(path.join(fixture.root, 'dist/commands', file))
