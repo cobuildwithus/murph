@@ -2460,6 +2460,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
   // request's route timestamp. The two bounded ids correlate one Web direct
   // ensure with the runtime invocation it launched.
   orchestration?: {
+    ingressConversationIsGroup?: boolean;
     temporalActivityStartedAtEpochMs?: number;
     temporalActivityRequestStartedAtEpochMs?: number;
     tokenAcquireStartedAtEpochMs?: number;
@@ -2894,6 +2895,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
   readonly string[]
 > = {
   orchestration: [
+    "ingressConversationIsGroup",
     "temporalActivityStartedAtEpochMs",
     "temporalActivityRequestStartedAtEpochMs",
     "tokenAcquireStartedAtEpochMs",
@@ -3092,6 +3094,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
 
 export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
   [
+    "orchestration.ingressConversationIsGroup",
     "orchestration.activeFenceTargetWasPriorVersion",
     "orchestration.activeWakeAccepted",
     "orchestration.activeWakeFoundNoActiveChild",

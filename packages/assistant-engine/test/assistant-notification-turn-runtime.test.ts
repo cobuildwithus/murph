@@ -455,6 +455,31 @@ test.each([
   expect(providerPrompt).not.toContain('2026-07-30T14:00:00.000Z')
 })
 
+test.each(['linq', 'telegram'] as const)('group %s notifications deliver with a null typing indicator', async (channel) => {
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience = {
+    ...sharedPlan.conversationPolicy.audience, channel, threadIsDirect: false,
+    threadId: 'synthetic-group', bindingDelivery: { kind: 'thread', target: 'synthetic-group' },
+  }
+  const { mocks, deliverMessage, sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+    realChannelTyping: true, sharedPlan, turnId: 'synthetic-group-notification',
+    providerResult: createProviderResult({ response: JSON.stringify({
+      kind: 'send_message', privateSummary: 'Synthetic summary.', text: 'Synthetic reminder.',
+    }) }),
+  })
+  const startTyping = vi.fn(async () => undefined)
+  await sendAssistantNotificationLocal({
+    instructions: 'Send the scheduled group reminder.', vault: '/vaults/test',
+    deliveryIdempotencyKey: 'synthetic-group-notification',
+    executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [],
+      channelTypingDependencies: { startLinqTyping: startTyping, startTelegramTyping: startTyping },
+    } },
+  })
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
+  expect(deliverMessage).toHaveBeenCalledOnce()
+  expect(startTyping).not.toHaveBeenCalled()
+})
+
 test('sendAssistantNotificationLocal persists the turn before outbound delivery and forwards the dedupe token', async () => {
   const persistedBeforeOutbound: string[] = []
   const traceEvents: unknown[] = []
@@ -553,10 +578,12 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
         recordEvent: vi.fn(async () => undefined),
       },
     })),
-    executeCodexTurnWithRecovery: vi.fn(async () => ({
-      kind: 'succeeded',
-      providerTurn: providerResult,
-    })),
+    executeCodexTurnWithRecovery: vi.fn(async (providerInput: Parameters<typeof executeCodexTurnWithRecovery>[0]) => {
+      expect(startTypingIndicator).not.toHaveBeenCalled()
+      await providerInput.onProviderRequestStarted?.({ startedAt: new Date().toISOString(), providerRequestOrdinal: 0 })
+      await providerInput.onProviderRequestStarted?.({ startedAt: new Date().toISOString(), providerRequestOrdinal: 1 })
+      return { kind: 'succeeded', providerTurn: providerResult }
+    }),
     normalizeAssistantExecutionContext: vi.fn((value) => value),
     resolveAssistantExecutionDefaultTarget: vi.fn((input) =>
       input.executionContext?.hosted?.defaultTarget ?? input.fallbackTarget,
@@ -2410,6 +2437,7 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
       assert.equal(input.input.serviceTier, 'flex')
       assert.equal(input.input.workingDirectory, undefined)
       assert.equal(input.progressDelivery, null)
+      await input.onProviderRequestStarted?.({ startedAt: new Date().toISOString(), providerRequestOrdinal: 0 })
       return {
         kind: 'succeeded',
         providerTurn: providerResult,
@@ -6317,6 +6345,7 @@ function createSharedPlan(): AssistantTurnSharedPlan {
 }
 
 async function loadNotificationTurnHarness(input: {
+  realChannelTyping?: boolean
   onExecuteCodexTurnWithRecovery?: (
     providerInput: NotificationTurnProviderInput,
   ) => Promise<AssistantCodexTurnRecoveryOutcome>
@@ -6372,13 +6401,16 @@ async function loadNotificationTurnHarness(input: {
       },
     })),
     executeCodexTurnWithRecovery: vi.fn(
-      async (providerInput: NotificationTurnProviderInput) =>
-        input.onExecuteCodexTurnWithRecovery
-          ? await input.onExecuteCodexTurnWithRecovery(providerInput)
-          : input.providerOutcome ?? {
-              kind: 'succeeded' as const,
-              providerTurn: input.providerResult,
-            },
+      async (providerInput: NotificationTurnProviderInput) => {
+        if (input.onExecuteCodexTurnWithRecovery) {
+          return await input.onExecuteCodexTurnWithRecovery(providerInput)
+        }
+        await providerInput.onProviderRequestStarted?.({ startedAt: new Date().toISOString(), providerRequestOrdinal: 0 })
+        return input.providerOutcome ?? {
+          kind: 'succeeded' as const,
+          providerTurn: input.providerResult,
+        }
+      },
     ),
     clearAssistantSessionCodexResumeState: vi.fn(
       async (clearInput: { session: AssistantSession }) => clearInput.session,
@@ -6475,7 +6507,9 @@ async function loadNotificationTurnHarness(input: {
       createAssistantTurnId: () => input.turnId,
     }
   })
-  vi.doMock('../src/assistant/channel-typing.js', () => ({
+  vi.doMock('../src/assistant/channel-typing.js', async (importOriginal) => input.realChannelTyping
+    ? await importOriginal<typeof import('../src/assistant/channel-typing.ts')>()
+    : ({
     assistantDeliveryOutcomeSupersedesTypingIndicator: (kind: string | null) =>
       kind === 'sent' || kind === 'queued',
     startAssistantChannelTypingIndicator:

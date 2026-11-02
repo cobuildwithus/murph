@@ -2438,7 +2438,11 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   operational Resend sender and `HostedLinqAlert` retry ledger. It carries the
   Web route receipt time and optional early ingress typing acceptance on the
   existing ingress trace, compares first accepted typing against the warm
-  2.5-second or cold 7-second cutoff, and creates one immutable alert per trace.
+  3-second or cold 8-second cutoff, and creates one immutable alert per trace.
+  Direct turns start typing when the model request fires (`turn/start`); direct Linq media
+  may start during preparation. Groups type only while a finished message draft
+  is held for sending; no-reply and reaction-only drafts stay silent. Web stamps ingress group
+  directness with the deferred webhook receipt so the typing monitor excludes queued groups.
   Runtime typing/restore callbacks and the existing alert cron trigger bounded
   asynchronous evaluation. The detailed classification, missing-evidence,
   recovery, and retention rules live in `agent-docs/RELIABILITY.md`. The progress

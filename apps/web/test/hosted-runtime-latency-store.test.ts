@@ -3183,6 +3183,7 @@ function createLatencyWritePrisma(input: {
         mailboxLaneSeq,
         _ingressTypingAcceptedAt,
         _webhookReceivedAt,
+        _phaseBreakdownJson,
         acceptedAt,
       ] = values;
       trace = createMutableLatencyTrace({

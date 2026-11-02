@@ -5,6 +5,7 @@ import {
   type AssistantChannelActivityHandle,
   type AssistantChannelDependencies,
 } from './channel-adapters.js'
+import { resolveAssistantConversationScope } from './conversation-policy.js'
 import {
   type AssistantCurrentAudienceDeliveryPrecedence,
   resolveAssistantCurrentAudienceDeliveryFields,
@@ -21,13 +22,17 @@ const ASSISTANT_TYPING_STOP_WAIT_MS = 2_000
 export function startAssistantChannelTypingIndicator(input: {
   channelDependencies?: AssistantChannelDependencies | null
   input: AssistantMessageInput
+  // Only the held message draft path may opt into group typing.
+  heldGroupReply?: true
   precedence?: AssistantCurrentAudienceDeliveryPrecedence
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
 }): (AssistantChannelActivityHandle & {
   recordAcceptedInputs: (acceptedInputIds: readonly string[]) => void
 }) | null {
-  if (input.input.deliverResponse !== true) {
+  if (input.input.deliverResponse !== true
+    || (resolveAssistantConversationScope(input.sharedPlan.conversationPolicy.audience) === 'group'
+      && input.heldGroupReply !== true)) {
     return null
   }
 

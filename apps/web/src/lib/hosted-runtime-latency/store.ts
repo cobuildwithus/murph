@@ -212,6 +212,7 @@ export interface HostedIngressLatencyDashboard {
 }
 
 export async function recordHostedIngressAcceptedFromMailboxItem(input: {
+  conversationIsGroup?: boolean;
   webhookReceivedAt?: Date;
   ingressTypingAcceptedAt?: Date;
   mailboxItemId: string;
@@ -230,6 +231,7 @@ export async function recordHostedIngressAcceptedFromMailboxItem(input: {
 
   await upsertHostedIngressLatencyTraceFromMailboxItem(prisma, {
     mailboxItem,
+    conversationIsGroup: input.conversationIsGroup,
     webhookReceivedAt: input.webhookReceivedAt,
     ingressTypingAcceptedAt: input.ingressTypingAcceptedAt,
     source,
@@ -239,6 +241,7 @@ export async function recordHostedIngressAcceptedFromMailboxItem(input: {
 }
 
 export async function recordHostedIngressTemporalSignalAccepted(input: {
+  conversationIsGroup?: boolean;
   webhookReceivedAt?: Date;
   ingressTypingAcceptedAt?: Date;
   at?: Date | string | null;
@@ -261,6 +264,7 @@ export async function recordHostedIngressTemporalSignalAccepted(input: {
 
   const trace = await upsertHostedIngressLatencyTraceFromMailboxItem(prisma, {
     mailboxItem,
+    conversationIsGroup: input.conversationIsGroup,
     webhookReceivedAt: input.webhookReceivedAt,
     ingressTypingAcceptedAt: input.ingressTypingAcceptedAt,
     source,
@@ -2286,6 +2290,7 @@ async function upsertHostedIngressLatencyTraceFromMailboxItem(
   input: {
     mailboxItem: NonNullable<Awaited<ReturnType<typeof readTraceMailboxItem>>>;
     source: HostedIngressLatencySource;
+    conversationIsGroup?: boolean;
     webhookReceivedAt?: Date;
     ingressTypingAcceptedAt?: Date;
   },
@@ -2301,6 +2306,7 @@ async function upsertHostedIngressLatencyTraceFromMailboxItem(
       mailbox_lane_seq,
       ingress_typing_accepted_at,
       webhook_received_at,
+      phase_breakdown_json,
       accepted_at,
       created_at,
       updated_at
@@ -2314,6 +2320,9 @@ async function upsertHostedIngressLatencyTraceFromMailboxItem(
       ${input.mailboxItem.laneSeq},
       ${input.ingressTypingAcceptedAt ?? null},
       ${input.webhookReceivedAt ?? null},
+      ${input.conversationIsGroup === undefined ? null : JSON.stringify({
+        schemaVersion: 1, orchestration: { ingressConversationIsGroup: input.conversationIsGroup },
+      })}::jsonb,
       ${input.mailboxItem.acceptedAt},
       CURRENT_TIMESTAMP,
       CURRENT_TIMESTAMP
@@ -2328,8 +2337,16 @@ async function upsertHostedIngressLatencyTraceFromMailboxItem(
     ), webhook_received_at = LEAST(
       hosted_ingress_latency_trace.webhook_received_at,
       EXCLUDED.webhook_received_at
-    )
-    WHERE (EXCLUDED.webhook_received_at IS NOT NULL
+    ), phase_breakdown_json = CASE
+      WHEN EXCLUDED.phase_breakdown_json IS NULL THEN hosted_ingress_latency_trace.phase_breakdown_json
+      ELSE COALESCE(hosted_ingress_latency_trace.phase_breakdown_json, '{"schemaVersion":1}'::jsonb)
+        || jsonb_build_object('orchestration',
+          EXCLUDED.phase_breakdown_json->'orchestration'
+          || COALESCE(hosted_ingress_latency_trace.phase_breakdown_json->'orchestration', '{}'::jsonb))
+      END
+    WHERE (EXCLUDED.phase_breakdown_json IS NOT NULL
+      AND hosted_ingress_latency_trace.phase_breakdown_json #> '{orchestration,ingressConversationIsGroup}' IS NULL)
+      OR (EXCLUDED.webhook_received_at IS NOT NULL
       AND (hosted_ingress_latency_trace.webhook_received_at IS NULL
         OR EXCLUDED.webhook_received_at < hosted_ingress_latency_trace.webhook_received_at))
       OR (EXCLUDED.ingress_typing_accepted_at IS NOT NULL

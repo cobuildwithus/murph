@@ -183,7 +183,9 @@ export function startHostedLinqInputTyping(input: Omit<
     return null;
   }
   if (
-    (context.routeAuthority && context.routeAuthority.threadId !== target)
+    // This is the inbound directness used to build the assistant audience.
+    context.threadIsDirect === false
+    || (context.routeAuthority && context.routeAuthority.threadId !== target)
     || getAssistantChannelAdapter("linq")?.canAutoReply({
       externalThreadRouteAuthorityPresent: context.routeAuthority != null,
       source: "linq",

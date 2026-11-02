@@ -117,6 +117,50 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     });
   });
 
+  it.each((["linq", "telegram"] as const).flatMap(source =>
+    [false, true].flatMap(wakeFails =>
+      [false, true].flatMap(conversationIsGroup =>
+        [false, true].map(traceFails => ({ source, wakeFails, conversationIsGroup, traceFails })),
+      ),
+    ),
+  ))("defers $source receipt and group=$conversationIsGroup without blocking handoff (wakeFails=$wakeFails, traceFails=$traceFails)", async ({ source, wakeFails, conversationIsGroup, traceFails }) => {
+    const tasks: Array<() => Promise<void>> = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const traceWrite = wakeFails
+      ? mocks.recordHostedIngressAcceptedFromMailboxItem
+      : mocks.recordHostedIngressTemporalSignalAccepted;
+    let settle!: () => void;
+    traceWrite.mockImplementationOnce(() => new Promise<undefined>((resolve, reject) => {
+      settle = () => traceFails ? reject(new Error("synthetic trace failure")) : resolve(undefined);
+    }));
+    if (wakeFails) mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(new Error("synthetic signal failure"));
+    const webhookReceivedAt = new Date("2026-09-01T00:00:00.000Z");
+    try {
+      const handoff = maybeHandoffHostedExecutionWebhookWake({
+        response, webhookReceivedAt,
+        scheduleAfterResponse: task => { tasks.push(task); },
+        wakeHandoff: buildWakeHandoff({ source, conversationIsGroup, originalInboundMailboxItemId: "mailbox_original" }),
+      });
+      if (wakeFails) await expect(handoff).rejects.toThrow("synthetic signal failure");
+      else await expect(handoff).resolves.toMatchObject({ signalAccepted: true });
+      expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledOnce();
+      expect(mocks.recordHostedIngressAcceptedFromMailboxItem).not.toHaveBeenCalled();
+      expect(mocks.recordHostedIngressTemporalSignalAccepted).not.toHaveBeenCalled();
+      expect(tasks).toHaveLength(wakeFails ? 1 : 2);
+      const deferredWrite = Promise.all(tasks.map(task => task()));
+      await vi.waitFor(() => expect(traceWrite).toHaveBeenCalledWith(expect.objectContaining({
+        conversationIsGroup, webhookReceivedAt, mailboxItemId: "mailbox_123", source,
+      })));
+      // Even a pending or failed trace cannot change the already-settled handoff.
+      settle();
+      await expect(deferredWrite).resolves.toEqual(tasks.map(() => undefined));
+      expect(warn).toHaveBeenCalledTimes(traceFails ? 1 : 0);
+    } finally {
+      settle?.();
+      warn.mockRestore();
+    }
+  });
+
   for (const wakeFails of [false, true]) {
     it.each([
       { originalInboundMailboxItemId: undefined, answeredMailboxItemIds: ["mailbox_123"] },

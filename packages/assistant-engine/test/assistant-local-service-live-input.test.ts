@@ -60,7 +60,7 @@ import {
 import { executeCodexAssistantTurnAttempt } from '../src/assistant/codex-runtime.ts'
 import { ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION } from '../src/assistant/group-reply-reconsideration.ts'
 
-test('sendAssistantMessageLocal live-steers same-conversation input without provider replay', async () => {
+test.each([false, true])('live-steered input keeps provider-start typing telemetry (direct: %s)', async (direct) => {
   const progressDeliveryDependencies = {
     sendLinq: vi.fn(async () => ({
       providerMessageId: 'linq-progress-message',
@@ -86,11 +86,12 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
       },
       identityId: 'identity-1',
       threadId: 'thread-1',
-      threadIsDirect: false,
+      threadIsDirect: direct,
     },
   })
   const sharedPlan = createSharedPlan()
   sharedPlan.conversationPolicy.audience.channel = 'telegram'
+  sharedPlan.conversationPolicy.audience.threadIsDirect = direct
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     plan: {
       ...sharedPlan,
@@ -121,6 +122,8 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
     },
   )
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    expect(startTelegramTyping).not.toHaveBeenCalled()
+    await providerInput.onProviderRequestStarted?.({ startedAt: new Date().toISOString(), providerRequestOrdinal: 0 })
     const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
       interrupt: async () => undefined,
       codexThreadId: 'provider-thread-active-turn',
@@ -199,7 +202,7 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
       channel: 'telegram',
       identityId: 'identity-1',
       threadId: 'thread-1',
-      directness: 'group',
+      directness: direct ? 'direct' : 'group',
     },
     expectedActiveTurnId: 'turn-1',
     prompt: 'Late follow up',
@@ -209,10 +212,13 @@ test('sendAssistantMessageLocal live-steers same-conversation input without prov
     expect(liveSteeredPrompts).toEqual(['Late follow up'])
   })
   expect(providerBoundInputIds).toEqual([['manual-1']])
-  await vi.waitFor(() => expect(onTypingAccepted).toHaveBeenCalledWith({
-    acceptedInputIds: ['manual-1'], at: expect.any(String), channel: 'telegram',
-  }))
-  expect(startTelegramTyping).toHaveBeenCalledOnce()
+  expect(startTelegramTyping).toHaveBeenCalledTimes(direct ? 1 : 0)
+  if (direct) {
+    expect(onTypingAccepted).toHaveBeenCalledWith(expect.objectContaining({ acceptedInputIds: ['initial'] }))
+    expect(onTypingAccepted).toHaveBeenCalledWith(expect.objectContaining({ acceptedInputIds: ['manual-1'] }))
+  } else {
+    expect(onTypingAccepted).not.toHaveBeenCalled()
+  }
   expect(releaseProviderAcceptedInputs).toHaveBeenCalledOnce()
   providerProgressRequested.resolve()
   await providerProgressDelivered.promise

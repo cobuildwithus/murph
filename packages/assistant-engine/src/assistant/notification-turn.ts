@@ -514,7 +514,7 @@ export async function sendAssistantNotificationLocal(
       const turnCreatedAt = new Date().toISOString()
       const progressDelivery = null
       let committedDeliveryOutcomeKind: AssistantDeliveryOutcome['kind'] | null = null
-      const typingIndicator = startAssistantNotificationTyping({ input, messageInput, executionContext, resolved, sharedPlan })
+      let typingIndicator: ReturnType<typeof startAssistantNotificationTyping> = null
 
       try {
         const notificationProviderRequestStarted =
@@ -532,6 +532,7 @@ export async function sendAssistantNotificationLocal(
           // Adapt the runner's lean start event to the message-input hook
           // shape; notification turns accept no input items.
           onProviderRequestStarted: (event) => {
+            typingIndicator ??= startAssistantNotificationTyping({ input, messageInput, executionContext, resolved, sharedPlan })
             notificationProviderRequestStartedAt = event.startedAt
             return notificationProviderRequestStarted?.({
                   acceptedInputIds: [],

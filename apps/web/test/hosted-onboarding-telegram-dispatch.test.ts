@@ -60,6 +60,7 @@ type TelegramExactRootUnwrapper = (input: TelegramRootReference & {
 
 const mocks = vi.hoisted(() => {
   const state = {
+    recordHostedIngressTemporalSignalAccepted: vi.fn(async () => undefined),
     acceptHostedFamilyInviteFromTelegramTx: vi.fn(),
     activeRootKeyIdsByDomain: new Map<string, string[]>(),
     drainHostedExecutionOutboxBestEffort: vi.fn(),
@@ -244,6 +245,11 @@ const mocks = vi.hoisted(() => {
 
   return state;
 });
+
+vi.mock("@/src/lib/hosted-runtime-latency/store", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-runtime-latency/store")>(),
+  recordHostedIngressTemporalSignalAccepted: mocks.recordHostedIngressTemporalSignalAccepted,
+}));
 
 vi.mock("@/src/lib/hosted-mailbox/store", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-mailbox/store")>(
@@ -673,6 +679,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       update_id: 321,
     });
     const response = await handleHostedOnboardingTelegramWebhook({
+      webhookReceivedAt: new Date("2026-09-01T00:00:00.000Z"),
       prisma,
       rawBody,
       secretToken: "telegram-secret",
@@ -708,6 +715,9 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       expectedUserId: "member_telegram_123",
       mailboxItemId: "mailbox_telegram:update:321",
     });
+    expect(mocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationIsGroup: false, source: "telegram", webhookReceivedAt: expect.any(Date) }),
+    );
     expect(response).not.toHaveProperty("wakeUserId");
     expect(hostedWebhookReceiptCreate).not.toHaveBeenCalled();
     expect(hostedWebhookReceiptUpdateMany).not.toHaveBeenCalled();
@@ -1736,6 +1746,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
 
     await expect(handleHostedOnboardingTelegramWebhook({
+      webhookReceivedAt: new Date("2026-09-01T00:00:00.000Z"),
       prisma,
       rawBody: JSON.stringify({
         message: {
@@ -1858,6 +1869,9 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       expectedUserId: "member_telegram_group_container",
       mailboxItemId: "mailbox_telegram:update:322",
     });
+    expect(mocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationIsGroup: true, source: "telegram", webhookReceivedAt: expect.any(Date) }),
+    );
   });
 
   it("re-prepares for a Telegram route that wins after the transaction route read", async () => {

@@ -288,6 +288,16 @@ function rebaseAssistantProviderResultDeliveryContexts(input: {
   }
 }
 
+function hasAssistantGroupReplyMessage(
+  result: ExecutedAssistantProviderTurnResult,
+): boolean {
+  return result.finalAction?.kind !== 'none' && (
+    normalizeNullableString(result.response) !== null
+    || result.responseCard != null
+    || (result.responseMedia?.length ?? 0) > 0
+  )
+}
+
 function selectAssistantGroupProviderResult(
   providerResult: ExecutedAssistantProviderTurnResult,
 ): ExecutedAssistantProviderTurnResult {
@@ -696,6 +706,7 @@ export async function sendAssistantMessageLocal(
       })
       const promptBuildMs = elapsedSince(promptBuildStartedAt)
       const route = resolveAssistantTurnRoute(input, defaults, resolved)
+
       const receipt = await createAssistantTurnReceipt({
         vault: input.vault,
         sessionId: resolved.session.sessionId,
@@ -717,13 +728,7 @@ export async function sendAssistantMessageLocal(
             })
           : null
       const hostedExecutionContext = executionContext?.hosted ?? null
-      const typingIndicator = startAssistantChannelTypingIndicator({
-        channelDependencies:
-          hostedExecutionContext?.channelTypingDependencies ?? null,
-        input,
-        session: resolved.session,
-        sharedPlan,
-      })
+      let typingIndicator: ReturnType<typeof startAssistantChannelTypingIndicator> = null
       let activeTurnInputController: ReturnType<
         typeof createAssistantActiveTurnInputController
       > | null = null
@@ -888,7 +893,6 @@ export async function sendAssistantMessageLocal(
           isHostedComputerToolTransportAvailable({
             executionContext,
           }) && currentAudienceReplyDeliveryAvailable
-        typingIndicator?.recordAcceptedInputs(initialAcceptedInputJournal.inputIds)
         let acceptedInputIdsForProviderRequest: readonly string[] =
           initialAcceptedInputJournal.inputIds
         let acceptedInputItemsForProviderRequest: readonly AssistantAcceptedTurnInputItemInput[] =
@@ -1812,6 +1816,15 @@ export async function sendAssistantMessageLocal(
               })
             },
             onProviderRequestStarted: (event) => {
+              if (!typingIndicator) {
+                typingIndicator = startAssistantChannelTypingIndicator({
+                  channelDependencies: hostedExecutionContext?.channelTypingDependencies ?? null,
+                  input,
+                  session: resolved.session,
+                  sharedPlan,
+                })
+                typingIndicator?.recordAcceptedInputs(providerRequestAcceptedInputIds)
+              }
               const startedAtMs = Date.parse(event.startedAt)
               if (Number.isFinite(startedAtMs)) {
                 providerRequestStartedAtMs = startedAtMs
@@ -2126,15 +2139,19 @@ export async function sendAssistantMessageLocal(
           }
         }
 
-        const firstRequest = await runCurrentProviderRequest({
-          allowFailedNoReplyRecovery: !holdGroupReplyDraft,
-        })
-        if (firstRequest.kind === 'completed') {
-          return firstRequest.result
-        }
-        providerResult = firstRequest.providerResult
-
-        if (holdGroupReplyDraft) {
+        const finishHeldGroupReplyDraft = async (
+          heldProviderResult: ExecutedAssistantProviderTurnResult,
+        ): Promise<ExecutedAssistantProviderTurnResult> => {
+          if (hasAssistantGroupReplyMessage(heldProviderResult)) {
+            typingIndicator = startAssistantChannelTypingIndicator({
+              channelDependencies: hostedExecutionContext?.channelTypingDependencies ?? null,
+              heldGroupReply: true,
+              input,
+              session: resolved.session,
+              sharedPlan,
+            })
+            typingIndicator?.recordAcceptedInputs(providerRequestAcceptedInputIds)
+          }
           const draftWindowOutcome = await turnInputController.finishDraftWindow({
             signal: currentInput.abortSignal,
           })
@@ -2158,7 +2175,7 @@ export async function sendAssistantMessageLocal(
               providerRequestDeliveryContextBaseOrdinal =
                 replyDeliveryContexts.length - 1
               currentSession = applyAssistantProviderTurnResumeInMemory({
-                providerResult,
+                providerResult: heldProviderResult,
                 session: currentSession,
               })
               currentInput = {
@@ -2177,7 +2194,11 @@ export async function sendAssistantMessageLocal(
                   'The group reply reconsideration unexpectedly completed through provider failure recovery.',
                 )
               }
-              providerResult = reconsiderationRequest.providerResult
+              heldProviderResult = reconsiderationRequest.providerResult
+              if (!hasAssistantGroupReplyMessage(heldProviderResult)) {
+                await stopAssistantChannelTypingIndicator(typingIndicator)
+                typingIndicator = null
+              }
             } finally {
               currentSession = {
                 ...currentSession,
@@ -2192,7 +2213,19 @@ export async function sendAssistantMessageLocal(
               })
             }
           }
-          providerResult = selectAssistantGroupProviderResult(providerResult)
+          return selectAssistantGroupProviderResult(heldProviderResult)
+        }
+
+        const firstRequest = await runCurrentProviderRequest({
+          allowFailedNoReplyRecovery: !holdGroupReplyDraft,
+        })
+        if (firstRequest.kind === 'completed') {
+          return firstRequest.result
+        }
+        providerResult = firstRequest.providerResult
+
+        if (holdGroupReplyDraft) {
+          providerResult = await finishHeldGroupReplyDraft(providerResult)
         }
 
         responseText = resolveAssistantPersistedReplyText({

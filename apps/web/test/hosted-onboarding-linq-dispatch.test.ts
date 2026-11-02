@@ -77,6 +77,7 @@ function buildPreparedDomainRootCandidate(input: {
 
 const mocks = vi.hoisted(() => {
   const state = {
+    recordHostedIngressTemporalSignalAccepted: vi.fn(async () => undefined),
     after: vi.fn(),
     getPrisma: vi.fn(),
     deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
@@ -263,6 +264,11 @@ function expectHostedLinqReadReceiptSent(chatId = "chat_123"): void {
     signal: undefined,
   });
 }
+
+vi.mock("@/src/lib/hosted-runtime-latency/store", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-runtime-latency/store")>(),
+  recordHostedIngressTemporalSignalAccepted: mocks.recordHostedIngressTemporalSignalAccepted,
+}));
 
 vi.mock("next/server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("next/server")>();
@@ -1987,6 +1993,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       });
 
       const response = await handleHostedOnboardingLinqWebhook({
+        webhookReceivedAt: new Date("2026-09-01T00:00:00.000Z"),
         prisma,
         rawBody: buildHostedLinqWebhookBody({
           data: {
@@ -2021,6 +2028,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
             userId: "member_123",
           }),
         }),
+      );
+      expect(mocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalledWith(
+        expect.objectContaining({ conversationIsGroup: false, source: "linq", webhookReceivedAt: expect.any(Date) }),
       );
       expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledWith({
         chatId: "chat_123",
@@ -6017,6 +6027,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
             kind: "accepted",
             wakeHandoff: {
               acceptedLinqDeliveryId: "hld_9198bd7323f52b51126f7632e9da6f47",
+              conversationIsGroup: false,
               eventId: "evt_null_preflight_duplicate",
               linqChatId: "chat_123",
               mailboxItemId: acceptedMailboxItem.id,

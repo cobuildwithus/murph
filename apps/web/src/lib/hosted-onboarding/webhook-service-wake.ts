@@ -54,6 +54,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   }
   const {
     acceptedLinqDeliveryId,
+    conversationIsGroup,
     eventId,
     mailboxItemId,
     originalInboundMailboxItemId,
@@ -109,6 +110,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   } catch (error) {
     scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse({
       acceptedLinqDeliveryId,
+      conversationIsGroup,
       webhookReceivedAt: input.webhookReceivedAt,
       ingressTypingAcceptedAt: input.ingressTypingAcceptedAt,
       mailboxItemId,
@@ -127,6 +129,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
 
   scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse({
     acceptedLinqDeliveryId,
+    conversationIsGroup,
     webhookReceivedAt: input.webhookReceivedAt,
     ingressTypingAcceptedAt: input.ingressTypingAcceptedAt,
     mailboxItemId,
@@ -210,6 +213,7 @@ async function recordHostedDirectEnsureWakeTimingBestEffort(timingRecord: {
 
 function scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse(input: {
   acceptedLinqDeliveryId?: string;
+  conversationIsGroup?: boolean;
   webhookReceivedAt?: Date;
   ingressTypingAcceptedAt?: Promise<Date | null>;
   mailboxItemId: string;
@@ -245,6 +249,7 @@ function scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse(input: {
     const ingressTypingAcceptedAt = await input.ingressTypingAcceptedAt ?? undefined;
     if (input.temporalSignalAcceptedAt) {
       await recordHostedWebhookIngressLatencyTemporalSignalBestEffort({
+        conversationIsGroup: input.conversationIsGroup,
         ingressTypingAcceptedAt,
         webhookReceivedAt: input.webhookReceivedAt,
         at: input.temporalSignalAcceptedAt,
@@ -255,6 +260,7 @@ function scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse(input: {
       return;
     }
     await recordHostedWebhookIngressLatencyAcceptedBestEffort({
+      conversationIsGroup: input.conversationIsGroup,
       ingressTypingAcceptedAt,
       webhookReceivedAt: input.webhookReceivedAt,
       mailboxItemId: input.mailboxItemId,
@@ -274,6 +280,7 @@ function scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse(input: {
 }
 
 async function recordHostedWebhookIngressLatencyAcceptedBestEffort(input: {
+  conversationIsGroup?: boolean;
   ingressTypingAcceptedAt?: Date;
   webhookReceivedAt?: Date;
   mailboxItemId: string;
@@ -282,6 +289,7 @@ async function recordHostedWebhookIngressLatencyAcceptedBestEffort(input: {
   const { mailboxItemId, source } = input;
   try {
     await recordHostedIngressAcceptedFromMailboxItem({
+      ...(input.conversationIsGroup === undefined ? {} : { conversationIsGroup: input.conversationIsGroup }),
       ingressTypingAcceptedAt: input.ingressTypingAcceptedAt,
       webhookReceivedAt: input.webhookReceivedAt,
       mailboxItemId,
@@ -297,6 +305,7 @@ async function recordHostedWebhookIngressLatencyAcceptedBestEffort(input: {
 }
 
 async function recordHostedWebhookIngressLatencyTemporalSignalBestEffort(input: {
+  conversationIsGroup?: boolean;
   ingressTypingAcceptedAt?: Date;
   webhookReceivedAt?: Date;
   at: Date;
@@ -307,6 +316,7 @@ async function recordHostedWebhookIngressLatencyTemporalSignalBestEffort(input: 
   const { at, mailboxItemId, source, userId } = input;
   try {
     await recordHostedIngressTemporalSignalAccepted({
+      ...(input.conversationIsGroup === undefined ? {} : { conversationIsGroup: input.conversationIsGroup }),
       ingressTypingAcceptedAt: input.ingressTypingAcceptedAt,
       webhookReceivedAt: input.webhookReceivedAt,
       at,

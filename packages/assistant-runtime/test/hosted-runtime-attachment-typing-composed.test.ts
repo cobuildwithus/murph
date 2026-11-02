@@ -64,7 +64,7 @@ test.each([
   { group: false, pendingAcceptance: false, text: true },
   { group: false, pendingAcceptance: true, text: true },
   { group: true, pendingAcceptance: false, text: true },
-])("real input import and HTTP typing precede admission and survive runtime handoff (group: $group, pending: $pendingAcceptance, text: $text)", async ({ group, pendingAcceptance, text }) => {
+])("real input import keeps groups quiet and hands direct typing to the runtime (group: $group, pending: $pendingAcceptance, text: $text)", async ({ group, pendingAcceptance, text }) => {
   vi.useFakeTimers({ toFake: ["Date"], now: new Date(TEST_NOW) });
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-typing-composed-"));
   const events: string[] = [];
@@ -73,6 +73,7 @@ test.each([
   const prepared = deferred<void>();
   const response = deferred<Response>();
   const assistantEntered = deferred<void>();
+  const providerRequestReady = deferred<void>();
   evidence.ready = prepared.promise;
   evidence.admitted = false;
   const target = `synthetic_composed_${group ? "group" : "private"}_${pendingAcceptance ? "pending" : "accepted"}_${text ? "text" : "audio"}`;
@@ -142,7 +143,7 @@ test.each([
       importItem: text ? async (...args) => {
         const result = await importer(...args);
         // Hold post-staging import completion as a slow progress publication
-        // would. Typing must already be in flight, without admitting a turn.
+        // would. Text typing must wait for the actual turn.
         await evidence.ready;
         return result;
       } : importer,
@@ -159,8 +160,15 @@ test.each([
           providerFetch: input.runtime.platform.providerFetch, linqDeliveryContexts: [route],
           signal: abort.signal,
         });
+        if (group) {
+          // The engine only requests group typing after a reply draft is held.
+          assert.equal(calls.length, 0, "group admission must never start HTTP typing");
+          return { progressed: false };
+        }
+        // Model setup may pause after admission; preparation retains ownership.
+        await providerRequestReady.promise;
         const handoff = typing.startLinqTyping?.({ target });
-        if (pendingAcceptance) {
+        if (pendingAcceptance || text) {
           assert.equal(milestones.some(isAccepted), false);
           response.resolve(new Response(null, { status: 204 }));
         }
@@ -168,7 +176,7 @@ test.each([
         assert.ok(handle, "staged input typing must reach the foreground owner");
         assert.equal(calls.length, 1, "handoff must not issue a duplicate HTTP start");
         assert.ok(handle.acceptedAt);
-        if (!pendingAcceptance) assert.equal(handle.acceptedAt, preparationAcceptedAt, "handoff preserves the original provider acceptance");
+        if (!pendingAcceptance && !text) assert.equal(handle.acceptedAt, preparationAcceptedAt, "handoff preserves the original provider acceptance");
         await handle.stop({ providerStop: false });
         assert.equal(calls.length, 1, "delivery clears typing without a redundant DELETE");
         const next = await typing.startLinqTyping?.({ target });
@@ -180,21 +188,34 @@ test.each([
       },
     });
     void running.catch(() => {});
-    await vi.waitFor(() => assert.equal(calls.length, 1, "typing starts before import completion"), { timeout: 2_000 });
+    if (group || text) {
+      await vi.waitFor(() => assert.ok(milestones.some(event => event.type === "assistant_input_staged")));
+      assert.equal(calls.length, 0, "group and text staging must never start HTTP typing");
+    } else {
+      await vi.waitFor(() => assert.equal(calls.length, 1, "typing starts before import completion"), { timeout: 2_000 });
+    }
     assert.equal(checked, false, "unsettled evidence must not admit the model");
     if (!text) assert.equal(evidence.admitted, false);
     assert.equal(milestones.some(isAccepted), false, "HTTP entry is not provider acceptance");
-    if (!pendingAcceptance) {
+    if (!group && !text && !pendingAcceptance) {
       response.resolve(new Response(null, { status: 204 }));
       await vi.waitFor(() => assert.equal(milestones.some(isAccepted), true));
       assert.equal(checked, false, "early typing must not bypass evidence admission");
     }
     prepared.resolve();
     await Promise.race([assistantEntered.promise, running.then(() => { throw new Error("Runtime ended before admitted reply"); })]);
+    assert.equal(calls.length, group || text ? 0 : 1, "admission must not start or stop typing before turn/start");
+    vi.setSystemTime(Date.now() + 1_200);
+    providerRequestReady.resolve();
     await running;
     assert.equal(checked, true);
+    if (group) {
+      assert.equal(calls.length, 0);
+      assert.equal(milestones.some(isAccepted), false);
+    }
     assert.ok(calls.every(call => call.pathname.endsWith("/typing")));
   } finally {
+    providerRequestReady.resolve();
     response.resolve(new Response(null, { status: 204 }));
     prepared.resolve();
     abort.abort();
