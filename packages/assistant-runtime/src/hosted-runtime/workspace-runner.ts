@@ -760,7 +760,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
 ): Promise<HostedWorkspaceRunnerResult> {
   return withIntegrationIngestMaterializer(input.vaultRoot, async (paths) => {
     await input.materializeWorkspaceArtifacts?.(paths);
-  }, () => runHostedWorkspaceUntilIdleOrBudgetWithHistory(input), input.now);
+  }, () => runHostedWorkspaceUntilIdleOrBudgetWithHistory(input));
 }
 
 async function runHostedWorkspaceUntilIdleOrBudgetWithHistory(

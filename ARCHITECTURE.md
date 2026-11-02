@@ -2750,8 +2750,8 @@ application code.
   non-expiring `integration-ingest` kind. The reader/preserver release creates no
   new cold references: candidate discovery is absent. A separate producer release
   may externalize unambiguous closed Brotli shards after the reader fleet converges.
-  The current month remains inline. Hosted append admission uses the runtime's
-  current UTC month and cold references are immutable. Sparse checkpoints retain
+  The current month remains inline. Provider imports retain their source-derived historical ingest month.
+  Only an explicitly referenced cold month is immutable in the reader release. Sparse checkpoints retain
   cold references even when no local bytes exist, including after a lazy read.
   Core history readers verify size and SHA-256 before enumeration, using an
   invocation-scoped artifact materializer when available; otherwise missing or

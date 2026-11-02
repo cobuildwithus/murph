@@ -30,13 +30,12 @@ test("missing cold shards cannot become empty history or new append targets", as
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("hosted writes admit the current month and reject a historical month", async () => {
+test("hosted writes admit unreferenced historical and current months", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "cold-core-write-"));
   try {
     await initializeVault({ vaultRoot: root });
     await withIntegrationIngestMaterializer(root, async () => {}, async () => {
-      await expect(appendJsonlRecord({ vaultRoot: root, relativePath: logicalPath, record: record("2020-01-01T00:00:00.000Z") }))
-        .rejects.toMatchObject({ code: "INTEGRATION_INGEST_COLD_MONTH_CLOSED" });
+      await appendJsonlRecord({ vaultRoot: root, relativePath: logicalPath, record: record("2020-01-01T00:00:00.000Z") });
       const month = new Date().toISOString().slice(0, 7);
       await appendJsonlRecord({ vaultRoot: root, relativePath: `ledger/integration-ingests/${month.slice(0, 4)}/${month}.jsonl`, record: record(new Date().toISOString()) });
     });

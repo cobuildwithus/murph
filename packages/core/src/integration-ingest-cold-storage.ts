@@ -9,7 +9,6 @@ import { VaultError } from "./errors.ts";
 
 const materializers = new AsyncLocalStorage<{
   vaultRoot: string;
-  now: () => string;
   materialize: (relativePaths: readonly string[]) => Promise<unknown>;
 }>();
 
@@ -18,9 +17,8 @@ export function withIntegrationIngestMaterializer<T>(
   vaultRoot: string,
   materialize: (relativePaths: readonly string[]) => Promise<unknown>,
   run: () => Promise<T>,
-  now: () => string = () => new Date().toISOString(),
 ): Promise<T> {
-  return materializers.run({ vaultRoot: path.resolve(vaultRoot), materialize, now }, run);
+  return materializers.run({ vaultRoot: path.resolve(vaultRoot), materialize }, run);
 }
 
 export async function materializeIntegrationIngestHistory(
@@ -50,13 +48,9 @@ export async function materializeIntegrationIngestHistory(
 export async function assertIntegrationIngestHistoryWritable(
   vaultRoot: string,
   logicalPath: string,
-  options: { rollback?: boolean } = {},
 ): Promise<void> {
-  const scope = materializers.getStore();
-  if ((!options.rollback && scope?.vaultRoot === path.resolve(vaultRoot)
-      && !logicalPath.endsWith(`/${scope.now().slice(0, 7)}.jsonl`))
-    || (await readHostedColdIngestReferences(vaultRoot)).some((entry) => entry.relativePath === `${logicalPath}.br`)) {
+  if ((await readHostedColdIngestReferences(vaultRoot)).some((entry) => entry.relativePath === `${logicalPath}.br`)) {
     throw new VaultError("INTEGRATION_INGEST_COLD_MONTH_CLOSED",
-      "Cold integration-ingest months are immutable. Write new evidence to the current month.");
+      "Referenced cold integration-ingest months are immutable.");
   }
 }

@@ -78,6 +78,8 @@ import {
   applyCanonicalWriteBatch,
   initializeVault,
   isActiveCanonicalWriteLockError,
+  readIntegrationIngestEntries,
+  readEvent,
 } from "@murphai/core";
 import { describe, expect, test, vi } from "vitest";
 import { persistCanonicalInboxCapture } from "@murphai/inboxd";
@@ -12046,6 +12048,38 @@ describe("foreground device ingestion", () => {
     }
   });
 
+  test.each(["absent", "empty"] as const)("publishes historical WHOOP data before acknowledging payload with %s cold catalogue", async (catalogue) => {
+    const fixture = await createForegroundDeviceFixture(10, {
+      now: "2026-11-02T12:00:00.000Z", start: "2026-10-29T22:00:00.000Z", end: "2026-10-30T06:00:00.000Z",
+    });
+    try {
+      if (catalogue === "empty") {
+        const refs = path.join(fixture.vaultRoot, ".runtime/operations/assistant/hosted-media-refs.json");
+        await mkdir(path.dirname(refs), { recursive: true });
+        await writeFile(refs, JSON.stringify({ schema: "murph.hosted-media-refs.v1", entries: [] }));
+      }
+      fixture.stageDeviceWake();
+      await fixture.run(async () => {
+        await waitForCondition(() => fixture.effects.length > 0, 5_000);
+        return { progressed: false };
+      });
+      const ingests = await readIntegrationIngestEntries(fixture.vaultRoot);
+      assert.ok(ingests.length > 0, "historical provider evidence must publish before acknowledgement");
+      assert.ok(ingests.some((entry) => entry.record.importedAt.startsWith("2026-10")));
+      assert.ok((await readFile(path.join(fixture.vaultRoot, "ledger/integration-ingests/2026/2026-10.jsonl"), "utf8")).length > 0);
+      const eventId = ingests.flatMap((entry) => entry.record.outputs.events.map((event) => event.id))[0];
+      assert.ok(eventId);
+      assert.ok(await readEvent({ vaultRoot: fixture.vaultRoot, eventId }));
+      await rebuildQueryProjection(fixture.vaultRoot);
+      assert.ok((await listMetricPoints(fixture.vaultRoot, { limit: null })).some((point) => point.metricKey === "readiness-score"));
+      assert.ok(fixture.receiptCounts.length > 0, "canonical publication must be durable before ack");
+      assert.equal(fixture.acks.length, 0);
+      for (const effect of fixture.effects.splice(0)) await effect();
+      assert.equal(fixture.acks.length, 1);
+      assert.deepEqual(fixture.acks[0]?.processedDirtyPayloadIds, ["payload_concurrent"]);
+    } finally { await fixture.cleanup(); }
+  });
+
   test("imports newly staged device data while the model is held and preserves one receipt chain", async () => {
     const fixture = await createForegroundDeviceFixture();
     const modelStarted = createDeferred<void>();
@@ -12287,9 +12321,10 @@ describe("foreground device ingestion", () => {
   });
 });
 
-async function createForegroundDeviceFixture(limitPerLane = 10) {
+async function createForegroundDeviceFixture(limitPerLane = 10, history?: { now: string; start: string; end: string }) {
+  const now = history?.now ?? TEST_NOW;
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "synthetic-concurrent-device-"));
-  await initializeVault({ createdAt: TEST_NOW, vaultRoot, timezone: "UTC" });
+  await initializeVault({ createdAt: now, vaultRoot, timezone: "UTC" });
   const authority = new AbortController();
   const items: HostedMailboxItem[] = [];
   const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
@@ -12302,10 +12337,10 @@ async function createForegroundDeviceFixture(limitPerLane = 10) {
   const wake: HostedExecutionDeviceSyncWake = {
     connectionId: "connection_concurrent",
     eventId: "device-sync.wake:concurrent",
-    expectedConnectedAt: TEST_NOW,
+    expectedConnectedAt: now,
     hint: { reason: "dirty" },
     kind: "device-sync.wake",
-    occurredAt: TEST_NOW,
+    occurredAt: now,
     provider: "whoop",
     reason: "webhook_hint",
     userId: TEST_USER_ID,
@@ -12313,7 +12348,7 @@ async function createForegroundDeviceFixture(limitPerLane = 10) {
   const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
     async createConnectLink() { throw new Error("No connection creation in ingestion"); },
     async applyUpdates(request) {
-      return { appliedAt: TEST_NOW, userId: TEST_USER_ID, updates: request.updates.map((update) => ({
+      return { appliedAt: now, userId: TEST_USER_ID, updates: request.updates.map((update) => ({
         connection: null, connectionId: update.connectionId, status: "updated" as const,
         tokenUpdate: "unchanged" as const, writeUpdate: "applied" as const,
       })) };
@@ -12323,7 +12358,7 @@ async function createForegroundDeviceFixture(limitPerLane = 10) {
         connections: [{
           connection: {
             accessTokenExpiresAt: "2099-01-01T00:00:00.000Z",
-            connectedAt: TEST_NOW, createdAt: TEST_NOW, updatedAt: TEST_NOW,
+            connectedAt: now, createdAt: now, updatedAt: now,
             displayName: "Synthetic device", externalAccountId: "synthetic_device",
             id: "connection_concurrent", metadata: {}, provider: "whoop",
             scopes: ["offline", "read:sleep", "read:recovery"], status: "active",
@@ -12340,7 +12375,7 @@ async function createForegroundDeviceFixture(limitPerLane = 10) {
           },
           sources: [],
         }],
-        generatedAt: TEST_NOW, userId: TEST_USER_ID,
+        generatedAt: now, userId: TEST_USER_ID,
       };
     },
     async fetchDirtyStates() {
@@ -12352,7 +12387,7 @@ async function createForegroundDeviceFixture(limitPerLane = 10) {
             payload: { resourceType: "recovery", resourceId: "sleep_concurrent" },
             resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop",
             windowEnd: null, windowStart: null }],
-          eventCount: "1", latestDirtyAt: TEST_NOW, provider: "whoop",
+          eventCount: "1", latestDirtyAt: now, provider: "whoop",
           resourceCategoryCounts: { summary: 1 }, sourceProviderCounts: { whoop: 1 },
           userId: TEST_USER_ID, windowEnd: null, windowStart: null,
         }],
@@ -12364,7 +12399,7 @@ async function createForegroundDeviceFixture(limitPerLane = 10) {
         connectionId: request.connectionId,
         dirtyRevision: fixture.newerDirtyRevision ? "8" : request.processedRevision,
         processedRevision: request.processedRevision, recorded: true,
-        stillDirty: fixture.newerDirtyRevision, nextWakeAt: fixture.newerDirtyRevision ? TEST_NOW : null,
+        stillDirty: fixture.newerDirtyRevision, nextWakeAt: fixture.newerDirtyRevision ? now : null,
         userId: TEST_USER_ID,
       };
     },
@@ -12379,7 +12414,7 @@ async function createForegroundDeviceFixture(limitPerLane = 10) {
     deviceSyncPort,
   };
   const ownerInput: Parameters<typeof createHostedWorkspaceSystemWork>[0]["preparation"] = {
-    now: () => TEST_NOW,
+    now: () => now,
     operatorHomeRoot: path.join(vaultRoot, ".runtime", "synthetic-operator"),
     runtime: {
       commitTimeoutMs: null, forwardedEnv: {}, platform, platformEnv: {}, userEnv: {},
@@ -12465,7 +12500,7 @@ async function createForegroundDeviceFixture(limitPerLane = 10) {
           return { status: "imported" };
         },
         kickSystemWork: () => fixture.owner?.kick(),
-        limitPerLane, now: () => TEST_NOW, platform, requestId: "request_concurrent_device",
+        limitPerLane, now: () => now, platform, requestId: "request_concurrent_device",
         runAssistantPhase, runtimeWakeSignal, signal: authority.signal,
         trackLocalWorkspaceMutationCompletion: (completion) => { if (completion) tracked.push(completion); },
         vaultRoot, workspace: fixture.workspace,
@@ -12510,8 +12545,8 @@ async function createForegroundDeviceFixture(limitPerLane = 10) {
         }));
       }
       const response = url.pathname.endsWith("/recovery")
-        ? { sleep_id: "sleep_concurrent", updated_at: TEST_NOW, score: { recovery_score: 72, resting_heart_rate: 54 } }
-        : { id: "sleep_concurrent", cycle_id: "cycle_concurrent", start: "2026-04-24T22:00:00.000Z", end: "2026-04-25T06:00:00.000Z", updated_at: TEST_NOW };
+        ? { sleep_id: "sleep_concurrent", updated_at: now, score: { recovery_score: 72, resting_heart_rate: 54 } }
+        : { id: "sleep_concurrent", cycle_id: "cycle_concurrent", start: history?.start ?? "2026-04-24T22:00:00.000Z", end: history?.end ?? "2026-04-25T06:00:00.000Z", updated_at: now };
       return new Response(JSON.stringify(response), { headers: { "content-type": "application/json" } });
     } finally {
       fixture.activeProviderRequests -= 1;

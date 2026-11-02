@@ -1683,3 +1683,6 @@ reader, checkpoint and privacy contracts.
 The [reader-first split follow-up](exec-plans/active/2026-11-02-ingest-cold-storage-split.md)
 supersedes the original cold-storage report's deployment guidance and records the
 independent reader and producer commit verification.
+
+The [historical ingest write correction](exec-plans/active/2026-11-02-ingest-historical-write-fix.md)
+tracks the reader backfill regression and producer thaw/retry proof.

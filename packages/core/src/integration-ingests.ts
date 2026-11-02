@@ -2062,7 +2062,7 @@ export async function truncateArchivedIntegrationIngestShard({
   targetRelativePath,
   vaultRoot,
 }: TruncateArchivedIntegrationIngestShardInput): Promise<void> {
-  await assertIntegrationIngestHistoryWritable(vaultRoot, targetRelativePath, { rollback: true });
+  await assertIntegrationIngestHistoryWritable(vaultRoot, targetRelativePath);
   const source = await readArchivedIntegrationIngestShardSource(vaultRoot, targetRelativePath);
   const inspection = await inspectIntegrationIngestSourceBytes(vaultRoot, source, {
     prefixByteLength: expectedBaseByteLength,

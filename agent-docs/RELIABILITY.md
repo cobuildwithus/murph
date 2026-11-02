@@ -2827,8 +2827,8 @@ to apply after cutover.
   stops archiving the current ingest month. Snapshot reconciliation keeps cold references even after materialization;
   it never applies image/video TTLs or prunes canonical cold objects. Receipt replay
   still resolves only the preimages it needs; ordinary startup does not fetch cold
-  months. Current-month writes and immutable closed objects prevent a later append
-  from replacing a referenced history object. Ship reader/preserver support fully
+  months. Historical device imports remain writable when no cold reference exists.
+  Explicitly referenced cold objects are immutable in the reader release. Ship reader/preserver support fully
   before the separate producer commit. Once sparse checkpoints exist, rollback
   may reach that reader commit but never the earlier catalogue-dropping parser.
 - Closed event-ledger and integration-ingest months compact only in the abortable hosted idle-shutdown lane and share its existing 30-second archive budget. Core publishes a fully validated deterministic gzip before deleting raw bytes, and normal readers and amendments stream bounded gzip output. A foreground wake aborts archive work before later maintenance, while a timeout, malformed shard, or ordinary archive failure leaves that source intact and does not block checkpointing. Remaining raw months are the next pass's durable worklist, so no cursor, repair queue, or second maintenance owner exists. Integration-ingest startup repair removes only an independently valid, newline-terminated, byte-identical raw/gzip pair; every mismatch remains a fail-closed representation conflict.
