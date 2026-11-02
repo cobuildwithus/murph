@@ -929,7 +929,7 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/product-specs/experiment-adherence-confidence.md` | Read-time assumed adherence, confidence ladder, correction semantics, category-scoped activity evidence, and typed subjective session evidence for experiments. | Experiment adherence behavior | High | 2026-07-16 |
 | `agent-docs/product-specs/experiment-outcome-selection.md` | Experiment-only selection rules for member-valued and capturable outcomes, credible evidence, typed session metrics, timeframe integrity, and setup handoff. | Experiment outcome selection behavior | High | 2026-07-16 |
 | `agent-docs/product-specs/captures.md` | Capture behavior. | Capture behavior | High | 2026-08-10 |
-| `agent-docs/exec-plans/active/2026-11-01-v2-meals-api.md` | Implement and ship the approved encrypted-projection Meals API and canonical removal. | Meals delivery plan | Medium | 2026-11-01 |
+| `agent-docs/exec-plans/active/2026-11-01-v2-meals-api.md` | Implement and ship the approved encrypted-projection Meals API, canonical removal and failed-wake recovery proof. | Meals delivery plan | Medium | 2026-11-01 |
 | `agent-docs/exec-plans/completed/2026-11-01-v2-meals-api-boundary.md` | v2 iOS Meals boundary investigation and existing endpoint verification. | Meals investigation evidence | Medium | 2026-11-01 |
 | `agent-docs/product-specs/ios-meals.md` | v2 iOS Meals list/detail/queued-delete contract, encrypted projection ownership, errors, and existing contact/profile/Apple Health endpoints. | iOS Meals API contract | High | 2026-11-01 |
 | `agent-docs/product-specs/companion-app.md` | Companion app plan. | Companion app plan | High | 2026-08-13 |
