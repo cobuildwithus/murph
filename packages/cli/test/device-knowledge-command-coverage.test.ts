@@ -13,9 +13,6 @@ import type {
   DeviceAccountReconcileResult,
   DeviceAccountShowResult,
   DeviceConnectResult,
-  DeviceDaemonStartResult,
-  DeviceDaemonStatusResult,
-  DeviceDaemonStopResult,
   DeviceProviderListResult,
 } from '@murphai/operator-config/device-cli-contracts'
 
@@ -86,12 +83,6 @@ function createDeviceCommandServices() {
   const services = createIntegratedDeviceSyncServices()
   const calls = {
     connect: null as Parameters<DeviceSyncServices['connect']>[0] | null,
-    daemonStart:
-      null as Parameters<DeviceSyncServices['daemonStart']>[0] | null,
-    daemonStatus:
-      null as Parameters<DeviceSyncServices['daemonStatus']>[0] | null,
-    daemonStop:
-      null as Parameters<DeviceSyncServices['daemonStop']>[0] | null,
     disconnectAccount:
       null as Parameters<DeviceSyncServices['disconnectAccount']>[0] | null,
     listAccounts:
@@ -122,13 +113,10 @@ function createDeviceCommandServices() {
   const connectResult: DeviceConnectResult = {
     status: 'ok',
     kind: 'device_connect_link',
-    backend: 'local-daemon',
-    baseUrl: deviceBaseUrl,
+    backend: 'hosted',
     provider: 'oura',
-    state: 'state_oura_01',
     expiresAt: '2026-04-08T01:00:00.000Z',
-    authorizationUrl: 'https://cloud.oura.test/oauth?state=state_oura_01',
-    openedBrowser: true,
+    connectUrl: 'https://connect.example.test/oura',
   }
 
   const accountListResult: DeviceAccountListResult = {
@@ -179,50 +167,11 @@ function createDeviceCommandServices() {
     },
   }
 
-  const daemonStatusResult: DeviceDaemonStatusResult = {
-    baseUrl: deviceBaseUrl,
-    statePath: '.runtime/operations/device-sync/state.json',
-    stdoutLogPath: '.runtime/operations/device-sync/stdout.log',
-    stderrLogPath: '.runtime/operations/device-sync/stderr.log',
-    managed: true,
-    running: true,
-    healthy: true,
-    pid: 45123,
-    startedAt: '2026-04-08T00:00:00.000Z',
-    message: 'Device daemon healthy.',
-  }
-
-  const daemonStartResult: DeviceDaemonStartResult = {
-    ...daemonStatusResult,
-    started: true,
-  }
-
-  const daemonStopResult: DeviceDaemonStopResult = {
-    ...daemonStatusResult,
-    running: false,
-    healthy: false,
-    pid: null,
-    stopped: true,
-    message: 'Device daemon stopped.',
-  }
-
   const stubbedServices: DeviceSyncServices = {
     ...services,
     async connect(input) {
       calls.connect = input
       return connectResult
-    },
-    async daemonStart(input) {
-      calls.daemonStart = input
-      return daemonStartResult
-    },
-    async daemonStatus(input) {
-      calls.daemonStatus = input
-      return daemonStatusResult
-    },
-    async daemonStop(input) {
-      calls.daemonStop = input
-      return daemonStopResult
     },
     async disconnectAccount(input) {
       calls.disconnectAccount = input
@@ -306,8 +255,8 @@ test('device commands route every verb through the registered device service gro
   ])
   assert.equal(connect.exitCode, null)
   assert.equal(connect.envelope.ok, true)
-  assert.equal(connect.envelope.data.backend, 'local-daemon')
-  assert.equal(connect.envelope.data.openedBrowser, true)
+  assert.equal(connect.envelope.data.backend, 'hosted')
+  assert.equal(connect.envelope.data.connectUrl, 'https://connect.example.test/oura')
   assert.deepEqual(calls.connect, {
     vault: vaultRoot,
     provider: 'oura',
@@ -400,56 +349,6 @@ test('device commands route every verb through the registered device service gro
     accountId: connectedAccount.id,
   })
 
-  const status = await runInProcessJsonCli<DeviceDaemonStatusResult>(cli, [
-    'device',
-    'daemon',
-    'status',
-    '--vault',
-    vaultRoot,
-    '--base-url',
-    deviceBaseUrl,
-  ])
-  assert.equal(status.exitCode, null)
-  assert.equal(status.envelope.ok, true)
-  assert.equal(status.envelope.data.healthy, true)
-  assert.deepEqual(calls.daemonStatus, {
-    vault: vaultRoot,
-    baseUrl: deviceBaseUrl,
-  })
-
-  const started = await runInProcessJsonCli<DeviceDaemonStartResult>(cli, [
-    'device',
-    'daemon',
-    'start',
-    '--vault',
-    vaultRoot,
-    '--base-url',
-    deviceBaseUrl,
-  ])
-  assert.equal(started.exitCode, null)
-  assert.equal(started.envelope.ok, true)
-  assert.equal(started.envelope.data.started, true)
-  assert.deepEqual(calls.daemonStart, {
-    vault: vaultRoot,
-    baseUrl: deviceBaseUrl,
-  })
-
-  const stopped = await runInProcessJsonCli<DeviceDaemonStopResult>(cli, [
-    'device',
-    'daemon',
-    'stop',
-    '--vault',
-    vaultRoot,
-    '--base-url',
-    deviceBaseUrl,
-  ])
-  assert.equal(stopped.exitCode, null)
-  assert.equal(stopped.envelope.ok, true)
-  assert.equal(stopped.envelope.data.stopped, true)
-  assert.deepEqual(calls.daemonStop, {
-    vault: vaultRoot,
-    baseUrl: deviceBaseUrl,
-  })
 })
 
 test('knowledge commands round-trip the registered CLI against a temp vault', async () => {

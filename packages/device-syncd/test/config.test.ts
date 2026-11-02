@@ -21,7 +21,6 @@ import {
   listConfiguredDeviceSyncProviderNames,
   listJunctionLinkDeviceConnectRouteEntries,
   JUNCTION_PRODUCTION_TIMESERIES_RESOURCES,
-  loadDeviceSyncEnvironment,
   resolveConfiguredDeviceSyncConnectTarget,
   parseConfiguredDeviceSyncRuntimeConfig,
   parseSerializableConfiguredDeviceSyncProviderConfigs,
@@ -88,47 +87,11 @@ test("computeRetryDelayMs uses the 15-second slot for the first retry", () => {
   assert.equal(computeRetryDelayMs(2), 60_000);
 });
 
-test("loadDeviceSyncEnvironment supports Oura-only deployments", () => {
-  const loaded = loadDeviceSyncEnvironment({
-    OURA_CLIENT_ID: "oura-client-id",
-    OURA_CLIENT_SECRET: "oura-client-secret",
-    ...createDeviceSyncEnv(),
-  });
-  const providers = requireValue(loaded.service.providers);
 
-  assert.equal(providers.length, 1);
-  assert.equal(providers[0]?.provider, "oura");
-  assert.equal(loaded.http.host, "127.0.0.1");
-  assert.equal(loaded.http.controlToken, "control-token-for-tests");
-});
 
-test("loadDeviceSyncEnvironment supports mixed WHOOP and Oura deployments", () => {
-  const loaded = loadDeviceSyncEnvironment({
-    WHOOP_CLIENT_ID: "whoop-client-id",
-    WHOOP_CLIENT_SECRET: "whoop-client-secret",
-    OURA_CLIENT_ID: "oura-client-id",
-    OURA_CLIENT_SECRET: "oura-client-secret",
-    ...createDeviceSyncEnv(),
-  });
-  const providers = requireValue(loaded.service.providers);
 
-  assert.deepEqual(
-    providers.map((provider) => provider.provider),
-    ["oura", "whoop"],
-  );
-});
 
-test("loadDeviceSyncEnvironment supports Strava-only deployments", () => {
-  const loaded = loadDeviceSyncEnvironment({
-    STRAVA_CLIENT_ID: "strava-client-id",
-    STRAVA_CLIENT_SECRET: "strava-client-secret",
-    ...createDeviceSyncEnv(),
-  });
-  const providers = requireValue(loaded.service.providers);
 
-  assert.equal(providers.length, 1);
-  assert.equal(providers[0]?.provider, "strava");
-});
 
 test("createConfiguredDeviceSyncRegistry assembles the configured providers in descriptor order", () => {
   const registry = createConfiguredDeviceSyncRegistry({
@@ -148,20 +111,7 @@ test("configuredDeviceSyncProviderKeys follow the shared descriptor order", () =
   assert.deepEqual(configuredDeviceSyncProviderKeys, ["junction", "oura", "whoop", "strava"]);
 });
 
-test("legacy Garmin env does not configure a direct provider", () => {
-  const env = {
-    GARMIN_API_BASE_URL: "https://apis.garmin.com/wellness-api/rest",
-    GARMIN_CLIENT_ID: "garmin-client-id",
-    GARMIN_CLIENT_SECRET: "garmin-client-secret",
-    ...createDeviceSyncEnv(),
-  };
 
-  assert.deepEqual(readConfiguredDeviceSyncProviderConfigs(env), {});
-  assert.throws(
-    () => loadDeviceSyncEnvironment(env),
-    /No device sync providers are configured/u,
-  );
-});
 
 test("shared provider-config helpers preserve descriptor order and report presence", () => {
   const configs = readConfiguredDeviceSyncProviderConfigs({
@@ -786,175 +736,29 @@ test("parseSerializableConfiguredDeviceSyncProviderConfigs rejects unknown provi
   );
 });
 
-test("loadDeviceSyncEnvironment rejects incomplete provider credentials", () => {
-  assert.throws(
-    () =>
-      loadDeviceSyncEnvironment({
-        OURA_CLIENT_ID: "oura-client-id",
-        ...createDeviceSyncEnv(),
-      }),
-    /Oura configuration is incomplete/u,
-  );
-});
 
-test("loadDeviceSyncEnvironment supports an explicit control token and public listener", () => {
-  const loaded = loadDeviceSyncEnvironment({
-    DEVICE_SYNC_PUBLIC_HOST: "0.0.0.0",
-    DEVICE_SYNC_PUBLIC_PORT: "9876",
-    OURA_CLIENT_ID: "oura-client-id",
-    OURA_CLIENT_SECRET: "oura-client-secret",
-    ...createDeviceSyncEnv(),
-  });
 
-  assert.equal(loaded.http.controlToken, "control-token-for-tests");
-  assert.equal(loaded.http.publicHost, "0.0.0.0");
-  assert.equal(loaded.http.publicPort, 9876);
-});
 
-test("loadDeviceSyncEnvironment keeps provider-owned webhook secrets off the generic service and http shapes", () => {
-  const loaded = loadDeviceSyncEnvironment({
-    OURA_CLIENT_ID: "oura-client-id",
-    OURA_CLIENT_SECRET: "oura-client-secret",
-    OURA_WEBHOOK_VERIFICATION_TOKEN: "verify-token-for-tests",
-    ...createDeviceSyncEnv(),
-  });
 
-  assert.equal(
-    Object.prototype.hasOwnProperty.call(loaded.service.config, "webhookVerificationToken"),
-    false,
-  );
-  assert.equal(
-    Object.prototype.hasOwnProperty.call(loaded.http, "webhookVerificationToken"),
-    false,
-  );
-});
 
-test("loadDeviceSyncEnvironment rejects non-decimal and out-of-range listener ports", () => {
-  assert.throws(
-    () =>
-      loadDeviceSyncEnvironment({
-        DEVICE_SYNC_PORT: "1e3",
-        OURA_CLIENT_ID: "oura-client-id",
-        OURA_CLIENT_SECRET: "oura-client-secret",
-        ...createDeviceSyncEnv(),
-      }),
-    /DEVICE_SYNC_PORT must be an integer/u,
-  );
-  assert.throws(
-    () =>
-      loadDeviceSyncEnvironment({
-        DEVICE_SYNC_PUBLIC_HOST: "0.0.0.0",
-        DEVICE_SYNC_PUBLIC_PORT: "70000",
-        OURA_CLIENT_ID: "oura-client-id",
-        OURA_CLIENT_SECRET: "oura-client-secret",
-        ...createDeviceSyncEnv(),
-      }),
-    /DEVICE_SYNC_PUBLIC_PORT must be an integer between 0 and 65535/u,
-  );
-});
 
-test("loadDeviceSyncEnvironment rejects non-loopback DEVICE_SYNC_HOST values", () => {
-  assert.throws(
-    () =>
-      loadDeviceSyncEnvironment({
-        DEVICE_SYNC_HOST: "0.0.0.0",
-        OURA_CLIENT_ID: "oura-client-id",
-        OURA_CLIENT_SECRET: "oura-client-secret",
-        ...createDeviceSyncEnv(),
-      }),
-    /DEVICE_SYNC_HOST must be a loopback hostname or address/u,
-  );
-});
 
-test("loadDeviceSyncEnvironment rejects URL-bracket control listener hosts", () => {
-  assert.throws(
-    () =>
-      loadDeviceSyncEnvironment({
-        DEVICE_SYNC_HOST: "[::1]",
-        OURA_CLIENT_ID: "oura-client-id",
-        OURA_CLIENT_SECRET: "oura-client-secret",
-        ...createDeviceSyncEnv(),
-      }),
-    /DEVICE_SYNC_HOST must be a loopback hostname or address/u,
-  );
-});
 
-test("loadDeviceSyncEnvironment ignores the removed bare PORT alias", () => {
-  const loaded = loadDeviceSyncEnvironment({
-    OURA_CLIENT_ID: "oura-client-id",
-    OURA_CLIENT_SECRET: "oura-client-secret",
-    PORT: "9999",
-    ...createDeviceSyncEnv(),
-  } as NodeJS.ProcessEnv);
 
-  assert.equal(loaded.http.port, 8788);
-});
 
-test("loadDeviceSyncEnvironment rejects partial public listener configuration", () => {
-  assert.throws(
-    () =>
-      loadDeviceSyncEnvironment({
-        DEVICE_SYNC_PUBLIC_HOST: "0.0.0.0",
-        OURA_CLIENT_ID: "oura-client-id",
-        OURA_CLIENT_SECRET: "oura-client-secret",
-        ...createDeviceSyncEnv(),
-      }),
-    /DEVICE_SYNC_PUBLIC_HOST and DEVICE_SYNC_PUBLIC_PORT together/u,
-  );
-});
 
-test("loadDeviceSyncEnvironment rejects URL-bracket public listener hosts", () => {
-  assert.throws(
-    () =>
-      loadDeviceSyncEnvironment({
-        DEVICE_SYNC_PUBLIC_HOST: "[::1]",
-        DEVICE_SYNC_PUBLIC_PORT: "9876",
-        OURA_CLIENT_ID: "oura-client-id",
-        OURA_CLIENT_SECRET: "oura-client-secret",
-        ...createDeviceSyncEnv(),
-      }),
-    /DEVICE_SYNC_PUBLIC_HOST must be a hostname or address without URL bracket syntax/u,
-  );
-});
 
-test("loadDeviceSyncEnvironment requires at least one provider", () => {
-  assert.throws(
-    () =>
-      loadDeviceSyncEnvironment({
-        ...createDeviceSyncEnv(),
-      }),
-    /No device sync providers are configured/u,
-  );
-});
 
-test("loadDeviceSyncEnvironment requires DEVICE_SYNC_CONTROL_TOKEN", () => {
-  assert.throws(
-    () =>
-      loadDeviceSyncEnvironment({
-        ...createDeviceSyncEnv({
-          DEVICE_SYNC_CONTROL_TOKEN: undefined,
-        }),
-        OURA_CLIENT_ID: "oura-client-id",
-        OURA_CLIENT_SECRET: "oura-client-secret",
-      }),
-    /DEVICE_SYNC_CONTROL_TOKEN/u,
-  );
-});
 
-test("loadDeviceSyncEnvironment requires DEVICE_SYNC_VAULT_ROOT instead of the removed VAULT_ROOT alias", () => {
-  assert.throws(
-    () =>
-      loadDeviceSyncEnvironment({
-        VAULT_ROOT: "/tmp/murph-vault",
-        ...createDeviceSyncEnv({
-          DEVICE_SYNC_VAULT_ROOT: undefined,
-        }),
-        OURA_CLIENT_ID: "oura-client-id",
-        OURA_CLIENT_SECRET: "oura-client-secret",
-      } as NodeJS.ProcessEnv),
-    /DEVICE_SYNC_VAULT_ROOT/u,
-  );
-});
+
+
+
+
+
+
+
+
+
 
 test("readConfiguredOuraDeviceSyncProviderConfig keeps the optional webhook verification token on the provider config", () => {
   const config = readConfiguredOuraDeviceSyncProviderConfig({
@@ -1094,42 +898,4 @@ test("createConsoleDeviceSyncLogger forwards messages and defaults missing conte
   assert.match(output, /info message \{ connected: true \}/u);
   assert.match(output, /warn message \{\}/u);
   assert.match(output, /error message \{ retryable: false \}/u);
-});
-
-test("loadDeviceSyncEnvironment wires Oura webhook timestamp tolerance into the provider", async () => {
-  const loaded = loadDeviceSyncEnvironment({
-    OURA_CLIENT_ID: "oura-client-id",
-    OURA_CLIENT_SECRET: "oura-client-secret",
-    OURA_WEBHOOK_TIMESTAMP_TOLERANCE_MS: "1000",
-    ...createDeviceSyncEnv(),
-  });
-  const providers = requireValue(loaded.service.providers);
-  const provider = requireValue(providers.find((entry) => entry.provider === "oura"));
-  const verifyAndParseWebhook = requireValue(provider.webhookHandler?.verifyAndParseWebhook);
-  const rawBody = Buffer.from(
-    JSON.stringify({
-      event_type: "delete",
-      data_type: "session",
-      object_id: "session-42",
-      user_id: "oura-user-1",
-      event_time: "2026-03-16T09:58:00.000Z",
-    }),
-    "utf8",
-  );
-  const timestamp = String(Math.floor(Date.parse("2026-03-16T09:59:58.000Z") / 1000));
-  const signature = createHmac("sha256", "oura-client-secret")
-    .update(`${timestamp}${rawBody.toString("utf8")}`)
-    .digest("hex");
-
-  await assert.rejects(
-    verifyAndParseWebhook({
-      headers: new Headers({
-        "x-oura-signature": signature,
-        "x-oura-timestamp": timestamp,
-      }),
-      rawBody,
-      now: "2026-03-16T10:00:00.000Z",
-    }),
-    /allowed tolerance window/u,
-  );
 });

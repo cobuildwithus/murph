@@ -333,7 +333,7 @@
       "@murphai/parsers/*": [
         "./packages/parsers/src/*.ts"
       ],
-        "@murphai/assistant-runtime": [
+      "@murphai/assistant-runtime": [
         "./packages/assistant-runtime/src/index.ts"
       ],
       "@murphai/assistant-runtime/hosted-assistant-bootstrap": [
@@ -389,12 +389,6 @@
       ],
       "@murphai/operator-config/message-formatting": [
         "./packages/operator-config/src/message-formatting.ts"
-      ],
-      "@murphai/operator-config/device-daemon": [
-        "./packages/operator-config/src/device-daemon.ts"
-      ],
-      "@murphai/operator-config/device-sync-client": [
-        "./packages/operator-config/src/device-sync-client.ts"
       ],
       "@murphai/operator-config/*": [
         "./packages/operator-config/src/*.ts"

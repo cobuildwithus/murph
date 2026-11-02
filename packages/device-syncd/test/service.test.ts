@@ -73,7 +73,6 @@ import {
 
 import type {
   DeviceSyncTickMutex,
-  DeviceSyncWorkerExecutor,
 } from "../src/service.ts";
 import type {
   DeviceConnectionHandler,
@@ -4891,10 +4890,8 @@ test("device sync service fails closed when stored token integrity validation fa
   close();
 });
 
-test("device sync service starts and stops its timers, closes owned stores, and rejects missing provider or account lookups", async () => {
+test("device sync service closes owned stores, and rejects missing provider or account lookups", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-lifecycle");
-  const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
-  const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
   const closeSpy = vi.spyOn(SqliteDeviceSyncStore.prototype, "close");
   const service = createDeviceSyncService({
     secret: "secret-for-tests",
@@ -4925,17 +4922,10 @@ test("device sync service starts and stops its timers, closes owned stores, and 
         && error.httpStatus === 404,
     );
 
-    service.start();
-    service.start();
-    service.stop();
     service.close();
 
-    assert.equal(setIntervalSpy.mock.calls.length, 2);
-    assert.equal(clearIntervalSpy.mock.calls.length, 2);
     assert.equal(closeSpy.mock.calls.length, 1);
   } finally {
-    setIntervalSpy.mockRestore();
-    clearIntervalSpy.mockRestore();
     closeSpy.mockRestore();
   }
 });
@@ -5333,84 +5323,6 @@ test("device sync service scheduler logs failures once and skips reentrant ticks
   });
 
   close();
-});
-
-test("device sync service worker batch logs drain failures once and skips reentrant ticks", async () => {
-  const vaultRoot = await makeTempDirectory("murph-device-syncd-worker-batch-error");
-  const workerErrors: Array<{ context?: Record<string, unknown>; message: string }> = [];
-  let workerErrorLoggedResolve: (() => void) | null = null;
-  const workerErrorLogged = new Promise<void>((resolve) => {
-    workerErrorLoggedResolve = resolve;
-  });
-  let drainCalls = 0;
-  const drainLimits: number[] = [];
-  const failingWorkerExecutor: DeviceSyncWorkerExecutor = {
-    async drainWorker(limit) {
-      drainCalls += 1;
-      drainLimits.push(limit);
-      throw new Error("worker batch exploded");
-    },
-  };
-  const { service, close } = createServiceFixture({
-    secret: "secret-for-tests",
-    config: {
-      vaultRoot,
-      publicBaseUrl: "https://sync.example.test/device-sync",
-      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
-      workerBatchSize: 7,
-      log: {
-        error(message, context) {
-          workerErrors.push({
-            message,
-            context: context as Record<string, unknown> | undefined,
-          });
-          workerErrorLoggedResolve?.();
-        },
-      },
-    },
-    workerExecutor: failingWorkerExecutor,
-    providers: [createFakeProvider()],
-  });
-
-  service.start();
-  await workerErrorLogged;
-  assert.equal(drainCalls, 1);
-  assert.deepEqual(drainLimits, [7]);
-  assert.equal(workerErrors.length, 1);
-  assert.equal(workerErrors[0]?.message, "Device sync worker tick failed.");
-  assert.deepEqual(workerErrors[0]?.context, {
-    failureCode: "DEVICE_SYNC_WORKER_TICK_FAILED",
-    error: {
-      category: "unexpected_error",
-      name: "Error",
-      message: "worker batch exploded",
-    },
-  });
-  close();
-
-  const skippedVaultRoot = await makeTempDirectory("murph-device-syncd-worker-batch-skip");
-  let skippedDrainCalls = 0;
-  const skipped = createServiceFixture({
-    secret: "secret-for-tests",
-    config: {
-      vaultRoot: skippedVaultRoot,
-      publicBaseUrl: "https://sync.example.test/device-sync",
-      stateDatabasePath: path.join(skippedVaultRoot, ".runtime", "device-syncd.sqlite"),
-    },
-    workerMutex: createSkippingTickMutex(() => true),
-    workerExecutor: {
-      async drainWorker() {
-        skippedDrainCalls += 1;
-        return 0;
-      },
-    },
-    providers: [createFakeProvider()],
-  });
-
-  skipped.service.start();
-  await Promise.resolve();
-  assert.equal(skippedDrainCalls, 0);
-  skipped.close();
 });
 
 test("device sync service worker handles missing providers, disconnected jobs, and reauthorization-required jobs", async () => {

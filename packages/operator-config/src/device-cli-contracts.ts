@@ -5,7 +5,7 @@ import {
   normalizeDeviceSyncConnectTargetKey as normalizeConfiguredDeviceSyncConnectTargetKey,
 } from '@murphai/device-syncd/config'
 import { httpBaseUrlSchema, httpUrlSchema } from './command-helpers.js'
-import { isoTimestampSchema, pathSchema } from './vault-cli-contracts.js'
+import { isoTimestampSchema } from './vault-cli-contracts.js'
 
 export const deviceSyncBaseUrlSchema = httpBaseUrlSchema
   .describe('Reachable base URL for the local device sync control plane.')
@@ -76,7 +76,7 @@ export const deviceSyncAccountSourceSchema = z.object({
 
 export const deviceSyncProviderSchema = z.object({
   provider: z.string().min(1),
-  source: z.enum(['catalog', 'local_control_plane']).optional(),
+  source: z.literal('catalog').optional(),
   displayName: z.string().min(1).optional(),
   callbackPath: z.string().min(1).nullable(),
   callbackUrl: z.string().url().nullable(),
@@ -131,22 +131,8 @@ export const deviceSyncJobSchema = z.object({
   finishedAt: isoTimestampSchema.nullable(),
 })
 
-export const deviceSyncLocalAvailabilitySchema = z.object({
-  baseUrl: deviceSyncBaseUrlSchema,
-  status: z.enum([
-    'healthy',
-    'not_configured',
-    'not_running',
-    'unhealthy',
-    'conflict',
-  ]),
-  configuredProviders: z.array(z.string().min(1)),
-  message: z.string().min(1).nullable(),
-})
-
 export const deviceProviderListResultSchema = z.object({
   baseUrl: deviceSyncBaseUrlSchema.optional(),
-  local: deviceSyncLocalAvailabilitySchema.optional(),
   providers: z.array(deviceSyncProviderSchema),
 })
 
@@ -164,22 +150,10 @@ const hostedDeviceConnectResultSchema = deviceConnectResultBaseSchema.extend({
   connectUrl: httpUrlSchema,
 }).strict()
 
-const localDaemonDeviceConnectResultSchema = deviceConnectResultBaseSchema.extend({
-  backend: z.literal('local-daemon'),
-  authorizationUrl: httpUrlSchema,
-  baseUrl: deviceSyncBaseUrlSchema,
-  state: z.string().min(1),
-  openedBrowser: z.boolean(),
-}).strict()
-
-export const deviceConnectResultSchema = z.discriminatedUnion('backend', [
-  hostedDeviceConnectResultSchema,
-  localDaemonDeviceConnectResultSchema,
-])
+export const deviceConnectResultSchema = hostedDeviceConnectResultSchema
 
 export const deviceAccountListResultSchema = z.object({
   baseUrl: deviceSyncBaseUrlSchema.optional(),
-  local: deviceSyncLocalAvailabilitySchema.optional(),
   provider: z.string().min(1).nullable(),
   sourceProvider: z.string().min(1).nullable().optional(),
   accounts: z.array(deviceSyncAccountSchema),
@@ -213,33 +187,9 @@ export const deviceAccountDisconnectResultSchema = z.object({
   account: deviceSyncAccountSchema,
 })
 
-export const deviceDaemonStatusResultSchema = z.object({
-  baseUrl: deviceSyncBaseUrlSchema,
-  statePath: pathSchema,
-  stdoutLogPath: pathSchema,
-  stderrLogPath: pathSchema,
-  managed: z.boolean(),
-  running: z.boolean(),
-  healthy: z.boolean(),
-  pid: z.number().int().positive().nullable(),
-  startedAt: isoTimestampSchema.nullable(),
-  message: z.string().min(1).nullable(),
-})
-
-export const deviceDaemonStartResultSchema = deviceDaemonStatusResultSchema.extend({
-  started: z.boolean(),
-})
-
-export const deviceDaemonStopResultSchema = deviceDaemonStatusResultSchema.extend({
-  stopped: z.boolean(),
-})
-
 export type DeviceProviderListResult = z.infer<typeof deviceProviderListResultSchema>
 export type DeviceConnectResult = z.infer<typeof deviceConnectResultSchema>
 export type DeviceAccountListResult = z.infer<typeof deviceAccountListResultSchema>
 export type DeviceAccountShowResult = z.infer<typeof deviceAccountShowResultSchema>
 export type DeviceAccountReconcileResult = z.infer<typeof deviceAccountReconcileResultSchema>
 export type DeviceAccountDisconnectResult = z.infer<typeof deviceAccountDisconnectResultSchema>
-export type DeviceDaemonStatusResult = z.infer<typeof deviceDaemonStatusResultSchema>
-export type DeviceDaemonStartResult = z.infer<typeof deviceDaemonStartResultSchema>
-export type DeviceDaemonStopResult = z.infer<typeof deviceDaemonStopResultSchema>

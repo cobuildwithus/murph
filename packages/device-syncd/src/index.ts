@@ -19,7 +19,6 @@ export type {
   DeviceSyncClock,
   DeviceSyncService,
   DeviceSyncTickMutex,
-  DeviceSyncWorkerExecutor,
 } from "./service.ts";
 export {
   cloneConfiguredDeviceSyncRuntimeConfig,
@@ -47,7 +46,6 @@ export {
   listJunctionLinkDeviceConnectRouteEntries,
   listConfiguredDeviceSyncProviderManifests,
   listConfiguredDeviceSyncProviderNames,
-  loadDeviceSyncEnvironment,
   normalizeDeviceConnectSourceId,
   normalizeDeviceSyncConnectTargetKey,
   normalizeJunctionLinkProviderFilter,
@@ -94,14 +92,11 @@ export type {
   DeviceSyncConfiguredProviderManifestByKey,
   HostedHintFieldKind,
   HostedHintPayloadFieldMap,
-  LoadedDeviceSyncEnvironment,
   SerializableConfigFieldKind,
   SerializableConfiguredDeviceSyncProviderConfigByKey,
   SerializableConfiguredDeviceSyncProviderConfigs,
   DirectDeviceConnectProvider,
 } from "./config.ts";
-export { buildPublicDeviceSyncErrorPayload, startDeviceSyncHttpServer } from "./http.ts";
-export type { CreateDeviceSyncHttpServerInput } from "./http.ts";
 export { SqliteDeviceSyncStore } from "./store.ts";
 export {
   buildJunctionClientUserId,

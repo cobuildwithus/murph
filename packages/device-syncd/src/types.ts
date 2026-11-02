@@ -56,11 +56,9 @@ export interface DeviceSyncServiceConfig {
   stateDatabasePath?: string;
   sessionTtlMs?: number;
   workerLeaseMs?: number;
-  workerPollMs?: number;
   // Number of durable job rows per drain tick. A provider batch may complete
   // multiple compatible rows in one worker pass, and each row counts here.
   workerBatchSize?: number;
-  schedulerPollMs?: number;
   log?: DeviceSyncLogger;
   shouldYieldJobExecution?: (() => boolean) | null;
   // Admission priority only: provider I/O and atomic publication keep running.
@@ -277,19 +275,6 @@ export interface DeviceSyncJobTimingDiagnostic {
   snapshotEventIdentityIndexCacheHitCount: number;
   snapshotEventIdentityIndexElapsedMs: number;
   snapshotNormalizationElapsedMs: number;
-}
-
-export interface DeviceSyncHttpConfig {
-  host?: string;
-  port?: number;
-  controlToken?: string;
-  publicHost?: string;
-  publicPort?: number;
-}
-
-export interface DeviceSyncHttpListenerAddress {
-  host: string;
-  port: number;
 }
 
 export type PublicProviderDescriptor = DeviceSyncProviderDescriptor;
@@ -1367,10 +1352,4 @@ export interface DeviceSyncImporterPort {
   resolveDeviceProviderSnapshotDefaultTimeZone?(input: {
     vaultRoot?: string;
   }): Promise<string | undefined>;
-}
-
-export interface NodeServerHandle {
-  control: DeviceSyncHttpListenerAddress;
-  public: DeviceSyncHttpListenerAddress | null;
-  close(): Promise<void>;
 }

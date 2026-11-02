@@ -10,12 +10,8 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "bin": {
-    "murph-device-syncd": "./bin.mjs"
-  },
   "files": [
     "README.md",
-    "bin.mjs",
     "dist"
   ],
   "exports": {
@@ -114,10 +110,6 @@
     "./hosted-hints": {
       "types": "./dist/hosted-hints.d.ts",
       "default": "./dist/hosted-hints.js"
-    },
-    "./http": {
-      "types": "./dist/http.d.ts",
-      "default": "./dist/http.js"
     },
     "./callback-redirect": {
       "types": "./dist/callback-redirect.d.ts",

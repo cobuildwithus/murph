@@ -1,6 +1,6 @@
 # @murphai/device-syncd
 
-Workspace-private local device sync runtime for Murph.
+Workspace-private hosted device ingestion and reconciliation runtime for Murph.
 
 Junction `blood_oxygen` resource jobs that fail complete-day normalization and
 `electrocardiogram_voltage` jobs that fail recording binding stay queued for a
@@ -13,30 +13,18 @@ normalization categories, ECG collection counts, and hosted progress diagnostics
 
 Contributing a new wearable provider? Start with `docs/device-provider-contribution-kit.md` in the repo root, then use the scaffolds listed in `docs/templates/README.md`.
 
-Murph's CLI can install, start, reuse, and stop this daemon for the selected vault through `murph device daemon ...`, so most operators should treat it as a built-in local service rather than a separately managed sidecar.
+Web owns authenticated device control and connection authority. The runner consumes
+shared hosted-runtime contracts and finite scheduler/worker passes. Local daemon
+entrypoints, listeners, launchers, and wearable fixture capture are retired.
 
-The daemon binds the control plane to localhost by default. CLI and web clients must authenticate that control plane with a bearer token. If provider callbacks or webhooks need public reachability, expose only the public callback/webhook routes through a separate listener or reverse proxy instead of widening `/accounts/*` and `/providers/*/connect`.
+`@murphai/device-syncd/public-ingress` owns OAuth state, callbacks and webhook
+preflight/dispatch. Configured provider assembly remains on
+`@murphai/device-syncd/config`. Shared source/account types, including source
+resource availability, remain available on `@murphai/device-syncd/client`.
 
-The package now also exports a reusable `DeviceSyncPublicIngress` layer that encapsulates provider-agnostic OAuth state, callback handling, and webhook preflight/dispatch. Hosted or alternate HTTP surfaces should import that seam from `@murphai/device-syncd/public-ingress`; the package root stays daemon-oriented. That shared ingress is the seam used by the current hosted Vercel control plane while keeping the local/tunneled callback flow alive.
-Daemon config readers and HTTP response helpers stay on `@murphai/device-syncd/config`
-and `@murphai/device-syncd/http` instead of leaking back through the shared ingress seam.
-Hosted surfaces should also reuse the configured-provider assembly helpers on
-`@murphai/device-syncd/config` instead of maintaining app-local provider config objects
-or registration lists.
-For non-daemon callers, `@murphai/device-syncd/client` is the canonical shared control-plane client surface for base-url/token resolution, loopback safety checks, and JSON request helpers inside this workspace or bundled public tarballs.
-
-What it does:
-- serves a provider-agnostic local control plane for CLI and web auth flows
-- owns OAuth connection state
-- stores encrypted provider tokens in SQLite under `.runtime/operations/device-sync/state.sqlite`
-- keeps `.runtime/operations/device-sync/**` local-only; those secrets, cursors, launcher artifacts, and logs are excluded from hosted workspace snapshots because the hosted lane uses a web-owned hosted device-sync control plane plus narrow signed runtime callbacks instead of the local daemon store
-- treats the managed control bearer and managed OAuth encryption secret as separate local files, so bearer rotation does not invalidate encrypted provider tokens
-- accepts provider webhooks when a provider supports them
-- runs background backfill and reconcile jobs
-- serializes active jobs per account so rotating refresh-token flows do not race
-- may execute compatible already-durable jobs as bounded provider-owned batches while keeping job rows granular for retry, ack, and idempotency
-- treats `DEVICE_SYNC_WORKER_BATCH_SIZE` as a durable job-row budget per tick; one provider batch may complete multiple rows, and each row counts against that budget
-- imports provider snapshots through `@murphai/importers`
+Provider snapshots flow through importers/core. Jobs serialize per account and
+retain bounded provider batching, retry, lease and disconnect fences. Hosted
+snapshots exclude the SQLite execution cache; Web remains connection authority.
 
 Hosted source hydration preserves control-plane source keys even when a cold
 restore creates a new local account id. Local-only accounts retain deterministic
@@ -278,7 +266,7 @@ and every supported redrive path are proven free of its schema version.
 It does **not** own canonical health-data import. The local data plane should still be the only component that normalizes provider payloads and writes them into the Murph vault.
 It also does **not** own provider-specific webhook-admin secrets. If a provider
 needs verification or subscription credentials, keep them on that provider's
-config and factory path instead of widening the generic ingress or daemon
+config and factory path instead of widening the generic ingress or runtime
 HTTP/env shapes.
 
 ## Provider model
@@ -516,27 +504,8 @@ Provider-readiness checkpoint:
 
 ## Environment
 
-Required:
-- `DEVICE_SYNC_VAULT_ROOT`
-- `DEVICE_SYNC_PUBLIC_BASE_URL`
-- `DEVICE_SYNC_SECRET` for the daemon's local bootstrap/service secret
-- `DEVICE_SYNC_CONTROL_TOKEN` for the control-plane bearer token
-
-Those two secrets are part of the local daemon contract. The hosted execution path uses signed internal web routes and hosted agent/session credentials instead of the daemon's `DEVICE_SYNC_CONTROL_TOKEN`.
-
-At least one provider must be configured.
-
-Common optional settings:
-- `DEVICE_SYNC_PORT`
-- `DEVICE_SYNC_HOST` (defaults to `127.0.0.1`)
-- `DEVICE_SYNC_ALLOWED_RETURN_ORIGINS`
-- `DEVICE_SYNC_STATE_DB_PATH`
-- `DEVICE_SYNC_WORKER_POLL_MS`
-- `DEVICE_SYNC_WORKER_BATCH_SIZE`
-- `DEVICE_SYNC_SCHEDULER_POLL_MS`
-- `DEVICE_SYNC_SESSION_TTL_MS`
-- `DEVICE_SYNC_WORKER_LEASE_MS`
-- `DEVICE_SYNC_PUBLIC_HOST` plus `DEVICE_SYNC_PUBLIC_PORT` to expose only `/oauth/*/callback` and `/webhooks/*`
+Hosted runtime configuration retains `DEVICE_SYNC_PUBLIC_BASE_URL` and
+`DEVICE_SYNC_SECRET`; signed Web routes own control-plane authentication.
 
 WHOOP settings:
 - `WHOOP_CLIENT_ID`
@@ -574,13 +543,6 @@ Strava settings:
 - `STRAVA_WEBHOOK_SIGNING_SECRET` when direct Strava webhook POST delivery is enabled; Strava POST events fail closed without a valid `X-Strava-Signature`
 - `STRAVA_WEBHOOK_TIMESTAMP_TOLERANCE_MS`
 - `STRAVA_WEBHOOK_VERIFY_TOKEN` when you want the Strava provider config to answer webhook preflight challenges and maintain the single app-global Strava webhook subscription
-
-## Run
-
-```bash
-# from the repo root
-node packages/device-syncd/dist/bin.js
-```
 
 ### Provider execution scope
 

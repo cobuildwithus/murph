@@ -7,9 +7,6 @@ import {
   deviceAccountShowResultSchema,
   deviceConnectResultSchema,
   deviceSyncConnectTargetSchema,
-  deviceDaemonStartResultSchema,
-  deviceDaemonStatusResultSchema,
-  deviceDaemonStopResultSchema,
   deviceProviderListResultSchema,
   deviceSyncBaseUrlSchema,
   deviceSyncProviderKeySchema,
@@ -74,18 +71,8 @@ const deviceControlOptionsSchema = withBaseOptions({
   baseUrl: deviceSyncBaseUrlSchema
     .optional()
     .describe(
-      'Override the local device sync control-plane URL. Read-only list commands use an explicit target when set; daemon-backed commands may manage the selected vault daemon when omitted.',
+      'Optional control-plane URL. Hosted device operations use the authenticated runtime.',
     ),
-})
-
-const deviceDaemonOptionsSchema = withBaseOptions({
-  baseUrl: deviceSyncBaseUrlSchema
-    .optional()
-    .describe(
-      'Override the loopback control-plane URL that Murph should manage for this vault.',
-    ),
-}).partial({
-  requestId: true,
 })
 
 export function registerDeviceCommands(
@@ -94,17 +81,17 @@ export function registerDeviceCommands(
 ) {
   const device = Cli.create('device', {
     description:
-      'Device sync commands for provider auth, account inspection, and the Murph-managed local device daemon.',
+      'Device sync commands for hosted provider auth and account inspection.',
   })
 
   const provider = Cli.create('provider', {
     description:
-      'List supported device providers plus local daemon availability.',
+      'List supported device providers.',
   })
 
   provider.command('list', {
     description:
-      'List the provider catalog without starting the local daemon; include live local descriptors when a daemon is already available.',
+      'List the supported device provider catalog.',
     args: emptyArgsSchema,
     options: deviceControlOptionsSchema,
     output: deviceProviderListResultSchema,
@@ -160,7 +147,7 @@ export function registerDeviceCommands(
 
   account.command('list', {
     description:
-      'List local daemon device accounts when an explicit/local control plane is available.',
+      'List connected device accounts through the authenticated hosted control plane.',
     args: emptyArgsSchema,
     options: deviceControlOptionsSchema.extend({
       provider: providerNameSchema.optional(),
@@ -230,55 +217,7 @@ export function registerDeviceCommands(
     },
   })
 
-  const daemon = Cli.create('daemon', {
-    description:
-      'Start, inspect, and stop the Murph-managed local device sync daemon for one vault.',
-  })
-
-  daemon.command('status', {
-    description:
-      'Show whether Murph is managing a local device sync daemon for this vault.',
-    args: emptyArgsSchema,
-    options: deviceDaemonOptionsSchema,
-    output: deviceDaemonStatusResultSchema,
-    async run({ options }) {
-      return await services.daemonStatus({
-        vault: options.vault,
-        baseUrl: options.baseUrl,
-      })
-    },
-  })
-
-  daemon.command('start', {
-    description:
-      'Start the local device sync daemon for this vault if Murph is not already managing one.',
-    args: emptyArgsSchema,
-    options: deviceDaemonOptionsSchema,
-    output: deviceDaemonStartResultSchema,
-    async run({ options }) {
-      return await services.daemonStart({
-        vault: options.vault,
-        baseUrl: options.baseUrl,
-      })
-    },
-  })
-
-  daemon.command('stop', {
-    description:
-      'Stop the local device sync daemon that Murph is managing for this vault.',
-    args: emptyArgsSchema,
-    options: deviceDaemonOptionsSchema,
-    output: deviceDaemonStopResultSchema,
-    async run({ options }) {
-      return await services.daemonStop({
-        vault: options.vault,
-        baseUrl: options.baseUrl,
-      })
-    },
-  })
-
   device.command(provider)
   device.command(account)
-  device.command(daemon)
   cli.command(device)
 }

@@ -1118,7 +1118,7 @@ Package verifier worker-exit result preservation is tracked in
 | `apps/cloudflare/scripts/benchmark-workspace-restore.md` | Synthetic encrypted restore benchmark, measurement controls, and local/Linux limitations. | Cloudflare workspace restore | Medium | 2026-09-04 |
 | `apps/cloudflare/DEPLOY.md` | Current deployment procedure for hosted execution, consumer-first Web runtime admission, single-pool capacity, isolated artifact smoke, compatible native gradual rollout, and member shell-hint transport retirement. | Hosted deploy flow | Medium | 2026-09-10 |
 | `packages/assistant-runtime/README.md` | Headless hosted runtime, durable completion, Browser Vault wake qualification, and compiled-worker prerequisites for focused entrypoint tests. | `packages/assistant-runtime/**` | Medium | 2026-09-11 |
-| `packages/device-syncd/README.md` | Local wearable sync runtime boundary and env contract. | `packages/device-syncd/**` | Medium | 2026-04-02 |
+| `packages/device-syncd/README.md` | Hosted wearable ingestion and finite reconciliation boundary. | `packages/device-syncd/**` | Medium | 2026-04-02 |
 | `packages/clinical-records/README.md` | Pure Clinical Records Intake contracts for raw FHIR retrieval manifests, deterministic source references, import-plan decisions, and bounded document-extraction proposals. | `packages/clinical-records/**` | Medium | 2026-09-11 |
 | `packages/health-metrics/README.md` | Neutral metric contracts, wearable catalogs, sample summaries, reviewed lab ranges, normalization, display formatting, and selection policy. | `packages/health-metrics/**` | Medium | 2026-09-10 |
 | `packages/hosted-execution/README.md` | Shared hosted execution contracts, auth, env, and client seam. | `packages/hosted-execution/**` | Medium | 2026-03-28 |
@@ -1676,3 +1676,5 @@ Legacy meal naming repair and shared write validation are tracked in
 `product-specs/ios-meals.md` owns its bounds, preservation and removal condition.
 
 Local product retirement: the CLI owns hosted onboarding; verification inventories exclude the retired setup and assistant wrapper packages. Inbox owners retain hosted normalization, storage, and repair without polling daemons. Release verification package discovery skips leftover `packages/*` folders that have no manifest.
+
+Local device daemon and fixture capture retirement is tracked in [the deletion plan](exec-plans/active/2026-11-02-remove-device-npm-jobs.md). Hosted CLI command signatures and source availability types remain.

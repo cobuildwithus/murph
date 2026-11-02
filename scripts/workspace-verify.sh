@@ -590,7 +590,6 @@ readonly cli_verify_test_files=(
   "packages/cli/test/cli-expansion-samples-audit.test.ts"
   "packages/cli/test/cli-expansion-workout.test.ts"
   "packages/cli/test/device-cli.test.ts"
-  "packages/cli/test/device-daemon.test.ts"
   "packages/cli/test/health-tail.test.ts"
   "packages/cli/test/canonical-write-source-audit.test.ts"
   "packages/cli/test/assistant-cron.test.ts"

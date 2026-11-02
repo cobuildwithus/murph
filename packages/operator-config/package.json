@@ -64,16 +64,6 @@
       "import": "./dist/device-cli-contracts.js",
       "default": "./dist/device-cli-contracts.js"
     },
-    "./device-daemon": {
-      "types": "./dist/device-daemon.d.ts",
-      "import": "./dist/device-daemon.js",
-      "default": "./dist/device-daemon.js"
-    },
-    "./device-sync-client": {
-      "types": "./dist/device-sync-client.d.ts",
-      "import": "./dist/device-sync-client.js",
-      "default": "./dist/device-sync-client.js"
-    },
     "./elevenlabs-runtime": {
       "types": "./dist/elevenlabs-runtime.d.ts",
       "import": "./dist/elevenlabs-runtime.js",

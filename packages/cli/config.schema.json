@@ -3376,7 +3376,7 @@
                           "maxLength": 128
                         },
                         "baseUrl": {
-                          "description": "Override the local device sync control-plane URL. Read-only list commands use an explicit target when set; daemon-backed commands may manage the selected vault daemon when omitted.",
+                          "description": "Optional control-plane URL. Hosted device operations use the authenticated runtime.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -3416,7 +3416,7 @@
                                   "maxLength": 128
                                 },
                                 "baseUrl": {
-                                  "description": "Override the local device sync control-plane URL. Read-only list commands use an explicit target when set; daemon-backed commands may manage the selected vault daemon when omitted.",
+                                  "description": "Optional control-plane URL. Hosted device operations use the authenticated runtime.",
                                   "type": "string",
                                   "minLength": 1
                                 }
@@ -3451,7 +3451,7 @@
                                   "maxLength": 128
                                 },
                                 "baseUrl": {
-                                  "description": "Override the local device sync control-plane URL. Read-only list commands use an explicit target when set; daemon-backed commands may manage the selected vault daemon when omitted.",
+                                  "description": "Optional control-plane URL. Hosted device operations use the authenticated runtime.",
                                   "type": "string",
                                   "minLength": 1
                                 },
@@ -3484,7 +3484,7 @@
                                   "maxLength": 128
                                 },
                                 "baseUrl": {
-                                  "description": "Override the local device sync control-plane URL. Read-only list commands use an explicit target when set; daemon-backed commands may manage the selected vault daemon when omitted.",
+                                  "description": "Optional control-plane URL. Hosted device operations use the authenticated runtime.",
                                   "type": "string",
                                   "minLength": 1
                                 }
@@ -3507,7 +3507,7 @@
                                   "maxLength": 128
                                 },
                                 "baseUrl": {
-                                  "description": "Override the local device sync control-plane URL. Read-only list commands use an explicit target when set; daemon-backed commands may manage the selected vault daemon when omitted.",
+                                  "description": "Optional control-plane URL. Hosted device operations use the authenticated runtime.",
                                   "type": "string",
                                   "minLength": 1
                                 }
@@ -3530,88 +3530,7 @@
                                   "maxLength": 128
                                 },
                                 "baseUrl": {
-                                  "description": "Override the local device sync control-plane URL. Read-only list commands use an explicit target when set; daemon-backed commands may manage the selected vault daemon when omitted.",
-                                  "type": "string",
-                                  "minLength": 1
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                },
-                "daemon": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "commands": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "status": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "requestId": {
-                                  "description": "Optional caller-supplied request id for audit correlation.",
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 128
-                                },
-                                "baseUrl": {
-                                  "description": "Override the loopback control-plane URL that Murph should manage for this vault.",
-                                  "type": "string",
-                                  "minLength": 1
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "start": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "requestId": {
-                                  "description": "Optional caller-supplied request id for audit correlation.",
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 128
-                                },
-                                "baseUrl": {
-                                  "description": "Override the loopback control-plane URL that Murph should manage for this vault.",
-                                  "type": "string",
-                                  "minLength": 1
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "stop": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "requestId": {
-                                  "description": "Optional caller-supplied request id for audit correlation.",
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 128
-                                },
-                                "baseUrl": {
-                                  "description": "Override the loopback control-plane URL that Murph should manage for this vault.",
+                                  "description": "Optional control-plane URL. Hosted device operations use the authenticated runtime.",
                                   "type": "string",
                                   "minLength": 1
                                 }

@@ -91,7 +91,6 @@ test('cli-owned vault services compose device sync on top of neutral vault servi
   assert.equal(Object.hasOwn(cliVaultServices, 'devices'), true)
   assert.equal(typeof cliVaultServices.devices.listProviders, 'function')
   assert.equal(typeof cliVaultServices.devices.connect, 'function')
-  assert.equal(typeof cliVaultServices.devices.daemonStart, 'function')
   assert.equal(isCliVaultServices(cliVaultServices), true)
 
   const unwiredCliVaultServices = createUnwiredCliVaultServices(neutralVaultServices)
@@ -99,5 +98,4 @@ test('cli-owned vault services compose device sync on top of neutral vault servi
   assert.equal(Object.hasOwn(unwiredCliVaultServices, 'devices'), true)
   assert.equal(typeof unwiredCliVaultServices.devices.listProviders, 'function')
   assert.equal(typeof unwiredCliVaultServices.devices.connect, 'function')
-  assert.equal(typeof unwiredCliVaultServices.devices.daemonStart, 'function')
 })

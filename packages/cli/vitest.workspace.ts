@@ -149,8 +149,6 @@ const cliVitestProjectSeeds: readonly CliVitestProjectSeed[] = [
     name: "cli-host-setup",
     fileParallelism: false,
     patterns: [
-      "device-daemon.test.ts",
-      "device-sync-client.test.ts",
       "gateway-*.test.ts",
       "inbox-*.test.ts",
       "setup-*.test.ts",

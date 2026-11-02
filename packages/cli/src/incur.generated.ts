@@ -56,9 +56,6 @@ declare module 'incur' {
       'device account reconcile': { args: { accountId: string }; options: { requestId?: string; baseUrl?: string } }
       'device account show': { args: { accountId: string }; options: { requestId?: string; baseUrl?: string } }
       'device connect': { args: { provider: string }; options: { requestId?: string; baseUrl?: string; returnTo?: string; open?: boolean } }
-      'device daemon start': { args: {}; options: { requestId?: string; baseUrl?: string } }
-      'device daemon status': { args: {}; options: { requestId?: string; baseUrl?: string } }
-      'device daemon stop': { args: {}; options: { requestId?: string; baseUrl?: string } }
       'device provider list': { args: {}; options: { requestId?: string; baseUrl?: string } }
       'diagnostic-test import-json': { args: {}; options: { requestId?: string; input: string } }
       'diagnostic-test payload-schema': { args: {}; options: {} }

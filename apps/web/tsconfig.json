@@ -346,9 +346,6 @@
       "@murphai/device-syncd/hosted-runtime": [
         "../../packages/device-syncd/src/hosted-runtime.ts"
       ],
-      "@murphai/device-syncd/http": [
-        "../../packages/device-syncd/src/http.ts"
-      ],
       "@murphai/device-syncd/junction-inline-authority": [
         "../../packages/device-syncd/src/junction-inline-authority.ts"
       ],

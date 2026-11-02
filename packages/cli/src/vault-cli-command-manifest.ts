@@ -832,9 +832,6 @@ export const vaultCliCommandDescriptors = [
         'showAccount',
         'reconcileAccount',
         'disconnectAccount',
-        'daemonStatus',
-        'daemonStart',
-        'daemonStop',
       ],
     },
     register({ cli, services }) {
