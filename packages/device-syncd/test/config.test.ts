@@ -330,5 +330,28 @@ test("only Junction is configured and runtime serialization preserves its secret
   const cloned = cloneConfiguredDeviceSyncRuntimeConfig(runtime);
   assert.deepEqual(cloned, runtime);
   assert.notEqual(cloned.providerConfigs.junction, runtime.providerConfigs.junction);
-  assert.throws(() => parseSerializableConfiguredDeviceSyncProviderConfigs({ whoop: {} }, "config"), /whoop/u);
+});
+
+test("runtime config from an older Web drops retired direct providers and still rejects unknown ones", () => {
+  const junction = { environment: "sandbox", region: "us" };
+  const olderWebRuntime = {
+    providerConfigs: {
+      junction,
+      oura: { clientId: "retired", clientSecret: "retired", scopes: ["daily"] },
+      strava: { clientId: "retired", clientSecret: "retired" },
+      whoop: { clientId: "retired", clientSecret: "retired", backfillDays: 30 },
+    },
+    publicBaseUrl: "https://sync.example.test",
+    secret: "runtime-secret",
+  };
+  const parsed = parseConfiguredDeviceSyncRuntimeConfig(olderWebRuntime, "runtime");
+  assert.deepEqual(Object.keys(parsed.providerConfigs), ["junction"]);
+  assert.deepEqual(
+    parseSerializableConfiguredDeviceSyncProviderConfigs({ whoop: {} }, "config"),
+    {},
+  );
+  assert.throws(
+    () => parseSerializableConfiguredDeviceSyncProviderConfigs({ polar: {} }, "config"),
+    /config\.polar is not a supported device-sync provider config/u,
+  );
 });

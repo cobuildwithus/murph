@@ -206,6 +206,16 @@ function parseSerializableProviderConfig(
   return parsed;
 }
 
+// Web builds from before the direct WHOOP, Oura and Strava removal can still
+// serialize those providers into runtime config that is already in flight. A
+// new runner drops them, so deploy order does not matter; any other unknown
+// provider is still rejected.
+const RETIRED_DIRECT_DEVICE_SYNC_PROVIDER_KEYS: ReadonlySet<string> = new Set([
+  "oura",
+  "strava",
+  "whoop",
+]);
+
 function requireSerializableConfiguredDeviceSyncProviderConfigsRecord(
   value: unknown,
   label: string,
@@ -214,7 +224,7 @@ function requireSerializableConfiguredDeviceSyncProviderConfigsRecord(
   const supportedProviders = new Set<string>(configuredDeviceSyncProviderKeys);
 
   for (const key of Object.keys(record)) {
-    if (!supportedProviders.has(key)) {
+    if (!supportedProviders.has(key) && !RETIRED_DIRECT_DEVICE_SYNC_PROVIDER_KEYS.has(key)) {
       throw new TypeError(`${label}.${key} is not a supported device-sync provider config.`);
     }
   }
