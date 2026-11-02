@@ -53,3 +53,5 @@ export * from "../versioned-json-files.ts";
 export * from "../sqlite-warning-filter.ts";
 export * from "../sqlite.ts";
 export * from "../ulid.ts";
+
+export * from "../hosted-media-references.ts";

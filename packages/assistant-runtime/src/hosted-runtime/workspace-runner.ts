@@ -1,3 +1,4 @@
+import { withIntegrationIngestMaterializer } from "@murphai/core";
 import {
   existsSync,
 } from "node:fs";
@@ -755,6 +756,14 @@ function resolveHostedWorkspaceCheckpointProgressProjection(input: {
 }
 
 export async function runHostedWorkspaceUntilIdleOrBudget(
+  input: HostedWorkspaceRunnerInput,
+): Promise<HostedWorkspaceRunnerResult> {
+  return withIntegrationIngestMaterializer(input.vaultRoot, async (paths) => {
+    await input.materializeWorkspaceArtifacts?.(paths);
+  }, () => runHostedWorkspaceUntilIdleOrBudgetWithHistory(input), input.now);
+}
+
+async function runHostedWorkspaceUntilIdleOrBudgetWithHistory(
   input: HostedWorkspaceRunnerInput,
 ): Promise<HostedWorkspaceRunnerResult> {
   assertHostedWorkspaceRunnerUser(input);

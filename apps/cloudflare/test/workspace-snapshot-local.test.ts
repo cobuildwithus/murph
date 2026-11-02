@@ -1,3 +1,4 @@
+import { brotliCompressSync } from "node:zlib";
 import { execFile } from "node:child_process";
 import { createCipheriv, createHash } from "node:crypto";
 import { access, chmod, link, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, truncate, utimes, writeFile } from "node:fs/promises";
@@ -9,6 +10,10 @@ import { describe, expect, it, vi } from "vitest";
 import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
 import {
   archiveClosedEventLedgerShards,
+  buildIntegrationEvidencePart,
+  buildIntegrationIngestRecord,
+  readIntegrationIngestEntries,
+  withIntegrationIngestMaterializer,
   initializeVault,
   readEvent,
   upsertEvent,
@@ -35,6 +40,8 @@ import {
 } from "@murphai/query";
 import {
   collectHostedWorkspaceSnapshotArchivePlan,
+  resolveHostedMediaReferenceCataloguePath,
+  HOSTED_MEDIA_REFS_SCHEMA,
 } from "@murphai/runtime-state/node";
 import {
   createEncryptedWorkspaceSnapshotFile,
@@ -1933,3 +1940,51 @@ function splitEncryptedSnapshotAcrossAuthTagBoundary(encryptedBytes: Buffer): Ui
     encryptedBytes.subarray(ciphertextEnd + 8),
   ].filter((chunk) => chunk.byteLength > 0);
 }
+
+
+it("restores a sparse encrypted checkpoint without cold bytes, then verifies a lazy history read", async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), "cold-snapshot-roundtrip-"));
+  const source = path.join(tempRoot, "source");
+  const vaultRoot = path.join(source, "vault");
+  const restored = path.join(tempRoot, "restored");
+  const relativePath = "ledger/integration-ingests/2020/2020-01.jsonl.br";
+  try {
+    await initializeVault({ vaultRoot });
+    const record = buildIntegrationIngestRecord({ id: "xfm_cold", provider: "synthetic", source: "device",
+      importedAt: "2020-01-01T00:00:00.000Z",
+      parts: [buildIntegrationEvidencePart({ role: "payload", fileName: "payload.json", mediaType: "application/json", content: '{"synthetic":true}' })],
+      eventOutputs: [], eventIdsComplete: true, sampleIds: [], sampleIdsComplete: true, eventCount: 0, sampleCount: 0 });
+    const coldBytes = brotliCompressSync(Buffer.from(`${JSON.stringify(record)}\n`));
+    await mkdir(path.dirname(path.join(vaultRoot, relativePath)), { recursive: true });
+    await writeFile(path.join(vaultRoot, relativePath), coldBytes);
+    const catalogue = resolveHostedMediaReferenceCataloguePath(vaultRoot);
+    await mkdir(path.dirname(catalogue), { recursive: true });
+    await writeFile(catalogue, JSON.stringify({ schema: HOSTED_MEDIA_REFS_SCHEMA, entries: [{
+      relativePath, byteSize: coldBytes.length, sha256: createHash("sha256").update(coldBytes).digest("hex"),
+      mediaId: "a".repeat(64), mediaKind: "integration-ingest", expiresAt: null,
+    }] }));
+    const plan = await collectHostedWorkspaceSnapshotArchivePlan({ durableRoot: source, vaultRoot, excludedVaultPaths: [relativePath] });
+    const userId = "synthetic_cold_member";
+    const snapshotId = "synthetic_cold_snapshot";
+    const objectKey = "synthetic/cold-snapshot.enc";
+    const aad = buildHostedWorkspaceSnapshotV2Aad({ userId, snapshotId, objectKey });
+    const dataKey = encodeHostedWorkspaceSnapshotV2DataKey(new Uint8Array(32).fill(9));
+    const encrypted = await createEncryptedWorkspaceSnapshotFile({ aad, archiveEntries: plan.entries,
+      dataKey, durableRoot: source, ivBase64: Buffer.alloc(12, 3).toString("base64url"),
+      maxEncryptedBytes: 16 * 1024 * 1024, outputDir: path.join(tempRoot, "scratch") });
+    await restoreEncryptedWorkspaceSnapshot({ dataKey, durableRoot: restored,
+      encryptedFilePath: encrypted.encryptedFilePath,
+      ref: createHostedWorkspaceSnapshotTestRef({ aad, encrypted, objectKey, snapshotId, userId }) });
+    const restoredVault = path.join(restored, "vault");
+    await expect(readFile(path.join(restoredVault, relativePath))).rejects.toMatchObject({ code: "ENOENT" });
+    const materialize = vi.fn(async (paths: readonly string[]) => {
+      expect(paths).toEqual([relativePath]);
+      await mkdir(path.dirname(path.join(restoredVault, relativePath)), { recursive: true });
+      await writeFile(path.join(restoredVault, relativePath), coldBytes);
+    });
+    expect(materialize).not.toHaveBeenCalled();
+    const entries = await withIntegrationIngestMaterializer(restoredVault, materialize, () => readIntegrationIngestEntries(restoredVault));
+    expect(entries[0]?.record).toEqual(record);
+    expect(materialize).toHaveBeenCalledOnce();
+  } finally { await rm(tempRoot, { recursive: true, force: true }); }
+});

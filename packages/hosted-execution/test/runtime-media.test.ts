@@ -20,3 +20,13 @@ describe("media read protocol", () => {
     expect(() => parseHostedRuntimeMediaCommand({ operation: "admit_read", descriptor, ...identity })).toThrow();
   });
 });
+
+
+it("admits non-expiring cold history and rejects a retention deadline", () => {
+  const cold = { ...descriptor, mediaKind: "integration-ingest" };
+  expect(parseHostedRuntimeMediaCommand({ operation: "read", descriptor: cold }))
+    .toEqual({ operation: "read", descriptor: cold });
+  expect(() => parseHostedRuntimeMediaCommand({ operation: "read", descriptor: {
+    ...cold, expiresAt: "2030-01-01T00:00:00.000Z",
+  } })).toThrow("cannot expire");
+});

@@ -4,7 +4,7 @@ import { parseHostedRuntimeOwnerIdentity, type HostedRuntimeOwnerIdentity } from
 export const HOSTED_RUNTIME_MEDIA_PATH = "/api/internal/hosted-runtime/media";
 export interface HostedRuntimeMediaDescriptor {
   mediaId: string;
-  mediaKind: "image" | "video";
+  mediaKind: "image" | "video" | "integration-ingest";
   byteSize: number;
   sha256: string;
   expiresAt: string | null;
@@ -35,10 +35,11 @@ export function parseHostedRuntimeMediaDescriptor(value: unknown): HostedRuntime
   const record = requireObject(value, "Runtime media descriptor");
   const mediaId = mediaDigest(record.mediaId);
   const sha256 = mediaDigest(record.sha256);
-  if (record.mediaKind !== "image" && record.mediaKind !== "video") throw new TypeError("Runtime media kind is invalid.");
+  if (record.mediaKind !== "image" && record.mediaKind !== "video" && record.mediaKind !== "integration-ingest") throw new TypeError("Runtime media kind is invalid.");
   if (typeof record.byteSize !== "number" || !Number.isSafeInteger(record.byteSize) || record.byteSize < 0) throw new TypeError("Runtime media size is invalid.");
   const expiresAt = record.expiresAt === null || record.expiresAt === undefined ? null : requireString(record.expiresAt, "Runtime media expiry");
   if (expiresAt !== null && !Number.isFinite(Date.parse(expiresAt))) throw new TypeError("Runtime media expiry is invalid.");
+  if (record.mediaKind === "integration-ingest" && expiresAt !== null) throw new TypeError("Cold ingest history cannot expire.");
   return { mediaId, mediaKind: record.mediaKind, byteSize: record.byteSize, sha256, expiresAt: expiresAt === null ? null : new Date(expiresAt).toISOString() };
 }
 

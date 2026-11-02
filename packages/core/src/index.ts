@@ -461,3 +461,4 @@ export * from "./integration-ingest-migration.ts";
 export { archiveClosedAuditShards, listAuditShardPaths, listAuditShardSources, readAuditShardRows } from "./audit-storage.ts";
 
 export { runMealPhotoMaintenance, type MealPhotoMaintenanceInput, type MealPhotoMaintenanceResult } from "./domains/events/meal-photo-maintenance.ts";
+export { materializeIntegrationIngestHistory, withIntegrationIngestMaterializer } from "./integration-ingest-cold-storage.ts";

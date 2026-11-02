@@ -129,7 +129,7 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
   ),
   definePortableAssistantFile(
     ".runtime/operations/assistant/hosted-media-refs.json",
-    "Hosted media reference catalogue that lets workspace snapshots externalize bounded image and video bytes while preserving lazy materialization.",
+    "Hosted media reference catalogue for lazy image/video bytes and non-expiring closed integration-ingest history.",
   ),
   definePortableAssistantFile(
     ".runtime/operations/assistant/hosted-system-mailbox.json",
