@@ -223,6 +223,7 @@ describe("meal photo companion routes", () => {
     mocks.assertCurrentMealPhotoCaptureEnrollmentTx.mockResolvedValue(undefined);
     mocks.assertCurrentManualMealPhotoUploadAuthorityTx.mockResolvedValue(undefined);
     mocks.readAndValidateMealPhotoUpload.mockResolvedValue({
+      uploadId: CAPTURE_ID,
       bytes: JPEG,
       captureId: CAPTURE_ID,
       capturedAt: CAPTURED_AT,
@@ -231,6 +232,7 @@ describe("meal photo companion routes", () => {
       width: 3,
     });
     mocks.readAndValidateManualMealPhotoUpload.mockResolvedValue({
+      uploadId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
       bytes: JPEG,
       captureId: CAPTURE_ID,
       capturedAt: CAPTURED_AT,
@@ -513,6 +515,7 @@ describe("meal photo companion routes", () => {
       userId: MEMBER_ID,
     });
     expect(mocks.buildHostedExecutionMealPhotoCapturedWake).toHaveBeenCalledWith({
+      uploadId: CAPTURE_ID,
       byteLength: JPEG.byteLength,
       captureId: CAPTURE_ID,
       capturedAt: CAPTURED_AT,
@@ -618,6 +621,7 @@ describe("meal photo companion routes", () => {
       expect.objectContaining({
         captureId: CAPTURE_ID,
         eventId: MANUAL_EVENT_ID,
+        uploadId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
         memberId: MEMBER_ID,
       }),
     );

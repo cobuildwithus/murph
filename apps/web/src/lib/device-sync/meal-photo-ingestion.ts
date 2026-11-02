@@ -68,6 +68,7 @@ export async function ingestCompanionMealPhoto(input: {
     userId: input.memberId,
   });
   const envelope = buildHostedExecutionMealPhotoCapturedWake({
+    uploadId: input.upload.uploadId,
     byteLength: staged.byteLength,
     captureId: input.upload.captureId,
     capturedAt: input.upload.capturedAt,

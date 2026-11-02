@@ -1,5 +1,10 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { createServer } from "node:http";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { addMeal, initializeVault } from "@murphai/core";
+import { createBrowserVaultReplica, readVault } from "@murphai/query/browser-replica-server";
 import { NodeNextRequest } from "next/dist/server/base-http/node";
 import { NextRequestAdapter } from "next/dist/server/web/spec-extension/adapters/next-request";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -177,4 +182,29 @@ it.each(["2f1c1fdc-c7b0-4d90-b902-8e6295959243", "a".repeat(64), null])("returns
   expect(await (await GET(request())).json()).toMatchObject({ days: [{ meals: [linkedMeal] }] });
   expect(await (await detail(request(), context())).json()).toEqual({ timeZone: "Asia/Tokyo", savedAt, meal: linkedMeal });
   expect((await DELETE(request("", { method: "DELETE" }), context())).status).toBe(202);
+});
+
+
+it("serves upload IDs from real canonical projection records and keeps typed/texted photos null", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "synthetic-meals-api-"));
+  try {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const photoPath = path.join(vaultRoot, "synthetic.jpg");
+    await writeFile(photoPath, Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    const expected = new Map<string, string | null>();
+    for (const uploadId of ["2f1c1fdc-c7b0-4d90-b902-8e6295959243", "a".repeat(64), undefined]) {
+      const imported = await addMeal({ vaultRoot, photoPath, occurredAt: savedAt, uploadId });
+      expected.set(imported.mealId, uploadId ?? null);
+    }
+    const typed = await addMeal({ vaultRoot, occurredAt: savedAt, note: "Synthetic typed meal" });
+    expected.set(typed.mealId, null);
+    const replica = await createBrowserVaultReplica({ vault: await readVault(vaultRoot), metricPoints: [], generatedAt: savedAt, sourceBundleHash: "a".repeat(64) });
+    mocks.decode.mockResolvedValue({ client: { replica } });
+    const listing = await (await GET(request())).json();
+    expect(listing.days[0].meals).toHaveLength(4);
+    for (const [id, uploadId] of expected) {
+      expect(listing.days[0].meals).toContainEqual(expect.objectContaining({ id, uploadId }));
+      expect(await (await detail(request(), context(id))).json()).toMatchObject({ meal: { id, uploadId } });
+    }
+  } finally { await rm(vaultRoot, { recursive: true, force: true }); }
 });
