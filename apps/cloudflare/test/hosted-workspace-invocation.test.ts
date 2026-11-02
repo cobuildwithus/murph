@@ -430,6 +430,25 @@ describe("runHostedWorkspaceInvocation", () => {
     );
   });
 
+  it("rejects new wakes once the package publishes its idle checkpoint", async () => {
+    const onRuntimeWakeReady = vi.fn();
+    mocks.runPackageHostedWorkspaceInvocation.mockImplementation(async (input: Record<string, unknown>) => {
+      const sendWake = onRuntimeWakeReady.mock.calls[0]![0];
+      expect(sendWake()).toBe(true);
+      requireCallable(input.onIdleRetirement, "idle retirement callback")();
+      expect(sendWake()).toBe(false);
+      return { nextWakeAt: null, redactedStatus: {}, status: "idle" };
+    });
+    const result = await runHostedWorkspaceInvocation(createWorkspaceJob({ forwardedEnv: {
+      HOSTED_ASSISTANT_MODEL: "gpt-job", HOSTED_ASSISTANT_PROVIDER: "openai", NODE_ENV: "production",
+    } }), {
+      onRuntimeWakeReady, waitForBackgroundAssistantWork,
+      supervisorEnv: { HOSTED_ASSISTANT_MODEL: "gpt-supervisor", HOSTED_ASSISTANT_PROVIDER: "openai", NODE_ENV: "production" },
+    });
+    // An earlier accepted wake still requests successor reconciliation.
+    expect(result.immediateRecheckRequested).toBe(true);
+  });
+
   it("does not lose a runtime wake accepted after the package's final drain", async () => {
     let reachFinalDrain!: () => void;
     const finalDrainReached = new Promise<void>((resolve) => {

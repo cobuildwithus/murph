@@ -551,9 +551,9 @@ describe("hosted workspace runtime entrypoint", () => {
     {
       expectedCheckpointDelayMs: 180_000,
       expectedImmediateRecheck: undefined,
-      expectedWakeReason: "assistant",
+      expectedWakeReason: "mailbox",
       mailboxWakeAt: new Date(Date.parse(TEST_NOW) + 5 * 60_000).toISOString(),
-      scenario: "retains the serviced assistant wake ahead of a future mailbox wake",
+      scenario: "replaces the serviced assistant wake with the computed future mailbox wake",
     },
     {
       expectedCheckpointDelayMs: 0,
@@ -689,11 +689,11 @@ describe("hosted workspace runtime entrypoint", () => {
         request.nextWakeAt,
         request.nextWakeReason,
       ]), [
-        ["idle_shutdown", TEST_NOW, expectedWakeReason],
+        ["idle_shutdown", mailboxWakeAt, expectedWakeReason],
       ]);
       assert.equal(result.immediateRecheckRequested, expectedImmediateRecheck);
       assert.equal(result.status, "scheduled");
-      assert.equal(result.nextWakeAt, TEST_NOW);
+      assert.equal(result.nextWakeAt, mailboxWakeAt);
       assert.equal(result.nextWakeReason, expectedWakeReason);
       assert.equal(assistantPhaseCalls, 2);
     } finally {
@@ -1471,7 +1471,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("round4: committed due assistant wake hidden pre-checkpoint is still serviced, not lost", async () => {
+  test("round4: committed due assistant wake hidden pre-checkpoint is handed to its successor", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-round4-hidden-wake-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -1599,29 +1599,13 @@ describe("hosted workspace runtime entrypoint", () => {
       ]);
 
       await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
-      await withRealTimeout(assistantThreeObserved.promise, 15_000, () => events.join(","));
-      assert.ok(
-        requireEventIndex(events, "snapshot:idle_shutdown")
-          < requireEventIndex(events, `assistant.phase:3:${TEST_NOW}:assistant`),
-      );
-      assert.ok(
-        requireEventIndex(events, "mailbox.importItem:mailbox_item_round4_hidden_wake_conversation")
-          < requireEventIndex(events, "snapshot:idle_shutdown"),
-      );
-
-      // Follow-up work preserves the spent window; no second clock advance.
       const result = await resultPromise;
-
-      assert.deepEqual(checkpointRequests.map((request) => [
-        request.reason,
-        request.nextWakeAt,
-        request.nextWakeReason,
-      ]), [
+      assert.equal(assistantPhaseCalls, 2);
+      assert.deepEqual(checkpointRequests.map((request) => [request.reason, request.nextWakeAt, request.nextWakeReason]), [
         ["idle_shutdown", TEST_NOW, "assistant"],
-        ["idle_shutdown", null, null],
       ]);
-      assert.equal(result.status, "idle");
-      assert.equal(result.nextWakeAt, null);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, TEST_NOW);
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
@@ -2423,32 +2407,15 @@ describe("hosted workspace runtime entrypoint", () => {
       ]);
 
       await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
-      await withRealTimeout(assistantThreeObserved.promise, 15_000, () => events.join(","));
-      assert.ok(
-        requireEventIndex(events, "snapshot:idle_shutdown")
-          < requireEventIndex(events, `assistant.phase:3:${TEST_NOW}:assistant`),
-      );
-
-      // Cleanup's local follow-up is dirty, but cannot mint another full
-      // quiet window. No additional clock advance is allowed here.
       const result = await resultPromise;
-      assert.deepEqual(snapshotTimes, [
-        Date.parse(TEST_NOW) + runnerIdleTtlMs,
-        Date.parse(TEST_NOW) + runnerIdleTtlMs,
-      ]);
-      assert.ok(requireEventIndex(events, "provider.cleanup")
-        < requireEventIndex(events, `assistant.phase:3:${TEST_NOW}:assistant`));
-
-      assert.deepEqual(checkpointRequests.map((request) => [
-        request.reason,
-        request.nextWakeAt,
-        request.nextWakeReason,
-      ]), [
+      assert.equal(assistantPhaseCalls, 2);
+      assert.deepEqual(checkpointRequests.map((request) => [request.reason, request.nextWakeAt, request.nextWakeReason]), [
         ["idle_shutdown", TEST_NOW, "assistant"],
-        ["idle_shutdown", null, null],
       ]);
-      assert.equal(result.nextWakeAt, null);
-      assert.equal(result.status, "idle");
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, TEST_NOW);
+      assert.ok(requireEventIndex(events, "provider.cleanup") < requireEventIndex(events, "snapshot:idle_shutdown"));
+      assert.deepEqual(snapshotTimes, [Date.parse(TEST_NOW) + runnerIdleTtlMs]);
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
@@ -2643,30 +2610,16 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      assert.equal(result.status, "idle");
-      assert.equal(result.nextWakeAt, null);
-      assert.equal(assistantPhaseCalls, 2);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, postCheckpointWakeAt);
+      assert.equal(assistantPhaseCalls, 1);
       assert.equal(phaseInputIds[0]?.length, 1);
-      assert.deepEqual(phaseInputIds[1], []);
-      assert.deepEqual(
-        events.filter((event) =>
-          event.startsWith("assistant.phase:") || event.startsWith("snapshot:")
-        ),
-        [
-          `assistant.phase:1:${postCheckpointWakeAt}`,
-          "snapshot:idle_shutdown",
-          `assistant.phase:2:${postCheckpointWakeAt}`,
-          "snapshot:idle_shutdown",
-        ],
-      );
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "idle_shutdown",
-        "idle_shutdown",
+      assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:") || event.startsWith("snapshot:")), [
+        `assistant.phase:1:${postCheckpointWakeAt}`, "snapshot:idle_shutdown",
       ]);
+      assert.equal(checkpointRequests.length, 1);
       assert.equal(checkpointRequests[0]?.nextWakeAt, postCheckpointWakeAt);
       assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
-      assert.equal(checkpointRequests[1]?.nextWakeAt, null);
-      assert.equal(checkpointRequests[1]?.nextWakeReason, null);
     } finally {
       await removeTempRoot(vaultRoot);
     }

@@ -3576,7 +3576,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
     }
   });
 
-  test("offers checkpointed vault-share before servicing repeated device-sync wakes", async () => {
+  test("drains checkpoint-backed vault-share and hands repeated device wakes off", async () => {
     const vaultRoot = await mkdtemp(
       path.join(tmpdir(), "murph-runtime-vault-share-device-pressure-"),
     );
@@ -3804,17 +3804,10 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         events.join(","),
       );
       for (const laneSeq of ["2", "3"] as const) {
-        assert.ok(
-          requireEventIndex(events, "vault-share.deliver:done")
-            < requireEventIndex(
-              events,
-              `mailbox.importItem:mailbox_item_entrypoint_vault_share_device_pressure_${laneSeq}`,
-            ),
-          events.join(","),
-        );
+        assert.ok(!events.includes(`mailbox.importItem:mailbox_item_entrypoint_vault_share_device_pressure_${laneSeq}`));
       }
       assert.equal(vaultShareDeliverCalls, 1);
-      assert.ok(checkpointRequests.length >= 2);
+      assert.equal(checkpointRequests.length, 1);
       assert.equal(
         fetchRequests.filter((request) =>
           request.requestId.includes(":checkpoint-wake-classify:")
@@ -3835,7 +3828,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
       );
       assert.equal(peakMailboxFetchesInFlight, 1);
       assert.ok(fetchRequests.every((request) => request.limitPerLane === 4));
-      assert.equal(result.status, "budget_exhausted");
+      assert.equal(result.status, "scheduled");
     } finally {
       offerRelease.resolve();
       runtimeAbortController.abort();

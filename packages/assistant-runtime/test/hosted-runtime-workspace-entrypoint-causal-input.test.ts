@@ -4,6 +4,7 @@ import {
   TEST_USER_ID,
   createAssistantAskRequestedWake,
   createSnapshotFixtureRef,
+  createVaultSnapshotBundle,
   createConsentedMemberAssistantAskRequestedWake,
   createDeferred,
   createDeviceSyncSystemWakeForMailboxItem,
@@ -1619,8 +1620,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
 
       try {
         await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-        const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
-          createWorkspaceRuntimeJobInput({
+        const artifactBytesByHash = new Map<string, Uint8Array>();
+        const runtimeJob = createWorkspaceRuntimeJobInput({
             forwardedEnv: {
               LINQ_API_TOKEN: "synthetic-linq-token",
             },
@@ -1663,19 +1664,13 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
               userId: TEST_USER_ID,
               workspaceVersion: "0",
             },
-          }),
-          {
+          });
+        const runtimeOptions: Parameters<typeof runHostedWorkspaceRuntimeJobInProcess>[1] = {
             async createCheckpointSnapshot(snapshotInput) {
               events.push(`snapshot:${snapshotInput.reason}`);
-              return {
-                snapshotRef: createSnapshotFixtureRef({
-                  hash:
-                    snapshotInput.reason === "idle_shutdown"
-                      ? "e".repeat(64)
-                      : "d".repeat(64),
-                  size: 512,
-                }),
-              };
+              const snapshot = await createVaultSnapshotBundle({ vaultRoot: activeVaultRoot });
+              artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+              return { snapshotRef: snapshot.snapshotRef };
             },
             async importItem(item) {
               events.push(`mailbox.importItem:${item.item.id}`);
@@ -1758,6 +1753,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
             },
             platform: {
               ...createPlatform({
+                artifactBytesByHash,
                 assistantAskPort: completion.privateCompletion
                   ? {
                       async request(request) {
@@ -2041,14 +2037,39 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
               return phaseResult;
             },
             vaultRoot,
-          },
-        );
-
+          };
         const result = await withRealTimeout(
-          resultPromise,
+          runHostedWorkspaceRuntimeJobInProcess(runtimeJob, runtimeOptions),
           15_000,
           () => events.join(","),
         );
+        if (transport.channel === "telegram"
+          && !(await listAssistantOutboxIntents(activeVaultRoot)).some((intent) =>
+            intent.deliveryIdempotencyKey === deliveryKey && intent.status === "sent")) {
+          // Non-idempotent delivery is durable before retirement. Restore the
+          // published snapshot in a successor and prove exactly one send.
+          const checkpoint = checkpointRequests.at(-1);
+          assert.ok(checkpoint?.snapshotRef);
+          assert.equal(result.status, "scheduled");
+          assert.ok(result.nextWakeAt);
+          const workspace = createWorkspaceState({
+            version: String(BigInt(checkpoint.expectedWorkspaceVersion) + 1n),
+            snapshotRef: checkpoint.snapshotRef,
+            nextWakeAt: checkpoint.nextWakeAt ?? null,
+            nextWakeReason: checkpoint.nextWakeReason ?? null,
+            redactedStatus: checkpoint.redactedStatus ?? null,
+          });
+          events.push("successor.start");
+          await withRealTimeout(runHostedWorkspaceRuntimeJobInProcess({
+            ...runtimeJob,
+            request: { ...runtimeJob.request, attemptId: "attempt_completion_successor",
+              workspaceVersion: workspace.version },
+          }, {
+            ...runtimeOptions,
+            platform: { ...runtimeOptions.platform,
+              workspacePort: createWorkspacePort({ checkpointRequests, events, workspace }) },
+          }), 15_000, () => events.join(","));
+        }
         const providerEvent = `provider.send:${deliveryKey}`;
         if (completion.privateCompletion) {
           const consentedAskInput =
@@ -2718,7 +2739,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
       assert.equal(result.status, "scheduled");
       if (!mixedDevicePrefix) {
         assert.equal(result.nextWakeReason, "assistant");
-        assert.ok(Date.parse(result.nextWakeAt ?? "") > Date.parse(TEST_NOW));
+        assert.equal(result.nextWakeAt, TEST_NOW);
       }
     } finally {
       if (mocks.actualCollectHostedAssistantDeliverySideEffects) {
@@ -3295,23 +3316,17 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
       );
 
       const idleCheckpointIndex = requireEventIndex(events, "snapshot:idle_shutdown");
-      assert.ok(
-        idleCheckpointIndex < requireEventIndex(
-          events,
-          "mailbox.importItem:mailbox_item_entrypoint_mixed_canonical",
-        ),
-        events.join(","),
-      );
-      if (deferredKind !== "device-sync.wake") {
-        assert.ok(
-          idleCheckpointIndex < requireEventIndex(
-            events,
-            "mailbox.importItem:mailbox_item_entrypoint_mixed_pending_effects",
-          ),
-          events.join(","),
-        );
+      if (deferredKind === "device-sync.wake") {
+        assert.ok(!events.includes("mailbox.importItem:mailbox_item_entrypoint_mixed_canonical"));
+        assert.equal(result.status, "scheduled");
+        assert.ok(result.nextWakeAt);
+      } else {
+        assert.ok(idleCheckpointIndex < requireEventIndex(events,
+          "mailbox.importItem:mailbox_item_entrypoint_mixed_canonical"));
+        assert.ok(idleCheckpointIndex < requireEventIndex(events,
+          "mailbox.importItem:mailbox_item_entrypoint_mixed_pending_effects"));
+        assert.equal(result.status, "idle");
       }
-      assert.equal(result.status, "idle");
     } finally {
       await removeTempRoot(vaultRoot);
     }

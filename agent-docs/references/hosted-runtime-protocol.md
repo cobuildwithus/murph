@@ -98,6 +98,18 @@ The live ownership split is:
   effects retain save-before-effect ordering and checkpoint their resulting
   dirty state without another full quiet window.
 
+  Successful idle publication ends assistant wake and deferred device service
+  in that invocation. The host closes wake admission before draining effects,
+  except while an active voice session retains the runtime. Already accepted
+  conversation input still drains; later arrivals use the durable successor.
+  Background system work stays quiesced, and due assistant or deferred device
+  wakes remain successor work.
+  Required projection, receipt, and acknowledgement effects keep their existing
+  save-before-effect ordering and may require a follow-up checkpoint. An empty
+  service of a presented assistant wake replaces the carried wake with its
+  explicitly computed schedule, including no next wake; an omitted schedule
+  retains the unserviced obligation.
+
   Conversation retention is separate: the existing activity callback transports
   original trusted receipt epoch milliseconds and child health publishes their
   process-local maximum as `conversationActivityReceivedAtEpochMs`. No callback

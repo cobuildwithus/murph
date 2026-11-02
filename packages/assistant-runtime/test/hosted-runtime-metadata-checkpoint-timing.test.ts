@@ -25,16 +25,14 @@ import {
   runHostedWorkspaceRuntimeJobInProcess,
 } from "../src/hosted-runtime.ts";
 
-test("metadata-only post-checkpoint reconciliation does not rearm the idle window", async () => {
+test("empty post-checkpoint wake hands off without rearming the idle window", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
   const events: string[] = [];
   const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
   const runnerIdleTtlMs = 180_000;
   const dueAssistantWakeAt = TEST_NOW;
   const durableWakeAt = "2026-04-27T00:20:00.000Z";
-  const replacementWakeAt = "2026-04-27T00:10:00.000Z";
   const assistantOneObserved = createDeferred<void>();
-  const assistantTwoObserved = createDeferred<void>();
   const checkpointStartedAtMs: number[] = [];
   const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
   const durableEffect = vi.fn(async () => {
@@ -125,19 +123,7 @@ test("metadata-only post-checkpoint reconciliation does not rearm the idle windo
               };
             }
 
-            if (assistantPass === 2) {
-              assistantTwoObserved.resolve();
-              return {
-                nextWakeAt: replacementWakeAt,
-                nextWakeReason: "assistant",
-                progressed: false,
-                runtimeProjectionCheckpointRequested: true,
-              };
-            }
-
-            return {
-              progressed: false,
-            };
+            assert.fail("retirement must not re-enter assistant service");
           },
           vaultRoot,
         },
@@ -149,24 +135,20 @@ test("metadata-only post-checkpoint reconciliation does not rearm the idle windo
     await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
     await waitForFakeTimerScheduled(() => events.join(","));
     await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
-    await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
-    await Promise.race([
-      waitForFakeTimerScheduled(() => events.join(",")),
-      resultPromise,
-    ]);
-    await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
-    await resultPromise;
+    const result = await resultPromise;
+    assert.equal(assistantPass, 1);
+    assert.equal(result.nextWakeAt, dueAssistantWakeAt);
+    assert.equal(result.nextWakeReason, "assistant");
 
     assert.equal(durableEffect.mock.calls.length, 1);
     assert.deepEqual(checkpointStartedAtMs, [
-      Date.parse(TEST_NOW) + runnerIdleTtlMs,
       Date.parse(TEST_NOW) + runnerIdleTtlMs,
       Date.parse(TEST_NOW) + runnerIdleTtlMs,
     ]);
     const finalCheckpoint = checkpointRequests.at(-1);
     assert.deepEqual(
       [finalCheckpoint?.nextWakeAt, finalCheckpoint?.nextWakeReason],
-      [replacementWakeAt, "assistant"],
+      [dueAssistantWakeAt, "assistant"],
     );
   } finally {
     vi.useRealTimers();

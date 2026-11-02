@@ -55,6 +55,7 @@ export interface HostedWorkspaceInvocationInput {
   job: HostedAssistantWorkspaceRuntimeJobInput;
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   mailboxPayloadDecoder: HostedWorkspaceMailboxPayloadDecoder;
+  onIdleRetirement?: () => void;
   onConversationActivityObserved?: (receivedAtEpochMs: number) => void;
   platform: HostedRuntimePlatform;
   preparedWorkspaceRestore?: HostedWorkspaceRestorePreparation | null;
@@ -102,6 +103,7 @@ export async function runHostedWorkspaceInvocation(
       voice: input.voice ?? null,
       latencyMilestones: input.latencyMilestones ?? null,
       onConversationActivityObserved: input.onConversationActivityObserved,
+      onIdleRetirement: input.onIdleRetirement,
       ...(input.preparedWorkspaceRestore
         ? { preparedWorkspaceRestore: input.preparedWorkspaceRestore }
         : {}),

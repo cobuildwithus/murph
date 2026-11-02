@@ -2459,7 +2459,7 @@ describe("hosted runtime shutdown signal", () => {
     }
   }, 30_000);
 
-  test("shutdown during post-checkpoint due assistant import returns the due wake", async () => {
+  test("retirement hands the due assistant wake off without starting another import", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -2541,7 +2541,7 @@ describe("hosted runtime shutdown signal", () => {
       assert.equal(assistantPhaseCalls, 1);
       assert.deepEqual(
         events.filter((event) => event.startsWith("mailbox.importItem:")),
-        ["mailbox.importItem:mailbox_item_shutdown_during_due_assistant_import"],
+        [],
       );
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "idle_window");
@@ -3323,7 +3323,7 @@ describe("hosted runtime shutdown signal", () => {
     }
   }, 30_000);
 
-  test("a shutdown after a projected wake pass still preserves due media retention", async () => {
+  test("retirement preserves due media retention alongside the projected assistant wake", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -3407,10 +3407,9 @@ describe("hosted runtime shutdown signal", () => {
         },
       );
 
-      assert.equal(assistantPhaseCalls, 2);
+      assert.equal(assistantPhaseCalls, 1);
       assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:")), [
         "assistant.phase:1:inbox_media_retention",
-        "assistant.phase:2:inbox_media_retention",
       ]);
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[0]?.nextWakeAt, projectedWakeAt);

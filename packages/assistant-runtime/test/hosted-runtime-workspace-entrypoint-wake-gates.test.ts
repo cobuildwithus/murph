@@ -706,22 +706,11 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         () => events.join(","),
       );
       assert.equal(result, "resolved");
-      assert.equal(assistantPhaseCalls, 2, events.join(","));
-      assert.ok(events.includes("snapshot:idle_shutdown"));
-      assert.ok(events.includes(
+      assert.equal(assistantPhaseCalls, 1, events.join(","));
+      assert.equal(checkpointRequests.length, 1);
+      assert.ok(!events.includes(
         "mailbox.importItem:mailbox_item_entrypoint_foreground_stale_gate_system_late",
       ));
-      assert.ok(
-        requireEventIndex(events, "snapshot:idle_shutdown")
-          < requireEventIndex(
-            events,
-            "mailbox.importItem:mailbox_item_entrypoint_foreground_stale_gate_system_late",
-          ),
-      );
-      assert.ok(
-        requireEventIndex(events, "snapshot:idle_shutdown")
-          < requireEventIndex(events, "assistant.phase:2"),
-      );
       assert.ok(checkpointRequests.length >= 1);
       assert.equal(checkpointRequests[0]?.nextWakeAt, systemFollowUpWakeAt);
       assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
@@ -1156,7 +1145,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         },
       );
 
-      assert.equal(assistantPhaseCalls, 3);
+      assert.equal(assistantPhaseCalls, 2);
       assert.ok(lateConversationInputId);
       assert.ok(events.includes("outbox.afterCheckpoint"));
       assert.ok(events.includes("snapshot:idle_shutdown"));
@@ -1164,10 +1153,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         requireEventIndex(events, "assistant.phase:2")
           < requireEventIndex(events, "snapshot:idle_shutdown"),
       );
-      assert.ok(
-        requireEventIndex(events, "snapshot:idle_shutdown")
-          < requireEventIndex(events, "assistant.phase:3"),
-      );
+      assert.ok(!events.includes("assistant.phase:3"));
       assert.equal(checkpointRequests.length, 1);
       assert.equal(checkpointRequests[0]?.nextWakeAt, outboxRetryWakeAt);
       assert.equal(
@@ -1952,11 +1938,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
       await vi.advanceTimersByTimeAsync(1);
       const result = await resultPromise;
 
-      assert.equal(assistantPhaseCalls, 2);
-      assert.ok(
-        requireEventIndex(events, "snapshot:idle_shutdown")
-          < requireEventIndex(events, `assistant.phase:2:${projectedWakeAt}`),
-      );
+      assert.equal(assistantPhaseCalls, 1);
+      assert.ok(!events.includes(`assistant.phase:2:${projectedWakeAt}`));
       assert.deepEqual(checkpointRequests.map((request) => [
         request.nextWakeAt,
         request.nextWakeReason,
@@ -2095,7 +2078,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
     }
   });
 
-  test("preserves system mailbox receipt counters across a checkpointed follow-up pass", async () => {
+  test("preserves system mailbox receipt counters when handing off a checkpointed wake", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-redacted-status-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -2183,9 +2166,9 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         },
       );
 
-      assert.equal(assistantPhaseCalls, 2, events.join(","));
-      assert.equal(result.status, "idle");
-      assert.equal(result.nextWakeAt, null);
+      assert.equal(assistantPhaseCalls, 1, events.join(","));
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, TEST_NOW);
       assert.equal(result.redactedStatus?.hostedSystemMailboxPrepared, 1);
       assert.equal(result.redactedStatus?.hostedSystemMailboxRecorded, 1);
     } finally {
@@ -2193,7 +2176,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
     }
   });
 
-  test("external runtime wake preserves already-serviced projected wake guard", async () => {
+  test("checkpoint-gated wake is handed off without an empty service pass", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -2263,10 +2246,9 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         },
       );
 
-      assert.equal(assistantPhaseCalls, 2);
+      assert.equal(assistantPhaseCalls, 1);
       assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:")), [
         "assistant.phase:1",
-        "assistant.phase:2",
       ]);
       assert.equal(checkpointRequests.length, 1);
       assert.equal(checkpointRequests[0]?.nextWakeAt, projectedWakeAt);
@@ -2408,7 +2390,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
       );
 
       assert.ok(projectedWakeAt);
-      assert.equal(assistantPhaseCalls, 3, events.join(","));
+      assert.equal(assistantPhaseCalls, 2, events.join(","));
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
         "mailbox.importItem:mailbox_item_entrypoint_post_checkpoint_future_wake_001",
       ]);
@@ -2420,15 +2402,8 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         .map((event, index) => ({ event, index }))
         .filter(({ event }) => event === "snapshot:idle_shutdown")
         .map(({ index }) => index);
-      assert.equal(snapshotIndexes.length, 3);
-      const finalSnapshotIndex = snapshotIndexes.at(2);
-      if (finalSnapshotIndex === undefined) {
-        throw new Error(events.join(","));
-      }
-      assert.ok(
-        requireEventIndex(events, `assistant.phase:3:${projectedWakeAt}`)
-          < finalSnapshotIndex,
-      );
+      assert.equal(snapshotIndexes.length, 2);
+      assert.ok(requireEventIndex(events, `assistant.phase:2:${projectedWakeAt}`) < snapshotIndexes[1]!);
       assert.deepEqual(
         checkpointRequests.map((request) => [
           request.expectedWorkspaceVersion,
@@ -2438,11 +2413,10 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         [
           ["4", projectedWakeAt, "assistant"],
           ["5", projectedWakeAt, "assistant"],
-          ["6", null, null],
         ],
       );
-      assert.equal(result.nextWakeAt, null);
-      assert.equal(result.status, "idle");
+      assert.equal(result.nextWakeAt, projectedWakeAt);
+      assert.equal(result.status, "scheduled");
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
