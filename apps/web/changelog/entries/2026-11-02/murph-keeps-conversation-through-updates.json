@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-11-02",
+  "order": 400,
+  "item": {
+    "id": "murph-keeps-conversation-through-updates",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Murph keeps the thread through updates",
+    "summary": "When we update how Murph talks, your conversation now carries on instead of starting fresh.",
+    "details": "Murph picks up the new guidance in the same conversation, so it still remembers what you were just talking about. Some bigger updates to Murph's tools can still start a fresh conversation.",
+    "relevanceTags": [
+      "messaging",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      4454
+    ]
+  }
+}
