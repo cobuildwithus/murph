@@ -51,11 +51,6 @@ const assistantCliPackageJson = JSON.parse(
 ) as {
   dependencies?: Record<string, string>
 }
-const setupCliPackageJson = JSON.parse(
-  readFileSync(path.join(repoRoot, 'packages', 'setup-cli', 'package.json'), 'utf8'),
-) as {
-  dependencies?: Record<string, string>
-}
 const auditOutputMaxBufferBytes = 16 * 1024 * 1024
 
 type BrowserCommand = {
@@ -1293,7 +1288,6 @@ describe('monorepo release flow coverage audit', () => {
         'frog@1.1.0: patches/frog@1.1.0.patch',
         'incur@0.4.5: patches/incur@0.4.5.patch',
         'incur@0.5.1: patches/incur@0.5.1.patch',
-        'ink@6.8.0: patches/ink@6.8.0.patch',
         'wrangler@4.90.0: patches/wrangler@4.90.0.patch',
         'wrangler@4.93.0: patches/wrangler@4.93.0.patch',
       ],
@@ -4726,7 +4720,7 @@ exit 1
       name: '@murphai/hosted-execution',
     }))
     expect(summary.packages).toContainEqual(expect.objectContaining({
-      bundledExternalDependencies: ['incur', 'ink'],
+      bundledExternalDependencies: ['incur'],
       bundledWorkspaceDependencies: expect.arrayContaining([
         '@murphai/assistant-cli',
         '@murphai/assistant-engine',
@@ -4741,7 +4735,6 @@ exit 1
         '@murphai/parsers',
         '@murphai/query',
         '@murphai/runtime-state',
-        '@murphai/setup-cli',
         '@murphai/vault-usecases',
       ]),
       name: '@murphai/murph',
@@ -4852,7 +4845,7 @@ exit 1
 
     expect(cliPackageJson.name).toBe('@murphai/murph')
     expect(cliPackageJson.files).toContain('CHANGELOG.md')
-    expect(cliPackageJson.bin?.murph).toBe('dist/bin.js')
+    expect(cliPackageJson.bin?.murph).toBeUndefined()
     expect(cliPackageJson.bin?.['vault-cli']).toBe('dist/bin.js')
     expect(cliPackageJson.dependencies?.['@murphai/device-syncd']).toBe('workspace:*')
     expect(cliPackageJson.dependencies?.['@murphai/messaging-ingress']).toBe('workspace:*')
@@ -4861,7 +4854,6 @@ exit 1
     expect(cliPackageJson.bundleDependencies).toContain('@murphai/messaging-ingress')
     expect(cliPackageJson.dependencies?.incur).toBe('0.5.1')
     expect(assistantCliPackageJson.dependencies?.incur).toBe('0.5.1')
-    expect(setupCliPackageJson.dependencies?.incur).toBe('0.5.1')
     expect(cliPackageJson.dependencies?.['@cfworker/json-schema']).toBe('^4.1.1')
     expect(cliPackageJson.dependencies?.['@modelcontextprotocol/server']).toBe('2.0.0-alpha.4')
     expect(cliPackageJson.dependencies?.['@scalar/openapi-types']).toBe('^0.8.0')
@@ -4869,7 +4861,6 @@ exit 1
     expect(cliPackageJson.dependencies?.tokenx).toBe('^1.3.0')
     expect(cliPackageJson.dependencies?.yaml).toBe('^2.8.2')
     expect(cliPackageJson.bundleDependencies).toContain('incur')
-    expect(cliPackageJson.bundleDependencies).toContain('ink')
     expect(packPublishables).toContain('resolveBundledExternalDependencies')
     expect(packPublishables).toContain('copyExternalBundledDependency')
     expect(packPublishables).toContain('stripBundledDependencyMetadata')
@@ -4997,24 +4988,6 @@ exit 1
         ]) {
           expect(existsSync(path.join(installedIncurDirectory, 'src', testSource))).toBe(false)
         }
-
-        const installedInkRuntime = readFileSync(
-          path.join(
-            installRoot,
-            'package',
-            'node_modules',
-            'ink',
-            'build',
-            'ink.js',
-          ),
-          'utf8',
-        )
-        expect(installedInkRuntime).toContain(
-          "import throttle from 'es-toolkit/compat/throttle';",
-        )
-        expect(installedInkRuntime).not.toContain(
-          "import { throttle } from 'es-toolkit/compat';",
-        )
 
         const installedArtifact = JSON.parse(
           readFileSync(installedArtifactPath, 'utf8'),

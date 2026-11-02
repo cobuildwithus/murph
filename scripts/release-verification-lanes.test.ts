@@ -210,7 +210,6 @@ describe("release verification executable lanes", () => {
         ],
         "platform-b": [
           "packages/core",
-          "packages/setup-cli",
           "packages/assistant-cli",
           "packages/contracts",
           "packages/clinical-records",
@@ -364,7 +363,7 @@ function releaseValidationFixture() {
     types: "dist/index.d.ts",
     exports: { ".": { types: "dist/index.d.ts", default: "dist/index.js" } },
     publishConfig: { access: "public" },
-    bin: { murph: "dist/bin.js", "vault-cli": "dist/bin.js" },
+    bin: { "vault-cli": "dist/bin.js" },
     files: ["dist", "CHANGELOG.md"],
   };
   const workspaceDependencies: Array<{ name: string; version: string }> = [];
@@ -459,7 +458,6 @@ describe("release context validation contracts", () => {
         `${packagePath} must set publishConfig.access to public.`,
         "Release packages must share one version, found: <missing>.",
         `${packagePath} must publish the primary package name @murphai/example-tool.`,
-        `${packagePath} must expose the murph bin from dist/bin.js.`,
         `${packagePath} must expose the vault-cli bin from dist/bin.js.`,
         `${packagePath} files must include CHANGELOG.md.`,
       ].join("\n"),

@@ -3,7 +3,6 @@ import { test } from 'vitest'
 
 import {
   classifyVaultCliInvocation,
-  detectCliProgramName,
   planVaultCliInvocation,
 } from '../src/vault-cli-routing.ts'
 
@@ -148,66 +147,7 @@ test('classifier keeps MCP invocations on the full command tree regardless of fl
   )
 })
 
-test('classifier preserves version and setup routing before command imports', () => {
-  assert.deepEqual(classifyVaultCliInvocation(['--version']), {
-    kind: 'version',
-  })
-  for (const argv of [
-    ['--version', '--help'],
-    ['--help', '--version'],
-    ['--no-config', '--version'],
-  ]) {
-    assert.equal(classifyVaultCliInvocation(argv).kind, 'full')
-  }
-  assert.deepEqual(classifyVaultCliInvocation(['onboard']), {
-    kind: 'setup',
-  })
-  assert.deepEqual(
-    classifyVaultCliInvocation(['--help'], {
-      programName: 'murph',
-    }),
-    {
-      kind: 'full',
-      reason: 'root-discovery',
-    },
-  )
-  for (const flag of ['--llms-full', '--schema']) {
-    assert.deepEqual(
-      classifyVaultCliInvocation([flag], {
-        programName: 'murph',
-      }),
-      {
-        kind: 'full',
-        reason: 'root-discovery',
-      },
-    )
-  }
-  assert.deepEqual(
-    classifyVaultCliInvocation(['--mcp'], {
-      programName: 'murph',
-    }),
-    {
-      kind: 'full',
-      reason: 'mcp-invocation',
-    },
-  )
-  assert.deepEqual(
-    classifyVaultCliInvocation([], {
-      programName: 'murph',
-    }),
-    {
-      kind: 'setup',
-    },
-  )
-  assert.deepEqual(
-    classifyVaultCliInvocation(['use', './vault'], {
-      programName: 'murph',
-    }),
-    {
-      kind: 'setup',
-    },
-  )
-})
+
 
 test('planner strips only the existing --vault override before classification', () => {
   assert.deepEqual(
@@ -240,8 +180,12 @@ test('planner strips only the existing --vault override before classification', 
   )
 })
 
-test('program-name detection keeps murph shims independent of setup imports', () => {
-  assert.equal(detectCliProgramName('/usr/local/bin/murph'), 'murph')
-  assert.equal(detectCliProgramName('/usr/local/bin/vault-cli'), 'vault-cli')
-  assert.equal(detectCliProgramName('/tmp/shim', 'murph'), 'murph')
+
+
+test('classifier preserves version and treats retired setup routes as unknown commands', () => {
+  assert.deepEqual(classifyVaultCliInvocation(['--version']), { kind: 'version' })
+  assert.deepEqual(classifyVaultCliInvocation([]), { kind: 'full', reason: 'missing-root' })
+  for (const root of ['onboard', 'use', 'model']) {
+    assert.deepEqual(classifyVaultCliInvocation([root]), { kind: 'full', reason: 'unknown-root' })
+  }
 })

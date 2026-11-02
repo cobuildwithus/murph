@@ -5076,7 +5076,6 @@ function createSharedPlan(input?: {
     cliAccess: {
       env: {},
       rawCommand: "vault-cli" as const,
-      setupCommand: "murph",
     },
     conversationPolicy: {
       audience:

@@ -86,12 +86,6 @@ const workspaceSmokePackages = [
     ],
   },
   {
-    packageName: "setup-cli",
-    requiredSubpaths: [
-      "setup-cli",
-    ],
-  },
-  {
     packageName: "inbox-services",
     requiredSubpaths: [],
     allowRootOnly: true,

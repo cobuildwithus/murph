@@ -4386,57 +4386,6 @@
             }
           }
         },
-        "model": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "options": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "show": {
-                  "description": "Show the saved default assistant backend configuration without changing it. This inspects persisted defaults, not live session state. When set, no update options are allowed.",
-                  "type": "boolean"
-                },
-                "preset": {
-                  "description": "Assistant backend preset to save. The CLI setup surface only accepts Codex for new model configuration.",
-                  "type": "string",
-                  "const": "codex"
-                },
-                "model": {
-                  "description": "Model id to save for the selected backend. In non-interactive mode, pair this with `--preset` unless Murph can reuse the currently saved backend.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "codexCommand": {
-                  "description": "Optional Codex CLI executable path. Only applies with `--preset codex`. Defaults to `codex`.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "profile": {
-                  "description": "Optional Codex profile name to save. Only applies with `--preset codex`.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "codexHome": {
-                  "description": "Optional Codex home directory to save. Only applies with `--preset codex`.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "reasoningEffort": {
-                  "description": "Optional assistant reasoning effort default to save for the selected backend. Use the matching `--preset` when Murph cannot infer the backend non-interactively.",
-                  "type": "string",
-                  "enum": [
-                    "low",
-                    "medium",
-                    "high",
-                    "xhigh"
-                  ]
-                }
-              }
-            }
-          }
-        },
         "route": {
           "type": "object",
           "additionalProperties": false,

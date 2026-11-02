@@ -128,7 +128,6 @@ import {
   knowledgeChallengeScoreCommandDescription,
 } from './commands/knowledge-challenge-score.js'
 import { registerKnowledgeCommands } from './commands/knowledge.js'
-import { registerModelCommands } from './commands/model.js'
 import { mapboxRouteEstimateResultSchema } from './mapbox-route.js'
 import {
   supplementLabelBatchSearchResultSchema,
@@ -881,14 +880,6 @@ export const vaultCliCommandDescriptors = [
     rootCommandNames: ['memory'],
     register({ cli }) {
       registerMemoryCommands(cli)
-    },
-  },
-  {
-    id: 'model',
-    bindingMode: 'none',
-    rootCommandNames: ['model'],
-    register({ cli }) {
-      registerModelCommands(cli)
     },
   },
   {

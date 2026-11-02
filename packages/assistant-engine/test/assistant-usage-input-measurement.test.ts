@@ -108,7 +108,7 @@ describe.skipIf(process.env.MURPH_MEASURE_USAGE_INPUT !== '1')('usage efficiency
           assistantCliContract: null, assistantHostedAutomationAvailable: true,
           assistantProgressUpdatesAvailable: true, channel: 'linq',
           ...(groupAvailable ? { assistantHostedGroupToolSurface: 'families' as const } : {}),
-          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' }, conversationScope: scope,
+          cliAccess: { rawCommand: 'vault-cli' }, conversationScope: scope,
           currentLocalDate: '2030-01-10', currentInstant: '2030-01-10T16:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
           ordinaryInboundTurn: fixture !== 'mealCloseout',

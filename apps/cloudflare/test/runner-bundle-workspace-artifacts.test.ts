@@ -190,7 +190,6 @@ describe("runner bundle runtime artifact staging", () => {
       "@murphai/parsers": "workspace:*",
       "@murphai/query": "workspace:*",
       "@murphai/runtime-state": "workspace:*",
-      "@murphai/setup-cli": "workspace:*",
       "@murphai/vault-usecases": "workspace:*",
       jose: "^6.2.2",
     });
@@ -956,7 +955,6 @@ async function prepareRunnerBundleValidationFixture(bundleDir: string): Promise<
     "{}\n",
     "utf8",
   );
-  await writeFile(path.join(nodeModulesDir, ".bin", "murph"), "#!/bin/sh\n", "utf8");
   await writeFile(
     path.join(nodeModulesDir, ".bin", "vault-cli"),
     "#!/bin/sh\n",

@@ -5,7 +5,6 @@ import { afterEach, test, vi } from 'vitest'
 // and core umbrella entrypoint outside their startup dependency graph.
 const forbiddenStartupModules = [
   '../src/vault-cli-command-manifest.js',
-  '@murphai/setup-cli/setup-assistant-wizard',
   '@murphai/core',
 ] as const
 
@@ -94,16 +93,4 @@ test('scoped command registration stays off the manifest and wizard surfaces', a
       root,
     })
   }
-})
-
-test('model command registration does not import the setup assistant wizard', async () => {
-  mockForbiddenStartupModules()
-
-  const [{ registerModelCommands }, { createVaultCliShell }] =
-    await Promise.all([
-      import('../src/commands/model.ts'),
-      import('../src/vault-cli-shell.js'),
-    ])
-
-  registerModelCommands(createVaultCliShell('vault-cli'))
 })

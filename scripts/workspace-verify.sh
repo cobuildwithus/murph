@@ -69,9 +69,6 @@ readonly shell_syntax_check_scripts=(
   "scripts/repo-tools.config.sh"
   "scripts/release.sh"
   "scripts/release-check.sh"
-  "scripts/setup-host.sh"
-  "scripts/setup-linux.sh"
-  "scripts/setup-macos.sh"
   "scripts/update-changelog.sh"
   "scripts/generate-release-notes.sh"
   "scripts/workspace-verify.sh"
@@ -107,7 +104,6 @@ readonly typecheck_package_dirs=(
   "packages/operator-config"
   "packages/assistant-engine"
   "packages/assistant-cli"
-  "packages/setup-cli"
   "packages/core"
   "packages/importers"
   "packages/device-syncd"
@@ -604,7 +600,6 @@ readonly cli_verify_test_files=(
   "packages/cli/test/incur-smoke.test.ts"
   "packages/cli/test/inbox-service-boundaries.test.ts"
   "packages/cli/test/search-runtime.test.ts"
-  "packages/cli/test/setup-cli.test.ts"
   "packages/cli/test/release-script-coverage-audit.test.ts"
   "packages/cli/test/release-workflow-guards.test.ts"
 )
@@ -1743,7 +1738,6 @@ run_test_diff() {
 
 run_verify_cli() {
   run_timed_step "Assistant CLI typecheck" pnpm --dir "packages/assistant-cli" typecheck || return $?
-  run_timed_step "Setup CLI typecheck" pnpm --dir "packages/setup-cli" typecheck || return $?
   run_timed_step "CLI package typecheck" pnpm --dir "packages/cli" typecheck || return $?
   run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts || return $?
   run_timed_step \

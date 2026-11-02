@@ -119,21 +119,6 @@
       "import": "./dist/operator-config.js",
       "default": "./dist/operator-config.js"
     },
-    "./setup-cli-contracts": {
-      "types": "./dist/setup-cli-contracts.d.ts",
-      "import": "./dist/setup-cli-contracts.js",
-      "default": "./dist/setup-cli-contracts.js"
-    },
-    "./setup-prompt-io": {
-      "types": "./dist/setup-prompt-io.d.ts",
-      "import": "./dist/setup-prompt-io.js",
-      "default": "./dist/setup-prompt-io.js"
-    },
-    "./setup-runtime-env": {
-      "types": "./dist/setup-runtime-env.d.ts",
-      "import": "./dist/setup-runtime-env.js",
-      "default": "./dist/setup-runtime-env.js"
-    },
     "./telegram-runtime": {
       "types": "./dist/telegram-runtime.d.ts",
       "import": "./dist/telegram-runtime.js",

@@ -1,4 +1,3 @@
-import { SETUP_RUNTIME_ENV_NOTICE } from '@murphai/operator-config/setup-runtime-env'
 import { resolveTelegramBotToken } from '@murphai/operator-config/telegram-runtime'
 import type {
   InboxConnectorConfig,
@@ -48,7 +47,7 @@ export async function runTelegramDoctorChecks(
     context.checks.push(
       failCheck(
         'token',
-        `Telegram bot token is missing from TELEGRAM_BOT_TOKEN. ${SETUP_RUNTIME_ENV_NOTICE}`,
+        `Telegram bot token is missing from TELEGRAM_BOT_TOKEN.`,
       ),
     )
   } else if (usesInjectedTelegramDriver) {

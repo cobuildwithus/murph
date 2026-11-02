@@ -1,4 +1,4 @@
-export const HOSTED_RUNNER_SMOKE_RESULT_SCHEMA = "murph.cloudflare-hosted-runner-smoke.v3";
+export const HOSTED_RUNNER_SMOKE_RESULT_SCHEMA = "murph.cloudflare-hosted-runner-smoke.v4";
 export const HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT = 5;
 export const HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT = 12;
 export const HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT = 2;
@@ -40,7 +40,7 @@ export interface HostedRunnerSmokeResult {
   codexHostedCliSchemaVaultOptionHidden: boolean;
   codexHostedCliVaultCommandProofCount: number;
   codexHostedCliVaultWriteProofCount: number;
-  codexHostedShellMurphPathBytes: number;
+  codexHostedShellVaultCliPathBytes: number;
   codexHostedShellPythonVersion: string;
   codexHostedShellVaultCliLlmsBytes: number;
   codexVersion: string;
@@ -49,7 +49,6 @@ export interface HostedRunnerSmokeResult {
   healthCommonsCliKnowledgeSearchBytes: number;
   healthCommonsRuntimeBiomarkerDesiredDirection: string;
   healthCommonsRuntimeKnowledgeEntityKeys: readonly string[];
-  murphCommandDiscovered: boolean;
   operatorHomeRebound: boolean;
   pdfParserProviderId: string;
   pdfTextSha256: string;
@@ -90,7 +89,7 @@ const HOSTED_RUNNER_SMOKE_RESULT_KEYS = new Set([
   "codexHostedCliSchemaVaultOptionHidden",
   "codexHostedCliVaultCommandProofCount",
   "codexHostedCliVaultWriteProofCount",
-  "codexHostedShellMurphPathBytes",
+  "codexHostedShellVaultCliPathBytes",
   "codexHostedShellPythonVersion",
   "codexHostedShellVaultCliLlmsBytes",
   "codexVersion",
@@ -99,7 +98,6 @@ const HOSTED_RUNNER_SMOKE_RESULT_KEYS = new Set([
   "healthCommonsCliKnowledgeSearchBytes",
   "healthCommonsRuntimeBiomarkerDesiredDirection",
   "healthCommonsRuntimeKnowledgeEntityKeys",
-  "murphCommandDiscovered",
   "operatorHomeRebound",
   "pdfParserProviderId",
   "pdfTextSha256",
@@ -250,9 +248,9 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
       "Hosted runner smoke result.codexHostedCliVaultWriteProofCount",
       HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
     ),
-    codexHostedShellMurphPathBytes: readPositiveFiniteNumber(
-      record.codexHostedShellMurphPathBytes,
-      "Hosted runner smoke result.codexHostedShellMurphPathBytes",
+    codexHostedShellVaultCliPathBytes: readPositiveFiniteNumber(
+      record.codexHostedShellVaultCliPathBytes,
+      "Hosted runner smoke result.codexHostedShellVaultCliPathBytes",
     ),
     codexHostedShellPythonVersion: readPython3VersionString(
       record.codexHostedShellPythonVersion,
@@ -286,10 +284,6 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
     healthCommonsRuntimeKnowledgeEntityKeys: readNonEmptyStringArray(
       record.healthCommonsRuntimeKnowledgeEntityKeys,
       "Hosted runner smoke result.healthCommonsRuntimeKnowledgeEntityKeys",
-    ),
-    murphCommandDiscovered: readTrue(
-      record.murphCommandDiscovered,
-      "Hosted runner smoke result.murphCommandDiscovered",
     ),
     operatorHomeRebound: readTrue(
       record.operatorHomeRebound,

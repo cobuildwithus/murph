@@ -45,7 +45,7 @@ if (foodResponse) mock.method(performance, 'now', () => 0)
 // inject exit/stdout: Incur's failure path really terminates this process.
 const { runMurphCliAction, renderMurphCliEntrypointError } = await import('../../src/cli-entry.ts')
 try {
-  await runMurphCliAction(argv, { argv0: 'vault-cli' })
+  await runMurphCliAction(argv, {})
 } catch (error) {
   // Use the bin's real renderer for errors before Incur can own the exit.
   const rendered = await renderMurphCliEntrypointError(error, argv)

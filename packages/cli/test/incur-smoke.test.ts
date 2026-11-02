@@ -129,7 +129,6 @@ async function runSourceEntrypointRawFromCwd(
       process.stderr.write = createProcessWriteInterceptor(stderr)
 
       await runMurphCliEntrypoint(args, {
-        argv0: 'vault-cli',
         exit(code = 0) {
           exitCode = code
         },
@@ -2691,32 +2690,7 @@ test('food search-labels-batch schema exposes hosted batch lookup inputs', async
   )
 })
 
-test('model schema explains preset-gated non-interactive updates', async () => {
-  const schema = JSON.parse(
-    await runSourceCliRaw(['model', '--schema', '--format', 'json']),
-  ) as {
-    options: {
-      properties: Record<string, {
-        description?: string
-      }>
-    }
-  }
 
-  assert.match(
-    String(schema.options.properties.preset?.description ?? ''),
-    /only accepts Codex/u,
-  )
-  assert.equal('providerPreset' in schema.options.properties, false)
-  assert.equal('baseUrl' in schema.options.properties, false)
-  assert.equal('apiKeyEnv' in schema.options.properties, false)
-  assert.equal('headersJson' in schema.options.properties, false)
-  assert.equal('modelProvider' in schema.options.properties, false)
-  assert.equal('oss' in schema.options.properties, false)
-  assert.match(
-    String(schema.options.properties.profile?.description ?? ''),
-    /Only applies with `--preset codex`/u,
-  )
-})
 
 test('blood-test list schema exposes targeted text, date-range, and status filters', async () => {
   const schema = JSON.parse(

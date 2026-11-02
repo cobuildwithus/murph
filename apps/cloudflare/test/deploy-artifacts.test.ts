@@ -1190,7 +1190,7 @@ async function createDeployArtifactFixture(input: {
     await writeWorkspacePackageManifest(packageDir, packageName);
   }
 
-  for (const binName of ["murph", "vault-cli"]) {
+  for (const binName of ["vault-cli"]) {
     const binPath = path.join(runnerBundleDir, "node_modules", ".bin", binName);
     await writeFile(binPath, "#!/usr/bin/env node\n", "utf8");
     await chmod(binPath, 0o755);

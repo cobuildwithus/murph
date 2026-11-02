@@ -25,7 +25,6 @@ const intentionallyFullOnlyRootCommandReasons = {
   genetics: 'Generic health CRUD root not currently a measured hot path.',
   intake: 'Intake helper commands are not currently a frequent agent path.',
   intervention: 'Intervention helper commands are not currently a frequent agent path.',
-  model: 'Model commands are runtime/model-card operator diagnostics.',
   provider: 'Provider registry commands are not currently a frequent agent path.',
   recipe: 'Recipe commands are not currently part of the optimized onboarding path.',
   samples: 'Samples commands cover explicit raw/debug sample paths.',

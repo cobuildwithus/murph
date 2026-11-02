@@ -11,7 +11,6 @@ import {
 } from "@/src/components/homepage/hero-clocks-in";
 import { HowItWorksSection } from "@/src/components/homepage/how-it-works-section";
 import { IntegrationsSection } from "@/src/components/homepage/integrations-section";
-import { LocalRunSection } from "@/src/components/homepage/local-run-section";
 import { MealPhotosSection } from "@/src/components/homepage/meal-photos-section";
 import { MurphCardHandoffGate } from "@/src/components/homepage/murph-card-handoff-dialog";
 import { NutritionSection } from "@/src/components/homepage/nutrition-section";
@@ -28,7 +27,6 @@ import type { HomepageSignupCta } from "@/src/components/homepage/types";
 import { HomepageAuthRuntimeProvider } from "@/src/components/hosted-onboarding/homepage-auth-runtime-provider";
 import { scheduleHomepageBrowserVaultPreparation } from "@/src/lib/browser-vault/homepage-preparation";
 import { fetchHeroContactInfo } from "@/src/lib/hero-contact-info";
-import { resolveHostedInstallScriptUrl } from "@/src/lib/hosted-onboarding/landing";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getMurphGithubStarCount } from "@/src/lib/github-stars";
 import {
@@ -116,8 +114,6 @@ export default async function HomePage() {
   const messengerChannel = resolveHeroMessengerChannel(country);
   const murphHeadshotSrc = pickRandomMurphHeadshotSrc();
   const referralRewards = getAvailableHostedPublicReferralRewards();
-  const installCommandUrl =
-    resolveHostedInstallScriptUrl() ?? "https://www.withmurph.ai/install.sh";
   const signupCta: HomepageSignupCta = authenticated
     ? {
         body: "Manage billing and connected wearables from one place.",
@@ -172,7 +168,6 @@ export default async function HomePage() {
           ? <ReferralSection rewards={referralRewards} />
           : null}
         <SignupCtaSection authenticated={authenticated} signupCta={signupCta} />
-        <LocalRunSection installCommandUrl={installCommandUrl} />
       </main>
       <SiteFooter />
     </HomepageAuthRuntimeProvider>

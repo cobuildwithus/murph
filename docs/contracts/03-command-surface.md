@@ -1,12 +1,10 @@
 # Command Surface
 
-Status: frozen baseline plus health extension fence for `murph` and `vault-cli`
+Status: frozen baseline plus health extension fence for `vault-cli`
 
 ## Namespace
 
-- `murph` is the product CLI. It uses the selected active vault for normal commands, `murph onboard --vault <path>` creates or selects one during setup, and `murph use <path>` selects an existing vault for future product commands.
 - `vault-cli` is the raw explicit-vault and operator surface. The command synopses below list that explicit-vault contract because every canonical vault command names its target with `--vault <path>`.
-- `murph` and `vault-cli` are two UX layers over the same command graph; product aliases such as `murph run`, `murph status`, `murph doctor`, and `murph stop` must stay discovery-compatible with their explicit-vault equivalents.
 - `packages/cli` owns command registration, schema validation, and delegation into `core`, `importers`, and `query`.
 - `device` commands delegate to the local `@murphai/device-syncd` control plane for provider OAuth/account actions while leaving canonical health writes behind the existing importer/core boundary, and the CLI may start or reuse that local daemon for the selected vault when no explicit control-plane target is provided.
 - Native `incur` owns the transport envelope and human-oriented formatting behavior.

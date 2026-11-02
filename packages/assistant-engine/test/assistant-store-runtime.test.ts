@@ -788,7 +788,6 @@ describe('assistant turn shared plan', () => {
     const cliAccess = {
       env: {},
       rawCommand: 'vault-cli' as const,
-      setupCommand: 'murph' as const,
     }
 
     turnPlanMocks.resolveAssistantCliAccessContext.mockReturnValue(cliAccess)
@@ -858,7 +857,6 @@ describe('assistant turn shared plan', () => {
     turnPlanMocks.resolveAssistantCliAccessContext.mockReturnValue({
       env: {},
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     })
     turnPlanMocks.resolveAssistantConversationPolicy.mockReturnValue({
       audience: {
@@ -931,7 +929,6 @@ describe('assistant turn shared plan', () => {
     turnPlanMocks.resolveAssistantCliAccessContext.mockReturnValue({
       env: {},
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     })
     turnPlanMocks.resolveAssistantConversationPolicy.mockReturnValue({
       audience: {
@@ -1002,7 +999,6 @@ describe('assistant turn shared plan', () => {
     turnPlanMocks.resolveAssistantCliAccessContext.mockReturnValue({
       env: {},
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     })
     turnPlanMocks.resolveAssistantConversationPolicy.mockReturnValue({
       audience: {

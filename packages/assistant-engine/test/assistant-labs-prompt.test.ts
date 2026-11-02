@@ -70,7 +70,6 @@ function createPromptInput(
     channel: 'telegram',
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     currentLocalDate: '2026-07-16',
     currentTimeZone: 'America/New_York',

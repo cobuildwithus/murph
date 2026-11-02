@@ -42,7 +42,6 @@ repo/
     assistant-engine/
     operator-config/
     assistant-cli/
-    setup-cli/
     assistant-runtime/
     gateway-core/
     cloudflare-hosted-control/
@@ -81,12 +80,11 @@ repo/
 - `packages/assistant-engine` owns headless assistant execution, provider-turn runtime, assistant state/outbox/status/store surfaces, automation, the assistant input spine, and assistant-specific vault/inbox/knowledge tools.
 - `packages/operator-config` owns persisted operator defaults, hosted assistant config, assistant backend target normalization, hosted provider/config helpers, setup/runtime-env helpers, device/channel readiness helpers, and shared CLI/setup contracts.
 - `packages/assistant-cli` owns CLI-only assistant wrappers, assistant commands, foreground terminal logging.
-- `packages/setup-cli` owns CLI-only onboarding, host setup, and setup-wizard flows.
 - `packages/assistant-runtime` owns the headless hosted runtime surface that runs bounded hosted inbox/bootstrap/assistant/outbox/device-sync workspace invocations behind an injected hosted platform context.
 - `packages/gateway-core` owns the published transport-neutral gateway contracts, route helpers, and opaque ids.
 - `packages/cloudflare-hosted-control` owns private Cloudflare processing/status/browser-vault control contracts shared between hosted web and Cloudflare without widening `packages/hosted-execution`.
 - `packages/hosted-local-harness` owns the local hosted-development and hosted E2E harness, including profile selection, redacted state files, runner-bundle prep, diagnostics, and cleanup.
-- `packages/cli` exposes the published `vault-cli` / `murph` shell, composes the command graph, consumes `packages/vault-usecases` for neutral vault usecase services, owns CLI-only device/control-plane composition, and must not bypass core for canonical writes.
+- `packages/cli` exposes the published `vault-cli` shell, composes the command graph, consumes `packages/vault-usecases` for neutral vault usecase services, owns CLI-only device/control-plane composition, and must not bypass core for canonical writes.
 - `apps/web` owns the hosted Next.js control plane, hosted Postgres product/control facts, encrypted mailbox rows, hosted workspace checkpoint metadata, usage ledger, onboarding, billing, consent, and device-sync authority.
 - `apps/cloudflare` owns the hosted execution plane: signed Temporal `ensure-processing` requests, status/browser-vault control, Durable Object coordination, encrypted runtime blobs, and the native runner-container path over `packages/assistant-runtime`.
 

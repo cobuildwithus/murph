@@ -1,44 +1,10 @@
-# Murph - Personal Health Assistant
+# @murphai/murph
 
-Murph is your personal health assistant.
-
-Install this package to get the main `murph` command and the full local Murph experience: onboarding, vault setup, direct local assistant turns, inbox capture, parser tooling, and the always-on assistant loop.
-
-The repo implementation happens to live in `packages/cli`, but that is a maintainer detail. For users, `@murphai/murph` is the installable Murph package.
-
-[Repository](https://github.com/cobuildwithus/murph) · [Architecture](https://github.com/cobuildwithus/murph/blob/main/ARCHITECTURE.md) · [Hosted control plane](https://github.com/cobuildwithus/murph/blob/main/apps/web/README.md) · [Hosted execution](https://github.com/cobuildwithus/murph/blob/main/apps/cloudflare/README.md)
-
-If you want a local, inspectable assistant that keeps durable truth in normal files you can read, this is the package you install.
+Typed `vault-cli` commands for the hosted Murph runtime and operators. Members use hosted channels and the iOS app; this package does not install a local Murph product or setup wizard.
 
 Runtime: Node `>= 24.22.1`.
 
-Supported host setup path: macOS and Linux.
-
-## Install
-
-```bash
-npm install -g @murphai/murph@latest
-# or
-pnpm add -g @murphai/murph@latest
-```
-
-## Quick start
-
-```bash
-murph onboard
-```
-
-`murph onboard` installs or reuses the local parser dependencies, initializes a vault, saves that vault as the default Murph vault for later commands, and walks through assistant, channel, and optional wearable setup.
-
-Once setup is complete, the main commands are:
-
-```bash
-murph assistant ask "Summarize my saved health context."
-murph run
-murph status
-```
-
-`vault-cli` is still available as a secondary alias for the operator surface, but `murph` is the primary command this package installs.
+[Repository](https://github.com/cobuildwithus/murph) · [Architecture](https://github.com/cobuildwithus/murph/blob/main/ARCHITECTURE.md)
 
 ## Vault operations
 
@@ -140,12 +106,12 @@ source on the same automation; its activity cursor restarts at the edit time.
 ## What you get
 
 - a file-native health vault with canonical writes owned by `@murphai/core`
-- direct local assistant turns, runtime automation, status, outbox, canonical memory, and canonical automation commands
+- canonical memory and automation commands used by the hosted assistant
 - a non-canonical derived knowledge wiki you can upsert and inspect under `derived/knowledge/**`
 - inbox capture, assistant attachment evidence, and parser-driven audio/video transcription through runtime services
 - optional local device sync through the bundled workspace-private `packages/device-syncd` runtime
 
-`@murphai/murph` is the installable local Murph product entrypoint. The wider monorepo also contains hosted control and execution apps plus many workspace-private owner packages, but the public npm surface is intentionally small: `@murphai/murph`, `@murphai/contracts`, `@murphai/hosted-execution`, and `@murphai/gateway-core`.
+`@murphai/murph` ships the runtime and operator CLI. The wider monorepo also contains hosted control and execution apps plus many workspace-private owner packages, but the public npm surface is intentionally small: `@murphai/murph`, `@murphai/contracts`, `@murphai/hosted-execution`, and `@murphai/gateway-core`.
 
 ## From source
 
@@ -153,7 +119,8 @@ If you are developing from a checkout instead of installing the published packag
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm onboard --vault ./vault
+pnpm build
+pnpm vault-cli vault stats --vault ./vault
 ```
 
 For package-local CLI iteration, use the source-first test lane:
@@ -170,20 +137,14 @@ pnpm --dir packages/cli verify
 pnpm verify:cli
 ```
 
-If `pnpm` is not available yet, use:
-
-```bash
-./scripts/setup-host.sh --vault ./vault
-```
-
 ## Config defaults
 
 The CLI supports incur's built-in config loading for command option defaults. By default it searches `~/.config/murph/config.json`.
 
 Those incur config defaults are local CLI convenience only. Hosted execution does not snapshot or honor `~/.config/murph/config.json`; portable runtime behavior must live in canonical vault state or typed operator config under `~/.murph/config.json`.
 
-- `murph --config <path> ...` selects an explicit config file
-- `murph --no-config ...` disables config loading for a single run
+- `vault-cli --config <path> ...` selects an explicit config file
+- `vault-cli --no-config ...` disables config loading for a single run
 - the published package now ships Incur's native `config.schema.json` so editors can validate and autocomplete those config files
 
 Config files only supply command `options`, following incur's nested `commands` shape. For example:
@@ -210,18 +171,18 @@ pnpm --dir packages/cli gen:config-schema
 
 ## Maintainer notes
 
-The package exports only the root CLI runtime entrypoint and exposes both `murph` and `vault-cli` bins from the same built entrypoint. Assistant helper APIs stay in workspace-private owner packages such as `@murphai/assistant-cli` and are bundled into the public tarball when the CLI runtime needs them.
+The package exports only the root CLI runtime entrypoint and exposes the `vault-cli` binary. Assistant helper APIs stay in workspace-private owner packages such as `@murphai/assistant-cli` and are bundled into the public tarball when the CLI runtime needs them.
 
 Machine-facing callers should rely on incur's native envelope via `--full-output --format json` instead of a Murph-specific wrapper contract.
 
 Current repo-local package responsibilities include:
 
 - the published command graph and install surface
-- CLI-owned command routing, onboarding entry, and built binary launchers
+- CLI-owned command routing, hosted onboarding commands, and the built binary launcher
 - device command surfaces that delegate to headless owner packages
 - release ownership for the public `@murphai/murph` package and bins
 
-Programmatic assistant, setup, and shared usecase APIs now stay in workspace-private owner packages such as `@murphai/assistant-cli`, `@murphai/setup-cli`, `@murphai/assistant-engine`, and `@murphai/operator-config`. The public npm install story is still `@murphai/murph`; the release flow bundles those private owners into the CLI tarball instead of publishing them as separate npm products.
+Programmatic assistant and shared usecase APIs now stay in workspace-private owner packages such as `@murphai/assistant-cli`, `@murphai/assistant-engine`, and `@murphai/operator-config`. The public npm install story is still `@murphai/murph`; the release flow bundles those private owners into the CLI tarball instead of publishing them as separate npm products.
 
 ## Release flow
 

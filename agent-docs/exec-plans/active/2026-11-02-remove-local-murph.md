@@ -49,3 +49,15 @@ Work only in the assigned isolated checkout. No pushes, PRs, production access, 
 - Full pnpm test:repo-tools is running; focused workspace-verify and release-verification-lanes rerun passed (61 tests).
 
 CI-only broad coverage and production deployment remain outside this task.
+
+### Slice 2
+
+Removed setup-cli, operator setup helpers, model picker, setup wrappers and root scripts, the murph binary, terminal UI dependencies, and the local installer and its landing-page entrypoints. Retained hosted signup, device tooling, and all four hosted onboarding commands.
+
+Generated the CLI schema, Incur command types, skill hash, and prepared runtime with the real generators. Workspace build and CLI/assistant-engine/operator-config/inbox-services/Web/Cloudflare typechecks pass. Operator-config tests: 455 passed; inbox-services tests: 67 passed; Web landing tests: 3 passed; focused prompt/access tests: 64 passed. CLI full suite passed 1396 tests before two stale expectations failed; both corrected and focused rerun passed 86 tests. Edited engine tests passed except one prompt digest snapshot, regenerated with Vitest and verified. Cloudflare Node workspace passed 4643 tests before two stale package/schema expectations failed; corrected focused rerun passed 12 tests. Containers helper passed 20 tests. The full verify:cli gate passed: 357 tests in 20 files, typechecks, prepared runtime, and package shape.
+
+The repository-tool full run passed 880 tests and failed 28: one obsolete package count was fixed and its focused suite passed; 27 pre-existing review-context fixture tests attempt Git commits with a non-noreply synthetic email rejected by the machine privacy hook. Both fixture source files are byte-identical to origin/main. No guard was weakened.
+
+Product UX: retired local install links and instructions are removed; hosted signup and account routes remain. Hosted channel/onboarding behavior is covered by the preserved runtime contracts. Source readback confirms hosted sections remain; rendered readback and focused real-Codex proof remain pending.
+
+Full runner assembly passed: CLI total 9,532,087 bytes, startup closure 19,857 bytes (33,200 budget); runner entry 77,854 bytes, static boot closure 2,014,162 bytes versus recorded 2,047,343 baseline (-33,181 bytes), 22 chunks, total 12,430,391 bytes. Exact origin/main bundle delta is deferred to final measurement.

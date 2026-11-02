@@ -54,7 +54,6 @@ export interface HostedContainerCodexShellSmokeResult {
   cliSurfaceContractBytes: number;
   cliSurfaceHotPathProofCount: number;
   healthCommonsCliGoalProofCount: number;
-  murphPathBytes: number;
   noteAddBytes: number;
   stderrBytes: number;
   vaultCliLlmsBytes: number;
@@ -638,7 +637,6 @@ async function runHostedContainerCodexShellAppServerProbe(input: {
         cliSurfaceContractBytes: 0,
         cliSurfaceHotPathProofCount: 0,
         healthCommonsCliGoalProofCount: 0,
-        murphPathBytes: 0,
         noteAddBytes: 0,
         stderrBytes,
         vaultCliLlmsBytes: 0,
@@ -805,7 +803,6 @@ async function runHostedContainerCodexShellAppServerProbe(input: {
         cliSurfaceContractBytes: cliSurface.contractBytes,
         cliSurfaceHotPathProofCount: cliSurface.hotPathProofCount,
         healthCommonsCliGoalProofCount: goalCli.proofCount,
-        murphPathBytes: environmentProbe.murphPathBytes,
         noteAddBytes: Buffer.byteLength(noteAdd.stdout, "utf8"),
         stderrBytes,
         vaultCliLlmsBytes: Buffer.byteLength(vaultCliLlms.stdout, "utf8"),
@@ -927,7 +924,6 @@ function findExecutable(name) {
   return "";
 }
 process.stdout.write(JSON.stringify({
-  murphPathBytes: Buffer.byteLength(findExecutable("murph"), "utf8"),
   providerCredentialPresent: Boolean(process.env.OPENAI_API_KEY),
   vaultCliPathBytes: Buffer.byteLength(findExecutable("vault-cli"), "utf8"),
   vaultRootInherited: process.env.VAULT === expectedVaultRoot,
@@ -936,14 +932,9 @@ process.stdout.write(JSON.stringify({
 }
 
 function readHostedContainerCodexShellEnvironmentProbe(stdout: string): {
-  murphPathBytes: number;
   vaultCliPathBytes: number;
 } {
   const record = readHostedContainerJsonObject(stdout, "Hosted Codex shell environment probe");
-  const murphPathBytes = readHostedContainerPositiveNumber(
-    record.murphPathBytes,
-    "Hosted Codex shell environment probe.murphPathBytes",
-  );
   const vaultCliPathBytes = readHostedContainerPositiveNumber(
     record.vaultCliPathBytes,
     "Hosted Codex shell environment probe.vaultCliPathBytes",
@@ -955,7 +946,6 @@ function readHostedContainerCodexShellEnvironmentProbe(stdout: string): {
     throw new Error("Hosted Codex shell smoke leaked provider credentials into command env.");
   }
   return {
-    murphPathBytes,
     vaultCliPathBytes,
   };
 }

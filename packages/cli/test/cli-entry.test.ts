@@ -36,8 +36,6 @@ const mockedCliEntryModules = [
   "../src/vault-cli-vault-context.js",
   "@murphai/assistant-engine/codex-lifecycle",
   "@murphai/operator-config/operator-config",
-  "@murphai/setup-cli/setup-cli",
-  "@murphai/operator-config/setup-runtime-env",
 ] as const;
 
 function mockCliActionModules(input: {
@@ -54,8 +52,6 @@ function mockCliActionModules(input: {
   onCreateVaultCliWithOptions?: (input: Record<string, unknown>) => void;
   operatorConfigModule: Record<string, unknown>;
   registerScopedVaultCliCommand?: ReturnType<typeof vi.fn>;
-  setupCliModule: Record<string, unknown>;
-  setupRuntimeEnvModule?: Record<string, unknown>;
 }) {
   vi.doMock("../src/vault-cli.js", () => ({
     CLI_CONFIG_FILES: [],
@@ -107,14 +103,6 @@ function mockCliActionModules(input: {
       (argv: readonly string[]) => argv.find((token) => !token.startsWith("-")) ?? null,
     ),
     ...input.operatorConfigModule,
-  }));
-  vi.doMock("@murphai/setup-cli/setup-cli", () => ({
-    createSetupServices: vi.fn(() => ({ setupHost: vi.fn(), setupMacos: vi.fn() })),
-    ...input.setupCliModule,
-  }));
-  vi.doMock("@murphai/operator-config/setup-runtime-env", () => ({
-    SETUP_RUNTIME_ENV_NOTICE: "Set the missing wearable environment variables.",
-    ...input.setupRuntimeEnvModule,
   }));
 }
 
@@ -402,9 +390,6 @@ test("runMurphCliAction prints --version through the requested stdout without im
   vi.doMock("../src/vault-cli.js", () => {
     throw new Error("vault CLI graph should not be imported for --version");
   });
-  vi.doMock("@murphai/setup-cli/setup-cli", () => {
-    throw new Error("setup CLI should not be imported for --version");
-  });
   vi.doMock("@murphai/operator-config/operator-config", () => {
     throw new Error("operator config should not be imported for --version");
   });
@@ -442,13 +427,6 @@ test("runMurphCliAction scopes known root commands without creating the full CLI
       resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
     },
     registerScopedVaultCliCommand,
-    setupCliModule: {
-      createSetupCli: vi.fn(),
-      formatSetupWearableLabel: vi.fn((value: string) => value),
-      listSetupPendingWearables: vi.fn(() => []),
-      listSetupReadyWearables: vi.fn(() => []),
-      resolveSetupPostLaunchAction: vi.fn(() => null),
-    },
   });
 
   await runMurphCliAction(["device", "account", "list"]);
@@ -521,13 +499,6 @@ test("runMurphCliAction keeps scoped routing when Incur skills are installed", a
         resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
       },
       registerScopedVaultCliCommand,
-      setupCliModule: {
-        createSetupCli: vi.fn(),
-        formatSetupWearableLabel: vi.fn((value: string) => value),
-        listSetupPendingWearables: vi.fn(() => []),
-        listSetupReadyWearables: vi.fn(() => []),
-        resolveSetupPostLaunchAction: vi.fn(() => null),
-      },
     });
 
     await runMurphCliAction(["device", "account", "list"]);
@@ -582,15 +553,6 @@ test("runMurphCliAction injects the resolved default vault for non-setup invocat
       resolveDefaultVault,
       resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
     },
-    setupCliModule: {
-      createSetupCli: vi.fn(),
-      detectSetupProgramName: vi.fn(() => "murph-setup"),
-      formatSetupWearableLabel: vi.fn((value: string) => value),
-      isSetupInvocation: vi.fn(() => false),
-      listSetupPendingWearables: vi.fn(() => []),
-      listSetupReadyWearables: vi.fn(() => []),
-      resolveSetupPostLaunchAction: vi.fn(() => null),
-    },
   });
 
   await runMurphCliAction(["model"]);
@@ -609,77 +571,9 @@ test("runMurphCliAction injects the resolved default vault for non-setup invocat
   ]);
 });
 
-test("runMurphCliAction rejects explicit --vault overrides for murph product commands", async () => {
-  const serve = vi.fn(async () => undefined);
-  const resolveConfiguredDefaultVault = vi.fn(async () => "/vaults/default");
 
-  mockCliActionModules({
-    cli: { serve },
-    operatorConfigModule: {
-      expandConfiguredVaultPath: vi.fn(),
-      resolveConfiguredDefaultVault,
-      resolveDefaultVault: vi.fn(async () => "/vaults/default"),
-      resolveEffectiveTopLevelToken: vi.fn(() => "assistant"),
-      resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
-    },
-    setupCliModule: {
-      createSetupCli: vi.fn(),
-      detectSetupProgramName: vi.fn(() => "murph"),
-      formatSetupWearableLabel: vi.fn((value: string) => value),
-      isSetupInvocation: vi.fn(() => false),
-      listSetupPendingWearables: vi.fn(() => []),
-      listSetupReadyWearables: vi.fn(() => []),
-      resolveSetupPostLaunchAction: vi.fn(() => null),
-    },
-  });
 
-  await assert.rejects(
-    () =>
-      runMurphCliAction(["assistant", "status", "--vault", "/vaults/other"], {
-        argv0: "murph",
-      }),
-    /`murph` uses one active vault/u,
-  );
-  assert.deepEqual(resolveConfiguredDefaultVault.mock.calls, []);
-  assert.equal(serve.mock.calls.length, 0);
-});
 
-test("runMurphCliAction rejects batch on the murph product CLI", async () => {
-  const serve = vi.fn(async () => undefined);
-  const resolveConfiguredDefaultVault = vi.fn(async () => "/vaults/default");
-  const resolveDefaultVault = vi.fn(async () => "/vaults/default");
-
-  mockCliActionModules({
-    cli: { serve },
-    operatorConfigModule: {
-      expandConfiguredVaultPath: vi.fn(),
-      resolveConfiguredDefaultVault,
-      resolveDefaultVault,
-      resolveEffectiveTopLevelToken: vi.fn(() => "batch"),
-      resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
-    },
-    setupCliModule: {
-      createSetupCli: vi.fn(),
-      detectSetupProgramName: vi.fn(() => "murph"),
-      formatSetupWearableLabel: vi.fn((value: string) => value),
-      isSetupInvocation: vi.fn(() => false),
-      listSetupPendingWearables: vi.fn(() => []),
-      listSetupReadyWearables: vi.fn(() => []),
-      resolveSetupPostLaunchAction: vi.fn(() => null),
-    },
-  });
-
-  await assert.rejects(
-    () =>
-      runMurphCliAction(["batch", "--command", '["memory","show"]'], {
-        argv0: "murph",
-      }),
-    /`batch` is only available through `vault-cli`/u,
-  );
-  assert.deepEqual(resolveConfiguredDefaultVault.mock.calls, []);
-  assert.deepEqual(resolveDefaultVault.mock.calls, []);
-  assert.equal(serve.mock.calls.length, 0);
-});
 
 test("runMurphCliAction lets JSON requests reach Incur when vault defaults are absent", async () => {
   const serve = vi.fn(async () => undefined);
@@ -691,15 +585,6 @@ test("runMurphCliAction lets JSON requests reach Incur when vault defaults are a
       expandConfiguredVaultPath: vi.fn(),
       resolveDefaultVault,
       resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
-    },
-    setupCliModule: {
-      createSetupCli: vi.fn(),
-      detectSetupProgramName: vi.fn(() => "vault-cli"),
-      formatSetupWearableLabel: vi.fn((value: string) => value),
-      isSetupInvocation: vi.fn(() => false),
-      listSetupPendingWearables: vi.fn(() => []),
-      listSetupReadyWearables: vi.fn(() => []),
-      resolveSetupPostLaunchAction: vi.fn(() => null),
     },
   });
 
@@ -731,15 +616,6 @@ for (const jsonArgv of [
         resolveDefaultVault,
         resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
       },
-      setupCliModule: {
-        createSetupCli: vi.fn(),
-        detectSetupProgramName: vi.fn(() => "vault-cli"),
-        formatSetupWearableLabel: vi.fn((value: string) => value),
-        isSetupInvocation: vi.fn(() => false),
-        listSetupPendingWearables: vi.fn(() => []),
-        listSetupReadyWearables: vi.fn(() => []),
-        resolveSetupPostLaunchAction: vi.fn(() => null),
-      },
     });
 
     await runMurphCliAction(jsonArgv);
@@ -755,63 +631,9 @@ for (const jsonArgv of [
   });
 }
 
-test("runMurphCliAction records the active-vault message when murph has no configured vault", async () => {
-  const serve = vi.fn(async () => undefined);
-  const resolveConfiguredDefaultVault = vi.fn(async () => null);
-  const resolveDefaultVault = vi.fn(async () => "/vaults/from-env");
-  const vaultContextRef: {
-    value: {
-      current: string | null;
-      missingVaultMessage: string | null;
-    } | null;
-  } = { value: null };
 
-  mockCliActionModules({
-    cli: { serve },
-    onInstallVaultCliVaultContext: (context) => {
-      vaultContextRef.value = context as {
-        current: string | null;
-        missingVaultMessage: string | null;
-      };
-    },
-    operatorConfigModule: {
-      expandConfiguredVaultPath: vi.fn(),
-      resolveConfiguredDefaultVault,
-      resolveDefaultVault,
-      resolveEffectiveTopLevelToken: vi.fn(() => "workout"),
-      resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
-    },
-    setupCliModule: {
-      createSetupCli: vi.fn(),
-      detectSetupProgramName: vi.fn(() => "murph"),
-      formatSetupWearableLabel: vi.fn((value: string) => value),
-      isSetupInvocation: vi.fn(() => false),
-      listSetupPendingWearables: vi.fn(() => []),
-      listSetupReadyWearables: vi.fn(() => []),
-      resolveSetupPostLaunchAction: vi.fn(() => null),
-    },
-  });
 
-  await runMurphCliAction(["workout", "list"], {
-    argv0: "murph",
-  });
-
-  assert.deepEqual(resolveConfiguredDefaultVault.mock.calls, [["/operator-home"]]);
-  assert.deepEqual(resolveDefaultVault.mock.calls, []);
-  assert.ok(vaultContextRef.value);
-  assert.equal(vaultContextRef.value.current, null);
-  assert.match(vaultContextRef.value.missingVaultMessage ?? "", /No active Murph vault is configured/u);
-  assert.deepEqual(serve.mock.calls, [
-    [
-      ["workout", "list"],
-      {
-        env: process.env,
-      },
-    ],
-  ]);
-});
-
-test("runMurphCliAction still allows murph init to target an explicit vault", async () => {
+test("runMurphCliAction allows vault-cli init to target an explicit vault", async () => {
   const serve = vi.fn(async () => undefined);
   const resolveConfiguredDefaultVault = vi.fn(async () => null);
   const resolveDefaultVault = vi.fn(async () => "/vaults/from-env");
@@ -831,19 +653,9 @@ test("runMurphCliAction still allows murph init to target an explicit vault", as
       resolveEffectiveTopLevelToken: vi.fn(() => "init"),
       resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
     },
-    setupCliModule: {
-      createSetupCli: vi.fn(),
-      detectSetupProgramName: vi.fn(() => "murph"),
-      formatSetupWearableLabel: vi.fn((value: string) => value),
-      isSetupInvocation: vi.fn(() => false),
-      listSetupPendingWearables: vi.fn(() => []),
-      listSetupReadyWearables: vi.fn(() => []),
-      resolveSetupPostLaunchAction: vi.fn(() => null),
-    },
   });
 
   await runMurphCliAction(["init", "--vault", "/vaults/new"], {
-    argv0: "murph",
   });
 
   assert.deepEqual(resolveConfiguredDefaultVault.mock.calls, []);
@@ -890,15 +702,6 @@ test("runMurphCliEntrypoint installs env loading and sqlite warning filtering be
       resolveConfiguredDefaultVault: vi.fn(async () => null),
       resolveDefaultVault: vi.fn(async () => "/vaults/default"),
       resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
-    },
-    setupCliModule: {
-      createSetupCli: vi.fn(),
-      detectSetupProgramName: vi.fn(() => "murph-setup"),
-      formatSetupWearableLabel: vi.fn((value: string) => value),
-      isSetupInvocation: vi.fn(() => false),
-      listSetupPendingWearables: vi.fn(() => []),
-      listSetupReadyWearables: vi.fn(() => []),
-      resolveSetupPostLaunchAction: vi.fn(() => null),
     },
   });
 
@@ -955,15 +758,6 @@ test("runMurphCliEntrypoint does not mask command failure when warm Codex shutdo
       resolveDefaultVault: vi.fn(async () => "/vaults/default"),
       resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
     },
-    setupCliModule: {
-      createSetupCli: vi.fn(),
-      detectSetupProgramName: vi.fn(() => "murph-setup"),
-      formatSetupWearableLabel: vi.fn((value: string) => value),
-      isSetupInvocation: vi.fn(() => false),
-      listSetupPendingWearables: vi.fn(() => []),
-      listSetupReadyWearables: vi.fn(() => []),
-      resolveSetupPostLaunchAction: vi.fn(() => null),
-    },
   });
 
   let caughtError: unknown = null;
@@ -996,15 +790,6 @@ test("runMurphCliEntrypoint preserves command failure when warm Codex shutdown a
       resolveDefaultVault: vi.fn(async () => "/vaults/default"),
       resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
     },
-    setupCliModule: {
-      createSetupCli: vi.fn(),
-      detectSetupProgramName: vi.fn(() => "murph-setup"),
-      formatSetupWearableLabel: vi.fn((value: string) => value),
-      isSetupInvocation: vi.fn(() => false),
-      listSetupPendingWearables: vi.fn(() => []),
-      listSetupReadyWearables: vi.fn(() => []),
-      resolveSetupPostLaunchAction: vi.fn(() => null),
-    },
   });
 
   await assert.rejects(
@@ -1029,224 +814,10 @@ test("runMurphCliEntrypoint surfaces warm Codex shutdown failure after success",
       resolveDefaultVault: vi.fn(async () => "/vaults/default"),
       resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
     },
-    setupCliModule: {
-      createSetupCli: vi.fn(),
-      detectSetupProgramName: vi.fn(() => "murph-setup"),
-      formatSetupWearableLabel: vi.fn((value: string) => value),
-      isSetupInvocation: vi.fn(() => false),
-      listSetupPendingWearables: vi.fn(() => []),
-      listSetupReadyWearables: vi.fn(() => []),
-      resolveSetupPostLaunchAction: vi.fn(() => null),
-    },
   });
 
   await assert.rejects(
     () => runMurphCliEntrypoint(["assistant", "status"]),
     (error) => error === cleanupError,
   );
-});
-
-test("runMurphCliAction reuses setup results for wearable launches and without a terminal chat handoff", async () => {
-  const serve = vi.fn(async () => undefined);
-  const stderrWrites: string[] = [];
-  const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
-    stderrWrites.push(String(chunk));
-    return true;
-  });
-  const setupCliServe = vi.fn(async (_argv: readonly string[], _options: unknown) => {
-    onSetupSuccess?.({
-      result: {
-        vault: "./vault-from-setup",
-      },
-    });
-  });
-  let onSetupSuccess:
-    | ((context: {
-        result: {
-          vault: string;
-        };
-      }) => void)
-    | null = null;
-
-  mockCliActionModules({
-    cli: { serve },
-    operatorConfigModule: {
-      expandConfiguredVaultPath: vi.fn((vault: string, homeDirectory: string) =>
-        path.join(homeDirectory, vault),
-      ),
-      resolveDefaultVault: vi.fn(async () => null),
-      resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
-    },
-    setupCliModule: {
-      createSetupCli: vi.fn((input: { onSetupSuccess: typeof onSetupSuccess }) => {
-        onSetupSuccess = input.onSetupSuccess;
-        return {
-          serve: setupCliServe,
-        };
-      }),
-      detectSetupProgramName: vi.fn(() => "murph-setup"),
-      formatSetupWearableLabel: vi.fn((value: string) => value.toUpperCase()),
-      isSetupInvocation: vi.fn(() => true),
-      listSetupPendingWearables: vi.fn(() => [
-        {
-          wearable: "whoop",
-          missingEnv: ["WHOOP_CLIENT_ID"],
-        },
-      ]),
-      listSetupReadyWearables: vi.fn(() => ["oura"]),
-      resolveSetupPostLaunchAction: vi.fn(() => null),
-    },
-  });
-
-  await runMurphCliAction(["onboard"], {
-    argv0: "murph",
-  });
-
-  assert.equal(setupCliServe.mock.calls.length, 1);
-  assert.deepEqual(serve.mock.calls, [
-    [
-      ["device", "connect", "oura", "--open"],
-      {
-        env: process.env,
-      },
-    ],
-  ]);
-  assert.deepEqual(stderrSpy.mock.calls, [
-    [
-      "\nSelected wearable setup is waiting on credentials: WHOOP (WHOOP_CLIENT_ID). Set the missing wearable environment variables.\n",
-    ],
-    ["\nOpening OURA connect flow in your browser.\n\n"],
-  ]);
-});
-
-test("runMurphCliAction passes the published CLI bin path into setup construction", async () => {
-  const serve = vi.fn(async () => undefined);
-  const setupCliServe = vi.fn(async () => undefined);
-  const createdServices = { setupHost: vi.fn(), setupMacos: vi.fn() };
-  type CreateSetupServicesInput = {
-    resolveCliBinPath: () => string;
-  };
-  type CreateSetupCliInput = {
-    commandName: string;
-    onSetupSuccess: unknown;
-    services: typeof createdServices;
-  };
-  const createSetupCli = vi.fn((input: CreateSetupCliInput) => ({
-    serve: setupCliServe,
-  }));
-  const createSetupServices = vi.fn((input: CreateSetupServicesInput) => createdServices);
-  const expectedCliBinPath = path.resolve(
-    path.dirname(fileURLToPath(new URL("../src/cli-entry.ts", import.meta.url))),
-    "../dist/bin.js",
-  );
-
-  mockCliActionModules({
-    cli: { serve },
-    operatorConfigModule: {
-      expandConfiguredVaultPath: vi.fn(),
-      resolveDefaultVault: vi.fn(async () => null),
-      resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
-    },
-    setupCliModule: {
-      createSetupCli,
-      createSetupServices,
-      detectSetupProgramName: vi.fn(() => "murph"),
-      formatSetupWearableLabel: vi.fn((value: string) => value),
-      isSetupInvocation: vi.fn(() => true),
-      listSetupPendingWearables: vi.fn(() => []),
-      listSetupReadyWearables: vi.fn(() => []),
-      resolveSetupPostLaunchAction: vi.fn(() => null),
-    },
-  });
-
-  await runMurphCliAction(["onboard", "--dryRun", "--vault", "./vault"], {
-    argv0: "murph",
-  });
-
-  assert.equal(createSetupServices.mock.calls.length, 1);
-  const createSetupServicesCall = createSetupServices.mock.calls[0];
-  assert.ok(createSetupServicesCall);
-  const [createSetupServicesInput] = createSetupServicesCall;
-  const { resolveCliBinPath } = createSetupServicesInput;
-  assert.equal(typeof resolveCliBinPath, "function");
-  assert.equal(resolveCliBinPath?.(), expectedCliBinPath);
-  assert.equal(createSetupCli.mock.calls.length, 1);
-  const createSetupCliCall = createSetupCli.mock.calls[0];
-  assert.ok(createSetupCliCall);
-  const [createSetupCliInput] = createSetupCliCall;
-  assert.deepEqual(createSetupCliCall, [
-    {
-      commandName: "murph",
-      onSetupSuccess: createSetupCliInput.onSetupSuccess,
-      services: createdServices,
-    },
-  ]);
-  assert.equal(typeof createSetupCliInput.onSetupSuccess, "function");
-  assert.equal(setupCliServe.mock.calls.length, 1);
-  assert.equal(serve.mock.calls.length, 0);
-});
-
-test("runMurphCliAction starts assistant automation when setup requests assistant-run", async () => {
-  const serve = vi.fn(async (_argv: readonly string[], options: { exit?: (code?: number) => void }) => {
-    options.exit?.(0);
-    return undefined;
-  });
-  const setupCliServe = vi.fn(async (_argv: readonly string[], options: { exit?: (code?: number) => void }) => {
-    options.exit?.(0);
-    onSetupSuccess?.({
-      result: {
-        vault: "./vault-from-setup",
-      },
-    });
-  });
-  const exit = vi.fn();
-  const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-  let onSetupSuccess:
-    | ((context: {
-        result: {
-          vault: string;
-        };
-      }) => void)
-    | null = null;
-
-  mockCliActionModules({
-    cli: { serve },
-    operatorConfigModule: {
-      expandConfiguredVaultPath: vi.fn((vault: string, homeDirectory: string) =>
-        path.join(homeDirectory, vault),
-      ),
-      resolveDefaultVault: vi.fn(async () => null),
-      resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
-    },
-    setupCliModule: {
-      createSetupCli: vi.fn((input: { onSetupSuccess: typeof onSetupSuccess }) => {
-        onSetupSuccess = input.onSetupSuccess;
-        return {
-          serve: setupCliServe,
-        };
-      }),
-      detectSetupProgramName: vi.fn(() => "murph-setup"),
-      formatSetupWearableLabel: vi.fn((value: string) => value.toUpperCase()),
-      isSetupInvocation: vi.fn(() => true),
-      listSetupPendingWearables: vi.fn(() => []),
-      listSetupReadyWearables: vi.fn(() => []),
-      resolveSetupPostLaunchAction: vi.fn(() => "assistant-run"),
-    },
-  });
-
-  await runMurphCliAction(["onboard"], {
-    argv0: "murph",
-    exit,
-  });
-
-  assert.equal(setupCliServe.mock.calls.length, 1);
-  assert.equal(typeof setupCliServe.mock.calls[0]?.[1]?.exit, "function");
-  assert.deepEqual(serve.mock.calls[0]?.[0], ["assistant", "run"]);
-  assert.equal(typeof serve.mock.calls[0]?.[1]?.exit, "function");
-  assert.equal(exit.mock.calls.length, 2);
-  assert.deepEqual(stderrSpy.mock.calls, [
-    [
-      "\nStarting Murph assistant automation. Leave this terminal open while channel auto-reply is active for Telegram or Linq. Press Ctrl+C to stop.\n\n",
-    ],
-  ]);
 });

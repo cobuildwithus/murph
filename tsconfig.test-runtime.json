@@ -62,9 +62,6 @@
       "path": "./packages/assistant-cli"
     },
     {
-      "path": "./packages/setup-cli"
-    },
-    {
       "path": "./packages/cli"
     }
   ]

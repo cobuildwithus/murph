@@ -2,15 +2,13 @@ import type { Metadata } from "next";
 
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { getMurphGithubStarCount } from "@/src/lib/github-stars";
-import { resolveHostedInstallScriptUrl } from "@/src/lib/hosted-onboarding/landing";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 import { StickyNav } from "../sticky-nav";
 
 const SECURITY_METADATA_DESCRIPTION =
-  "How Murph protects hosted and local health data. Hosted architecture, encryption, auth, and the local self-hosted lane.";
-const HOSTED_INSTALL_SCRIPT_URL_FALLBACK = "https://www.withmurph.ai/install.sh";
+  "How Murph protects health data. Hosted architecture, encryption, and authentication.";
 const SECURITY_OPEN_GRAPH_IMAGE = {
   alt: "Murph Security. How Murph protects health data.",
   height: 630,
@@ -31,7 +29,7 @@ export const metadata: Metadata = createMurphPageMetadata({
   },
   twitter: {
     description:
-      "How Murph protects hosted and local health data.",
+      "How Murph protects health data.",
     images: [SECURITY_OPEN_GRAPH_IMAGE],
   },
 });
@@ -41,8 +39,6 @@ export default async function SecurityPage() {
     getHostedPageAuthSnapshot(),
     getMurphGithubStarCount(),
   ]);
-  const installCommandUrl =
-    resolveHostedInstallScriptUrl() ?? HOSTED_INSTALL_SCRIPT_URL_FALLBACK;
 
   return (
     <>
@@ -52,7 +48,6 @@ export default async function SecurityPage() {
         <PromisesSection />
         <HostedOverviewSection />
         <EncryptionSection />
-        <LocalSection installCommandUrl={installCommandUrl} />
       </main>
       <SiteFooter />
     </>
@@ -585,131 +580,6 @@ function EncryptionSection() {
   );
 }
 
-const LOCAL_SOURCE_REFS = [
-  {
-    href: "https://github.com/cobuildwithus/murph/blob/main/ARCHITECTURE.md",
-    text: "ARCHITECTURE.md",
-  },
-  {
-    href: "https://github.com/cobuildwithus/murph/blob/main/apps/web/src/lib/hosted-web/encryption.ts",
-    text: "hosted-web/encryption.ts",
-  },
-  {
-    href: "https://github.com/cobuildwithus/murph/blob/main/apps/web/src/lib/hosted-onboarding/contact-privacy-core.ts",
-    text: "contact-privacy-core.ts",
-  },
-  {
-    href: "https://github.com/cobuildwithus/murph/blob/main/apps/web/src/lib/hosted-execution/cloudflare-callback-auth.ts",
-    text: "cloudflare-callback-auth.ts",
-  },
-] as const;
-
-function LocalSection({ installCommandUrl }: { installCommandUrl: string }) {
-  return (
-    <section
-      aria-labelledby="security-local-title"
-      className="bg-[#2a2520] px-4 py-20 sm:px-6 sm:py-24 lg:px-10 lg:py-28"
-      id="local"
-    >
-      <div className="mx-auto max-w-[1120px]">
-        <div className="rounded-3xl bg-[#dfe4cf] px-6 py-14 sm:px-10 sm:py-20 lg:px-14">
-          <p className="font-mono text-[10px] font-medium tracking-[0.14em] text-[#3a4a1e] uppercase">
-            Local Murph &middot; for developers
-          </p>
-          <h2 className="mt-6 max-w-[24ch] font-serif text-[clamp(1.75rem,4vw,3rem)] font-semibold leading-[1.05] tracking-[-0.03em] text-balance text-[#2d3436]" id="security-local-title">
-            Or run the whole thing yourself.
-          </h2>
-          <p className="mt-6 max-w-[58ch] text-[1rem] leading-[1.7] text-pretty text-[#4d4533]">
-            If you do not want your Murph vault on Murph-hosted servers, run
-            Murph on your own machine. Local Murph keeps your vault as files
-            on your disk, protected by your operating system and whatever disk
-            encryption you use.
-          </p>
-          <div className="mt-14 grid gap-x-16 gap-y-10 lg:grid-cols-[1.1fr_1fr]">
-            <div className="overflow-x-auto">
-              <VaultTreeDiagram />
-            </div>
-            <LocalInfoList installCommandUrl={installCommandUrl} />
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function LocalInfoList({ installCommandUrl }: { installCommandUrl: string }) {
-  return (
-    <dl className="space-y-6 lg:pt-4">
-      <div className="border-t border-[#2d3436]/15 pt-5">
-        <dt className="font-mono text-[10px] font-medium tracking-[0.14em] text-[#3a4a1e] uppercase">
-          Storage format
-        </dt>
-        <dd className="mt-2 text-[0.9375rem] leading-[1.55] text-[#2d3436]">
-          Plain Markdown + JSONL under a single vault root. Human-readable,
-          grep-able, git-friendly.
-        </dd>
-      </div>
-      <div className="border-t border-[#2d3436]/15 pt-5">
-        <dt className="font-mono text-[10px] font-medium tracking-[0.14em] text-[#3a4a1e] uppercase">
-          Disk encryption
-        </dt>
-        <dd className="mt-2 text-[0.9375rem] leading-[1.55] text-[#2d3436]">
-          Your filesystem&apos;s posture. FileVault, LUKS, BitLocker. We do
-          not add another layer below your OS.
-        </dd>
-      </div>
-      <div className="border-t border-[#2d3436]/15 pt-5">
-        <dt className="font-mono text-[10px] font-medium tracking-[0.14em] text-[#3a4a1e] uppercase">
-          Install
-        </dt>
-        <dd className="mt-2 font-mono text-[12px] leading-[1.5] text-[#2d3436]">
-          <code className="break-all rounded bg-[#2d3436]/5 px-2 py-1">
-            curl -fsSL {installCommandUrl} | bash
-          </code>
-        </dd>
-      </div>
-      <div className="border-t border-[#2d3436]/15 pt-5">
-        <dt className="font-mono text-[10px] font-medium tracking-[0.14em] text-[#3a4a1e] uppercase">
-          Source
-        </dt>
-        <dd className="mt-2 text-[0.9375rem] leading-[1.55] text-[#2d3436]">
-          <a
-            className="-my-3 inline-block py-3 underline decoration-[#c4a882]/60 decoration-1 underline-offset-[3px] transition-colors focus-visible:rounded focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5a6e32] hover:text-[#5a6e32]"
-            href="https://github.com/cobuildwithus/murph"
-            rel="noopener noreferrer"
-            target="_blank"
-          >
-            github.com/cobuildwithus/murph
-          </a>
-          <span className="ml-2 text-[#736a58]">&middot; Apache 2.0</span>
-        </dd>
-      </div>
-      <div className="border-t border-[#2d3436]/15 pt-5">
-        <dt className="font-mono text-[10px] font-medium tracking-[0.14em] text-[#3a4a1e] uppercase">
-          Key files
-        </dt>
-        <dd className="mt-3">
-          <ul className="font-mono text-[12px] leading-[1.5]">
-            {LOCAL_SOURCE_REFS.map((ref) => (
-              <li key={ref.text}>
-                <a
-                  className="inline-flex min-h-[44px] items-center text-[#2d3436] underline decoration-[#c4a882]/50 decoration-1 underline-offset-[3px] transition-colors focus-visible:rounded focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5a6e32] hover:text-[#5a6e32] hover:decoration-[#5a6e32]/60"
-                  href={ref.href}
-                  rel="noopener noreferrer"
-                  target="_blank"
-                >
-                  {ref.text}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </dd>
-      </div>
-    </dl>
-  );
-}
-
-
 const DIAGRAM_COLORS = {
   ink: "#2d3436",
   inkMuted: "#736a58",
@@ -933,111 +803,6 @@ function ArchitectureDiagramMobile() {
       <text className="font-mono" fill={inkMuted} fontSize="9" letterSpacing="0.1em" textAnchor="middle" x="160" y="509">
         RESULT
       </text>
-    </svg>
-  );
-}
-
-
-const VAULT_TREE = [
-  { label: "~/", level: 0, sub: "home" },
-  { label: ".murph/", level: 1, sub: "vault root" },
-  { label: "health/", level: 2, sub: "biomarkers · labs · body" },
-  { label: "experiments/", level: 2, sub: "protocols · runs · outcomes" },
-  { label: "journal/", level: 2, sub: "free-text · timestamped" },
-  { label: "sources/", level: 2, sub: "cited research · sideloaded docs" },
-  { label: "wearables/", level: 2, sub: "oura · whoop · garmin · strava" },
-  { label: "config", level: 1, sub: "toml · opinions" },
-] as const;
-
-const VAULT_TREE_ROW_H = 36;
-const VAULT_TREE_BASE_X = 40;
-const VAULT_TREE_INDENT = 32;
-
-function VaultTreeDiagram() {
-  const { ink, inkMuted, accent } = DIAGRAM_COLORS;
-  const tree = VAULT_TREE;
-  const rowH = VAULT_TREE_ROW_H;
-  const baseX = VAULT_TREE_BASE_X;
-  const indentStep = VAULT_TREE_INDENT;
-
-  return (
-    <svg
-      aria-label="The local vault root is a directory under your home folder containing plain Markdown and JSONL files grouped by domain: health records, experiment logs, journal, cited research, and raw wearable imports."
-      className="block w-full min-w-[400px]"
-      role="img"
-      viewBox={`0 0 560 ${40 + tree.length * rowH + 40}`}
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <text
-        className="font-mono"
-        fill={inkMuted}
-        fontSize="9"
-        letterSpacing="0.14em"
-        x={baseX}
-        y="20"
-      >
-        VAULT ROOT
-      </text>
-
-      {tree.map((item, i) => {
-        const y = 40 + i * rowH;
-        const x = baseX + item.level * indentStep;
-        const lineColor = i === 0 ? accent : "rgba(45,52,54,0.18)";
-        const labelColor = i === 0 ? accent : ink;
-        return (
-          <g key={item.label}>
-            {item.level > 0 ? (
-              <>
-                <line
-                  stroke="rgba(45,52,54,0.25)"
-                  strokeWidth="0.8"
-                  x1={x - indentStep + 8}
-                  x2={x - indentStep + 8}
-                  y1={y - rowH + 8}
-                  y2={y + 12}
-                />
-                <line
-                  stroke="rgba(45,52,54,0.25)"
-                  strokeWidth="0.8"
-                  x1={x - indentStep + 8}
-                  x2={x - 4}
-                  y1={y + 12}
-                  y2={y + 12}
-                />
-              </>
-            ) : null}
-            <rect
-              fill="transparent"
-              height="24"
-              rx="4"
-              stroke={lineColor}
-              strokeWidth={i === 0 ? "1" : "0.8"}
-              width="150"
-              x={x}
-              y={y}
-            />
-            <text
-              className="font-mono"
-              fill={labelColor}
-              fontSize="12"
-              fontWeight={i === 0 ? "600" : "500"}
-              x={x + 10}
-              y={y + 16}
-            >
-              {item.label}
-            </text>
-            <text
-              className="font-mono"
-              fill={inkMuted}
-              fontSize="10"
-              x={x + 170}
-              y={y + 16}
-            >
-              {item.sub}
-            </text>
-          </g>
-        );
-      })}
     </svg>
   );
 }

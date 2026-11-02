@@ -6,7 +6,7 @@ describe('scheduled phone-call prompt', () => {
   it.each(['automation-auto-reply', 'automation-cron'] as const)('composes call authority for %s', (turnTrigger) => {
     const prompt = buildAssistantSystemPrompt({
       assistantCliContract: null, assistantHostedAutomationAvailable: true,
-      channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+      channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
       conversationScope: 'direct', currentLocalDate: '2030-04-01',
       currentTimeZone: 'America/New_York', hostedRuntime: true,
       modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger,

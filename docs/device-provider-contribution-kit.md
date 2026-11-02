@@ -128,7 +128,6 @@ Most first-class provider additions touch both package seams plus a small set of
 
 Update these only when the provider should appear there now:
 - `apps/web/src/lib/device-sync/**`
-- `packages/cli/src/setup-cli.ts`
 - `packages/cli/src/setup-wizard.ts`
 - onboarding or hosted settings docs
 

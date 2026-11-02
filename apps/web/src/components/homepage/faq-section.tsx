@@ -53,11 +53,11 @@ const FAQ_ITEMS = [
   ],
   [
     "What happens to my data?",
-    "Unless Murph clearly says otherwise and gets any required consent, health data you submit through Murph is not used to train general-purpose AI models. Murph encrypts sensitive data at rest and keeps storage scoped by purpose. The service can decrypt data when it needs to run requested tasks or maintain the service. Local Murph keeps your vault on your device.",
+    "Unless Murph clearly says otherwise and gets any required consent, health data you submit through Murph is not used to train general-purpose AI models. Murph encrypts sensitive data at rest and keeps storage scoped by purpose. The service can decrypt data when it needs to run requested tasks or maintain the service.",
   ],
   [
-    "Can I self-host Murph?",
-    "Yes. Murph is open source under Apache 2.0. Run it locally with one command. The hosted version is for people who'd rather not run anything themselves.",
+    "Is Murph open source?",
+    "Yes. Murph’s source is available under Apache 2.0. Members use the hosted service through messaging and the iOS app.",
   ],
   [
     "Can I cancel anytime?",

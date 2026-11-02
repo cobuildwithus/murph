@@ -4,7 +4,6 @@ import {
 
   parseHostedSignupPhoneNumber,
 
-  resolveHostedInstallScriptUrl,
 
 
   resolveHostedSignupPhoneNumber,
@@ -30,36 +29,4 @@ describe("hosted onboarding landing helpers", () => {
   });
 
 
-  it("derives the hosted install-script URL from the public base URL", () => {
-    expect(resolveHostedInstallScriptUrl(createProcessEnv({}))).toBeNull();
-    expect(
-      resolveHostedInstallScriptUrl(
-        createProcessEnv({ HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test" }),
-      ),
-    ).toBe("https://join.example.test/install.sh");
-    expect(
-      resolveHostedInstallScriptUrl(
-        createProcessEnv({ HOSTED_WEB_BASE_URL: "https://murph.example.test/app" }),
-      ),
-    ).toBeNull();
-    expect(
-      resolveHostedInstallScriptUrl(
-        createProcessEnv({ HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://" }),
-      ),
-    ).toBeNull();
-    expect(
-      resolveHostedInstallScriptUrl(
-        createProcessEnv({ VERCEL_PROJECT_PRODUCTION_URL: "www.withmurph.ai" }),
-      ),
-    ).toBe("https://www.withmurph.ai/install.sh");
-  });
-
-
 });
-
-function createProcessEnv(values: Record<string, string>): NodeJS.ProcessEnv {
-  return {
-    NODE_ENV: "test",
-    ...values,
-  };
-}

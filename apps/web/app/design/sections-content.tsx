@@ -5,7 +5,6 @@ import { FaqSection } from "@/src/components/homepage/faq-section";
 import { HeroClocksIn } from "@/src/components/homepage/hero-clocks-in";
 import { HowItWorksSection } from "@/src/components/homepage/how-it-works-section";
 import { IntegrationsSection } from "@/src/components/homepage/integrations-section";
-import { LocalRunSection } from "@/src/components/homepage/local-run-section";
 import { DEFAULT_MURPH_HEADSHOT } from "@/src/components/homepage/murph-headshot-avatar";
 import { NutritionSection } from "@/src/components/homepage/nutrition-section";
 import { PersonasSection } from "@/src/components/homepage/personas-section";
@@ -330,19 +329,6 @@ export function SectionsContent({
               inert
             >
               <IntegrationsSection authenticated={false} />
-            </div>
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Homepage local installation">
-            <div
-              id="homepage-local-installation"
-              data-design-section="homepage-local-installation"
-              className="-mx-5 sm:-mx-8 lg:-mx-12"
-              inert
-            >
-              <LocalRunSection installCommandUrl="https://www.withmurph.ai/install.sh" />
             </div>
           </StudySection>
 

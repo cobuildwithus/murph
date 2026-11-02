@@ -1,5 +1,4 @@
 import os from 'node:os'
-import { SETUP_RUNTIME_ENV_NOTICE } from '@murphai/operator-config/setup-runtime-env'
 import {
   resolveTelegramApiBaseUrl,
   resolveTelegramBotToken,
@@ -99,7 +98,7 @@ export function createInboxAppEnvironment(
     if (!token) {
       throw new VaultCliError(
         'INBOX_TELEGRAM_TOKEN_MISSING',
-        `Telegram requires a bot token in TELEGRAM_BOT_TOKEN. ${SETUP_RUNTIME_ENV_NOTICE}`,
+        `Telegram requires a bot token in TELEGRAM_BOT_TOKEN.`,
       )
     }
 

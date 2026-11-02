@@ -96,7 +96,7 @@ describe.skipIf(process.env.MURPH_MEASURE_WEEKLY_USAGE_INPUT !== '1')('weekly us
         const layers = build({
           assistantCliContract: null, assistantHostedAutomationAvailable: true,
           assistantProgressUpdatesAvailable: true, channel: 'linq',
-          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' }, conversationScope: scope,
+          cliAccess: { rawCommand: 'vault-cli' }, conversationScope: scope,
           currentLocalDate: '2030-01-10', currentInstant: '2030-01-10T16:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
           ordinaryInboundTurn: true,

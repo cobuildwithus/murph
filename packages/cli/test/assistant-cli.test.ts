@@ -23,14 +23,14 @@ import {
 import { createIntegratedInboxServices } from '@murphai/inbox-services'
 import { formatAssistantRunEventForTerminal } from '@murphai/assistant-cli/run-terminal-logging'
 import { formatStructuredErrorMessage } from '@murphai/operator-config/text/shared'
-import type { SetupConfiguredAssistant } from '@murphai/operator-config/setup-cli-contracts'
-import type { SetupAssistantResolver } from '@murphai/setup-cli/setup-assistant'
-import type { SetupAssistantWizardInput } from '@murphai/setup-cli/setup-assistant-wizard'
+
+
+
 import {
   collectVaultCliDescriptorRootCommandNames,
   collectVaultRequiredCliDescriptorRootCommandNames,
 } from '../src/vault-cli-command-manifest.js'
-import { registerModelCommands } from '../src/commands/model.js'
+
 import { createVaultCli } from '../src/vault-cli.js'
 import { createUnwiredVaultServices } from '@murphai/vault-usecases'
 import {
@@ -774,447 +774,32 @@ test.sequential(
   ASSISTANT_CLI_TIMEOUT_MS,
 )
 
-test('manifest marks query as vault-backed while model and route are exempt', () => {
+test('manifest marks query as vault-backed while route is exempt', () => {
   assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('query'), true)
-  assert.equal(collectVaultCliDescriptorRootCommandNames().includes('model'), true)
   assert.equal(collectVaultCliDescriptorRootCommandNames().includes('commons'), true)
   assert.equal(collectVaultCliDescriptorRootCommandNames().includes('route'), true)
   assert.equal(collectVaultCliDescriptorRootCommandNames().includes('research'), true)
   assert.equal(collectVaultCliDescriptorRootCommandNames().includes('deepthink'), false)
-  assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('model'), false)
   assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('commons'), false)
   assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('research'), false)
   assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('route'), false)
 })
 
-test('model --show returns the saved assistant backend', async () => {
-  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-show-'))
-  cleanupPaths.push(homeRoot)
 
-  await saveAssistantOperatorDefaultsPatch(
-    {
-      backend: {
-        adapter: 'codex-cli',
-        approvalPolicy: 'never',
-        codexCommand: null,
-        model: 'gpt-5.4',
-        oss: false,
-        profile: 'ops',
-        reasoningEffort: 'medium',
-        sandbox: 'danger-full-access',
-      },
-      account: {
-        source: 'codex',
-        kind: 'account',
-        planCode: null,
-        planName: 'Pro',
-        quota: null,
-      },
-    },
-    homeRoot,
-  )
 
-  const cli = Cli.create('vault-cli')
-  registerModelCommands(cli, {
-    resolveHomeDirectory: () => homeRoot,
-    terminal: {
-      stdinIsTTY: false,
-      stderrIsTTY: false,
-    },
-  })
 
-  const result = await runRegisteredCliJson<{
-    configured: boolean
-    backend: {
-      adapter: string
-      model: string | null
-      profile: string | null
-    } | null
-    summary: string | null
-  }>(cli, ['model', '--show'])
 
-  assert.equal(result.exitCode, null)
-  assert.equal(result.envelope.ok, true)
-  assert.equal(result.envelope.data?.configured, true)
-  assert.deepEqual(result.envelope.data?.backend, {
-    adapter: 'codex-cli',
-    approvalPolicy: 'never',
-    codexCommand: null,
-    model: 'gpt-5.4',
-    modelProvider: null,
-    oss: false,
-    profile: 'ops',
-    reasoningEffort: 'medium',
-    sandbox: 'danger-full-access',
-  })
-  assert.equal(result.envelope.data?.summary, 'gpt-5.4 via Codex app-server (Pro account)')
-})
 
-test('model --show fails closed for an unsupported persisted backend', async () => {
-  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-show-unsupported-backend-'))
-  cleanupPaths.push(homeRoot)
 
-  await writeLegacyAssistantOperatorConfig(homeRoot)
 
-  const cli = Cli.create('vault-cli')
-  registerModelCommands(cli, {
-    resolveHomeDirectory: () => homeRoot,
-    terminal: {
-      stdinIsTTY: false,
-      stderrIsTTY: false,
-    },
-  })
 
-  const result = await runRegisteredCliJson(cli, ['model', '--show'])
 
-  assert.equal(result.exitCode, 1)
-  assert.equal(result.envelope.ok, false)
-  assert.equal(result.envelope.error?.code, 'UNKNOWN')
-  assert.match(
-    result.envelope.error?.message ?? '',
-    /Reconfigure the assistant for Codex App Server/u,
-  )
-})
 
-test('model --preset codex replaces an unsupported persisted backend', async () => {
-  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-replace-unsupported-backend-'))
-  cleanupPaths.push(homeRoot)
-  await writeLegacyAssistantOperatorConfig(homeRoot, '~/vault')
 
-  const resolveAssistant = vi.fn(
-    async ({ options, preset }): Promise<SetupConfiguredAssistant> => ({
-      preset,
-      enabled: true,
-      provider: 'codex-cli',
-      model: options.assistantModel ?? null,
-      modelProvider: null,
-      codexCommand: options.assistantCodexCommand ?? null,
-      codexHome: options.assistantCodexHome ?? null,
-      profile: options.assistantProfile ?? null,
-      reasoningEffort: options.assistantReasoningEffort ?? null,
-      sandbox: 'danger-full-access',
-      approvalPolicy: 'never',
-      oss: false,
-      account: null,
-      detail: 'saved codex backend',
-    }),
-  )
 
-  const cli = Cli.create('vault-cli')
-  registerModelCommands(cli, {
-    assistantSetup: {
-      resolve: resolveAssistant,
-    },
-    resolveHomeDirectory: () => homeRoot,
-    terminal: {
-      stdinIsTTY: false,
-      stderrIsTTY: false,
-    },
-  })
 
-  const result = await runRegisteredCliJson<{
-    backend: {
-      adapter: string
-      model: string | null
-      modelProvider: string | null
-    } | null
-  }>(cli, [
-    'model',
-    '--preset',
-    'codex',
-    '--model',
-    'gpt-6.1-sol',
-  ])
 
-  assert.equal(result.exitCode, null)
-  assert.equal(result.envelope.ok, true)
-  assert.equal(result.envelope.data?.backend?.adapter, 'codex-cli')
-  assert.equal(result.envelope.data?.backend?.model, 'gpt-6.1-sol')
-  assert.equal(result.envelope.data?.backend?.modelProvider, null)
 
-  const config = await readOperatorConfig(homeRoot)
-  assert.equal(config?.defaultVault, '~/vault')
-  assert.equal(config?.assistant?.backend?.adapter, 'codex-cli')
-  assert.equal(
-    config?.assistant?.backend?.adapter === 'codex-cli'
-      ? config.assistant.backend.modelProvider
-      : null,
-    null,
-  )
-})
-
-test('model rejects removed provider and local inference options', async () => {
-  const resolve = vi.fn()
-  const cli = Cli.create('vault-cli')
-  registerModelCommands(cli, {
-    assistantSetup: { resolve },
-    terminal: { stdinIsTTY: false, stderrIsTTY: false },
-  })
-
-  for (const option of [['--modelProvider', 'unsupported-provider'], ['--oss']]) {
-    const result = await runRegisteredCliJson(cli, ['model', '--preset', 'codex', ...option])
-    assert.equal(result.envelope.ok, false)
-  }
-  assert.equal(resolve.mock.calls.length, 0)
-})
-
-test('model rejects unsupported legacy presets', async () => {
-  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-legacy-preset-'))
-  cleanupPaths.push(homeRoot)
-
-  const cli = Cli.create('vault-cli')
-  registerModelCommands(cli, {
-    resolveHomeDirectory: () => homeRoot,
-    terminal: {
-      stdinIsTTY: false,
-      stderrIsTTY: false,
-    },
-  })
-
-  const result = await runRegisteredCliJson(cli, [
-    'model',
-    '--preset',
-    'unsupported-provider',
-    '--model',
-    'gpt-4.1-mini',
-  ])
-
-  assert.equal(result.exitCode, 1)
-  assert.equal(result.envelope.ok, false)
-  assert.equal(result.envelope.error?.code, 'VALIDATION_ERROR')
-  assert.equal(result.envelope.error?.message, 'The command input is invalid.')
-  assert.equal(result.envelope.error?.stage, 'validation')
-  assert.equal(result.envelope.error?.fieldErrors?.[0]?.path, 'preset')
-  assert.doesNotMatch(JSON.stringify(result.envelope.error), /unsupported-provider/u)
-})
-
-test('model --show includes a note for an explicit saved Codex home', async () => {
-  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-show-codex-home-'))
-  cleanupPaths.push(homeRoot)
-
-  await saveAssistantOperatorDefaultsPatch(
-    {
-      backend: {
-        adapter: 'codex-cli',
-        approvalPolicy: 'never',
-        codexCommand: null,
-        codexHome: '/tmp/codex-1',
-        model: 'gpt-5.4',
-        oss: false,
-        profile: null,
-        reasoningEffort: 'medium',
-        sandbox: 'danger-full-access',
-      },
-      account: null,
-    },
-    homeRoot,
-  )
-
-  const cli = Cli.create('vault-cli')
-  registerModelCommands(cli, {
-    resolveHomeDirectory: () => homeRoot,
-    terminal: {
-      stdinIsTTY: false,
-      stderrIsTTY: false,
-    },
-  })
-
-  const result = await runRegisteredCliJson<{
-    backend: {
-      codexHome?: string | null
-    } | null
-    notes: string[]
-  }>(cli, ['model', '--show'])
-
-  assert.equal(result.exitCode, null)
-  assert.equal(result.envelope.ok, true)
-  assert.equal(result.envelope.data?.backend?.codexHome, '[path]')
-  assert.deepEqual(result.envelope.data?.notes, [
-    'A saved Codex home is configured; path redacted in CLI output.',
-  ])
-})
-
-test('interactive bare model uses the Codex wizard selection before resolving details', async () => {
-  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-wizard-'))
-  cleanupPaths.push(homeRoot)
-
-  const assistantWizard = vi.fn(async (_input: SetupAssistantWizardInput) => ({
-    assistantPreset: 'codex' as const,
-  }))
-  const resolveAssistant = vi.fn(
-    async ({ options, preset }): Promise<SetupConfiguredAssistant> => ({
-      preset,
-      enabled: true,
-      provider: 'codex-cli',
-      model: 'gpt-6.1-sol',
-      modelProvider: null,
-      codexCommand: null,
-      codexHome: options.assistantCodexHome ?? null,
-      profile: null,
-      reasoningEffort: options.assistantReasoningEffort ?? null,
-      sandbox: 'danger-full-access',
-      approvalPolicy: 'never',
-      oss: false,
-      account: null,
-      detail: 'resolved Codex after wizard selection',
-    }),
-  )
-  const assistantSetup: SetupAssistantResolver = {
-    resolve: resolveAssistant,
-  }
-
-  const cli = Cli.create('vault-cli')
-  registerModelCommands(cli, {
-    assistantSetup,
-    assistantWizard,
-    resolveHomeDirectory: () => homeRoot,
-    terminal: {
-      stdinIsTTY: true,
-      stderrIsTTY: true,
-    },
-  })
-
-  const result = await runRegisteredCliJson<{
-    summary: string | null
-  }>(cli, ['model'])
-
-  assert.equal(result.exitCode, null)
-  assert.equal(result.envelope.ok, true)
-  assert.equal(assistantWizard.mock.calls.length, 1)
-  assert.deepEqual(assistantWizard.mock.calls[0]?.[0], {
-  })
-  assert.equal(resolveAssistant.mock.calls.length, 1)
-  assert.deepEqual(resolveAssistant.mock.calls[0]?.[0], {
-    allowPrompt: true,
-    commandName: 'model',
-    options: {
-      vault: './vault',
-      strict: true,
-      whisperModel: 'base.en',
-      assistantPreset: 'codex',
-    },
-    preset: 'codex',
-  })
-  assert.equal(
-    result.envelope.data?.summary,
-    'gpt-6.1-sol via Codex app-server',
-  )
-})
-
-test('model reuses existing Codex defaults when only the model changes', async () => {
-  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-update-'))
-  cleanupPaths.push(homeRoot)
-
-  await saveAssistantOperatorDefaultsPatch(
-    {
-      backend: {
-        adapter: 'codex-cli',
-        approvalPolicy: 'never',
-        codexCommand: null,
-        codexHome: '/tmp/codex-1',
-        model: 'gpt-5.4',
-        modelProvider: null,
-        oss: false,
-        profile: 'ops',
-        reasoningEffort: 'medium',
-        sandbox: 'danger-full-access',
-      },
-      account: null,
-    },
-    homeRoot,
-  )
-
-  const resolveAssistant = vi.fn(
-    async ({ options, preset }): Promise<SetupConfiguredAssistant> => ({
-      preset,
-      enabled: true,
-      provider: 'codex-cli',
-      model: options.assistantModel ?? null,
-      modelProvider: null,
-      codexCommand: options.assistantCodexCommand ?? null,
-      codexHome: options.assistantCodexHome ?? null,
-      profile: options.assistantProfile ?? null,
-      reasoningEffort: options.assistantReasoningEffort ?? null,
-      sandbox: 'danger-full-access',
-      approvalPolicy: 'never',
-      oss: false,
-      account: null,
-      detail: 'saved codex backend',
-    }),
-  )
-  const assistantSetup: SetupAssistantResolver = {
-    resolve: resolveAssistant,
-  }
-
-  const cli = Cli.create('vault-cli')
-  registerModelCommands(cli, {
-    assistantSetup,
-    resolveHomeDirectory: () => homeRoot,
-    terminal: {
-      stdinIsTTY: false,
-      stderrIsTTY: false,
-    },
-  })
-
-  const result = await runRegisteredCliJson<{
-    backend: {
-      adapter: string
-      model: string | null
-      modelProvider: string | null
-    } | null
-    notes: string[]
-    summary: string | null
-  }>(cli, ['model', '--model', 'gpt-6-sol'])
-
-  assert.equal(result.exitCode, null)
-  assert.equal(result.envelope.ok, true)
-  assert.equal(resolveAssistant.mock.calls.length, 1)
-  assert.deepEqual(resolveAssistant.mock.calls[0]?.[0], {
-    allowPrompt: false,
-    commandName: 'model',
-    options: {
-      vault: './vault',
-      strict: true,
-      whisperModel: 'base.en',
-      assistantPreset: 'codex',
-      assistantModel: 'gpt-6-sol',
-      assistantCodexCommand: undefined,
-      assistantCodexHome: '/tmp/codex-1',
-      assistantProfile: 'ops',
-      assistantReasoningEffort: 'medium',
-    },
-    preset: 'codex',
-  })
-  assert.deepEqual(result.envelope.data?.backend, {
-    adapter: 'codex-cli',
-    approvalPolicy: 'never',
-    codexCommand: null,
-    codexHome: '[path]',
-    model: 'gpt-6-sol',
-    modelProvider: null,
-    oss: false,
-    profile: 'ops',
-    reasoningEffort: 'medium',
-    sandbox: 'danger-full-access',
-  })
-  assert.deepEqual(result.envelope.data?.notes, [
-    'A saved Codex home is configured; path redacted in CLI output.',
-  ])
-  assert.equal(
-    result.envelope.data?.summary,
-    'gpt-6-sol via Codex app-server',
-  )
-
-  const savedConfig = await readOperatorConfig(homeRoot)
-  assert.equal(savedConfig?.assistant?.backend?.adapter, 'codex-cli')
-  assert.equal(savedConfig?.assistant?.backend?.model, 'gpt-6-sol')
-  assert.equal(
-    savedConfig?.assistant?.backend?.adapter === 'codex-cli'
-      ? savedConfig.assistant.backend.modelProvider
-      : null,
-    null,
-  )
-})
 
 test('root status, doctor, and stop aliases reuse the assistant command schemas', () => {
   const cli = createVaultCli(

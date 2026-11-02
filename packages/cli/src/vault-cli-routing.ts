@@ -1,11 +1,7 @@
-import path from 'node:path'
-
 import {
   extractVaultOverride,
   type VaultOverrideParseResult,
 } from './vault-cli-vault-argv.js'
-
-export type VaultCliProgramName = 'murph' | 'vault-cli'
 
 const lazyRootCommands = [
   'allergy',
@@ -62,7 +58,6 @@ export type KnownLazyRootCommand = (typeof lazyRootCommands)[number]
 
 export type CliInvocationPlan =
   | { kind: 'version' }
-  | { kind: 'setup' }
   | { kind: 'scoped'; root: KnownLazyRootCommand }
   | { kind: 'full'; reason: string }
 
@@ -94,30 +89,15 @@ const rootDiscoveryFlags = new Set([
   '--schema',
 ])
 
-export function detectCliProgramName(
-  argv0: string | undefined,
-  shimProgramName = process.env.SETUP_PROGRAM_NAME,
-): VaultCliProgramName {
-  const normalizedShimProgramName = shimProgramName?.trim().toLowerCase()
-  if (normalizedShimProgramName === 'murph') {
-    return 'murph'
-  }
-
-  const baseName = path.basename(argv0 ?? '').toLowerCase()
-  return baseName === 'murph' ? 'murph' : 'vault-cli'
-}
-
 export function planVaultCliInvocation(
   args: readonly string[],
   input: {
     env?: NodeJS.ProcessEnv
-    programName?: VaultCliProgramName
   } = {},
 ): PlannedVaultCliInvocation {
   const vaultOverride = extractVaultOverride(args)
   const plan = classifyVaultCliInvocation(vaultOverride.argv, {
     env: input.env,
-    programName: input.programName,
   })
 
   return {
@@ -133,7 +113,6 @@ export function classifyVaultCliInvocation(
   argv: readonly string[],
   input: {
     env?: NodeJS.ProcessEnv
-    programName?: VaultCliProgramName
   } = {},
 ): CliInvocationPlan {
   if (isCompletionEnvironment(input.env)) {
@@ -154,7 +133,6 @@ export function classifyVaultCliInvocation(
     }
   }
 
-  const programName = input.programName ?? 'vault-cli'
   let sawRootDiscovery = false
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -200,7 +178,7 @@ export function classifyVaultCliInvocation(
       }
     }
 
-    return classifyRootToken(token, programName)
+    return classifyRootToken(token)
   }
 
   if (sawRootDiscovery) {
@@ -210,28 +188,13 @@ export function classifyVaultCliInvocation(
     }
   }
 
-  if (programName === 'murph') {
-    return { kind: 'setup' }
-  }
-
   return {
     kind: 'full',
     reason: sawRootDiscovery ? 'root-discovery' : 'missing-root',
   }
 }
 
-function classifyRootToken(
-  root: string,
-  programName: VaultCliProgramName,
-): CliInvocationPlan {
-  if (root === 'onboard') {
-    return { kind: 'setup' }
-  }
-
-  if (programName === 'murph' && (root === 'help' || root === 'use')) {
-    return { kind: 'setup' }
-  }
-
+function classifyRootToken(root: string): CliInvocationPlan {
   if (isKnownLazyRoot(root)) {
     return {
       kind: 'scoped',

@@ -6,15 +6,15 @@ Murph is a conversation-first personal health assistant.
 
 It helps people understand, decide, act, and follow through across their health. Murph can answer questions, interpret connected data, remember relevant context, help with plans and tasks, provide private or user-chosen social support, and run bounded experiments when uncertainty about what works is the real problem.
 
-Its compounding advantage is longitudinal context: useful history, evidence, preferences, constraints, goals, actions, and outcomes that can improve later help without making the member repeat the whole story. Underneath that relationship, Murph keeps durable human-reviewed truth in Markdown, append-only machine event ledgers in JSONL, and layers a typed CLI, local daemons, and hosted control/execution surfaces on top of that vault.
+Its compounding advantage is longitudinal context: useful history, evidence, preferences, constraints, goals, actions, and outcomes that can improve later help without making the member repeat the whole story. Underneath that relationship, Murph keeps durable human-reviewed truth in Markdown, append-only machine event ledgers in JSONL, and layers a typed runtime CLI and hosted control/execution surfaces on top of that vault.
 
-The main installable product entrypoint is `@murphai/murph`, which gives you the `murph` command.
+Members use hosted Murph through iMessage/SMS, Telegram, email, and the iOS app. `vault-cli` is the runtime and operator command surface.
 
 ## What ships here
 
 - a file-native vault with canonical writes owned by `packages/core`
-- the installable `@murphai/murph` package, which provides the `murph` CLI and onboarding flow
-- provider-backed local assistant turns and automation, with runtime state under `vault/.runtime/operations/assistant/**`
+- the `@murphai/murph` package, which provides the `vault-cli` runtime binary
+- provider-backed hosted assistant turns and automation, with runtime state under `vault/.runtime/operations/assistant/**`
 - a public Health Commons in `packages/health-commons` for protocol pages, biomarker pages, source pages, exact revisions, and generated outcome summaries
 - a two-layer knowledge system: stable health reference pages under `bank/library/**` plus a non-canonical compiled personal wiki under `derived/knowledge/**`, synthesized by the active assistant, persisted through shared assistant/CLI write surfaces, searchable locally, and kept rebuildable
 - inbox capture, assistant attachment evidence, and parser-driven audio/video transcription
@@ -27,68 +27,19 @@ The main installable product entrypoint is `@murphai/murph`, which gives you the
 - shared hosted execution contracts and env/client helpers in `@murphai/hosted-execution`
 - workspace-private headless owner/runtime packages such as `@murphai/assistant-engine`, `@murphai/operator-config`, `@murphai/assistant-runtime`, plus the public contract package `@murphai/gateway-core`
 
-## Install
+## Development
 
-Runtime: Node `>= 24.22.1`.
-
-Preferred install for most users:
+Runtime: Node `>= 24.22.1`. Use the pinned package manager from this checkout:
 
 ```bash
-npm install -g @murphai/murph@latest
-# or
-pnpm add -g @murphai/murph@latest
-
-murph onboard
+corepack pnpm install --frozen-lockfile
+pnpm build
+pnpm dev
 ```
 
-`@murphai/murph` is the full local Murph package. The repo keeps many internal workspace packages, but the public npm surface is intentionally narrow: `@murphai/murph`, `@murphai/contracts`, `@murphai/hosted-execution`, and `@murphai/gateway-core`. The remaining owner packages stay workspace-private and are bundled into those public tarballs only when a public package still needs them at runtime.
+`pnpm dev` runs the hosted development stack. The repository does not provide a local Murph product installer or setup wizard. Operator commands use `pnpm vault-cli ... --vault <path>`.
 
-`murph` is the simple product entrypoint: it operates on one active vault at a time, selected during onboarding or later with `murph use <path>`. The lower-level `vault-cli` binary remains the raw explicit-vault surface for development, automation, and other contract-level consumers.
-
-
-## From this repo
-
-Supported host setup path: macOS and Linux.
-
-Preferred setup from a checkout:
-
-```bash
-pnpm onboard --vault ./vault
-```
-
-`pnpm onboard` is the repo-local install and onboarding entrypoint. It sets up the host wrapper, installs or reuses local dependencies, builds the workspace, initializes the target vault, saves that vault as the default CLI vault, installs `murph` and `vault-cli` shims for future shells, and hands off to the interactive onboarding flow for assistant defaults, channels, and optional wearable setup.
-
-If `pnpm` is not available yet, use:
-
-```bash
-./scripts/setup-host.sh --vault ./vault
-```
-
-`pnpm onboard` is the only supported repo-local onboarding command. `pnpm` reserves `setup` as a built-in command, so this repo no longer exposes a root `setup` script.
-
-Direct dependency installs and review flows should prefer `corepack pnpm ...` so the exact pnpm version pinned in `package.json#packageManager` is used automatically.
-After intentional dependency refreshes on a trusted machine, review blocked install scripts with `corepack pnpm deps:ignored-builds` and record any required approvals with `corepack pnpm deps:approve-builds`.
-
-## Quick start
-
-Installed package:
-
-```bash
-murph onboard
-murph use ./vault
-murph model
-murph assistant ask "Hello"
-murph run
-```
-
-Use `murph model` any time after onboarding to reopen the assistant model/provider picker and switch the saved default model without rerunning the full setup flow.
-
-From this repo:
-
-```bash
-pnpm onboard --vault ./vault
-vault-cli vault stats
-```
+After intentional dependency refreshes, review blocked install scripts with `corepack pnpm deps:ignored-builds` and record required approvals with `corepack pnpm deps:approve-builds`.
 
 ## Mental model
 
@@ -124,10 +75,9 @@ Only four packages are published to npm: `@murphai/murph`, `@murphai/contracts`,
 | `packages/assistant-engine`  | Workspace-private headless assistant execution/runtime owner.                                                                              |
 | `packages/operator-config`   | Workspace-private operator config, setup/runtime-env, and hosted assistant config owner.                                                   |
 | `packages/assistant-cli`     | Workspace-private CLI-only assistant wrappers, commands, and terminal logging.                                                |
-| `packages/setup-cli`         | Workspace-private CLI-only onboarding, host setup, and setup-wizard package.                                                               |
 | `packages/gateway-core`      | Headless transport-neutral gateway boundary.                                                                                               |
 | `packages/assistant-runtime` | Workspace-private headless hosted execution surface used by Cloudflare runner paths.                                                       |
-| `packages/cli`               | The published `@murphai/murph` package, exposing the `murph` / `vault-cli` binaries and the main operator surface.                         |
+| `packages/cli`               | The published `@murphai/murph` package, exposing the `vault-cli` binary and the main operator surface.                         |
 | `apps/web`                   | Hosted Next.js control plane for onboarding, billing, OAuth, webhooks, encrypted mailbox intake, workspace checkpoints, and hosted runtime status/logs. |
 | `apps/cloudflare`            | Thin hosted runner for signed Temporal processing requests, status, per-user coordination, encrypted hosted bundles, and container-backed workspace runtime passes. |
 | `fixtures` and `e2e`         | Deterministic fixtures and smoke coverage.                                                                                                 |

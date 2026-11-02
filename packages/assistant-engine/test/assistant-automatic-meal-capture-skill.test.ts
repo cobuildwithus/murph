@@ -16,7 +16,6 @@ function buildPrompt(input: {
     channel: 'imessage',
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     currentLocalDate: input.currentLocalDate ?? '2026-07-18',
     currentTimeZone: 'America/New_York',

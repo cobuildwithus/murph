@@ -22,7 +22,6 @@ import {
 import parsersProject from "./packages/parsers/vitest.config.ts";
 import queryProject from "./packages/query/vitest.config.ts";
 import runtimeStateProject from "./packages/runtime-state/vitest.config.ts";
-import setupCliProject from "./packages/setup-cli/vitest.config.ts";
 import vaultUsecasesProject from "./packages/vault-usecases/vitest.config.ts";
 import {
   defineConfig,
@@ -150,11 +149,6 @@ const ROOT_REPO_PROJECTS: RootRepoProject[] = [
   {
     config: runtimeStateProject,
     root: "packages/runtime-state",
-    include: ["test/**/*.test.ts"],
-  },
-  {
-    config: setupCliProject,
-    root: "packages/setup-cli",
     include: ["test/**/*.test.ts"],
   },
   {

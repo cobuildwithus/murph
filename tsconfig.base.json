@@ -342,10 +342,7 @@
       "@murphai/assistant-cli/*": [
         "./packages/assistant-cli/src/*.ts"
       ],
-      "@murphai/setup-cli/*": [
-        "./packages/setup-cli/src/*.ts"
-      ],
-      "@murphai/assistant-runtime": [
+        "@murphai/assistant-runtime": [
         "./packages/assistant-runtime/src/index.ts"
       ],
       "@murphai/assistant-runtime/hosted-assistant-bootstrap": [

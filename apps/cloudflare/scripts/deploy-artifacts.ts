@@ -410,10 +410,6 @@ async function assertRunnerBundleShape(
 
   if (manifest.includeBundleOnlyDependencies) {
     await assertReadableFile(
-      path.join(bundleDir, "node_modules", ".bin", "murph"),
-      "runner murph binary",
-    );
-    await assertReadableFile(
       path.join(bundleDir, "node_modules", ".bin", "vault-cli"),
       "runner vault-cli binary",
     );

@@ -27,7 +27,7 @@ describe('native poll dynamic tool', () => {
     for (const available of [false, true]) {
       const layers = buildAssistantSystemPromptLayers({
         assistantCliContract: null, assistantPollsAvailable: available,
-        channel: 'telegram', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        channel: 'telegram', cliAccess: { rawCommand: 'vault-cli' },
         conversationScope, currentLocalDate: '2026-09-21', currentTimeZone: 'UTC',
         hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
       })

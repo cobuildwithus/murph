@@ -149,11 +149,9 @@ async function runSmokeChecks(input: {
     throw new Error("Hosted runner smoke child did not rebind VAULT to the restored vault root.");
   }
 
-  await resolveCommandPath("murph");
   await resolveCommandPath("vault-cli");
   await resolveCommandPath("codex");
 
-  await runTextCommand("murph", ["--help"]);
   await runTextCommand("vault-cli", ["--help"]);
   await runDeviceSyncRuntimeSmoke();
   const codexPreflight = await runCodexPreflight();
@@ -253,7 +251,7 @@ async function runSmokeChecks(input: {
     codexHostedCliSchemaVaultOptionHidden: hostedCodexConfig.schemaVaultOptionHidden,
     codexHostedCliVaultCommandProofCount: hostedCodexConfig.vaultCommandProofCount,
     codexHostedCliVaultWriteProofCount: hostedCodexConfig.vaultWriteProofCount,
-    codexHostedShellMurphPathBytes: hostedCodexConfig.murphPathBytes,
+    codexHostedShellVaultCliPathBytes: hostedCodexConfig.vaultCliPathBytes,
     codexHostedShellPythonVersion: hostedCodexConfig.pythonVersion,
     codexHostedShellVaultCliLlmsBytes: hostedCodexConfig.vaultCliLlmsBytes,
     codexVersion: codexPreflight.version,
@@ -264,7 +262,6 @@ async function runSmokeChecks(input: {
       healthCommonsRuntime.biomarkerDesiredDirection,
     healthCommonsRuntimeKnowledgeEntityKeys:
       healthCommonsRuntime.knowledgeEntityKeys,
-    murphCommandDiscovered: true,
     operatorHomeRebound: true,
     pdfParserProviderId: pdfParse.providerId,
     pdfTextSha256: sha256Hex(pdfParse.text),
@@ -659,7 +656,7 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(input: {
   memberWorkspacePreloadBypassDenied: boolean;
   memberWorkspaceTempWriteAllowed: boolean;
   memberWorkspaceVaultWriteAllowed: boolean;
-  murphPathBytes: number;
+  vaultCliPathBytes: number;
   pythonVersion: string;
   schemaVaultOptionHidden: boolean;
   shellEnvironmentPolicyAllowlisted: boolean;
@@ -747,7 +744,7 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(input: {
       shellProbe.memberWorkspaceTempWriteAllowed,
     memberWorkspaceVaultWriteAllowed:
       shellProbe.memberWorkspaceVaultWriteAllowed,
-    murphPathBytes: shellProbe.murphPathBytes,
+    vaultCliPathBytes: shellProbe.vaultCliPathBytes,
     pythonVersion: shellProbe.pythonVersion,
     schemaVaultOptionHidden: shellProbe.schemaVaultOptionHidden,
     shellEnvironmentPolicyAllowlisted: true,
@@ -821,7 +818,7 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
   memberWorkspacePreloadBypassDenied: boolean;
   memberWorkspaceTempWriteAllowed: boolean;
   memberWorkspaceVaultWriteAllowed: boolean;
-  murphPathBytes: number;
+  vaultCliPathBytes: number;
   pythonVersion: string;
   schemaVaultOptionHidden: boolean;
   vaultCommandProofCount: number;
@@ -1080,7 +1077,7 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
       groupReadSecretEnvironmentDenied: groupReadProof.secretEnvironmentDenied,
       groupReadSiblingRootReadDenied: groupReadProof.siblingRootReadDenied,
       ...memberWorkspaceProof,
-      murphPathBytes: environmentProbe.murphPathBytes,
+      vaultCliPathBytes: environmentProbe.vaultCliPathBytes,
       pythonVersion,
       schemaVaultOptionHidden: vaultCliProof.schemaVaultOptionHidden,
       vaultCommandProofCount: vaultCliProof.vaultCommandProofCount,
@@ -1788,7 +1785,6 @@ function findExecutable(name) {
 }
 const proof = {
   cwdRebound: process.cwd() === expectedVaultRoot,
-  murphPathBytes: Buffer.byteLength(findExecutable("murph"), "utf8"),
   providerCredentialPresent: Boolean(process.env.OPENAI_API_KEY || process.env.VERCEL_AI_API_KEY),
   python3PathBytes: Buffer.byteLength(findExecutable("python3"), "utf8"),
   pythonPathBytes: Buffer.byteLength(findExecutable("python"), "utf8"),
@@ -1804,16 +1800,12 @@ function parseCodexEnvironmentProbe(
   stdout: string,
   vaultRoot: string,
 ): {
-  murphPathBytes: number;
+  vaultCliPathBytes: number;
 } {
   const record = readObject(parseJsonFromCommandStdout(stdout, "environment-probe"), "environment probe");
   const vaultCliPathBytes = readPositiveNumber(
     record.vaultCliPathBytes,
     "environment probe.vaultCliPathBytes",
-  );
-  const murphPathBytes = readPositiveNumber(
-    record.murphPathBytes,
-    "environment probe.murphPathBytes",
   );
   readPositiveNumber(record.pythonPathBytes, "environment probe.pythonPathBytes");
   readPositiveNumber(record.python3PathBytes, "environment probe.python3PathBytes");
@@ -1840,7 +1832,7 @@ function parseCodexEnvironmentProbe(
   }
 
   return {
-    murphPathBytes,
+    vaultCliPathBytes,
   };
 }
 

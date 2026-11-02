@@ -16,9 +16,6 @@ const {
   resolveTelegramFileBaseUrlMock: vi.fn(),
 }))
 
-vi.mock('@murphai/operator-config/setup-runtime-env', () => ({
-  SETUP_RUNTIME_ENV_NOTICE: 'setup runtime env notice',
-}))
 
 vi.mock('@murphai/operator-config/telegram-runtime', () => ({
   resolveTelegramApiBaseUrl: resolveTelegramApiBaseUrlMock,

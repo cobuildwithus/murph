@@ -6,7 +6,7 @@ function privateLayers() {
   return buildAssistantSystemPromptLayers({
     assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
     channel: 'telegram', conversationScope: 'direct', hostedRuntime: true,
-    cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+    cliAccess: { rawCommand: 'vault-cli' },
     currentLocalDate: '2026-05-18', currentTimeZone: 'UTC',
     modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
   })
@@ -35,7 +35,7 @@ describe('private Journal capture and recovery instructions', () => {
   })
 
   it('grounds shell execution in the current workspace and distinguishes launch failures from ambiguous writes', () => {
-    const guidance = buildAssistantCliGuidanceText({ rawCommand: 'vault-cli', setupCommand: 'murph' })
+    const guidance = buildAssistantCliGuidanceText({ rawCommand: 'vault-cli' })
     expect(privateLayers().prompt).toContain(guidance)
     expect(guidance).toContain('Use the current turn working directory')
     expect(guidance).toContain('do not invent a workspace path or reuse one from an older transcript')

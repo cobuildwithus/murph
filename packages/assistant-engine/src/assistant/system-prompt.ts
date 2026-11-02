@@ -74,7 +74,7 @@ export interface AssistantSystemPromptInput {
   assistantStyleSettingsAvailable?: boolean | null;
   assistantTone?: AssistantTonePreference | null;
   channel: string | null;
-  cliAccess: Pick<AssistantCliAccessContext, "rawCommand" | "setupCommand">;
+  cliAccess: Pick<AssistantCliAccessContext, "rawCommand">;
   canonicalTimeZoneAvailable?: boolean;
   currentInstant?: string;
   currentLocalDate: string;
@@ -1960,7 +1960,6 @@ function buildAssistantAvailableAutomationGuidanceText(
         ? "Scheduled automation changes for this conversation are available through `murph.automation`."
         : "Scheduled assistant automation commands are available directly through `vault-cli automation ...` in this privileged local route.",
     buildAssistantSharedAutomationActionText(
-      "vault-cli assistant run",
       conversationScope,
       hostedRuntime
     )
@@ -1968,7 +1967,6 @@ function buildAssistantAvailableAutomationGuidanceText(
 }
 
 function buildAssistantSharedAutomationActionText(
-  assistantRunCommand: string,
   conversationScope: AssistantConversationScope,
   hostedRuntime: boolean
 ): string {
@@ -1991,7 +1989,7 @@ ${routeGuidance}${hostedRuntime ? "" : ` Reserve ${code(
 
 ${buildAssistantSharedAutomationPreferenceText(conversationScope, hostedRuntime)}${hostedRuntime ? "" : `
 
-Automation schedules execute while ${code(assistantRunCommand)} is active for the vault.`}`;
+Automation schedules execute through hosted maintenance.`}`;
 }
 
 function buildAssistantSharedAutomationPreferenceText(

@@ -76,7 +76,7 @@ describe('imported-record natural recall evidence', () => {
       assistantCliContract: null, assistantContextSnapshotPrompt: null,
       assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
       assistantKnowledgeToolsAvailable: false, channel: 'linq',
-      cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+      cliAccess: { rawCommand: 'vault-cli' },
       conversationScope: 'direct', hostedRuntime: true, ordinaryInboundTurn: true,
       currentInstant: '2026-04-11T12:00:00Z', currentLocalDate: '2026-04-11', currentTimeZone: 'UTC',
       modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,

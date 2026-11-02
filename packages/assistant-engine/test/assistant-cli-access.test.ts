@@ -31,7 +31,6 @@ describe("prepareAssistantDirectCliEnv", () => {
         HOME: "/tmp/murph-home",
       },
       rawCommand: "vault-cli",
-      setupCommand: "murph",
     });
   });
 
@@ -190,15 +189,14 @@ describe("prepareAssistantDirectCliEnv", () => {
   it("builds operator guidance that points callers back to the CLI surface", () => {
     const guidance = buildAssistantCliGuidanceText({
       rawCommand: "vault-cli",
-      setupCommand: "murph",
     });
 
     expect(guidance).toContain("`vault-cli` is the canonical Murph CLI");
-    expect(guidance).toContain("`murph` is the setup entrypoint");
+    expect(guidance).not.toContain("setup entrypoint");
     expect(guidance).toContain("Use the matching local CLI command directly");
     expect(guidance).toContain("prefer `--format json`");
-    expect(guidance).toContain("do not run recursive assistant or delivery commands");
-    expect(guidance).toContain("`assistant deliver`");
+    expect(guidance).toContain("do not start another assistant process");
+    expect(guidance).not.toMatch(/`assistant (chat|ask|run|deliver)`|`chat`|`run`/);
     expect(guidance).toContain(
       "`stage` names the failure",
     );

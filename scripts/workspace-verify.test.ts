@@ -959,7 +959,7 @@ run_all_package_coverage 1
 
     expect(result.status, result.stderr).toBe(0);
     const pairs = result.stdout.trim().split("\n");
-    expect(pairs).toHaveLength(25);
+    expect(pairs).toHaveLength(24);
     expect(pairs).toContain(
       "packages/hosted-execution|Package coverage for packages/hosted-execution",
     );
@@ -1124,7 +1124,7 @@ run_workspace_package_coverage() {
         command sleep 0.01
       done
       ;;
-    "packages/setup-cli")
+    "packages/assistant-cli")
       : >"$fourth_peer_started_file"
       while [[ ! -f "$refill_release_file" ]]; do
         command sleep 0.01

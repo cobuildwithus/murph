@@ -69,7 +69,6 @@ async function main(): Promise<void> {
 
     console.log(`Hosted runner smoke passed.`);
     console.log(`childCwdIsIsolated=${result.childCwdIsIsolated}`);
-    console.log(`murphCommandDiscovered=${result.murphCommandDiscovered}`);
     console.log(`vaultCliCommandDiscovered=${result.vaultCliCommandDiscovered}`);
     console.log(`codexCommandDiscovered=${result.codexCommandDiscovered}`);
     console.log(`codexVersion=${result.codexVersion}`);
@@ -99,7 +98,7 @@ async function main(): Promise<void> {
       `codexGroupReadSecretEnvironmentDenied=${result.codexGroupReadSecretEnvironmentDenied}`,
     );
     console.log(`codexHostedShellVaultCliLlmsBytes=${result.codexHostedShellVaultCliLlmsBytes}`);
-    console.log(`codexHostedShellMurphPathBytes=${result.codexHostedShellMurphPathBytes}`);
+    console.log(`codexHostedShellVaultCliPathBytes=${result.codexHostedShellVaultCliPathBytes}`);
     console.log(`codexHostedShellPythonVersion=${result.codexHostedShellPythonVersion}`);
     console.log(`codexHostedCliSchemaVaultOptionHidden=${result.codexHostedCliSchemaVaultOptionHidden}`);
     console.log(`codexHostedCliVaultCommandProofCount=${result.codexHostedCliVaultCommandProofCount}`);
