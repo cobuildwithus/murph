@@ -179,7 +179,6 @@ export type AssistantUsageTokenPricingBasis =
   | "openai-flex"
   | "openai-priority"
   | "standard";
-export type AssistantUsageStripeMeterSource = "murph";
 
 export interface AssistantUsageRecord {
   operatorTaskId?: string | null;
@@ -209,7 +208,6 @@ export interface AssistantUsageRecord {
   schema: typeof ASSISTANT_USAGE_SCHEMA;
   servedModel: string | null;
   sessionId: string;
-  stripeMeterSource: AssistantUsageStripeMeterSource;
   surface: string | null;
   tokenPricingBasis: AssistantUsageTokenPricingBasis;
   totalTokens: number | null;
@@ -1008,7 +1006,6 @@ export function parseAssistantUsageRecord(value: unknown): AssistantUsageRecord 
     schema: normalizeUsageSchema(record.schema),
     servedModel: normalizeOptionalString(record.servedModel, "servedModel"),
     sessionId: normalizeRequiredString(record.sessionId, "sessionId"),
-    stripeMeterSource: normalizeAssistantUsageStripeMeterSource(record.stripeMeterSource),
     surface: normalizeOptionalString(record.surface, "surface"),
     tokenPricingBasis: normalizeAssistantUsageTokenPricingBasis(record.tokenPricingBasis),
     totalTokens: normalizeOptionalInteger(record.totalTokens, "totalTokens"),
@@ -1117,24 +1114,6 @@ function normalizeProviderRequestOutcome(value: unknown): AssistantProviderReque
   throw new TypeError(
     "providerRequestOutcome must be succeeded, failed, aborted, or partial.",
   );
-}
-
-export function normalizeAssistantUsageStripeMeterSource(
-  value: unknown,
-): AssistantUsageStripeMeterSource {
-  const normalized = normalizeOptionalString(value, "stripeMeterSource");
-
-  if (!normalized) {
-    return "murph";
-  }
-
-  if (normalized !== "murph") {
-    throw new TypeError(
-      "stripeMeterSource must be 'murph' when provided.",
-    );
-  }
-
-  return normalized;
 }
 
 export function normalizeAssistantUsageTokenPricingBasis(

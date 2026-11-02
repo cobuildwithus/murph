@@ -844,7 +844,6 @@ async function createUsageResetFixture(): Promise<UsageResetFixture> {
     schema: "murph.assistant-usage.v1",
     servedModel: "gpt-6.1-sol",
     sessionId: "session_" + fixtureId,
-    stripeMeterSource: "murph",
     surface: "hosted-runner",
     tokenPricingBasis: "standard",
     totalTokens: 165,

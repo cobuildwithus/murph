@@ -149,7 +149,7 @@ async function proposeName(input: MealNameRepairInput, name: string, note: strin
         providerRequestOrdinal: event.usage.providerRequestOrdinal,
         providerRequestOutcome: event.usage.providerRequestOutcome ?? "succeeded",
         reportingUserId: null, routeId: null, schema: ASSISTANT_USAGE_SCHEMA,
-        sessionId: attemptId, stripeMeterSource: "murph", surface: "hosted-runtime",
+        sessionId: attemptId, surface: "hosted-runtime",
         triggerKind: "meal-name-repair", turnId,
         usageId: createAssistantUsageId({ attemptCount: 1, providerRequestOrdinal: event.usage.providerRequestOrdinal, turnId }),
       }), null);

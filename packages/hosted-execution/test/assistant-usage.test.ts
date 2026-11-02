@@ -111,7 +111,6 @@ test("measured maintenance identities isolate members, providers, and response o
   assert.equal(record.providerRequestId, input.providerRequestId);
 });
 
-
 test("usage records default and validate token pricing basis", () => {
   const baseRecord = buildAssistantMaintenanceUsageRecord({
     assistantSessionId: "asst_123",
@@ -359,7 +358,6 @@ test("assistant usage records accept TTS character cost basis", () => {
     schema: ASSISTANT_USAGE_SCHEMA,
     servedModel: null,
     sessionId: "asst_123",
-    stripeMeterSource: "murph",
     surface: "hosted-runtime",
     tokenPricingBasis: "standard",
     totalTokens: null,
@@ -681,7 +679,6 @@ test("assistant usage parsing preserves a missing totalTokens value", () => {
       schema: ASSISTANT_USAGE_SCHEMA,
       servedModel: null,
       sessionId: "asst_123",
-      stripeMeterSource: "murph",
       surface: null,
       tokenPricingBasis: "standard",
       totalTokens: null,
@@ -1101,23 +1098,6 @@ test("assistant usage parsing allows only token-count raw usage metadata", () =>
   );
 });
 
-test("assistant usage parsing rejects Vercel meter source payloads", () => {
-  assert.throws(
-    () => parseAssistantUsageRecord({
-      attemptCount: 1,
-      credentialSource: "platform",
-      occurredAt: "2026-03-29T12:00:00.000Z",
-      provider: "codex-cli",
-      schema: ASSISTANT_USAGE_SCHEMA,
-      sessionId: "asst_123",
-      stripeMeterSource: "external-meter",
-      turnId: "turn_123",
-      usageId: "turn_123.attempt-1",
-    }),
-    /stripeMeterSource must be 'murph' when provided/u,
-  );
-});
-
 test("assistant usage parsing rejects non-canonical usage ids", () => {
   assert.throws(
     () =>
@@ -1174,7 +1154,6 @@ test("assistant usage parsing rejects invalid schema and non-string optional val
       parseAssistantUsageRecord({
         attemptCount: 1,
         credentialSource: "invalid",
-        stripeMeterSource: "invalid",
         occurredAt: "2026-03-29T12:00:00.000Z",
         provider: "codex-cli",
         schema: "murph.assistant-usage.v0",
@@ -1183,22 +1162,6 @@ test("assistant usage parsing rejects invalid schema and non-string optional val
         usageId: "turn_123.attempt-1",
       }),
     /credentialSource must be 'member', 'platform', or 'unknown'/u,
-  );
-
-  assert.throws(
-    () =>
-      parseAssistantUsageRecord({
-        attemptCount: 1,
-        credentialSource: "platform",
-        stripeMeterSource: "invalid",
-        occurredAt: "2026-03-29T12:00:00.000Z",
-        provider: "codex-cli",
-        schema: ASSISTANT_USAGE_SCHEMA,
-        sessionId: "asst_123",
-        turnId: "turn_123",
-        usageId: "turn_123.attempt-1",
-      }),
-    /stripeMeterSource must be 'murph' when provided/u,
   );
 
   assert.throws(
