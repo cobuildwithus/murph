@@ -1,3 +1,5 @@
+import { brotliCompressSync } from "node:zlib";
+import { SqliteDeviceSyncStore } from "@murphai/device-syncd/service";
 import {
   createPlatform as createV2SnapshotFixturePlatform,
   createSnapshotFixtureRef,
@@ -79,6 +81,8 @@ import {
   initializeVault,
   isActiveCanonicalWriteLockError,
   readIntegrationIngestEntries,
+  buildIntegrationIngestRecord,
+  appendJsonlRecord,
   readEvent,
 } from "@murphai/core";
 import { describe, expect, test, vi } from "vitest";
@@ -12078,6 +12082,49 @@ describe("foreground device ingestion", () => {
       assert.equal(fixture.acks.length, 1);
       assert.deepEqual(fixture.acks[0]?.processedDirtyPayloadIds, ["payload_concurrent"]);
     } finally { await fixture.cleanup(); }
+  });
+
+  test("reader release queues referenced-month imports without acknowledging their payloads", async () => {
+    const fixture = await createForegroundDeviceFixture(10, {
+      now: "2026-11-02T12:00:00.000Z", start: "2026-10-29T22:00:00.000Z", end: "2026-10-30T06:00:00.000Z",
+    });
+    const failJob = vi.spyOn(SqliteDeviceSyncStore.prototype, "failJobIfOwned");
+    const relativePath = "ledger/integration-ingests/2026/2026-10.jsonl.br";
+    try {
+      const prior = buildIntegrationIngestRecord({ id: "xfm_prior", provider: "synthetic", source: "device",
+        importedAt: "2026-10-01T00:00:00.000Z", parts: [], eventOutputs: [], eventIdsComplete: true,
+        sampleIds: [], sampleIdsComplete: true, eventCount: 0, sampleCount: 0 });
+      const bytes = brotliCompressSync(Buffer.from(`${JSON.stringify(prior)}\n`));
+      await mkdir(path.dirname(path.join(fixture.vaultRoot, relativePath)), { recursive: true });
+      await writeFile(path.join(fixture.vaultRoot, relativePath), bytes);
+      const cataloguePath = path.join(fixture.vaultRoot, ".runtime/operations/assistant/hosted-media-refs.json");
+      await mkdir(path.dirname(cataloguePath), { recursive: true });
+      const catalogue = { schema: "murph.hosted-media-refs.v1", entries: [{
+        relativePath, mediaKind: "integration-ingest", expiresAt: null, mediaId: "a".repeat(64),
+        sha256: createHash("sha256").update(bytes).digest("hex"), byteSize: bytes.length,
+      }] };
+      await writeFile(cataloguePath, JSON.stringify(catalogue));
+      fixture.stageDeviceWake();
+      await fixture.run(async () => {
+        await waitForCondition(() => fixture.effects.length > 0, 5_000);
+        return { progressed: false };
+      });
+      const failure = failJob.mock.calls.find((call) => call[3] === "HOSTED_COLD_HISTORY_UNAVAILABLE");
+      assert.ok(failure, "reader rejection must reach the job owner as a retryable cold failure");
+      assert.equal(failure[6], true);
+      assert.equal(failure[7], true);
+      const transition = failJob.mock.results[failJob.mock.calls.indexOf(failure)]!;
+      assert.equal(transition.type, "return");
+      assert.equal(transition.value?.disposition, "queued");
+      for (const effect of fixture.effects.splice(0)) await effect();
+      assert.deepEqual(fixture.acks.flatMap((ack) => ack.processedDirtyPayloadIds ?? []), []);
+      await expect(appendJsonlRecord({ vaultRoot: fixture.vaultRoot,
+        relativePath: relativePath.slice(0, -3), record: prior }))
+        .rejects.toMatchObject({ code: "HOSTED_COLD_HISTORY_UNAVAILABLE", retryable: true });
+      assert.deepEqual(await readFile(path.join(fixture.vaultRoot, relativePath)), bytes);
+      assert.deepEqual(JSON.parse(await readFile(cataloguePath, "utf8")), catalogue);
+      assert.deepEqual((await readIntegrationIngestEntries(fixture.vaultRoot)).map((entry) => entry.record), [prior]);
+    } finally { failJob.mockRestore(); await fixture.cleanup(); }
   });
 
   test("imports newly staged device data while the model is held and preserves one receipt chain", async () => {

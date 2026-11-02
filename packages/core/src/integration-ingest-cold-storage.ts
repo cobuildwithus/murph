@@ -5,7 +5,6 @@ import {
   readHostedColdIngestReferences,
 } from "@murphai/runtime-state/node";
 import { statAndHashVaultFile } from "./raw-artifact-integrity.ts";
-import { VaultError } from "./errors.ts";
 
 const materializers = new AsyncLocalStorage<{
   vaultRoot: string;
@@ -50,7 +49,6 @@ export async function assertIntegrationIngestHistoryWritable(
   logicalPath: string,
 ): Promise<void> {
   if ((await readHostedColdIngestReferences(vaultRoot)).some((entry) => entry.relativePath === `${logicalPath}.br`)) {
-    throw new VaultError("INTEGRATION_INGEST_COLD_MONTH_CLOSED",
-      "Referenced cold integration-ingest months are immutable.");
+    throw new HostedColdHistoryUnavailableError();
   }
 }

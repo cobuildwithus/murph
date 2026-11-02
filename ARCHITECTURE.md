@@ -2751,7 +2751,10 @@ application code.
   new cold references: candidate discovery is absent. A separate producer release
   may externalize unambiguous closed Brotli shards after the reader fleet converges.
   The current month remains inline. Provider imports retain their source-derived historical ingest month.
-  Only an explicitly referenced cold month is immutable in the reader release. Sparse checkpoints retain
+  An explicitly referenced cold month is immutable in the reader release; attempts
+  fail with retryable `HOSTED_COLD_HISTORY_UNAVAILABLE`. Device jobs remain queued
+  beyond their attempt ceiling and never acknowledge unpublished payload IDs.
+  Sparse checkpoints retain
   cold references even when no local bytes exist, including after a lazy read.
   Core history readers verify size and SHA-256 before enumeration, using an
   invocation-scoped artifact materializer when available; otherwise missing or
@@ -2766,8 +2769,10 @@ application code.
   acceptance and Worker/runner reader-preserver release completely before deploying
   the separate producer commit. No runtime flag controls this split. Before any
   producer runs, the reader release may roll back to the prior inline-only release.
-  After the first sparse checkpoint, the reader/preserver commit is the rollback
-  floor: rolling the producer back to it preserves references and verified reads.
+  After the first sparse checkpoint, the retry-aware reader/preserver release is
+  the rollback floor. It preserves references and verified reads, and keeps cold
+  historical appends queued until a thaw-capable producer release returns. Earlier
+  reader-only revisions that reject these appends non-retryably are not safe floors.
   Earlier runners silently discard the new kind when parsing and rewrite the
   catalogue without it at checkpoint, losing workspace history and orphaning its
   objects. Never route sparse workspaces to those binaries.

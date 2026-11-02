@@ -16148,3 +16148,26 @@ test.each(["preparation", "wrapped", "publication", "download", "gate", "job-yie
     }
   },
 );
+
+
+test("cold history unavailability retains accepted resource work beyond its retry ceiling", async () => {
+  const vaultRoot = await makeTempDirectory("cold-history-retry-");
+  let now = new Date("2030-01-01T12:00:00.000Z");
+  const fixture = await createCanonicalContentionServiceFixture({ vaultRoot, now: () => now,
+    importer: { async importDeviceProviderSnapshot() {
+      throw deviceSyncError({ code: "HOSTED_COLD_HISTORY_UNAVAILABLE", message: "Synthetic cold outage", retryable: true });
+    } },
+  });
+  try {
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      await fixture.service.runWorkerOnce();
+      const job = fixture.store.getJobById(fixture.jobId)!;
+      assert.equal(job.attempts, attempt);
+      assert.equal(job.status, "queued");
+      assert.ok(job.maxAttempts > attempt);
+      assert.equal(job.lastErrorCode, "HOSTED_COLD_HISTORY_UNAVAILABLE");
+      now = new Date(job.availableAt);
+    }
+    assert.ok(fixture.service.listJobFailureDiagnostics().every((entry) => entry.retryable && entry.jobDisposition === "queued"));
+  } finally { fixture.close(); await rm(vaultRoot, { recursive: true, force: true }); }
+});

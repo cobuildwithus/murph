@@ -26,7 +26,7 @@ test("missing cold shards cannot become empty history or new append targets", as
       .rejects.toMatchObject({ retryable: true });
     expect(materialize).not.toHaveBeenCalled();
     await expect(appendJsonlRecord({ vaultRoot: root, relativePath: logicalPath, record: record("2020-01-01T00:00:00.000Z") }))
-      .rejects.toMatchObject({ code: "INTEGRATION_INGEST_COLD_MONTH_CLOSED" });
+      .rejects.toMatchObject({ code: "HOSTED_COLD_HISTORY_UNAVAILABLE", retryable: true });
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
