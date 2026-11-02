@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { addMeal, initializeVault } from "@murphai/core";
-import { createBrowserVaultCoreQueryClient, splitBrowserVaultReplica } from "@murphai/query/browser-replica";
+import { createBrowserVaultCoreQueryClient, splitBrowserVaultReplica } from "@murphai/query/browser-replica-client";
 import { createBrowserVaultReplica, readVault } from "@murphai/query/browser-replica-server";
 import { NodeNextRequest } from "next/dist/server/base-http/node";
 import { NextRequestAdapter } from "next/dist/server/web/spec-extension/adapters/next-request";
