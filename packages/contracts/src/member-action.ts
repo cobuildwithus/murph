@@ -1,4 +1,5 @@
 import * as z from "./zod-runtime.ts";
+import { companionMealIdSchema } from "./companion-meals.ts";
 import {
   workoutSessionPresentationV1Schema,
   workoutSessionCardV1Bounds,
@@ -478,6 +479,7 @@ export type WorkoutLiveSnapshotMemberActionV1 = z.infer<
 export const memberActionV1Schema = z.discriminatedUnion("kind", [
   workoutLiveApplyMemberActionV1Schema,
   workoutLiveSnapshotMemberActionV1Schema,
+  z.object({ kind: z.literal("meal.delete"), version: z.literal(1), mealId: companionMealIdSchema }).strict(),
 ]);
 
 export type MemberActionV1 = z.infer<typeof memberActionV1Schema>;
@@ -501,6 +503,8 @@ export type MemberActionRequestV1 = z.infer<
 >;
 
 export const memberActionRejectionReasonV1Schema = z.enum([
+  "meal_not_found",
+  "meal_changed",
   "multiple_active_workouts",
   "no_active_workout",
   "workout_changed",

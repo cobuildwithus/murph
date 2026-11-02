@@ -137,7 +137,11 @@ const scopedImportSurfaceProbes: readonly ScopedImportSurfaceProbe[] = [
     // Admit the measured count only; no package or byte-budget change.
     // PR #4397 measured 320 with Zod 4.5.4 and 321 with patched Zod 4.6.6.
     // The sole added module is zod/v4/locales/tg.js; no package is added.
-    maxResolvedModules: 321,
+    // PR #4420 measured 322 locally and on Linux CI. The sole added module is
+    // contracts/dist/companion-meals.js, shared by the member-action schema and
+    // public contracts entrypoint. Isolating that module restores 321; no new
+    // package or transitive subtree is loaded. Admit only the measured count.
+    maxResolvedModules: 322,
   },
 ]
 

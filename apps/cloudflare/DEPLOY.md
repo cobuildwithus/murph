@@ -244,6 +244,18 @@ does not stop an already accepted automatic rollout. Native manual progression
 needs separate hosted hold/retry proof before it can provide that additional
 control. No manual scheduler or automatic rollback is introduced here.
 
+### Meals action consumer floor
+
+The companion Meals routes ship in Web before the runtime. Web requires a
+generation-17 Browser Vault replica with a structured Meals section for both
+reads and removal; earlier replicas return `MEALS_PROJECTION_UNAVAILABLE` and
+cannot enqueue `meal.delete`. The runtime publishing that projection must also
+include the typed `deleteMealRecord` consumer. No read wakes the runtime to
+force publication. After admission begins, retain that consumer on every
+rollback target: queued actions use the existing closed encrypted member-action
+union and cannot be read by the pre-Meals runtime. Complete the normal native
+image rollout and signed deploy checks before declaring the runtime deployed.
+
 ### Common-media secure file reader floor
 
 The common-media reader release broadens secure-file MIME validation and generated

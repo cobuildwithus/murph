@@ -93,6 +93,28 @@ describe("member-action mailbox crypto boundary", () => {
     });
   });
 
+  it("keeps durable acceptance when post-commit signaling fails", async () => {
+    mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(new Error("synthetic signal failure"));
+    const current = vi.fn(async () => { mocks.events.push("session-current"); });
+    await expect(submitMemberAction({
+      memberId: "member-1", prisma: prisma as never, assertCurrentAuthorityTx: current,
+      request: { schemaVersion: 1, actionId: ACTION_ID, requestedAt: "2026-11-01T12:00:00Z", action: { kind: "meal.delete", version: 1, mealId: "meal_fixture" } },
+    })).resolves.toMatchObject({ accepted: true });
+    expect(current).toHaveBeenCalledWith(transactionClient);
+    expect(mocks.events.indexOf("session-current")).toBeLessThan(mocks.events.indexOf("mailbox-appended"));
+    expect(mocks.events).toContain("transaction-commit");
+  });
+
+  it("does not append after admission authority is revoked", async () => {
+    await expect(submitMemberAction({
+      memberId: "member-1", prisma: prisma as never,
+      assertCurrentAuthorityTx: async () => { throw new Error("synthetic revoked session"); },
+      request: { schemaVersion: 1, actionId: ACTION_ID, requestedAt: "2026-11-01T12:00:00Z", action: { kind: "meal.delete", version: 1, mealId: "meal_fixture" } },
+    })).rejects.toThrow("revoked session");
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
   it("prepares request crypto before the access-fenced admission transaction", async () => {
     await expect(submitMemberAction({
       memberId: "member-1",

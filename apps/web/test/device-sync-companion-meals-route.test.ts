@@ -1,0 +1,171 @@
+import { beforeEach, expect, it, vi } from "vitest";
+import { createServer } from "node:http";
+import { NodeNextRequest } from "next/dist/server/base-http/node";
+import { NextRequestAdapter } from "next/dist/server/web/spec-extension/adapters/next-request";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+
+vi.mock("server-only", () => ({}));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), current: vi.fn(), authority: vi.fn(), workspace: vi.fn(), control: vi.fn(), decode: vi.fn(), submit: vi.fn() }));
+vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({}) }));
+vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({ requireActiveHostedMemberAuthFromBearerToken: mocks.auth }));
+vi.mock("@/src/lib/better-auth/native-auth", () => ({ assertHostedNativeMemberAuthCurrentTx: mocks.current }));
+vi.mock("@/src/lib/browser-vault/authority", () => ({ assertBrowserVaultMemberAuthority: mocks.authority }));
+vi.mock("@/src/lib/hosted-workspace/store", () => ({ readHostedWorkspace: mocks.workspace }));
+vi.mock("@/src/lib/hosted-execution/control", () => ({ readHostedExecutionControlClientIfConfigured: () => ({ createBrowserVaultSession: mocks.control }) }));
+vi.mock("@/src/lib/member-actions/submit", () => ({ submitMemberAction: mocks.submit }));
+vi.mock("@/src/lib/browser-vault/loader", () => ({ parseBrowserVaultSessionResponse: (value: unknown) => value, decodeReadyBrowserVaultSession: mocks.decode }));
+import { GET } from "../app/api/device-sync/companion/meals/route";
+import { GET as detail, DELETE } from "../app/api/device-sync/companion/meals/[mealId]/route";
+
+const savedAt = "2026-11-01T12:00:00.000Z";
+const replicaRef = {
+  byteLength: 128, dataVersion: "d".repeat(64), generatedAt: savedAt, generation: 17,
+  keyId: "browser-vault-replica:d", objectKey: "users/browser-vault-replicas/opaque/replica.json",
+  replicaSchema: "murph.browser-vault-replica", runtimeRootKeyId: "udrk:runtime:test-root",
+  schema: "murph.hosted-browser-vault-replica-ref.v1", sourceBundleHash: "a".repeat(64),
+};
+const meal = { id: "meal_fixture", eatenAt: savedAt, name: "Synthetic grain bowl", calories: 500, proteinGrams: null, carbsGrams: null, fatGrams: null, uploadId: null };
+const days = ["2026-11-01", "2026-10-31", "2026-10-30"].map(date => ({ date, calories: 500, proteinGrams: null, carbsGrams: null, fatGrams: null, mealCount: 1, calorieMealCount: 1, meals: [{ ...meal, id: date === "2026-11-01" ? meal.id : `meal_${date.replaceAll("-", "")}` }] }));
+const projection = { schemaVersion: 1, timeZone: "Asia/Tokyo", days };
+const request = (query = "", init?: RequestInit & { duplex?: "half" }) => new Request(`https://app.example.test/api/device-sync/companion/meals${query}`, init);
+const context = (mealId = meal.id) => ({ params: Promise.resolve({ mealId }) });
+
+beforeEach(() => {
+  vi.resetAllMocks();
+  mocks.auth.mockResolvedValue({ member: { id: "member_native" } });
+  mocks.workspace.mockResolvedValue({ browserVaultReplicaRef: replicaRef, version: "v1" });
+  mocks.control.mockResolvedValue({ state: "ready" });
+  mocks.decode.mockResolvedValue({ client: { replica: { generation: 17, generatedAt: savedAt, meals: projection, privateNotes: ["must not leave reader"] } } });
+  mocks.submit.mockResolvedValue({ accepted: true, actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243" });
+});
+
+it("pages whole days using vault timezone, saved timestamp, and native identity", async () => {
+  const first = await GET(request("?limit=2"));
+  expect(first.status).toBe(200);
+  expect(first.headers.get("cache-control")).toContain("no-store");
+  expect(await first.json()).toEqual({ timeZone: "Asia/Tokyo", savedAt, days: days.slice(0, 2), nextCursor: "2026-10-31" });
+  expect(await (await GET(request("?limit=2&cursor=2026-10-31"))).json()).toEqual({ timeZone: "Asia/Tokyo", savedAt, days: days.slice(2), nextCursor: null });
+  expect(mocks.control).toHaveBeenCalledWith(expect.objectContaining({ userId: "member_native", requestedShards: ["core"] }));
+  expect(mocks.decode).toHaveBeenCalledWith(expect.objectContaining({ expectedMemberId: "member_native" }));
+});
+
+it.each(["", "2026-02-30", "nope", "2026-13-01"])("rejects bad cursor %s distinctly", async cursor => {
+  const response = await GET(request(`?cursor=${cursor}`));
+  expect(response.status).toBe(400);
+  expect(await response.json()).toMatchObject({ error: { code: "MEALS_INVALID_CURSOR" } });
+});
+
+it.each(["?limit=0", "?limit=32", "?limit=1.5", "?limit=1&limit=2", "?memberId=someone-else"])("rejects invalid request %s", async query => {
+  expect(await (await GET(request(query))).json()).toMatchObject({ error: { code: "MEALS_INVALID_REQUEST" } });
+});
+
+it("returns only the one member-owned meal without images or provenance", async () => {
+  expect(await (await detail(request(), context())).json()).toEqual({ timeZone: "Asia/Tokyo", savedAt, meal });
+});
+
+it.each(["meal_othermember", "invalid"])("treats missing or foreign IDs alike: %s", async id => {
+  for (const route of [detail, DELETE]) {
+    const response = await route(request(), context(id));
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ error: { code: "MEAL_NOT_FOUND" } });
+  }
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
+
+it.each([null, { ...replicaRef, generation: 16 }])("fails closed on missing/old projection before queuing", async ref => {
+  mocks.workspace.mockResolvedValue({ browserVaultReplicaRef: ref });
+  const response = await DELETE(request(), context());
+  expect(response.status).toBe(503);
+  expect(await response.json()).toMatchObject({ error: { code: "MEALS_PROJECTION_UNAVAILABLE", retryable: true } });
+  expect(mocks.submit).not.toHaveBeenCalled();
+  expect(mocks.control).not.toHaveBeenCalled();
+});
+
+it("distinguishes a valid empty snapshot from a missing meals payload or decryption failure", async () => {
+  mocks.decode.mockResolvedValueOnce({ client: { replica: { generation: 17, generatedAt: savedAt, meals: { ...projection, days: [] } } } });
+  expect(await (await GET(request())).json()).toEqual({ timeZone: "Asia/Tokyo", savedAt, days: [], nextCursor: null });
+  mocks.decode.mockResolvedValueOnce({ client: { replica: { generation: 17 } } });
+  expect((await GET(request())).status).toBe(503);
+  mocks.decode.mockRejectedValueOnce(new Error("synthetic decryption failure"));
+  expect((await GET(request())).status).toBe(503);
+});
+
+it("returns accepted only after typed mailbox admission with session revalidation", async () => {
+  const response = await DELETE(request("", { method: "DELETE" }), context());
+  expect(response.status).toBe(202);
+  expect(await response.json()).toEqual({ accepted: true, actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243" });
+  const submitted = mocks.submit.mock.calls[0]![0];
+  expect(submitted).toMatchObject({ memberId: "member_native", request: { action: { kind: "meal.delete", version: 1, mealId: meal.id }, schemaVersion: 1 } });
+  await submitted.assertCurrentAuthorityTx({ transaction: true });
+  expect(mocks.current).toHaveBeenLastCalledWith({ member: { id: "member_native" } }, { transaction: true });
+});
+
+it("reports failed admission and does not accept request bodies", async () => {
+  mocks.submit.mockRejectedValue(new Error("synthetic mailbox failure"));
+  expect(await (await DELETE(request(), context())).json()).toMatchObject({ error: { code: "MEAL_REMOVAL_UNAVAILABLE" } });
+  mocks.submit.mockClear();
+  expect((await DELETE(request("", { method: "DELETE", body: "{}" }), context())).status).toBe(400);
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
+
+it.each(["omitted", "empty string", "empty stream"])("accepts a DELETE with %s body", async kind => {
+  const body = kind === "omitted" ? undefined : kind === "empty string" ? ""
+    : new ReadableStream<Uint8Array>({ start(controller) { controller.close(); } });
+  const response = await DELETE(request("", { method: "DELETE", body, duplex: "half", headers: { "content-length": "0" } }), context());
+  expect(response.status).toBe(202);
+  expect(mocks.submit).toHaveBeenCalledTimes(1);
+});
+
+it.each(["one byte", "oversized stream"])("rejects a DELETE with %s before submission", async kind => {
+  const body = kind === "one byte" ? "x" : new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(new Uint8Array(1024)); controller.close(); },
+  });
+  const response = await DELETE(request("", { method: "DELETE", body, duplex: "half" }), context());
+  expect(response.status).toBe(400);
+  expect(await response.json()).toMatchObject({ error: { code: "MEALS_INVALID_REQUEST", retryable: false } });
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
+
+it("accepts body-free HTTP DELETE through Next's Node request adapter", async () => {
+  let streamPresent = false;
+  const server = createServer(async (incoming, outgoing) => {
+    try {
+      const adapted = NextRequestAdapter.fromNodeNextRequest(new NodeNextRequest(incoming), new AbortController().signal);
+      streamPresent = adapted.body !== null;
+      const response = await DELETE(adapted, context());
+      outgoing.writeHead(response.status);
+      outgoing.end(await response.text());
+    } catch {
+      outgoing.writeHead(500).end();
+    }
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Synthetic server address missing.");
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/device-sync/companion/meals/${meal.id}`, {
+      method: "DELETE", headers: { "content-length": "0", connection: "close" },
+    });
+    expect(streamPresent).toBe(true);
+    expect(response.status).toBe(202);
+    expect(await response.json()).toMatchObject({ accepted: true });
+    expect(mocks.submit).toHaveBeenCalledTimes(1);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+});
+
+it.each([401, 403])("preserves existing access error %s without loading health data", async httpStatus => {
+  mocks.auth.mockRejectedValue(hostedOnboardingError({ code: "ACCESS_DENIED", message: "Access denied.", httpStatus }));
+  expect((await GET(request())).status).toBe(httpStatus);
+  expect(mocks.workspace).not.toHaveBeenCalled();
+});
+
+it("withholds health data if session or consent is revoked during decryption", async () => {
+  mocks.current.mockRejectedValueOnce(hostedOnboardingError({ code: "UNAUTHORIZED", message: "Sign in required.", httpStatus: 401 }));
+  expect((await GET(request())).status).toBe(401);
+  mocks.authority.mockResolvedValueOnce(undefined).mockRejectedValueOnce(hostedOnboardingError({ code: "HOSTED_CONSENT_REQUIRED", message: "Consent required.", httpStatus: 403 }));
+  const response = await DELETE(request(), context());
+  expect(response.status).toBe(403);
+  expect(mocks.submit).not.toHaveBeenCalled();
+});

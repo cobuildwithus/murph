@@ -5,6 +5,23 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
+  signal: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: mocks.signal }));
+vi.mock("@/src/lib/legal/consent", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/legal/consent")>(),
+  assertHostedHistoricalLaunchConsentGranted: async () => undefined,
+}));
+// Replace only external crypto; admission locks, append and candidate SQL are real.
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-crypto/domain-root-store")>(),
+  prepareHostedDomainRootForWeb: async ({ userId }: { userId: string }) => ({ domain: "ingress", userId, rootKeyId: "synthetic-root" }),
+  revalidatePreparedHostedDomainRootForWebTx: async () => ({ rootKeyId: "synthetic-root", root: Promise.resolve({}) }),
+}));
+vi.mock("@/src/lib/hosted-mailbox/encryption", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-mailbox/encryption")>(),
+  encryptHostedMailboxPayloadStringFromPreparedRoot: async () => "synthetic-encrypted-payload",
 }));
 
 vi.mock("@/src/lib/prisma", async (importOriginal) => {
@@ -27,6 +44,8 @@ import {
   hasHostedRuntimeActiveAccess,
 } from "@/src/lib/hosted-mailbox/runtime-access";
 import { createPrismaClient } from "@/src/lib/prisma";
+import { submitMemberAction } from "@/src/lib/member-actions/submit";
+import type { MemberActionV1 } from "@murphai/contracts";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresProof = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -254,6 +273,7 @@ describe.skipIf(!runPostgresProof)(
     });
 
     it.each([
+      "member.action.requested",
       "member.preferences.updated",
       "device-sync.wake",
       "health.daily-metric.reported",
@@ -458,6 +478,37 @@ describe.skipIf(!runPostgresProof)(
         `access-complete:${memberId}`,
         `handoff:${memberId}`,
       ]);
+    });
+
+    it.each(["meal.delete", "workout.live.apply"] as const)("recovers accepted %s after a lost initial wake and stops at import", async kind => {
+      const client = requirePrisma(prisma);
+      const memberId = createId("member_action_recovery");
+      memberIds.push(memberId);
+      await client.hostedMember.create({ data: { id: memberId, billingStatus: "active" } });
+      // An idle workspace has no timer to rescue this accepted action.
+      await client.hostedWorkspace.create({ data: { userId: memberId, nextWakeAt: null } });
+      const action: MemberActionV1 = kind === "meal.delete"
+        ? { kind, version: 1, mealId: "meal_fixture" }
+        : {
+          kind, version: 1,
+          expectedWorkout: { actionBinding: "a".repeat(64), exercises: [{ name: "Synthetic movement", sets: [{ logged: false }] }] },
+          mutations: [{ kind: "set.put", exercisePosition: 1, exerciseName: "Synthetic movement", setPosition: 1, expectedResult: null, result: { kind: "reps", reps: 8 } }],
+        };
+      const actionId = randomUUID();
+      mocks.signal.mockReset().mockRejectedValueOnce(new Error("synthetic Temporal failure before acceptance"));
+      await expect(submitMemberAction({ memberId, prisma: client, request: {
+        action, actionId, requestedAt: new Date().toISOString(), schemaVersion: 1,
+      } })).resolves.toMatchObject({ accepted: true, actionId });
+      const item = await client.hostedMailboxItem.findFirstOrThrow({ where: { userId: memberId, dedupeKey: `member.action.requested:${actionId}` } });
+      expect(item.kind).toBe("member.action.requested");
+      expect(mocks.signal).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ mailboxItemId: item.id, expectedUserId: memberId }));
+      const now = new Date(item.createdAt.getTime() + 60_000);
+      mocks.signal.mockResolvedValue({ signalAccepted: true, workflowId: "hosted-user-runtime:synthetic" });
+      await expect(runHostedPreferenceHandoffSweeper({ now, logger: buildLogger() })).resolves.toMatchObject({ candidateUsers: 1, handoffAccepted: 1 });
+      expect(mocks.signal).toHaveBeenLastCalledWith({ abortSignal: expect.any(AbortSignal), expectedUserId: memberId, mailboxItemId: item.id });
+      await client.hostedWorkspace.update({ where: { userId: memberId }, data: { redactedStatusJson: { hostedMailboxSystemImportedSeq: String(item.laneSeq) } } });
+      await expect(runHostedPreferenceHandoffSweeper({ now, logger: buildLogger() })).resolves.toMatchObject({ candidateUsers: 0 });
+      expect(mocks.signal).toHaveBeenCalledTimes(2);
     });
 
     it("signals only system items beyond the persisted imported frontier", async () => {
