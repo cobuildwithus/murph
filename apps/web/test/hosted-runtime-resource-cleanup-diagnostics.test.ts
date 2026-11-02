@@ -3,17 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
 
 const mocks = vi.hoisted(() => ({
-  control: vi.fn(), reconcile: vi.fn(), cutover: vi.fn(),
+  control: vi.fn(), reconcile: vi.fn(),
   memberLock: vi.fn(), ownerLock: vi.fn(), mediaCommand: vi.fn(),
 }));
 vi.mock("@/src/lib/hosted-execution/control", () => ({ readHostedExecutionControlClientIfConfigured: mocks.control }));
 vi.mock("@/src/lib/hosted-execution/runtime-upload-recovery", () => ({ reconcileHostedRuntimeUploads: mocks.reconcile }));
 vi.mock("@/src/lib/hosted-onboarding/shared", () => ({ lockHostedMemberRow: mocks.memberLock }));
 vi.mock("@/src/lib/hosted-execution/runtime-owner", () => ({ lockHostedRuntimeOwnerRowTx: mocks.ownerLock, requireHostedRuntimeOwnerTx: vi.fn() }));
-vi.mock("@/src/lib/hosted-execution/runtime-cutover", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/src/lib/hosted-execution/runtime-cutover")>()),
-  lockHostedRuntimeMemberCutoverTx: mocks.cutover,
-}));
 vi.mock("@/src/lib/hosted-execution/runtime-media", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/src/lib/hosted-execution/runtime-media")>()),
   executeHostedRuntimeMediaCommand: mocks.mediaCommand,
@@ -150,7 +146,6 @@ describe("runtime resource cleanup diagnostics", () => {
     vi.spyOn(Date, "now").mockReturnValue(NOW.getTime());
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     mocks.reconcile.mockResolvedValue(undefined);
-    mocks.cutover.mockResolvedValue("postgres");
     mocks.mediaCommand.mockResolvedValue({ cutover: "postgres", applied: true, reason: null, purge: null });
   });
   afterEach(() => vi.restoreAllMocks());
@@ -395,7 +390,6 @@ describe("runtime resource cleanup diagnostics", () => {
     expect(f.prisma.$transaction).toHaveBeenCalledTimes(3);
     expect(f.prisma.$queryRaw.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.reconcile.mock.invocationCallOrder[0]);
     expect(f.purge.mock.invocationCallOrder[0]).toBeGreaterThan(f.prisma.$transaction.mock.invocationCallOrder[2]);
-    expect(mocks.memberLock.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.cutover.mock.invocationCallOrder[0]);
     expect(mocks.ownerLock.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.memberLock.mock.invocationCallOrder[0]);
     expect(f.orphanTable.update.mock.calls).toEqual(rows.map(row => [{ where: { userId_kind_resourceId: {
       userId: row.userId, kind: row.kind, resourceId: row.resourceId,

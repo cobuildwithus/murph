@@ -30,7 +30,7 @@ const TEST_VERCEL_OIDC_PUBLIC_JWK = {
 
 describe("cloudflare worker queue backpressure routes", () => {
   beforeEach(() => {
-    vi.spyOn(runtimeOwnerClient, "commandHostedRuntimeOwner").mockResolvedValue({ cutover: "legacy", status: "observed", owner: null });
+    vi.spyOn(runtimeOwnerClient, "commandHostedRuntimeOwner").mockResolvedValue({ cutover: "postgres", status: "observed", owner: null });
   });
   afterEach(() => {
     vi.useRealTimers();

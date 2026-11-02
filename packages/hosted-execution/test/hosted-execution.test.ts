@@ -830,7 +830,6 @@ describe("hosted execution coverage gaps", () => {
       "./routes",
       "./runtime-control",
       "./runtime-media",
-      "./runtime-migration",
       "./runtime-owner",
       "./runtime-resource-purge",
       "./runtime-resources",

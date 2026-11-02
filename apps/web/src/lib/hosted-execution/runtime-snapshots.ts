@@ -1,4 +1,3 @@
-import { lockHostedRuntimeMemberCutoverTx } from "./runtime-cutover";
 import { hostedWorkspaceSnapshotObjectKey } from "@murphai/hosted-execution/storage-paths";
 import { Prisma, type PrismaClient, type HostedRuntimeSnapshotUpload } from "@prisma/client";
 import { HOSTED_RUNTIME_ORPHAN_GRACE_MS, type HostedRuntimeSnapshotCommand, type HostedRuntimeSnapshotResponse } from "@murphai/hosted-execution/runtime-resources";
@@ -31,8 +30,7 @@ export async function executeHostedRuntimeSnapshotCommand(input: {
     : { ...command, userId: input.userId };
   const runtimeIdentity = { userId: input.userId, ...parseHostedRuntimeOwnerIdentity(identity) };
   return input.prisma.$transaction(async (tx) => {
-    const cutover = await lockHostedRuntimeMemberCutoverTx(tx, input.userId);
-    if (cutover !== "postgres") return { cutover, applied: false, session: null };
+    const cutover = "postgres" as const;
     if (command.operation === "snapshot_managed_settled") return settleManagedSnapshotUploadTx({ tx, userId: input.userId, command, now });
     await requireHostedRuntimeOwnerTx(tx, runtimeIdentity);
     const current = await tx.hostedRuntimeSnapshotUpload.findUnique({ where: { userId: input.userId } });

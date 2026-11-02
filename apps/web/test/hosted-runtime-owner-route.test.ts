@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const edges = vi.hoisted(() => ({
   after: vi.fn<(task: () => Promise<void>) => void>(),
-  authenticate: vi.fn(), backend: vi.fn(), retire: vi.fn(), release: vi.fn(),
+  authenticate: vi.fn(), retire: vi.fn(), release: vi.fn(),
   authorize: vi.fn(), claim: vi.fn(), notify: vi.fn(), loaded: vi.fn(),
 }));
 vi.mock("next/server", async (original) => ({
@@ -11,9 +11,6 @@ vi.mock("next/server", async (original) => ({
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({}) }));
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
   requireHostedCloudflareCallbackJsonRequest: edges.authenticate,
-}));
-vi.mock("@/src/lib/hosted-execution/runtime-cutover", () => ({
-  readHostedRuntimeMemberBackend: edges.backend,
 }));
 vi.mock("@/src/lib/hosted-execution/runtime-owner", () => ({
   retireHostedRuntime: edges.retire,
@@ -25,10 +22,6 @@ vi.mock("@/src/lib/hosted-execution/runtime-owner", () => ({
 vi.mock("@/src/lib/hosted-orchestration/runtime-owner-release", () => {
   edges.loaded("completion");
   return { notifyHostedRuntimeOwnerCompletion: edges.notify };
-});
-vi.mock("@/src/lib/hosted-execution/runtime-materialization", () => {
-  edges.loaded("legacy");
-  return {};
 });
 vi.mock("@/src/lib/hosted-execution/runtime-upload-recovery", () => {
   edges.loaded("uploads");
@@ -56,7 +49,6 @@ beforeEach(() => {
   vi.resetModules();
   vi.resetAllMocks();
   edges.authenticate.mockResolvedValue({ userId: identity.userId, payload: command });
-  edges.backend.mockResolvedValue("postgres");
   edges.retire.mockResolvedValue(true);
   edges.release.mockResolvedValue(true);
   edges.authorize.mockResolvedValue({ cutover: "postgres", owner: null });
@@ -153,7 +145,7 @@ describe("runtime ownership response", () => {
     expect(edges.after).not.toHaveBeenCalled();
   });
 
-  it("authorizes providers without loading completion, legacy, or upload recovery", async () => {
+  it("authorizes providers without loading completion or upload recovery", async () => {
     const payload = { operation: "authorize_provider", runnerContainerName: "synthetic-slot",
       providerEgressTokenHash: null, providerKind: "linq" };
     edges.authenticate.mockResolvedValueOnce({ userId: identity.userId, payload });
@@ -161,13 +153,12 @@ describe("runtime ownership response", () => {
     expect(edges.authorize).toHaveBeenCalledExactlyOnceWith({ ...payload, prisma: {}, userId: identity.userId });
     expect(edges.after).not.toHaveBeenCalled();
     expect(edges.loaded).not.toHaveBeenCalled();
-    expect(edges.backend).not.toHaveBeenCalled();
   });
 
-  it.each(["admission", "cutover"] as const)("tells the Worker why a claim was blocked (%s)", async (reason) => {
+  it.each(["admission"] as const)("tells the Worker why a claim was blocked (%s)", async (reason) => {
     edges.authenticate.mockResolvedValueOnce({ userId: identity.userId,
       payload: { operation: "claim", processingMode: "system_mailbox" } });
-    const cutover = reason === "cutover" ? "draining" : "postgres";
+    const cutover = "postgres";
     edges.claim.mockResolvedValueOnce({ cutover, status: "blocked", reason });
     await expect((await post()).json()).resolves.toEqual({
       cutover, status: "blocked", owner: null, blockedReason: reason,
@@ -175,13 +166,4 @@ describe("runtime ownership response", () => {
     expect(edges.claim).toHaveBeenCalledExactlyOnceWith({ prisma: {}, userId: identity.userId, processingMode: "system_mailbox" });
   });
 
-  it.each(["legacy", "draining"])("uses the authorization snapshot for %s routing", async (cutover) => {
-    edges.authenticate.mockResolvedValueOnce({ userId: identity.userId, payload: {
-      operation: "authorize_provider", runnerContainerName: null,
-      providerEgressTokenHash: "c".repeat(64), providerKind: "linq",
-    } });
-    edges.authorize.mockResolvedValueOnce({ cutover, owner: null });
-    await expect((await post()).json()).resolves.toEqual({ cutover, status: "blocked", owner: null });
-    expect(edges.backend).not.toHaveBeenCalled();
-  });
 });

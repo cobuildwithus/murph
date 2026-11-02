@@ -41,7 +41,7 @@ const EMAIL_PROCESSING_OUTCOMES = ["runtime_processing_accepted", "retry_later",
 const EMAIL_RETRY_REASONS = [
   "active_child_rejected", "admission_blocked", "checkpoint_handoff_pending", "claim_blocked",
   "command_budget_exhausted", "completion_unconfirmed", "container_busy", "container_not_ready",
-  "container_rpc_error", "container_rpc_timeout", "cutover_blocked", "missing_container_binding",
+  "container_rpc_error", "container_rpc_timeout", "missing_container_binding",
   "processing_mode_conflict", "retirement_pending", "starting_fence_preserved", "wake_unconfirmed",
 ];
 

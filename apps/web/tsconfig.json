@@ -187,9 +187,6 @@
       "@murphai/hosted-execution/runtime-media": [
         "../../packages/hosted-execution/src/runtime-media.ts"
       ],
-      "@murphai/hosted-execution/runtime-migration": [
-        "../../packages/hosted-execution/src/runtime-migration.ts"
-      ],
       "@murphai/hosted-execution/runtime-owner": [
         "../../packages/hosted-execution/src/runtime-owner.ts"
       ],

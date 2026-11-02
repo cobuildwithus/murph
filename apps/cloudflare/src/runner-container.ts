@@ -2411,13 +2411,13 @@ export class RunnerContainer extends Container {
       // Claim precedes binding, readiness and native launch. An empty child
       // cannot prove idle while that durable owner is handing work to this slot,
       // including after DO eviction. Explicit retirement owns uncertain work.
-      const { cutover, status, owner } = await commandHostedRuntimeOwner({
+      const { status, owner } = await commandHostedRuntimeOwner({
         source: this.environment,
         userId: binding.userId,
         command: { operation: "reconcile" },
         timeoutMs: RUNNER_DESTROY_SETTLE_TIMEOUT_MS,
       });
-      if (cutover !== "postgres" || status !== "observed") return false;
+      if (status !== "observed") return false;
       if (owner?.runnerContainerName !== binding.slotName || owner.phase === "idle") return true;
       // A lost outer result can leave a completed owner retiring after its
       // mailbox drains. The existing lifecycle alarm must recover it even when

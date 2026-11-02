@@ -182,7 +182,6 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
           throw new TypeError("Hosted runtime usage member does not match its authority.");
         }
         if (input.runtimeIdentity) {
-          await tx.$queryRaw`SELECT phase FROM hosted_runtime_cutover WHERE id = 'runtime' FOR SHARE`;
           const [funding, recordedFunding] = await Promise.all([
             tx.hostedRuntimeOwner.findUnique({
               where: { userId: memberId }, select: { allowanceBeneficiaryMemberId: true },

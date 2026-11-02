@@ -1,6 +1,6 @@
 import { projectHostedRuntimeOwner } from "./runtime-owner-snapshot";
-import { readHostedRuntimeMemberBackend } from "./runtime-cutover";
-import type { HostedRuntimeOwner, PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
+import type { HostedRuntimeOwner } from "./runtime-owner";
 import { parseHostedRuntimeOwnerResponse, type HostedRuntimeOwnerCommand, type HostedRuntimeOwnerResponse } from "@murphai/hosted-execution/runtime-owner";
 import {
   recordHostedRuntimeFailure, isHostedRuntimeDeletionReady, recordHostedRuntimeTargetRetired, authorizeHostedRuntimeProvider,
@@ -16,11 +16,6 @@ type IdentityCommand = Exclude<Extract<HostedRuntimeOwnerCommand, { attemptId: s
 
 /** Durable ownership commands. The HTTP boundary owns advisory completion hints. */
 export async function executeHostedRuntimeOwnerCommand(input: CommandInput): Promise<HostedRuntimeOwnerResponse> {
-  if (input.command.operation === "resolve_legacy") {
-    const { resolveHostedLegacyMaterialization } = await import("./runtime-materialization");
-    const result = await resolveHostedLegacyMaterialization({ ...input.command, prisma: input.prisma, userId: input.userId });
-    return parseHostedRuntimeOwnerResponse({ cutover: result.cutover, status: "observed", owner: projectHostedRuntimeOwner(result.owner) });
-  }
   if (input.command.operation === "authorize_provider" || input.command.operation === "authorize_effect") {
     const result = input.command.operation === "authorize_provider"
       ? await authorizeHostedRuntimeProvider({ ...input.command, prisma: input.prisma, userId: input.userId })
@@ -29,12 +24,12 @@ export async function executeHostedRuntimeOwnerCommand(input: CommandInput): Pro
       status: result.owner ? "authorized" : "blocked", owner: projectHostedRuntimeOwner(result.owner) });
   }
   const result = await executeCommand({ ...input, command: input.command });
-  const cutover = result.cutover ?? await readHostedRuntimeMemberBackend(input.prisma, input.userId);
+  const cutover = "postgres";
   return parseHostedRuntimeOwnerResponse({ cutover, status: result.status, owner: projectHostedRuntimeOwner(result.owner),
     blockedReason: result.blockedReason });
 }
 
-async function executeCommand(input: Omit<CommandInput, "command"> & { command: Exclude<HostedRuntimeOwnerCommand, { operation: "resolve_legacy" | "authorize_provider" | "authorize_effect" }> }): Promise<CommandResult> {
+async function executeCommand(input: Omit<CommandInput, "command"> & { command: Exclude<HostedRuntimeOwnerCommand, { operation: "authorize_provider" | "authorize_effect" }> }): Promise<CommandResult> {
   const { prisma, userId, command } = input;
   switch (command.operation) {
     case "reconcile":
