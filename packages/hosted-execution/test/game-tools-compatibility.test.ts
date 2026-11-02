@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { writeFile, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { parseHostedRuntimeGroupToolRequest, parseHostedRuntimeGroupToolResponse } from "../src/parsers/runtime-control.ts";
 import { hostedGameToolRequestSchema, hostedGameToolResponseSchema } from "../src/game-tools.ts";
 
 const origin = { kind: "accepted_input", assistantInputId: "ain_synthetic" };
@@ -143,4 +144,50 @@ it.each([undefined, "Leo owes Ava breakfast."])("round-trips recap requests and 
   const response = { action: "write_recap", result: { status: "ok", recap } };
   expect(hostedGameToolResponseSchema.parse(response)).toEqual(response);
   expect(hostedGameToolRequestSchema.safeParse({ ...request, recap: { ...recap, scoreLine: null } }).success).toBe(false);
+});
+
+
+it("round-trips setup through the runtime parser and rejects extra authority and legacy create stakes", () => {
+  const update = { operation: "create", gameId: "game_setup", terms: {
+    tasks: [{ memberId: "player_first", text: "Walk" }, { memberId: "player_second", text: "Read" }],
+    schedule: { count: 3 }, lengthDays: 7, stakes: [{ kind: "prize", item: "Lunch" }],
+  } };
+  const request = { action: "update_game", origin, update };
+  expect(parseHostedRuntimeGroupToolRequest(request)).toEqual(request);
+  for (const extra of [{ actorMemberId: "other" }, { containerMemberId: "other" }, { terms: { ...update.terms, lengthDays: 2 } }, { terms: { ...update.terms, stakes: [{ kind: "per_miss", item: "Lunch" }] } }]) {
+    expect(() => parseHostedRuntimeGroupToolRequest({ ...request, update: { ...update, ...extra } })).toThrow();
+  }
+  const read = { action: "read_game", origin };
+  expect(parseHostedRuntimeGroupToolRequest(read)).toEqual(read);
+  const response = { action: "read_game", result: { status: "ok", state: { games: [] } } };
+  expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+  expect(() => parseHostedRuntimeGroupToolRequest({ action: "update_game", origin, update: { operation: "approve", gameId: "game_setup" } })).toThrow();
+  const approval = { action: "update_game", origin, update: { operation: "approve", gameId: "game_setup", expectedTermsVersion: 1 } };
+  expect(parseHostedRuntimeGroupToolRequest(approval)).toEqual(approval);
+});
+
+
+// Historical-reader proof needs the base Git object; ordinary CI may be shallow.
+it.skipIf(process.env.MURPH_VERIFY_GAME_SETUP_SKEW !== "1")("fences the setup roster for the deployed strict response reader", async () => {
+  const target = new URL(`../src/.game-setup-skew-${randomUUID()}.ts`, import.meta.url);
+  const root = fileURLToPath(new URL("../../../", import.meta.url));
+  await writeFile(target, execFileSync("git", ["show", "0edefc73dc:packages/hosted-execution/src/game-tools.ts"], { cwd: root, encoding: "utf8" }), { flag: "wx" });
+  try {
+    const legacy = await import(target.href) as typeof import("../src/game-tools.ts");
+    const oldPayload = { action: "read_game", result: { status: "ok", state: { games: [] } } };
+    const players = [{ memberId: "player_first", firstName: "Ava", timeZone: "UTC", isSender: true }, { memberId: "player_second", firstName: null, timeZone: null, isSender: false }];
+    const nextPayload = { ...oldPayload, result: { ...oldPayload.result, state: { games: [], players } } };
+    expect(legacy.hostedGameToolResponseSchema.parse(oldPayload)).toEqual(oldPayload);
+    const invited = response({ ...game, status: "invited", startsOn: null,
+      players: [{ ...game.players[0], dayOne: null }],
+      changeControls: { canStartNow: false, canEdit: false, canEditSchedule: false, canEditStartDate: false, editableFromDay: null } });
+    expect(legacy.hostedGameToolResponseSchema.parse(invited)).toEqual(invited);
+    expect(parseHostedRuntimeGroupToolResponse(invited)).toEqual(invited);
+    expect(legacy.hostedGameToolResponseSchema.safeParse(nextPayload).success).toBe(false);
+    expect(parseHostedRuntimeGroupToolResponse(nextPayload)).toEqual(nextPayload);
+    const marked = { action: "read_game", origin, includePlayers: true };
+    expect(parseHostedRuntimeGroupToolRequest(marked)).toEqual(marked);
+    expect(legacy.hostedGameToolRequestSchema.safeParse(marked).success).toBe(false);
+    expect(() => parseHostedRuntimeGroupToolRequest({ action: "update_game", origin, update: { operation: "approve", gameId: "game_setup", proposalId: "proposal_synthetic", expectedTermsVersion: 1 } })).toThrow();
+  } finally { await rm(target, { force: true }); }
 });

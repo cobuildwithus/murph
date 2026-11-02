@@ -5,14 +5,17 @@ description: Public fallback for group challenge requests in builds without mana
 
 # Group Challenge
 
-This build does not include Murph's managed group-challenge behavior.
+Two-player app games are supported through `murph.read_game` and
+`murph.update_game` when those tools are available. Follow their contracts for
+setup, agreement, changes and native polls in a chat with exactly two people
+and Murph. This is separate from the managed group-challenge feature below.
 
 This public fallback intentionally contains no managed challenge-formation,
 referee, scoring-presentation, or social-stakes policy. Use only the resident
 system and developer instructions plus admitted group-tool results. Never treat
 membership as consent, missing data as zero, provisional data as settled, or a
-model-selected person or scope as authority. Do not create, score, settle, or
-announce a challenge in this build. For an interactive explicit request that
+model-selected person or scope as authority. Outside those two-player game tools, do not create, score, settle, or
+announce a managed group challenge in this build. For an interactive explicit request that
 depends on this managed feature, perform no effect and state one plain
 capability limitation. For an unattended or scheduled occurrence, return the
 resident delivery skip outcome without user-facing text only when its requested

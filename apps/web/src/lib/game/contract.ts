@@ -51,6 +51,7 @@ export interface GameTermsVersion {
 export interface GameTermsInput {
   /** New games use any; retained photo/heart_rate terms keep their requirement. */
   checkInKind?: GameCheckInKind;
+  /** Seat 0 is the creator, seat 1 the other player, including chat-created games. */
   tasks: GameTask[];
   schedule: GameSchedule;
   stakes: GameStake[];
@@ -122,7 +123,8 @@ export interface GameProfileView {
   avatarUrl: string | null;
 }
 
-/** POST /games */
+/** POST /games. Chat setup translates member-keyed tasks into this same command,
+ * seating both verified players in negotiating rather than an unclaimed invite. */
 export interface CreateGameBody {
   gameId: string;
   terms: GameTermsInput;
@@ -347,6 +349,9 @@ export interface GameTicketView {
   redeemedAt: string | null;
 }
 
+/** Addressed app rematches also use the existing join/negotiate commands from chat.
+ * Shared native shape for app and chat creation: negotiating + no pendingChange
+ * waits for seat 1 to Shake on it; seat 0 has already agreed. */
 export interface GameView {
   changeControls: GameChangeControls;
   pendingChange: GamePendingChange | null;

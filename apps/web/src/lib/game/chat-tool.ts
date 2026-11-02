@@ -11,10 +11,10 @@ import { requireHostedRuntimeActiveAccessForUpdateTx } from "../hosted-mailbox/r
 import { resolveHostedGroupMessageSenderMemberId } from "../hosted-groups/group-message-sender";
 import { assertHostedThreadRouteEgressAuthority } from "../hosted-routing/thread-route-store";
 import { getPrisma } from "../prisma";
-import { readGameChatState, readGameRecapMaterial, runGameCommand, sealGameRecap } from "./service";
+import { readGameChatState, readGameChatProfiles, readGameRecapMaterial, runGameCommand, runGameChatUpdate, sealGameRecap } from "./service";
 import { gameRecapMessage } from "./recap-message";
 import { gameRecapToolResult, validateGameRecap, withValidGameSuperlatives, type GameRecapChatMessage } from "./recap";
-import { gamePairWhere, readGameChatPlayerIds, requireExactGameChat, sameGamePlayers } from "./chat-membership";
+import { addressedGameRematchWhere, gameChatPlayerIds, gamePairWhere, readGameChatPlayerIds, requireExactGameChat, sameGamePlayers } from "./chat-membership";
 import { isGameEnabled, isGameOn } from "./access";
 import { gamePairLoreFingerprint } from "./pair-fingerprint";
 
@@ -22,13 +22,16 @@ type Input = { memberId: string; runtimeIdentity: HostedRuntimeIdentity | null; 
 
 /** The signed runtime selects only a game and accepted Message ref, never an actor. */
 export async function handleGameChatTool(input: Input): Promise<HostedGameToolResponse> {
-  if (!isGameEnabled()) return { action: input.request.action, result: { status: "unavailable", error: "game_unavailable" } };
+  if (!isGameEnabled()) return { action: input.request.action, result: { status: "unavailable", error: "GAME_DISABLED: Games are unavailable right now." } };
   if (input.request.origin.kind === "game_recap") return handleGameRecapTool(input as Input & { request: Extract<HostedGameToolRequest, { action: "read_game" | "write_recap" }> & { origin: { kind: "game_recap" } } });
   const prisma = getPrisma();
   const actor = await prisma.$transaction((tx) => authorizeGameChatActorTx(input, tx));
-  if (!actor) return { action: input.request.action, result: { status: "unavailable", error: "game_player_unavailable" } };
-  const playerMemberIds = await requireExactGameChat(input.memberId);
+  if (!actor) return { action: input.request.action, result: { status: "unavailable", error: "Games are one-on-one. Use a chat with just the two players and Murph, or start in the app." } };
+  let playerMemberIds: readonly string[];
+  try { playerMemberIds = await requireExactGameChat(input.memberId); }
+  catch { return { action: input.request.action, result: { status: "unavailable", error: "Use a chat with just the two players and Murph, or start a one-on-one game in the app." } }; }
   if (!playerMemberIds.includes(actor)) return { action: input.request.action, result: { status: "unavailable", error: "game_player_unavailable" } };
+  if (!isGameOn({ players: playerMemberIds.map(memberId => ({ memberId })) })) return { action: input.request.action, result: { status: "unavailable", error: "GAME_DISABLED: Games are invite-only for now." } };
   let dayOutcome: Extract<Awaited<ReturnType<typeof runGameCommand>>, { ok: true }>["dayOutcome"];
   let photoResult: Awaited<ReturnType<typeof handleGameChatPhoto>> | null = null;
   if (input.request.action === "game_photo") {
@@ -47,18 +50,11 @@ export async function handleGameChatTool(input: Input): Promise<HostedGameToolRe
   }
   if (input.request.action === "update_game") {
     const update = input.request.update;
-    const command = "date" in update
-      ? { type: "setDayCompletion", gameId: update.gameId, date: update.date, incomplete: update.operation === "mark_incomplete" }
-      : update.operation === "cancel_game"
-      ? { type: "cancelInvite", gameId: update.gameId }
-      : update.operation === "propose"
-      ? { type: "proposeChange", gameId: update.gameId, proposalId: update.proposalId, expectedTermsVersion: update.expectedTermsVersion, change: update.change }
-      : { type: "respondChange", gameId: update.gameId, proposalId: update.proposalId, decision: update.operation };
-    const result = await runGameCommand({
+    const result = await runGameChatUpdate({
       actorMemberId: actor,
       chatContainerMemberId: input.memberId,
       chatPlayerMemberIds: playerMemberIds,
-      command,
+      update,
       beforeMutationTx: async (tx) => {
         if (await authorizeGameChatActorTx({ ...input, playerMemberIds }, tx) !== actor) throw new TypeError("Game player authority changed.");
       },
@@ -71,9 +67,17 @@ export async function handleGameChatTool(input: Input): Promise<HostedGameToolRe
     if (!sameGamePlayers(latestPlayers, playerMemberIds)) throw new TypeError("Game chat participants changed.");
   }
   if (input.request.action === "game_photo" && !sameGamePlayers(await requireExactGameChat(input.memberId), playerMemberIds)) throw new TypeError("Game chat participants changed.");
-  const state = hostedGameChatStateSchema.parse(await readGameChatState(input.memberId, playerMemberIds, actor));
+  const state = await readGameToolState(input, playerMemberIds, actor);
   const loreGuidance = input.request.action === "read_game" ? gameLiveLoreGuidanceForState(state) : undefined;
   return { action: input.request.action, result: { status: "ok", state, ...(loreGuidance ? { loreGuidance, loreFingerprint: gamePairLoreFingerprint(playerMemberIds) } : {}), ...(dayOutcome ? { dayOutcome } : {}), ...(photoResult?.photoOutcome ? { photoOutcome: photoResult.photoOutcome } : {}) } };
+}
+
+/** Preserve the unmarked response shape for older strict runtime readers. */
+async function readGameToolState(input: Input, playerMemberIds: readonly string[], actor: string) {
+  return hostedGameChatStateSchema.parse({
+    ...await readGameChatState(input.memberId, playerMemberIds, actor),
+    ...(input.request.action === "read_game" && input.request.includePlayers ? { players: (await readGameChatProfiles(playerMemberIds)).map(player => ({ ...player, isSender: player.memberId === actor })) } : {}),
+  });
 }
 
 /** A free player may agree to their game without gaining personal AI access. */
@@ -92,11 +96,15 @@ export async function authorizeGameChatActorTx(input: Input, tx: Prisma.Transact
   if (!actor) return null;
   const players = await readGameChatPlayerIds(input.memberId, tx);
   if (!players.includes(actor) || (input.playerMemberIds && !sameGamePlayers(players, input.playerMemberIds))) return null;
+  // A read exposes only this exact pair's games. Creation alone
+  // may write before the pair has a game; all other mutations require one.
+  if (players.length !== 2) return null;
+  if (input.request.action === "read_game" || (input.request.action === "update_game" && input.request.update.operation === "create")) return actor;
   const game = await tx.game.findFirst({
-    where: { ...gamePairWhere(players), status: { in: ["negotiating", "live", "settled"] }, ...(input.request.action === "update_game" ? { id: input.request.update.gameId } : input.request.action === "game_photo" ? { id: input.request.photo.gameId } : {}) },
-    select: { id: true, players: { select: { memberId: true }, take: 3 } },
+    where: { OR: [{ ...gamePairWhere(players), status: { in: ["negotiating", "live", "settled"] } }, addressedGameRematchWhere(players)], ...(input.request.action === "update_game" ? { id: input.request.update.gameId } : input.request.action === "game_photo" ? { id: input.request.photo.gameId } : {}) },
+    select: { id: true, status: true, createdBy: true, inviteeMemberId: true, previousGameId: true, players: { select: { memberId: true }, take: 3 } },
   });
-  if (!game || !areGamePlayersAllowed(game, input.playerMemberIds)) return null;
+  if (!game || !areGamePlayersAllowed(game, players)) return null;
   return actor;
 }
 
@@ -217,7 +225,8 @@ function readGameIncomingRoute(wake: HostedExecutionConversationMessageWake, con
 }
 
 
-function areGamePlayersAllowed(game: { players: readonly { memberId: string }[] }, expected?: readonly string[]): boolean {
-  if (game.players.length !== 2 || !isGameOn(game)) return false;
-  return expected === undefined || sameGamePlayers(game.players.map((player) => player.memberId), expected);
+function areGamePlayersAllowed(game: Parameters<typeof gameChatPlayerIds>[0], expected: readonly string[]): boolean {
+  const players = gameChatPlayerIds(game);
+  if (players.length !== 2 || !isGameOn(game)) return false;
+  return sameGamePlayers(players, expected);
 }

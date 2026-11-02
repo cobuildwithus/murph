@@ -82,7 +82,7 @@ Two people can have up to ten open games together. Unexpired addressed rematch
 invites, unexpired negotiations and live games count; unclaimed link invites do
 not count until joined. An eleventh is refused with `TOO_MANY_GAMES` (409). Each
 game keeps its own schedule, days, posts, unlocks, prize, changes, recap and
-rematch chain. Starting another uses the same link invite flow. Home returns
+rematch chain. Starting another uses the same link invite or exact-pair chat setup flow. Home returns
 all games in its existing list; the client groups them by person and orders its
 pager. Home lists the games waiting on you
 today first, then your other live games, invites, and results.
@@ -541,7 +541,100 @@ claimed seat and original invite deadline remain unchanged. Approval determines 
 default Day 1 from that moment, or keeps an explicitly selected later date.
 Resetting a proposed date to the default is explicit (`startsOn: null`), distinct
 from omitting a date change. The original seven-day invite expiry also bounds
-unfinished negotiation. A pair cannot reserve another game while negotiating.
+unfinished negotiation. Each negotiation counts toward the pair's ten-open-games cap.
+
+## Setup in a two-person chat
+
+Either person can ask Murph to set up a game in a chat containing exactly those
+two members and Murph. In a larger room it makes no game write and explains
+that games are one-on-one: use a chat with just the two players and Murph, or
+start in the app. The accepted message's signed sender is always the actor.
+
+Murph gathers each person's task (or the same task for both), one prize for the
+winner or dare for the loser, schedule, length and optional Day 1. It asks only
+for missing choices and states the defaults: seven days, every day. App limits
+apply: 3–365 days, task/stake text up to 200 characters, named weekdays or any N
+days over the entire game, and a picked date tomorrow through 60 days out.
+Omitting the date uses acceptance time, including the existing 03:00–20:00
+start-today window and schedule alignment. Start now uses the existing mutually
+agreed change only when offered. New games store `checkInKind: any`.
+
+Both players need their existing GameProfile first name and time zone. Murph
+never invents either, splits a display name, or guesses a zone. `PROFILE_REQUIRED`
+identifies the missing player; Murph names that person from the conversation
+and asks them to add their first name and time zone in the Murph app. Private
+contact names, photos and relationship labels are not shared setup options.
+
+`update_game create` creates an ordinary two-seat `negotiating` game with no
+pending change or obligations. The creator's request is their agreement.
+Murph's one reply states the complete terms and asks the other player to agree;
+there is no duplicate lifecycle proposal message. Their explicit agreement
+uses the existing invite acceptance command (also available as Shake on it in
+the app), then the existing durable kickoff. Counteroffers, response and
+cancellation use the existing moves. A poll vote never starts a game. Chat moves
+continue to bypass the HTTP `MURPH_GAME_REQUIRE_CURRENT_TERMS` door.
+
+Fresh-game access, moderation, ten-open-games cap and settled same-pair rematch
+chain rules are the app's rules, including the unlisted-player rematch exception.
+New game IDs are game_ followed by at least 20 random lowercase letters and
+digits, never names, dates or terms. Creation retries reuse that ID; a waiting
+duplicate is not another game. Creating
+a new game leaves other games alone. Ambiguous new-versus-change asks need one
+clarification.
+
+Setup and poll guidance is returned by the engine on each successful ordinary
+`read_game`, alongside the existing multiple-game selection guidance. The initial
+tool descriptions contain only brief triggers; recap reads do not receive setup
+guidance. New-game creation never targets an existing game, and an ambiguous
+new-versus-change ask is clarified even when several existing games fit.
+
+Poll guidance owned by that read result:
+
+> When debating a shared choice, create one native murph.poll (2–4 concrete
+> options, keeping the chosen labels verbatim), then read its results before
+> proposing terms from the winner; a tie
+> needs a choice. Do not stack polls, poll one person’s own task or a simple
+> yes/no, or repeat options after creating the poll.
+
+### Play again in iMessage
+
+An addressed app rematch is visible to both players in their exact-pair chat
+while its invite is open and neither player is blocked. The invitee can say yes
+right here or Shake on it in the app. Chat approval uses the same join command,
+terms version, addressee check, pair lock, cap and chain rules. The creator cannot
+accept for the other player. A counteroffer uses the app’s negotiate command,
+which claims the invitee’s seat without starting the game. Before claiming a
+seat, the invitee has no decline action in the app or chat: it stays open and
+the creator can call it off. The rematch notice offers yes or changes here or
+in the app, without a link.
+
+Unaddressed link invites stay app-only: they are bearer links whose invitee is
+unknown until someone opens one. An addressed rematch’s existing shared shape
+(status invited, one seated creator) parses under the old strict runtime reader;
+no additional compatibility marker or native GameView field is needed.
+
+### Chat setup deployment
+
+Deploy Web before the runner that sends create or initial-terms approval.
+Old runners never send those operations and retain their app handoff for initial
+agreement until updated. During that window a new Web-authored rematch notice
+can mention chat agreement before that room’s runner supports it; the app
+remains available. Verify chat agreement after the runner rollout converges.
+New ordinary game reads set the
+transport-only `includePlayers: true` marker and receive two profile references
+with `isSender`; the model does not author the marker. Unmarked responses keep
+the old shape. The deployed `hostedGameChatStateSchema.strict()` rejects a new
+`players` field, so Web-first ordering alone cannot protect older running
+readers without this gate. Remove the marker and make the roster unconditional
+in a later cleanup after all old readers and warm runtimes have drained.
+Keep compatible Web while new senders remain active; reverting Web requires
+rolling back and draining those senders first. No data migration is needed:
+chat-created rows are ordinary negotiating games that the app already reads.
+
+Existing group membership transport has member IDs, but its model projection
+intentionally removes IDs and handles. Room memory forbids raw handles and is
+not an identity roster. Game reads therefore own these minimal player references;
+no broader membership disclosure or new native GameView field is needed.
 
 ## Progress and photos in chat
 
