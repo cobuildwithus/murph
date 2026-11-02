@@ -1,6 +1,6 @@
 # Game days off and recap superlatives
 
-Status: active
+Status: completed
 Created: 2026-11-02
 Updated: 2026-11-02
 
@@ -69,4 +69,6 @@ Ordinary group fixtures also unchanged. Source baseline f3acfb07a968.
 Parent review: Ready. Preserves grace, count schedules, old stored scoring,
 member-addressed copy, old writer replay and optional fallback. No new query or
 external work. Group-chat skill inspected; no conflicting game-save guidance.
-PR review, exact-head CI, merge and deploy remain pending.
+Implementation is complete. PR #4448 owns pending external ReviewGPT, exact-head
+CI, merge and deployment receipts; this session remains its completion owner.
+Completed: 2026-11-02
