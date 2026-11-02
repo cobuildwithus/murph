@@ -152,7 +152,7 @@ async function proposeName(input: MealNameRepairInput, name: string, note: strin
         sessionId: attemptId, stripeMeterSource: "murph", surface: "hosted-runtime",
         triggerKind: "meal-name-repair", turnId,
         usageId: createAssistantUsageId({ attemptCount: 1, providerRequestOrdinal: event.usage.providerRequestOrdinal, turnId }),
-      }));
+      }), null);
     }
   }
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mealNameViolation, preserveMealNameDetails } from "../src/meal-name.ts";
+import { mealNameViolation, preserveMealNameDetails } from "../src/companion-meals.ts";
 
 describe("shared meal naming policy", () => {
   it.each([

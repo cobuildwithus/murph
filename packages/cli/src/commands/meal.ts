@@ -59,8 +59,9 @@ import { publicValidationIssue } from './public-validation-issue.js'
 const mealNameGuidance = MEAL_NAME_GUIDANCE
 const mealNameSchema = z.string().trim().describe(mealNameGuidance)
 
-function validateMealName(name: string | undefined): string {
+function validateMealName(name: string | undefined, required = false): string | undefined {
   if (name === undefined) {
+    if (!required) return undefined
     throw new VaultCliError('invalid_option', 'Supply a short dish name with --name; no meal was written.', {
       hint: mealNameGuidance, retryable: false, stage: 'validation',
     })
@@ -594,7 +595,7 @@ async function runMealAdd(
     nutrition,
   })
 
-  const validatedName = validateMealName(name)
+  const validatedName = validateMealName(name, true)
 
   const importers = (await loadImportersRuntimeModule()).createImporters()
   const mealInput = {

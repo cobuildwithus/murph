@@ -1181,3 +1181,34 @@ test.sequential('meal saves require a dish name instead of displaying an ingredi
     assert.equal(list.count, 0)
   } finally { await rm(parentRoot, { recursive: true, force: true }) }
 })
+
+test.sequential('meal corrections preserve optional names and validate an explicit generic title', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-cli-meal-corrections-')
+  try {
+    await initializeVault({ vaultRoot })
+    const cli = createMealCli()
+    const saved = await addMeal({ vaultRoot, name: 'Bean tacos', note: 'Two tacos', occurredAt: '2026-10-20T12:00:00Z', nutrition: { totals: { calories: 450 } } })
+    for (const args of [['--note', 'One taco'], ['--nutrition-calories', '300'], ['--occurred-at', '2026-10-20T13:00:00Z', '--day-key-policy', 'keep']]) {
+      const edited = await runInProcessJsonCli<ShowResult & { entity: { title: string } }>(cli, ['meal', 'edit', saved.mealId, ...args, '--vault', vaultRoot])
+      assert.equal(edited.exitCode, null, JSON.stringify({ args, envelope: edited.envelope }))
+      assert.equal(requireData(edited.envelope).entity.title, 'Bean tacos')
+    }
+    const renamed = await runInProcessJsonCli<ShowResult & { entity: { title: string } }>(cli, ['meal', 'edit', saved.mealId, '--title', 'Black bean tacos', '--vault', vaultRoot])
+    const meal = requireData(renamed.envelope).entity
+    assert.equal(meal.title, 'Black bean tacos')
+    assert.equal(meal.data.note, 'One taco')
+    assert.deepEqual(meal.data.nutrition, { totals: { calories: 300 } })
+    assert.equal(meal.occurredAt, '2026-10-20T13:00:00.000Z')
+    const photoPath = path.join(parentRoot, 'synthetic.jpg')
+    await writeFile(photoPath, 'synthetic attachment')
+    const raw = await addMeal({ vaultRoot, photoPath })
+    const corrected = requireData((await runInProcessJsonCli<ShowResult & { entity: { title: string } }>(cli, [
+      'meal', 'edit', raw.mealId, '--note', 'Non-food object; not consumed.', '--vault', vaultRoot,
+    ])).envelope)
+    assert.equal(corrected.entity.title, 'Meal')
+    assert.equal(corrected.entity.data.note, 'Non-food object; not consumed.')
+    const payload = path.join(parentRoot, 'unnamed.json')
+    await writeFile(payload, JSON.stringify({ note: 'One bowl' }))
+    assert.equal((await runInProcessJsonCli(cli, ['meal', 'import-json', '--input', `@${payload}`, '--vault', vaultRoot])).exitCode, 1)
+  } finally { await rm(parentRoot, { recursive: true, force: true }) }
+})

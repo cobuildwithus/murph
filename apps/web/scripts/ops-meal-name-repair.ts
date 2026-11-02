@@ -3,14 +3,17 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { chromium, request as apiRequest, type APIRequestContext, type BrowserContext } from "@playwright/test";
-import { mealNameViolation, mealNamesRepairResultSchema, type MealNamesRepairResult } from "@murphai/contracts";
+import { mealNameViolation, mealNamesRepairResultSchema, parseMemberActionOutcomeV1, type MealNamesRepairResult } from "@murphai/contracts";
 import { prepareFeedbackProfile } from "./ops-feedback";
 
 class MealRepairRunnerError extends Error {}
+type RepairRequest = Pick<APIRequestContext, "fetch">;
+type OwnerContext = { cookies: BrowserContext["cookies"]; request: RepairRequest };
+type CompletedRepair = MealNamesRepairResult & { completedAt: string };
 
 const ORIGIN = "https://www.withmurph.ai";
 const ENDPOINT = `${ORIGIN}/api/ops/meal-name-repair`;
-async function api(request: APIRequestContext, url: string, body?: unknown): Promise<unknown> {
+async function api(request: RepairRequest, url: string, body?: unknown): Promise<unknown> {
   const response = await request.fetch(url, { method: body === undefined ? "GET" : "POST", data: body,
     headers: { Origin: ORIGIN, Accept: "application/json" }, maxRedirects: 0, maxRetries: 0, timeout: 30_000 });
   try {
@@ -24,7 +27,7 @@ function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new MealRepairRunnerError("Invalid response");
   return value as Record<string, unknown>;
 }
-async function runMember(request: APIRequestContext, target: string): Promise<MealNamesRepairResult> {
+async function runMember(request: RepairRequest, target: string): Promise<CompletedRepair> {
   for (let batch = 0; batch < 100000; batch++) {
     const query = `${ENDPOINT}?target=${encodeURIComponent(target)}&batch=${batch}`;
     let status = record(await api(request, query));
@@ -37,13 +40,14 @@ async function runMember(request: APIRequestContext, target: string): Promise<Me
       } while (status.status === "pending" && Date.now() < deadline);
     }
     if (status.status !== "applied") throw new MealRepairRunnerError("Repair batch did not complete; rerun to resume");
-    const result = mealNamesRepairResultSchema.parse(status.result);
-    if (result.done) return result;
+    const outcome = parseMemberActionOutcomeV1(status);
+    const result = mealNamesRepairResultSchema.parse(outcome.result);
+    if (result.done) return { ...result, completedAt: outcome.completedAt };
   }
   throw new MealRepairRunnerError("Repair batch limit reached");
 }
 
-async function nativeOwnerApi(context: BrowserContext): Promise<APIRequestContext> {
+async function nativeOwnerApi(context: OwnerContext): Promise<APIRequestContext> {
   // Reuse the signed-in account's own session in memory. Never persist or print credentials.
   const cookie = (await context.cookies(ORIGIN)).find(cookie => cookie.name === "__Host-murph-auth-session");
   const token = cookie ? decodeURIComponent(cookie.value).split(".")[0] : null;
@@ -60,17 +64,17 @@ async function readOwnerMeals(request: APIRequestContext) {
   });
   return { savedAt: result.savedAt, meals };
 }
-async function runOwner(context: BrowserContext) {
+export async function runOwner(context: OwnerContext) {
   const native = await nativeOwnerApi(context);
   try {
     const before = await readOwnerMeals(native);
     const result = await runMember(context.request, "owner");
     const deadline = Date.now() + 20 * 60_000;
     let after = await readOwnerMeals(native);
-    while (result.renamed > 0 && after.savedAt === before.savedAt && Date.now() < deadline) {
+    while (result.renamed > 0 && Date.parse(after.savedAt) < Date.parse(result.completedAt) && Date.now() < deadline) {
       await delay(10_000); after = await readOwnerMeals(native);
     }
-    if (result.renamed > 0 && after.savedAt === before.savedAt) throw new MealRepairRunnerError("Owner Meals projection has not refreshed");
+    if (result.renamed > 0 && Date.parse(after.savedAt) < Date.parse(result.completedAt)) throw new MealRepairRunnerError("Owner Meals projection has not refreshed");
     let preserved = 0;
     const fields = ["eatenAt", "calories", "proteinGrams", "carbsGrams", "fatGrams", "uploadId"];
     for (const meal of before.meals) {

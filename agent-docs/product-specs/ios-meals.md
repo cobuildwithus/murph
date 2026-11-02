@@ -437,7 +437,11 @@ Portable versioned progress under `.runtime/operations/meal-name-repair/v1.json`
 records the fixed scan boundary, cursor, pending revision-checked write and numeric
 batch receipts. Replaying a batch returns its original cumulative counts. A pending
 write is reconciled against the exact resulting revision before counting it; a
-concurrent edit is skipped. Foreground input preempts model work. Canonical reads
+concurrent edit is skipped. Foreground input preempts model work and the mailbox
+retains the accepted request with its existing retry deadline. Usage accounting
+explicitly disables member notice delivery. The operator client checks projection
+freshness against the recorded completion time so reruns need no new snapshot.
+Canonical reads
 reuse the existing vault event reader; provider/write work is bounded per batch.
 
 Deploy Web's compatible action/result readers first, converge the runtime consumer,

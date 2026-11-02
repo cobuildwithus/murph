@@ -53,5 +53,3 @@ export {
 export * from "./integration-ingest.ts";
 export * from "./junction-resources.ts";
 export * from "./lookup-id-families.ts";
-
-export * from "./meal-name.ts";
