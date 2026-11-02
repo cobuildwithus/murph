@@ -370,3 +370,463 @@ describe("Junction opt-in timeseries configuration", () => {
     })).toThrow(/unsupported resource/u);
   });
 });
+
+it("declares provider-owned job definitions for every built-in provider job kind", () => {
+  expect(getConfiguredDeviceSyncProviderJobDefinition("junction", "backfill")).toEqual({
+    payload: {
+      emptyBackfillAttempts: { kind: "number", includeInHostedHint: true },
+      historicalProofFirstSeenAt: { kind: "string", includeInHostedHint: true },
+      historicalProofSourceProviderSlug: { kind: "string", includeInHostedHint: true },
+      historicalProviderRecordsSeen: { kind: "boolean", includeInHostedHint: true },
+      historicalRecordsSeen: { kind: "boolean", includeInHostedHint: true },
+      sourceProviderSlug: { kind: "string", includeInHostedHint: true },
+      timeseriesCursor: { kind: "string", includeInHostedHint: true },
+      timeseriesResourceCursor: { kind: "string", includeInHostedHint: true },
+      timeseriesWindowHours: { kind: "number", includeInHostedHint: true },
+      workoutStreamCursor: { kind: "string", includeInHostedHint: true },
+      workoutStreamEmptySeen: { kind: "boolean", includeInHostedHint: true },
+      windowEnd: { kind: "string", includeInHostedHint: true },
+      windowStart: { kind: "string", includeInHostedHint: true },
+    },
+  });
+  expect(getConfiguredDeviceSyncProviderJobDefinition("junction", "reconcile")).toMatchObject({
+    payload: {
+      timeseriesResourceCursor: { kind: "string", includeInHostedHint: true },
+      timeseriesWindowHours: { kind: "number", includeInHostedHint: true },
+      workoutStreamCursor: { kind: "string", includeInHostedHint: true },
+      workoutStreamEmptySeen: { kind: "boolean", includeInHostedHint: true },
+    },
+  });
+  expect(getConfiguredDeviceSyncProviderJobDefinition("junction", "resource")).toMatchObject({
+    payload: {
+      workoutStreamCursor: { kind: "string", includeInHostedHint: true },
+      workoutStreamEmptyReplay: { kind: "boolean", includeInHostedHint: true },
+      workoutStreamEmptySeen: { kind: "boolean", includeInHostedHint: true },
+    },
+  });
+
+});
+
+it("lists a redacted provider catalog without runtime config or URLs", () => {
+  const catalog = listDeviceSyncProviderCatalog();
+
+  expect(catalog.map((provider) => provider.provider)).toEqual(configuredDeviceSyncProviderKeys);
+  for (const manifest of deviceSyncProviderManifests) {
+    const connection = resolveDeviceProviderConnectionDescriptor(manifest.descriptor);
+    expect(catalog.find((provider) => provider.provider === manifest.provider)).toMatchObject({
+      callbackPath: connection.callbackPath ?? null,
+      defaultScopes: [...(connection.defaultScopes ?? [])],
+    });
+  }
+  expect(catalog.find((provider) => provider.provider === "junction")).toMatchObject({
+    displayName: "Junction",
+    callbackPath: "/connect/junction/callback",
+    webhookPath: "/webhooks/junction",
+    supportsWebhooks: true,
+  });
+  expect(JSON.stringify(catalog)).not.toMatch(/clientSecret|clientId|readConfig/u);
+});
+
+it("reads configured providers and creates runtime providers through the manifest registry", () => {
+  const configs = readConfiguredDeviceSyncProviderConfigs({
+    JUNCTION_API_KEY: "sk_us_test_manifest",
+    JUNCTION_CLIENT_USER_ID_SECRET: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
+    JUNCTION_ENV: "sandbox",
+    JUNCTION_REGION: "us",
+  });
+
+  expect(Object.keys(configs).sort()).toEqual(["junction"]);
+
+  const providers = createConfiguredDeviceSyncProvidersFromConfigs(configs);
+
+  expect(providers.map((provider) => provider.provider)).toEqual(["junction"]);
+  expect(providers[0]?.credentialPolicy).toEqual({ kind: "provider_config", providerConfigKey: "junction" });
+});
+
+it("keeps public provider descriptors aligned with runtime provider descriptors", () => {
+  const configs = readConfiguredDeviceSyncProviderConfigs({
+    JUNCTION_API_KEY: "sk_us_test_manifest", JUNCTION_CLIENT_USER_ID_SECRET: "synthetic-secret",
+    JUNCTION_ENV: "sandbox", JUNCTION_REGION: "us",
+  });
+
+  const publicDescriptors = listConfiguredDeviceSyncPublicProviderDescriptors(configs);
+  const runtimeProviders = createConfiguredDeviceSyncProvidersFromConfigs(configs);
+
+  for (const runtimeProvider of runtimeProviders) {
+    const connection = resolveDeviceProviderConnectionDescriptor(runtimeProvider.descriptor);
+    expect(
+      publicDescriptors.find((descriptor) => descriptor.provider === runtimeProvider.provider),
+    ).toMatchObject({
+      defaultScopes: [
+        ...(connection.defaultScopes ?? []),
+      ],
+      provider: runtimeProvider.provider,
+    });
+  }
+
+  expect(runtimeProviders).toHaveLength(1);
+  expect(publicDescriptors).toHaveLength(1);
+  expect(publicDescriptors[0]?.credentialPolicy).toBe("provider_config");
+});
+
+it("round-trips serializable provider configs through manifest field specs", () => {
+  const cloned = cloneSerializableConfiguredDeviceSyncProviderConfigs({
+    junction: {
+      allowedLinkHosts: ["junction.com", "tryvital.io"],
+      apiKey: "sk_us_test_runtime",
+      clientUserIdNamespace: "e2e",
+      clientUserIdSecret: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
+      environment: "sandbox",
+      region: "us",
+      webhookSecret: "<REDACTED_WEBHOOK_SECRET>",
+      webhookTimestampToleranceMs: 300_000,
+      providerFilter: ["oura", "withings"],
+      summaryResources: ["profile", "activity"],
+      timeseriesResources: ["blood_oxygen", "stress_level"],
+      summaryBackfillDays: 180,
+      timeseriesBackfillDays: 14,
+      reconcileDays: 7,
+      reconcileIntervalMs: 3_600_000,
+      requestTimeoutMs: 10_000,
+    },
+
+  });
+
+  expect(cloned.junction).not.toHaveProperty("apiKey");
+  expect(cloned.junction).not.toHaveProperty("allowCustomBaseUrl");
+  expect(cloned.junction).not.toHaveProperty("baseUrl");
+  expect(cloned.junction).not.toHaveProperty("clientUserIdSecret");
+  expect(cloned.junction).not.toHaveProperty("timeseriesResources");
+  expect(cloned.junction).not.toHaveProperty("webhookSecret");
+  expect(cloned.junction).toMatchObject({
+    allowedLinkHosts: ["junction.com", "tryvital.io"],
+    clientUserIdNamespace: "e2e",
+    environment: "sandbox",
+    region: "us",
+    providerFilter: ["oura", "withings"],
+  });
+
+  expect(
+    parseSerializableConfiguredDeviceSyncProviderConfigs(
+      structuredClone(cloned),
+      "runtime.providerConfigs",
+    ),
+  ).toEqual(cloned);
+});
+
+it("rejects provider-owned admin secrets from serialized runtime config", () => {
+
+  expect(() =>
+    parseSerializableConfiguredDeviceSyncProviderConfigs(
+      {
+        junction: {
+          apiKey: "sk_us_test_runtime",
+        },
+      },
+      "runtime.providerConfigs",
+    ),
+  ).toThrow(/provider-owned API secret/);
+  expect(() =>
+    parseSerializableConfiguredDeviceSyncProviderConfigs(
+      {
+        junction: {
+          clientUserIdSecret: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
+        },
+      },
+      "runtime.providerConfigs",
+    ),
+  ).toThrow(/provider-owned HMAC secret/);
+  expect(() =>
+    parseSerializableConfiguredDeviceSyncProviderConfigs(
+      {
+        junction: {
+          webhookSecret: "<REDACTED_WEBHOOK_SECRET>",
+        },
+      },
+      "runtime.providerConfigs",
+    ),
+  ).toThrow(/provider-owned webhook secret/);
+});
+
+it("shapes hosted hint payloads from the provider manifest", () => {
+  const workoutStreamCursor = JSON.stringify({
+    v: 1,
+    i: [JSON.stringify(["garmin", "watch", "watch-1", "workout-1"])],
+  });
+  const timeseriesResourceCursor = "body_mass_index";
+  expect(
+    shapeHostedDeviceSyncJobHintPayload("junction", {
+      kind: "backfill",
+      payload: {
+        emptyBackfillAttempts: 2,
+        historicalProviderRecordsSeen: true,
+        historicalRecordsSeen: true,
+        resources: ["profile"],
+        timeseriesCursor: "2026-04-01T00:00:00.000Z",
+        timeseriesResourceCursor,
+        workoutStreamCursor,
+        windowEnd: "2026-04-22T00:00:00.000Z",
+        windowStart: "2026-01-22T00:00:00.000Z",
+      },
+    }),
+  ).toEqual({
+    emptyBackfillAttempts: 2,
+    historicalProviderRecordsSeen: true,
+    historicalRecordsSeen: true,
+    timeseriesCursor: "2026-04-01T00:00:00.000Z",
+    timeseriesResourceCursor,
+    workoutStreamCursor,
+    windowEnd: "2026-04-22T00:00:00.000Z",
+    windowStart: "2026-01-22T00:00:00.000Z",
+  });
+
+  expect(
+    shapeHostedDeviceSyncJobHintPayload("junction", {
+      kind: "resource",
+      payload: {
+        calendarRefreshDay: "2026-04-02",
+        resource: "water",
+        resourceCategory: "timeseries",
+        sourceInstanceId: "garmin-watch-1",
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+        workoutStreamEmptyReplay: true,
+        workoutStreamEmptySeen: true,
+        windowEnd: "2026-04-03T00:00:00.000Z",
+        windowStart: "2026-04-02T00:00:00.000Z",
+      },
+    }),
+  ).toEqual({
+    calendarRefreshDay: "2026-04-02",
+    resource: "water",
+    resourceCategory: "timeseries",
+    sourceInstanceId: "garmin-watch-1",
+    sourceProviderSlug: "garmin",
+    sourceType: "watch",
+    workoutStreamEmptyReplay: true,
+    workoutStreamEmptySeen: true,
+    windowEnd: "2026-04-03T00:00:00.000Z",
+    windowStart: "2026-04-02T00:00:00.000Z",
+  });
+
+  expect(
+    shapeHostedDeviceSyncJobHintPayload("junction", {
+      kind: "resource",
+      payload: {
+        eventType: "daily.data.activity.created",
+        historicalBackfillVersion: 2,
+        historicalProviderRecordsSeen: true,
+        historicalUnresolvedProviderRecordIdentitiesJson:
+          "{\"v\":1,\"i\":[\"blood-pressure-0123456789abcdef\",\"blood-pressure-fedcba9876543210\"]}",
+        historicalUnresolvedProviderRecordCount: 2,
+        ignored: "value",
+        objectId: "activity-1",
+        occurredAt: "2026-04-22T00:00:00.000Z",
+        resource: "activity",
+        resourceCategory: "summary",
+        sourceProviderSlug: "oura",
+        windowEnd: "2026-04-22T00:00:00.000Z",
+        windowStart: "2026-04-21T00:00:00.000Z",
+      },
+    }),
+  ).toEqual({
+    eventType: "daily.data.activity.created",
+    historicalBackfillVersion: 2,
+    historicalProviderRecordsSeen: true,
+    historicalUnresolvedProviderRecordIdentitiesJson:
+      "{\"v\":1,\"i\":[\"blood-pressure-0123456789abcdef\",\"blood-pressure-fedcba9876543210\"]}",
+    historicalUnresolvedProviderRecordCount: 2,
+    objectId: "activity-1",
+    occurredAt: "2026-04-22T00:00:00.000Z",
+    resource: "activity",
+    resourceCategory: "summary",
+    sourceProviderSlug: "oura",
+    windowEnd: "2026-04-22T00:00:00.000Z",
+    windowStart: "2026-04-21T00:00:00.000Z",
+  });
+
+  const companionBatchJson = JSON.stringify({
+    schemaVersion: 1,
+    records: [{
+      recordId: "a".repeat(64),
+      kind: "recovery_score",
+      value: 72,
+      startAt: "2026-04-21T04:00:00.000Z",
+      endAt: "2026-04-21T12:00:00.000Z",
+    }],
+  });
+  expect(
+    shapeHostedDeviceSyncJobHintPayload("junction", {
+      kind: "resource",
+      payload: {
+        eventType: JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+        occurredAt: "2026-04-22T00:00:00.000Z",
+        resource: JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
+        resourceCategory: "summary",
+        sourceProviderSlug: JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+        webhookDataJson: companionBatchJson,
+      },
+    }),
+  ).toEqual({
+    eventType: JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
+    occurredAt: "2026-04-22T00:00:00.000Z",
+    resource: JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
+    resourceCategory: "summary",
+    sourceProviderSlug: JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
+    webhookDataJson: companionBatchJson,
+  });
+
+});
+
+it("resolves typed manifests by provider key", () => {
+  expect(getConfiguredDeviceSyncProviderManifest("junction").provider).toBe("junction");
+});
+
+it("normalizes built-in job payloads through the manifest job definitions", () => {
+  expect(
+    normalizeConfiguredDeviceSyncJobInput("junction", {
+      kind: "backfill",
+      payload: {
+        windowEnd: "2026-04-22T00:00:00.000Z",
+        windowStart: "2026-04-01T00:00:00.000Z",
+      },
+    }, "test"),
+  ).toEqual({
+    kind: "backfill",
+    payload: {
+      windowEnd: "2026-04-22T00:00:00.000Z",
+      windowStart: "2026-04-01T00:00:00.000Z",
+    },
+  });
+
+  expect(
+    normalizeConfiguredDeviceSyncJobInput("junction", {
+      kind: "resource",
+      payload: {
+        calendarRefreshDay: "2026-04-02",
+        resource: "water",
+        resourceCategory: "timeseries",
+        sourceInstanceId: "garmin-watch-1",
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+        windowStart: "2026-04-02T00:00:00.000Z",
+      },
+    }, "test"),
+  ).toEqual({
+    kind: "resource",
+    payload: {
+      calendarRefreshDay: "2026-04-02",
+      resource: "water",
+      resourceCategory: "timeseries",
+      sourceInstanceId: "garmin-watch-1",
+      sourceProviderSlug: "garmin",
+      sourceType: "watch",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-02T00:00:00.000Z",
+    },
+  });
+
+  expect(
+    normalizeConfiguredDeviceSyncJobRecord("junction", {
+      id: "job-1",
+      provider: "junction",
+      accountId: "acct-1",
+      kind: "resource",
+      payload: {
+        eventType: "daily.data.activity.updated",
+        objectId: "activity-123",
+        resource: "activity",
+      },
+      priority: 90,
+      availableAt: "2026-04-22T00:00:00.000Z",
+      attempts: 0,
+      maxAttempts: 5,
+      dedupeKey: null,
+      status: "queued",
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      createdAt: "2026-04-22T00:00:00.000Z",
+      updatedAt: "2026-04-22T00:00:00.000Z",
+      startedAt: null,
+      finishedAt: null,
+    }, "test"),
+  ).toMatchObject({
+    kind: "resource",
+    payload: {
+      eventType: "daily.data.activity.updated",
+      objectId: "activity-123",
+      resource: "activity",
+    },
+  });
+});
+
+it("rejects built-in job payloads that drift from the provider manifest", () => {
+  expect(() =>
+    normalizeConfiguredDeviceSyncJobInput("junction", {
+      kind: "resource",
+      payload: {
+        resource: "sleep",
+        objectId: "sleep_123",
+        unexpected: true,
+      },
+    }, "test"),
+  ).toThrow(/not declared in the provider manifest/);
+
+  expect(() =>
+    normalizeConfiguredDeviceSyncJobRecord("junction", {
+      id: "job-2",
+      provider: "junction",
+      accountId: "acct-1",
+      kind: "resource",
+      payload: {
+        objectId: 123,
+        resource: "activity",
+      },
+      priority: 90,
+      availableAt: "2026-04-22T00:00:00.000Z",
+      attempts: 0,
+      maxAttempts: 5,
+      dedupeKey: null,
+      status: "queued",
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      createdAt: "2026-04-22T00:00:00.000Z",
+      updatedAt: "2026-04-22T00:00:00.000Z",
+      startedAt: null,
+      finishedAt: null,
+    }, "test"),
+  ).toThrow(/objectId must be a string/);
+});
+
+it("re-exports the manifest registry through the package root barrel", () => {
+  expect(rootConfiguredDeviceSyncProviderKeys).toEqual(configuredDeviceSyncProviderKeys);
+  expect(rootDeviceSyncProviderManifests).toEqual(deviceSyncProviderManifests);
+  expect(rootGetConfiguredDeviceSyncProviderManifest("junction")).toBe(
+    getConfiguredDeviceSyncProviderManifest("junction"),
+  );
+  expect(rootGetConfiguredDeviceSyncProviderJobDefinition("junction", "resource")).toBe(
+    getConfiguredDeviceSyncProviderJobDefinition("junction", "resource"),
+  );
+  expect(rootResolveConfiguredDeviceSyncProviderManifest("junction")).toBe(
+    getConfiguredDeviceSyncProviderManifest("junction"),
+  );
+});
+
+it("freezes exported manifest shapes so callers cannot mutate shared registry state", () => {
+  const junctionManifest = getConfiguredDeviceSyncProviderManifest("junction");
+
+  expect(Object.isFrozen(junctionManifest)).toBe(true);
+  expect(Object.isFrozen(junctionManifest.capabilities)).toBe(true);
+  expect(Object.isFrozen(junctionManifest.env)).toBe(true);
+  expect(Object.isFrozen(junctionManifest.env.configKeys)).toBe(true);
+  expect(Object.isFrozen(junctionManifest.jobs)).toBe(true);
+  expect(Object.isFrozen(junctionManifest.jobs.resource ?? {})).toBe(true);
+  expect(Object.isFrozen(junctionManifest.jobs.resource?.payload ?? {})).toBe(true);
+  expect(Object.isFrozen(junctionManifest.jobs.resource?.payload.objectId ?? {})).toBe(true);
+  expect(Object.isFrozen(junctionManifest.serializableFields)).toBe(true);
+});

@@ -68,7 +68,7 @@ test('manifest marks query as vault-backed while route is exempt', () => {
   assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('query'), true)
   assert.equal(collectVaultCliDescriptorRootCommandNames().includes('commons'), true)
   assert.equal(collectVaultCliDescriptorRootCommandNames().includes('route'), true)
-  assert.equal(collectVaultCliDescriptorRootCommandNames().includes('research'), true)
+  assert.equal(collectVaultCliDescriptorRootCommandNames().includes('research'), false)
   assert.equal(collectVaultCliDescriptorRootCommandNames().includes('deepthink'), false)
   assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('commons'), false)
   assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('research'), false)

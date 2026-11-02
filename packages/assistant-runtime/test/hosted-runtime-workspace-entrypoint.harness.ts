@@ -147,6 +147,27 @@ import {
 import { describe, expect, type Mock, test, vi } from "vitest";
 import { assertHostedVaultShareWorkerBuilt } from "./hosted-vault-share-worker-build.ts";
 
+// The shared mailbox fixture exercises one summary resource. Keep the real
+// Junction scheduler, executor and importer while excluding unrelated timeseries
+// backfills from these authority and concurrency proofs. Only the explicitly
+// named shared fixture is narrowed; custom Junction configurations keep their resources.
+vi.mock("@murphai/device-syncd/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@murphai/device-syncd/config")>();
+  return {
+    ...actual,
+    createConfiguredDeviceSyncProvidersFromConfigs: (
+      configs: Parameters<typeof actual.createConfiguredDeviceSyncProvidersFromConfigs>[0],
+    ) => actual.createConfiguredDeviceSyncProvidersFromConfigs({
+      ...configs,
+      ...(configs.junction?.apiKey === "sk_us_mailbox_fixture" ? { junction: {
+        ...configs.junction, apiBaseUrl: "https://junction.example.test",
+        summaryResources: ["sleep"], timeseriesResources: [], summaryBackfillDays: 1,
+        reconcileDays: 1, reconcileIntervalMs: 6 * 60 * 60_000,
+      } } : {}),
+    }),
+  };
+});
+
 type HasCompleteAssistantAutoReplyDeliveryTerminalEvidence = (
   input: {
     captureId?: string | null;
@@ -1991,9 +2012,13 @@ function createWorkspaceRuntimeJobInput(input: {
         ...TEST_HOSTED_CODEX_FORWARDED_ENV,
         ...(input.forwardedEnv ?? {}),
       },
-      ...(input.platformEnv === undefined
-        ? {}
-        : { platformEnv: input.platformEnv }),
+      platformEnv: input.platformEnv ?? (input.resolvedConfig?.deviceSync ? {
+        JUNCTION_API_KEY: "sk_us_mailbox_fixture",
+        JUNCTION_CLIENT_USER_ID_SECRET: "synthetic-client-secret",
+        JUNCTION_ENV: "sandbox",
+        JUNCTION_REGION: "us",
+        JUNCTION_API_BASE_URL: "https://junction.example.test",
+      } : {}),
       ...(input.resolvedConfig === undefined ? {} : { resolvedConfig: input.resolvedConfig }),
     },
   };
@@ -2105,6 +2130,26 @@ function createDeviceSyncResolvedConfig(): HostedAssistantRuntimeResolvedConfig 
   };
 }
 
+function buildJunctionSleepFixtureResponse(pathname: string, sleep?: {
+  id: string;
+  start: string;
+  end: string;
+  updated_at: string;
+}): Record<string, unknown> {
+  if (pathname.includes("/user/providers/")) {
+    return { providers: [{ slug: "whoop_v2", name: "WHOOP", status: "connected", resource_availability: { sleep: true } }] };
+  }
+  if (pathname.includes("/summary/sleep/")) {
+    return { sleep: sleep ? [{
+      id: sleep.id, date: `${sleep.end.slice(0, 10)}T00:00:00.000Z`,
+      calendar_date: sleep.end.slice(0, 10), bedtime_start: sleep.start, bedtime_stop: sleep.end,
+      duration: (Date.parse(sleep.end) - Date.parse(sleep.start)) / 1_000,
+      type: "long_sleep", updated_at: sleep.updated_at, source: { provider: "whoop_v2" },
+    }] : [] };
+  }
+  return { sleep_cycle: [], data: [] };
+}
+
 function createSnapshotDeviceSyncPort(input: {
   connectionId: string;
   connectionStatus?: "active" | "disconnected";
@@ -2114,9 +2159,11 @@ function createSnapshotDeviceSyncPort(input: {
 }): HostedRuntimeDeviceSyncPort & {
   readonly applyUpdatesCalls: number;
   readonly fetchSnapshotCalls: number;
+  readonly fetchSourceSnapshotCalls: number;
 } {
   let applyUpdatesCalls = 0;
   let fetchSnapshotCalls = 0;
+  let fetchSourceSnapshotCalls = 0;
   return {
     async ackDirtyStateProcessed() {
       throw new Error("Device sync dirty ack should not run in this e2e.");
@@ -2151,6 +2198,9 @@ function createSnapshotDeviceSyncPort(input: {
       };
     },
     async fetchSnapshot(request) {
+      // Junction additionally reads redacted source authority during execution.
+      // Track those explicitly as well as the total snapshot count.
+      if (request?.includeCredentialMaterial === false) fetchSourceSnapshotCalls += 1;
       fetchSnapshotCalls += 1;
       await input.onFetchSnapshot?.(request?.signal ?? null);
       return {
@@ -2160,25 +2210,30 @@ function createSnapshotDeviceSyncPort(input: {
               accessTokenExpiresAt: "2099-01-01T00:00:00.000Z",
               connectedAt: TEST_NOW,
               createdAt: TEST_NOW,
-              displayName: "Synthetic WHOOP",
+              displayName: "Synthetic Junction",
               externalAccountId: "synthetic-whoop-account",
               id: input.connectionId,
-              metadata: {},
-              provider: "whoop",
-              scopes: ["offline", "read:recovery", "read:sleep", "read:workout"],
+              metadata: {
+                junctionHistoricalBackfillStatus: "coverage_v3_complete",
+                junctionHistoricalBackfillWindowStart: "2026-04-26T00:00:00.000Z",
+                junctionHistoricalBackfillWindowEnd: "2026-04-27T00:00:00.000Z",
+              },
+              provider: "junction",
+              scopes: [],
               status: input.connectionStatus ?? "active",
               updatedAt: TEST_NOW,
             },
             credential: {
-              kind: "oauth_tokens",
-              tokenBundle: {
-                accessToken: "synthetic-access-token",
-                accessTokenExpiresAt: "2099-01-01T00:00:00.000Z",
-                keyVersion: "synthetic-key-version",
-                refreshToken: "synthetic-refresh-token",
-                tokenVersion: 1,
-              },
+              kind: "provider_config",
+              providerConfigKey: "junction",
+              credentialMetadata: {},
             },
+            sources: [{
+              sourceProviderSlug: "whoop_v2", displayName: "WHOOP", status: "connected",
+              firstSeenAt: TEST_NOW, lastSeenAt: TEST_NOW, lastDataAt: null,
+              resourceCount: 3, resourceAvailabilitySummary: { sleep: true, activity: true, workouts: true },
+              lastErrorCode: null, lastErrorMessage: null,
+            }],
             localState: {
               lastErrorCode: null,
               lastErrorMessage: null,
@@ -2194,6 +2249,7 @@ function createSnapshotDeviceSyncPort(input: {
         userId: TEST_USER_ID,
       };
     },
+    get fetchSourceSnapshotCalls() { return fetchSourceSnapshotCalls; },
     get fetchSnapshotCalls() {
       return fetchSnapshotCalls;
     },
@@ -2575,6 +2631,7 @@ async function runHostedWorkspaceRuntimeJobInProcess(
 }
 
 export {
+  buildJunctionSleepFixtureResponse,
   HOSTED_CONTAINER_CA_ENV_KEYS,
   HOSTED_UNSTABLE_PROCESS_ENV_KEYS,
   OPENAI_HTTPS_PROBE_SCRIPT,

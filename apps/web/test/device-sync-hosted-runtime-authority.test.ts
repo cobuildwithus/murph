@@ -66,6 +66,19 @@ const mocks = vi.hoisted(() => ({
   writeHostedRuntimeLogs: vi.fn(),
 }));
 
+// The authority tests exercise generic OAuth fencing with a synthetic configured
+// provider. Real Junction policy resolution remains in place for Junction cases.
+vi.mock("@murphai/device-syncd/provider-credential-policy", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@murphai/device-syncd/provider-credential-policy")>();
+  return {
+    ...actual,
+    resolveConfiguredDeviceSyncProviderCredentialPolicy: (provider: string) =>
+      provider === "demo"
+        ? { kind: "oauth_tokens" as const }
+        : actual.resolveConfiguredDeviceSyncProviderCredentialPolicy(provider),
+  };
+});
+
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
   createHostedDeviceSyncControlPlane: mocks.createHostedDeviceSyncControlPlane,
 }));
@@ -181,7 +194,7 @@ function buildHostedRecord(
       source: "hosted",
     },
     nextReconcileAt: null,
-    provider: "oura",
+    provider: "demo",
 
     providerConfigKey: null,
     providerAccountBlindIndex: "blind:acct_123",
@@ -2246,7 +2259,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     const currentSourceProviderSlug = "currentSourceProviderSlug" in scenario
       && typeof scenario.currentSourceProviderSlug === "string"
       ? scenario.currentSourceProviderSlug
-      : "oura";
+      : "demo";
     const connectionId = "conn_junction";
     const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
       connectionId,

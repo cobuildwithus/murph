@@ -158,7 +158,7 @@ function buildDeviceConnectionRecord(overrides: Partial<{
     accessTokenExpiresAt: null,
     connectedAt: new Date("2026-04-01T08:00:00.000Z"),
     createdAt: new Date("2026-04-01T08:00:00.000Z"),
-    credentialKind: "oauth_tokens" as const,
+    credentialKind: "provider_config" as const,
     credentialMetadataJson: {},
     displayName: null,
     externalAccountIdEncrypted: null,
@@ -172,9 +172,9 @@ function buildDeviceConnectionRecord(overrides: Partial<{
     lastWebhookAt: null,
     metadataJson: {},
     nextReconcileAt: null,
-    provider: "oura",
+    provider: "junction",
     providerAccountBlindIndex: null,
-    providerConfigKey: null,
+    providerConfigKey: "junction",
     refreshLeaseExpiresAt: null,
     refreshLeaseOwner: null,
     refreshLeaseTokenVersion: null,
@@ -280,11 +280,11 @@ describe("device sync settings routes", () => {
       "HOSTED_DEVICE_ROUTING_INDEX_KEY",
       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     );
-    vi.stubEnv("JUNCTION_API_KEY", "");
-    vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "");
-    vi.stubEnv("JUNCTION_ENV", "");
+    vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+    vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
+    vi.stubEnv("JUNCTION_ENV", "sandbox");
     vi.stubEnv("JUNCTION_PROVIDER_FILTER", "");
-    vi.stubEnv("JUNCTION_REGION", "");
+    vi.stubEnv("JUNCTION_REGION", "us");
     vi.stubEnv("DEVICE_SYNC_BACKFILL_DIAGNOSTIC_ENABLED", "true");
     vi.stubEnv(
       "DEVICE_SYNC_PUBLIC_BASE_URL",
@@ -361,12 +361,17 @@ describe("device sync settings routes", () => {
         lastSyncStartedAt: new Date("2026-04-03T06:55:00.000Z"),
         lastWebhookAt: new Date("2026-04-03T07:01:00.000Z"),
         nextReconcileAt: new Date("2026-04-03T16:00:00.000Z"),
-        provider: "oura",
+        provider: "junction",
         scopesJson: ["daily"],
         updatedAt: new Date("2026-04-03T07:05:00.000Z"),
       }),
     ]);
-    mocks.findManyDeviceConnectionSources.mockResolvedValue([]);
+    mocks.findManyDeviceConnectionSources.mockResolvedValue([
+      buildDeviceConnectionSourceRecord({
+        connectionId: "dsc_oura_123",
+        sourceProviderSlug: "oura",
+      }),
+    ]);
     mocks.findFirstDeviceConnection.mockResolvedValue(null);
     mocks.queryWhoopMembers.mockResolvedValue([]);
     mocks.diagnoseBackfill.mockResolvedValue({
@@ -434,7 +439,7 @@ describe("device sync settings routes", () => {
         lastWebhookAt: "2026-04-03T07:01:00.000Z",
         metadata: {},
         nextReconcileAt: "2026-04-03T16:00:00.000Z",
-        provider: "oura",
+        provider: "junction",
         scopes: ["daily"],
         status: "active",
         updatedAt: "2026-04-03T07:05:00.000Z",
@@ -457,7 +462,7 @@ describe("device sync settings routes", () => {
           lastWebhookAt: "2026-04-03T07:01:00.000Z",
           metadata: {},
           nextReconcileAt: "2026-04-03T16:00:00.000Z",
-          provider: "oura",
+          provider: "junction",
           scopes: ["daily"],
           status: "active",
           updatedAt: "2026-04-03T07:05:00.000Z",
@@ -468,7 +473,7 @@ describe("device sync settings routes", () => {
           callbackPath: "/oauth/oura/callback",
           callbackUrl: "https://join.example.test/oauth/oura/callback",
           defaultScopes: ["daily"],
-          provider: "oura",
+          provider: "junction",
           supportsWebhooks: true,
           webhookPath: "/webhooks/oura",
           webhookUrl: "https://join.example.test/webhooks/oura",
@@ -504,7 +509,7 @@ describe("device sync settings routes", () => {
     expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
     expect(mocks.listConfiguredDeviceSyncPublicProviderDescriptors).toHaveBeenCalledWith(
       expect.objectContaining({
-        oura: expect.any(Object),
+        junction: expect.any(Object),
       }),
       {
         publicBaseUrl: "https://join.example.test/api/device-sync",
@@ -521,7 +526,7 @@ describe("device sync settings routes", () => {
         {
           connectionId: expect.stringMatching(/^dspc_/),
           headline: "Connected and syncing normally",
-          provider: "oura",
+          provider: "junction",
           providerLabel: "Oura",
           statusLabel: "Connected",
           tone: "calm",
@@ -534,14 +539,19 @@ describe("device sync settings routes", () => {
     mocks.findManyDeviceConnections.mockResolvedValueOnce([
       buildDeviceConnectionRecord({
         id: "dsc_oura_123",
-        provider: "oura",
+        provider: "junction",
       }),
       buildDeviceConnectionRecord({
         id: "dsc_oura_456",
-        provider: "oura",
+        provider: "junction",
         updatedAt: new Date("2026-04-01T08:06:00.000Z"),
       }),
     ]);
+
+    mocks.findManyDeviceConnectionSources.mockResolvedValueOnce(
+      ["dsc_oura_123", "dsc_oura_456"].map((connectionId) =>
+        buildDeviceConnectionSourceRecord({ connectionId, sourceProviderSlug: "oura" })),
+    );
 
     const response = await settingsDeviceSyncRoute.GET(
       new Request("https://join.example.test/api/settings/device-sync"),
@@ -562,11 +572,11 @@ describe("device sync settings routes", () => {
       sources: [
         {
           connectionId: expect.stringMatching(/^dspc_/),
-          provider: "oura",
+          provider: "junction",
         },
         {
           connectionId: expect.stringMatching(/^dspc_/),
-          provider: "oura",
+          provider: "junction",
         },
       ],
     });
@@ -574,7 +584,7 @@ describe("device sync settings routes", () => {
 
   it("does not mark settings sources configured when authoritative provider config is invalid", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    vi.stubEnv("OURA_RECONCILE_DAYS", "soon");
+    vi.stubEnv("JUNCTION_RECONCILE_DAYS", "soon");
 
     try {
       const response = await settingsDeviceSyncRoute.GET(
@@ -637,7 +647,7 @@ describe("device sync settings routes", () => {
     expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
     expect(mocks.listConfiguredDeviceSyncPublicProviderDescriptors).toHaveBeenCalledWith(
       expect.objectContaining({
-        oura: expect.any(Object),
+        junction: expect.any(Object),
       }),
       {
         publicBaseUrl: "https://join.example.test/api/device-sync",
@@ -713,14 +723,19 @@ describe("device sync settings routes", () => {
     mocks.findManyDeviceConnections.mockResolvedValueOnce([
       buildDeviceConnectionRecord({
         id: "dsc_oura_123",
-        provider: "oura",
+        provider: "junction",
       }),
       buildDeviceConnectionRecord({
         id: "dsc_oura_456",
-        provider: "oura",
+        provider: "junction",
         updatedAt: new Date("2026-04-01T08:06:00.000Z"),
       }),
     ]);
+
+    mocks.findManyDeviceConnectionSources.mockResolvedValueOnce(
+      ["dsc_oura_123", "dsc_oura_456"].map((connectionId) =>
+        buildDeviceConnectionSourceRecord({ connectionId, sourceProviderSlug: "oura" })),
+    );
 
     const response = await settingsDeviceSyncSidebarStatusRoute.GET(
       new Request("https://join.example.test/api/settings/device-sync/sidebar-status"),
@@ -1288,23 +1303,23 @@ describe("device sync settings routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("set-cookie")).toContain("murph-device-sync-oura=");
+    expect(response.headers.get("set-cookie")).toContain("murph-device-sync-junction=");
     expect(mocks.prepareConnectionStart).toHaveBeenCalledWith(
       "member_123",
       expect.objectContaining({
         connectSourceId: "oura",
         connectTarget: "oura",
-        provider: "oura",
+        provider: "junction",
       }),
     );
     expect(mocks.startConnection).toHaveBeenCalledWith(
       "member_123",
-      "oura",
+      "junction",
       "/device-sync/connect/complete?source=connect&connectSource=oura&connectTarget=oura",
       {
         connectSourceId: "oura",
         connectTarget: "oura",
-        sourceProviderSlug: null,
+        sourceProviderSlug: "oura",
       },
     );
     await expect(response.json()).resolves.toEqual({
@@ -1379,7 +1394,7 @@ describe("device sync settings routes", () => {
     );
   });
 
-  it("uses an explicit provider selector when a visible source has direct and Junction targets", async () => {
+  it("uses an explicit provider selector for a provider-labelled Junction source", async () => {
     vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
     vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
     vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
@@ -1471,7 +1486,7 @@ describe("device sync settings routes", () => {
     expect(mocks.startConnection).not.toHaveBeenCalled();
   });
 
-  it("allows a new member to take the 98th tracked WHOOP slot through direct OAuth", async () => {
+  it("allows a new member to take the 98th tracked WHOOP slot through Junction", async () => {
     vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
     vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
     mocks.queryWhoopMembers.mockResolvedValueOnce(
@@ -1496,12 +1511,12 @@ describe("device sync settings routes", () => {
     expect(response.status).toBe(200);
     expect(mocks.startConnection).toHaveBeenCalledWith(
       "member_123",
-      "whoop",
+      "junction",
       "/device-sync/connect/complete?source=connect&connectSource=whoop&connectTarget=whoop",
       {
         connectSourceId: "whoop",
         connectTarget: "whoop",
-        sourceProviderSlug: null,
+        sourceProviderSlug: "whoop_v2",
       },
     );
   });
@@ -1529,12 +1544,12 @@ describe("device sync settings routes", () => {
     expect(response.status).toBe(200);
     expect(mocks.startConnection).toHaveBeenCalledWith(
       "member_123",
-      "whoop",
+      "junction",
       "/device-sync/connect/complete?source=connect&connectSource=whoop&connectTarget=whoop",
       {
         connectSourceId: "whoop",
         connectTarget: "whoop",
-        sourceProviderSlug: null,
+        sourceProviderSlug: "whoop_v2",
       },
     );
     expect(mocks.queryWhoopMembers).not.toHaveBeenCalled();
@@ -1578,7 +1593,7 @@ describe("device sync settings routes", () => {
   });
 
   it("reports malformed hosted connect provider config as a server configuration failure", async () => {
-    vi.stubEnv("OURA_CLIENT_SECRET", "");
+    vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "");
 
     const response = await connectSourceStartRoute.POST(
       createJsonPostRequest(
@@ -1736,7 +1751,7 @@ describe("device sync settings routes", () => {
       ok: true,
       source: {
         connectionId: OURA_PUBLIC_CONNECTION_ID,
-        provider: "oura",
+        provider: "junction",
         statusLabel: "Connected",
         tone: "calm",
       },
@@ -1744,6 +1759,10 @@ describe("device sync settings routes", () => {
   });
 
   it("keeps upstream source context on connection status lookups", async () => {
+    vi.stubEnv("JUNCTION_API_KEY", "");
+    vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "");
+    vi.stubEnv("JUNCTION_ENV", "");
+    vi.stubEnv("JUNCTION_REGION", "");
     mocks.findManyDeviceConnections.mockResolvedValueOnce([
       buildDeviceConnectionRecord({
         displayName: "Junction",

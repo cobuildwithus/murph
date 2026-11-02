@@ -59,20 +59,22 @@ describe("device-sync root route", () => {
       "HOSTED_DEVICE_ROUTING_INDEX_KEY",
       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     );
-    vi.stubEnv("OURA_CLIENT_ID", "oura-client");
-    vi.stubEnv("OURA_CLIENT_SECRET", "oura-secret");
+    vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+    vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
+    vi.stubEnv("JUNCTION_ENV", "sandbox");
+    vi.stubEnv("JUNCTION_REGION", "us");
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       describeProviders: mocks.describeProviders,
     });
     mocks.describeProviders.mockReturnValue([
       {
-        callbackPath: "/oauth/oura/callback",
-        callbackUrl: "https://join.example.test/oauth/oura/callback",
+        callbackPath: "/connect/junction/callback",
+        callbackUrl: "https://join.example.test/connect/junction/callback",
         defaultScopes: ["daily"],
-        provider: "oura",
+        provider: "junction",
         supportsWebhooks: true,
-        webhookPath: "/webhooks/oura",
-        webhookUrl: "https://join.example.test/webhooks/oura",
+        webhookPath: "/webhooks/junction",
+        webhookUrl: "https://join.example.test/webhooks/junction",
       },
     ]);
   });
@@ -94,15 +96,15 @@ describe("device-sync root route", () => {
       ok: true,
       providers: [
         {
-          callbackPath: "/oauth/oura/callback",
-          callbackUrl: "https://join.example.test/api/device-sync/oauth/oura/callback",
-          connectionKind: "oauth2",
-          credentialPolicy: "oauth_tokens",
-          defaultScopes: ["personal", "daily", "workout", "session", "spo2"],
-          provider: "oura",
+          callbackPath: "/connect/junction/callback",
+          callbackUrl: "https://join.example.test/api/device-sync/connect/junction/callback",
+          connectionKind: "external_link",
+          credentialPolicy: "provider_config",
+          defaultScopes: [],
+          provider: "junction",
           supportsWebhooks: true,
-          webhookPath: "/webhooks/oura",
-          webhookUrl: "https://join.example.test/api/device-sync/webhooks/oura",
+          webhookPath: "/webhooks/junction",
+          webhookUrl: "https://join.example.test/api/device-sync/webhooks/junction",
         },
       ],
     });
@@ -110,7 +112,7 @@ describe("device-sync root route", () => {
 
   it("does not advertise providers when authoritative provider config is invalid", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    vi.stubEnv("OURA_RECONCILE_DAYS", "soon");
+    vi.stubEnv("JUNCTION_RECONCILE_DAYS", "soon");
 
     try {
       const response = await deviceSyncRootRoute.GET(
@@ -134,7 +136,7 @@ describe("device-sync root route", () => {
 
   it("maps route wrapper request errors to a no-store JSON error", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+    vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "");
 
     try {
       const response = await deviceSyncRootRoute.GET(

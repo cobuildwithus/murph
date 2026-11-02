@@ -355,3 +355,165 @@ test("runtime config from an older Web drops retired direct providers and still 
     /config\.polar is not a supported device-sync provider config/u,
   );
 });
+
+test("createConfiguredDeviceSyncRegistry assembles the configured providers in descriptor order", () => {
+  const registry = createConfiguredDeviceSyncRegistry({
+    JUNCTION_API_KEY: "sk_us_test_config", JUNCTION_CLIENT_USER_ID_SECRET: "synthetic-secret",
+    JUNCTION_ENV: "sandbox", JUNCTION_REGION: "us",
+  });
+
+  assert.deepEqual(
+    registry.list().map((provider) => provider.provider),
+    ["junction"],
+  );
+});
+
+test("configuredDeviceSyncProviderKeys follow the shared descriptor order", () => {
+  assert.deepEqual(configuredDeviceSyncProviderKeys, ["junction"]);
+});
+
+test("legacy Garmin env does not configure a direct provider", () => {
+  const env = {
+    GARMIN_API_BASE_URL: "https://apis.garmin.com/wellness-api/rest",
+    GARMIN_CLIENT_ID: "garmin-client-id",
+    GARMIN_CLIENT_SECRET: "garmin-client-secret",
+    ...createDeviceSyncEnv(),
+  };
+
+  assert.deepEqual(readConfiguredDeviceSyncProviderConfigs(env), {});
+
+});
+
+test("shared provider-config helpers preserve descriptor order and report presence", () => {
+  const configs = readConfiguredDeviceSyncProviderConfigs({
+    JUNCTION_API_KEY: "sk_us_test_config", JUNCTION_CLIENT_USER_ID_SECRET: "synthetic-secret",
+    JUNCTION_ENV: "sandbox", JUNCTION_REGION: "us",
+  });
+
+  assert.equal(hasConfiguredDeviceSyncProviderConfigs({}), false);
+  assert.equal(hasConfiguredDeviceSyncProviderConfigs(configs), true);
+  assert.deepEqual(listConfiguredDeviceSyncProviderNames(configs), ["junction"]);
+});
+
+test("shared provider runtime env key lists stay aligned with the configured providers", () => {
+  assert.deepEqual(deviceSyncProviderRuntimeSecretEnvKeys, [
+    "JUNCTION_API_KEY",
+    "JUNCTION_CLIENT_USER_ID_SECRET",
+    "JUNCTION_WEBHOOK_SECRET",
+  ]);
+  assert.deepEqual(deviceSyncProviderRuntimeVariableEnvKeys, [
+    "JUNCTION_API_BASE_URL",
+    "JUNCTION_CLIENT_USER_ID_NAMESPACE",
+    "JUNCTION_ENV",
+    "JUNCTION_PROVIDER_FILTER",
+    "JUNCTION_PUSH_SOURCE_RECOVERY_ENABLED",
+    "JUNCTION_RECONCILE_DAYS",
+    "JUNCTION_RECONCILE_INTERVAL_MS",
+    "JUNCTION_REGION",
+    "JUNCTION_REQUEST_TIMEOUT_MS",
+    "JUNCTION_SUMMARY_BACKFILL_DAYS",
+    "JUNCTION_SUMMARY_RESOURCES",
+    "JUNCTION_TIMESERIES_BACKFILL_DAYS",
+    "JUNCTION_WEBHOOK_TIMESTAMP_TOLERANCE_MS",
+  ]);
+});
+
+const junctionRuntimeConfig = {
+  environment: "sandbox" as const,
+  region: "us" as const,
+  providerFilter: ["oura", "whoop_v2"],
+};
+const junctionRuntimeEnv = {
+  JUNCTION_API_KEY: "sk_us_test_config",
+  JUNCTION_CLIENT_USER_ID_SECRET: "synthetic-secret",
+  JUNCTION_ENV: "sandbox",
+  JUNCTION_REGION: "us",
+  JUNCTION_PROVIDER_FILTER: "oura,whoop_v2",
+};
+
+test("cloneSerializableConfiguredDeviceSyncProviderConfigs strips provider-only runtime fields", () => {
+  const cloned = cloneSerializableConfiguredDeviceSyncProviderConfigs({
+    junction: { ...junctionRuntimeConfig, apiKey: "sk_us_synthetic", clientUserIdSecret: "synthetic-secret",
+      fetchImpl: fetch, webhookSecret: "synthetic-webhook-secret", timeseriesResources: ["steps"] },
+  });
+  assert.deepEqual(cloned, { junction: junctionRuntimeConfig });
+});
+
+test("readConfiguredDeviceSyncRuntimeConfig keeps only the shared hosted runtime subset", () => {
+  const runtimeConfig = readConfiguredDeviceSyncRuntimeConfig({
+    ...junctionRuntimeEnv,
+    DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
+    DEVICE_SYNC_SECRET: "runtime-codec-secret",
+    JUNCTION_WEBHOOK_SECRET: "synthetic-webhook-secret",
+  });
+  assert.deepEqual(runtimeConfig, {
+    providerConfigs: { junction: junctionRuntimeConfig },
+    publicBaseUrl: "https://device-sync.example.test",
+    secret: "runtime-codec-secret",
+  });
+  assert.equal(Object.hasOwn(requireValue(runtimeConfig).providerConfigs.junction ?? {}, "webhookSecret"), false);
+});
+
+test("parseConfiguredDeviceSyncRuntimeConfig accepts the shared hosted runtime shape", () => {
+  const parsed = parseConfiguredDeviceSyncRuntimeConfig({
+    providerConfigs: { junction: junctionRuntimeConfig },
+    publicBaseUrl: "https://device-sync.example.test", secret: "codec-secret",
+  }, "runtime.deviceSync");
+  assert.equal(parsed.publicBaseUrl, "https://device-sync.example.test");
+  assert.equal(parsed.secret, "codec-secret");
+  assert.deepEqual(parsed.providerConfigs.junction, junctionRuntimeConfig);
+});
+
+test("parseConfiguredDeviceSyncRuntimeConfig rejects unknown top-level runtime fields", () => {
+  assert.throws(() => parseConfiguredDeviceSyncRuntimeConfig({
+    providerConfigs: { junction: junctionRuntimeConfig },
+    publicBaseUrl: "https://device-sync.example.test", secret: "codec-secret", unexpectedField: "nope",
+  }, "runtime.deviceSync"), /runtime\.deviceSync\.unexpectedField/u);
+});
+
+test("readConfiguredDeviceSyncRuntimeConfig returns null when hosted runtime prerequisites are incomplete", () => {
+  assert.equal(readConfiguredDeviceSyncRuntimeConfig({
+    ...junctionRuntimeEnv, DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
+  }), null);
+  assert.deepEqual(readConfiguredDeviceSyncRuntimeConfig({
+    DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test", DEVICE_SYNC_SECRET: "runtime-codec-secret",
+  }), { providerConfigs: {}, publicBaseUrl: "https://device-sync.example.test", secret: "runtime-codec-secret" });
+  assert.throws(() => readConfiguredDeviceSyncRuntimeConfig({
+    DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test", DEVICE_SYNC_SECRET: "runtime-codec-secret",
+    JUNCTION_API_KEY: "sk_us_synthetic",
+  }), /Junction configuration is incomplete/u);
+});
+
+test("cloneConfiguredDeviceSyncRuntimeConfig preserves the runtime-safe shape and clones arrays", () => {
+  const config = { providerConfigs: { junction: junctionRuntimeConfig },
+    publicBaseUrl: "https://device-sync.example.test", secret: "runtime-codec-secret" };
+  const cloned = cloneConfiguredDeviceSyncRuntimeConfig(config);
+  assert.deepEqual(cloned, config);
+  assert.notEqual(cloned.providerConfigs.junction?.providerFilter, config.providerConfigs.junction.providerFilter);
+});
+
+test("parseSerializableConfiguredDeviceSyncProviderConfigs parses the hosted runtime subset", () => {
+  const input = { junction: { ...junctionRuntimeConfig, apiBaseUrl: "https://junction.example.test",
+    allowedLinkHosts: ["junction.example.test"], clientUserIdNamespace: "test", summaryBackfillDays: 21,
+    timeseriesBackfillDays: 14, reconcileDays: 7, reconcileIntervalMs: 7_200_000, requestTimeoutMs: 30_000,
+    summaryResources: ["sleep", "activity"], webhookTimestampToleranceMs: 60_000,
+    pushSourceRecoveryEnabled: true } };
+  assert.deepEqual(parseSerializableConfiguredDeviceSyncProviderConfigs(input, "runtime.providerConfigs"), input);
+});
+
+test("parseSerializableConfiguredDeviceSyncProviderConfigs rejects unknown providers and runtime-only fields", () => {
+  assert.throws(() => parseSerializableConfiguredDeviceSyncProviderConfigs({ fitbit: {} }, "runtime.providerConfigs"),
+    /runtime\.providerConfigs\.fitbit is not a supported device-sync provider config/u);
+  for (const [field, value, message] of [
+    ["fetchImpl", "not-serializable", /junction\.fetchImpl is not supported in serialized runtime config/u],
+    ["providerFilter", ["oura", ""], /junction\.providerFilter\[1\] must be a non-empty string/u],
+    ["apiKey", "sk_us_synthetic", /provider-owned API secret/u],
+    ["clientUserIdSecret", "synthetic-secret", /provider-owned HMAC secret/u],
+    ["webhookSecret", "synthetic-secret", /provider-owned webhook secret/u],
+    ["mysteriousField", "nope", /junction\.mysteriousField is not a supported serialized provider config field/u],
+  ] as const) {
+    assert.throws(() => parseSerializableConfiguredDeviceSyncProviderConfigs({
+      junction: { ...junctionRuntimeConfig, [field]: value },
+    }, "runtime.providerConfigs"), message);
+  }
+});

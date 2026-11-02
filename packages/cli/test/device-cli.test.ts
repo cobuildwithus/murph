@@ -425,3 +425,35 @@ function respondJson(
   response.setHeader('Content-Length', Buffer.byteLength(body))
   response.end(body)
 }
+
+test.sequential('hosted device connect retains its generated return target option schema', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-cli-'))
+
+  try {
+    const connectSchema = JSON.parse(
+      await runSourceDeviceCliRaw([
+        'device',
+        'connect',
+        'whoop',
+        '--vault',
+        vaultRoot,
+        '--schema',
+        '--format',
+        'json',
+      ]),
+    ) as {
+      options: {
+        properties: Record<string, {
+          description?: string
+        }>
+      }
+    }
+
+    assert.match(
+      String(connectSchema.options.properties.returnTo?.description ?? ''),
+      /root-relative path/u,
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})

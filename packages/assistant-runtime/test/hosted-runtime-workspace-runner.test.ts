@@ -11902,7 +11902,7 @@ async function waitForCondition(predicate: () => boolean, timeoutMs = 1_000): Pr
 }
 
 // This composes the real workspace runner and automation lane, mailbox owner,
-// WHOOP provider, importer, WriteBatch/receipt persistence, and query. The engine
+// Junction provider with WHOOP-labelled data, importer, WriteBatch/receipt persistence, and query. The engine
 // pass is a held model stand-in and device HTTP is synthetic. Cross-process projection coherence is a separate query
 // owner requirement: these reads intentionally start after the commit settles.
 describe("foreground device ingestion", () => {
@@ -12079,7 +12079,7 @@ describe("foreground device ingestion", () => {
       assert.ok(eventId);
       assert.ok(await readEvent({ vaultRoot: fixture.vaultRoot, eventId }));
       await rebuildQueryProjection(fixture.vaultRoot);
-      assert.ok((await listMetricPoints(fixture.vaultRoot, { limit: null })).some((point) => point.metricKey === "readiness-score"));
+      assert.ok((await listMetricPoints(fixture.vaultRoot, { limit: null })).some((point) => point.metricKey === "sleep-score"));
       assert.ok(fixture.receiptCounts.length > 0, "canonical publication must be durable before ack");
       assert.equal(fixture.acks.length, 0);
       for (const effect of fixture.effects.splice(0)) await effect();
@@ -12130,10 +12130,10 @@ describe("foreground device ingestion", () => {
         assert.equal(failJob.mock.calls.length, 0);
         const records = await readIntegrationIngestEntries(fixture.vaultRoot);
         assert.ok(records.some((entry) => entry.record.id === prior.id));
-        assert.ok(records.some((entry) => entry.record.provider === "whoop"));
+        assert.ok(records.some((entry) => entry.record.provider === "junction"));
         assert.deepEqual((await readHostedMediaReferenceCatalogue({ vaultRoot: fixture.vaultRoot })).entries, []);
         await rebuildQueryProjection(fixture.vaultRoot);
-        assert.ok((await listMetricPoints(fixture.vaultRoot, { limit: null })).some((point) => point.metricKey === "readiness-score"));
+        assert.ok((await listMetricPoints(fixture.vaultRoot, { limit: null })).some((point) => point.metricKey === "sleep-score"));
         for (const effect of fixture.effects.splice(0)) await effect();
         assert.deepEqual(fixture.acks[0]?.processedDirtyPayloadIds, ["payload_concurrent"]);
         assert.notEqual(createHash("sha256").update(await readFile(path.join(fixture.vaultRoot, relativePath))).digest("hex"), cold.sha256);
@@ -12420,6 +12420,9 @@ describe("foreground device ingestion", () => {
 
 async function createForegroundDeviceFixture(limitPerLane = 10, history?: { now: string; start: string; end: string }) {
   const now = history?.now ?? TEST_NOW;
+  const sleepStart = history?.start ?? "2026-04-24T22:00:00.000Z";
+  const sleepEnd = history?.end ?? "2026-04-25T06:00:00.000Z";
+  const sleepDay = sleepEnd.slice(0, 10);
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "synthetic-concurrent-device-"));
   await initializeVault({ createdAt: now, vaultRoot, timezone: "UTC" });
   const authority = new AbortController();
@@ -12466,7 +12469,7 @@ async function createForegroundDeviceFixture(limitPerLane = 10, history?: { now:
             lastSyncErrorAt: null, lastSyncStartedAt: null, lastWebhookAt: null,
             nextReconcileAt: "2099-01-01T00:00:00.000Z",
           },
-          sources: [{ sourceProviderSlug: "whoop_v2", displayName: null, status: "connected", resourceCount: 1, resourceAvailabilitySummary: { sleep: true }, lastErrorCode: null, lastErrorMessage: null, firstSeenAt: TEST_NOW, lastSeenAt: TEST_NOW, lastDataAt: null }],
+          sources: [{ sourceProviderSlug: "whoop_v2", displayName: null, status: "connected", resourceCount: 1, resourceAvailabilitySummary: { sleep: true }, lastErrorCode: null, lastErrorMessage: null, firstSeenAt: now, lastSeenAt: now, lastDataAt: null }],
         }],
         generatedAt: now, userId: TEST_USER_ID,
       };
@@ -12477,7 +12480,7 @@ async function createForegroundDeviceFixture(limitPerLane = 10, history?: { now:
         items: [{
           connectionId: "connection_concurrent", dirtyRevision: "7", processedRevision: "0",
           dirtyResources: [{ count: 1, dirtyPayloadId: "payload_concurrent", jobKind: "resource",
-            payload: { resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop_v2", windowStart: "2026-04-24T00:00:00.000Z", windowEnd: "2026-04-26T00:00:00.000Z" },
+            payload: { resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop_v2", windowStart: sleepStart, windowEnd: sleepEnd },
             resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop",
             windowEnd: null, windowStart: null }],
           eventCount: "1", latestDirtyAt: now, provider: "junction",
@@ -12641,7 +12644,7 @@ async function createForegroundDeviceFixture(limitPerLane = 10, history?: { now:
       }
       const response = url.pathname.includes("/user/providers/")
         ? { providers: [{ slug: "whoop_v2", name: "WHOOP", status: "connected", resource_availability: { sleep: true } }] }
-        : { sleep: [{ id: "sleep_concurrent", user_id: "synthetic_device", date: "2026-04-25T00:00:00.000Z", calendar_date: "2026-04-25", bedtime_start: history?.start ?? "2026-04-24T22:00:00.000Z", bedtime_stop: history?.end ?? "2026-04-25T06:00:00.000Z", type: "long_sleep", duration: 28800, total: 27000, awake: 1800, light: 15000, rem: 6000, deep: 6000, score: 72, created_at: now, updated_at: now, source: { provider: "whoop_v2" } }] };
+        : { sleep: [{ id: "sleep_concurrent", user_id: "synthetic_device", date: `${sleepDay}T00:00:00.000Z`, calendar_date: sleepDay, bedtime_start: sleepStart, bedtime_stop: sleepEnd, type: "long_sleep", duration: 28800, total: 27000, awake: 1800, light: 15000, rem: 6000, deep: 6000, score: 72, created_at: now, updated_at: now, source: { provider: "whoop_v2" } }] };
       return new Response(JSON.stringify(response), { headers: { "content-type": "application/json" } });
     } finally {
       fixture.activeProviderRequests -= 1;

@@ -1132,6 +1132,7 @@ test('real source-cause food responses preserve CLI output and distinguish sourc
   vi.stubEnv('MURPH_DATA_API_KEY', 'PRIVATE_SENTINEL')
   vi.spyOn(process, 'loadEnvFile').mockImplementation(() => {})
   vi.spyOn(performance, 'now').mockReturnValue(0)
+  vi.useFakeTimers({ toFake: ['Date'] })
   const { syntheticOats } = await import('./fixtures/food-label-response.ts')
   const labels = await import('../src/food-labels.ts')
   const { VaultCliError } = await import('@murphai/operator-config/vault-cli-errors')

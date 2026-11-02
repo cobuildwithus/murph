@@ -11,6 +11,7 @@ import type { HostedRuntimeDeviceSyncPort } from "../src/hosted-runtime-contract
 import { createEmptyHostedMailboxImportState } from "../src/hosted-runtime/mailbox-state.ts";
 import { enqueueHostedSystemMailboxItem } from "../src/hosted-runtime/system-mailbox.ts";
 import {
+  buildJunctionSleepFixtureResponse,
   TEST_NOW, TEST_USER_ID, createDeferred, createDeviceSyncResolvedConfig,
   createMailboxItem, createMailboxPort, createPlatform,
   createResolvedDeviceSyncSystemMailboxItem, createSnapshotDeviceSyncPort,
@@ -62,14 +63,14 @@ test.each(["completed", "quiesced", "no-progress"] as const)(
     vi.setSystemTime(new Date(TEST_NOW));
     const providerFetch: typeof fetch = async (request) => {
       const url = new URL(request instanceof Request ? request.url : String(request));
-      assert.equal(url.origin, "https://whoop.example.test");
+      assert.equal(url.origin, "https://junction.example.test");
       const pathname = url.pathname;
       events.push(`provider.fetch:${pathname}`);
-      return new Response(JSON.stringify(pathname.endsWith("/synthetic-progress-sleep") ? {
-        id: "synthetic-progress-sleep", nap: false,
+      return new Response(JSON.stringify(buildJunctionSleepFixtureResponse(pathname, {
+        id: "synthetic-progress-sleep",
         start: "2026-04-26T00:30:00.000Z", end: "2026-04-26T07:30:00.000Z",
         updated_at: "2026-04-26T08:00:00.000Z",
-      } : { records: [] }), { headers: { "content-type": "application/json" }, status: 200 });
+      })), { headers: { "content-type": "application/json" }, status: 200 });
     };
     vi.stubGlobal("fetch", providerFetch);
     try {
@@ -79,7 +80,7 @@ test.each(["completed", "quiesced", "no-progress"] as const)(
         wake: {
           connectionId, eventId: deviceItem.dedupeKey, expectedConnectedAt: TEST_NOW,
           hint: { occurredAt: TEST_NOW, reason: "webhook_dirty_transition" },
-          kind: "device-sync.wake", occurredAt: TEST_NOW, provider: "whoop",
+          kind: "device-sync.wake", occurredAt: TEST_NOW, provider: "junction",
           reason: "webhook_hint", userId: TEST_USER_ID,
         },
       });
@@ -146,11 +147,11 @@ test.each(["completed", "quiesced", "no-progress"] as const)(
               connectionId, dirtyRevision: "7", processedRevision: "0",
               dirtyResources: [{
                 count: 1, dirtyPayloadId: "synthetic-progress-payload", jobKind: "resource",
-                payload: { resourceType: "sleep", resourceId: "synthetic-progress-sleep" },
+                payload: { resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop_v2", objectId: "synthetic-progress-sleep" },
                 resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop",
                 windowEnd: null, windowStart: null,
               }],
-              eventCount: "1", latestDirtyAt: TEST_NOW, provider: "whoop",
+              eventCount: "1", latestDirtyAt: TEST_NOW, provider: "junction",
               resourceCategoryCounts: { summary: 1 }, sourceProviderCounts: { whoop: 1 },
               userId: TEST_USER_ID, windowEnd: null, windowStart: null,
             }],
@@ -203,7 +204,16 @@ test.each(["completed", "quiesced", "no-progress"] as const)(
             assert.equal(handled.size, 2, "Fresh foreground input must run before the background snapshot boundary.");
             assert.equal(await readFile(path.join(vaultRoot, "audit/progress-generation.md"), "utf8"), "second write\n");
             const rows = await listCanonicalEntities(vaultRoot, { family: "event" });
-            assert.equal(rows.some((row) => JSON.stringify(row.attributes).includes("synthetic-progress-sleep")), scenario !== "no-progress");
+            assert.deepEqual(rows.filter((row) => row.kind === "sleep_session").map((row) => ({
+              occurredAt: row.occurredAt, startAt: row.attributes.startAt,
+              endAt: row.attributes.endAt, durationMinutes: row.attributes.durationMinutes,
+              dataOrigin: row.attributes.dataOrigin,
+            })), scenario === "no-progress" ? [] : [{
+              occurredAt: "2026-04-26T07:30:00.000Z", startAt: "2026-04-26T00:30:00.000Z",
+              endAt: "2026-04-26T07:30:00.000Z", durationMinutes: 420,
+              dataOrigin: { version: 1, aggregatorProvider: "junction", sourceProviderSlug: "whoop-v2",
+                normalizerVersion: "junction-normalizer.v1", observedAtRaw: "2026-04-26T00:00:00.000Z", timestampSemantics: "utc" },
+            }]);
             const snapshot = await createVaultSnapshotBundle({ vaultRoot });
             artifacts.set(snapshot.hash, snapshot.bytes);
             return { snapshotRef: snapshot.snapshotRef };

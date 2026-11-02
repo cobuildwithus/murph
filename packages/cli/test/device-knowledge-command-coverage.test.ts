@@ -58,7 +58,7 @@ const deviceBaseUrl = 'http://127.0.0.1:45123'
 
 const connectedAccount: DeviceAccountShowResult['account'] = {
   id: 'acct_oura_01',
-  provider: 'oura',
+  provider: 'junction',
   externalAccountId: 'oura-user-1',
   displayName: 'Oura Test Account',
   status: 'active',
@@ -99,11 +99,11 @@ function createDeviceCommandServices() {
     baseUrl: deviceBaseUrl,
     providers: [
       {
-        provider: 'oura',
-        callbackPath: '/oauth/oura/callback',
-        callbackUrl: `${deviceBaseUrl}/oauth/oura/callback`,
-        webhookPath: '/webhooks/oura',
-        webhookUrl: `${deviceBaseUrl}/webhooks/oura`,
+        provider: 'junction',
+        callbackPath: '/connect/junction/callback',
+        callbackUrl: `${deviceBaseUrl}/connect/junction/callback`,
+        webhookPath: '/webhooks/junction',
+        webhookUrl: `${deviceBaseUrl}/webhooks/junction`,
         supportsWebhooks: true,
         defaultScopes: ['email', 'personal', 'daily'],
       },
@@ -114,14 +114,14 @@ function createDeviceCommandServices() {
     status: 'ok',
     kind: 'device_connect_link',
     backend: 'hosted',
-    provider: 'oura',
+    provider: 'junction',
     expiresAt: '2026-04-08T01:00:00.000Z',
     connectUrl: 'https://connect.example.test/oura',
   }
 
   const accountListResult: DeviceAccountListResult = {
     baseUrl: deviceBaseUrl,
-    provider: 'oura',
+    provider: 'junction',
     accounts: [connectedAccount],
   }
 
@@ -135,7 +135,7 @@ function createDeviceCommandServices() {
     account: connectedAccount,
     job: {
       id: 'job_oura_01',
-      provider: 'oura',
+      provider: 'junction',
       accountId: connectedAccount.id,
       kind: 'reconcile',
       payload: {
@@ -235,7 +235,7 @@ test('device commands route every verb through the registered device service gro
   ])
   assert.equal(providers.exitCode, null)
   assert.equal(providers.envelope.ok, true)
-  assert.equal(providers.envelope.data.providers[0]?.provider, 'oura')
+  assert.equal(providers.envelope.data.providers[0]?.provider, 'junction')
   assert.deepEqual(calls.listProviders, {
     vault: vaultRoot,
     baseUrl: deviceBaseUrl,
@@ -274,7 +274,7 @@ test('device commands route every verb through the registered device service gro
     '--base-url',
     deviceBaseUrl,
     '--provider',
-    'oura',
+    'junction',
   ])
   assert.equal(accounts.exitCode, null)
   assert.equal(accounts.envelope.ok, true)
@@ -282,7 +282,7 @@ test('device commands route every verb through the registered device service gro
   assert.deepEqual(calls.listAccounts, {
     vault: vaultRoot,
     baseUrl: deviceBaseUrl,
-    provider: 'oura',
+    provider: 'junction',
   })
 
   const shown = await runInProcessJsonCli<DeviceAccountShowResult>(cli, [
@@ -297,7 +297,7 @@ test('device commands route every verb through the registered device service gro
   ])
   assert.equal(shown.exitCode, null)
   assert.equal(shown.envelope.ok, true)
-  assert.equal(shown.envelope.data.account.provider, 'oura')
+  assert.equal(shown.envelope.data.account.provider, 'junction')
   assert.deepEqual(calls.showAccount, {
     vault: vaultRoot,
     baseUrl: deviceBaseUrl,

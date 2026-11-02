@@ -9,6 +9,7 @@ import {
   createPlatform,
   createResolvedDeviceSyncSystemMailboxItem,
   createSnapshotDeviceSyncPort,
+  buildJunctionSleepFixtureResponse,
   createVaultSnapshotBundle,
   createWorkspacePort,
   createWorkspaceRuntimeJobInput,
@@ -125,17 +126,13 @@ test.each([
   vi.stubGlobal("fetch", vi.fn(async (request: string | URL | Request) => {
     const url = new URL(request instanceof Request ? request.url : String(request));
     const pathname = url.pathname;
-    if (url.hostname === "whoop.example.test") {
-      // The reconcile pass reads each scoped WHOOP collection once; only sleep has a record.
+    if (url.hostname === "junction.example.test") {
+      // The real Junction reconcile imports WHOOP-labelled sleep.
       events.push("device.provider:" + pathname);
-      return new Response(JSON.stringify({
-        next_token: null,
-        records: pathname.endsWith("/v2/activity/sleep") ? [{
-          id: SLEEP_ID, nap: false, score_state: "SCORED",
-          start: "2026-04-26T00:30:00.000Z", end: SLEEP_END,
-          updated_at: "2026-04-26T08:00:00.000Z",
-        }] : [],
-      }), { headers: { "content-type": "application/json" }, status: 200 });
+      return new Response(JSON.stringify(buildJunctionSleepFixtureResponse(pathname, {
+        id: SLEEP_ID, start: "2026-04-26T00:30:00.000Z", end: SLEEP_END,
+        updated_at: "2026-04-26T08:00:00.000Z",
+      })), { headers: { "content-type": "application/json" }, status: 200 });
     }
     if (pathname.includes("/messages/synthetic-system-recording-reply")) return new Response(null, { status: 204 });
     assert.ok(pathname.endsWith("/messages"));
@@ -357,7 +354,7 @@ test.each([
           wake: {
             connectionId: CONNECTION_ID, eventId: deviceItem.dedupeKey, expectedConnectedAt: TEST_NOW,
             hint: { nextReconcileAt: TEST_NOW, occurredAt: TEST_NOW },
-            kind: "device-sync.wake", occurredAt: TEST_NOW, provider: "whoop", reason: "reconcile_due", userId: TEST_USER_ID,
+            kind: "device-sync.wake", occurredAt: TEST_NOW, provider: "junction", reason: "reconcile_due", userId: TEST_USER_ID,
           },
         });
         events.push("device.staged");
@@ -392,8 +389,12 @@ test.each([
     assert.equal(events.includes("replica.publish"), false);
     const providerReads = () => events.filter((event) => event.startsWith("device.provider:"));
     const admittedProviderReads = providerReads();
-    assert.ok(admittedProviderReads.includes("device.provider:/developer/v2/activity/sleep"), facts());
-    assert.ok(events.indexOf("device.provider:/developer/v2/activity/sleep") < events.indexOf("system.recording.checkpoint"), facts());
+    // Junction verifies source authority around admission; credentials are hydrated once.
+    assert.equal(deviceSyncPort.fetchSourceSnapshotCalls, 4, facts());
+    assert.equal(deviceSyncPort.fetchSnapshotCalls - deviceSyncPort.fetchSourceSnapshotCalls, 1, facts());
+    const admittedSnapshotReads = deviceSyncPort.fetchSnapshotCalls;
+    assert.ok(admittedProviderReads.includes("device.provider:/v2/summary/sleep/synthetic-whoop-account"), facts());
+    assert.ok(events.indexOf("device.provider:/v2/summary/sleep/synthetic-whoop-account") < events.indexOf("system.recording.checkpoint"), facts());
     initialSystemOwner = false;
     vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-system-recording-foreground-replacement-"));
     roots.push(vaultRoot);
@@ -455,7 +456,7 @@ test.each([
     }
     // Cold restores record the checkpointed import; they never re-read the provider.
     assert.deepEqual(providerReads(), admittedProviderReads, facts());
-    assert.equal(deviceSyncPort.fetchSnapshotCalls, 1, facts());
+    assert.equal(deviceSyncPort.fetchSnapshotCalls, admittedSnapshotReads, facts());
     if (scenario === "scheduler-refresh" || scenario.startsWith("refresh-")) {
       assert.ok(refreshWakeSent, facts());
     }
