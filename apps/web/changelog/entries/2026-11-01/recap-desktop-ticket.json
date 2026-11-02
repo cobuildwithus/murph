@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-01",
+  "order": 120,
+  "item": {
+    "id": "recap-desktop-ticket",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "A ticket to your recap",
+    "summary": "Recap links on a computer now open a story card with a gold ticket to scan with your iPhone.",
+    "details": "The layout stacks in narrow windows. iPhone and iPad visitors keep the same Open in Murph handoff.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": []
+  }
+}

@@ -71,7 +71,7 @@ export function GameInviteStudy() {
       <div id="game-recap-iphone" className="max-w-md bg-background px-6 py-7 text-foreground" inert>
         <GameRecapView appUrl="ai.withmurph.app://recap/game_synthetic" />
       </div>
-      <div id="game-recap" className="max-w-md bg-background px-6 py-7 text-foreground" inert>
+      <div id="game-recap" className="bg-background text-foreground" inert>
         <GameRecapView recapUrl="https://www.withmurph.ai/recap/game_synthetic" />
       </div>
       <p className="max-w-2xl text-sm leading-6 text-muted-foreground">

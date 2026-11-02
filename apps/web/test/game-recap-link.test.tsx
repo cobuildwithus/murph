@@ -1,3 +1,4 @@
+import { parseHTML } from "linkedom";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -45,8 +46,10 @@ describe("public recap handoff", () => {
   ])("renders the desktop QR handoff for UA %s", async (userAgent) => {
     requestHeaders.userAgent = userAgent;
     const html = renderToStaticMarkup(await GameRecapPage({ params: Promise.resolve({ gameId: id }) }));
-    expect(html).toContain("Your recap is in Murph.");
-    expect(html).toContain("Scan with your iPhone camera to watch it.");
+    const { document } = parseHTML(html);
+    expect(document.querySelector("h1")?.textContent).toBe("Your week, in pictures.");
+    expect([...document.querySelectorAll("p")].map((p) => p.textContent)).toContain("Scan the ticket with your iPhone camera to watch it in Murph.");
+    expect(document.querySelector('[role="img"] svg')).not.toBeNull();
     expect(html).toContain("No Murph yet?");
     expect(html).toContain("Get it on the App Store");
     expect(html).toContain('<svg');
@@ -67,7 +70,8 @@ describe("public recap handoff", () => {
     expect(html).toContain("Open in Murph");
     expect(html).toContain(`href="ai.withmurph.app://recap/${id}"`);
     expect(html).not.toContain("<svg");
-    expect(html).not.toContain("Scan with your iPhone camera");
+    expect(html).toContain("Your recap is in Murph.");
+    expect(html).not.toContain("Scan the ticket");
   });
 
   it.each(["short", "a".repeat(65), "game/other", "game?query", "game%2Fother", "game%", "game<script>"])("404s malformed ID %s", async (gameId) => {
