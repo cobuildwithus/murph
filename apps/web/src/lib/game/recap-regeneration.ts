@@ -44,7 +44,7 @@ export async function requestGameRecapRegeneration(input: GameRecapRegenerationR
     // uncertain. Accepted/delivered receipts already own their provider identity.
     const key = createHostedLinqDeliveryIdempotencyLookupKey(latest?.commandKey ?? gameChatLifecycleEventId(input.gameId, "recap"));
     const delivery = key ? await tx.hostedLinqDelivery.findUnique({ where: { idempotencyKey: key }, select: { status: true } }) : null;
-    if (delivery && !["accepted", "delivered", "read", "skipped"].includes(delivery.status)) return result("delivery_pending");
+    if (delivery && !["accepted", "delivered", "read", "sent_no_receipt_expected", "skipped"].includes(delivery.status)) return result("delivery_pending");
     if (latest && !delivery) return result("delivery_unavailable");
     if (!input.execute) return result("would_regenerate");
     await tx.gameEvent.create({ data: { gameId: input.gameId, actor: input.operatorMemberId,
