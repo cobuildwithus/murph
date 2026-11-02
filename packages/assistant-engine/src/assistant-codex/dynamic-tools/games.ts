@@ -16,7 +16,7 @@ export const MURPH_READ_GAME_RECAP_TOOL = {
 } as const
 export const MURPH_WRITE_RECAP_TOOL = {
   namespace: 'murph', name: 'write_recap',
-  description: 'Save the recap for this finished game. Returns ok, or a list of problems to fix (unknown entries, a quote that is not verbatim, text over its limit, banned words). Fix every problem and call it again; the last accepted call is what the players see.',
+  description: 'Save the recap for this finished game. Include superlatives only when read_game supplies both player memberIds: exactly one {memberId, title, line} each. Titles finish “Most likely to…” but omit those heading words from title; use 2–6 words, at most 80 characters, no trailing period, and differ between players. Each line is one short warm teasing sentence, at most 160 characters. Ground both only in this game’s entries and text both players can see: their posts, words, timing, streaks, shared excuses and tasks. Never invent details, use private information, be mean, or joke about bodies or weight. Invalid superlatives are dropped without failing the story. Returns ok, or a list of problems to fix (unknown entries, a quote that is not verbatim, text over its limit, banned words). Fix every problem and call it again; the last accepted call is what the players see.',
   inputSchema: { type: 'object', additionalProperties: false, required: ['pages', 'chatLine'], properties: {
     pages: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['background', 'blocks'], properties: {
       background: { type: 'string', enum: ['night', 'paper', 'sage', 'sienna', 'slate'] },
@@ -26,6 +26,8 @@ export const MURPH_WRITE_RECAP_TOOL = {
         text: { type: 'string' }, statValue: { type: 'string' },
         quote: { type: 'object', additionalProperties: false, required: ['who', 'text'], properties: { who: { type: 'string' }, text: { type: 'string' }, date: { type: 'string' } } },
       } } },
+    } } }, superlatives: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'object', additionalProperties: false, required: ['memberId', 'title', 'line'], properties: {
+      memberId: { type: 'string' }, title: { type: 'string', maxLength: 80 }, line: { type: 'string', maxLength: 160 },
     } } }, scoreLine: { type: 'string' }, chatLine: { type: 'string' },
   } },
 } as const
@@ -54,7 +56,7 @@ export const MURPH_UPDATE_GAME_TOOL = {
     }, required: ['kind'] },
   }, required: ['messageRef', 'operation', 'gameId'] },
 } as const
-export const GAME_PHOTO_CHAT_GUIDANCE = 'In iMessage game groups, a clear current photo relevant to the sender’s own challenge can introduce saving a check-in once per person. Read_game first with that sender’s current messageRef; only when photoCheckIn.introductionAvailable and that player has no current post, call game_photo operation=offer for that exact photo. Only an offer result permits one brief question, such as “Want me to use this as your check-in photo?” A suppressed offer stays quiet. Ordinary unrelated photos and conversation clearly between people stay quiet. This is permission for this photo only, never automatic future saving. After introduction, later unsolicited photos stay quiet. An explicit save request acts without redundant consent; a contextual yes to the pending offer saves that selected photo only. A no dismisses it. Never save another person’s photo, backdate, or claim the image verifies task completion. If today already has a post, replacing consumes the one retake: ask first unless replacement was explicitly requested, then pass its exact currentEntryId. Respect the current check-in kind returned by read_game; games with any allow photo artifacts. If a legacy game requires another kind, explain the server restriction.'
+export const GAME_PHOTO_CHAT_GUIDANCE = 'In iMessage game groups, a clear current photo relevant to the sender’s own challenge can introduce saving a check-in once per person. Read_game first with that sender’s current messageRef; only when photoCheckIn.introductionAvailable and that player has no current post, call game_photo operation=offer for that exact photo. Only an offer result permits one brief question, such as “Want me to use this as your check-in photo?” A suppressed offer stays quiet. Ordinary unrelated photos and conversation clearly between people stay quiet. This is permission for this photo only, never automatic future saving. After introduction, later unsolicited photos stay quiet. An explicit save request acts without redundant consent; a contextual yes to the pending offer saves that selected photo only. A no dismisses it. Never save another person’s photo, backdate, or claim the image verifies task completion. If today already has a post, replacing consumes the one retake: ask first unless replacement was explicitly requested, then pass its exact currentEntryId. On DAY_CLOSED for a day off, credit the effort in one brief, kind reply, name the day off and the next game day from the refusal (or say no game days remain). Do not retry, offer an app workaround, or claim the post counted or was saved. Respect the current check-in kind returned by read_game; games with any allow photo artifacts. If a legacy game requires another kind, explain the server restriction.'
 export const MURPH_GAME_PHOTO_TOOL = {
   namespace: 'murph', name: 'game_photo',
   description: `${GAME_PHOTO_CHAT_GUIDANCE} This tool supports iMessage/Linq only. Read_game before acting. messageRef identifies the current requesting sender. For a new photo, sourceMessageRef and attachmentOrdinal identify one exact accepted attachment from that sender in this room today. For yes/no to a pending offer, omit those selectors so the server uses the stored selection. Offer records an introduction attempt, not delivery or a saved photo; write the question only when photoOutcome=offer. Only photoOutcome=saved confirms a check-in. If bytes are unavailable, ask them to resend a JPEG/HEIC photo or use the app. Do not mention internal IDs, flags, transport, or stored source references.`,
@@ -85,7 +87,7 @@ export function readGameDynamicToolRequest(input: { arguments: unknown; tool: st
     return parsed.ok ? { kind: 'game' as const, request: { action: 'game_lore' as const, ...parsed.args } } : { kind: 'invalid-game-arguments' as const, validationDigest: parsed.validationDigest }
   }
   if (input.tool === 'write_recap') {
-    const parsed = parseDynamicToolArguments({ schema: hostedGameRecapSchema, value: input.arguments, schemaRootKeys: ['pages', 'scoreLine', 'chatLine'], toolName: 'murph.write_recap' })
+    const parsed = parseDynamicToolArguments({ schema: hostedGameRecapSchema, value: input.arguments, schemaRootKeys: ['pages', 'scoreLine', 'chatLine', 'superlatives'], toolName: 'murph.write_recap' })
     return parsed.ok ? { kind: 'game' as const, request: { action: 'write_recap' as const, recap: parsed.args } } : { kind: 'invalid-game-arguments' as const, validationDigest: parsed.validationDigest }
   }
   if (input.tool === 'read_game') {

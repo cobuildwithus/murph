@@ -30,6 +30,17 @@ describe("game photo accepted-source bridge", () => {
     authorize.mockResolvedValue({ actor: "player_synthetic", wake: wake() });
   });
   afterEach(() => vi.useRealTimers());
+  it("returns the shared off-day refusal before downloading or writing", async () => {
+    m.posting.mockResolvedValue({ ...(await m.posting()), scheduled: false, offDayMessage: "Saturday's a day off. Back Monday." });
+    expect(await handleGameChatPhoto(input("save"))).toEqual({ status: "rejected", error: "DAY_CLOSED: Saturday's a day off. Back Monday." });
+    expect(m.download).not.toHaveBeenCalled();
+    expect(m.run).not.toHaveBeenCalled();
+    expect(m.update).not.toHaveBeenCalled();
+  });
+  it("preserves a command refusal if the day closes while downloading", async () => {
+    m.run.mockResolvedValueOnce({ ok: false, error: { code: "DAY_CLOSED", message: "Saturday's a day off. Back Monday." } });
+    expect(await handleGameChatPhoto(input("save"))).toEqual({ status: "rejected", error: "DAY_CLOSED: Saturday's a day off. Back Monday." });
+  });
   it("does not dismiss another game's pending offer", async () => {
     m.profile.mockResolvedValue({ chatPhotoIntroducedAt: now, chatPhotoOffer: offer });
     const request = input("dismiss", false);

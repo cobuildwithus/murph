@@ -524,6 +524,22 @@ function excuseDay(state: RuleState, player: RulePlayer, now: Date): number {
   return reject("DAY_CLOSED", "There's no missed day to excuse.");
 }
 
+/** Shared app/chat refusal, using the player's game date and versioned terms. */
+export function gameOffDayMessage(state: RuleState, player: RulePlayer, dayIndex: number): string | null {
+  const date = addDays(player.dayOne!, dayIndex);
+  const schedule = termsForDay(state.game.terms, dayIndex).schedule;
+  if ("count" in schedule || schedule.days.includes(weekdayOf(date))) return null;
+  const weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  const day = weekdays[weekdayOf(date)];
+  for (let next = dayIndex + 1; next < state.game.lengthDays; next += 1) {
+    const nextDate = addDays(player.dayOne!, next);
+    if (firstScheduledDate(nextDate, termsForDay(state.game.terms, next).schedule) === nextDate) {
+      return `${day}'s a day off. Back ${weekdays[weekdayOf(nextDate)]}.`;
+    }
+  }
+  return `${day}'s a day off. No game days left.`;
+}
+
 /**
  * Which day a photo counts for. Normally today. In the hour after a player's
  * 3am boundary, a post captured before that boundary (by the phone's
@@ -545,6 +561,8 @@ function postingDay(state: RuleState, player: RulePlayer, captureAgeMs: number |
   }
   if (today < 0) reject("DAY_CLOSED", "Day 1 hasn't started yet.");
   if (today >= lengthDays) reject("DAY_CLOSED", "This game is over.");
+  const offDay = gameOffDayMessage(state, player, today);
+  if (offDay) reject("DAY_CLOSED", offDay);
   // A shot the phone kept from an earlier day never counts for today.
   if (captureAgeMs !== null) {
     const dayStart = dayStartInstant(addDays(player.dayOne!, today), player.timeZone).getTime();

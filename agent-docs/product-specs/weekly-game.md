@@ -191,6 +191,19 @@ this default without deleting other people's private contact choices.
   permanent after a non-excuse attempt, including withdrawal. Recap reveals
   every live artifact to the game's players. Excuses remain private to their
   owner.
+- **Days off.** A new post on an unscheduled game day is refused with HTTP
+  409 `DAY_CLOSED`, after applying eligible scheduled-yesterday offline grace.
+  Dates use the posting player's time zone and 3 AM boundary. Count schedules
+  have no off days. The message names the day and next scheduled day under its
+  effective terms: "Saturday's a day off. Back Monday." If the game has no
+  scheduled days remaining, it says "Saturday's a day off. No game days left."
+  No entry is saved and no locked artifact is created. Chat photo saves return
+  the same code and message; Murph credits the effort briefly, explains the day
+  off and next game day, and neither retries nor claims credit.
+  The exact HTTP body is:
+  ```json
+  {"error":{"code":"DAY_CLOSED","message":"Saturday's a day off. Back Monday.","retryable":false}}
+  ```
 - **Offline grace.** In the hour after a player's 3am boundary, a photo the
   phone says it captured before the boundary (monotonic capture age, with 30
   seconds of slack) counts for the day that just ended, if that was a scheduled
@@ -240,7 +253,7 @@ this default without deleting other people's private contact choices.
   lines and three-word phrase reuse from earlier `Chat line used:` lore entries,
   returning the fixed correction messages for a retry. The accepted recap is
   sealed on the game row and both players receive
-  `recap: { pages, scoreLine?, chatLine } | null` in `GameView`. After one
+  `recap: { pages, scoreLine?, chatLine, superlatives? } | null` in `GameView`. After one
   accepted `write_recap`, the runtime replaces any model-authored final copy
   with the server-returned delivery text: the sealed `chatLine`, a newline,
   then `Watch the recap: <public origin>/recap/<gameId>`. Web derives it on save
@@ -261,6 +274,29 @@ this default without deleting other people's private contact choices.
   is stored, including on replay. This needs no database migration or split PR.
   Deploy the runtime response reader with the larger delivery-text bound before
   Web starts composing links; the old 160-character reader rejects long messages.
+- **Recap superlatives.** Murph supplies one optional pair in the existing
+  sealed recap. Each `memberId` is an exact player ID from `read_game`; the app
+  maps IDs regardless of viewer orientation. The title finishes "Most likely
+  to…" without repeating those heading words, uses 2–6 words, at most 80 characters, and has no trailing period. Titles
+  differ case-insensitively. Each line is one short warm teasing sentence of
+  1–160 characters. Grounding is limited to this game's entries and text both
+  players can see: posts, words, timing, streaks, shared excuses and tasks.
+  Never invent a detail, expose private context, insult, or joke about bodies
+  or weight. Invalid shape, lengths, duplicate titles, duplicate/unknown IDs or
+  an incomplete roster drop the whole optional field without failing the recap.
+  Old recaps and fallback stories omit it; the app retains its existing rule.
+  Exact additive JSON (synthetic example):
+  ```json
+  {"superlatives":[{"memberId":"player_first","title":"Give the mat tenure","line":"The purple mat made every appearance."},{"memberId":"player_second","title":"Recruit the laundry basket","line":"The laundry basket supervised every set."}]}
+  ```
+  The [iOS contract](ios-game.md) owns client mapping and wire examples.
+  Deploy Web first: it accepts both shapes and returns a legacy-shaped recap
+  to writers that omit superlatives, including replay of a newer saved story.
+  The composed instructions request the field only when the tool supports it.
+  Then deploy the runtime producer. New runtimes also require read_game's player
+  IDs before producing the field. Once saved, compatible Web is the rollback
+  floor; old strict Web readers cannot read these sealed records.
+
 - **Operator recap regeneration.** An authenticated, allowlisted operator may
   reserve one settled game's recap again through `POST /api/ops/game-recap`, with
   same-origin mutation protection. `scripts/ops-game-recap --game-id <GAME_ID>

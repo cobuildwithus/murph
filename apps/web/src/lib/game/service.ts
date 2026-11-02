@@ -54,6 +54,7 @@ import {
   GAME_MAX_LENGTH_DAYS,
   GAME_SEATS_1V1,
   GameRuleError,
+  gameOffDayMessage,
   isGameDue,
   isGameInviteExpired,
   isTicketExpired,
@@ -1487,7 +1488,7 @@ export async function readGameRecapMaterial(gameId: string, containerMemberId: s
     validation: { startedAt: row.startedAt ?? row.createdAt, settledAt: row.settledAt,
       playerNamesByMemberId: row.players.map((player) => ({ memberId: player.memberId, name: names.get(player.memberId) ?? "" })),
       result: result.scores.map((score) => ({ memberId: score.memberId, name: names.get(score.memberId) ?? "", score: score.score })) },
-    game: { id: row.id, players: row.players.map((player) => ({ name: names.get(player.memberId) ?? "", task: terms.tasks.find((task) => task.seat === player.seat)?.text ?? "" })),
+    game: { id: row.id, players: row.players.map((player) => ({ memberId: player.memberId, name: names.get(player.memberId) ?? "", task: terms.tasks.find((task) => task.seat === player.seat)?.text ?? "" })),
       lengthDays: row.lengthDays, schedule: terms.schedule, stakes: terms.stakes, score: result.scores.map((score) => ({ name: names.get(score.memberId) ?? "", score: score.score })), days: postsByDay },
   };
 }
@@ -1557,7 +1558,7 @@ export async function readGamePhotoPostingStateTx(tx: Prisma.TransactionClient, 
   const now = gameNow(await databaseNow(tx), loaded.row);
   const dayIndex = dayIndexAt(player, now);
   if (dayIndex === null || dayIndex < 0 || dayIndex >= loaded.row.lengthDays || !player.dayOne) return null;
-  return { now, dayIndex, player, scheduled: isScheduledDay(loaded.state, dayIndex),
+  return { now, dayIndex, player, scheduled: isScheduledDay(loaded.state, dayIndex), offDayMessage: gameOffDayMessage(loaded.state, player, dayIndex),
     checkInKind: currentTerms(loaded.state.game.terms).checkInKind ?? "photo",
     currentEntryId: liveEntry(loaded.state.entries, actor, dayIndex)?.id ?? null,
     attemptsRemaining: Math.max(0, 2 - attemptsUsed(loaded.state.entries, actor, dayIndex)) };

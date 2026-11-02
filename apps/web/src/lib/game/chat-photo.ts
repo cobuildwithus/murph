@@ -51,7 +51,7 @@ export async function handleGameChatPhoto(input: Input): Promise<PhotoResult> {
       } });
     },
   });
-  if (!result.ok) return rejected(result.error.code);
+  if (!result.ok) return rejected(`${result.error.code}: ${result.error.message}`.slice(0, 128));
   return { status: "ok", photoOutcome: "saved" };
 }
 
@@ -70,7 +70,7 @@ async function preparePhotoTx(input: Input, tx: Prisma.TransactionClient): Promi
   }
   const posting = await readGamePhotoPostingStateTx(tx, input.photo.gameId, input.actor);
   if (!posting || posting.checkInKind === "heart_rate") return { result: rejected("photo_check_in_unavailable") };
-  if (!posting.scheduled) return { result: rejected("not_a_scheduled_day") };
+  if (!posting.scheduled) return { result: rejected(`DAY_CLOSED: ${posting.offDayMessage}`) };
   const selection = await selectGamePhoto(input, tx, profile.chatPhotoOffer, posting);
   if ("result" in selection) return selection;
   if (input.photo.operation === "offer") return recordPhotoIntroduction(input, tx, profile.chatPhotoIntroducedAt, posting, selection.offer);

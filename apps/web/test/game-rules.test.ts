@@ -474,14 +474,15 @@ describe("weekly game: posting", () => {
 
 describe("weekly game: schedules and scoring", () => {
   it("scores only scheduled days in a set-days game", () => {
-    // Mon/Wed/Fri. Leo's Day 0 is Saturday 2026-10-17.
+    // Day 0 is Monday; preserve scoring for legacy off-day entries.
     let state = live(invited({ days: [0, 2, 4] }));
-    for (const day of [0, 2, 4, 6]) state = post(state, LEO, at(state, LEO, day, 9)); // Sat, Mon, Wed, Fri
+    for (const day of [0, 2, 4]) state = post(state, LEO, at(state, LEO, day, 9));
+    state.entries.push({ ...state.entries[0], id: "legacy_off_day", dayIndex: 6 });
     const leo = scorePlayer(state, playerFor(state, LEO)!);
     expect(leo).toMatchObject({ misses: 0, score: 3 });
-    // Ava plays the same indices (Leo's Mon and Wed) from Sydney and misses Friday.
+    // The other player posts Monday and Wednesday from Sydney, missing Friday.
+    state = post(state, AVA, at(state, AVA, 0, 9));
     state = post(state, AVA, at(state, AVA, 2, 9));
-    state = post(state, AVA, at(state, AVA, 4, 9));
     expect(scorePlayer(state, playerFor(state, AVA)!)).toMatchObject({ misses: 1, score: 2 });
   });
 
@@ -513,13 +514,14 @@ describe("weekly game: schedules and scoring", () => {
   });
 
   it("owes nothing for a perfect game, matching its perfect outcome", () => {
-    // Eight days of Mon/Wed/Fri: both post every scheduled day, and Leo also posts on days off.
+    // Eight days of Mon/Wed/Fri: both post every scheduled day.
     const eightDays = invited({ days: [0, 2, 4] }, [WINNER_GETS, PER_MISS]);
     eightDays.game.lengthDays = 8;
     let state = live(eightDays);
     for (let day = 0; day < 8; day += 1) {
+      if (!isScheduledDay(state, day)) continue;
       state = post(state, LEO, at(state, LEO, day, 9));
-      if (isScheduledDay(state, day)) state = post(state, AVA, at(state, AVA, day, 9));
+      state = post(state, AVA, at(state, AVA, day, 9));
     }
     const settled = decideSettle(state);
     expect(settled.result.scores.map((score) => score.misses)).toEqual([0, 0]);
@@ -872,5 +874,51 @@ describe("weekly game: self-play round 1 regressions", () => {
       expect(isGameDue(onlyLast, new Date(Math.max(deadline, firstGrace) - 1))).toBe(false);
       expect(firstToEnd).not.toBe(lastToEnd);
     }
+  });
+});
+
+
+describe("scheduled posting admission", () => {
+  function weekdays(): RuleState {
+    const state = live(invited({ days: [0, 1, 2, 3, 4] }), NYC);
+    state.game.lengthDays = 14;
+    for (const player of state.players) player.dayOne = "2030-03-04";
+    return state;
+  }
+  function decide(state: RuleState, now: Date, captureAgeMs: number | null = null) {
+    return decidePost(state, { memberId: LEO, now, captureAgeMs, kind: "photo",
+      mediaKeys: ["owned/photo"], mediaKeyPrefix: "owned/" });
+  }
+  it("refuses Saturday and names Monday", () => {
+    const state = weekdays();
+    expect(() => decide(state, at(state, LEO, 5, 12))).toThrow("Saturday's a day off. Back Monday.");
+    try { decide(state, at(state, LEO, 5, 12)); } catch (error) {
+      expect(error).toBeInstanceOf(GameRuleError);
+      expect((error as GameRuleError).error.code).toBe("DAY_CLOSED");
+    }
+  });
+  it("keeps scheduled yesterday's capture in grace on an off day", () => {
+    const state = weekdays();
+    expect(decide(state, at(state, LEO, 5, 3, 30), 45 * 60_000)).toMatchObject({ dayIndex: 4, graceUsed: true });
+    expect(() => decide(state, at(state, LEO, 5, 4), 75 * 60_000)).toThrow("Saturday's a day off");
+  });
+  it("leaves count schedules open on Saturday", () => {
+    const state = weekdays();
+    state.game.terms.versions[0].schedule = { count: 5 };
+    expect(decide(state, at(state, LEO, 5, 12))).toMatchObject({ dayIndex: 5, graceUsed: false });
+  });
+  it("uses the player's 3 AM boundary rather than UTC Saturday", () => {
+    const state = weekdays();
+    expect(decide(state, new Date("2030-03-09T07:59:59Z"))).toMatchObject({ dayIndex: 4 });
+    expect(() => decide(state, new Date("2030-03-09T08:00:00Z"))).toThrow("Saturday's a day off. Back Monday.");
+    state.players[0].timeZone = "Pacific/Honolulu";
+    expect(decide(state, new Date("2030-03-09T08:00:00Z"))).toMatchObject({ dayIndex: 4 });
+  });
+  it("uses the next day's effective terms and avoids promising a day after the game", () => {
+    const state = weekdays();
+    state.game.terms.versions.push({ ...state.game.terms.versions[0], n: 2, fromDay: 6, schedule: { days: [6] } });
+    expect(() => decide(state, at(state, LEO, 5, 12))).toThrow("Saturday's a day off. Back Sunday.");
+    state.game.lengthDays = 6;
+    expect(() => decide(state, at(state, LEO, 5, 12))).toThrow("Saturday's a day off. No game days left.");
   });
 });
