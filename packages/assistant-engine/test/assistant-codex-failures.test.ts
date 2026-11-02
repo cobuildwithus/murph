@@ -465,7 +465,7 @@ describe('assistant Codex failure helpers', () => {
     expect(buildCodexFailure({ ...input, code: 1, signal: null, stderr: '' })).toMatchObject(expected)
   })
 
-  it.each(['serverOverloaded', 'flexUnavailable'])('retries structured capacity error %s without diagnosing connection loss', (kind) => {
+  it.each(['serverOverloaded', 'flexUnavailable', 'policyCapacityUnavailable'])('retries structured capacity error %s without diagnosing connection loss', (kind) => {
     const input = {
       errorInfo: { kind, httpStatusCode: null },
       fallback: 'Synthetic provider rejection.',
@@ -492,17 +492,31 @@ describe('assistant Codex failure helpers', () => {
     }
   })
 
-  it.each(['invalidPrompt'])('preserves terminal Codex 0.158 error %s', (kind) => {
-    expect(buildCodexTurnFailedError({
+  it.each(['invalidPrompt', 'modelNotFound'])('keeps structured rejection %s terminal despite retry-like prose', (kind) => {
+    const input = {
       errorInfo: { kind, httpStatusCode: null },
-      fallback: 'capacity unavailable; retrying',
+      fallback: kind === 'modelNotFound'
+        ? 'rate limit; stream disconnected; retrying'
+        : 'stream disconnected; capacity unavailable; retrying',
       providerActionCount: 0,
       codexThreadId: 'thread-terminal-error',
-      status: 'failed',
-    })).toMatchObject({
-      code: 'ASSISTANT_CODEX_FAILED',
-      context: { codexErrorInfo: kind, retryable: false },
-    })
+    }
+    for (const failure of [
+      buildCodexTurnFailedError({ ...input, status: 'failed' }),
+      buildCodexFailure({ ...input, code: 1, signal: null, stderr: '' }),
+    ]) {
+      expect(failure).toMatchObject({
+        code: 'ASSISTANT_CODEX_FAILED',
+        context: {
+          codexErrorInfo: kind,
+          connectionLost: false,
+          recoverableConnectionLoss: false,
+          retryable: false,
+        },
+      })
+      expect(computeAssistantAutoReplyRetryAt(failure, Date.parse('2030-01-15T10:00:00Z')))
+        .toBeNull()
+    }
   })
 
   it('combines stdin write fallback details without duplicating identical messages', () => {

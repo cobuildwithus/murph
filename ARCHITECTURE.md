@@ -1671,7 +1671,7 @@ Web exposes the native field only when its existing assistant-configuration
 resolution confirms that the current managed runtime is authorized for the
 full product-model catalog; missing authority fails closed.
 The production image defaults to a catalog containing GPT-6.1 Terra, GPT-6.1 Sol and GPT-6 Luna plus
-GPT-5.6 Luna and Sol, retaining GPT-6 Sol for saved conversation preferences. CLI 0.163.0 supplies the existing entries from its native catalog; the pinned
+GPT-5.6 Luna and Sol, retaining GPT-6 Sol for saved conversation preferences. CLI 0.166.0 supplies the existing entries from its native catalog; the pinned
 `apps/cloudflare/codex-model-catalog.terra.json` adds the official refreshed
 Codex Terra launch entry. Terra retains its native 500K context window; existing
 GPT-6 and GPT-6.1 Sol entries retain their native 272K limit. The image fails validation for missing entries. Web separately derives Astra authority from the canonical available models

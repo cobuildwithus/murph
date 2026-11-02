@@ -1356,7 +1356,7 @@ The native runner image has a default GPT-6.1 Sol, GPT-6 Sol/Luna, and GPT-5.6 S
 the latter only from Web's explicit Max/OpenAI workspace authorization. Missing
 authority, Edge, and group runtimes retain the default catalog and its
 existing delegation choices. The
-pinned Codex 0.163.0 release supplies every entry natively; the image validates
+pinned Codex 0.166.0 release supplies every entry natively; the image validates
 its bundled catalog without a separate launch supplement. Murph supplies its own base
 instructions for each turn.
 The Astra context window remains at most 272,000 tokens, verified while building the

@@ -102,7 +102,7 @@ minimumReleaseAgeExclude:
   - '@cobuild/repo-tools@0.1.18'
   - '@cobuild/review-gpt@0.5.157'
   - '@onkernel/sdk@0.76.0'
-  - '@openai/codex@0.163.0||0.163.0-darwin-arm64||0.163.0-darwin-x64||0.163.0-linux-arm64||0.163.0-linux-x64||0.163.0-win32-arm64||0.163.0-win32-x64'
+  - '@openai/codex@0.166.0||0.166.0-darwin-arm64||0.166.0-darwin-x64||0.166.0-linux-arm64||0.166.0-linux-x64||0.166.0-win32-arm64||0.166.0-win32-x64'
   - '@temporalio/activity@1.16.3'
   - '@temporalio/client@1.16.3'
   - '@temporalio/common@1.16.3'

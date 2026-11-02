@@ -120,8 +120,12 @@ export function readAssistantAutoReplyReceiptMetadata(
 
 export function isAssistantProviderCapacityError(error: unknown): boolean {
   const context = readAssistantProviderErrorContext(error)
+  if (context?.codexErrorInfo === 'modelNotFound') {
+    return false
+  }
   if (context?.codexErrorInfo === 'serverOverloaded'
-    || context?.codexErrorInfo === 'flexUnavailable') {
+    || context?.codexErrorInfo === 'flexUnavailable'
+    || context?.codexErrorInfo === 'policyCapacityUnavailable') {
     return true
   }
   const message = errorMessage(error).toLowerCase()

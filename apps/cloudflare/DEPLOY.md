@@ -2438,11 +2438,11 @@ pnpm --dir apps/cloudflare runner:docker:base
 ```
 
 That image is prepared in the local Docker cache under the stable GHCR tag
-`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.22.1-codex0.163.0-live1`,
+`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.22.1-codex0.166.0-live1`,
 which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
-The base Dockerfile builds the CLI from the checksum-pinned Codex 0.163.0 source
+The base Dockerfile builds the CLI from the checksum-pinned Codex 0.166.0 source
 with `patches/codex-public-live.patch`. It keeps the same release's bundled
 Code Mode host and sandbox resources. The patch adds public API-key Live
 compatibility, owned-session shutdown, opt-in app-server input ownership, and a
@@ -2458,7 +2458,7 @@ that exact binary before its final-image sandbox proof.
 
 To update the patch, retain the pinned release as its base, run the affected
 upstream tests, and run `pnpm --dir apps/cloudflare verify:codex-upstream-source`
-to verify applicability. Codex 0.163.0 supplies the policy-aware websocket transport;
+to verify applicability. Codex 0.166.0 supplies the policy-aware websocket transport;
 the patch preserves upstream response-interruption acknowledgements and native
 transcript-tail history recording, retains that transport, and only adds the public Live wire adapter,
 client-managed input ownership, owned-session finalization, and the request
@@ -2475,7 +2475,7 @@ rule. The protected deployment workflow must provide that cache before this
 patch is considered operationally ready; its current fresh-runner forced
 build would otherwise recompile Codex for each deployment.
 
-Codex CLI 0.163.0 supplies native Sol, Luna and Astra entries. Its bundled
+Codex CLI 0.166.0 supplies native Sol, Luna and Astra entries. Its bundled
 Sol/Luna entries match the former pinned launch supplement, which is removed
 along with its bundle staging and fingerprint input. The native bundled catalog
 is the sole model-entry source.
@@ -2485,8 +2485,15 @@ and context-window validation. Missing product models fail the image build.
 Codex 0.158 broadens `httpConnectionFailed` to include unexpected HTTP statuses.
 Murph keeps permanent HTTP rejections terminal while preserving recovery for
 transport failures, timeouts, throttling, and server failures. The new
-`flexUnavailable` classification remains terminal; this upgrade does not add a
-higher-priced service-tier fallback.
+`flexUnavailable`, `serverOverloaded`, and `policyCapacityUnavailable`
+classifications use Murph's existing five-minute capacity retry; none triggers
+connection recovery or a higher-priced service-tier fallback. `modelNotFound`
+remains terminal even when provider prose contains a retry or rate-limit hint.
+Codex 0.166.0 defaults fresh native memory profiles to v2, but the shared hosted
+config still disables the memory feature, generation, and use. Its newly stable
+reasoning-effort override remains enabled by the upstream default, as intended
+by the 0.165.0 release; Murph still sends its selected effort on each turn.
+`instant_interrupt` and `code_mode_interrupt` stay explicit process overrides.
 This upgrade changes the runner base fingerprint, but no Web/Worker payload or
 workspace snapshot schema. Build the new base and final runner together through
 the existing deploy path; version-fenced containers replace the old runtime.

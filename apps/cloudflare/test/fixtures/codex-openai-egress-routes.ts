@@ -5,10 +5,10 @@
  * source review at the new commit rather than trusting one platform's binary layout.
  */
 export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
-  upstreamCommit: "83086188ae0614bd882818ff1aa23f3194962012",
+  upstreamCommit: "6ff1e1ca3b30fc8b914720681fcf5fe62e95f856",
   upstreamSourceRoot: "codex-rs",
-  upstreamTag: "rust-v0.163.0",
-  version: "0.163.0",
+  upstreamTag: "rust-v0.166.0",
+  version: "0.166.0",
   baseRelativeProviderRoutes: [
     "alpha/search",
     "guardian",
@@ -24,6 +24,9 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
     "responses",
   ],
   reviewedSources: [
+    "codex-rs/model-provider/src/gcp/mod.rs",
+    "codex-rs/responses-api-proxy/src/auth.rs",
+    "codex-rs/login/src/auth/personal_access_token.rs",
     "codex-rs/agent-message-board-client/src/client.rs",
     "codex-rs/backend-client/src/client/turn_usage.rs",
     "codex-rs/ext/guardian-v2/src/async_scorer/decisions.rs",
@@ -217,6 +220,54 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
     },
   ],
   nonProviderBinaryCandidates: [
+    {
+      candidate: "/v1/projects",
+      disposition: "different_origin",
+      owner: "codex-gcp",
+      reason: "The 0.166.0 GCP provider constructs https://aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/publishers/openai/v1 in model-provider/src/gcp/mod.rs. Murph does not select this provider.",
+    },
+    {
+      candidate: "/v1/responsesworkload",
+      disposition: "binary_false_positive",
+      owner: "codex-auth",
+      reason: "The 0.166.0 release concatenates the exact OpenAI /v1/responses URL with the workload-identity validation error in responses-api-proxy/src/auth.rs; the request route remains /v1/responses.",
+    },
+    {
+      candidate: "/v1/realtimewswsshttpsquicksilverintent",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "The 0.166.0 macOS release joins the /v1/realtime normalization literal with adjacent scheme and intent literals in realtime_websocket/methods.rs; the reviewed route is /v1/realtime.",
+    },
+    {
+      candidate: "/v1/realtimewswsshttpsrealtime",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "The 0.166.0 Linux release joins the /v1/realtime normalization literal with adjacent scheme literals and the sideband URL error in realtime_websocket/methods.rs.",
+    },
+    {
+      candidate: "/v1/user-auth-credential/whoamisk-proj-fedramp-sk-svcacct-fedramp-auth.lock",
+      disposition: "binary_false_positive",
+      owner: "codex-auth",
+      reason: "The 0.166.0 macOS release joins WHOAMI_PATH in login/src/auth/personal_access_token.rs to adjacent credential-prefix and auth-lock constants. Only /v1/user-auth-credential/whoami is sent to the separate authentication origin.",
+    },
+    {
+      candidate: "/v1/user-auth-credential/whoamisk-svcacct-fedramp-",
+      disposition: "binary_false_positive",
+      owner: "codex-auth",
+      reason: "The 0.166.0 Linux release joins WHOAMI_PATH in login/src/auth/personal_access_token.rs to an adjacent credential-prefix constant. Only /v1/user-auth-credential/whoami is sent to the separate authentication origin.",
+    },
+    {
+      candidate: "/v1/decisionsanswerschoiceinputcontentphasetools/listmissing",
+      disposition: "binary_false_positive",
+      owner: "codex-guardian",
+      reason: "The 0.166.0 Linux release joins the exact /v1/decisions URL in ext/guardian-v2/src/async_scorer/decisions.rs to serialized request fields and MCP discovery text. The real Decisions route remains blocked.",
+    },
+    {
+      candidate: "/v1/rowscols-gnu.tmpsocksteplinediffrootcwdslastargvenumusedwait",
+      disposition: "binary_false_positive",
+      owner: "dependency",
+      reason: "The 0.166.0 Linux release joins the rtc_avas/v1/ dependency literal to adjacent field and platform labels; reviewed provider sources contain no such endpoint.",
+    },
     {
       candidate: "/v1/analytics/codex/turn-costsmethodspath_prefixesstruct",
       disposition: "binary_false_positive",
