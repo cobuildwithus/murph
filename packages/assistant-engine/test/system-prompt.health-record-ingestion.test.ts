@@ -35,7 +35,7 @@ describe('assistant system prompt health record ingestion invariant', () => {
     const automatic = await readFile(path.join(resolveAssistantSkillsRoot(), 'automatic-meal-capture', 'SKILL.md'), 'utf8')
     expect(food).toContain('--name "<short dish name>"')
     expect(food).toContain('meal edit --name')
-    expect(automatic).toContain('An imported photo stub is not evidence of consumption')
+    expect(automatic).toMatch(/An imported photo stub is not\s+evidence of consumption/u)
     expect(automatic).not.toContain('record only that the retained image was')
   })
 

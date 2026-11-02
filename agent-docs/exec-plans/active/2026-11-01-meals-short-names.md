@@ -74,8 +74,9 @@ session/access/consent checks and no-store behavior; no public or long-lived URL
 
 This explicitly extends automatic-photo retention to a low-resolution derivative
 and needs a product retention decision. Strip EXIF, bound pixel/byte size, keep
-same-member access, and purge on photo removal, meal deletion and account
-cleanup, including historical objects and app caches. If closeout is intended
+same-member access, and purge on explicit member photo removal, meal deletion and account
+cleanup, including historical objects and app caches. Automatic closeout would remove full-size bytes while retaining the derivative
+only under the newly chosen policy. If closeout is intended
 to remove all image content, keep that promise and show a plain tile instead.
 Historical purged photos cannot be recovered; do not build a backfill now.
 
@@ -117,3 +118,12 @@ Pricing: https://developers.cloudflare.com/r2/pricing/
   Same synthetic fixtures, native scripted transport; excludes prompt_cache_key.
 - Product UX Ready: new names, edits, legacy meals, invalid-name retry and known
   non-food exclusion covered. No production content or member messages used.
+
+- Changelog generated and rendered through the archive test (4 passes); Web
+  typecheck passes. Meals route suite passes after the standard typecheck
+  generated the local Prisma client. Initial parallel route run lacked that
+  generated client; no application failure or production read occurred.
+- Draft PR: https://github.com/cobuildwithus/murph/pull/4437. Candidate includes
+  the hook-generated CLI config/types/skill hash. Final ReviewGPT and required
+  exact-head CI remain external delivery gates, followed by authorized merge
+  and protected-main Cloudflare deployment.
