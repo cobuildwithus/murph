@@ -1,6 +1,6 @@
 # Recap link preview
 
-Status: active
+Status: completed
 Created: 2026-11-01
 Updated: 2026-11-01
 
@@ -44,4 +44,8 @@ and the lookup-free handoff. Leave page body and native handoff untouched.
 - Initial focused recap/changelog tests: 15 passed. Web typecheck passed.
 - Complexity guard passed with no hotspots; page body is byte-unchanged.
 - Full-size and 360px-wide image inspected; approved Paper export matched.
-- Final checks and PR review pending.
+- Final focused tests: 15 passed across recap handoff, PNG and changelog.
+- Final Web typecheck, scoped lint and diff checks passed.
+- Implementation is complete. PR #4433 owns the external ReviewGPT,
+  exact-head CI, merge and production verification receipts.
+Completed: 2026-11-01
