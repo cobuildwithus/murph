@@ -1,5 +1,5 @@
 The desktop recap ticket presentation and responsive scan proof are tracked in
-[the design plan](exec-plans/active/2026-11-01-recap-desktop-design.md).
+[the design plan](exec-plans/completed/2026-11-01-recap-desktop-design.md).
 The public recap route retains the contract in `product-specs/weekly-game.md`.
 
 Recap desktop QR handoff and Apple mobile preservation are tracked in

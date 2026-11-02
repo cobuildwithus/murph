@@ -44,3 +44,13 @@ Focused recap and changelog tests: 57 passed. Browser tests: 2 passed. Web
 typecheck, focused lint, diff whitespace check, and complexity guard passed;
 no changed function exceeds 20. No new dependencies or metadata/OG edits.
 Parent review confirms the Apple branch retains the previous markup and styles.
+
+## Candidate handoff
+
+Implementation and local proof are complete in PR #4434. Synthetic screenshots
+are attached to the PR; source preview deployment is
+`dpl_3oYL3ydSdCqWgh11kmR97JW2phqF`. Final ReviewGPT, exact-head CI, merge, and
+canonical deployment verification remain completion gates owned by this session.
+Status: completed
+Updated: 2026-11-01
+Completed: 2026-11-01
