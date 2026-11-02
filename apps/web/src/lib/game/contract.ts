@@ -436,6 +436,7 @@ export interface GameHistoryGameView {
   previews: GameHistoryPreviewView[];
 }
 
+/** One of up to six visible posts, including words, in day and player-seat order. */
 export interface GameHistoryPreviewView extends GameEntryView {
   mine: boolean;
 }
