@@ -4,6 +4,7 @@ import {
   HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD as THRESHOLD,
   HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD as ATTEMPTS,
   HOSTED_RUNTIME_RUNAWAY_PROCESSING_RETRY_THRESHOLD as RETRIES,
+  HOSTED_RUNTIME_RUNAWAY_SNAPSHOT_THRESHOLD as SNAPSHOTS,
   readHostedRuntimeRunawayHealth,
 } from "@/src/lib/hosted-runtime-log/runaway-alert-monitor";
 
@@ -50,6 +51,40 @@ describe.skipIf(!enabled)("runtime runaway PostgreSQL aggregate", () => {
   async function seedAccepted(count: number, input: Parameters<typeof seed>[1] = {}) {
     await seedAttempts(count, { metadata: acceptedStart, ...input });
   }
+  async function seedSnapshots(count: number, input: Parameters<typeof seed>[1] = {}) {
+    await seed(count, { event: "checkpoint.snapshot_finished",
+      metadata: { checkpointReason: "idle_shutdown", snapshotElapsedMs: 5_500 }, ...input });
+  }
+
+  it.each([SNAPSHOTS - 1, SNAPSHOTS, SNAPSHOTS + 1])("alerts on snapshots alone at %s", async count => {
+    await seedSnapshots(count);
+    expect(await readHostedRuntimeRunawayHealth({ now, database })).toEqual({
+      anomalous: count >= SNAPSHOTS, runawaySubjectCount: count >= SNAPSHOTS ? 1 : 0,
+      subjects: count >= SNAPSHOTS ? [{ subjectPrefix: "abcdef01", invocationCount: 0,
+        processingAttemptCount: 0, processingRetryCount: 0, snapshotCount: count,
+        snapshotSeconds: Math.round(count * 5.5), checkpointReason: "idle_shutdown",
+        processingMode: "none", nextWakeReason: "none", processingOutcome: "none" }] : [],
+    });
+  });
+
+  it("aggregates only snapshot numeric durations and dominant allowlisted reasons", async () => {
+    await seedSnapshots(SNAPSHOTS);
+    for (const snapshotElapsedMs of ["5500", "private@example.test", null, true, {}, []]) {
+      await seedSnapshots(1, { metadata: { checkpointReason: "import", snapshotElapsedMs } });
+    }
+    await seedSnapshots(1, { metadata: { checkpointReason: "import", snapshotElapsedMs: 500.5 } });
+    await seed(1, { metadata: { processingMode: "default", checkpointReason: "import", snapshotElapsedMs: 999_999 } });
+    const health = await readHostedRuntimeRunawayHealth({ now, database });
+    expect(health.subjects[0]).toMatchObject({ snapshotCount: SNAPSHOTS + 7,
+      snapshotSeconds: 166, checkpointReason: "idle_shutdown", processingMode: "default" });
+  });
+
+  it.each(["private@example.test", null, { private: "value" }])("redacts unknown checkpoint reason %j", async checkpointReason => {
+    await seedSnapshots(SNAPSHOTS, { metadata: { checkpointReason } });
+    const health = await readHostedRuntimeRunawayHealth({ now, database });
+    expect(health.subjects[0]).toMatchObject({ checkpointReason: "unknown", snapshotSeconds: 0 });
+    expect(JSON.stringify(health)).not.toMatch(/private|@/);
+  });
 
   it.each([THRESHOLD - 1, THRESHOLD, THRESHOLD + 1])("evaluates the actual SQL threshold at %s events", async count => {
     await seed(count);
@@ -65,9 +100,14 @@ describe.skipIf(!enabled)("runtime runaway PostgreSQL aggregate", () => {
     await seed(50, { event: "runtime.invocation_started" });
     await seedAccepted(ATTEMPTS - RETRIES);
     await seedAttempts(RETRIES - 1);
+    await seedSnapshots(SNAPSHOTS - 1);
+    await seedSnapshots(50, { at: new Date(+now - 60 * 60_000 - 1) });
+    await seedSnapshots(50, { at: new Date(+now + 1) });
     expect((await readHostedRuntimeRunawayHealth({ now, database })).anomalous).toBe(false);
     await seed(1, { at: new Date(+now - 60 * 60_000) });
+    await seedSnapshots(1, { at: new Date(+now - 60 * 60_000) });
     expect((await readHostedRuntimeRunawayHealth({ now, database })).subjects[0]?.invocationCount).toBe(THRESHOLD);
+    expect((await readHostedRuntimeRunawayHealth({ now, database })).subjects[0]?.snapshotCount).toBe(SNAPSHOTS);
   });
 
   it("caps top subjects while preserving the total and dominant redacted labels", async () => {
@@ -81,7 +121,8 @@ describe.skipIf(!enabled)("runtime runaway PostgreSQL aggregate", () => {
     expect(health.subjects).toHaveLength(10);
     expect(health.subjects[0]).toEqual({ subjectPrefix: "abcdef01", invocationCount: 101,
       processingAttemptCount: 0, processingRetryCount: 0, processingMode: "system_mailbox",
-      nextWakeReason: "device-sync.reconcile", processingOutcome: "none" });
+      nextWakeReason: "device-sync.reconcile", processingOutcome: "none",
+      snapshotCount: 0, snapshotSeconds: 0, checkpointReason: "none" });
     expect(health.subjects[1]?.invocationCount).toBe(51);
     expect(JSON.stringify(health)).not.toContain(subject);
   });
@@ -91,7 +132,8 @@ describe.skipIf(!enabled)("runtime runaway PostgreSQL aggregate", () => {
     const health = await readHostedRuntimeRunawayHealth({ now, database });
     expect(health.subjects).toEqual([{ subjectPrefix: "abcdef01", invocationCount: 40,
       processingAttemptCount: 0, processingRetryCount: 0, processingMode: "default",
-      nextWakeReason: "inbox_media_retention", processingOutcome: "none" }]);
+      nextWakeReason: "inbox_media_retention", processingOutcome: "none",
+      snapshotCount: 0, snapshotSeconds: 0, checkpointReason: "none" }]);
   });
 
   it("does not return private or malformed diagnostic values", async () => {
@@ -107,7 +149,8 @@ describe.skipIf(!enabled)("runtime runaway PostgreSQL aggregate", () => {
     expect(health.subjects).toEqual([{ subjectPrefix: "unknown", invocationCount: 40,
       processingAttemptCount: 10, processingRetryCount: 10, processingMode: "unknown",
       // An unlisted reason keeps only the fixed outcome label.
-      nextWakeReason: "unknown", processingOutcome: "retry_later" }]);
+      nextWakeReason: "unknown", processingOutcome: "retry_later",
+      snapshotCount: 0, snapshotSeconds: 0, checkpointReason: "none" }]);
     expect(JSON.stringify(health)).not.toMatch(/synthetic|@|15555550123/);
   });
 
@@ -117,7 +160,8 @@ describe.skipIf(!enabled)("runtime runaway PostgreSQL aggregate", () => {
       anomalous: count >= ATTEMPTS, runawaySubjectCount: count >= ATTEMPTS ? 1 : 0,
       subjects: count >= ATTEMPTS ? [{ subjectPrefix: "abcdef01", invocationCount: 0,
         processingAttemptCount: count, processingRetryCount: 0, processingMode: "system_mailbox",
-        nextWakeReason: "none", processingOutcome: "runtime_processing_accepted" }] : [],
+        nextWakeReason: "none", processingOutcome: "runtime_processing_accepted",
+        snapshotCount: 0, snapshotSeconds: 0, checkpointReason: "none" }] : [],
     });
   });
 
@@ -130,7 +174,8 @@ describe.skipIf(!enabled)("runtime runaway PostgreSQL aggregate", () => {
       subjects: count >= RETRIES ? [{ subjectPrefix: "abcdef01", invocationCount: 0,
         processingAttemptCount: ATTEMPTS - RETRIES - 2 + count, processingRetryCount: count,
         processingMode: "system_mailbox", nextWakeReason: "none",
-        processingOutcome: "runtime_processing_accepted" }] : [],
+        processingOutcome: "runtime_processing_accepted",
+        snapshotCount: 0, snapshotSeconds: 0, checkpointReason: "none" }] : [],
     });
   });
 
@@ -143,6 +188,8 @@ describe.skipIf(!enabled)("runtime runaway PostgreSQL aggregate", () => {
   it("ranks subjects by their worst ratio to any threshold and labels accepted attempts", async () => {
     const invocations = "1".repeat(64);
     const retryStorm = "2".repeat(64);
+    const snapshotLoop = "3".repeat(64);
+    await seedSnapshots(SNAPSHOTS * 3, { key: snapshotLoop });
     await seed(THRESHOLD + 5, { key: invocations });
     await seedAttempts(ATTEMPTS * 2, { metadata: { runtimeProcessingRequestedMode: "default",
       runtimeProcessingOutcome: "runtime_processing_accepted", runtimeProcessingAction: "started" } });
@@ -150,7 +197,7 @@ describe.skipIf(!enabled)("runtime runaway PostgreSQL aggregate", () => {
     await seedAttempts(RETRIES * 2.5, { key: retryStorm });
     const health = await readHostedRuntimeRunawayHealth({ now, database });
     expect(health.subjects.map(({ subjectPrefix, processingOutcome }) => [subjectPrefix, processingOutcome]))
-      .toEqual([["22222222", "retry_later:claim_blocked"], ["abcdef01", "runtime_processing_accepted"],
+      .toEqual([["33333333", "none"], ["22222222", "retry_later:claim_blocked"], ["abcdef01", "runtime_processing_accepted"],
         ["11111111", "none"]]);
   });
 });

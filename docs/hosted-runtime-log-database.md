@@ -1305,7 +1305,8 @@ The existing five-minute `/api/internal/hosted-runtime/latency-alert/cron` also
 runs the runaway invocation monitor. A subject with at least 25
 `runtime.invocation_finished` rows, at least 60 `runner.processing_finished`
 rows, or at least 20 `runner.processing_finished` rows with outcome
-`retry_later`, in the trailing 60 minutes opens the shared operational email
+`retry_later`, or at least 30 `checkpoint.snapshot_finished` rows in the
+trailing 60 minutes opens the shared operational email
 incident.
 Every Worker ensure-processing call writes one `runner.processing_finished` row
 and calls Web, so the second count catches retry storms that never start a run
@@ -1313,7 +1314,10 @@ and calls Web, so the second count catches retry storms that never start a run
 activity: from 2026-09-23 to 2026-10-07 every member-hour with 20 or more
 retries was a retry storm, while busy healthy members mostly log accepted
 attempts. Subjects rank by their worst ratio to any threshold, and the email
-shows each subject's retry count. Thresholds and window are named constants; recipient
+shows each subject's retry and snapshot counts. The snapshot trigger catches
+loops inside a single invocation. Seven-day calibration across 5,904 member-hours
+found p99.9 of 20 snapshots and a non-runaway maximum of 21; runaway hours reached
+123 and 379. Thresholds and window are named constants; recipient
 and timezone configuration is shared with the latency monitor. Reminders use
 the existing six-hour interval and jitter, including quiet hours like the runtime
 progress monitor. A healthy evaluation clears the incident without a recovery
@@ -1326,7 +1330,12 @@ qualifying subject count and at most ten highest-count subjects. Email and
 incident details contain only counts, eight-character digest prefixes, and
 dominant allowlisted `processingMode`/`nextWakeReason` labels plus the dominant
 processing outcome (`retry_later:<allowlisted reason>`, a bare outcome, or
-`unknown` for missing or unrecognized values). No raw identity lookup, payload export,
+`unknown` for missing or unrecognized values). Snapshot diagnostics include the
+dominant allowlisted checkpoint reason and total snapshot seconds, summed only
+from JSON numeric `snapshotElapsedMs` values on snapshot-finished events. The
+existing v1 details schema and monitor identity remain stable: these are additive
+health fields, and incident recovery reads only the unchanged incident ID and
+message fields. No raw identity lookup, payload export,
 migration, or runtime control action is required.
 
 ### Maintenance replay-barrier failure evidence
