@@ -14,6 +14,7 @@ import { requireActiveHostedMemberAuthFromBearerToken } from "../hosted-onboardi
 import { readHostedWorkspace } from "../hosted-workspace/store";
 import { submitMemberAction } from "../member-actions/submit";
 import { getPrisma } from "../prisma";
+import { readRawBodyBuffer } from "../http";
 
 export function mealApiError(code: string, httpStatus: number, message: string) {
   return hostedOnboardingError({ code, httpStatus, message, retryable: httpStatus === 503 });
@@ -96,7 +97,12 @@ export function requireProjectedMeal(projection: CompanionMealsProjection, id: s
 export async function queueCompanionMealRemoval(request: Request, id: string) {
   const { auth, prisma, projection } = await readCompanionMeals(request);
   requireProjectedMeal(projection, id);
-  if (request.body !== null) throw mealApiError("MEALS_INVALID_REQUEST", 400, "Meal removal does not accept a body.");
+  try {
+    await readRawBodyBuffer(request, { limitBytes: 0 });
+  } catch (error) {
+    if (!(error instanceof RangeError)) throw error;
+    throw mealApiError("MEALS_INVALID_REQUEST", 400, "Meal removal does not accept a body.");
+  }
   try {
     const result = await submitMemberAction({
       memberId: auth.member.id,

@@ -1,4 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
+import { createServer } from "node:http";
+import { NodeNextRequest } from "next/dist/server/base-http/node";
+import { NextRequestAdapter } from "next/dist/server/web/spec-extension/adapters/next-request";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 vi.mock("server-only", () => ({}));
@@ -24,7 +27,7 @@ const replicaRef = {
 const meal = { id: "meal_fixture", eatenAt: savedAt, name: "Synthetic grain bowl", calories: 500, proteinGrams: null, carbsGrams: null, fatGrams: null, uploadId: null };
 const days = ["2026-11-01", "2026-10-31", "2026-10-30"].map(date => ({ date, calories: 500, proteinGrams: null, carbsGrams: null, fatGrams: null, mealCount: 1, calorieMealCount: 1, meals: [{ ...meal, id: date === "2026-11-01" ? meal.id : `meal_${date.replaceAll("-", "")}` }] }));
 const projection = { schemaVersion: 1, timeZone: "Asia/Tokyo", days };
-const request = (query = "", init?: RequestInit) => new Request(`https://app.example.test/api/device-sync/companion/meals${query}`, init);
+const request = (query = "", init?: RequestInit & { duplex?: "half" }) => new Request(`https://app.example.test/api/device-sync/companion/meals${query}`, init);
 const context = (mealId = meal.id) => ({ params: Promise.resolve({ mealId }) });
 
 beforeEach(() => {
@@ -103,6 +106,53 @@ it("reports failed admission and does not accept request bodies", async () => {
   mocks.submit.mockClear();
   expect((await DELETE(request("", { method: "DELETE", body: "{}" }), context())).status).toBe(400);
   expect(mocks.submit).not.toHaveBeenCalled();
+});
+
+it.each(["omitted", "empty string", "empty stream"])("accepts a DELETE with %s body", async kind => {
+  const body = kind === "omitted" ? undefined : kind === "empty string" ? ""
+    : new ReadableStream<Uint8Array>({ start(controller) { controller.close(); } });
+  const response = await DELETE(request("", { method: "DELETE", body, duplex: "half", headers: { "content-length": "0" } }), context());
+  expect(response.status).toBe(202);
+  expect(mocks.submit).toHaveBeenCalledTimes(1);
+});
+
+it.each(["one byte", "oversized stream"])("rejects a DELETE with %s before submission", async kind => {
+  const body = kind === "one byte" ? "x" : new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(new Uint8Array(1024)); controller.close(); },
+  });
+  const response = await DELETE(request("", { method: "DELETE", body, duplex: "half" }), context());
+  expect(response.status).toBe(400);
+  expect(await response.json()).toMatchObject({ error: { code: "MEALS_INVALID_REQUEST", retryable: false } });
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
+
+it("accepts body-free HTTP DELETE through Next's Node request adapter", async () => {
+  let streamPresent = false;
+  const server = createServer(async (incoming, outgoing) => {
+    try {
+      const adapted = NextRequestAdapter.fromNodeNextRequest(new NodeNextRequest(incoming), new AbortController().signal);
+      streamPresent = adapted.body !== null;
+      const response = await DELETE(adapted, context());
+      outgoing.writeHead(response.status);
+      outgoing.end(await response.text());
+    } catch {
+      outgoing.writeHead(500).end();
+    }
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Synthetic server address missing.");
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/device-sync/companion/meals/${meal.id}`, {
+      method: "DELETE", headers: { "content-length": "0", connection: "close" },
+    });
+    expect(streamPresent).toBe(true);
+    expect(response.status).toBe(202);
+    expect(await response.json()).toMatchObject({ accepted: true });
+    expect(mocks.submit).toHaveBeenCalledTimes(1);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
 });
 
 it.each([401, 403])("preserves existing access error %s without loading health data", async httpStatus => {
