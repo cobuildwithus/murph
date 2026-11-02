@@ -19,14 +19,12 @@ test("idle retirement bounds snapshots when a due assistant pass finds no work",
   let snapshots = 0;
   let passes = 0;
   let effects = 0;
-  let retiring = false;
   const laterWakeAt = "2026-04-27T00:02:00.000Z";
   try {
     await initializeVault({ createdAt: TEST_NOW, vaultRoot });
     const result = await runHostedWorkspaceRuntimeJobInProcess(
       createWorkspaceRuntimeJobInput({ request: { runnerIdleTtlMs: 1 } }), {
         vaultRoot,
-        onIdleRetirement: () => { retiring = true; },
         platform: createPlatform({
           mailboxPort: createMailboxPort({ events, items: [] }),
           workspacePort: createWorkspacePort({ events, checkpointRequests,
@@ -46,7 +44,6 @@ test("idle retirement bounds snapshots when a due assistant pass finds no work",
               checkpointReason: "system_mailbox_receipt",
               nextWakeAt: TEST_NOW, nextWakeReason: "assistant",
               afterDurableCheckpoint: async () => {
-                assert.equal(retiring, true, "host admission closes before effect drain");
                 effects++;
                 return { requiresFollowUpCheckpoint: true,
                   nextWakeAt: laterWakeAt, nextWakeReason: "system-mailbox" };

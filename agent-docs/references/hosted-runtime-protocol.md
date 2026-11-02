@@ -99,9 +99,8 @@ The live ownership split is:
   dirty state without another full quiet window.
 
   Successful idle publication ends assistant wake and deferred device service
-  in that invocation. The host closes wake admission before draining effects,
-  except while an active voice session retains the runtime. Already accepted
-  conversation input still drains; later arrivals use the durable successor.
+  in that invocation. Conversation input can still resume foreground work and
+  renew the idle window; host wake admission stays open until invocation return.
   Background system work stays quiesced, and due assistant or deferred device
   wakes remain successor work.
   Required projection, receipt, and acknowledgement effects keep their existing

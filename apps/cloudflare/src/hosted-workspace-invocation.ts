@@ -296,7 +296,6 @@ export async function runHostedWorkspaceInvocation(
       ...(Object.keys(latencyMilestones).length > 0 ? { latencyMilestones } : {}),
       mailboxPayloadDecoder: decodeMailboxPayload,
       onConversationActivityObserved: options.onConversationActivityObserved,
-      onIdleRetirement: () => { acceptingRuntimeWakes = false; },
       platform,
       voice: invocationVoice,
       preparedWorkspaceRestore: options.preparedWorkspaceRestore ?? null,

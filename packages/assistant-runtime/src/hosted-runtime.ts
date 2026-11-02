@@ -816,8 +816,6 @@ export interface HostedWorkspaceRuntimeJobOptions {
   onConversationActivityObserved?: (
     receivedAtEpochMs: number,
   ) => void;
-  /** Close host wake admission before draining an idle checkpoint. */
-  onIdleRetirement?: () => void;
   runAssistantPhase?: HostedWorkspaceRuntimeAssistantPhase;
   runtimeIssueProvenance?: {
     releaseSha: string | null;
@@ -7283,7 +7281,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           stage: "workspace.checkpoint.idle_shutdown",
           status: "done",
         });
-        if (!voiceMayRetainRuntime()) options.onIdleRetirement?.();
         const durableCheckpointEffectCount = pendingDurableCheckpointEffects.length;
         readyDurableCheckpointEffects.push(...pendingDurableCheckpointEffects.splice(0));
         const conversationInputAhead = checkpoint.conversationInputAhead === true;
