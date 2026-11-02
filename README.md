@@ -81,22 +81,15 @@ Only four packages are published to npm: `@murphai/murph`, `@murphai/contracts`,
 | `apps/cloudflare`            | Thin hosted runner for signed Temporal processing requests, status, per-user coordination, encrypted hosted bundles, and container-backed workspace runtime passes. |
 | `fixtures` and `e2e`         | Deterministic fixtures and smoke coverage.                                                                                                 |
 
-## Local and hosted surfaces
+## Hosted surfaces
 
-Murph now has three distinct runtime tiers:
-
-### 1. Local operator surface
-
-- `vault-cli` / `murph` for vault operations, assistant turns, automation, onboarding, and diagnostics
-- the workspace-private `packages/device-syncd` runtime for local wearable sync
-
-### 2. Hosted control plane
+### Hosted control plane
 
 - `apps/web` owns hosted onboarding, billing, OAuth callbacks, webhook intake, device-sync control-plane metadata, sparse routing state, encrypted hosted mailbox rows, workspace checkpoint metadata, and hosted runtime status/logs
 - it does not own canonical health data
 - webhook and app paths append durable mailbox facts and signal Temporal only; they do not directly nudge a user runner in Cloudflare
 
-### 3. Hosted execution plane
+### Hosted execution plane
 
 - `apps/cloudflare` restores encrypted hosted bundles, coordinates per-user runtime passes, keeps only DO-local runner coordination state, and invokes the workspace-private `@murphai/assistant-runtime` package against web-owned mailbox/checkpoint/log ports
 - private `cobuildwithus/murph-cloud` runs the per-user Temporal workflow worker that reads web-owned reconciliation facts, calls Cloudflare `ensure-processing`, and stores only pointer-level orchestration state
@@ -108,15 +101,14 @@ Murph now has three distinct runtime tiers:
 The root CLI is no longer just a vault editor. The built command surface includes:
 
 - health-vault operations such as `init`, `show`, `list`, `timeline`, `journal`, `document`, `meal`, `samples`, `audit`, `vault`, and the health registry commands
-- `assistant` for local chat, status, outbox, cron, automation, and provider-backed runtime control
+- `assistant onboarding` for hosted onboarding resume context, status, completion, and reopening
 - `device` for local wearable/device auth, status, and daemon control
 - env-gated route estimation through `vault-cli route estimate`, which uses temporary Mapbox geocoding and Search Box lookups for distance, duration, hiking POIs, and optional approximate elevation between two points without persisting the route payload in Murph state
-- root shortcuts such as `chat`, `run`, `status`, `doctor`, and `stop`
 - AI-assisted synthesis helpers such as `knowledge`
 
 The `knowledge` surface is intentionally narrow: use it to persist pages, inspect saved pages, lint the wiki, rebuild the index, and tail the append-only wiki log. The assistant's wiki-maintainer workflow itself lives in the runtime prompt plus the dedicated `assistant.knowledge.*` tools, not in repo `AGENTS.md`.
 
-For operator UX, prefer `murph`. It resolves one active vault and no longer expects ad hoc `--vault` switching on normal commands. Use `murph use <path>` to select a different existing vault, or `murph onboard --vault <path>` to create/select one during setup. Use `vault-cli` when you intentionally need the raw explicit-vault contract.
+Use `vault-cli` with an explicit `--vault <path>` for runtime and operator commands.
 
 ### Choosing a read command
 
@@ -139,11 +131,9 @@ pnpm vault-cli --help
 ### Operator flows
 
 ```bash
-pnpm onboard --vault ./vault
-murph use ./vault
-murph assistant ask "Summarize my recent activity"
-murph run
-murph device daemon start
+pnpm vault-cli init --vault ./vault
+pnpm vault-cli assistant onboarding status --vault ./vault
+pnpm vault-cli device daemon start --vault ./vault
 ```
 
 ### Developer flows

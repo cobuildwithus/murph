@@ -1,20 +1,8 @@
 import { expectTypeOf, test } from 'vitest'
 
 import type {
-  AttachmentParseJobRecord,
-  InboxCaptureRecord,
-  InboxPipeline,
-  InboxRuntimeStore,
-  InboxSearchHit,
-  IndexedAttachment,
-  InboundCapture,
-  PersistedCapture,
-  PollConnector,
-} from '@murphai/inboxd'
-import type {
-  InboxPipeline as InboxServicesPipeline,
   PersistedCapture as InboxServicesPersistedCapture,
-  PollConnector as InboxServicesPollConnector,
+  InboxPipeline as InboxServicesPipeline,
   RuntimeAttachmentParseJobRecord,
   RuntimeAttachmentRecord,
   RuntimeCaptureRecord,
@@ -22,6 +10,16 @@ import type {
   RuntimeSearchHit,
   RuntimeStore,
 } from '@murphai/inbox-services'
+import type {
+  AttachmentParseJobRecord,
+  InboundCapture,
+  InboxCaptureRecord,
+  InboxPipeline,
+  InboxRuntimeStore,
+  InboxSearchHit,
+  IndexedAttachment,
+  PersistedCapture,
+} from '@murphai/inboxd'
 
 type InboxServicesRuntimeStoreOwner = Pick<
   InboxRuntimeStore,
@@ -46,7 +44,6 @@ test('inbox services runtime record types stay owned by inboxd', () => {
   expectTypeOf<RuntimeAttachmentParseJobRecord>().toEqualTypeOf<AttachmentParseJobRecord>()
   expectTypeOf<RuntimeCaptureRecordInput>().toEqualTypeOf<InboundCapture>()
   expectTypeOf<InboxServicesPersistedCapture>().toEqualTypeOf<PersistedCapture>()
-  expectTypeOf<InboxServicesPollConnector>().toEqualTypeOf<PollConnector>()
   expectTypeOf<InboxServicesPipeline>().toEqualTypeOf<InboxPipeline>()
   expectTypeOf<RuntimeStore>().toEqualTypeOf<InboxServicesRuntimeStoreOwner>()
 })

@@ -1,4 +1,3 @@
-import Link from "next/link";
 import type { ReactNode } from "react";
 import {
   CheckCircleIcon,
@@ -47,7 +46,6 @@ import {
   JoinInviteSignOutButtonIsland,
 } from "./join-invite-islands";
 
-const MURPH_GITHUB_URL = "https://github.com/cobuildwithus/murph";
 
 export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel }) {
   const { status } = model;
@@ -342,18 +340,6 @@ export function JoinInviteCheckoutPanel({
             }
           />
         ) : null}
-      </div>
-
-      <div className="text-center text-sm text-muted-foreground">
-        Want to self-host?{" "}
-        <Link
-          href={MURPH_GITHUB_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="font-semibold text-foreground underline-offset-4 hover:underline"
-        >
-          View Murph on GitHub.
-        </Link>
       </div>
 
       <div className="rounded-xl border border-border bg-background px-6 py-5 sm:px-8">

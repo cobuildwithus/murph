@@ -1490,7 +1490,9 @@ function createPublicGoalSummaries() {
 }
 
 function selectRunnerDependencyPackageName(packageNames: readonly string[]): string {
-  const packageName = packageNames.find((entry) => entry !== hostedRunnerRuntimePackageName);
+  const packageName = packageNames.find(
+    (entry) => entry !== hostedRunnerRuntimePackageName && entry !== "@murphai/assistant-engine",
+  );
 
   if (!packageName) {
     throw new Error("Fixture must include at least one runner dependency package.");

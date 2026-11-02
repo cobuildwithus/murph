@@ -318,4 +318,3 @@ test('assistant onboarding resume-context marks missing service surfaces unavail
     hint: 'Use a runtime with the matching service enabled to inspect this surface.',
   })
 })
-

@@ -1,27 +1,23 @@
 import assert from "node:assert/strict";
+import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { promises as fs } from "node:fs";
 import { test } from "vitest";
 
 import { initializeVault } from "@murphai/core";
 
-import * as indexSurface from "../src/index.ts";
-import * as runtimeSurface from "../src/runtime.ts";
-import {
-  prepareInboxCaptureRecord,
-  buildInboxCaptureLedgerPath,
-  buildInboxCaptureLedgerPathForOccurredAt,
-} from "../src/indexing/persist/canonical-records.ts";
 import type {
   InboundCapture,
-  PersistedCapture,
   StoredAttachment,
   StoredCapture,
 } from "../src/contracts/capture.ts";
-import type { PollConnector } from "../src/connectors/types.ts";
-import { runInboxDaemon, runPollConnector } from "../src/kernel/daemon.ts";
-import type { InboxPipeline } from "../src/kernel/pipeline.ts";
+import * as indexSurface from "../src/index.ts";
+import {
+  buildInboxCaptureLedgerPath,
+  buildInboxCaptureLedgerPathForOccurredAt,
+  prepareInboxCaptureRecord,
+} from "../src/indexing/persist/canonical-records.ts";
+import * as runtimeSurface from "../src/runtime.ts";
 import { buildAttachmentId } from "../src/shared.ts";
 
 test("runtime and package barrels expose the same inbox runtime seam", async () => {
@@ -392,113 +388,6 @@ test("sqlite runtime rejects attachment ids that do not belong to the chosen cap
   }
 });
 
-test("runPollConnector returns an aggregate error when restart cleanup fails after a watch error", async () => {
-  let watchCalls = 0;
-  let closeCalls = 0;
-
-  await assert.rejects(
-    () =>
-      runPollConnector({
-        connector: createStubPollConnector({
-          id: "linq:primary",
-          source: "linq",
-          accountId: "primary",
-          async watch() {
-            watchCalls += 1;
-            throw new Error("watch exploded");
-          },
-          async close() {
-            closeCalls += 1;
-            if (closeCalls === 1) {
-              throw new Error("close exploded");
-            }
-          },
-        }),
-        pipeline: createStubInboxPipeline(),
-        signal: new AbortController().signal,
-        restartConnectorOnFailure: true,
-        connectorRestartDelayMs: 1,
-        maxConnectorRestartDelayMs: 1,
-      }),
-    (error: unknown) => {
-      assert.ok(error instanceof AggregateError);
-      assert.equal(
-        error.message,
-        "Connector watch failed (watch exploded) and cleanup before restart also failed (close exploded).",
-      );
-      assert.deepEqual(
-        error.errors.map((entry) => (entry instanceof Error ? entry.message : String(entry))),
-        ["watch exploded", "close exploded"],
-      );
-      return true;
-    },
-  );
-
-  assert.equal(watchCalls, 1);
-  assert.equal(closeCalls, 2);
-});
-
-test("runInboxDaemon treats maxAttempts zero as disabled retries and wraps the first connector failure", async () => {
-  let watchCalls = 0;
-
-  await assert.rejects(
-    () =>
-      runInboxDaemon({
-        pipeline: createStubInboxPipeline(),
-        connectors: [
-          createStubPollConnector({
-            id: "telegram:primary",
-            source: "telegram",
-            accountId: "primary",
-            async watch() {
-              watchCalls += 1;
-              throw new Error("watch exploded");
-            },
-          }),
-        ],
-        signal: new AbortController().signal,
-        continueOnConnectorFailure: true,
-        connectorRestartPolicy: {
-          enabled: true,
-          backoffMs: [0],
-          maxAttempts: 0,
-        },
-      }),
-    /Connector "telegram:primary" \(telegram\) failed: watch exploded/,
-  );
-
-  assert.equal(watchCalls, 1);
-});
-
-test("runInboxDaemon exits without starting connectors when the parent signal is already aborted", async () => {
-  const controller = new AbortController();
-  controller.abort();
-  let watchCalls = 0;
-
-  await runInboxDaemon({
-    pipeline: createStubInboxPipeline(),
-    connectors: [
-      createStubPollConnector({
-        id: "telegram:primary",
-        source: "telegram",
-        accountId: "primary",
-        async watch() {
-          watchCalls += 1;
-        },
-      }),
-    ],
-    signal: controller.signal,
-    continueOnConnectorFailure: true,
-    connectorRestartPolicy: {
-      enabled: true,
-      backoffMs: [0],
-      maxAttempts: 1,
-    },
-  });
-
-  assert.equal(watchCalls, 0);
-});
-
 async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
 }
@@ -586,107 +475,5 @@ function createIndexedCaptureFixture(input: {
     eventId: stored.eventId,
     input: inbound,
     stored,
-  };
-}
-
-function createStubInboxPipeline(): InboxPipeline {
-  return {
-    runtime: {
-      databasePath: ":memory:",
-      close() {},
-      getCursor() {
-        return null;
-      },
-      setCursor() {},
-      findByExternalId() {
-        return null;
-      },
-      upsertCaptureIndex() {
-        throw new Error("upsertCaptureIndex should not be called");
-      },
-      enqueueDerivedJobs() {},
-      listAttachmentParseJobs() {
-        return [];
-      },
-      claimNextAttachmentParseJob() {
-        return null;
-      },
-      requeueAttachmentParseJobs() {
-        return 0;
-      },
-      completeAttachmentParseJob() {
-        throw new Error("completeAttachmentParseJob should not be called");
-      },
-      failAttachmentParseJob() {
-        throw new Error("failAttachmentParseJob should not be called");
-      },
-      listCaptures() {
-        return [];
-      },
-      searchCaptures() {
-        return [];
-      },
-      redactCaptureText() {
-        return false;
-      },
-      getCapture() {
-        return null;
-      },
-      getAttachment() {
-        return null;
-      },
-    },
-    async processCapture(input) {
-      return createPersistedCapture(input);
-    },
-    close() {},
-  };
-}
-
-function createStubPollConnector(input: {
-  id: string;
-  source: string;
-  accountId?: string | null;
-  backfill?: PollConnector["backfill"];
-  watch?: PollConnector["watch"];
-  close?: PollConnector["close"];
-}): PollConnector {
-  return {
-    id: input.id,
-    source: input.source,
-    accountId: input.accountId ?? null,
-    kind: "poll",
-    capabilities: {
-      backfill: input.backfill !== undefined,
-      watch: input.watch !== undefined,
-      webhooks: false,
-      attachments: true,
-    },
-    async backfill(cursor, emit) {
-      if (!input.backfill) {
-        return cursor;
-      }
-
-      return input.backfill(cursor, emit);
-    },
-    async watch(cursor, emit, signal) {
-      if (!input.watch) {
-        return;
-      }
-
-      await input.watch(cursor, emit, signal);
-    },
-    close: input.close,
-  };
-}
-
-function createPersistedCapture(capture: InboundCapture): PersistedCapture {
-  return {
-    captureId: `cap-${capture.externalId}`,
-    eventId: `evt-${capture.externalId}`,
-    auditId: `aud-${capture.externalId}`,
-    sourceDirectory: `raw/inbox/${capture.source}/${capture.externalId}`,
-    createdAt: capture.occurredAt,
-    deduped: false,
   };
 }
