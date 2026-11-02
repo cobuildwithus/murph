@@ -249,10 +249,7 @@ async function buildDiffScopeSummary(explicitChangedFiles) {
       continue;
     }
 
-    const verifyCliTypecheckCovered = runVerifyCli
-      && (metadata.dir === "packages/assistant-cli" || metadata.dir === "packages/setup-cli");
-
-    if (typeof metadata.scripts.typecheck === "string" && !verifyCliTypecheckCovered) {
+    if (typeof metadata.scripts.typecheck === "string") {
       typecheckDirs.push(metadata.dir);
     }
 

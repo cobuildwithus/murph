@@ -18,7 +18,6 @@ async function runCli(argv: string[]): Promise<string> {
   try {
     process.exitCode = undefined
     await runMurphCliAction(argv, {
-      argv0: 'vault-cli',
       exit(code) {
         if (code && code !== 0) {
           throw new Error(`exit ${code}`)

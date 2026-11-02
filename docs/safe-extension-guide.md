@@ -6,8 +6,7 @@ This guide is the downstream integration reference for extending the Murph vault
 
 ## Non-Negotiable Boundaries
 
-- Treat `murph` as the product-facing CLI for the current active vault.
-- Treat `vault-cli` as the raw explicit-vault/operator surface for development, automation, assistant/runtime integration, and the OpenClaw plugin.
+- Treat `vault-cli` as the raw explicit-vault/operator surface for development, automation, assistant/runtime integration.
 - Keep canonical vault writes inside `@murphai/core` only.
 - Keep human-facing truth in Markdown (`CORE.md`, `journal/`, `bank/`).
 - Keep machine-facing truth in append-only JSONL ledgers (`ledger/events`, display-grade `ledger/metric-samples`, explicit raw/debug `ledger/samples`, `audit`).
@@ -19,17 +18,16 @@ This guide is the downstream integration reference for extending the Murph vault
 
 ## Package Families And Public Posture
 
-Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-execution`, `@murphai/gateway-core`, `@murphai/murph`, and `@murphai/openclaw-plugin`. Other workspace packages are private owner packages. Public tarballs may bundle private owners when needed, but those private packages are not standalone public API.
+Only four packages are published to npm: `@murphai/contracts`, `@murphai/hosted-execution`, `@murphai/gateway-core`, and `@murphai/murph`. Other workspace packages are private owner packages. Public tarballs may bundle private owners when needed, but those private packages are not standalone public API.
 
 | Family | Public posture | Allowed to do | Must not do |
 | --- | --- | --- | --- |
 | Contract and shared gateway packages (`@murphai/contracts`, `@murphai/hosted-execution`, `@murphai/gateway-core`) | Published, narrow entrypoints | Define shared schemas, hosted/control-plane contracts, and transport-neutral gateway contracts | Reach into app/package internals or become canonical write owners |
-| Product CLI package (`@murphai/murph`) | Published; ships both `murph` and `vault-cli` | Present the product CLI, raw vault CLI, onboarding/setup, local daemon composition, and operator formatting over owner packages | Bypass owner packages for canonical writes or expose private workspace packages as public API |
-| OpenClaw bundle (`@murphai/openclaw-plugin`) | Published skill bundle | Teach OpenClaw to use the existing `vault-cli` surface against the operator's configured vault | Start a second Murph assistant runtime or invent an OpenClaw-owned storage contract |
+| Product CLI package (`@murphai/murph`) | Published; ships `vault-cli` | Present runtime vault commands, hosted onboarding, device daemon composition, and operator formatting over owner packages | Bypass owner packages for canonical writes or expose private workspace packages as public API |
 | Vault contract and mutation owners (`@murphai/core`, `@murphai/vault-usecases`, private health/usecase owners) | Workspace-private | Validate state, perform canonical mutations, compose command-shaped usecases, and keep write paths behind owner seams | Publish ad hoc public APIs or let callers mutate canonical files directly |
 | Import, inbox, parser, query, and projection owners (`@murphai/importers`, `@murphai/inboxd`, `@murphai/parsers`, `@murphai/query`, `@murphai/health-commons`) | Workspace-private | Normalize external evidence, persist raw/canonical intake through core, publish derived artifacts, and build read-only projections | Decide new canonical storage rules or mutate vault truth from read/projection paths |
 | Runtime-state and local daemon owners (`@murphai/runtime-state`, `@murphai/device-syncd`) | Workspace-private | Own explicit `.runtime/operations/**` and `.runtime/projections/**` paths, daemon control planes, local projections, and runtime path/versioning policy | Hide durable state in undocumented runtime paths or store canonical product truth in runtime state |
-| Assistant and hosted runtime owners (`@murphai/assistant-engine`, `@murphai/assistant-cli`, `@murphai/assistant-runtime`, `@murphai/operator-config`, hosted apps) | Workspace-private or app-local | Orchestrate assistant turns, bounded hosted workspace invocations, provider config, and hosted control/execution planes over explicit contracts | Treat assistant/session/runtime residue as canonical health or product truth |
+| Assistant and hosted runtime owners (`@murphai/assistant-engine`, `@murphai/assistant-runtime`, `@murphai/operator-config`, hosted apps) | Workspace-private or app-local | Orchestrate assistant turns, bounded hosted workspace invocations, provider config, and hosted control/execution planes over explicit contracts | Treat assistant/session/runtime residue as canonical health or product truth |
 
 ## Safe Extension Patterns
 
@@ -86,7 +84,7 @@ If a query needs to "fix up" data while reading, move that logic into core migra
 
 ### Add a new CLI command
 
-1. Put product-facing flows under `murph` when they operate on the active vault.
+1. Put runtime and operator commands under `vault-cli` with explicit vault ownership.
 2. Keep raw explicit-vault, automation, assistant/runtime, and integration flows available through `vault-cli`.
 3. Validate arguments at the edge.
 4. Delegate the actual operation to core, importers, or query packages.
@@ -140,6 +138,4 @@ Downstream follow-up stays blocked until the source lanes publish the frozen hea
 - Mutable artifacts under `raw/`
 - Assistant state written into the vault root
 - User-facing or queryable feature state landing in assistant runtime instead of canonical vault records
-- Product flows hidden behind `vault-cli` only when they should be available through `murph`
-- Raw explicit-vault/operator flows exposed only through `murph` when integrations need `vault-cli`
 - Cross-package imports that let non-core packages mutate canonical state implicitly

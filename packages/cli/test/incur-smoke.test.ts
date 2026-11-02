@@ -129,7 +129,6 @@ async function runSourceEntrypointRawFromCwd(
       process.stderr.write = createProcessWriteInterceptor(stderr)
 
       await runMurphCliEntrypoint(args, {
-        argv0: 'vault-cli',
         exit(code = 0) {
           exitCode = code
         },
@@ -1683,7 +1682,7 @@ test('published config schema artifact stays on the native incur shape', async (
             properties?: {
               commands?: {
                 properties?: {
-                  ask?: {
+                  onboarding?: {
                     properties?: {
                       options?: {
                         properties?: {
@@ -1706,7 +1705,7 @@ test('published config schema artifact stays on the native incur shape', async (
     schema.properties?.commands?.properties?.vault?.properties?.commands?.properties?.show?.properties?.options?.properties?.requestId,
   )
   assert.ok(
-    schema.properties?.commands?.properties?.assistant?.properties?.commands?.properties?.ask?.properties?.options?.properties?.model,
+    schema.properties?.commands?.properties?.assistant?.properties?.commands?.properties?.onboarding
   )
   assert.equal(Object.hasOwn(schema.properties?.commands?.properties ?? {}, 'age'), false)
   assert.equal(schemaText.includes('"x-incur-'), false)
@@ -2691,32 +2690,7 @@ test('food search-labels-batch schema exposes hosted batch lookup inputs', async
   )
 })
 
-test('model schema explains preset-gated non-interactive updates', async () => {
-  const schema = JSON.parse(
-    await runSourceCliRaw(['model', '--schema', '--format', 'json']),
-  ) as {
-    options: {
-      properties: Record<string, {
-        description?: string
-      }>
-    }
-  }
 
-  assert.match(
-    String(schema.options.properties.preset?.description ?? ''),
-    /only accepts Codex/u,
-  )
-  assert.equal('providerPreset' in schema.options.properties, false)
-  assert.equal('baseUrl' in schema.options.properties, false)
-  assert.equal('apiKeyEnv' in schema.options.properties, false)
-  assert.equal('headersJson' in schema.options.properties, false)
-  assert.equal('modelProvider' in schema.options.properties, false)
-  assert.equal('oss' in schema.options.properties, false)
-  assert.match(
-    String(schema.options.properties.profile?.description ?? ''),
-    /Only applies with `--preset codex`/u,
-  )
-})
 
 test('blood-test list schema exposes targeted text, date-range, and status filters', async () => {
   const schema = JSON.parse(
@@ -3311,78 +3285,6 @@ test('knowledge upsert rejects whitespace-only bodies through the CLI boundary',
   }
 })
 
-test('root run alias keeps the same command schema as assistant run', async () => {
-  const rootSchema = JSON.parse(
-    await runSourceCliRaw(['run', '--schema', '--format', 'json']),
-  ) as {
-    args: unknown
-    options: unknown
-  }
-  const assistantSchema = JSON.parse(
-    await runSourceCliRaw(['assistant', 'run', '--schema', '--format', 'json']),
-  ) as {
-    args: unknown
-    options: unknown
-  }
-
-  assert.deepEqual(rootSchema.args, assistantSchema.args)
-  assert.deepEqual(rootSchema.options, assistantSchema.options)
-})
-
-test('root status alias keeps the same command schema as assistant status', async () => {
-  const rootSchema = JSON.parse(
-    await runSourceCliRaw(['status', '--schema', '--format', 'json']),
-  ) as {
-    args: unknown
-    options: unknown
-  }
-  const assistantSchema = JSON.parse(
-    await runSourceCliRaw(['assistant', 'status', '--schema', '--format', 'json']),
-  ) as {
-    args: unknown
-    options: unknown
-  }
-
-  assert.deepEqual(rootSchema.args, assistantSchema.args)
-  assert.deepEqual(rootSchema.options, assistantSchema.options)
-})
-
-test('root doctor alias keeps the same command schema as assistant doctor', async () => {
-  const rootSchema = JSON.parse(
-    await runSourceCliRaw(['doctor', '--schema', '--format', 'json']),
-  ) as {
-    args: unknown
-    options: unknown
-  }
-  const assistantSchema = JSON.parse(
-    await runSourceCliRaw(['assistant', 'doctor', '--schema', '--format', 'json']),
-  ) as {
-    args: unknown
-    options: unknown
-  }
-
-  assert.deepEqual(rootSchema.args, assistantSchema.args)
-  assert.deepEqual(rootSchema.options, assistantSchema.options)
-})
-
-test('root stop alias keeps the same command schema as assistant stop', async () => {
-  const rootSchema = JSON.parse(
-    await runSourceCliRaw(['stop', '--schema', '--format', 'json']),
-  ) as {
-    args: unknown
-    options: unknown
-  }
-  const assistantSchema = JSON.parse(
-    await runSourceCliRaw(['assistant', 'stop', '--schema', '--format', 'json']),
-  ) as {
-    args: unknown
-    options: unknown
-  }
-
-  assert.deepEqual(rootSchema.args, assistantSchema.args)
-  assert.deepEqual(rootSchema.options, assistantSchema.options)
-})
-
 test('automation save and edit schemas expose typed automation fields and a separate JSON import fallback', async () => {
   const saveSchema = JSON.parse(
     await runSourceCliRaw(['automation', 'save', '--schema', '--format', 'json']),
@@ -3606,76 +3508,6 @@ test('memory show schema accepts an optional memory id and compact projection', 
     /document existence plus each record's id, section, and text/u,
   )
   assert.deepEqual(schema.options.required ?? [], [])
-}, INCUR_SCHEMA_TIMEOUT_MS)
-
-test('assistant session list schema emits the normalized session output shape', async () => {
-  const schema = JSON.parse(
-    await runSourceCliRaw(['assistant', 'session', 'list', '--schema', '--format', 'json']),
-  ) as {
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-    output: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-
-  assert.equal('stateRoot' in schema.output.properties, true)
-  assert.equal('sessions' in schema.output.properties, true)
-  assert.equal('limit' in schema.options.properties, true)
-  assert.equal('filters' in schema.output.properties, true)
-  assert.equal('count' in schema.output.properties, true)
-  assert.deepEqual(schema.output.required, ['vault', 'stateRoot', 'filters', 'sessions', 'count'])
-
-  const sessions = schema.output.properties.sessions as {
-    items?: {
-      properties?: Record<string, unknown>
-      required?: string[]
-    }
-  }
-  const sessionVariant = sessions.items
-
-  assert.notEqual(sessionVariant, undefined)
-  assert.equal('providerSessionId' in (sessionVariant?.properties ?? {}), false)
-  assert.equal('providerBinding' in (sessionVariant?.properties ?? {}), false)
-  assert.equal('target' in (sessionVariant?.properties ?? {}), false)
-  assert.equal('providerOptions' in (sessionVariant?.properties ?? {}), false)
-  assert.equal('model' in (sessionVariant?.properties ?? {}), true)
-  assert.equal('resumeThreadId' in (sessionVariant?.properties ?? {}), true)
-}, INCUR_SCHEMA_TIMEOUT_MS)
-
-test('assistant session show schema emits the normalized session output shape', async () => {
-  const schema = JSON.parse(
-    await runSourceCliRaw(['assistant', 'session', 'show', '--schema', '--format', 'json']),
-  ) as {
-    args: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-    output: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-
-  assert.equal('sessionId' in schema.args.properties, true)
-  assert.deepEqual(schema.args.required, ['sessionId'])
-  assert.equal('stateRoot' in schema.output.properties, true)
-  assert.equal('session' in schema.output.properties, true)
-  assert.deepEqual(schema.output.required, ['vault', 'stateRoot', 'session'])
-
-  const session = schema.output.properties.session as {
-    properties?: Record<string, unknown>
-    required?: string[]
-  }
-  const sessionVariant = session
-
-  assert.notEqual(sessionVariant, undefined)
-  assert.equal('providerSessionId' in (sessionVariant?.properties ?? {}), false)
-  assert.equal('providerBinding' in (sessionVariant?.properties ?? {}), false)
-  assert.equal('target' in (sessionVariant?.properties ?? {}), true)
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
 test('automation help points operators at canonical automations', async () => {

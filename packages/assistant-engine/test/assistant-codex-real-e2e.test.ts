@@ -873,7 +873,7 @@ describeRealCodex('real Codex event-list family isolation', () => {
         assistantHostedDeviceConnectProviders: [],
         assistantKnowledgeToolsAvailable: false,
         channel: 'linq',
-        cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: 'direct',
         currentInstant: '2026-04-11T12:00:00.000Z',
         currentLocalDate: '2026-04-11',
@@ -985,7 +985,7 @@ function buildBoundedEventListPrompt(assistantCliContract: string, conversationS
     assistantCliContract, assistantHostedAutomationAvailable: false,
     assistantContextSnapshotPrompt: null, assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [], assistantKnowledgeToolsAvailable: false,
-    channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+    channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
     conversationScope, currentInstant: '2026-04-11T12:00:00.000Z',
     currentLocalDate: '2026-04-11', currentTimeZone: 'America/New_York', hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
@@ -1207,7 +1207,7 @@ async function buildFocusedExperimentListInstructions() {
     assistantCliContract, assistantHostedAutomationAvailable: false,
     assistantContextSnapshotPrompt: null, assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [], assistantKnowledgeToolsAvailable: false,
-    channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+    channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
     conversationScope: 'direct', currentInstant: '2026-04-11T12:00:00.000Z',
     currentLocalDate: '2026-04-11', currentTimeZone: 'UTC', hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
@@ -1380,7 +1380,7 @@ async function buildFocusedActivityProjectionInstructions() {
     assistantCliContract, assistantHostedAutomationAvailable: false,
     assistantContextSnapshotPrompt: null, assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [], assistantKnowledgeToolsAvailable: false,
-    channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+    channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
     conversationScope: 'direct', currentInstant: '2026-01-03T12:00:00.000Z',
     currentLocalDate: '2026-01-03', currentTimeZone: 'UTC', hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
@@ -1666,7 +1666,7 @@ async function buildFocusedSleepPatternProjectionInstructions() {
     assistantCliContract, assistantHostedAutomationAvailable: false,
     assistantContextSnapshotPrompt: null, assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [], assistantKnowledgeToolsAvailable: false,
-    channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+    channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
     conversationScope: 'direct', currentInstant: '2026-01-04T12:00:00.000Z',
     currentLocalDate: '2026-01-04', currentTimeZone: 'UTC', hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
@@ -1770,7 +1770,7 @@ describeRealCodex('real model canonical production journeys', () => {
           codexCommand, codexHome: config.codexHome,
           developerInstructions: buildAssistantSystemPrompt({
             assistantCliContract: null, channel: 'linq',
-            cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+            cliAccess: { rawCommand: 'vault-cli' },
             conversationScope: 'direct', currentLocalDate: '2026-11-02', currentTimeZone: 'UTC',
             hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
             assistantTone: phase === 'initial' ? 'formal' : 'casual',
@@ -1993,6 +1993,7 @@ describeRealCodex('real model canonical production journeys', () => {
       })
       expect(providerRequests).toBeGreaterThan(0)
       const commands = (await readFile(commandLogPath, 'utf8')).trim().split('\n').filter(Boolean)
+      expect(commands.some((command) => /^(?:onboard|use|model|run|status|doctor|stop|assistant (?:ask|chat|deliver|run|status|doctor|stop|session|self-target))\b/u.test(command))).toBe(false)
       expect(commands.filter((command) => command.startsWith(`meal show ${meal.mealId}`)
         && !isRecordedVaultHelpCommand(command))).toHaveLength(1)
       const reads = readCapabilityRoutingActions(result.jsonEvents).filter((action) =>
@@ -2592,7 +2593,7 @@ describeRealCodex('real Codex Telegram file delivery e2e', () => {
           assistantCliContract: null, assistantContextSnapshotPrompt: null,
           assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
           assistantKnowledgeToolsAvailable: false, channel: 'telegram',
-          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: '2026-09-04', currentTimeZone: 'UTC',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
         }),
@@ -2666,7 +2667,7 @@ describeRealCodex('real Codex common media file delivery e2e', () => {
           assistantCliContract: null, assistantContextSnapshotPrompt: null,
           assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
           assistantKnowledgeToolsAvailable: false, channel: 'linq',
-          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: '2026-10-21', currentTimeZone: 'UTC',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
         }),
@@ -2720,7 +2721,7 @@ describeRealCodex('real Codex public image URL recovery e2e', () => {
           assistantCliContract: null, assistantContextSnapshotPrompt: null,
           assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
           assistantKnowledgeToolsAvailable: false, channel: 'linq',
-          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: '2026-10-21', currentTimeZone: 'UTC',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
         }),
@@ -5596,7 +5597,7 @@ describeRealCodex('real Codex missing knowledge recovery e2e', () => {
           assistantCliContract: null, assistantContextSnapshotPrompt: null,
           assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
           assistantKnowledgeToolsAvailable: false, channel: 'linq',
-          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: '2026-09-04', currentTimeZone: 'UTC',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
           turnTrigger: null,
@@ -5649,7 +5650,7 @@ describeRealCodex('real Codex compact knowledge read e2e', () => {
           assistantCliContract: null, assistantContextSnapshotPrompt: null,
           assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
           assistantKnowledgeToolsAvailable: false, channel: 'linq',
-          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: '2026-09-04', currentTimeZone: 'UTC',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
           turnTrigger: null,
@@ -5710,7 +5711,7 @@ describeRealCodex('real Codex optional knowledge show e2e', () => {
           assistantCliContract: null, assistantContextSnapshotPrompt: null,
           assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
           assistantKnowledgeToolsAvailable: false, channel: 'linq',
-          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: '2026-09-04', currentTimeZone: 'UTC',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
           turnTrigger: null,
@@ -5829,7 +5830,7 @@ describeRealCodex('real Codex optional knowledge ledger and wiki write e2e', () 
           assistantCliContract: null, assistantContextSnapshotPrompt: await readAssistantCurrentStatePrompt({ vaultRoot }),
           assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
           assistantKnowledgeToolsAvailable: false, channel: 'linq',
-          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: '2026-09-04', currentTimeZone: 'UTC',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
           turnTrigger: null,
@@ -5947,7 +5948,6 @@ describeRealCodex('real Codex workout capture default e2e', () => {
             channel: 'linq',
             cliAccess: {
               rawCommand: 'vault-cli',
-              setupCommand: 'murph',
             },
             conversationScope: 'direct',
             currentInstant: new Date().toISOString(),
@@ -6206,7 +6206,6 @@ describeRealCodex('real Codex coordinated workout exercise e2e', () => {
             channel: 'linq',
             cliAccess: {
               rawCommand: 'vault-cli',
-              setupCommand: 'murph',
             },
             conversationScope: 'direct',
             currentLocalDate: '2026-08-20',
@@ -6549,7 +6548,7 @@ describeRealCodex('real Codex routine chat readiness e2e', () => {
           assistantHostedDeviceConnectProviders: [],
           assistantKnowledgeToolsAvailable: false,
           channel: 'linq',
-          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct',
           currentLocalDate: '2026-09-08',
           currentTimeZone: 'UTC',
@@ -6690,7 +6689,6 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             channel: 'linq',
             cliAccess: {
               rawCommand: 'vault-cli',
-              setupCommand: 'murph',
             },
             conversationScope: 'direct',
             currentLocalDate: '2026-08-26',
@@ -6964,7 +6962,6 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             channel: 'linq',
             cliAccess: {
               rawCommand: 'vault-cli',
-              setupCommand: 'murph',
             },
             conversationScope: 'direct',
             currentLocalDate: '2026-08-26',
@@ -7187,7 +7184,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             assistantHostedDeviceConnectProviders: [],
             assistantKnowledgeToolsAvailable: false,
             channel: 'linq',
-            cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+            cliAccess: { rawCommand: 'vault-cli' },
             conversationScope: 'direct',
             currentLocalDate: '2030-01-15',
             currentTimeZone: 'UTC',
@@ -7397,7 +7394,6 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             channel: 'linq',
             cliAccess: {
               rawCommand: 'vault-cli',
-              setupCommand: 'murph',
             },
             conversationScope: 'direct',
             currentLocalDate: '2030-01-15',
@@ -7585,7 +7581,6 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             channel: 'linq',
             cliAccess: {
               rawCommand: 'vault-cli',
-              setupCommand: 'murph',
             },
             conversationScope: 'direct',
             currentLocalDate: '2026-08-20',
@@ -8155,7 +8150,6 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
             channel: 'telegram',
             cliAccess: {
               rawCommand: 'vault-cli',
-              setupCommand: 'murph',
             },
             conversationScope: 'direct',
             currentLocalDate: '2026-08-26',
@@ -8513,7 +8507,6 @@ describeRealCodex('real Codex X post reading e2e', () => {
             channel: 'telegram',
             cliAccess: {
               rawCommand: 'vault-cli',
-              setupCommand: 'murph',
             },
             conversationScope: 'direct',
             currentLocalDate: '2026-08-26',
@@ -8617,7 +8610,6 @@ describeRealCodex('real Codex member-local current clock e2e', () => {
           channel: 'linq',
           cliAccess: {
             rawCommand: 'vault-cli',
-            setupCommand: 'murph',
           },
           conversationScope: 'direct',
           currentInstant: '2027-02-14T07:17:05.678Z',
@@ -13008,7 +13000,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       const systemOptions = {
         assistantCliContract: null, assistantHostedAutomationAvailable: true,
         assistantHostedGroupToolSurface: 'shared_read', assistantProgressUpdatesAvailable: false,
-        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: 'group', hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
         onboardingGuidance: false, currentTimeZone: 'UTC',
       } as const
@@ -13120,7 +13112,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: null, onboardingGuidance: false, modelBehaviorProfile: 'gpt5-agentic',
           assistantHostedGroupToolSurface: 'shared_read', channel: 'linq',
-          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'group', hostedRuntime: true,
           currentLocalDate: '2026-09-20', currentTimeZone: 'America/New_York',
           turnTrigger: 'automation-cron', scheduledOccurrenceAt: '2026-09-20T13:00:00.000Z',
@@ -16945,7 +16937,7 @@ describeRealCodex('real Codex generated-music fallback e2e', () => {
         assistantProgressUpdatesAvailable: false,
         assistantStyleSettingsAvailable: false,
         channel: 'linq',
-        cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: 'direct',
         currentLocalDate: '2026-09-08',
         currentInstant: '2026-09-08T12:00:00.000Z',
@@ -19311,7 +19303,7 @@ describeRealCodex('real Codex private Journal capture recovery e2e', () => {
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
           channel: 'telegram', conversationScope: 'direct', hostedRuntime: false,
-          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          cliAccess: { rawCommand: 'vault-cli' },
           currentInstant: '2026-05-18T16:00:00Z', currentLocalDate: '2026-05-18',
           currentTimeZone: 'America/New_York', modelBehaviorProfile: 'gpt5-agentic',
           onboardingGuidance: false,
@@ -19389,7 +19381,7 @@ describeRealCodex('real Codex private Journal capture recovery boundaries e2e', 
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
           channel: 'telegram', conversationScope: 'direct', hostedRuntime: true,
-          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          cliAccess: { rawCommand: 'vault-cli' },
           currentInstant: '2026-05-18T16:00:00Z', currentLocalDate: '2026-05-18',
           currentTimeZone: 'America/New_York', modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
         }),
@@ -19885,7 +19877,7 @@ describeRealCodex('real Codex memory compact receipt e2e', () => {
           assistantCliContract,
           assistantContextSnapshotPrompt: `Observed conversational language: English. Canonical saved memory: ${JSON.stringify(saved.record)}`,
           canonicalTimeZoneAvailable: true, channel: 'linq',
-          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: promptTimeContext.currentLocalDate,
           currentTimeZone: 'UTC', hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
           onboardingGuidance: false, turnTrigger: null,
@@ -21456,7 +21448,7 @@ describeRealCodex('real Codex canonical plan reminder targets e2e', () => {
           assistantCliContract: null, assistantContextSnapshotPrompt: null,
           assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
           assistantHostedGroupToolSurface: 'none', assistantKnowledgeToolsAvailable: false,
-          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: scenario.date, currentInstant: occurrenceAt,
           currentTimeZone: 'America/New_York', hostedRuntime: true,
           modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
@@ -24839,7 +24831,6 @@ function buildPublicGoalSetupDeveloperInstructions(now = new Date()): string {
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationScope: 'direct',
     currentLocalDate: toLocalDayKey(now, 'America/New_York'),
@@ -29623,7 +29614,7 @@ describeRealCodex('real Codex voice reminder destination e2e', () => {
           assistantHostedAutomationAvailable: true, assistantProgressUpdatesAvailable: false,
           assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
           assistantKnowledgeToolsAvailable: false, assistantContextSnapshotPrompt: null,
-          channel: 'voice', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          channel: 'voice', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: '2026-10-14',
           currentInstant: '2026-10-14T16:00:00.000Z', currentTimeZone: 'America/New_York',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
@@ -29699,7 +29690,7 @@ describeRealCodex('real Codex link recovery progress e2e', () => {
           assistantHostedDeviceConnectAvailable: true,
           assistantHostedDeviceConnectProviders: [{ label: 'Oura', provider: 'oura' }],
           assistantKnowledgeToolsAvailable: false, assistantProgressUpdatesAvailable: true,
-          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: '2026-10-14',
           currentInstant: '2026-10-14T16:00:00.000Z', currentTimeZone: 'America/New_York',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
@@ -29821,7 +29812,7 @@ describeRealCodex('real Codex automation edit progress e2e', () => {
           assistantHostedAutomationAvailable: true, assistantProgressUpdatesAvailable: true,
           assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
           assistantKnowledgeToolsAvailable: false, assistantContextSnapshotPrompt: null,
-          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: '2026-10-14',
           currentInstant: '2026-10-14T16:00:00.000Z', currentTimeZone: 'America/New_York',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
@@ -29932,7 +29923,7 @@ describeRealCodex('real Codex weekday automation authoring e2e', () => {
           assistantHostedAutomationAvailable: true, assistantProgressUpdatesAvailable: false,
           assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
           assistantKnowledgeToolsAvailable: false, assistantContextSnapshotPrompt: null,
-          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: '2026-10-09',
           currentInstant: '2026-10-09T19:00:00.000Z', currentTimeZone: 'America/New_York',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
@@ -30240,7 +30231,6 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
             channel: 'linq',
             cliAccess: {
               rawCommand: 'vault-cli',
-              setupCommand: 'murph',
             },
             conversationScope: 'direct',
             currentLocalDate: '2026-09-04',
@@ -30458,7 +30448,6 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
             channel: 'linq',
             cliAccess: {
               rawCommand: 'vault-cli',
-              setupCommand: 'murph',
             },
             conversationScope: 'direct',
             currentLocalDate: '2026-07-27',
@@ -30578,7 +30567,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         assistantCliContract: null, assistantHostedAutomationAvailable: false,
         assistantHostedGroupToolSurface: 'none', assistantProgressUpdatesAvailable: false,
         assistantStyleSettingsAvailable: false, channel: 'linq',
-        cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: 'direct', currentLocalDate: '2026-09-06',
         currentInstant: '2026-09-06T16:00:00.000Z', currentTimeZone: 'America/New_York',
         hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
@@ -30665,7 +30654,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         assistantProgressUpdatesAvailable: false,
         assistantStyleSettingsAvailable: false,
         channel: 'linq',
-        cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: 'direct',
         currentLocalDate: '2026-09-08',
         currentInstant: '2026-09-08T12:00:00.000Z',
@@ -30814,7 +30803,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         assistantCliContract: null, assistantHostedAutomationAvailable: false,
         assistantHostedGroupToolSurface: 'none', assistantProgressUpdatesAvailable: false,
         assistantStyleSettingsAvailable: false, channel: 'email',
-        cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: 'group', currentLocalDate: '2026-09-06', currentTimeZone: 'America/New_York',
         hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
         ordinaryInboundTurn: true,
@@ -30853,7 +30842,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
       assistantKnowledgeToolsAvailable: false,
       assistantProgressUpdatesAvailable: false,
       channel: 'linq',
-      cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+      cliAccess: { rawCommand: 'vault-cli' },
       conversationScope: 'direct',
       currentLocalDate: '2026-09-06',
       currentInstant: '2026-09-07T00:00:00.000Z',
@@ -31983,7 +31972,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         assistantHostedAutomationAvailable: true,
         assistantProgressUpdatesAvailable: false,
         channel: 'linq',
-        cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: 'direct',
         currentLocalDate: '2026-08-10',
         currentTimeZone: 'America/New_York',
@@ -32932,7 +32921,6 @@ describeRealCodex('real Codex recurring meal-tracking setup e2e', () => {
           channel: 'linq',
           cliAccess: {
             rawCommand: 'vault-cli',
-            setupCommand: 'murph',
           },
           conversationScope: 'direct',
           currentLocalDate: '2026-08-28',
@@ -33047,7 +33035,6 @@ describeRealCodex('real Codex recurring meal-tracking setup e2e', () => {
             channel: 'linq',
             cliAccess: {
               rawCommand: 'vault-cli',
-              setupCommand: 'murph',
             },
             conversationScope: input.conversationScope,
             currentLocalDate: '2026-08-28',
@@ -33230,7 +33217,6 @@ describeRealCodex('real Codex strict meal import recovery e2e', () => {
           channel: 'linq',
           cliAccess: {
             rawCommand: 'vault-cli',
-            setupCommand: 'murph',
           },
           conversationScope: 'direct',
           currentLocalDate: '2026-08-30',
@@ -33415,7 +33401,6 @@ describeRealCodex('real Codex food label query recovery e2e', () => {
           channel: 'linq',
           cliAccess: {
             rawCommand: 'vault-cli',
-            setupCommand: 'murph',
           },
           conversationScope: 'direct',
           currentLocalDate: '2026-08-30',
@@ -33695,7 +33680,6 @@ describeRealCodex('real Codex typed goal stale-ID recovery e2e', () => {
           channel: 'linq',
           cliAccess: {
             rawCommand: 'vault-cli',
-            setupCommand: 'murph',
           },
           conversationScope: 'direct',
           currentLocalDate: '2026-08-30',
@@ -33929,7 +33913,7 @@ async function buildRegimenLabelDeveloperInstructions(vaultRoot: string) {
     assistantHostedDeviceConnectProviders: [],
     assistantKnowledgeToolsAvailable: false,
     channel: 'linq',
-    cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+    cliAccess: { rawCommand: 'vault-cli' },
     conversationScope: 'direct',
     currentLocalDate: '2026-08-26',
     currentTimeZone: 'America/New_York',
@@ -34069,7 +34053,6 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
           channel: 'linq',
           cliAccess: {
             rawCommand: 'vault-cli',
-            setupCommand: 'murph',
           },
           conversationScope: 'direct',
           currentLocalDate: '2026-08-26',
@@ -34194,7 +34177,6 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
           channel: 'linq',
           cliAccess: {
             rawCommand: 'vault-cli',
-            setupCommand: 'murph',
           },
           conversationScope: 'direct',
           currentLocalDate: '2026-08-26',
@@ -34409,7 +34391,6 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
           channel: 'linq',
           cliAccess: {
             rawCommand: 'vault-cli',
-            setupCommand: 'murph',
           },
           conversationScope: 'direct',
           currentLocalDate: '2026-08-26',
@@ -38236,7 +38217,6 @@ function buildAutomaticMealClarificationDeveloperInstructions(input: {
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationScope: 'direct',
     currentLocalDate: input.currentLocalDate ?? '2026-08-24',
@@ -38424,7 +38404,6 @@ async function runRealNutritionCardAuthorityScenario(input: {
         channel: 'linq',
         cliAccess: {
           rawCommand: 'vault-cli',
-          setupCommand: 'murph',
         },
         conversationScope: 'direct',
         currentLocalDate: '2026-07-30',
@@ -40203,7 +40182,6 @@ function buildRepeatedSetDeveloperInstructions(
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationScope,
     currentLocalDate: '2030-01-15',
@@ -40753,7 +40731,7 @@ async function runLiveWorkoutRepetitionRecoveryProbe(
       assistantHostedDeviceConnectAvailable: false,
       assistantHostedDeviceConnectProviders: [],
       assistantKnowledgeToolsAvailable: false,
-      channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+      channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
       conversationScope: 'direct', currentLocalDate: new Date().toISOString().slice(0, 10),
       currentTimeZone: 'UTC', hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
       onboardingGuidance: false, turnTrigger: null,
@@ -41173,7 +41151,6 @@ function buildWearableArrivalDeveloperInstructions(
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationScope: 'direct',
     currentLocalDate: promptTimeContext.currentLocalDate,
@@ -41760,7 +41737,6 @@ function buildGroupPointOfViewDeveloperInstructions(input?: {
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationScope: 'group',
     currentLocalDate: '2026-07-27',
@@ -41783,7 +41759,6 @@ function buildExperimentOnboardingDeveloperInstructions(assistantHostedAutomatio
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationScope: 'direct',
     currentLocalDate: '2026-07-29',
@@ -41815,7 +41790,6 @@ function buildScheduledAutomationDeveloperInstructions(
     channel,
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationScope,
     currentLocalDate: '2026-08-05',
@@ -42103,7 +42077,6 @@ function buildHostedGroupStatusDeveloperInstructions(
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationScope: 'group',
     currentLocalDate,
@@ -42127,7 +42100,6 @@ function buildHostedUsageOptionsDeveloperInstructions(
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationScope,
     currentLocalDate: '2026-07-29',
@@ -42151,7 +42123,6 @@ function buildHostedUsageProgressDeveloperInstructions(
     channel,
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationScope: 'group',
     currentLocalDate: '2026-08-09',
@@ -42183,7 +42154,6 @@ function buildDirectConversationDeveloperInstructions(
     channel,
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationScope: 'direct',
     currentInstant: currentInstant ?? undefined,
@@ -42211,7 +42181,6 @@ function buildPainRoutingDeveloperInstructions(
     channel: input.channel,
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationScope: input.conversationScope,
     currentLocalDate: '2026-07-30',
@@ -42558,7 +42527,6 @@ function buildMidnightLinqReminderDeveloperInstructions(
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationScope: 'direct',
     currentLocalDate,
@@ -42586,7 +42554,6 @@ function buildVagueReminderDeveloperInstructions(): string {
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationScope: 'direct',
     currentLocalDate: '2026-10-14',
@@ -42690,7 +42657,6 @@ function buildWeatherAlertDeveloperInstructions(scheduled: boolean): string {
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationScope: 'direct',
     currentLocalDate: '2026-07-30',
@@ -42717,7 +42683,6 @@ function buildAdaptiveWearableDeveloperInstructions(input: {
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationScope: input.conversationScope,
     currentLocalDate: '2026-08-25',
@@ -42749,7 +42714,6 @@ function buildWeeklyHealthInsightDeveloperInstructions(input: {
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationScope: 'direct',
     currentLocalDate: input.currentLocalDate ?? '2026-08-09',
@@ -42776,7 +42740,6 @@ function buildAutomaticMealCloseoutDeveloperInstructions(input: {
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationScope: 'direct',
     currentLocalDate: input.currentLocalDate ?? '2026-08-24',
@@ -42800,7 +42763,6 @@ function buildCapabilityRoutingDeveloperInstructions(assistantContextSnapshotPro
     channel: 'local',
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationScope: 'direct',
     currentLocalDate: '2026-07-26',
@@ -42824,7 +42786,6 @@ function buildRoutinePresentationDeveloperInstructions(input: {
     channel: input.channel,
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationScope: 'direct',
     currentLocalDate: '2026-08-12',
@@ -42937,7 +42898,6 @@ function buildTelegramRichContentDeveloperInstructions(): string {
     channel: 'telegram',
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationScope: 'direct',
     currentLocalDate: '2026-08-12',
@@ -44188,7 +44148,7 @@ describeRealCodex('real Codex imported hospital history e2e', () => {
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
           channel: 'telegram', conversationScope: 'direct', hostedRuntime: true,
-          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          cliAccess: { rawCommand: 'vault-cli' },
           currentInstant: '2026-09-10T16:00:00Z', currentLocalDate: '2026-09-10', currentTimeZone: 'America/New_York',
           modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
         }),
@@ -44264,7 +44224,7 @@ describeRealCodex('real Codex downloaded hospital documents e2e', () => {
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
           channel: 'telegram', conversationScope: 'direct', hostedRuntime: true,
-          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          cliAccess: { rawCommand: 'vault-cli' },
           currentInstant: '2026-09-10T16:00:00Z', currentLocalDate: '2026-09-10', currentTimeZone: 'America/New_York',
           modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
         }),
@@ -44403,7 +44363,7 @@ describeRealCodex('real Codex native conversation polls e2e', () => {
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantPollsAvailable: true,
-          channel, cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          channel, cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'group', currentLocalDate: '2026-09-21',
           currentInstant: '2026-09-21T16:00:00.000Z', currentTimeZone: 'America/New_York',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
@@ -44493,7 +44453,7 @@ describeRealCodex('real Codex poll self vote e2e', () => {
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantPollsAvailable: true,
-          channel, cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          channel, cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'group', currentLocalDate: '2026-09-22',
           currentInstant: '2026-09-22T16:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
@@ -44628,7 +44588,7 @@ describeRealCodex('real Codex poll freshness e2e', () => {
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantPollsAvailable: true,
-          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'group', currentLocalDate: '2026-09-22', currentInstant: '2026-09-22T16:00:00.000Z',
           currentTimeZone: 'UTC', hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
         }),
@@ -44697,7 +44657,7 @@ describeRealCodex('real Codex proactive plan follow-through e2e', () => {
             assistantHostedAutomationAvailable: true, assistantProgressUpdatesAvailable: false,
             assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
             assistantKnowledgeToolsAvailable: false,
-            channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+            channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
             conversationScope: 'direct', currentLocalDate: '2030-04-01',
             currentInstant: '2030-04-01T08:00:00.000Z', currentTimeZone: 'UTC',
             hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
@@ -44898,7 +44858,7 @@ describeRealCodex('wearable haptic reminder journey', () => {
               ? 'Saved member context: The member wears WHOOP. In an earlier conversation they declined wrist buzz offers and asked not to be offered them again.' : null,
           assistantCliContract, assistantKnowledgeToolsAvailable: false, assistantHostedAutomationAvailable: true,
           assistantHostedDeviceConnectAvailable: true, assistantHostedDeviceConnectProviders: [],
-          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: now.toISOString().slice(0, 10),
           currentInstant: scheduled ? targetAt : now.toISOString(), currentTimeZone: 'UTC',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
@@ -45114,7 +45074,7 @@ describeRealCodex('scheduled phone-call reminder journey', () => {
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
           assistantHostedAutomationAvailable: !scheduled,
-          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: scheduled ? '2030-04-02' : '2030-04-01',
           currentInstant: scheduled ? due : now, currentTimeZone: 'America/New_York',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
@@ -45473,7 +45433,7 @@ describeRealCodex('real Codex game v1 rules e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: null, assistantKnowledgeToolsAvailable: false, channel: 'linq',
-          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' }, conversationScope: 'group',
+          cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T16:00:00.000Z', currentTimeZone: 'America/New_York',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
         }),
@@ -45538,7 +45498,7 @@ describeRealCodex('real Codex game agreement e2e', () => {
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
-          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'group', currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T16:00:00.000Z', currentTimeZone: 'America/New_York',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
         }),
@@ -45615,7 +45575,7 @@ describeRealCodex('real Codex game chat adjustment e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: null, assistantKnowledgeToolsAvailable: false, channel: 'linq',
-          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' }, conversationScope: 'group',
+          cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T22:00:00.000Z', currentTimeZone: 'America/New_York',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
         }),
@@ -45852,7 +45812,7 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
-          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'group', currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T16:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
         }),
@@ -46050,7 +46010,7 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
-          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'group', currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T16:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
         }),
@@ -46110,7 +46070,7 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
-          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'group', currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T16:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
         }),
@@ -46471,7 +46431,7 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
         allowFinishWithoutReply: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({ assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
-          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' }, conversationScope: 'group',
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-05', currentInstant: '2030-03-05T12:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null }),
         dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL], env: config.env,
@@ -46552,7 +46512,7 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
         allowFinishWithoutReply: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({ assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
-          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' }, conversationScope: 'group',
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-05', currentInstant: '2030-03-05T15:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null }),
         dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL], env: config.env,
@@ -46678,7 +46638,7 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
         allowFinishWithoutReply: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
         developerInstructions: [buildAssistantSystemPrompt({ assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
-          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' }, conversationScope: 'group',
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: kind === 'off-day' ? '2030-03-09' : '2030-03-05', currentInstant: kind === 'off-day' ? '2030-03-09T12:00:00.000Z' : '2030-03-05T12:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null }), GAME_PHOTO_CHAT_GUIDANCE].join('\n'),
         dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL], env: config.env,
@@ -46774,7 +46734,7 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: null, assistantKnowledgeToolsAvailable: false, channel: 'linq',
-          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' }, conversationScope: 'group',
+          cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-06', currentInstant: processingAt, currentTimeZone: 'America/New_York',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
         }),
@@ -46956,7 +46916,7 @@ describeRealCodex('real Codex game chat setup', () => {
         codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantPollsAvailable: true, assistantHostedGroupToolSurface: 'families',
-          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' }, conversationScope: 'group',
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T12:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
         }),

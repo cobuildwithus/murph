@@ -13,7 +13,6 @@ function createPromptInput(
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationScope,
     currentLocalDate: '2026-08-10',

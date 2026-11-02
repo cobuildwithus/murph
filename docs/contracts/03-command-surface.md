@@ -1,12 +1,10 @@
 # Command Surface
 
-Status: frozen baseline plus health extension fence for `murph` and `vault-cli`
+Status: frozen baseline plus health extension fence for `vault-cli`
 
 ## Namespace
 
-- `murph` is the product CLI. It uses the selected active vault for normal commands, `murph onboard --vault <path>` creates or selects one during setup, and `murph use <path>` selects an existing vault for future product commands.
 - `vault-cli` is the raw explicit-vault and operator surface. The command synopses below list that explicit-vault contract because every canonical vault command names its target with `--vault <path>`.
-- `murph` and `vault-cli` are two UX layers over the same command graph; product aliases such as `murph run`, `murph status`, `murph doctor`, and `murph stop` must stay discovery-compatible with their explicit-vault equivalents.
 - `packages/cli` owns command registration, schema validation, and delegation into `core`, `importers`, and `query`.
 - `device` commands delegate to the local `@murphai/device-syncd` control plane for provider OAuth/account actions while leaving canonical health writes behind the existing importer/core boundary, and the CLI may start or reuse that local daemon for the selected vault when no explicit control-plane target is provided.
 - Native `incur` owns the transport envelope and human-oriented formatting behavior.
@@ -34,7 +32,6 @@ vault-cli audit receipt <xfm_id> --vault <path> [--request-id <id>]
 vault-cli audit show <id> --vault <path> [--request-id <id>]
 vault-cli audit list --vault <path> [--action <action>] [--actor <actor>] [--status <status>] [--from <date>] [--to <date>] [--sort asc|desc] [--limit <n>] [--request-id <id>]
 vault-cli audit tail --vault <path> [--limit <n>] [--request-id <id>]
-vault-cli run --vault <path> [--maxPerScan <n>] [--allowSelfAuthored] [--sessionRolloverHours <hours>] [--once] [--request-id <id>]
 vault-cli knowledge upsert --vault <path> --body <markdown> [--title <title>] [--slug <slug>] [--page-type <type>] [--status <status>] [--clear-library-links] [--library-slug <slug> ...] [--related-slug <slug> ...] [--source-path <path> ...] [--request-id <id>]
 vault-cli knowledge append-section <slug> <heading> --vault <path> --body <markdown> [--title <title>] [--position prepend|append] [--source-path <path> ...] [--request-id <id>]
 vault-cli knowledge list --vault <path> [--page-type <type>] [--status <status>] [--request-id <id>]
@@ -43,17 +40,6 @@ vault-cli knowledge show <slug> --vault <path> [--if-exists] [--request-id <id>]
 vault-cli knowledge lint --vault <path> [--request-id <id>]
 vault-cli knowledge log tail --vault <path> [--limit <n>] [--request-id <id>]
 vault-cli knowledge index rebuild --vault <path> [--request-id <id>]
-vault-cli assistant ask <prompt> --vault <path> [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--thread <id>] [--codexCommand <path>] [--codexHome <path>] [--model <model>] [--modelProvider <id>] [--reasoningEffort low|medium|high|xhigh] [--sandbox read-only|workspace-write|danger-full-access] [--approvalPolicy never] [--profile <name>] [--deliverResponse] [--deliveryTarget <target>] [--request-id <id>]
-vault-cli assistant deliver <message> --vault <path> [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--thread <id>] [--deliveryTarget <target>] [--request-id <id>]
-vault-cli assistant status --vault <path> [--session <id>] [--limit <n>] [--request-id <id>]
-vault-cli assistant doctor --vault <path> [--repair] [--request-id <id>]
-vault-cli assistant run --vault <path> [--maxPerScan <n>] [--allowSelfAuthored] [--sessionRolloverHours <hours>] [--once] [--request-id <id>]
-vault-cli assistant stop --vault <path> [--request-id <id>]
-vault-cli status --vault <path> [--session <id>] [--limit <n>] [--request-id <id>]
-vault-cli doctor --vault <path> [--repair] [--request-id <id>]
-vault-cli stop --vault <path> [--request-id <id>]
-vault-cli assistant session list --vault <path> [--limit <n>] [--request-id <id>]
-vault-cli assistant session show <sessionId> --vault <path> [--request-id <id>]
 vault-cli memory show [memoryId] --vault <path> [--compact] [--record-only]
 vault-cli memory set-name <displayName> --vault <path> [--compact]
 vault-cli memory upsert <text> --vault <path> [--compact] --section <section>
@@ -264,13 +250,13 @@ Patch-style edit commands (`event`, `document`, `meal`, `workout`, `intervention
 
 For event-backed edit commands (`event`, `document`, `meal`, `workout`, `intervention`), changing `occurredAt` or `timeZone` without setting `dayKey` directly now requires `--day-key-policy keep|recompute`. This prevents silent stale-day retention and prevents legacy records without explicit `timeZone` provenance from silently materializing the vault default timezone into the saved record during edits.
 
-`vault-cli assistant ask|chat|deliver|status|doctor|run|stop|session` persist or inspect assistant runtime state only. Durable user-facing memory is managed through the top-level canonical `memory` noun backed by `bank/memory.md`, and durable scheduled assistant prompts are managed through the top-level canonical `automation` noun backed by `bank/automations/*.md`. Accepted inbound assistant-automation captures may still auto-preserve stored document attachments into the canonical document import surface before reply behavior runs, while leaving the original inbox capture evidence in place under `raw/inbox/**`. Coarse system-written turn receipts, replay-safe outbox intents, diagnostics snapshots, persisted status snapshots, and other assistant runtime artifacts live under `vault/.runtime/operations/assistant/**` for read-only `status` / `doctor` inspection. Session JSON keeps only public provider headers; secret-bearing provider headers live in private sidecars under `vault/.runtime/operations/assistant/secrets/**`, and `assistant doctor --repair` can tighten permissive runtime modes in place. Assistant ask/chat and the root `chat` shorthand are Codex App Server surfaces only: they accept Codex launch/config overrides such as `--codexCommand`, `--codexHome`, `--modelProvider`, `--reasoningEffort`, `--sandbox`, `--approvalPolicy never`, and `--profile`. Assistant-originated writes are rebound to the real host-side user turn instead of trusting client-supplied provenance text, and the canonical vault remains authoritative.
+`vault-cli assistant onboarding` reads or updates the shared hosted onboarding lifecycle. Durable user-facing memory is managed through the top-level canonical `memory` noun backed by `bank/memory.md`, and durable scheduled assistant prompts are managed through the top-level canonical `automation` noun backed by `bank/automations/*.md`. Accepted inbound assistant-automation captures may still auto-preserve stored document attachments into the canonical document import surface before reply behavior runs, while leaving the original inbox capture evidence in place under `raw/inbox/**`. Coarse system-written turn receipts, replay-safe outbox intents, diagnostics snapshots, persisted status snapshots, and other assistant runtime artifacts live under `vault/.runtime/operations/assistant/**`. Session JSON keeps only public provider headers; secret-bearing provider headers live in private sidecars under `vault/.runtime/operations/assistant/secrets/**`. Assistant-originated writes are rebound to the real host-side user turn instead of trusting client-supplied provenance text, and the canonical vault remains authoritative.
 
 Assistant personality settings remain canonical product state in the active runtime's `bank/preferences.json`, owned by core preference usecases. They are intentionally absent from the raw CLI so no registered general command advertises an audience-independent path to them. Private direct turns and authenticated hosted Linq group turns receive the exact-turn `murph.assistant_style` operation instead; the former targets the person runtime and the latter targets only the synthetic room runtime. Hosted mutations obtain the current provider batch's runtime-owned causal frontier, equal to the newest exact-successor sequence admitted before provider start; the model cannot supply or rewrite that number or a target member. Synthetic room writes also require the accepted input's current non-direct Linq route authority, and group email cannot mutate room style. Per-field watermarks live in the bounded companion `bank/assistant-preference-mutations.json` and are committed by the same owner. This is a registered-tool and prompt-surface policy, not a filesystem sandbox around the privileged Codex runtime. The first personality-aware reader/writer release remains the rollback floor because older strict readers can reject `assistant.personality`.
 
-Assistant delivery targets are transport-native strings only; serialized objects such as JSON blobs or `[object Object]` are rejected before outbound delivery. `assistant status --session <id>` preflights the session id and fails with the assistant session-not-found error instead of silently falling back to a global empty status window.
+Assistant delivery targets are transport-native strings only; serialized objects such as JSON blobs or `[object Object]` are rejected before outbound delivery.
 
-The existing assistant runtime commands remain runtime inspection/control only. Any future user-facing, queryable, or durable assistant setting must pass the persisted-state placement gate: canonical product state is not an `assistant` runtime CRUD surface, so it must use a core-owned canonical record or explicit derived materialization.
+Onboarding state remains runtime lifecycle state. Any future user-facing, queryable, or durable assistant setting must pass the persisted-state placement gate: canonical product state is not an `assistant` runtime CRUD surface, so it must use a core-owned canonical record or explicit derived materialization.
 
 `vault-cli knowledge *` manages Murph's non-canonical personal compiled wiki under `derived/knowledge/**`. That wiki is distinct from the stable reference layer under `bank/library/**`: `bank/library` is durable shared health context, while `derived/knowledge` is the assistant-authored user-specific synthesis layer. `knowledge upsert` writes one page and refreshes `derived/knowledge/index.md`. `knowledge append-section` creates the page when needed or appends/prepends one `## <heading>` section through the same locked write path, rejects duplicate section headings on the target page, refuses to overwrite an existing page file that cannot be loaded as a knowledge graph page, refreshes the index, and appends the write log. `knowledge show` fails with `knowledge_page_not_found` for a missing slug; for an optional page, `--if-exists` instead returns `page: null` and `degradation: null`, but only when every generic page parses, because an invalid page could still declare the slug. Otherwise it fails with `knowledge_page_invalid`, and it never writes. Each successful upsert or append also appends a chronological entry to `derived/knowledge/log.md`, and whitespace-only bodies are rejected before any write. `knowledge log tail` is the intentionally small operator-facing log inspection surface; richer wiki-maintainer behavior belongs in the assistant runtime prompt, which routes wiki reads and writes through these `vault-cli knowledge` commands, not in `AGENTS.md`.
 
@@ -363,13 +349,9 @@ The placeholder grammar above applies to health nouns that expose the shared sca
 - `vault` exposes `show | stats | repair | update`.
 - `export` exposes `create | show | list | materialize | prune`.
 - `audit` exposes `show | list | tail`.
-- `assistant` is a Codex App Server-backed orchestration noun for local turns, outbound delivery, session inspection, runtime diagnostics, and always-on inbox triage; it stores only runtime metadata under `vault/.runtime/operations/assistant/**`, uses explicit conversation bindings for session reuse, coalesces adjacent pending inbound messages from the same conversation lane into one auto-reply turn before advancing the reply cursor, can opt into self-authored auto-reply plus age-based session rollover for dedicated self-chat threads, treats `--deliveryTarget` as a one-send override, only fires due canonical automations while `assistant run` is active for the vault, and delegates canonical promotions back through inbox/core boundaries.
+- `assistant onboarding` exposes the hosted lifecycle commands `status`, `resume-context`, `complete`, and `reopen`; canonical health writes remain owned by their existing vault commands.
 - `memory` is a canonical product noun backed by the single curated `bank/memory.md` document; operators inspect the whole document with `show`, save the user's preferred display name with the typed `set-name` command, and mutate individual records with `upsert`, `update`, or `forget`. `memoryId` arguments use `mem_<ULID>` ids. Group runtimes receive the preferred display name through the consented `profile-name.v0` vault-share projection from memory.
 - `automation` is a canonical product noun backed by `bank/automations/*.md` and exposes typed `save`, explicit `import-json`, readable/list, and scaffold surfaces.
-- Top-level `status` is a shorthand alias for `assistant status`; it shares the same option/output contract so installed `murph status` discovery stays truthful.
-- Top-level `doctor` is a shorthand alias for `assistant doctor`; it shares the same option/output contract so installed `murph doctor` discovery stays truthful.
-- Top-level `run` is a shorthand alias for `assistant run`; it shares the same option/output contract so installed `murph run` discovery stays truthful while keeping automation explicit.
-- Top-level `stop` is a shorthand alias for `assistant stop`; it shares the same option/output contract so installed `murph stop` discovery stays truthful while giving operators a supported recovery path for stuck assistant automation locks.
 - `device` is backed locally by `@murphai/device-syncd`; it exposes provider discovery plus browser-based connect/reconcile/disconnect actions, and it can also start, inspect, or stop the Murph-managed local daemon for the selected vault. In hosted execution, `device account list` and `device account reconcile` use the invocation-scoped bridge instead of starting a local daemon.
 
 These are semantic groupings, not a parallel command registry. For example, `event` remains the generic write/read surface for non-specialized event kinds, and `provider` remains the registry-backed noun for `bank/providers/*.md`.
@@ -381,7 +363,7 @@ Registry-backed readable/list surfaces may expose noun-specific filters where th
 Every command now uses native `incur` command definitions directly:
 
 1. `incur` validates positional arguments and named options against the command schema.
-2. The handler receives parsed `args` and `options` and delegates to the owning boundary surface for that noun. Current owners include `core`, `importers`, `query`, `vault-usecases`, `inbox-services`, `device-syncd`, `assistant-cli`/`assistant-engine`, and gateway packages. Canonical health writes still terminate in `packages/core`.
+2. The handler receives parsed `args` and `options` and delegates to the owning boundary surface for that noun. Current owners include `core`, `importers`, `query`, `vault-usecases`, `inbox-services`, `device-syncd`, `assistant-engine`, and gateway packages. Canonical health writes still terminate in `packages/core`.
 3. The handler returns the command-specific payload directly.
 4. Plain `--format json` writes that payload body directly to stdout.
 5. `--full-output --format json` wraps the same payload in incur's success/error envelope, including metadata and CTAs when present.

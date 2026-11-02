@@ -10,9 +10,7 @@ export {
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
 } from './automation/shared.js'
 export {
-  runAssistantAutomation,
   runAssistantAutomationPass,
-  type RunAssistantAutomationInput,
   type RunAssistantAutomationPassInput,
 } from './automation/run-loop.js'
 export {

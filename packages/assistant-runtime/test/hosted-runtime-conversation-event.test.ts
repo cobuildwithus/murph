@@ -19,7 +19,6 @@ const mocks = vi.hoisted(() => ({
   logHostedTelegramAttachmentDownloadUnavailable: vi.fn(),
   createInboxParserService: vi.fn(),
   createInboxPipeline: vi.fn(),
-  createParsedInboxPipeline: vi.fn(),
   normalizeHostedEmailConversationCapture: vi.fn(),
   normalizeHostedLinqConversationCapture: vi.fn(),
   normalizeHostedTelegramConversationCapture: vi.fn(),
@@ -31,7 +30,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@murphai/inboxd/runtime", () => ({
   createInboxPipeline: mocks.createInboxPipeline,
-  createParsedInboxPipeline: mocks.createParsedInboxPipeline,
   openInboxRuntime: mocks.openInboxRuntime,
 }));
 

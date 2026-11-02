@@ -1190,7 +1190,7 @@ async function createDeployArtifactFixture(input: {
     await writeWorkspacePackageManifest(packageDir, packageName);
   }
 
-  for (const binName of ["murph", "vault-cli"]) {
+  for (const binName of ["vault-cli"]) {
     const binPath = path.join(runnerBundleDir, "node_modules", ".bin", binName);
     await writeFile(binPath, "#!/usr/bin/env node\n", "utf8");
     await chmod(binPath, 0o755);
@@ -1490,7 +1490,9 @@ function createPublicGoalSummaries() {
 }
 
 function selectRunnerDependencyPackageName(packageNames: readonly string[]): string {
-  const packageName = packageNames.find((entry) => entry !== hostedRunnerRuntimePackageName);
+  const packageName = packageNames.find(
+    (entry) => entry !== hostedRunnerRuntimePackageName && entry !== "@murphai/assistant-engine",
+  );
 
   if (!packageName) {
     throw new Error("Fixture must include at least one runner dependency package.");

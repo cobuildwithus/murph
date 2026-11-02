@@ -69,7 +69,7 @@ async function invoke(argv: string[], pipe = false, entry?: typeof import('../sr
     process.exitCode = undefined
     // Import after resetModules so entry and middleware share the same ALS instance.
     const run = entry ?? (await import('../src/cli-entry.ts')).runMurphCliAction
-    await run(argv, { argv0: 'vault-cli', exit: (code) => { exits.push(code) }, stdout: (s) => {
+    await run(argv, { exit: (code) => { exits.push(code) }, stdout: (s) => {
       if (pipe) throw Object.assign(new Error('broken pipe'), { code: 'EPIPE' })
       stdout.push(s)
     } })
@@ -102,7 +102,7 @@ test('real scoped and full routes automatically report lifecycle phases with byt
   const root = await vault()
   for (const [command, kind] of [['goal', 'scoped'], ['family', 'full']] as const) {
     const argv = [command, 'list', '--vault', root, '--format', 'json']
-    assert.equal(planVaultCliInvocation(argv, { programName: 'vault-cli' }).plan.kind, kind)
+    assert.equal(planVaultCliInvocation(argv).plan.kind, kind)
     const baseline = await invoke(argv)
     const { result, timing } = await collect(() => invoke(argv))
     assert.deepEqual(result, baseline)

@@ -162,7 +162,6 @@ async function runBatchCommand(input: {
     process.exitCode = undefined
     const { runMurphCliAction } = await import('../cli-entry.js')
     await runMurphCliAction(executionArgv, {
-      argv0: 'vault-cli',
       exit(code) {
         if (code && code !== 0) {
           throw new Error(`Command exited with status ${code}.`)

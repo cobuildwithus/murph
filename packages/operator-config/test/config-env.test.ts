@@ -40,17 +40,8 @@ import {
   tryParseHostedAssistantConfig,
 } from '../src/hosted-assistant-config.ts'
 import { normalizeHostedAssistantConfig } from '../src/assistant/hosted-config.ts'
-import {
-  applySetupRuntimeEnvOverridesToProcess,
-  describeSelectedSetupWearables,
-  describeSetupChannelStatus,
-  resolveSetupChannelMissingEnv,
-  resolveSetupWearableMissingEnv,
-} from '../src/setup-runtime-env.ts'
-import {
-  normalizeSetupWearables,
-  setupCommandOptionsSchema,
-} from '../src/setup-cli-contracts.ts'
+
+
 import {
   timeZoneSchema,
   workoutFormatListResultSchema,
@@ -84,125 +75,13 @@ async function withTemporaryProcessEnv(
   }
 }
 
-test('setup env helpers trim values, report missing keys, and surface channel readiness', () => {
-  const env: NodeJS.ProcessEnv = {
-    WHOOP_CLIENT_ID: '  whoop-id  ',
-    TELEGRAM_BOT_TOKEN: '   telegram-bot-token   ',
-  }
 
-  assert.equal(readEnvValue(env, ['TELEGRAM_BOT_TOKEN', 'WHOOP_CLIENT_ID']), 'telegram-bot-token')
-  assert.deepEqual(resolveSetupChannelMissingEnv('telegram', env), [])
-  assert.deepEqual(describeSetupChannelStatus('telegram', env, 'darwin'), {
-    badge: 'ready',
-    detail: 'Bot token is available in the current environment.',
-    missingEnv: [],
-    ready: true,
-  })
-})
 
-test('setup wearables are deduplicated, sorted, and keyed off trimmed env values', () => {
-  const env: NodeJS.ProcessEnv = {
-    JUNCTION_API_KEY: '  sk_us_junction-test  ',
-    JUNCTION_CLIENT_USER_ID_SECRET: '  junction-user-secret  ',
-    JUNCTION_ENV: 'sandbox',
-    JUNCTION_REGION: '   ',
-    OURA_CLIENT_ID: '  oura-id  ',
-    OURA_CLIENT_SECRET: '  oura-secret  ',
-    WHOOP_CLIENT_ID: '  whoop-id  ',
-    WHOOP_CLIENT_SECRET: '  whoop-secret  ',
-  }
 
-  assert.deepEqual(resolveSetupWearableMissingEnv('garmin', env), ['JUNCTION_REGION'])
 
-  const configuredWearables = describeSelectedSetupWearables({
-    env,
-    wearables: ['whoop', 'garmin', 'oura', 'whoop'],
-  })
 
-  assert.deepEqual(
-    configuredWearables.map(({ wearable, ready, missingEnv }) => ({
-      missingEnv,
-      ready,
-      wearable,
-    })),
-    [
-      {
-        missingEnv: ['JUNCTION_REGION'],
-        ready: false,
-        wearable: 'garmin',
-      },
-      {
-        missingEnv: [],
-        ready: true,
-        wearable: 'oura',
-      },
-      {
-        missingEnv: [],
-        ready: true,
-        wearable: 'whoop',
-      },
-    ],
-  )
-  assert.match(
-    configuredWearables[0]?.detail ?? '',
-    /JUNCTION_REGION/u,
-  )
-  assert.deepEqual(
-    normalizeSetupWearables(['whoop', 'garmin', 'whoop']),
-    ['garmin', 'whoop'],
-  )
-})
 
-test('applySetupRuntimeEnvOverridesToProcess only writes trimmed non-empty overrides', async () => {
-  await withTemporaryProcessEnv(
-    {
-      MURPH_OPERATOR_CONFIG_TEST_KEEP: 'keep-me',
-      MURPH_OPERATOR_CONFIG_TEST_NEW: undefined,
-      MURPH_OPERATOR_CONFIG_TEST_SET: 'original',
-    },
-    async () => {
-      applySetupRuntimeEnvOverridesToProcess({
-        MURPH_OPERATOR_CONFIG_TEST_KEEP: '   ',
-        MURPH_OPERATOR_CONFIG_TEST_NEW: 'new-value',
-        MURPH_OPERATOR_CONFIG_TEST_SET: '  updated  ',
-      })
 
-      assert.equal(process.env.MURPH_OPERATOR_CONFIG_TEST_KEEP, 'keep-me')
-      assert.equal(process.env.MURPH_OPERATOR_CONFIG_TEST_NEW, 'new-value')
-      assert.equal(process.env.MURPH_OPERATOR_CONFIG_TEST_SET, '  updated  ')
-    },
-  )
-})
-
-test('setup command options prefer explicit vault, then VAULT env, then ./vault', async () => {
-  await withTemporaryProcessEnv(
-    {
-      VAULT: '  /env-vault  ',
-    },
-    async () => {
-      assert.equal(
-        setupCommandOptionsSchema.parse({ vault: '/explicit-vault' }).vault,
-        '/explicit-vault',
-      )
-      assert.equal(
-        setupCommandOptionsSchema.parse({}).vault,
-        '/env-vault',
-      )
-    },
-  )
-
-  await withTemporaryProcessEnv(
-    {
-      VAULT: '   ',
-    },
-    async () => {
-      assert.equal(
-        setupCommandOptionsSchema.parse({}).vault,
-        './vault',
-      )
-    },
-  )
-})
 
 test('command helpers normalize top-level tokens and request ids', () => {
   assert.deepEqual(emptyArgsSchema.parse({}), {})

@@ -1447,22 +1447,6 @@ export const assistantDeliverResultSchema = z.object({
   delivery: assistantChannelDeliverySchema,
 })
 
-export const assistantSessionListResultSchema = z.object({
-  vault: pathSchema,
-  stateRoot: pathSchema,
-  filters: z.object({
-    limit: z.number().int().positive().max(50),
-  }),
-  sessions: z.array(assistantSessionSummarySchema),
-  count: z.number().int().nonnegative(),
-})
-
-export const assistantSessionShowResultSchema = z.object({
-  vault: pathSchema,
-  stateRoot: pathSchema,
-  session: assistantSessionOutputSchema,
-})
-
 export const assistantCronStatusResultSchema = z.object({
   vault: pathSchema,
   stateRoot: pathSchema,
@@ -1568,66 +1552,6 @@ export const assistantCronPresetInstallResultSchema = z.object({
   job: assistantCronJobSchema,
   resolvedPrompt: z.string().min(1),
   resolvedVariables: z.record(z.string(), z.string()),
-})
-
-export const assistantSelfDeliveryTargetListResultSchema = z.object({
-  configPath: pathSchema,
-  targets: z.array(assistantSelfDeliveryTargetSchema),
-})
-
-export const assistantSelfDeliveryTargetShowResultSchema = z.object({
-  configPath: pathSchema,
-  target: assistantSelfDeliveryTargetSchema.nullable(),
-})
-
-export const assistantSelfDeliveryTargetSetResultSchema = z.object({
-  configPath: pathSchema,
-  target: assistantSelfDeliveryTargetSchema,
-})
-
-export const assistantSelfDeliveryTargetClearResultSchema = z.object({
-  configPath: pathSchema,
-  clearedChannels: z.array(z.string().min(1)),
-})
-
-export const assistantRunResultSchema = z.object({
-  vault: pathSchema,
-  startedAt: isoTimestampSchema,
-  stoppedAt: isoTimestampSchema,
-  reason: z.enum(['completed', 'signal', 'error']),
-  daemonStarted: z.boolean(),
-  scans: z.number().int().nonnegative(),
-  considered: z.number().int().nonnegative(),
-  routed: z.number().int().nonnegative(),
-  noAction: z.number().int().nonnegative(),
-  skipped: z.number().int().nonnegative(),
-  failed: z.number().int().nonnegative(),
-  replyConsidered: z.number().int().nonnegative(),
-  replied: z.number().int().nonnegative(),
-  replySkipped: z.number().int().nonnegative(),
-  replyFailed: z.number().int().nonnegative(),
-  lastError: z.string().nullable(),
-  lastFailure: z
-    .object({
-      phase: z.enum(['capture', 'reply', 'daemon']),
-      code: z.string().min(1).max(96),
-      retryable: z.boolean(),
-      message: z.string().min(1).max(320),
-    })
-    .nullable()
-    .default(null),
-})
-
-export const assistantStopResultSchema = z.object({
-  vault: pathSchema,
-  stateRoot: pathSchema,
-  stopped: z.boolean(),
-  stopMethod: z.enum(['signal', 'force-kill', 'stale-lock-cleanup']),
-  pid: z.number().int().positive().nullable(),
-  startedAt: isoTimestampSchema.nullable(),
-  stoppedAt: isoTimestampSchema,
-  command: z.string().min(1).nullable(),
-  message: z.string().min(1),
 })
 
 export const assistantAutoReplyChannelStateSchema = z
@@ -1765,14 +1689,8 @@ export type AssistantAskResult = AssistantAskResultRecord
 export type AssistantDeliverResult = z.infer<
   typeof assistantDeliverResultSchema
 >
-export type AssistantSessionListResult = z.infer<
-  typeof assistantSessionListResultSchema
->
 export type AssistantSessionSummary = z.infer<
   typeof assistantSessionSummarySchema
->
-export type AssistantSessionShowResult = z.infer<
-  typeof assistantSessionShowResultSchema
 >
 export type AssistantCronSchedule = z.infer<typeof assistantCronScheduleSchema>
 export type AssistantCronScheduleInput = z.infer<typeof assistantCronScheduleInputSchema>
@@ -1832,20 +1750,6 @@ export type AssistantCronPresetInstallResult = z.infer<
   typeof assistantCronPresetInstallResultSchema
 >
 export type AssistantSelfDeliveryTarget = z.infer<typeof assistantSelfDeliveryTargetSchema>
-export type AssistantSelfDeliveryTargetListResult = z.infer<
-  typeof assistantSelfDeliveryTargetListResultSchema
->
-export type AssistantSelfDeliveryTargetShowResult = z.infer<
-  typeof assistantSelfDeliveryTargetShowResultSchema
->
-export type AssistantSelfDeliveryTargetSetResult = z.infer<
-  typeof assistantSelfDeliveryTargetSetResultSchema
->
-export type AssistantSelfDeliveryTargetClearResult = z.infer<
-  typeof assistantSelfDeliveryTargetClearResultSchema
->
-export type AssistantRunResult = z.infer<typeof assistantRunResultSchema>
-export type AssistantStopResult = z.infer<typeof assistantStopResultSchema>
 export type AssistantOnboardingCompletionReason =
   (typeof assistantOnboardingCompletionReasonValues)[number]
 export type AssistantOnboardingState = z.infer<

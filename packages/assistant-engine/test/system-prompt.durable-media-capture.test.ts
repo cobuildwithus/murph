@@ -11,7 +11,6 @@ function buildPrompt(): string {
     channel: null,
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     currentLocalDate: '2026-06-26',
     currentTimeZone: 'America/Los_Angeles',

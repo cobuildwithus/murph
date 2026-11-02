@@ -21,7 +21,6 @@ const baseConversationInput: AssistantSystemPromptInput = {
   channel: 'local',
   cliAccess: {
     rawCommand: 'vault-cli',
-    setupCommand: 'murph',
   },
   currentLocalDate: '2026-06-29',
   currentTimeZone: 'America/New_York',
@@ -509,7 +508,6 @@ describe('assistant dynamic context prompt blocks', () => {
       channel: 'local',
       cliAccess: {
         rawCommand: 'vault-cli',
-        setupCommand: 'murph',
       },
       currentLocalDate: '2026-06-29',
       currentTimeZone: 'America/New_York',

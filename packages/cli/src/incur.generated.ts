@@ -10,22 +10,10 @@ declare module 'incur' {
       'assertion payload-schema': { args: {}; options: {} }
       'assertion save': { args: {}; options: { requestId?: string; occurredAt?: string | string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; timeZone?: string; assertion: "absence_asserted" | "denial_asserted" | "negative_screening" | "normality_asserted" | "not_applicable" | "not_pregnant" | "no_known_conditions" | "no_known_allergies" | "no_known_drug_allergies" | "no_known_food_allergies" | "no_known_medications" | "no_known_family_history"; domain?: "allergy" | "condition" | "family" | "medication" | "pregnancy" | "screening" | "social" | "symptom" | "test" | "exam" | "other"; polarity?: "absent" | "denied" | "normal" | "negative" | "not_applicable"; subject?: string; assertionText?: string; assertedOn?: string; sourceLabel?: string } }
       'assertion scaffold': { args: {}; options: { requestId?: string } }
-      'assistant ask': { args: { prompt: string }; options: { requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; codexCommand?: string; codexHome?: string; model?: string; modelProvider?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; sandbox?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "never"; profile?: string; deliverResponse?: boolean; deliveryTarget?: string } }
-      'assistant deliver': { args: { message: string }; options: { requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; deliveryTarget?: string } }
-      'assistant doctor': { args: {}; options: { requestId?: string; repair: boolean } }
       'assistant onboarding complete': { args: {}; options: { requestId?: string; reason: "user_answered" | "user_declined" | "manual" } }
       'assistant onboarding reopen': { args: {}; options: { requestId?: string } }
       'assistant onboarding resume-context': { args: {}; options: { requestId?: string; limit: number } }
       'assistant onboarding status': { args: {}; options: { requestId?: string } }
-      'assistant run': { args: {}; options: { requestId?: string; maxPerScan: number; allowSelfAuthored?: boolean; sessionRolloverHours?: number; once?: boolean } }
-      'assistant self-target clear': { args: { channel?: string }; options: { requestId?: string } }
-      'assistant self-target list': { args: {}; options: { requestId?: string } }
-      'assistant self-target set': { args: { channel: string }; options: { requestId?: string; identity?: string; participant?: string; thread?: string; deliveryTarget?: string } }
-      'assistant self-target show': { args: { channel: string }; options: { requestId?: string } }
-      'assistant session list': { args: {}; options: { requestId?: string; limit: number } }
-      'assistant session show': { args: { sessionId: string }; options: { requestId?: string } }
-      'assistant status': { args: {}; options: { requestId?: string; session?: string; limit: number } }
-      'assistant stop': { args: {}; options: { requestId?: string } }
       'audit list': { args: {}; options: { requestId?: string; action?: string; actor?: string; status?: "success" | "failure"; from?: string; to?: string; sort: "asc" | "desc"; limit: number } }
       'audit receipt': { args: { id: string }; options: { requestId?: string } }
       'audit show': { args: { id: string }; options: { requestId?: string } }
@@ -76,7 +64,6 @@ declare module 'incur' {
       'diagnostic-test payload-schema': { args: {}; options: {} }
       'diagnostic-test save': { args: { testName: string }; options: { requestId?: string; occurredAt?: string | string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; timeZone?: string; resultStatus?: "pending" | "normal" | "abnormal" | "mixed" | "unknown"; summary?: string; testCategory?: string; specimenType?: string; labName?: string; reportedAt?: string | string } }
       'diagnostic-test scaffold': { args: {}; options: { requestId?: string } }
-      'doctor': { args: {}; options: { requestId?: string; repair: boolean } }
       'document delete': { args: { id: string }; options: { requestId?: string } }
       'document edit': { args: { id: string }; options: { requestId?: string; title?: string; note?: string; occurredAt?: string | string | string; timeZone?: string; dayKey?: string; source?: "manual" | "import" | "device" | "derived"; tag?: string[]; clearTitle?: boolean; clearNote?: boolean; clearTimeZone?: boolean; clearDayKey?: boolean; clearSource?: boolean; clearTags?: boolean; dayKeyPolicy?: "keep" | "recompute" } }
       'document import': { args: { file: string }; options: { requestId?: string; title?: string; occurredAt?: string | string | string; note?: string; source?: "manual" | "import" | "device" | "derived"; reuseExact: boolean } }
@@ -214,7 +201,6 @@ declare module 'incur' {
       'memory show': { args: { memoryId?: string }; options: { recordOnly?: boolean; compact?: boolean } }
       'memory update': { args: { memoryId: string; text: string }; options: { compact?: boolean; section?: "Identity" | "Preferences" | "Instructions" | "Context" } }
       'memory upsert': { args: { text: string }; options: { compact?: boolean; section: "Identity" | "Preferences" | "Instructions" | "Context" } }
-      'model': { args: {}; options: { show?: boolean; preset?: "codex"; model?: string; codexCommand?: string; profile?: string; codexHome?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh" } }
       'protocol import-json': { args: {}; options: { requestId?: string; input: string } }
       'protocol list': { args: {}; options: { requestId?: string; status?: "available" | "archived"; commonsProtocol?: string; limit: number } }
       'protocol show': { args: { id: string }; options: { requestId?: string } }
@@ -246,7 +232,6 @@ declare module 'incur' {
       'research scout-batch-payload-schema': { args: {}; options: {} }
       'route estimate': { args: { origin: string; destination: string }; options: { waypoint?: string[]; profile?: "walking" | "cycling" | "driving" | "driving-traffic"; elevation?: boolean; geometry?: boolean; country?: string[]; language?: string; elevationSampleSpacingMeters?: number; maxElevationSamples?: number } }
       'route resolve-address': { args: { query: string }; options: { country?: string[]; language?: string } }
-      'run': { args: {}; options: { requestId?: string; maxPerScan: number; allowSelfAuthored?: boolean; sessionRolloverHours?: number; once?: boolean } }
       'samples add': { args: {}; options: { requestId?: string; stream: "heart_rate" | "spo2" | "hrv" | "steps" | "sleep_stage" | "respiratory_rate" | "temperature" | "glucose"; unit: string; recordedAt: string | string; value?: number; source?: "device" | "import" | "manual" | "derived"; quality?: "raw" | "normalized" | "derived"; sourcePath?: string; batchSourceFileName?: string; batchPresetId?: string; batchDelimiter?: string; batchTimestampColumn?: string; batchValueColumn?: string; batchMetadataColumns?: string[]; stage?: "awake" | "light" | "deep" | "rem"; startAt?: string | string; endAt?: string | string; durationMinutes?: number } }
       'samples batch list': { args: {}; options: { requestId?: string; stream?: "heart_rate" | "spo2" | "hrv" | "steps" | "sleep_stage" | "respiratory_rate" | "temperature" | "glucose"; from?: string; to?: string; limit: number } }
       'samples batch show': { args: { id: string }; options: { requestId?: string } }
@@ -270,8 +255,6 @@ declare module 'incur' {
       'social-history import-json': { args: {}; options: { requestId?: string; input: string } }
       'social-history payload-schema': { args: {}; options: {} }
       'social-history scaffold': { args: {}; options: { requestId?: string } }
-      'status': { args: {}; options: { requestId?: string; session?: string; limit: number } }
-      'stop': { args: {}; options: { requestId?: string } }
       'supplement compound list': { args: {}; options: { requestId?: string; limit: number; status?: "active" | "paused" | "completed" | "stopped" } }
       'supplement compound show': { args: { compound: string }; options: { requestId?: string; status?: "active" | "paused" | "completed" | "stopped" } }
       'supplement list': { args: {}; options: { requestId?: string; limit: number; status?: "active" | "paused" | "completed" | "stopped" } }

@@ -50,7 +50,7 @@ describe('wrist haptic tool boundary', () => {
     const prompt = buildAssistantSystemPrompt({
       assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantHostedAutomationAvailable: true,
       assistantHostedDeviceConnectAvailable: true, assistantHostedDeviceConnectProviders: [],
-      channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+      channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
       conversationScope: 'direct', currentLocalDate: '2026-10-01',
       currentInstant: '2026-10-01T12:00:00.000Z', currentTimeZone: 'UTC',
       hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,

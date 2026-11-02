@@ -18,7 +18,7 @@ describe("runner bundle package closure", () => {
     expect(reducedWorkspacePackageNames).not.toContain("@murphai/murph");
     expect(reducedBuildPackageNames).toEqual(hostedRunnerBuildPackageNames);
     expect(reducedBuildPackageNames).toContain("@murphai/murph");
-    expect(reducedBuildPackageNames).toContain("@murphai/assistant-cli");
-    expect(reducedBuildPackageNames).toContain("@murphai/setup-cli");
+    expect(reducedBuildPackageNames).not.toContain("@murphai/assistant-cli");
+    expect(reducedBuildPackageNames).not.toContain("@murphai/setup-cli");
   });
 });

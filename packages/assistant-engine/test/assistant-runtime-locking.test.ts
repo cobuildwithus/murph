@@ -11,7 +11,6 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 
 import {
-  acquireAssistantAutomationRunLock,
   clearAssistantAutomationRunLock,
   inspectAssistantAutomationRunLock,
 } from '../src/assistant/automation/runtime-lock.ts'
@@ -371,51 +370,6 @@ test('assistant runtime write lock surfaces held external metadata as a VaultCli
   )
 })
 
-test('assistant automation run lock reports same-process activity and blocks reentry with context', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'murph-assistant-automation-lock-',
-  )
-  cleanupPaths.push(parentRoot)
-
-  const paths = resolveAssistantStatePaths(vaultRoot)
-  const lock = await acquireAssistantAutomationRunLock({
-    once: true,
-    paths,
-  })
-
-  const active = await inspectAssistantAutomationRunLock(paths)
-  assert.equal(active.state, 'active')
-  assert.equal(active.pid, process.pid)
-  assert.equal(active.mode, 'once')
-  assert.notEqual(active.command, null)
-  assert.equal(
-    active.reason,
-    'assistant automation already active in this process',
-  )
-
-  await assert.rejects(
-    () => acquireAssistantAutomationRunLock({ paths }),
-    (error) => {
-      assert.ok(error instanceof VaultCliError)
-      assert.equal(error.code, 'ASSISTANT_AUTOMATION_ALREADY_RUNNING')
-      assert.equal(error.context?.sameProcess, true)
-      assert.equal(error.context?.mode, 'once')
-      return true
-    },
-  )
-
-  await lock.release()
-
-  assert.deepEqual(await inspectAssistantAutomationRunLock(paths), {
-    state: 'unlocked',
-    pid: null,
-    startedAt: null,
-    mode: null,
-    command: null,
-    reason: null,
-  })
-})
-
 test('assistant automation run lock distinguishes external active and stale holders', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-assistant-automation-external-lock-',
@@ -446,18 +400,6 @@ test('assistant automation run lock distinguishes external active and stale hold
     command: 'existing-automation-runner',
     reason: null,
   })
-
-  await assert.rejects(
-    () => acquireAssistantAutomationRunLock({ paths }),
-    (error) => {
-      assert.ok(error instanceof VaultCliError)
-      assert.equal(error.code, 'ASSISTANT_AUTOMATION_ALREADY_RUNNING')
-      assert.equal(error.context?.sameProcess, false)
-      assert.equal(error.context?.mode, 'continuous')
-      assert.match(error.message, /existing-automation-runner/u)
-      return true
-    },
-  )
 
   await writeFile(
     path.join(paths.assistantStateRoot, '.automation-run.lock', 'owner.json'),

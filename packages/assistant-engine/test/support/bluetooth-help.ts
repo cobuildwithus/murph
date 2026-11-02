@@ -8,7 +8,7 @@ export function buildBluetoothHelpInstructions(conversationScope: 'direct' | 'gr
     assistantHostedDeviceConnectProviders: [{ provider: 'whoop', label: 'WHOOP' }],
     assistantKnowledgeToolsAvailable: false,
     channel: 'linq',
-    cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+    cliAccess: { rawCommand: 'vault-cli' },
     conversationScope,
     currentLocalDate: '2026-10-23',
     currentTimeZone: 'America/New_York',

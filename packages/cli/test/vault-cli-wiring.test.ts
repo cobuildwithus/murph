@@ -13,7 +13,6 @@ afterEach(async () => {
   vi.resetModules()
   vi.doUnmock('incur')
   vi.doUnmock('@murphai/vault-usecases')
-  vi.doUnmock('@murphai/assistant-engine/assistant-state')
   vi.doUnmock('@murphai/inbox-services')
   vi.doUnmock('../src/vault-cli-bootstrap.js')
   vi.doUnmock('../src/vault-cli-command-manifest.js')
@@ -31,12 +30,7 @@ test('createVaultCli uses the default integrated inbox services wiring', async (
     query: {},
     devices: {},
   }))
-  const createIntegratedInboxServices = vi.fn(
-    (_options?: {
-      enableAssistantAutoReplyChannel?: (vault: string, channel: string) => Promise<boolean>
-    }) => ({}),
-  )
-  const enableAssistantAutoReplyChannelLocal = vi.fn(async () => true)
+  const createIntegratedInboxServices = vi.fn(() => ({}))
   const registerVaultCliCommandDescriptors = vi.fn()
   const createVaultCliShell = vi.fn(() => fakeCli)
 
@@ -48,16 +42,6 @@ test('createVaultCli uses the default integrated inbox services wiring', async (
     return {
       ...actual,
       createIntegratedVaultServices: createDefaultVaultServices,
-    }
-  })
-  vi.doMock('@murphai/assistant-engine/assistant-state', async () => {
-    const actual = await vi.importActual<
-      typeof import('@murphai/assistant-engine/assistant-state')
-    >('@murphai/assistant-engine/assistant-state')
-
-    return {
-      ...actual,
-      enableAssistantAutoReplyChannelLocal,
     }
   })
   vi.doMock('@murphai/inbox-services', async () => {
@@ -91,20 +75,7 @@ test('createVaultCli uses the default integrated inbox services wiring', async (
 
   assert.equal(createDefaultVaultServices.mock.calls.length, 1)
   assert.equal(createIntegratedInboxServices.mock.calls.length, 1)
-  assert.equal(
-    typeof createIntegratedInboxServices.mock.calls[0]?.[0]?.enableAssistantAutoReplyChannel,
-    'function',
-  )
-
-  await createIntegratedInboxServices.mock.calls[0]?.[0]?.enableAssistantAutoReplyChannel?.(
-    '/vaults/default',
-    'telegram',
-  )
-
-  assert.deepEqual(enableAssistantAutoReplyChannelLocal.mock.calls, [[{
-    channel: 'telegram',
-    vault: '/vaults/default',
-  }]])
+  assert.deepEqual(createIntegratedInboxServices.mock.calls, [[]])
   assert.equal(registerVaultCliCommandDescriptors.mock.calls.length, 1)
   assert.equal(createVaultCliShell.mock.calls.length, 1)
 })

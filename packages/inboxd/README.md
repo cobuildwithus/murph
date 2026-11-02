@@ -4,7 +4,7 @@ Workspace-private source-agnostic inbox ingestion for Murph.
 
 This package keeps canonical inbox evidence in the vault and uses local runtime state for source cursors, a durable local capture mutation cursor, transient dedupe caches, capture-local search tables, and attachment job state.
 
-Stateless provider ingress semantics that need to be shared with hosted callers now live in `@murphai/messaging-ingress`. `@murphai/inboxd` consumes that package for provider webhook parsing/minimization and keeps ownership of the Telegram polling driver, runtime state, capture persistence, and generic parsed-email normalization used by hosted ingress.
+Stateless provider ingress semantics that need to be shared with hosted callers now live in `@murphai/messaging-ingress`. `@murphai/inboxd` consumes that package for provider webhook parsing/minimization and keeps ownership of runtime state, capture persistence, and generic parsed-email normalization used by hosted ingress.
 
 Consumers that only need shared Linq or Telegram webhook parsing, verification, targets, summaries, or sparse minimization should depend on `@murphai/messaging-ingress` directly instead of `@murphai/inboxd` convenience subpaths.
 
@@ -14,7 +14,7 @@ Consumers that need inbox-owned normalization without the full inboxd barrel sho
 
 - Run on Node.js `>=24.22.1`.
 - `@murphai/inboxd` resolves runtime paths and opens its SQLite projection database through `@murphai/runtime-state`, storing rebuildable capture/search state under `<vault>/.runtime/projections/inboxd.sqlite`.
-- Inbox daemon/config state lives separately under `<vault>/.runtime/operations/inbox/*.json`.
+- Inbox promotion/config state lives separately under `<vault>/.runtime/operations/inbox/*.json`.
 - Query-owned lexical search state lives separately under `<vault>/.runtime/projections/query.sqlite`.
 - The package writes runtime state next to the vault and expects normal local filesystem read/write access there.
 
@@ -38,10 +38,8 @@ and animated GIF storyboard encoding keeps its separate settings.
 
 ## Current scope
 
-- connector contracts for polling and webhook sources
-- a generic normalized chat-poll connector factory for source-specific transports
-- Telegram polling connector ownership, generic parsed-email normalization for hosted ingress, and shared Telegram/Linq normalization primitives
-- source-specific checkpoints for connectors whose cursors are not derivable from `occurredAt`/`externalId`
+- generic parsed-email normalization for hosted ingress and shared Telegram/Linq normalization primitives
+- capture checkpoints for persisted hosted message projections
 - capture pipeline with atomic raw persistence, inbox-capture ledger append, dedupe, FTS, and a durable local capture mutation cursor for downstream inbox/query projections
 - rebuilds and replay dedupe treat raw envelopes as source evidence, not a legacy persistence lane, except for the narrow current-format crash-recovery path gated by unresolved `inbox_capture_persist` metadata
 - runtime list, show, and search helpers for future agent/runtime surfaces
@@ -59,7 +57,6 @@ These methods mutate only inbox-local projection state such as `.runtime/project
 
 When combined with `@murphai/parsers`, runtime consumers can drain those queues without mixing parser state into canonical health records.
 
-`@murphai/inboxd` also owns the optional inbox-plus-parser composition helpers `createParsedInboxPipeline(...)` and `runInboxDaemonWithParsers(...)`, so the parser package stays focused on parser contracts, registry/toolchain discovery, and parse execution rather than on inbox runtime orchestration.
 
 Expired capture retention also drops a legacy v1 ledger row when an equivalent
 expired v2 row remains in the same shard. Equivalence preserves every identity,

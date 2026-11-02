@@ -13,7 +13,6 @@ function buildPrompt(conversationScope: AssistantConversationScope): string {
     channel: 'telegram',
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationScope,
     currentLocalDate: '2026-08-02',

@@ -427,7 +427,7 @@ function createFoodScheduleCommandConfig(services: VaultServices) {
       title: z.string().min(1).max(160).describe('Remembered food title.'),
     }),
     description: 'Schedule one remembered food for daily auto-log meal creation.',
-    hint: 'This schedules recurring meal logging for a remembered food. The daily log fires while `vault-cli assistant run` is active for the same vault.',
+    hint: 'This schedules recurring meal logging for a remembered food. The hosted assistant processes the daily log for the same vault.',
     options: withBaseOptions({
       time: dailyFoodTimeSchema.describe('Daily local time in 24-hour HH:MM form.'),
       note: z

@@ -132,7 +132,7 @@ function buildKnowledgePrompt(input: {
     assistantCliContract: null, assistantContextSnapshotPrompt: null,
     assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
     assistantKnowledgeToolsAvailable: input.assistantKnowledgeToolsAvailable ?? false, channel: 'linq',
-    cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+    cliAccess: { rawCommand: 'vault-cli' },
     conversationScope: input.conversationScope ?? 'direct', currentLocalDate: '2026-10-16', currentTimeZone: 'UTC',
     hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, ordinaryInboundTurn: true,
   })

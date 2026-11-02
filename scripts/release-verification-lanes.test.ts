@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -114,13 +115,12 @@ function discoverCoveragePackageDirs(): string[] {
 
   return readdirSync(packagesRoot, { withFileTypes: true })
     .flatMap((entry) => {
-      if (!entry.isDirectory()) {
+      const packageJsonPath = path.join(packagesRoot, entry.name, "package.json");
+      if (!entry.isDirectory() || !existsSync(packageJsonPath)) {
         return [];
       }
 
-      const packageJson: unknown = JSON.parse(
-        readFileSync(path.join(packagesRoot, entry.name, "package.json"), "utf8"),
-      );
+      const packageJson: unknown = JSON.parse(readFileSync(packageJsonPath, "utf8"));
       if (!isRecord(packageJson) || !isRecord(packageJson.scripts)) {
         return [];
       }
@@ -206,13 +206,10 @@ describe("release verification executable lanes", () => {
           "packages/hosted-execution",
           "packages/importers",
           "packages/inbox-services",
-          "packages/openclaw-plugin",
           "packages/operator-config",
         ],
         "platform-b": [
           "packages/core",
-          "packages/setup-cli",
-          "packages/assistant-cli",
           "packages/contracts",
           "packages/clinical-records",
           "packages/device-syncd",
@@ -365,7 +362,7 @@ function releaseValidationFixture() {
     types: "dist/index.d.ts",
     exports: { ".": { types: "dist/index.d.ts", default: "dist/index.js" } },
     publishConfig: { access: "public" },
-    bin: { murph: "dist/bin.js", "vault-cli": "dist/bin.js" },
+    bin: { "vault-cli": "dist/bin.js" },
     files: ["dist", "CHANGELOG.md"],
   };
   const workspaceDependencies: Array<{ name: string; version: string }> = [];
@@ -460,7 +457,6 @@ describe("release context validation contracts", () => {
         `${packagePath} must set publishConfig.access to public.`,
         "Release packages must share one version, found: <missing>.",
         `${packagePath} must publish the primary package name @murphai/example-tool.`,
-        `${packagePath} must expose the murph bin from dist/bin.js.`,
         `${packagePath} must expose the vault-cli bin from dist/bin.js.`,
         `${packagePath} files must include CHANGELOG.md.`,
       ].join("\n"),

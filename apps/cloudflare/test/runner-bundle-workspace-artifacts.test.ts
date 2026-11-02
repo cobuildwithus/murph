@@ -173,7 +173,6 @@ describe("runner bundle runtime artifact staging", () => {
     };
 
     expect(stagedPackageJson.dependencies).toEqual({
-      "@murphai/assistant-cli": "workspace:*",
       "@murphai/assistant-engine": "workspace:*",
       "@murphai/clinical-records": "workspace:*",
       "@murphai/core": "workspace:*",
@@ -190,7 +189,6 @@ describe("runner bundle runtime artifact staging", () => {
       "@murphai/parsers": "workspace:*",
       "@murphai/query": "workspace:*",
       "@murphai/runtime-state": "workspace:*",
-      "@murphai/setup-cli": "workspace:*",
       "@murphai/vault-usecases": "workspace:*",
       jose: "^6.2.2",
     });
@@ -956,7 +954,6 @@ async function prepareRunnerBundleValidationFixture(bundleDir: string): Promise<
     "{}\n",
     "utf8",
   );
-  await writeFile(path.join(nodeModulesDir, ".bin", "murph"), "#!/bin/sh\n", "utf8");
   await writeFile(
     path.join(nodeModulesDir, ".bin", "vault-cli"),
     "#!/bin/sh\n",

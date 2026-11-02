@@ -30,7 +30,6 @@ function buildPrompt(): string {
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationScope: 'direct',
     currentLocalDate: '2026-08-30',

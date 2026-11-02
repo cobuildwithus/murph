@@ -449,11 +449,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "25a2c1624b5506a55ac4c34946288cafc06b2e89af5230516f04430ef063a8e9",
-        "group": "a9bea22008b1911d455928df8a26d167d0ac14bc80a0db1fb87e55a855b9b751",
+        "direct": "b033d3e8ddb405e1e1e9ade23bbf97a5c56026d8cf1f3aa285f150b73e90d5a9",
+        "group": "3f10d23569735e17bbdf717cbf8beff93468a7b093fd76954244bee57a21370b",
         "maintenance": "52f122f38125b96ccf960ea62ada87ef983f3e1060cdafef33eae3309b970038",
         "outputOnly": "b87c76c464b664e3d9dcbf947b1cd7a3c823dad67b72a8597c8a462e1bd3dd54",
-        "scheduledEmail": "f0ec466d9ffd58b389430dd6e00c2741296754acfbd804c2e18129390e6d988e",
+        "scheduledEmail": "772fe0172ea1b7b7b1b36eaeec2256379365c3e8f57aa65d21878e9f45564969",
       }
     `)
   })
@@ -611,7 +611,6 @@ describe('assistant Codex turn planning', () => {
           cliAccess: {
             env: { ...createSharedPlan().cliAccess.env, ...(input.configured ? { EXA_API_KEY: 'configured-sentinel' } : {}) },
             rawCommand: 'vault-cli',
-            setupCommand: 'murph',
           },
         }, {
           channel,
@@ -811,7 +810,6 @@ describe('assistant Codex turn planning', () => {
           cliAccess: {
             env,
             rawCommand: 'vault-cli',
-            setupCommand: 'murph',
           },
         }),
       })
@@ -3731,7 +3729,6 @@ describe('assistant Codex turn planning', () => {
           cliAccess: {
             env,
             rawCommand: 'vault-cli',
-            setupCommand: 'murph',
           },
         }),
       })
@@ -3857,7 +3854,6 @@ describe('assistant Codex turn planning', () => {
           cliAccess: {
             env: options.env,
             rawCommand: 'vault-cli',
-            setupCommand: 'murph',
           },
         }, conversationScope === 'group'
           ? {
@@ -5597,7 +5593,6 @@ describe('assistant Codex turn planning', () => {
               HOSTED_WEB_BASE_URL: 'https://new.example.test',
             },
             rawCommand: 'vault-cli',
-            setupCommand: 'murph',
           },
         }),
         oldPromptTimeContext: basePromptTimeContext,
@@ -5608,7 +5603,6 @@ describe('assistant Codex turn planning', () => {
               HOSTED_WEB_BASE_URL: 'https://old.example.test',
             },
             rawCommand: 'vault-cli',
-            setupCommand: 'murph',
           },
         }),
         unexpectedTurnText: 'https://new.example.test',
@@ -8352,22 +8346,9 @@ function createUnreachableInboxServices(): InboxServices {
     throw new Error('unreachable inbox service call')
   }
   return {
-    bootstrap: unreachable,
     init: unreachable,
-    sourceAdd: unreachable,
-    sourceList: unreachable,
-    sourceRemove: unreachable,
-    sourceSetEnabled: unreachable,
-    doctor: unreachable,
-    setup: unreachable,
     repairEnvelopes: unreachable,
     compactParserAttempts: unreachable,
-    parse: unreachable,
-    requeue: unreachable,
-    backfill: unreachable,
-    run: unreachable,
-    status: unreachable,
-    stop: unreachable,
     list: unreachable,
     listAttachments: unreachable,
     showAttachment: unreachable,
@@ -8433,7 +8414,6 @@ function createSharedPlan(
     cliAccess: {
       env: { MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON: '/synthetic/hosted-models.json' },
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationPolicy: {
       audience: {

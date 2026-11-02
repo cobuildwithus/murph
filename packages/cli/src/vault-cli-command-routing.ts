@@ -18,25 +18,18 @@ export async function registerScopedVaultCliCommand(input: {
       registerAllergyCommands(input.cli, services)
       return
     }
-    case 'assistant':
-    case 'doctor':
-    case 'run':
-    case 'status':
-    case 'stop': {
+    case 'assistant': {
       const [
-        { registerAssistantCommands },
+        { registerAssistantOnboardingCommands },
         services,
-        { createDefaultInboxServices },
         { createIntegratedDeviceSyncServices, ensureCliVaultServices },
       ] = await Promise.all([
-        import('@murphai/assistant-cli/commands/assistant'),
+        import('./commands/assistant-onboarding.js'),
         createScopedVaultServices(),
-        import('./vault-cli-inbox-services.js'),
         import('./device-services.js'),
       ])
-      registerAssistantCommands(
+      registerAssistantOnboardingCommands(
         input.cli,
-        createDefaultInboxServices(),
         ensureCliVaultServices(services, {
           devices: createIntegratedDeviceSyncServices(),
         }),

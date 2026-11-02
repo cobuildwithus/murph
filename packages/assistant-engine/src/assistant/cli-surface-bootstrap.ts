@@ -34,27 +34,8 @@ const assistantCliSurfaceBootstrapIgnoredOptionNames = new Set([
   'vault',
 ])
 const assistantCliSurfaceBootstrapIgnoredCommandNames = new Set([
-  'assistant ask',
-  'assistant chat',
-  'assistant deliver',
-  'assistant doctor',
   'assistant onboarding reopen',
   'assistant onboarding status',
-  'assistant run',
-  'assistant self-target clear',
-  'assistant self-target list',
-  'assistant self-target set',
-  'assistant self-target show',
-  'assistant session list',
-  'assistant session show',
-  'assistant status',
-  'assistant stop',
-  'chat',
-  'doctor',
-  'model',
-  'run',
-  'status',
-  'stop',
 ])
 // Keep stale prebuilt contracts from advertising the removed shell-bypass
 // surface during a rolling deployment.

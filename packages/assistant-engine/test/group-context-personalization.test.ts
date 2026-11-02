@@ -22,7 +22,6 @@ const basePromptInput = {
   channel: 'linq',
   cliAccess: {
     rawCommand: 'vault-cli',
-    setupCommand: 'murph',
   },
   currentLocalDate: '2026-08-07',
   currentTimeZone: 'America/New_York',

@@ -1,24 +1,23 @@
-import { mkdir } from 'node:fs/promises'
+import {
+  inboxRuntimeConfigSchema,
+  normalizeInboxRuntimeConfig,
+  type InboxConnectorConfig,
+  type InboxRuntimeConfig,
+} from '@murphai/operator-config/inbox-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   hasLocalStatePath,
   readVersionedJsonStateFile,
   resolveRuntimePaths,
   writeVersionedJsonStateFile,
 } from '@murphai/runtime-state/node'
-import {
-  inboxRuntimeConfigSchema,
-  type InboxConnectorConfig,
-  type InboxRuntimeConfig,
-  normalizeInboxRuntimeConfig,
-} from '@murphai/operator-config/inbox-cli-contracts'
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { mkdir } from 'node:fs/promises'
 import type {
   InboxPaths,
   InboxRuntimeModule,
   RuntimeStore,
 } from '../inbox-app/types.js'
 import {
-  connectorNamespaceKey,
   fileExists,
   relativeToVault,
 } from './shared.js'
@@ -132,20 +131,6 @@ export async function readConfig(
   }
 }
 
-export async function writeConfig(
-  paths: InboxPaths,
-  config: InboxRuntimeConfig,
-): Promise<void> {
-  await writeVersionedJsonStateFile({
-    filePath: paths.inboxConfigPath,
-    schema: INBOX_RUNTIME_CONFIG_SCHEMA,
-    schemaVersion: INBOX_RUNTIME_CONFIG_SCHEMA_VERSION,
-    value: normalizeInboxRuntimeConfig(
-      inboxRuntimeConfigSchema.parse(config),
-    ),
-  })
-}
-
 export async function rebuildRuntime(
   paths: InboxPaths,
   inboxd: InboxRuntimeModule,
@@ -177,10 +162,6 @@ export async function rebuildRuntime(
   }
 }
 
-export function sortConnectors(config: InboxRuntimeConfig): void {
-  config.connectors.sort((left, right) => left.id.localeCompare(right.id))
-}
-
 export function findConnector(
   config: InboxRuntimeConfig,
   sourceId: string,
@@ -201,26 +182,4 @@ export function requireConnector(
   }
 
   return connector
-}
-
-export function ensureConnectorNamespaceAvailable(
-  config: InboxRuntimeConfig,
-  candidate: InboxConnectorConfig,
-): void {
-  const namespace = connectorNamespaceKey(candidate)
-  const conflict = config.connectors.find(
-    (connector) => connectorNamespaceKey(connector) === namespace,
-  )
-  if (!conflict) {
-    return
-  }
-
-  throw new VaultCliError(
-    'INBOX_SOURCE_NAMESPACE_EXISTS',
-    `Inbox source "${candidate.id}" aliases the same runtime namespace as "${conflict.id}".`,
-    {
-      accountId: candidate.accountId ?? null,
-      source: candidate.source,
-    },
-  )
 }

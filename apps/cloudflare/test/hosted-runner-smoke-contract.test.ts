@@ -44,7 +44,7 @@ const validHostedRunnerSmokeResult = {
   codexHostedCliSchemaVaultOptionHidden: true,
   codexHostedCliVaultCommandProofCount: HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
   codexHostedCliVaultWriteProofCount: HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
-  codexHostedShellMurphPathBytes: 1536,
+  codexHostedShellVaultCliPathBytes: 1536,
   codexHostedShellPythonVersion: "Python 3.11.2",
   codexHostedShellVaultCliLlmsBytes: 4096,
   codexVersion: "codex-cli 0.125.0",
@@ -55,7 +55,6 @@ const validHostedRunnerSmokeResult = {
   healthCommonsRuntimeKnowledgeEntityKeys: [
     "biomarker:deep-sleep-minutes",
   ],
-  murphCommandDiscovered: true,
   operatorHomeRebound: true,
   pdfParserProviderId: "poppler.pdf",
   pdfTextSha256: "b".repeat(64),
@@ -123,11 +122,10 @@ describe("parseHostedRunnerSmokeResult", () => {
       codexHostedCliSchemaVaultOptionHidden: true,
       codexHostedCliVaultCommandProofCount: HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
       codexHostedCliVaultWriteProofCount: HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
-      codexHostedShellMurphPathBytes: 1536,
+      codexHostedShellVaultCliPathBytes: 1536,
       codexHostedShellPythonVersion: "Python 3.11.2",
       codexHostedShellVaultCliLlmsBytes: 4096,
       codexVersion: "codex-cli 0.125.0",
-      murphCommandDiscovered: true,
       operatorHomeRebound: true,
       pdfParserProviderId: "poppler.pdf",
       pdfTextSha256: "b".repeat(64),
@@ -291,9 +289,9 @@ describe("parseHostedRunnerSmokeResult", () => {
 
     expect(() => parseHostedRunnerSmokeResult({
       ...validHostedRunnerSmokeResult,
-      codexHostedShellMurphPathBytes: 0,
+      codexHostedShellVaultCliPathBytes: 0,
     })).toThrow(
-      "Hosted runner smoke result.codexHostedShellMurphPathBytes must be a positive finite number.",
+      "Hosted runner smoke result.codexHostedShellVaultCliPathBytes must be a positive finite number.",
     );
 
     expect(() => parseHostedRunnerSmokeResult({
@@ -371,7 +369,6 @@ describe("parseHostedRunnerSmokeResult", () => {
       "codexMemberWorkspaceVaultWriteAllowed",
       "codexHostedConfigShellEnvironmentPolicyAllowlisted",
       "codexHostedCliSchemaVaultOptionHidden",
-      "murphCommandDiscovered",
       "operatorHomeRebound",
       "reportedVaultIdMatchesExpected",
       "ripgrepCommandDiscovered",

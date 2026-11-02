@@ -49,7 +49,7 @@ describe('weekly usage optimizer', () => {
   })
 
   it('composes bounded Luna eligibility without the retired no-tool prohibition', () => {
-    const prompt = buildAssistantSystemPrompt({ assistantCliContract: null, assistantContextSnapshotPrompt: null, assistantHostedDeviceConnectAvailable: false, assistantKnowledgeToolsAvailable: false, channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' }, currentLocalDate: '2026-10-05', currentTimeZone: 'UTC', modelBehaviorProfile: 'gpt5-agentic', turnTrigger: 'automation-cron', hostedRuntime: true, conversationScope: 'direct', onboardingGuidance: false })
+    const prompt = buildAssistantSystemPrompt({ assistantCliContract: null, assistantContextSnapshotPrompt: null, assistantHostedDeviceConnectAvailable: false, assistantKnowledgeToolsAvailable: false, channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, currentLocalDate: '2026-10-05', currentTimeZone: 'UTC', modelBehaviorProfile: 'gpt5-agentic', turnTrigger: 'automation-cron', hostedRuntime: true, conversationScope: 'direct', onboardingGuidance: false })
     const composed = [prompt, seed.instructions, MURPH_AUTOMATION_TOOL.description].join('\n')
     expect(composed).toContain('bounded low-risk workflows')
     expect(composed).toContain('Preserve explicit member model preferences')

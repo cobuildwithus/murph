@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { appendFileSync, readdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -23,8 +23,6 @@ export const PACKAGE_COVERAGE_PLAN = Object.freeze([
   // Core, Device Sync, Query, and Vault dominate platform-b; the smaller owners
   // fill platform-a.
   { dir: "packages/core", shard: "platform-b" },
-  { dir: "packages/setup-cli", shard: "platform-b" },
-  { dir: "packages/assistant-cli", shard: "platform-b" },
   { dir: "packages/cloudflare-hosted-control", shard: "platform-a" },
   { dir: "packages/contracts", shard: "platform-b" },
   { dir: "packages/clinical-records", shard: "platform-b" },
@@ -41,7 +39,6 @@ export const PACKAGE_COVERAGE_PLAN = Object.freeze([
   { dir: "packages/inbox-services", shard: "platform-a" },
   { dir: "packages/inboxd", shard: "platform-b" },
   { dir: "packages/messaging-ingress", shard: "platform-b" },
-  { dir: "packages/openclaw-plugin", shard: "platform-a" },
   { dir: "packages/operator-config", shard: "platform-a" },
   { dir: "packages/parsers", shard: "platform-b" },
   { dir: "packages/query", shard: "platform-b" },
@@ -68,8 +65,14 @@ function discoverWorkspacePackages(repoRoot) {
       continue;
     }
 
+    // Like pnpm, ignore folders without a manifest, such as build output left behind by a deleted package.
+    const packageJsonPath = path.join(packagesRoot, entry.name, "package.json");
+    if (!existsSync(packageJsonPath)) {
+      continue;
+    }
+
     const dir = path.posix.join("packages", entry.name);
-    const packageJson = readJson(path.join(packagesRoot, entry.name, "package.json"));
+    const packageJson = readJson(packageJsonPath);
     const coverageScript = packageJson.scripts?.["test:coverage"];
     discovered.push({
       dir,

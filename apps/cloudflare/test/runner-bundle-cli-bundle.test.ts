@@ -195,7 +195,7 @@ async function stageFakeInstalledCli(cliSource: string): Promise<string> {
   await writeFile(
     path.join(cliPackageDir, "package.json"),
     JSON.stringify({
-      bin: { murph: "dist/bin.js", "vault-cli": "dist/bin.js" },
+      bin: { "vault-cli": "dist/bin.js" },
       name: "@murphai/murph",
       type: "module",
       version: "9.9.9",
@@ -361,7 +361,7 @@ describe("runner bundle vault-cli esbuild step", () => {
     expect(bundledSource).not.toContain("node:async_hooks");
     expect(bundledSource).not.toContain("murph.cli-timing.v1");
     expect(bundledSource).toMatch(/import\(["']@murphai\/runtime-state\/node\/cli-timing["']\)/u);
-    for (const currentEntry of [entry, bundledEntry, ...["vault-cli", "murph"].map((name) =>
+    for (const currentEntry of [entry, bundledEntry, ...["vault-cli"].map((name) =>
       path.join(bundleDir, "node_modules", ".bin", name))]) {
       const wrapper = path.dirname(currentEntry).endsWith(`${path.sep}.bin`);
       const enabled = await runTimingFixture({ bundleDir, entry: currentEntry, enabled: true, wrapper });
@@ -454,7 +454,7 @@ describe("runner bundle vault-cli esbuild step", () => {
     );
     await access(bundledEntry);
 
-    for (const binName of ["vault-cli", "murph"]) {
+    for (const binName of ["vault-cli"]) {
       const wrapperPath = path.join(bundleDir, "node_modules", ".bin", binName);
       const wrapper = await readFile(wrapperPath, "utf8");
       expect(wrapper).toContain("../@murphai/murph/.bundle/bin.js");

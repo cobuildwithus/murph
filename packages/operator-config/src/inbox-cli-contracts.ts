@@ -8,7 +8,6 @@ import { VaultCliError } from './vault-cli-errors.js'
 
 export const inboxSourceValues = ['telegram', 'linq'] as const
 export const inboxPromotionTargetValues = ['meal', 'document', 'journal', 'experiment-note'] as const
-export const inboxCheckStatusValues = ['pass', 'warn', 'fail'] as const
 
 export const inboxConnectorOptionsSchema = z.object({
   backfillLimit: z.number().int().positive().max(5000).optional(),
@@ -27,32 +26,6 @@ export const inboxConnectorConfigSchema = z.object({
 
 export const inboxRuntimeConfigSchema = z.object({
   connectors: z.array(inboxConnectorConfigSchema),
-})
-
-export const inboxDoctorCheckSchema = z.object({
-  name: z.string().min(1),
-  status: z.enum(inboxCheckStatusValues),
-  message: z.string().min(1),
-  details: z.record(z.string(), z.unknown()).optional(),
-})
-
-export const inboxParserToolStatusSchema = z.object({
-  available: z.boolean(),
-  command: z.string().min(1).nullable(),
-  modelPath: z.string().min(1).nullable().optional(),
-  source: z.enum(['config', 'env', 'system', 'missing']),
-  reason: z.string().min(1),
-})
-
-export const inboxParserToolchainStatusSchema = z.object({
-  configPath: pathSchema,
-  discoveredAt: isoTimestampSchema,
-  tools: z.object({
-    ffmpeg: inboxParserToolStatusSchema,
-    whisper: inboxParserToolStatusSchema.extend({
-      modelPath: z.string().min(1).nullable(),
-    }),
-  }),
 })
 
 export const inboxPromotionEntrySchema = z.object({
@@ -137,125 +110,6 @@ export const inboxInitResultSchema = z.object({
   configPath: pathSchema,
   createdPaths: z.array(pathSchema),
   rebuiltCaptures: z.number().int().nonnegative(),
-})
-
-export const inboxSourceAddResultSchema = z.object({
-  vault: pathSchema,
-  configPath: pathSchema,
-  connector: inboxConnectorConfigSchema,
-  connectorCount: z.number().int().nonnegative(),
-  autoReplyEnabled: z.boolean().optional(),
-})
-
-export const inboxSourceRemoveResultSchema = z.object({
-  vault: pathSchema,
-  configPath: pathSchema,
-  removed: z.boolean(),
-  connectorId: z.string().min(1),
-  connectorCount: z.number().int().nonnegative(),
-})
-
-export const inboxSourceListResultSchema = z.object({
-  vault: pathSchema,
-  configPath: pathSchema,
-  connectors: z.array(inboxConnectorConfigSchema),
-})
-
-export const inboxDoctorResultSchema = z.object({
-  vault: pathSchema,
-  configPath: pathSchema.nullable(),
-  databasePath: pathSchema.nullable(),
-  target: z.string().min(1).nullable(),
-  ok: z.boolean(),
-  checks: z.array(inboxDoctorCheckSchema),
-  connectors: z.array(inboxConnectorConfigSchema),
-  parserToolchain: inboxParserToolchainStatusSchema.nullable().optional(),
-})
-
-export const inboxSetupResultSchema = z.object({
-  vault: pathSchema,
-  configPath: pathSchema,
-  updatedAt: isoTimestampSchema,
-  tools: inboxParserToolchainStatusSchema.shape.tools,
-})
-
-export const inboxBootstrapResultSchema = z.object({
-  vault: pathSchema,
-  init: inboxInitResultSchema.omit({
-    vault: true,
-  }),
-  setup: inboxSetupResultSchema.omit({
-    vault: true,
-  }),
-  doctor: inboxDoctorResultSchema.omit({
-    vault: true,
-  }),
-})
-
-export const inboxParseJobResultSchema = z.object({
-  captureId: z.string().min(1),
-  attachmentId: z.string().min(1),
-  status: z.enum(['failed', 'succeeded']),
-  providerId: z.string().min(1).nullable(),
-  resultPath: pathSchema.nullable(),
-  errorCode: z.string().min(1).nullable(),
-  errorMessage: z.string().min(1).nullable(),
-})
-
-export const inboxParseResultSchema = z.object({
-  vault: pathSchema,
-  attempted: z.number().int().nonnegative(),
-  succeeded: z.number().int().nonnegative(),
-  failed: z.number().int().nonnegative(),
-  results: z.array(inboxParseJobResultSchema),
-})
-
-export const inboxRequeueResultSchema = z.object({
-  vault: pathSchema,
-  count: z.number().int().nonnegative(),
-  filters: z.object({
-    captureId: z.string().min(1).optional(),
-    attachmentId: z.string().min(1).optional(),
-    state: z.enum(['failed', 'running']).optional(),
-  }),
-})
-
-export const inboxBackfillResultSchema = z.object({
-  vault: pathSchema,
-  sourceId: z.string().min(1),
-  importedCount: z.number().int().nonnegative(),
-  dedupedCount: z.number().int().nonnegative(),
-  cursor: z.record(z.string(), z.unknown()).nullable(),
-  parse: inboxParseResultSchema
-    .omit({
-      vault: true,
-    })
-    .optional(),
-})
-
-export const inboxDaemonStateSchema = z.object({
-  running: z.boolean(),
-  stale: z.boolean(),
-  pid: z.number().int().positive().nullable(),
-  startedAt: isoTimestampSchema.nullable(),
-  stoppedAt: isoTimestampSchema.nullable(),
-  status: z.enum(['idle', 'running', 'stopped', 'failed', 'stale']),
-  connectorIds: z.array(z.string().min(1)),
-  statePath: pathSchema,
-  configPath: pathSchema,
-  databasePath: pathSchema,
-  failureCategory: z.string().min(1).nullable().optional(),
-  failureCode: z.string().min(1).nullable().optional(),
-  message: z.string().min(1).nullable(),
-})
-
-export const inboxRunResultSchema = z.object({
-  vault: pathSchema,
-  sourceIds: z.array(z.string().min(1)),
-  startedAt: isoTimestampSchema,
-  stoppedAt: isoTimestampSchema,
-  reason: z.enum(['completed', 'signal', 'error']),
-  statePath: pathSchema,
 })
 
 export const inboxListResultSchema = z.object({
@@ -421,21 +275,9 @@ export const inboxAttachmentStatusResultSchema = z.object({
 export type InboxConnectorConfig = z.infer<typeof inboxConnectorConfigSchema>
 export type InboxRuntimeConfig = z.infer<typeof inboxRuntimeConfigSchema>
 export type InboxSource = (typeof inboxSourceValues)[number]
-export type InboxDoctorCheck = z.infer<typeof inboxDoctorCheckSchema>
-export type InboxParserToolStatus = z.infer<typeof inboxParserToolStatusSchema>
-export type InboxParserToolchainStatus = z.infer<typeof inboxParserToolchainStatusSchema>
 export type InboxPromotionEntry = z.infer<typeof inboxPromotionEntrySchema>
 export type InboxPromotionStore = z.infer<typeof inboxPromotionStoreSchema>
 export type InboxInitResult = z.infer<typeof inboxInitResultSchema>
-export type InboxSourceAddResult = z.infer<typeof inboxSourceAddResultSchema>
-export type InboxSourceRemoveResult = z.infer<typeof inboxSourceRemoveResultSchema>
-export type InboxSourceListResult = z.infer<typeof inboxSourceListResultSchema>
-export type InboxDoctorResult = z.infer<typeof inboxDoctorResultSchema>
-export type InboxSetupResult = z.infer<typeof inboxSetupResultSchema>
-export type InboxBootstrapResult = z.infer<typeof inboxBootstrapResultSchema>
-export type InboxBackfillResult = z.infer<typeof inboxBackfillResultSchema>
-export type InboxDaemonState = z.infer<typeof inboxDaemonStateSchema>
-export type InboxRunResult = z.infer<typeof inboxRunResultSchema>
 export type InboxListResult = z.infer<typeof inboxListResultSchema>
 export type InboxShowResult = z.infer<typeof inboxShowResultSchema>
 export type InboxSearchResult = z.infer<typeof inboxSearchResultSchema>
@@ -443,9 +285,6 @@ export type InboxEnvelopeRepairResult = z.infer<typeof inboxEnvelopeRepairResult
 export type InboxParserAttemptCompactionResult = z.infer<
   typeof inboxParserAttemptCompactionResultSchema
 >
-export type InboxParseJobResult = z.infer<typeof inboxParseJobResultSchema>
-export type InboxParseResult = z.infer<typeof inboxParseResultSchema>
-export type InboxRequeueResult = z.infer<typeof inboxRequeueResultSchema>
 export type InboxPromoteMealResult = z.infer<typeof inboxPromoteMealResultSchema>
 
 export function normalizeInboxConnectorAccountId(

@@ -15,7 +15,6 @@ test('resolveAssistantCliAccessContext prepends the Murph shim directory to PATH
   })
 
   assert.equal(access.rawCommand, 'vault-cli')
-  assert.equal(access.setupCommand, 'murph')
   assert.equal(
     access.env.PATH,
     `${userBinDirectory}${path.delimiter}/opt/homebrew/bin`,
@@ -25,16 +24,14 @@ test('resolveAssistantCliAccessContext prepends the Murph shim directory to PATH
 test('buildAssistantCliGuidanceText keeps only non-duplicative CLI guidance', () => {
   const guidance = buildAssistantCliGuidanceText({
     rawCommand: 'vault-cli',
-    setupCommand: 'murph',
   })
 
   assert.match(guidance, /canonical Murph CLI/u)
-  assert.match(guidance, /setup entrypoint/u)
-  assert.match(guidance, /same top-level `chat` and `run` aliases/u)
+  assert.doesNotMatch(guidance, /setup entrypoint/u)
+  assert.doesNotMatch(guidance, /`chat`|`run`|`assistant ask`|`assistant deliver`/u)
   assert.match(guidance, /matching local CLI command directly/u)
   assert.match(guidance, /prefer `--format json`/u)
-  assert.match(guidance, /do not run recursive assistant or delivery commands/u)
-  assert.match(guidance, /`assistant deliver`/u)
+  assert.match(guidance, /do not start another assistant process/u)
   assert.doesNotMatch(guidance, /vault-cli <command> --help/u)
   assert.doesNotMatch(guidance, /vault-cli <command> --schema --format json/u)
   assert.doesNotMatch(guidance, /vault-cli --llms-full/u)
@@ -43,7 +40,6 @@ test('buildAssistantCliGuidanceText keeps only non-duplicative CLI guidance', ()
 test('buildAssistantCliGuidanceText omits provider-bound tool guidance', () => {
   const guidance = buildAssistantCliGuidanceText({
     rawCommand: 'vault-cli',
-    setupCommand: 'murph',
   })
 
   assert.doesNotMatch(guidance, /bound assistant tools/u)

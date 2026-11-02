@@ -139,7 +139,7 @@ describe('host support workflow guards', () => {
     expect(workflow).toContain('- name: Prepare built CLI runtime artifacts')
     expect(workflow).toContain('run: pnpm build:test-runtime:prepared')
     expect(workflow).toContain(
-      'run: env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run packages/cli/test/setup-cli.test.ts packages/cli/test/inbox-service-boundaries.test.ts --no-coverage --maxWorkers 1',
+      'run: env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run packages/cli/test/cli-entry.test.ts packages/cli/test/vault-cli-routing.test.ts packages/cli/test/inbox-service-boundaries.test.ts --no-coverage --maxWorkers 1',
     )
   })
 })

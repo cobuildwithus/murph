@@ -23,7 +23,7 @@ describe('group shared metric presentation prompt', () => {
   ])('does not instruct an unavailable route to persist corrections: $channel/$available', ({ channel, available }) => {
     const prompt = buildAssistantSystemPrompt({
       assistantCliContract: null, assistantHostedAutomationAvailable: available,
-      channel, cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+      channel, cliAccess: { rawCommand: 'vault-cli' },
       conversationScope: 'group', hostedRuntime: true, onboardingGuidance: false,
       modelBehaviorProfile: 'gpt5-agentic', currentLocalDate: '2030-02-12', currentTimeZone: 'UTC',
     })
@@ -50,7 +50,7 @@ describe('group shared metric presentation prompt', () => {
     const scheduled = buildAssistantSystemPrompt({
       assistantCliContract: null, onboardingGuidance: false, modelBehaviorProfile: 'gpt5-agentic',
       assistantHostedGroupToolSurface: 'shared_read', assistantHostedAutomationAvailable: true, channel: 'linq',
-      cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+      cliAccess: { rawCommand: 'vault-cli' },
       conversationScope: 'group', hostedRuntime: true,
       currentLocalDate: '2026-08-05', currentTimeZone: 'America/New_York',
       turnTrigger: 'automation-cron', scheduledOccurrenceAt: '2026-08-05T13:00:00.000Z',
@@ -250,7 +250,6 @@ function buildHostedGroupSharedPrompt(
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     conversationScope: 'group',
     currentLocalDate: '2026-08-27',

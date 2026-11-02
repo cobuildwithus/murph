@@ -24,13 +24,6 @@ export type {
   RequeueAttachmentParseJobsInput,
 } from "./contracts/derived.ts";
 export type {
-  BaseConnector,
-  Cursor,
-  EmitCapture,
-  PollConnector,
-  WebhookConnector,
-} from "./connectors/types.ts";
-export type {
   ChatAttachment,
   ChatMessage,
   CreateInboundCaptureFromChatMessageInput,
@@ -59,14 +52,6 @@ export {
   compareInboundCaptures,
   createInboundCaptureFromChatMessage,
 } from "./connectors/chat/message.ts";
-export type {
-  ChatPollDriver,
-  ChatPollWatcherHandle,
-  CreateNormalizedChatPollConnectorInput,
-} from "./connectors/chat/poll.ts";
-export {
-  createNormalizedChatPollConnector,
-} from "./connectors/chat/poll.ts";
 export {
   normalizeParsedEmailMessage,
   toParsedEmailChatMessage,
@@ -95,21 +80,6 @@ export type {
   NormalizeLinqWebhookEventInput,
 } from "./connectors/linq/normalize.ts";
 export {
-  DEFAULT_TELEGRAM_ALLOWED_UPDATES,
-  createTelegramApiPollDriver,
-  createTelegramBotApiPollDriver,
-  createTelegramPollConnector,
-  createTelegramUpdateCheckpoint,
-  readTelegramUpdateCheckpoint,
-} from "./connectors/telegram/connector.ts";
-export type {
-  CreateTelegramApiPollDriverInput,
-  CreateTelegramBotApiPollDriverInput,
-  TelegramApiClient,
-  TelegramConnectorOptions,
-  TelegramPollDriver,
-} from "./connectors/telegram/connector.ts";
-export {
   normalizeTelegramMessage,
   normalizeTelegramUpdate,
   toTelegramChatMessage,
@@ -120,22 +90,6 @@ export type {
   TelegramAttachmentDownloadDriver,
 } from "./connectors/telegram/normalize.ts";
 export {
-  createConnectorRegistry,
-} from "./kernel/registry.ts";
-export type {
-  ConnectorRegistry,
-} from "./kernel/registry.ts";
-export {
-  runInboxDaemon,
-  runPollConnector,
-  runPollConnectorBackfill,
-} from "./kernel/daemon.ts";
-export type {
-  ConnectorRestartPolicy,
-  RunPollConnectorBackfillInput,
-  RunPollConnectorBackfillResult,
-} from "./kernel/daemon.ts";
-export {
   createInboxPipeline,
   processCapture,
 } from "./kernel/pipeline.ts";
@@ -144,15 +98,6 @@ export type {
   InboxPipeline,
   PipelineContext,
 } from "./kernel/pipeline.ts";
-export {
-  createParsedInboxPipeline,
-  runInboxDaemonWithParsers,
-} from "./parsers.ts";
-export type {
-  CreateParsedInboxPipelineInput,
-  ParsedInboxPipeline,
-  RunInboxDaemonWithParsersInput,
-} from "./parsers.ts";
 export {
   listInboxCaptureMutations,
   openInboxRuntime,

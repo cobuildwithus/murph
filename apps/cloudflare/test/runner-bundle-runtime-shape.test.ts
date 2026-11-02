@@ -143,7 +143,7 @@ describe("runner bundle publication", () => {
         }),
         [`${cliRelative}/package.json`]: JSON.stringify({
           name: "@murphai/murph", version, type: "module",
-          bin: { murph: "./dist/bin.js", "vault-cli": "./dist/bin.js" },
+          bin: { "vault-cli": "./dist/bin.js" },
         }),
         [`${cliRelative}/dist/bin.js`]:
           'import { readFileSync } from "node:fs";\n' +
@@ -183,7 +183,7 @@ describe("runner bundle publication", () => {
       for (const name of removed) {
         await expect(access(path.join(final, name))).rejects.toMatchObject({ code: "ENOENT" });
       }
-      for (const command of ["murph", "vault-cli"]) {
+      for (const command of ["vault-cli"]) {
         const executable = path.join(final, "node_modules/.bin", command);
         expect((await lstat(executable)).isSymbolicLink()).toBe(false);
         expect(execFileSync(executable, ["roundtrip"], { cwd: root, encoding: "utf8" }).trim())

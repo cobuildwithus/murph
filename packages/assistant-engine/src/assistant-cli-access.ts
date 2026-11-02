@@ -60,7 +60,6 @@ const HOSTED_CODEX_DIRECT_CLI_ENV_NAMES = [
 export interface AssistantCliAccessContext {
   env: NodeJS.ProcessEnv
   rawCommand: 'vault-cli'
-  setupCommand: 'murph'
 }
 
 export function resolveAssistantCliAccessContext(
@@ -69,16 +68,15 @@ export function resolveAssistantCliAccessContext(
   return {
     env,
     rawCommand: 'vault-cli',
-    setupCommand: 'murph',
   }
 }
 
 export function buildAssistantCliGuidanceText(
-  access: Pick<AssistantCliAccessContext, 'rawCommand' | 'setupCommand'>,
+  access: Pick<AssistantCliAccessContext, 'rawCommand'>,
 ): string {
   return [
-    `\`${access.rawCommand}\` is the canonical Murph CLI. \`${access.setupCommand}\` is the setup entrypoint and also exposes the same top-level \`chat\` and \`run\` aliases after setup.`,
-    'Use the matching local CLI command directly, prefer `--format json` for machine-readable output, and do not run recursive assistant or delivery commands such as `assistant chat`, `assistant ask`, `assistant run`, `assistant deliver`, `chat`, or `run` from inside an assistant turn.',
+    `\`${access.rawCommand}\` is the canonical Murph CLI.`,
+    'Use the matching local CLI command directly, prefer `--format json` for machine-readable output, and do not start another assistant process from inside an assistant turn.',
     'Use the current turn working directory for CLI commands; do not invent a workspace path or reuse one from an older transcript. If a working-directory error proves the process failed before the command started, use `pwd` in the default current directory, then run the corrected command there once. Do not create a replacement workspace. If execution may have started, verify canonical state before another write.',
     '`stage` names the failure. For a read-only command, `retryable: true` permits at most one unchanged retry in the turn; never retry an unchanged write. Fixing a `fieldErrors` field, a `hint` prerequisite, or a precise bounded `message` is a new attempt. Otherwise stop; never guess or echo omitted details.',
   ].join('\n\n')

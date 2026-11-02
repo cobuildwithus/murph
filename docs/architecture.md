@@ -41,14 +41,11 @@ repo/
     health-commons/
     assistant-engine/
     operator-config/
-    assistant-cli/
-    setup-cli/
     assistant-runtime/
     gateway-core/
     cloudflare-hosted-control/
     hosted-local-harness/
     cli/
-    openclaw-plugin/
   fixtures/
     minimal-vault/
     sample-imports/
@@ -64,7 +61,7 @@ repo/
 - Keep each package's `exports` map intentionally small and semantic. When a package starts wanting many file-shaped subpaths or compatibility wrappers, that is a signal to split ownership or add one clearer owner seam rather than turning `package.json` into a directory listing.
 - Re-export another package's surface only when this package is the real owner-level API. Otherwise callers should import from the true owner package directly.
 - Compatibility shims are temporary migration tools, not permanent architecture. Remove pass-through files and subpath aliases once callers have moved.
-- Only `@murphai/contracts`, `@murphai/hosted-execution`, `@murphai/gateway-core`, `@murphai/murph`, and `@murphai/openclaw-plugin` are published. Other `packages/*` entries are workspace-private owner packages that may be bundled into published tarballs when needed.
+- Only `@murphai/contracts`, `@murphai/hosted-execution`, `@murphai/gateway-core`, and `@murphai/murph` are published. Other `packages/*` entries are workspace-private owner packages that may be bundled into published tarballs when needed.
 - `packages/contracts` defines the shared language: canonical Zod contracts, TypeScript types, parse helpers, generated JSON Schema artifacts, and the shared vault-family registry/layout/query-source metadata consumed by core, query, and inboxd.
 - `packages/hosted-execution` owns shared hosted runtime-control contracts, route builders, auth canonicalization helpers, redacted runtime-log/status codecs, and vendor-neutral hosted env names while deployed topology and auth adapters stay app-local.
 - `packages/runtime-state` defines canonical local-state taxonomy and paths (`.runtime/operations/**`, `.runtime/projections/**`, `.runtime/cache/**`, `.runtime/tmp/**`), aggregates subsystem-owned operational descriptor manifests for portability policy, and provides shared JSON/SQLite versioning helpers and migration defaults.
@@ -72,7 +69,7 @@ repo/
 - `packages/importers` parses external inputs, hosts provider-adapter normalization for direct API connectors, and delegates all canonical writes to core.
 - `packages/device-syncd` owns local provider OAuth state, reconnect/disconnect control, scheduled wearable imports, and optional webhook intake while keeping provider credentials in durable local operational state under `.runtime/operations/device-sync/**` and outside the canonical vault.
 - `packages/messaging-ingress` owns stateless Telegram/Linq webhook parsing, verification, target grammar, summaries, and sparse minimization without taking on polling, hosted policy, or runtime persistence.
-- `packages/inboxd` owns source-agnostic inbox capture, raw attachment persistence, the append-only `ledger/inbox-captures` canonical metadata log, explicit legacy-envelope migration, inbox-local runtime cursors/source-specific checkpoints/capture indexes, and attachment-level derived-job orchestration, with its rebuildable SQLite projection under `.runtime/projections/inboxd.sqlite` and daemon/config JSON state under `.runtime/operations/inbox/**`.
+- `packages/inboxd` owns source-agnostic inbox capture, raw attachment persistence, the append-only `ledger/inbox-captures` canonical metadata log, explicit legacy-envelope migration, inbox-local runtime cursors/source-specific checkpoints/capture indexes, and attachment-level derived-job orchestration, with its rebuildable SQLite projection under `.runtime/projections/inboxd.sqlite` and read-only connector identity configuration under `.runtime/operations/inbox/**`.
 - `packages/inbox-services` owns lower-level inbox runtime, read, and promotion service composition used by CLI/assistant flows without becoming the canonical inbox-capture owner.
 - `packages/parsers` owns local-first multimedia parsing for inbox attachments, writes one versioned derived result bundle per attempt under `derived/inbox/**`, and owns the strict reader plus legacy-attempt compactor.
 - `packages/health-metrics` owns neutral MetricPoint contracts, health metric definitions, source metadata, unit normalization, display formatting, and selection policy reused by query projections and browser-vault exports.
@@ -80,15 +77,12 @@ repo/
 - `packages/vault-usecases` owns CLI/headless vault usecase orchestration over core, importers, and query. It exposes the neutral service surface, lazy runtime loaders, command-shaped input normalization, and assistant-safe vault path helpers used by CLI and headless runtimes. It is not a canonical write owner, query-model owner, inbox/device runtime owner, assistant/session owner, or broad re-export layer.
 - `packages/health-commons` owns the public Health Commons for biomarker, Goal guide, measurement-method, source, and source-person pages, plus build-time catalog generation and scoped runtime artifacts consumed by local and hosted surfaces.
 - `packages/assistant-engine` owns headless assistant execution, provider-turn runtime, assistant state/outbox/status/store surfaces, automation, the assistant input spine, and assistant-specific vault/inbox/knowledge tools.
-- `packages/operator-config` owns persisted operator defaults, hosted assistant config, assistant backend target normalization, hosted provider/config helpers, setup/runtime-env helpers, device/channel readiness helpers, and shared CLI/setup contracts.
-- `packages/assistant-cli` owns CLI-only assistant wrappers, assistant commands, foreground terminal logging.
-- `packages/setup-cli` owns CLI-only onboarding, host setup, and setup-wizard flows.
+- `packages/operator-config` owns persisted operator defaults, hosted assistant config, assistant backend target normalization, hosted provider/config helpers, runtime-env helpers, device/channel readiness helpers, and shared CLI contracts.
 - `packages/assistant-runtime` owns the headless hosted runtime surface that runs bounded hosted inbox/bootstrap/assistant/outbox/device-sync workspace invocations behind an injected hosted platform context.
 - `packages/gateway-core` owns the published transport-neutral gateway contracts, route helpers, and opaque ids.
 - `packages/cloudflare-hosted-control` owns private Cloudflare processing/status/browser-vault control contracts shared between hosted web and Cloudflare without widening `packages/hosted-execution`.
 - `packages/hosted-local-harness` owns the local hosted-development and hosted E2E harness, including profile selection, redacted state files, runner-bundle prep, diagnostics, and cleanup.
-- `packages/cli` exposes the published `vault-cli` / `murph` shell, composes the command graph, consumes `packages/vault-usecases` for neutral vault usecase services, owns CLI-only device/control-plane composition, and must not bypass core for canonical writes.
-- `packages/openclaw-plugin` exposes the published OpenClaw-compatible skill bundle that teaches OpenClaw to call the existing Murph CLI rather than running a second assistant runtime.
+- `packages/cli` exposes the published `vault-cli` shell, composes the command graph, consumes `packages/vault-usecases` for neutral vault usecase services, owns CLI-only device/control-plane composition, and must not bypass core for canonical writes.
 - `apps/web` owns the hosted Next.js control plane, hosted Postgres product/control facts, encrypted mailbox rows, hosted workspace checkpoint metadata, usage ledger, onboarding, billing, consent, and device-sync authority.
 - `apps/cloudflare` owns the hosted execution plane: signed Temporal `ensure-processing` requests, status/browser-vault control, Durable Object coordination, encrypted runtime blobs, and the native runner-container path over `packages/assistant-runtime`.
 

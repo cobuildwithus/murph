@@ -284,7 +284,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
       const layers = buildAssistantSystemPromptLayers({
         assistantCliContract: null, assistantHostedAutomationAvailable: scope !== 'local',
         assistantHostedGroupToolSurface: scope === 'group' ? 'families' : 'none',
-        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: scope === 'local' ? 'direct' : scope, currentLocalDate: '2026-11-02', currentInstant: '2026-11-02T16:00:00.000Z', currentTimeZone: 'UTC',
         hostedRuntime: scope !== 'local', modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, ordinaryInboundTurn: true,
       })
@@ -347,7 +347,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
     }
     const layers = buildAssistantSystemPromptLayers({
       currentLocalDate: '2026-11-02', currentTimeZone: 'UTC', conversationScope: 'direct',
-      cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+      cliAccess: { rawCommand: 'vault-cli' },
       assistantCliContract: null, channel: 'linq', onboardingGuidance: false, modelBehaviorProfile: 'gpt5-agentic',
     })
     const instructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
@@ -458,7 +458,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
       const layers = buildAssistantSystemPromptLayers({
         assistantCliContract: null, assistantHostedAutomationAvailable: true,
         assistantHostedGroupToolSurface: direct ? 'none' : 'shared_read',
-        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: scope, currentLocalDate: '2026-09-28',
         currentInstant: '2026-09-28T08:00:00.000Z', currentTimeZone: 'UTC',
         hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
@@ -513,7 +513,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
       const layers = buildAssistantSystemPromptLayers({
         assistantCliContract: null, assistantHostedAutomationAvailable: true,
         assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
-        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: scope, currentLocalDate: '2026-09-28',
         currentInstant: '2026-09-28T08:00:00.000Z', currentTimeZone: 'UTC',
         hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
@@ -596,7 +596,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
       const layers = buildAssistantSystemPromptLayers({
         assistantCliContract: null, assistantHostedAutomationAvailable: true,
         assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
-        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: scope, currentLocalDate: '2026-10-01',
         currentInstant: '2026-10-01T08:00:00.000Z', currentTimeZone: 'Europe/Paris',
         hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
@@ -674,7 +674,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
       const layers = buildAssistantSystemPromptLayers({
         assistantCliContract: null, assistantHostedAutomationAvailable: true,
         assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
-        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: scope, currentLocalDate: '2026-09-14',
         currentInstant: '2026-09-14T16:00:00.000Z', currentTimeZone: 'America/New_York',
         hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
@@ -734,7 +734,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
       const layers = buildAssistantSystemPromptLayers({
         assistantCliContract: null, assistantHostedAutomationAvailable: true,
         assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
-        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: scope, currentLocalDate: '2026-10-01',
         currentInstant: '2026-10-01T08:00:00.000Z', currentTimeZone: 'Europe/Paris',
         hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
@@ -813,7 +813,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
       const layers = buildAssistantSystemPromptLayers({
         assistantCliContract: null, assistantHostedAutomationAvailable: true,
         assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
-        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: scope, currentLocalDate: '2026-10-01',
         currentInstant: '2026-10-01T08:00:00.000Z', currentTimeZone: 'Europe/Paris',
         hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
@@ -900,7 +900,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
       const layers = buildAssistantSystemPromptLayers({
         assistantCliContract: null, assistantHostedAutomationAvailable: true,
         assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
-        channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: scope, currentLocalDate: '2026-09-14',
         currentInstant: '2026-09-14T16:00:00.000Z', currentTimeZone: 'America/New_York',
         hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
@@ -950,7 +950,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
       const layers = buildAssistantSystemPromptLayers({
         assistantCliContract: null, assistantHostedAutomationAvailable: true,
         assistantProgressUpdatesAvailable: true, channel: 'linq',
-        cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: scope, currentLocalDate: '2026-10-14',
         currentInstant: '2026-10-14T16:00:00.000Z', currentTimeZone: 'America/New_York',
         hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
@@ -998,7 +998,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
       const layers = buildAssistantSystemPromptLayers({
         assistantCliContract: null, assistantHostedAutomationAvailable: true,
         assistantProgressUpdatesAvailable: true, channel: 'linq',
-        cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: scope, currentLocalDate: '2026-10-14',
         currentInstant: '2026-10-14T16:00:00.000Z', currentTimeZone: 'America/New_York',
         hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
@@ -1242,7 +1242,7 @@ describe('native poll input measurement', () => {
         const layers = buildAssistantSystemPromptLayers({
           assistantPollsAvailable: selfVote || phase === 'head', assistantCliContract: null, assistantHostedAutomationAvailable: true,
           assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
-          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: scope, currentLocalDate: '2026-09-21',
           currentInstant: '2026-09-21T16:00:00.000Z', currentTimeZone: 'America/New_York',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
@@ -1321,7 +1321,7 @@ describe('on-demand sender contact input measurement', () => {
         const layers = buildAssistantSystemPromptLayers({
           assistantCliContract: null, assistantHostedAutomationAvailable: true,
           assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
-          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: scope, currentLocalDate: '2030-04-01',
           currentInstant: '2030-04-01T16:00:00.000Z', currentTimeZone: 'America/New_York',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
@@ -1374,7 +1374,7 @@ describe('game tools initial input measurement', () => {
         const layers = buildAssistantSystemPromptLayers({
           assistantCliContract: null, assistantHostedAutomationAvailable: true,
           assistantHostedGroupToolSurface: scope === 'group' ? 'families' : 'none',
-          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: scope, currentLocalDate: '2030-04-01', currentInstant: '2030-04-01T16:00:00.000Z', currentTimeZone: 'America/New_York',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, ordinaryInboundTurn: true,
         })
@@ -1432,7 +1432,7 @@ describe('game progress and photo initial input measurement', () => {
           assistantCliContract: null, assistantHostedAutomationAvailable: true,
           assistantDynamicContextPrompts: phase === 'head' && scope === 'group' ? [GAME_PHOTO_CHAT_GUIDANCE] : [],
           assistantHostedGroupToolSurface: scope === 'group' ? 'families' : 'none',
-          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: scope, currentLocalDate: '2030-04-01', currentInstant: '2030-04-01T16:00:00.000Z', currentTimeZone: 'America/New_York',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, ordinaryInboundTurn: true,
         })
@@ -1503,7 +1503,7 @@ describe('game host initial input measurement', () => {
             ? [GAME_PHOTO_CHAT_GUIDANCE, ...(liveGameLoreAvailable ? [GAME_LIVE_LORE_GUIDANCE] : [])]
             : [],
           assistantHostedGroupToolSurface: scope === 'group' ? 'families' : 'none',
-          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: scope, currentLocalDate: '2030-04-01', currentInstant: '2030-04-01T16:00:00.000Z', currentTimeZone: 'America/New_York',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, ordinaryInboundTurn: true,
         })
@@ -1567,7 +1567,7 @@ describe('game incomplete initial input measurement', () => {
           assistantCliContract: null, assistantHostedAutomationAvailable: true,
           assistantDynamicContextPrompts: scope === 'group' ? [GAME_PHOTO_CHAT_GUIDANCE] : [],
           assistantHostedGroupToolSurface: scope === 'group' ? 'families' : 'none',
-          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: scope, currentLocalDate: '2030-04-01', currentInstant: '2030-04-01T16:00:00.000Z', currentTimeZone: 'America/New_York',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, ordinaryInboundTurn: true,
         })
@@ -1636,7 +1636,7 @@ describe('Bluetooth help initial input measurement', () => {
         const layers = buildAssistantSystemPromptLayers({
           assistantCliContract: null, assistantHostedAutomationAvailable: true,
           assistantHostedGroupToolSurface: scope === 'group' ? 'families' : 'none',
-          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: scope, currentLocalDate: '2030-04-01', currentInstant: '2030-04-01T16:00:00.000Z', currentTimeZone: 'America/New_York',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, ordinaryInboundTurn: true,
         })
@@ -1693,7 +1693,7 @@ describe('meal names initial input measurement', () => {
         const layers = buildAssistantSystemPromptLayers({
           assistantCliContract: null, assistantHostedAutomationAvailable: true,
           assistantHostedGroupToolSurface: scope === 'group' ? 'families' : 'none',
-          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: scope, currentLocalDate: '2030-04-01', currentInstant: '2030-04-01T16:00:00.000Z', currentTimeZone: 'America/New_York',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, ordinaryInboundTurn: true,
         })

@@ -127,7 +127,7 @@ describe("runHostedRunnerSmokeDetailed", () => {
               HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
             codexHostedCliVaultWriteProofCount:
               HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
-            codexHostedShellMurphPathBytes: 1536,
+            codexHostedShellVaultCliPathBytes: 1536,
             codexHostedShellPythonVersion: "Python 3.11.2",
             codexHostedShellVaultCliLlmsBytes: 4096,
             codexVersion: "codex-cli 0.125.0",
@@ -139,7 +139,6 @@ describe("runHostedRunnerSmokeDetailed", () => {
             healthCommonsRuntimeKnowledgeEntityKeys: [
               "biomarker:deep-sleep-minutes",
             ],
-            murphCommandDiscovered: true,
             operatorHomeRebound: true,
             pdfParserProviderId: "poppler.pdf",
             pdfTextSha256: "b".repeat(64),
@@ -147,7 +146,7 @@ describe("runHostedRunnerSmokeDetailed", () => {
             reportedVaultIdMatchesExpected: true,
             ripgrepCommandDiscovered: true,
             ripgrepVersion: "ripgrep 13.0.0",
-            schema: "murph.cloudflare-hosted-runner-smoke.v3",
+            schema: "murph.cloudflare-hosted-runner-smoke.v4",
             vaultCliCommandDiscovered: true,
             vaultRootRebound: true,
             vaultShowBytes: 128,
@@ -202,7 +201,7 @@ describe("runHostedRunnerSmokeDetailed", () => {
       expect(result.codexHostedCliVaultWriteProofCount).toBe(
         HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
       );
-      expect(result.codexHostedShellMurphPathBytes).toBe(1536);
+      expect(result.codexHostedShellVaultCliPathBytes).toBe(1536);
       expect(result.codexHostedShellPythonVersion).toBe("Python 3.11.2");
       expect(result.codexHostedShellVaultCliLlmsBytes).toBe(4096);
       expect(result.codexVersion).toBe("codex-cli 0.125.0");
@@ -212,7 +211,6 @@ describe("runHostedRunnerSmokeDetailed", () => {
       expect(result.healthCommonsRuntimeBiomarkerDesiredDirection).toBe(
         "lower_or_stable",
       );
-      expect(result.murphCommandDiscovered).toBe(true);
       expect(result.audioNormalizedMp3Bytes).toBe(9216);
       expect(result.audioPreparedWavBytes).toBe(35328);
       expect(result.pdfParserProviderId).toBe("poppler.pdf");

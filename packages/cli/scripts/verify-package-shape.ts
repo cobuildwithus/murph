@@ -95,14 +95,7 @@ assert(
   packageJson.dependencies?.['@murphai/exercise-library'] === 'workspace:*',
   'package.json must depend on @murphai/exercise-library so the published @murphai/murph package ships the public exercise catalog.',
 )
-assert(
-  packageJson.dependencies?.['@murphai/assistant-cli'] === 'workspace:*',
-  'package.json must depend on @murphai/assistant-cli so the published @murphai/murph shell can delegate assistant UI and daemon-aware wrappers cleanly.',
-)
-assert(
-  packageJson.dependencies?.['@murphai/setup-cli'] === 'workspace:*',
-  'package.json must depend on @murphai/setup-cli so the published @murphai/murph shell can delegate onboarding and host setup cleanly.',
-)
+
 assert(
   packageJson.main === './dist/index.js',
   'package.json must expose ./dist/index.js as main.',
@@ -153,65 +146,28 @@ for (const [dependencyName, expectedSpecifier] of Object.entries(bundledIncurRun
     `package.json must declare ${dependencyName}@${expectedSpecifier} while incur is bundled, because npm does not install dependencies declared only by bundled dependency payloads.`,
   )
 }
-const bundledInkRuntimeDependencies: Record<string, string> = {
-  '@alcalzone/ansi-tokenize': '^0.2.4',
-  'ansi-escapes': '^7.3.0',
-  'ansi-styles': '^6.2.1',
-  'auto-bind': '^5.0.1',
-  chalk: '^5.6.0',
-  'cli-boxes': '^3.0.0',
-  'cli-cursor': '^4.0.0',
-  'cli-truncate': '^5.1.1',
-  'code-excerpt': '^4.0.0',
-  'es-toolkit': '^1.39.10',
-  'indent-string': '^5.0.0',
-  'is-in-ci': '^2.0.0',
-  'patch-console': '^2.0.0',
-  'react-reconciler': '^0.33.0',
-  scheduler: '^0.27.0',
-  'signal-exit': '^3.0.7',
-  'slice-ansi': '^8.0.0',
-  'stack-utils': '^2.0.6',
-  'string-width': '^8.1.1',
-  'terminal-size': '^4.0.1',
-  'type-fest': '^5.4.1',
-  'widest-line': '^6.0.0',
-  'wrap-ansi': '^9.0.0',
-  ws: '^8.18.0',
-  'yoga-layout': '~3.2.1',
-}
-for (const [dependencyName, expectedSpecifier] of Object.entries(bundledInkRuntimeDependencies)) {
-  assert(
-    packageJson.dependencies?.[dependencyName] === expectedSpecifier,
-    `package.json must declare ${dependencyName}@${expectedSpecifier} while Ink is bundled, because npm does not install dependencies declared only by bundled dependency payloads.`,
-  )
-}
+
+
 assert(
   packageJson.bundleDependencies?.includes('incur') === true,
   'package.json bundleDependencies must include incur so published installs ship the reviewed error-envelope and canonical skill-hash patches.',
 )
-assert(
-  packageJson.bundleDependencies?.includes('ink') === true,
-  'package.json bundleDependencies must include Ink so published installs ship the patched throttle subpath import.',
-)
+
 assert(
   packageJson.bin?.['vault-cli'] === 'dist/bin.js',
   'package.json must expose vault-cli from dist/bin.js.',
 )
-assert(
-  packageJson.bin?.murph === 'dist/bin.js',
-  'package.json must expose murph from dist/bin.js as the onboarding entrypoint.',
-)
+
 assert(
   JSON.stringify(Object.keys(packageJson.bin ?? {}).sort()) ===
-    JSON.stringify(['murph', 'vault-cli']),
-  'package.json must expose only the murph and vault-cli binaries.',
+    JSON.stringify(['vault-cli']),
+  'package.json must expose only the vault-cli binary.',
 )
 assert(
   packageLocalRelativePaths.every(
     (relativePath) => !relativePath.includes('runner-vault-cli'),
   ),
-  'packages/cli must not reintroduce runner-vault-cli compatibility files now that murph and vault-cli share dist/bin.js.',
+  'packages/cli must not reintroduce runner-vault-cli compatibility files because vault-cli uses dist/bin.js.',
 )
 assert(
   packageJson.exports?.['.']?.default === './dist/index.js',
@@ -322,14 +278,7 @@ assert(
   tsconfig.references?.some((reference) => reference.path === '../vault-inbox') !== true,
   'tsconfig.json must not keep a ../vault-inbox reference after collapsing to the assistant-engine owner.',
 )
-assert(
-  tsconfig.references?.some((reference) => reference.path === '../assistant-cli') === true,
-  'tsconfig.json must reference ../assistant-cli so the published shell can build against the assistant transport package.',
-)
-assert(
-  tsconfig.references?.some((reference) => reference.path === '../setup-cli') === true,
-  'tsconfig.json must reference ../setup-cli so the published shell can build against the onboarding package.',
-)
+
 assert(
   tsconfigTypecheck.references === undefined,
   'tsconfig.typecheck.json must stay source-resolved and avoid project references that require prebuilt workspace artifacts.',

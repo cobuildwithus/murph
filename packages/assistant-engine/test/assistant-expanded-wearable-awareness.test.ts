@@ -13,7 +13,7 @@ function buildPrompt(): string {
     assistantHostedDeviceConnectProviders: [],
     assistantKnowledgeToolsAvailable: false,
     channel: 'telegram',
-    cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+    cliAccess: { rawCommand: 'vault-cli' },
     currentLocalDate: '2026-08-12',
     currentTimeZone: 'America/Chicago',
     onboardingGuidance: false,

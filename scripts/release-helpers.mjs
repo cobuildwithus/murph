@@ -803,12 +803,6 @@ function validatePrimaryReleasePackage(context, manifest, primaryPackage, errors
       );
     }
 
-    if (primaryPackage.packageJson?.bin?.murph !== 'dist/bin.js') {
-      errors.push(
-        `${path.relative(context.repoRoot, primaryPackage.packageJsonPath)} must expose the murph bin from dist/bin.js.`,
-      );
-    }
-
     if (primaryPackage.packageJson?.bin?.['vault-cli'] !== 'dist/bin.js') {
       errors.push(
         `${path.relative(context.repoRoot, primaryPackage.packageJsonPath)} must expose the vault-cli bin from dist/bin.js.`,

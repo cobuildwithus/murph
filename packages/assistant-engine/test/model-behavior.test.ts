@@ -2458,7 +2458,6 @@ function createCommonCodexPromptInput(
     channel: 'telegram',
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     currentLocalDate: '2026-04-15',
     currentTimeZone: 'Asia/Kuala_Lumpur',
@@ -2483,7 +2482,6 @@ function createCommonNotificationPromptInput(
     channel: 'telegram',
     cliAccess: {
       rawCommand: 'vault-cli',
-      setupCommand: 'murph',
     },
     currentLocalDate: '2026-04-15',
     currentTimeZone: 'Asia/Kuala_Lumpur',

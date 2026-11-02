@@ -78,7 +78,7 @@ it.skipIf(!live)('replays synthetic Murph workflows through native Codex with ca
       } else {
         const { layers } = buildAssistantSystemPromptWithCacheMetadata({
           assistantCliContract: null, channel: 'imessage',
-          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          cliAccess: { rawCommand: 'vault-cli' },
           currentLocalDate: '2026-09-22', currentTimeZone: 'UTC',
           currentInstant: `2026-09-22T12:0${iteration}:00.000Z`,
           onboardingGuidance: false, modelBehaviorProfile: 'gpt5-agentic',

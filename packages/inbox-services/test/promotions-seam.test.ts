@@ -1,19 +1,29 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   resolveRuntimePaths,
   writeVersionedJsonStateFile,
   type RuntimePaths,
 } from '@murphai/runtime-state/node'
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { afterEach, test } from 'vitest'
 
 import { createInboxPromotionOps } from '../src/inbox-app/promotions.ts'
-import { ensureConfigFile } from '../src/inbox-services/state.ts'
+import type {
+  CoreRuntimeModule,
+  ImportersFactoryRuntimeModule,
+  InboxAppEnvironment,
+  InboxRuntimeModule,
+  ParsersRuntimeModule,
+  QueryRuntimeModule,
+  RuntimeAttachmentRecord,
+  RuntimeCaptureRecord,
+  RuntimeStore,
+} from '../src/inbox-app/types.ts'
 import {
   documentCanonicalPromotionSpec,
   mealCanonicalPromotionSpec,
@@ -30,17 +40,7 @@ import {
   resolveExperimentPromotionTarget,
   resolvePromotionAttachmentFilePath,
 } from '../src/inbox-services/promotions.ts'
-import type {
-  CoreRuntimeModule,
-  ImportersFactoryRuntimeModule,
-  InboxAppEnvironment,
-  InboxRuntimeModule,
-  ParsersRuntimeModule,
-  QueryRuntimeModule,
-  RuntimeAttachmentRecord,
-  RuntimeCaptureRecord,
-  RuntimeStore,
-} from '../src/inbox-app/types.ts'
+import { ensureConfigFile } from '../src/inbox-services/state.ts'
 
 const tempRoots: string[] = []
 
@@ -215,18 +215,6 @@ function createInboxRuntimeModule(runtime: RuntimeStore): InboxRuntimeModule {
     async openInboxRuntime() {
       return runtime
     },
-    async createInboxPipeline() {
-      throw new Error('createInboxPipeline not used in promotions tests')
-    },
-    async createParsedInboxPipeline() {
-      throw new Error('createParsedInboxPipeline not used in promotions tests')
-    },
-    createTelegramPollConnector() {
-      throw new Error('createTelegramPollConnector not used in promotions tests')
-    },
-    createTelegramBotApiPollDriver() {
-      throw new Error('createTelegramBotApiPollDriver not used in promotions tests')
-    },
     async rebuildRuntimeFromVault() {
       throw new Error('rebuildRuntimeFromVault not used in promotions tests')
     },
@@ -246,15 +234,6 @@ function createInboxRuntimeModule(runtime: RuntimeStore): InboxRuntimeModule {
         mutated: false,
         scannedEnvelopeCount: 0,
       }
-    },
-    async runInboxDaemon() {
-      throw new Error('runInboxDaemon not used in promotions tests')
-    },
-    async runPollConnectorBackfill() {
-      throw new Error('runPollConnectorBackfill not used in promotions tests')
-    },
-    async runInboxDaemonWithParsers() {
-      throw new Error('runInboxDaemonWithParsers not used in promotions tests')
     },
   }
 }
@@ -357,29 +336,10 @@ function createInboxAppEnvironment(input: {
     async compactLegacyParserAttempts() {
       throw new Error('compactLegacyParserAttempts not used in promotions tests')
     },
-    async createConfiguredParserRegistry() {
-      throw new Error('createConfiguredParserRegistry not used in promotions tests')
-    },
-    createInboxParserService() {
-      throw new Error('createInboxParserService not used in promotions tests')
-    },
-    async discoverParserToolchain() {
-      throw new Error('discoverParserToolchain not used in promotions tests')
-    },
-    async writeParserToolchainConfig() {
-      throw new Error('writeParserToolchainConfig not used in promotions tests')
-    },
   }
 
   return {
     clock: input.clock ?? (() => new Date('2026-04-08T12:00:00.000Z')),
-    getPid: () => 1,
-    getPlatform: () => 'darwin',
-    getHomeDirectory: () => '/tmp',
-    killProcess() {},
-    sleep: async () => undefined,
-    getEnvironment: () => ({}),
-    usesInjectedTelegramDriver: false,
     loadCore: async () => input.core ?? createCoreRuntimeModule(),
     loadImporters: async () =>
       input.importers ?? {
@@ -398,12 +358,6 @@ function createInboxAppEnvironment(input: {
     loadParsers: async () => parsers,
     loadQuery: async () => query,
     requireParsers: async () => parsers,
-    async loadConfiguredTelegramDriver() {
-      throw new Error('loadConfiguredTelegramDriver not used in promotions tests')
-    },
-    async enableAssistantAutoReplyChannel() {
-      return false
-    },
     journalPromotionEnabled: true,
   }
 }

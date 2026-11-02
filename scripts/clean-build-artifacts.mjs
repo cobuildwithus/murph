@@ -14,8 +14,6 @@ const BUILD_ARTIFACTS = {
   "packages/runtime-state": ".tsbuildinfo",
   "packages/operator-config": ".tsbuildinfo",
   "packages/assistant-engine": ".tsbuildinfo",
-  "packages/assistant-cli": ".tsbuildinfo",
-  "packages/setup-cli": ".tsbuildinfo",
   "packages/gateway-core": ".tsbuildinfo",
   "packages/health-commons": ".tsbuildinfo",
   "packages/exercise-library": ".tsbuildinfo",
@@ -36,7 +34,6 @@ const BUILD_ARTIFACTS = {
   "packages/inbox-services": ".tsbuildinfo",
   "packages/vault-usecases": ".tsbuildinfo",
   "packages/cli": ".tsbuildinfo",
-  "packages/openclaw-plugin": ".tsbuildinfo",
   "packages/assistant-runtime": ".tsbuildinfo",
 };
 
@@ -50,8 +47,6 @@ const CLEAN_GROUPS = {
     "packages/runtime-state",
     "packages/operator-config",
     "packages/assistant-engine",
-    "packages/assistant-cli",
-    "packages/setup-cli",
     "packages/gateway-core",
     "packages/health-commons",
     "packages/exercise-library",
@@ -65,7 +60,6 @@ const CLEAN_GROUPS = {
     "packages/inbox-services",
     "packages/vault-usecases",
     "packages/cli",
-    "packages/openclaw-plugin",
     "packages/assistant-runtime",
   ],
   "test-runtime": [
@@ -78,8 +72,6 @@ const CLEAN_GROUPS = {
     "packages/operator-config",
     "packages/assistant-engine",
     "packages/assistant-runtime",
-    "packages/assistant-cli",
-    "packages/setup-cli",
     "packages/gateway-core",
     "packages/health-commons",
     "packages/exercise-library",

@@ -4707,7 +4707,6 @@ function createCodexShellSmokeResult() {
     cliSurfaceHotPathProofCount: 5,
     client: "codex-app-server",
     healthCommonsCliGoalProofCount: 6,
-    murphPathBytes: 28,
     noteAddBytes: 128,
     stderrBytes: 0,
     vaultCliLlmsBytes: 4096,

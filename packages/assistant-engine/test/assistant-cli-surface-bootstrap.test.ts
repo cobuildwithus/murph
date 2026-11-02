@@ -286,26 +286,6 @@ test('buildAssistantCliSurfaceContract normalizes commands into a compact index 
         name: 'search docs',
       },
       {
-        description: 'Recursive assistant route',
-        name: 'assistant run',
-      },
-      {
-        description: 'Outbound delivery route',
-        name: 'assistant deliver',
-      },
-      {
-        description: 'Assistant runtime diagnostics',
-        name: 'assistant status',
-      },
-      {
-        description: 'Assistant session inspection',
-        name: 'assistant session list',
-      },
-      {
-        description: 'Assistant self delivery setup',
-        name: 'assistant self-target set',
-      },
-      {
         description: 'Assistant onboarding status',
         name: 'assistant onboarding status',
       },
@@ -323,14 +303,6 @@ test('buildAssistantCliSurfaceContract normalizes commands into a compact index 
             type: 'object',
           },
         },
-      },
-      {
-        description: 'Assistant configuration diagnostics',
-        name: 'assistant doctor',
-      },
-      {
-        description: 'Stop the assistant runtime',
-        name: 'assistant stop',
       },
       {
         description: 'Mark onboarding complete',
@@ -357,18 +329,6 @@ test('buildAssistantCliSurfaceContract normalizes commands into a compact index 
             },
           },
         },
-      },
-      {
-        description: 'Root status alias',
-        name: 'status',
-      },
-      {
-        description: 'Root doctor alias',
-        name: 'doctor',
-      },
-      {
-        description: 'Root model config',
-        name: 'model',
       },
       {
         description: '   ',
@@ -1112,12 +1072,6 @@ test('buildAssistantCliSurfaceContract keeps every normalized command reconstruc
       })),
       {
         name: 'search docs',
-      },
-      {
-        name: 'assistant stop',
-      },
-      {
-        name: 'assistant status',
       },
       {
         name: '   ',

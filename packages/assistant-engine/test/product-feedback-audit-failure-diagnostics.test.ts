@@ -273,7 +273,7 @@ describe('scheduled audit rejection through the real parser, recorder and failur
     const prompt = buildAssistantSystemPrompt({
       assistantCliContract: null, assistantContextSnapshotPrompt: null,
       assistantHostedDeviceConnectAvailable: false, assistantKnowledgeToolsAvailable: false,
-      channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+      channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
       currentLocalDate: '2030-01-07', currentTimeZone: 'UTC', modelBehaviorProfile: 'gpt5-agentic',
       turnTrigger: 'automation-cron', hostedRuntime: true, conversationScope: 'direct', onboardingGuidance: false,
     })

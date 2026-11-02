@@ -21,7 +21,7 @@ import type {
   DeviceSyncServices,
 } from './device-services.js'
 import { ensureCliVaultServices } from './device-services.js'
-import { registerAssistantCommands } from '@murphai/assistant-cli/commands/assistant'
+import { registerAssistantOnboardingCommands } from './commands/assistant-onboarding.js'
 import { registerAuditCommands } from './commands/audit.js'
 import { registerAutomationCommands } from './commands/automation.js'
 import {
@@ -128,7 +128,6 @@ import {
   knowledgeChallengeScoreCommandDescription,
 } from './commands/knowledge-challenge-score.js'
 import { registerKnowledgeCommands } from './commands/knowledge.js'
-import { registerModelCommands } from './commands/model.js'
 import { mapboxRouteEstimateResultSchema } from './mapbox-route.js'
 import {
   supplementLabelBatchSearchResultSchema,
@@ -528,9 +527,9 @@ export const vaultCliCommandDescriptors = [
   {
     id: 'assistant',
     bindingMode: 'indirect',
-    rootCommandNames: ['assistant', 'run', 'status', 'doctor', 'stop'],
-    register({ cli, services, inboxServices }) {
-      registerAssistantCommands(cli, inboxServices, services)
+    rootCommandNames: ['assistant'],
+    register({ cli, services }) {
+      registerAssistantOnboardingCommands(cli, services)
     },
   },
   {
@@ -881,14 +880,6 @@ export const vaultCliCommandDescriptors = [
     rootCommandNames: ['memory'],
     register({ cli }) {
       registerMemoryCommands(cli)
-    },
-  },
-  {
-    id: 'model',
-    bindingMode: 'none',
-    rootCommandNames: ['model'],
-    register({ cli }) {
-      registerModelCommands(cli)
     },
   },
   {

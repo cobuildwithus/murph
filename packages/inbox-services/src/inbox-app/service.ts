@@ -1,9 +1,7 @@
-import { createInboxBootstrapDoctorOps } from './bootstrap-doctor.js'
+import { createInboxInitOps } from './init.js'
 import { createInboxAppEnvironment } from './environment.js'
 import { createInboxPromotionOps } from './promotions.js'
 import { createInboxReadOps } from './reads.js'
-import { createInboxRuntimeOps } from './runtime.js'
-import { createInboxSourceOps } from './sources.js'
 import { createInboxStorageRepairOps } from './storage-repair.js'
 
 import type {
@@ -17,10 +15,8 @@ export function createIntegratedInboxServices(
   const env = createInboxAppEnvironment(dependencies)
 
   return {
-    ...createInboxBootstrapDoctorOps(env),
-    ...createInboxSourceOps(env),
+    ...createInboxInitOps(env),
     ...createInboxStorageRepairOps(env),
-    ...createInboxRuntimeOps(env),
     ...createInboxReadOps(env),
     ...createInboxPromotionOps(env),
   }
