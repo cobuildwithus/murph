@@ -970,14 +970,6 @@ test("wearable metric ranking balances specificity and recency ahead of provider
     const sleep = await summarizeWearableSleepRuntime(vaultRoot);
 
     assert.equal(sleep[0]?.totalSleepMinutes.selection.provider, "garmin");
-    assert.equal(
-      sleep[0]?.totalSleepMinutes.confidence.reasons[0]?.includes("scored highest"),
-      true,
-    );
-    assert.equal(
-      sleep[0]?.totalSleepMinutes.confidence.reasons[0]?.includes("ahead of Oura observation:sleep-total-minutes"),
-      true,
-    );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -7689,7 +7681,7 @@ test("runtime wearable summaries read identically from compact and legacy full-f
       path.join(vaultRoot, "ledger/events/2026/2026-04.jsonl"),
       [
         // Conflicting same-provider steps facets keep a populated confidence
-        // block (candidateCount, reasons) in the compact stored envelope.
+        // block (candidateCount, conflictingProviders) in the compact stored envelope.
         {
           schemaVersion: "murph.event.v1",
           id: "evt_stored_form_steps_oura_01",
@@ -7785,7 +7777,7 @@ test("runtime wearable summaries read identically from compact and legacy full-f
     const compactReads = await readRuntimeSummaries();
     assert.match(compactReads, /"resolution":"fallback"/u);
     assert.match(compactReads, /"conflictingProviders":\["garmin","oura"\]/u);
-    assert.match(compactReads, /Duplicate evidence from Oura disagreed after source reconciliation/u);
+    assert.doesNotMatch(compactReads, /"reasons"/u);
 
     // Rewrite the stored metric rows to the legacy full form in place. The
     // source manifest and schema version are untouched, so ensureFresh keeps

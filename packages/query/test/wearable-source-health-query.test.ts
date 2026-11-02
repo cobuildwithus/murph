@@ -1160,3 +1160,54 @@ test("ordinary timing charges extra global preflight separately from the locked 
   assert.equal(report.commands[0]!.outcome, "error");
   assert.equal(phaseCount(report, "query-freshness"), 1); assert.equal(focused.mock.calls.length, 0);
 });
+
+test("legacy confidence prose is ignored without rebuilding and disappears on wearable publication", async () => {
+  const { root, shard } = await fixture();
+  await rebuildQueryProjection(root);
+  const location = currentQueryProjectionLocation(root);
+  const rows = wearableStore.readWearableSummaryRows(location, {}).rows;
+  const expected = composePublicWearableSummaryBundleFromStoredRows({
+    rows, providers: [], providerFilterWasProvided: false,
+  }, {});
+  const database = new DatabaseSync(location.absolutePath);
+  try {
+    const encode = createWearableSummaryEncoder(database);
+    const update = database.prepare("UPDATE query_wearable_summaries SET summary_json = ? WHERE id = ?");
+    for (const [index, row] of rows.entries()) {
+      if (row.summaryKind === "source_health") continue;
+      // Alternate old compact and old full envelopes, both under today's schema.
+      const summary = index % 2 === 0
+        ? JSON.parse(row.summaryJson)
+        : codec.parseStoredWearableSummary<Record<string, unknown>>(row.summaryKind, row.summaryJson)!;
+      if (row.summaryKind === "activity") {
+        summary.activityEvidence = JSON.parse(row.summaryJson).activityEvidence;
+      }
+      for (const value of Object.values(summary)) {
+        if (value && typeof value === "object" && "confidence" in value) {
+          Object.assign(value.confidence!, { reasons: ["Synthetic obsolete confidence explanation."] });
+        }
+      }
+      update.run(encode(JSON.stringify(summary)), row.id);
+    }
+  } finally { database.close(); }
+  const before = inspectProjection(root);
+  const rebuildSpy = vi.spyOn(rebuild, "rebuildQueryProjectionFromCanonicalSource");
+  const publishSpy = vi.spyOn(projector, "buildWearableSummaryProjectionFromDataset");
+  const actual = await rebuild.readFreshWearableSummaryRows(root, {});
+  assert.deepEqual(composePublicWearableSummaryBundleFromStoredRows(actual, {}), expected);
+  assert.doesNotMatch(JSON.stringify(expected), /"reasons"/u);
+  assert.equal((await getQueryProjectionStatus(root)).fresh, true);
+  assert.deepEqual(inspectProjection(root), before);
+  assert.equal(publishSpy.mock.calls.length, 0);
+  assert.equal(rebuildSpy.mock.calls.length, 0);
+  // The next canonical wearable change uses the existing wearable-only owner.
+  await appendFile(shard, `${JSON.stringify(observation("evt_upgrade_new", "garmin", "2026-05-05", "steps", 9000, "count"))}\n`);
+  const published = await rebuild.readFreshWearableSummaryRows(root, {});
+  assert.equal(publishSpy.mock.calls.length, 1);
+  assert.equal(rebuildSpy.mock.calls.length, 0);
+  assert.ok(published.rows.every(row => !row.summaryJson.includes('"reasons"')));
+  const after = inspectProjection(root);
+  assert.deepEqual(after.global, before.global);
+  assert.deepEqual(after.globalMeta, before.globalMeta);
+  assert.equal(after.currentSchema, true);
+});

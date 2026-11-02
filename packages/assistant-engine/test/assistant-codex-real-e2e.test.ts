@@ -1,3 +1,4 @@
+import { listCanonicalWriteEvidence, readCanonicalAuditRecords } from './canonical-audit-test-helpers.js'
 import { buildBluetoothHelpInstructions } from './support/bluetooth-help.js'
 import { readHostedDelegationHintOverrides } from './support/hosted-delegation-hints.js'
 import { materializeRegimenLabelFixture, REGIMEN_FUZZY_FOOD_NAMES, REGIMEN_LABEL_SCENARIOS, REGIMEN_SHAKE_TOTALS } from './support/supplement-regimen-label-fixture.js'
@@ -68,7 +69,6 @@ import {
   listGoals,
   listAutomations,
   listWorkoutFormats,
-  listWriteOperationMetadataPaths,
   patchAutomation,
   readEvent,
   readMemoryDocument,
@@ -505,7 +505,7 @@ describeRealCodex('real clinical document extraction journeys', () => {
     try {
       await mkdir(path.dirname(documentPath), { recursive: true })
       await writeFile(documentPath, bytes)
-      const writesBefore = await listWriteOperationMetadataPaths(fixture.vault)
+      const writesBefore = await listCanonicalWriteEvidence(fixture.vault)
       const result = await executeClinicalDocumentExtraction({
         workspaceRoot: fixture.vault, documentPath, timeZone: 'UTC', extractedText: clinicalFhirResourceExtractionText(resource),
         source: { rawRef, sha256: createHash('sha256').update(bytes).digest('hex'), mediaType: 'application/fhir+json', clinicalOccurredAt: occurredAt,
@@ -534,7 +534,7 @@ describeRealCodex('real clinical document extraction journeys', () => {
       }
       expect(result.records.flatMap((entry) => entry.payload.kind === 'measurement' ? entry.payload.measurements.map((measurement) => measurement.metric) : [])).toEqual(['resting-heart-rate'])
       expect(JSON.stringify(result.records)).not.toMatch(/temperature|blood-pressure/iu)
-      expect(await listWriteOperationMetadataPaths(fixture.vault)).toEqual(writesBefore)
+      expect(await listCanonicalWriteEvidence(fixture.vault)).toEqual(writesBefore)
       expect(await readFile(documentPath, 'utf8')).toBe(bytes)
       process.stdout.write(`[clinical-structured-live] ${JSON.stringify({ status: result.status, records: result.records, reason: result.reason, providerEntries })}\n`)
     } finally {
@@ -561,7 +561,7 @@ describeRealCodex('real clinical document extraction journeys', () => {
         const sourceText = mixed ? `${finding}\n${education}` : education
         await mkdir(path.dirname(documentPath), { recursive: true })
         await writeFile(documentPath, sourceText)
-        const writesBefore = await listWriteOperationMetadataPaths(fixture.vault)
+        const writesBefore = await listCanonicalWriteEvidence(fixture.vault)
         const result = await executeClinicalDocumentExtraction({
           workspaceRoot: fixture.vault, documentPath, timeZone: 'UTC', extractedText: sourceText,
           source: { rawRef, sha256: createHash('sha256').update(sourceText).digest('hex'), mediaType: 'text/plain', clinicalOccurredAt: '2026-02-14T10:00:00Z' },
@@ -584,7 +584,7 @@ describeRealCodex('real clinical document extraction journeys', () => {
           expect(result.records).toEqual([])
         }
         expect(JSON.stringify(result.records)).not.toMatch(/asthma|albuterol|inhaler|logo|illustration/iu)
-        expect(await listWriteOperationMetadataPaths(fixture.vault)).toEqual(writesBefore)
+        expect(await listCanonicalWriteEvidence(fixture.vault)).toEqual(writesBefore)
         expect(await readFile(documentPath, 'utf8')).toBe(sourceText)
         process.stdout.write(`[clinical-education-live] ${JSON.stringify({ mixed, status: result.status, records: result.records })}\n`)
       }
@@ -628,7 +628,7 @@ describeRealCodex('real clinical document extraction journeys', () => {
     try {
       await mkdir(path.dirname(documentPath), { recursive: true })
       await writeFile(documentPath, sourceText)
-      const writesBefore = await listWriteOperationMetadataPaths(fixture.vault)
+      const writesBefore = await listCanonicalWriteEvidence(fixture.vault)
       const result = await executeClinicalDocumentExtraction({
         workspaceRoot: fixture.vault, documentPath, timeZone: 'UTC', extractedText: sourceText,
         source: { rawRef, sha256: createHash('sha256').update(sourceText).digest('hex'), mediaType: 'text/plain', recordedAt: '2026-07-10T12:00:00.000Z' },
@@ -649,7 +649,7 @@ describeRealCodex('real clinical document extraction journeys', () => {
         clinicalFact: { clinicalDate: '2020-03-12' },
       })
       expect(result.records.every((record) => record.dateBasis === 'document' && sourceText.includes(record.dateEvidence!))).toBe(true)
-      expect(await listWriteOperationMetadataPaths(fixture.vault)).toEqual(writesBefore)
+      expect(await listCanonicalWriteEvidence(fixture.vault)).toEqual(writesBefore)
       expect(await readFile(documentPath, 'utf8')).toBe(sourceText)
       process.stdout.write(`[clinical-date-recovery-live] ${JSON.stringify(result)}\n`)
     } finally {
@@ -676,7 +676,7 @@ describeRealCodex('real clinical document extraction journeys', () => {
     try {
       await mkdir(path.dirname(documentPath), { recursive: true })
       await writeFile(documentPath, sourceText)
-      const writesBefore = await listWriteOperationMetadataPaths(fixture.vault)
+      const writesBefore = await listCanonicalWriteEvidence(fixture.vault)
       const result = await executeClinicalDocumentExtraction({
         workspaceRoot: fixture.vault, documentPath, timeZone: 'UTC', extractedText: sourceText,
         source: { rawRef, sha256: createHash('sha256').update(sourceText).digest('hex'), mediaType: 'text/plain', recordedAt: '2026-07-10T12:00:00.000Z' },
@@ -694,7 +694,7 @@ describeRealCodex('real clinical document extraction journeys', () => {
       expect(dated.map((record) => new Date(record.payload.kind === 'note' ? record.payload.clinicalFact!.clinicalDate! : record.payload.occurredAt).toISOString()).sort())
         .toEqual(['2020-03-12T12:00:00.000Z', '2025-02-03T15:00:00.000Z', '2026-07-10T12:00:00.000Z'])
       expect(dated.every((record) => Boolean(record.dateEvidence) && sourceText.includes(record.dateEvidence!))).toBe(true)
-      expect(await listWriteOperationMetadataPaths(fixture.vault)).toEqual(writesBefore)
+      expect(await listCanonicalWriteEvidence(fixture.vault)).toEqual(writesBefore)
       expect(await readFile(documentPath, 'utf8')).toBe(sourceText)
       process.stdout.write(`[clinical-date-live] ${JSON.stringify({ status: result.status, records: result.records, reason: result.reason })}\n`)
     } finally {
@@ -750,7 +750,7 @@ describeRealCodex('real clinical document extraction journeys', () => {
         await mkdir(renderRoot)
         await writeFile(documentPath, pdf)
         await execFileAsync('pdftoppm', ['-png', '-scale-to', '1400', '-singlefile', documentPath, path.join(renderRoot, 'page-1')], { timeout: 30_000 })
-        const writesBefore = await listWriteOperationMetadataPaths(fixture.vault)
+        const writesBefore = await listCanonicalWriteEvidence(fixture.vault)
         const result = await executeClinicalDocumentExtraction({
           workspaceRoot: fixture.vault, documentPath, timeZone: 'UTC',
           source: { rawRef, sha256: createHash('sha256').update(pdf).digest('hex'), mediaType: 'application/pdf' },
@@ -780,7 +780,7 @@ describeRealCodex('real clinical document extraction journeys', () => {
         }
         process.stdout.write(`[clinical-extraction-live-visual] ${JSON.stringify({ family, status: result.status, viewedPage, records: result.records })}\n`)
         expect(turns).toHaveLength(1)
-        expect(await listWriteOperationMetadataPaths(fixture.vault)).toEqual(writesBefore)
+        expect(await listCanonicalWriteEvidence(fixture.vault)).toEqual(writesBefore)
         expect(await readFile(documentPath, 'utf8')).toBe(pdf)
       } finally {
         observer.mockRestore()
@@ -809,7 +809,7 @@ describeRealCodex('real clinical document extraction journeys', () => {
       try {
         await mkdir(path.dirname(documentPath), { recursive: true })
         await writeFile(documentPath, sourceText)
-        const writesBefore = await listWriteOperationMetadataPaths(fixture.vault)
+        const writesBefore = await listCanonicalWriteEvidence(fixture.vault)
         const result = await executeClinicalDocumentExtraction({
           workspaceRoot: fixture.vault,
           documentPath,
@@ -836,7 +836,7 @@ describeRealCodex('real clinical document extraction journeys', () => {
         })
         if (partial) expect(result.reason).toMatch(/unreadable|scan|recover|missing|partial/iu)
         expect(JSON.stringify(result.records)).not.toContain('999')
-        expect(await listWriteOperationMetadataPaths(fixture.vault)).toEqual(writesBefore)
+        expect(await listCanonicalWriteEvidence(fixture.vault)).toEqual(writesBefore)
         expect(await readFile(documentPath, 'utf8')).toBe(sourceText)
         expect(existsSync(path.join(fixture.vault, 'unauthorized-write.txt'))).toBe(false)
         process.stdout.write(`[clinical-extraction-live] ${JSON.stringify({ scenario: partial ? 'partial' : 'complete', status: result.status, records: result.records.length, glucose: 90, reason: result.reason ?? null })}\n`)
@@ -913,7 +913,7 @@ describeRealCodex('real Codex event-list family isolation', () => {
       // whose event command calls integrated query.listEvents unchanged.
       await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot })
       const canonicalBefore = await snapshotRealCodexCanonicalVault(vaultRoot)
-      const writesBefore = await listWriteOperationMetadataPaths(vaultRoot)
+      const writesBefore = await listCanonicalWriteEvidence(vaultRoot)
       const result = await executeRealCodexAppServerTurn({
         approvalPolicy: 'never',
         allowFinishWithoutReply: false,
@@ -961,7 +961,7 @@ describeRealCodex('real Codex event-list family isolation', () => {
       expect(read.output).not.toMatch(/red suitcase|ferry|noon/iu)
       expect(readDynamicToolAttempts(result.jsonEvents)).toEqual([])
       expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(canonicalBefore)
-      expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
+      expect(await listCanonicalWriteEvidence(vaultRoot)).toEqual(writesBefore)
       expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
       expect((await getQueryProjectionStatus(vaultRoot)).exists).toBe(false)
       expect(reply).toMatch(/(?:spare )?key[^.!?\n]{0,60}blue pouch/iu)
@@ -1044,7 +1044,7 @@ describeRealCodex('real Codex bounded event list limit e2e', () => {
       // The recorder runs the shipped source CLI; no event output is fixtured.
       await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot })
       const canonicalBefore = await snapshotRealCodexCanonicalVault(vaultRoot)
-      const writesBefore = await listWriteOperationMetadataPaths(vaultRoot)
+      const writesBefore = await listCanonicalWriteEvidence(vaultRoot)
       const result = await executeRealCodexAppServerTurn({
         approvalPolicy: 'never',
         allowFinishWithoutReply: false,
@@ -1082,7 +1082,7 @@ describeRealCodex('real Codex bounded event list limit e2e', () => {
       expect(reads[0]?.kind === 'command' && reads[0].ok).toBe(true)
       expect(readDynamicToolAttempts(result.jsonEvents)).toEqual([])
       expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(canonicalBefore)
-      expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
+      expect(await listCanonicalWriteEvidence(vaultRoot)).toEqual(writesBefore)
       expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
       expect(reply).toMatch(/travel adapter/iu)
       expect(reply).toMatch(/hotel checkout/iu)
@@ -1267,14 +1267,14 @@ describe('focused experiment list production contract', () => {
       await buildFocusedExperimentListInstructions()
       await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath: path.join(root, 'commands.log'), vaultRoot })
       const before = await snapshotRealCodexCanonicalVault(vaultRoot)
-      const writesBefore = await listWriteOperationMetadataPaths(vaultRoot)
+      const writesBefore = await listCanonicalWriteEvidence(vaultRoot)
       const args = ['experiment', 'list', '--status', 'active', '--limit', '2']
       expectFocusedExperimentListOutput((await execFileAsync(path.join(binDirectory, 'vault-cli'), [...args, '--format', 'json'])).stdout)
       const toon = (await execFileAsync(path.join(binDirectory, 'vault-cli'), args)).stdout
       expect(toon.trim()).not.toMatch(/^\{/u)
       expectFocusedExperimentListOutput(toon)
       expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
-      expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
+      expect(await listCanonicalWriteEvidence(vaultRoot)).toEqual(writesBefore)
       expect((await getQueryProjectionStatus(vaultRoot)).exists).toBe(false)
     } finally { await removeRealCodexTemporaryPaths([root]) }
   }, 120_000)
@@ -1292,7 +1292,7 @@ describeRealCodex('real Codex focused experiment list e2e', () => {
       const developerInstructions = await buildFocusedExperimentListInstructions()
       await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot })
       const before = await snapshotRealCodexCanonicalVault(vaultRoot)
-      const writesBefore = await listWriteOperationMetadataPaths(vaultRoot)
+      const writesBefore = await listCanonicalWriteEvidence(vaultRoot)
       const result = await executeRealCodexAppServerTurn({
         approvalPolicy: 'never', allowFinishWithoutReply: false,
         baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -1334,7 +1334,7 @@ describeRealCodex('real Codex focused experiment list e2e', () => {
       expect(readDynamicToolAttempts(result.jsonEvents)).toEqual([])
       expect(result.runtimeIssueInputs).toEqual([])
       expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
-      expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
+      expect(await listCanonicalWriteEvidence(vaultRoot)).toEqual(writesBefore)
       expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
       expect((await getQueryProjectionStatus(vaultRoot)).exists).toBe(false)
       const reply = result.finalMessage.trim()
@@ -1440,6 +1440,7 @@ function expectFocusedActivityProjectionOutput(
       expect(steps[index]).toMatch(new RegExp(`^\\s*value: ${value}$`, 'mu'))
     })
   }
+  expect(output).not.toMatch(/\breasons\b|scored highest|daily cumulative lower-bound/iu)
   const absent = FOCUSED_ACTIVITY_STEP_VALUES.filter(value => !expected.some(day => day.value === value))
   expect(output).not.toMatch(new RegExp(absent.join('|'), 'u'))
 }
@@ -1475,7 +1476,7 @@ describe('focused activity projection production contract', () => {
       await buildFocusedActivityProjectionInstructions()
       await materializeFocusedActivityProjectionCli({ binDirectory, commandLogPath: path.join(root, 'commands.log'), vaultRoot })
       const before = await snapshotRealCodexCanonicalVault(vaultRoot)
-      const writesBefore = await listWriteOperationMetadataPaths(vaultRoot)
+      const writesBefore = await listCanonicalWriteEvidence(vaultRoot)
       const args = ['wearables', 'activity', 'list', '--date', '2026-01-03', '--provider', 'oura', '--limit', '1']
       expectFocusedActivityProjectionOutput((await execFileAsync(path.join(binDirectory, 'vault-cli'), [...args, '--format', 'json'])).stdout)
       const toon = (await execFileAsync(path.join(binDirectory, 'vault-cli'), args)).stdout
@@ -1489,7 +1490,7 @@ describe('focused activity projection production contract', () => {
       )
       expectFocusedActivityProjectionOutput((await execFileAsync(path.join(binDirectory, 'vault-cli'), composedArgs)).stdout, FOCUSED_COMPOSED_ACTIVITY)
       expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
-      expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
+      expect(await listCanonicalWriteEvidence(vaultRoot)).toEqual(writesBefore)
       expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
       await expectOnlyFocusedActivityProjection(vaultRoot)
     } finally { await removeRealCodexTemporaryPaths([root]) }
@@ -1514,7 +1515,7 @@ describe('focused blood-test projection production contract', () => {
       await buildFocusedActivityProjectionInstructions()
       await materializeFocusedActivityProjectionCli({ binDirectory, commandLogPath: path.join(root, 'commands.log'), vaultRoot })
       const before = await snapshotRealCodexCanonicalVault(vaultRoot)
-      const writesBefore = await listWriteOperationMetadataPaths(vaultRoot)
+      const writesBefore = await listCanonicalWriteEvidence(vaultRoot)
       const args = ['blood-test', 'list', '--text', 'ApoB', '--from', '2026-03-03', '--to', '2026-03-03', '--limit', '1']
       const json = (await execFileAsync(path.join(binDirectory, 'vault-cli'), [...args, '--format', 'json'])).stdout
       const document = readRecord(JSON.parse(json))
@@ -1534,7 +1535,7 @@ describe('focused blood-test projection production contract', () => {
       expect(toon).not.toMatch(/Ferritin|\b999\b|\b101\b/u)
       expect(await getQueryProjectionStatus(vaultRoot)).toMatchObject({ exists: false, fresh: false })
       expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
-      expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
+      expect(await listCanonicalWriteEvidence(vaultRoot)).toEqual(writesBefore)
       expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
     } finally { await removeRealCodexTemporaryPaths([root]) }
   }, 120_000)
@@ -1553,7 +1554,7 @@ async function runFocusedActivityProjectionJourney(input: {
     const developerInstructions = await buildFocusedActivityProjectionInstructions()
     await materializeFocusedActivityProjectionCli({ binDirectory, commandLogPath, vaultRoot })
     const before = await snapshotRealCodexCanonicalVault(vaultRoot)
-    const writesBefore = await listWriteOperationMetadataPaths(vaultRoot)
+    const writesBefore = await listCanonicalWriteEvidence(vaultRoot)
     const result = await executeRealCodexAppServerTurn({
       approvalPolicy: 'never', allowFinishWithoutReply: false,
       baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -1592,7 +1593,7 @@ async function runFocusedActivityProjectionJourney(input: {
     expect(readDynamicToolAttempts(result.jsonEvents)).toEqual([])
     expect(result.runtimeIssueInputs).toEqual([])
     expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
-    expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
+    expect(await listCanonicalWriteEvidence(vaultRoot)).toEqual(writesBefore)
     expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
     await expectOnlyFocusedActivityProjection(vaultRoot)
     const reply = result.finalMessage.trim()
@@ -1614,7 +1615,7 @@ describeRealCodex('real Codex focused wearable activity projection e2e', () => {
     })
   }, 360_000)
 
-  it('answers composed multi-provider step days from one native read without other lookups or effects', async () => {
+  it('answers multi-provider step days without confidence prose or extra effects', async () => {
     await runFocusedActivityProjectionJourney({
       expected: FOCUSED_COMPOSED_ACTIVITY, label: 'composed-two-days',
       options: { '--from': '2026-01-02', '--to': '2026-01-03', '--limit': '2' },
@@ -1692,7 +1693,7 @@ describeRealCodex('real Codex focused sleep-pattern projection e2e', () => {
       // Reuse the existing native production CLI wrapper, including its command log.
       await materializeFocusedActivityProjectionCli({ binDirectory, commandLogPath, vaultRoot })
       const before = await snapshotRealCodexCanonicalVault(vaultRoot)
-      const writesBefore = await listWriteOperationMetadataPaths(vaultRoot)
+      const writesBefore = await listCanonicalWriteEvidence(vaultRoot)
       const result = await executeRealCodexAppServerTurn({
         approvalPolicy: 'never', allowFinishWithoutReply: false,
         baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -1735,7 +1736,7 @@ describeRealCodex('real Codex focused sleep-pattern projection e2e', () => {
       expect(readDynamicToolAttempts(result.jsonEvents)).toEqual([])
       expect(result.runtimeIssueInputs).toEqual([])
       expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
-      expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
+      expect(await listCanonicalWriteEvidence(vaultRoot)).toEqual(writesBefore)
       expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
       expect(await getQueryProjectionStatus(vaultRoot)).toMatchObject({
         exists: true, fresh: false, builtAt: null, entityCount: 0, searchDocumentCount: 0,
@@ -1931,7 +1932,7 @@ describeRealCodex('real model canonical production journeys', () => {
         },
       })
       const before = await snapshotRealCodexCanonicalVault(vaultRoot)
-      const writesBefore = await listWriteOperationMetadataPaths(vaultRoot)
+      const writesBefore = await listCanonicalWriteEvidence(vaultRoot)
       // These requested facts occur only in the saved meal, never in the prompt.
       const result = await executeRealCodexAppServerTurn({
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -1958,7 +1959,7 @@ describeRealCodex('real model canonical production journeys', () => {
         && action.output.includes('lentils'))
       expect(reads).toHaveLength(1)
       expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
-      expect(await listWriteOperationMetadataPaths(vaultRoot)).toEqual(writesBefore)
+      expect(await listCanonicalWriteEvidence(vaultRoot)).toEqual(writesBefore)
       expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
       expect(result.responseCard).toBeNull()
       expect(result.responseMedia).toEqual([])
@@ -2014,9 +2015,8 @@ describeRealCodex('real model canonical production journeys', () => {
       }
       // A batch invocation may contain all four saves. Count canonical effects,
       // not the number of shell commands chosen by the model.
-      const writes = await Promise.all((await listWriteOperationMetadataPaths(vaultRoot))
-        .map(async relative => JSON.parse(await readFile(path.join(vaultRoot, relative), 'utf8'))))
-      expect(writes.filter(write => write.operationType === 'meal_import')).toHaveLength(4)
+      const audits = await readCanonicalAuditRecords(vaultRoot)
+      expect(audits.filter(record => record.action === 'meal_add')).toHaveLength(4)
       expect(result.finalMessage).toMatch(/logged|saved|recorded|added/iu)
       expect(result.finalMessage).not.toMatch(/calories|\bkcal\b|\bgrams\b|couldn['’]t|unable/iu)
       expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
@@ -2358,7 +2358,7 @@ describeRealCodex('real Codex canonical availability e2e', () => {
     try {
       const context = await prepareCorrectedAvailabilityContext(workingDirectory)
       const before = await snapshotRealCodexCanonicalVault(workingDirectory)
-      const writesBefore = await listWriteOperationMetadataPaths(workingDirectory)
+      const writesBefore = await listCanonicalWriteEvidence(workingDirectory)
       const result = await executeRealCodexAppServerTurn({
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
@@ -2380,7 +2380,7 @@ describeRealCodex('real Codex canonical availability e2e', () => {
       expect(result.responseCard).toBeNull()
       expect(result.runtimeIssueInputs).toEqual([])
       expect(await snapshotRealCodexCanonicalVault(workingDirectory)).toEqual(before)
-      expect(await listWriteOperationMetadataPaths(workingDirectory)).toEqual(writesBefore)
+      expect(await listCanonicalWriteEvidence(workingDirectory)).toEqual(writesBefore)
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }
@@ -13448,7 +13448,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         const skillsRoot = path.join(workingDirectory, 'skills')
         await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
         const before = await snapshotRealCodexCanonicalVault(workingDirectory)
-        const writesBefore = await listWriteOperationMetadataPaths(workingDirectory)
+        const writesBefore = await listCanonicalWriteEvidence(workingDirectory)
         const result = await executeRealCodexAppServerTurn({
           approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
           codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
@@ -13527,7 +13527,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         expect(finalAnswer?.eventIndex).toBeGreaterThan(actions[0]!.eventIndex)
         expect(forbiddenEffects).toEqual([])
         expect(await snapshotRealCodexCanonicalVault(workingDirectory)).toEqual(before)
-        expect(await listWriteOperationMetadataPaths(workingDirectory)).toEqual(writesBefore)
+        expect(await listCanonicalWriteEvidence(workingDirectory)).toEqual(writesBefore)
         expect(result.runtimeIssueInputs).toEqual([])
         expect(result.responseMedia).toEqual([])
         expect(result.responseCard).toBeNull()
@@ -16874,7 +16874,7 @@ describeRealCodex('real Codex generated-music fallback e2e', () => {
         ordinaryInboundTurn: true,
       })
       const before = await snapshotRealCodexCanonicalVault(workingDirectory)
-      const writesBefore = await listWriteOperationMetadataPaths(workingDirectory)
+      const writesBefore = await listCanonicalWriteEvidence(workingDirectory)
       const result = await executeRealCodexAppServerTurn({
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand, codexHome: home.codexHome,
@@ -16944,7 +16944,7 @@ describeRealCodex('real Codex generated-music fallback e2e', () => {
       expect(result.runtimeIssueInputs).toEqual([])
       expect(forbiddenEffects).toEqual([])
       expect(await snapshotRealCodexCanonicalVault(workingDirectory)).toEqual(before)
-      expect(await listWriteOperationMetadataPaths(workingDirectory)).toEqual(writesBefore)
+      expect(await listCanonicalWriteEvidence(workingDirectory)).toEqual(writesBefore)
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...isolatedHomePaths, ...config.temporaryPaths])
     }
@@ -30592,7 +30592,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         ordinaryInboundTurn: true,
       })
       const before = await snapshotRealCodexCanonicalVault(workingDirectory)
-      const writesBefore = await listWriteOperationMetadataPaths(workingDirectory)
+      const writesBefore = await listCanonicalWriteEvidence(workingDirectory)
       const result = await executeRealCodexAppServerTurn({
         approvalPolicy: 'never',
         baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -30652,7 +30652,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
       })}\n`)
       expect(forbiddenEffects).toEqual([])
       expect(await snapshotRealCodexCanonicalVault(workingDirectory)).toEqual(before)
-      expect(await listWriteOperationMetadataPaths(workingDirectory)).toEqual(writesBefore)
+      expect(await listCanonicalWriteEvidence(workingDirectory)).toEqual(writesBefore)
       expect(actions.filter((action) => action.kind === 'command')).toEqual([])
       expect(actions.filter((action) => action.kind === 'dynamic' && !action.success)).toEqual([])
       expect(actions.filter((action) =>
@@ -33573,7 +33573,7 @@ describeRealCodex('real Codex typed goal stale-ID recovery e2e', () => {
         `${existingGoalId.slice(0, -1)}${replacementSuffix}`
       const goalsBefore = await listGoals(vaultRoot)
       const operationsBefore =
-        await listWriteOperationMetadataPaths(vaultRoot)
+        await listCanonicalWriteEvidence(vaultRoot)
       const [manifest] = await Promise.all([
         readAssistantCliLlmsFullManifestFromCliEntry({
           cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
@@ -33672,7 +33672,7 @@ describeRealCodex('real Codex typed goal stale-ID recovery e2e', () => {
       )).toBe(false)
       expect(await listGoals(vaultRoot)).toEqual(goalsBefore)
       expect(
-        await listWriteOperationMetadataPaths(vaultRoot),
+        await listCanonicalWriteEvidence(vaultRoot),
       ).toEqual(operationsBefore)
       expect(
         readCapabilityRoutingActions(result.jsonEvents).filter(
@@ -37374,7 +37374,7 @@ async function runRealNumericContextJourney(input: {
     })
 
     const inheritedPath = normalizeEnvString(input.config.env.PATH)
-    const writesBefore = new Set(await listWriteOperationMetadataPaths(vaultRoot))
+    const writesBefore = new Set(await listCanonicalWriteEvidence(vaultRoot))
     const result = await executeRealCodexAppServerTurn({
       approvalPolicy: 'never',
       baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -37417,7 +37417,7 @@ async function runRealNumericContextJourney(input: {
     const state = await readNumericTargetState({ goalId, vaultRoot })
 
     return {
-      mutationCount: (await listWriteOperationMetadataPaths(vaultRoot)).filter(file => !writesBefore.has(file)).length,
+      mutationCount: (await listCanonicalWriteEvidence(vaultRoot)).filter(file => !writesBefore.has(file)).length,
       card: result.responseCard,
       commands: commandText === '' ? [] : commandText.split('\n'),
       goalId,
@@ -37625,7 +37625,7 @@ async function runRealDefaultMealAttachmentBoundary(input: {
     })
 
     const inheritedPath = normalizeEnvString(input.config.env.PATH)
-    const writesBefore = new Set(await listWriteOperationMetadataPaths(vaultRoot))
+    const writesBefore = new Set(await listCanonicalWriteEvidence(vaultRoot))
     const result = await executeRealCodexAppServerTurn({
       approvalPolicy: 'never',
       baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -37676,7 +37676,7 @@ async function runRealDefaultMealAttachmentBoundary(input: {
       : null
     const saved = await readVaultRawTolerant(vaultRoot)
     return {
-      mutationCount: (await listWriteOperationMetadataPaths(vaultRoot)).filter(file => !writesBefore.has(file)).length,
+      mutationCount: (await listCanonicalWriteEvidence(vaultRoot)).filter(file => !writesBefore.has(file)).length,
       savedMealCount: new Set(saved.events.filter((event) => event.kind === 'meal').map((event) => event.entityId)).size,
       card: result.responseCard,
       commands: commandText === '' ? [] : commandText.split('\n'),
@@ -45220,7 +45220,7 @@ describeRealCodex('bounded reaction routing journeys', () => {
     const fixture = await createCanonicalLiveFixture(config)
     const timings: number[] = []
     try {
-      const writesBefore = await listWriteOperationMetadataPaths(fixture.vault)
+      const writesBefore = await listCanonicalWriteEvidence(fixture.vault)
       for (const scenario of [
         { name: 'receipt-heart', reaction: 'Reacted with a heart reaction.', targetMessage: 'Your afternoon stretch is logged.', expected: 'quiet' },
         { name: 'receipt-like', reaction: 'Reacted with a like reaction.', targetMessage: 'The reminder is canceled.', expected: 'quiet' },
@@ -45275,7 +45275,7 @@ describeRealCodex('bounded reaction routing journeys', () => {
         expect(meteredResponses, scenario.name).toBe(bypass ? 0 : 1)
         expect.soft(decision, scenario.name).toBe(scenario.expected)
       }
-      expect(await listWriteOperationMetadataPaths(fixture.vault)).toEqual(writesBefore)
+      expect(await listCanonicalWriteEvidence(fixture.vault)).toEqual(writesBefore)
     } finally {
       const sorted = [...timings].sort((left, right) => left - right)
       process.stdout.write(`[usage-reaction-router-latency] ${JSON.stringify({ samples: sorted.length, minMs: sorted[0], medianMs: sorted[Math.floor(sorted.length / 2)], p95Ms: sorted[Math.max(0, Math.ceil(sorted.length * 0.95) - 1)], maxMs: sorted.at(-1) })}\n`)
@@ -45292,7 +45292,7 @@ describeRealCodex('production reaction routing turn journey', () => {
     const config = await resolveRealCodexE2eConfig({ productionTransport: true })
     const fixture = await createCanonicalLiveFixture(config, 'linq')
     try {
-      const writesBefore = await listWriteOperationMetadataPaths(fixture.vault)
+      const writesBefore = await listCanonicalWriteEvidence(fixture.vault)
       for (const scenario of [
         { name: 'quiet', reaction: 'Reacted with a heart reaction.', targetMessage: 'Your afternoon stretch is logged.', requests: 1 },
         { name: 'clarification', reaction: 'Reacted with a question reaction.', targetMessage: 'An easy run should feel conversational, while tempo is comfortably hard.', requests: 1 },
@@ -45322,7 +45322,7 @@ describeRealCodex('production reaction routing turn journey', () => {
         }
         process.stdout.write(`[usage-reaction-full-turn] ${JSON.stringify({ scenario: scenario.name, requests, reply: result.response })}\n`)
       }
-      expect(await listWriteOperationMetadataPaths(fixture.vault)).toEqual(writesBefore)
+      expect(await listCanonicalWriteEvidence(fixture.vault)).toEqual(writesBefore)
     } finally {
       await fixture.close()
       await removeRealCodexTemporaryPaths(config.temporaryPaths)

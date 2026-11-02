@@ -57,8 +57,8 @@ import type { DateInput } from "../types.ts";
 
 export const WRITE_OPERATION_SCHEMA_VERSION = "murph.write-operation.v1";
 export const WRITE_OPERATION_DIRECTORY = ".runtime/operations";
-export const TERMINAL_WRITE_OPERATION_PRUNE_MIN_RETAINED_COUNT = 100;
-export const TERMINAL_WRITE_OPERATION_PRUNE_RETENTION_MS = 24 * 60 * 60 * 1000;
+export const TERMINAL_WRITE_OPERATION_PRUNE_MIN_RETAINED_COUNT = 0;
+export const TERMINAL_WRITE_OPERATION_PRUNE_RETENTION_MS = 0;
 
 type WriteOperationStatus = "staged" | "committing" | "committed" | "rolled_back" | "failed";
 type WriteOperationActionState = "staged" | "applied" | "reused" | "rolled_back";
@@ -1375,13 +1375,8 @@ export async function pruneTerminalWriteOperationRecords(
       continue;
     }
 
-    if (operation.status !== "committed") {
+    if (!isTerminalWriteOperationStatus(operation.status)) {
       result.retainedProtectedCount += 1;
-      continue;
-    }
-
-    if (operation.error) {
-      result.retainedErroredTerminalCount += 1;
       continue;
     }
 
@@ -2388,10 +2383,11 @@ export class WriteBatch {
           const rollbackTriggerError = this.record.error;
           this.record.status = "rolled_back";
           this.record.updatedAt = nowIso();
-          await this.persistBestEffort();
 
           try {
-            await this.cleanupStageArtifacts();
+            // Never remove recovery evidence unless terminal state is durable.
+            await this.persist();
+            await this.cleanupTerminalArtifacts();
           } catch {
             this.record.error = rollbackTriggerError;
             this.record.updatedAt = nowIso();
@@ -2403,7 +2399,7 @@ export class WriteBatch {
       }
 
       try {
-        await this.cleanupStageArtifacts();
+        await this.cleanupTerminalArtifacts();
       } catch (error) {
         this.record.error = toStoredOperationError(error);
         this.record.updatedAt = nowIso();
@@ -2431,7 +2427,7 @@ export class WriteBatch {
       this.record.updatedAt = nowIso();
       this.record.error = undefined;
       await this.persist();
-      await this.cleanupStageArtifacts();
+      await this.cleanupTerminalArtifacts();
     } finally {
       await lock?.release();
     }
@@ -2472,8 +2468,11 @@ export class WriteBatch {
     }
   }
 
-  private async cleanupStageArtifacts(): Promise<void> {
+  private async cleanupTerminalArtifacts(): Promise<void> {
+    // Receipts and hosted payloads have their own durable owner. Delete the
+    // recovery journal last so interrupted cleanup remains retryable.
     await fs.rm(this.stageRootAbsolutePath, { recursive: true, force: true });
+    await safeUnlink(this.metadataAbsolutePath);
   }
 
   private async cleanupGuardReceiptIfConfigured(): Promise<void> {

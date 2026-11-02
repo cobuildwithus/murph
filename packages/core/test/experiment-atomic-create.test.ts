@@ -1,3 +1,4 @@
+import { observeWriteOperations } from "./helpers/observed-write-operations.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
@@ -9,9 +10,7 @@ import { test } from "vitest";
 import {
   createExperiment,
   initializeVault,
-  listWriteOperationMetadataPaths,
   parseFrontmatterDocument,
-  readStoredWriteOperation,
   updateExperiment,
   VaultError,
   withHostedCanonicalWritePort,
@@ -75,6 +74,8 @@ function completeExperimentInput(vaultRoot: string) {
   };
 }
 
+const { listObservedWriteOperationPaths, readObservedWriteOperation } = observeWriteOperations();
+
 test("complete experiment create commits plan, onboarding, and start evidence in one operation", async () => {
   const vaultRoot = await makeVault();
 
@@ -112,9 +113,9 @@ test("complete experiment create commits plan, onboarding, and start evidence in
       raw,
     );
 
-    const operationPaths = await listWriteOperationMetadataPaths(vaultRoot);
+    const operationPaths = await listObservedWriteOperationPaths(vaultRoot);
     const operations = await Promise.all(
-      operationPaths.map((relativePath) => readStoredWriteOperation(vaultRoot, relativePath)),
+      operationPaths.map((relativePath) => readObservedWriteOperation(vaultRoot, relativePath)),
     );
     assert.equal(
       operations.filter((operation) => operation.operationType === "experiment_create").length,

@@ -42,8 +42,10 @@ import type { QueryWearableSummaryKind } from "./wearable-summary-store.ts";
 //
 // The decode defaults below are a persistence contract: if the envelope
 // shape, `STORED_SELECTION_KEYS`, or `resolveMetric`'s empty output ever
-// changes, bump `QUERY_PROJECTION_SQLITE_VERSION` so stored rows rebuild
-// (write-side verification protects writes, not previously stored rows).
+// changes, preserve legacy reads or migrate through wearable-only publication.
+// Never bump the global version for removable wearable detail: that resets the
+// whole database. Old reasons are ignored below; the next source publication
+// replaces those rows through the existing wearable owner.
 
 export type StoredWearableMetricSummaryKind = Exclude<QueryWearableSummaryKind, "source_health">;
 
@@ -328,9 +330,6 @@ function compactStoredConfidence(confidence: Record<string, unknown>): Record<st
   if (confidence.level !== "high") {
     compact.level = confidence.level;
   }
-  if (Array.isArray(confidence.reasons) && confidence.reasons.length > 0) {
-    compact.reasons = confidence.reasons;
-  }
 
   return compact;
 }
@@ -353,7 +352,16 @@ function decodeStoredWearableMetricEnvelope(metric: WearableMetricKey, stored: u
     return emptyStoredWearableMetricEnvelope(metric);
   }
 
-  if (!isJsonObject(stored) || !isCompactStoredEnvelope(stored)) {
+  if (!isJsonObject(stored)) {
+    return stored;
+  }
+
+  // Legacy full and compact envelopes may still contain discarded prose.
+  if (isJsonObject(stored.confidence)) {
+    delete stored.confidence.reasons;
+  }
+
+  if (!isCompactStoredEnvelope(stored)) {
     return stored;
   }
 
@@ -368,7 +376,6 @@ function decodeStoredWearableMetricEnvelope(metric: WearableMetricKey, stored: u
       conflictingProviders: confidence.conflictingProviders ?? [],
       exactDuplicateCount: confidence.exactDuplicateCount ?? 0,
       level: confidence.level ?? "high",
-      reasons: confidence.reasons ?? [],
     },
     metric,
     selection: {

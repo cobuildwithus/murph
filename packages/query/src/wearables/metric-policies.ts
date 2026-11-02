@@ -23,28 +23,6 @@ export function scoreMetricPolicy(
     : WHOOP_DAY_STRAIN_FRAGMENT_PENALTY;
 }
 
-export function buildMetricPolicySelectionReason(
-  metric: WearableMetricKey,
-  selection: WearableMetricCandidate,
-  candidates: readonly WearableMetricCandidate[],
-): string | null {
-  const sameDayCandidates = collectSameDayWhoopDayStrainCycleCandidates(metric, selection, candidates);
-  if (sameDayCandidates.length < 2) {
-    return null;
-  }
-
-  const representative = selectWhoopDayStrainCycleRepresentative(sameDayCandidates);
-  if (representative?.candidateId !== selection.candidateId) {
-    return null;
-  }
-
-  return [
-    "Applied WHOOP day-strain cycle policy: selected the highest same-day WHOOP cycle strain",
-    `from ${sameDayCandidates.length} cycle candidates`,
-    "so a newer lower cycle fragment cannot override a higher accumulated strain candidate.",
-  ].join(" ");
-}
-
 function collectSameDayWhoopDayStrainCycleCandidates(
   metric: WearableMetricKey,
   candidate: WearableMetricCandidate,

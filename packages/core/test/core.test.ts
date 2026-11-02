@@ -1,3 +1,4 @@
+import { observeWriteOperations } from "./helpers/observed-write-operations.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import os from "node:os";
@@ -91,8 +92,6 @@ import {
 import {
   listProtectedCanonicalPaths,
   readRecoverableStoredWriteOperation,
-  listWriteOperationMetadataPaths,
-  readStoredWriteOperation,
   WriteBatch,
   WRITE_OPERATION_SCHEMA_VERSION,
 } from "../src/operations/index.ts";
@@ -209,6 +208,8 @@ async function writeExternalFile(directory: string, fileName: string, content: s
   return filePath;
 }
 
+const { listObservedWriteOperationPaths, readObservedWriteOperation } = observeWriteOperations();
+
 test("core constants stay aligned with canonical contracts constants", () => {
   assert.equal(CORE_VAULT_SCHEMA_VERSION, CONTRACT_SCHEMA_VERSION.vault);
   assert.deepEqual(CORE_FRONTMATTER_SCHEMA_VERSIONS, {
@@ -272,8 +273,8 @@ test("initializeVault bootstraps the baseline contract layout and passes validat
     relativePath: initialized.auditPath,
   });
   const auditRecord = expectRecord<AuditRecord>(auditRecords[0]);
-  const operationPaths = await listWriteOperationMetadataPaths(vaultRoot);
-  const operation = await readStoredWriteOperation(vaultRoot, operationPaths[0] as string);
+  const operationPaths = await listObservedWriteOperationPaths(vaultRoot);
+  const operation = await readObservedWriteOperation(vaultRoot, operationPaths[0] as string);
 
   assert.equal(auditRecords.length, 1);
   assert.equal(auditRecord.action, "vault_init");
@@ -933,9 +934,9 @@ test("repairVault returns a no-op result when metadata and directories are alrea
   const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
-  const operationPathsBeforeRepair = await listWriteOperationMetadataPaths(vaultRoot);
+  const operationPathsBeforeRepair = await listObservedWriteOperationPaths(vaultRoot);
   const repaired = await repairVault({ vaultRoot });
-  const operationPathsAfterRepair = await listWriteOperationMetadataPaths(vaultRoot);
+  const operationPathsAfterRepair = await listObservedWriteOperationPaths(vaultRoot);
 
   assert.equal(repaired.updated, false);
   assert.deepEqual(repaired.createdDirectories, []);
@@ -1112,8 +1113,8 @@ test("public raw, jsonl, and batchless audit writes persist canonical operation 
   });
 
   const operations = await Promise.all(
-    (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
-      readStoredWriteOperation(vaultRoot, relativePath),
+    (await listObservedWriteOperationPaths(vaultRoot)).map((relativePath) =>
+      readObservedWriteOperation(vaultRoot, relativePath),
     ),
   );
   const auditRecordPaths = [
@@ -1969,9 +1970,9 @@ test("createExperiment returns the existing experiment for idempotent retries", 
   assert.deepEqual(createdExperimentEvents[0]?.links, [
     { type: "related_to", targetId: first.experiment.id },
   ]);
-  const operationPaths = await listWriteOperationMetadataPaths(vaultRoot);
+  const operationPaths = await listObservedWriteOperationPaths(vaultRoot);
   const operations = await Promise.all(
-    operationPaths.map((relativePath) => readStoredWriteOperation(vaultRoot, relativePath)),
+    operationPaths.map((relativePath) => readObservedWriteOperation(vaultRoot, relativePath)),
   );
   const experimentOperations = operations.filter((operation) => operation.operationType === "experiment_create");
 
@@ -3163,7 +3164,7 @@ test("write batches roll back earlier writes when a later action fails", async (
 
   await assert.rejects(() => fs.access(path.join(vaultRoot, "notes/partial.txt")));
 
-  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  const operation = await readObservedWriteOperation(vaultRoot, batch.metadataRelativePath);
   assert.equal(operation.status, "rolled_back");
 });
 
@@ -3298,7 +3299,7 @@ test("direct and batched immutable raw writes reuse identical content and reject
   });
   await reuseBatch.commit();
 
-  const reusedOperation = await readStoredWriteOperation(vaultRoot, reuseBatch.metadataRelativePath);
+  const reusedOperation = await readObservedWriteOperation(vaultRoot, reuseBatch.metadataRelativePath);
   assert.equal(reusedOperation.status, "committed");
   assert.equal(reusedOperation.actions[0]?.state, "reused");
   assert.equal(reusedOperation.actions[0]?.effect, "reuse");
@@ -3333,7 +3334,7 @@ test("direct and batched immutable raw writes reuse identical content and reject
     (error: unknown) => error instanceof VaultError && error.code === "VAULT_RAW_IMMUTABLE",
   );
 
-  const failedOperation = await readStoredWriteOperation(vaultRoot, failingBatch.metadataRelativePath);
+  const failedOperation = await readObservedWriteOperation(vaultRoot, failingBatch.metadataRelativePath);
   assert.equal(failedOperation.status, "rolled_back");
 });
 
@@ -3373,7 +3374,7 @@ test("direct and batched raw copies reuse identical files and reject divergent f
   });
   await reuseBatch.commit();
 
-  const reusedOperation = await readStoredWriteOperation(vaultRoot, reuseBatch.metadataRelativePath);
+  const reusedOperation = await readObservedWriteOperation(vaultRoot, reuseBatch.metadataRelativePath);
   assert.equal(reusedOperation.status, "committed");
   assert.equal(reusedOperation.actions[0]?.state, "reused");
   assert.equal(reusedOperation.actions[0]?.effect, "reuse");
@@ -3403,7 +3404,7 @@ test("direct and batched raw copies reuse identical files and reject divergent f
     (error: unknown) => error instanceof VaultError && error.code === "VAULT_RAW_IMMUTABLE",
   );
 
-  const failedOperation = await readStoredWriteOperation(vaultRoot, failingBatch.metadataRelativePath);
+  const failedOperation = await readObservedWriteOperation(vaultRoot, failingBatch.metadataRelativePath);
   assert.equal(failedOperation.status, "rolled_back");
 });
 
@@ -3450,8 +3451,8 @@ test("committed raw-copy actions omit payload blobs while replayable text and js
 
   const operation = (
     await Promise.all(
-      (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
-        readStoredWriteOperation(vaultRoot, relativePath),
+      (await listObservedWriteOperationPaths(vaultRoot)).map((relativePath) =>
+        readObservedWriteOperation(vaultRoot, relativePath),
       ),
     )
   ).find((candidate) => candidate.operationType === "test_payload_metadata_shapes");
@@ -3618,7 +3619,7 @@ test("readStoredWriteOperation rejects write actions with unknown states", async
   );
 
   await assert.rejects(
-    () => readStoredWriteOperation(vaultRoot, relativePath),
+    () => readObservedWriteOperation(vaultRoot, relativePath),
     (error: unknown) => error instanceof VaultError && error.code === "OPERATION_INVALID",
   );
 });
@@ -3738,7 +3739,7 @@ test("direct and batched text writes keep no-overwrite and append semantics alig
     '{"source":"direct"}\n{"source":"batch"}\n',
   );
 
-  const appendOperation = await readStoredWriteOperation(vaultRoot, appendBatch.metadataRelativePath);
+  const appendOperation = await readObservedWriteOperation(vaultRoot, appendBatch.metadataRelativePath);
   assert.equal(appendOperation.status, "committed");
   assert.equal(appendOperation.actions[0]?.effect, "append");
   assert.equal(appendOperation.actions[0]?.existedBefore, true);
@@ -4181,8 +4182,8 @@ test("WriteBatch rolls back earlier writes when a later staged action fails duri
   await assert.rejects(() => fs.access(path.join(vaultRoot, "bank/goals/rollback-check.md")));
 
   const operations = await Promise.all(
-    (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
-      readStoredWriteOperation(vaultRoot, relativePath),
+    (await listObservedWriteOperationPaths(vaultRoot)).map((relativePath) =>
+      readObservedWriteOperation(vaultRoot, relativePath),
     ),
   );
   const operation = operations.find((candidate) => candidate.operationType === "test_rollback");
@@ -4209,26 +4210,26 @@ test("WriteBatch keeps committed canonical writes when post-commit stage cleanup
   const stageRootAbsolutePath = path.join(vaultRoot, batch.stageRootRelativePath);
   const originalCleanupStageArtifacts = readRequiredPrototypeMethod<
     () => Promise<void>
-  >(batch, "cleanupStageArtifacts");
+  >(batch, "cleanupTerminalArtifacts");
 
   await batch.stageTextWrite(targetRelativePath, "committed\n", {
     overwrite: false,
   });
 
-  Reflect.set(Object.getPrototypeOf(batch), "cleanupStageArtifacts", async function cleanupStageArtifactsWithFailure() {
+  Reflect.set(Object.getPrototypeOf(batch), "cleanupTerminalArtifacts", async function cleanupTerminalArtifactsWithFailure() {
     throw new Error("injected cleanup failure");
   });
 
   try {
     await batch.commit();
   } finally {
-    Reflect.set(Object.getPrototypeOf(batch), "cleanupStageArtifacts", originalCleanupStageArtifacts);
+    Reflect.set(Object.getPrototypeOf(batch), "cleanupTerminalArtifacts", originalCleanupStageArtifacts);
   }
 
   assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), "committed\n");
   assert.equal(await fs.access(stageRootAbsolutePath).then(() => true, () => false), true);
 
-  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  const operation = await readObservedWriteOperation(vaultRoot, batch.metadataRelativePath);
   assert.equal(operation.status, "committed");
   assert.equal(operation.error?.message, "injected cleanup failure");
   assert.equal(operation.actions[0]?.state, "applied");
@@ -4285,7 +4286,7 @@ test("WriteBatch rolls back applied canonical writes when guard receipt persiste
   assert.equal(await fs.access(path.join(vaultRoot, batch.stageRootRelativePath)).then(() => true, () => false), false);
   assert.equal(await fs.access(lockAbsolutePath).then(() => true, () => false), false);
 
-  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  const operation = await readObservedWriteOperation(vaultRoot, batch.metadataRelativePath);
   assert.equal(operation.status, "rolled_back");
   assert.equal(operation.error?.message, "injected guard receipt failure");
   assert.equal(operation.actions[0]?.state, "rolled_back");
@@ -4347,7 +4348,7 @@ test("WriteBatch still rolls back canonical writes when action metadata persiste
   assert.equal(await fs.access(path.join(vaultRoot, batch.stageRootRelativePath)).then(() => true, () => false), false);
   assert.equal(await fs.access(lockAbsolutePath).then(() => true, () => false), false);
 
-  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  const operation = await readObservedWriteOperation(vaultRoot, batch.metadataRelativePath);
   assert.equal(operation.status, "rolled_back");
   assert.equal(operation.error?.message, "injected post-mutation persist failure");
   assert.equal(operation.actions[0]?.state, "rolled_back");
@@ -4400,7 +4401,7 @@ test("WriteBatch keeps raw-copy recovery metadata durable before finalization an
   Reflect.set(action, "appliedAt", undefined);
   await applyRawCopy.call(batch, action);
 
-  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  const operation = await readObservedWriteOperation(vaultRoot, batch.metadataRelativePath);
   assert.equal(operation.actions[0]?.state, "applied");
   assert.equal(operation.actions[0]?.effect, "copy");
   assert.equal(operation.actions[0]?.existedBefore, false);
@@ -4476,7 +4477,7 @@ test("WriteBatch keeps text-overwrite rollback prerequisites durable before fina
   Reflect.set(action, "appliedAt", undefined);
   await applyTextWrite.call(batch, 0, action);
 
-  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  const operation = await readObservedWriteOperation(vaultRoot, batch.metadataRelativePath);
   assert.equal(operation.actions[0]?.state, "applied");
   assert.equal(operation.actions[0]?.effect, "update");
   assert.equal(operation.actions[0]?.existedBefore, true);
@@ -4538,7 +4539,7 @@ test("WriteBatch resumes no-overwrite text reuses without requiring overwrite ba
   Reflect.set(action, "appliedAt", undefined);
   await applyTextWrite.call(batch, 0, action);
 
-  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  const operation = await readObservedWriteOperation(vaultRoot, batch.metadataRelativePath);
   const storedAction = operation.actions[0];
   assert.equal(storedAction?.kind, "text_write");
   if (storedAction?.kind !== "text_write") {
@@ -4612,7 +4613,7 @@ test("WriteBatch keeps append rollback prerequisites durable before finalization
 
   assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), "first\nsecond\n");
 
-  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  const operation = await readObservedWriteOperation(vaultRoot, batch.metadataRelativePath);
   assert.equal(operation.actions[0]?.state, "applied");
   assert.equal(operation.actions[0]?.effect, "append");
   assert.equal(operation.actions[0]?.originalSize, Buffer.byteLength("first\n"));
@@ -4678,7 +4679,7 @@ test("WriteBatch keeps delete rollback prerequisites durable before finalization
 
   assert.equal(await fs.access(targetAbsolutePath).then(() => true, () => false), false);
 
-  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  const operation = await readObservedWriteOperation(vaultRoot, batch.metadataRelativePath);
   assert.equal(operation.actions[0]?.state, "applied");
   assert.equal(operation.actions[0]?.effect, "delete");
   assert.equal(operation.actions[0]?.existedBefore, true);
@@ -4700,7 +4701,7 @@ test("WriteBatch preserves raw delete allowance when reading stored operations",
   });
   await batch.stageDelete(targetRelativePath, { allowRaw: true });
 
-  const stored = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  const stored = await readObservedWriteOperation(vaultRoot, batch.metadataRelativePath);
   const storedAction = stored.actions[0];
   assert.equal(storedAction?.kind, "delete");
   if (storedAction?.kind !== "delete") {
@@ -4780,10 +4781,10 @@ test("WriteBatch keeps rollback bookkeeping best-effort when rollback-status per
   assert.equal(injectedCommitFailure, true);
   assert.equal(injectedRollbackStatusFailure, true);
   assert.equal(await fs.access(targetAbsolutePath).then(() => true, () => false), false);
-  assert.equal(await fs.access(path.join(vaultRoot, batch.stageRootRelativePath)).then(() => true, () => false), false);
+  assert.equal(await fs.access(path.join(vaultRoot, batch.stageRootRelativePath)).then(() => true, () => false), true);
   assert.equal(await fs.access(lockAbsolutePath).then(() => true, () => false), false);
 
-  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  const operation = await readObservedWriteOperation(vaultRoot, batch.metadataRelativePath);
   assert.notEqual(operation.status, "failed");
   assert.equal(operation.error?.message, "injected post-mutation persist failure");
 });
@@ -4802,7 +4803,7 @@ test("WriteBatch preserves the original rollback error when rollback cleanup lea
   const originalPersist = readRequiredPrototypeMethod<() => Promise<void>>(batch, "persist");
   const originalCleanupStageArtifacts = readRequiredPrototypeMethod<
     () => Promise<void>
-  >(batch, "cleanupStageArtifacts");
+  >(batch, "cleanupTerminalArtifacts");
   let injectedPersistFailure = false;
 
   await batch.stageTextWrite(targetRelativePath, "applied before rollback cleanup failure\n", {
@@ -4836,8 +4837,8 @@ test("WriteBatch preserves the original rollback error when rollback cleanup lea
   );
   Reflect.set(
     Object.getPrototypeOf(batch),
-    "cleanupStageArtifacts",
-    async function cleanupStageArtifactsWithFailure() {
+    "cleanupTerminalArtifacts",
+    async function cleanupTerminalArtifactsWithFailure() {
       throw new Error("injected rollback cleanup failure");
     },
   );
@@ -4846,14 +4847,14 @@ test("WriteBatch preserves the original rollback error when rollback cleanup lea
     await assert.rejects(() => batch.commit(), /injected post-mutation persist failure/u);
   } finally {
     Reflect.set(Object.getPrototypeOf(batch), "persist", originalPersist);
-    Reflect.set(Object.getPrototypeOf(batch), "cleanupStageArtifacts", originalCleanupStageArtifacts);
+    Reflect.set(Object.getPrototypeOf(batch), "cleanupTerminalArtifacts", originalCleanupStageArtifacts);
   }
 
   assert.equal(injectedPersistFailure, true);
   assert.equal(await fs.access(targetAbsolutePath).then(() => true, () => false), false);
   assert.equal(await fs.access(path.join(vaultRoot, batch.stageRootRelativePath)).then(() => true, () => false), true);
 
-  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  const operation = await readObservedWriteOperation(vaultRoot, batch.metadataRelativePath);
   assert.equal(operation.status, "rolled_back");
   assert.equal(operation.error?.message, "injected post-mutation persist failure");
   assert.equal(operation.actions[0]?.state, "rolled_back");
@@ -4920,7 +4921,7 @@ test("WriteBatch removes guard receipts when committed-status persistence fails 
   assert.equal(await fs.access(path.join(receiptRoot, `${batch.operationId}.json`)).then(() => true, () => false), false);
   assert.equal(await fs.access(path.join(receiptRoot, batch.operationId)).then(() => true, () => false), false);
 
-  const operation = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
+  const operation = await readObservedWriteOperation(vaultRoot, batch.metadataRelativePath);
   assert.equal(operation.status, "rolled_back");
   assert.equal(operation.error?.message, "injected committed-status persist failure");
   assert.equal(operation.actions[0]?.state, "rolled_back");

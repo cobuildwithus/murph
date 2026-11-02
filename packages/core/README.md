@@ -73,3 +73,22 @@ snapshots. It checks connection/retrieval path identity and the immutable hashes
 of declared resource pages, downloaded documents, and batch predecessors. Nested
 pages belong to their snapshot manifest; unbound files remain validation errors.
 Clinical interpretation, patient binding, and pagination remain importer-owned.
+
+## Write-operation journal retention
+
+A successful `WriteBatch.commit` removes its staging tree and journal after
+canonical actions, configured guard/hosted receipts, and configured hosted
+persistence finish. A successful rollback does the same after persisting its
+terminal state. Deletion removes the staging tree first and the journal last;
+cleanup failure leaves terminal metadata for a later checkpoint cleanup.
+Guard receipts, hosted receipts and hosted content-addressed payloads have
+separate owners and are not removed by this cleanup.
+
+The existing checkpoint pruner removes validated committed and rolled-back
+records older than the previous successful checkpoint, including terminal records
+with diagnostic errors. Its default history count and time retention are zero.
+Staged, committing, failed, malformed and uncheckpointed records remain untouched.
+Recovery still needs their action state, staged payloads, append baselines and
+backups; terminal operations are explicitly excluded by inbox recovery. A missing
+checkpoint leaves pruning inert. New successful local writes retire immediately
+even without hosted checkpoints.

@@ -90,7 +90,7 @@ test("lists only write-operation metadata with real sibling stage directories", 
   );
 });
 
-test("pruneTerminalWriteOperationRecords removes only clean committed records covered by a newer checkpoint and retention window", async () => {
+test("pruneTerminalWriteOperationRecords removes committed and rolled-back records covered by a newer checkpoint", async () => {
   const vaultRoot = await makeVaultRoot();
   const staleCommitted = await createCommittedOperation(vaultRoot, "bank/prune-committed.md");
   const retainedRolledBack = await createRolledBackOperation(vaultRoot, "bank/retain-rolled-back.md");
@@ -145,14 +145,14 @@ test("pruneTerminalWriteOperationRecords removes only clean committed records co
   });
 
   assert.equal(result.scannedCount, 9);
-  assert.equal(result.prunedCount, 2);
-  assert.equal(result.prunedFileCount, 2);
+  assert.equal(result.prunedCount, 5);
+  assert.equal(result.prunedFileCount, 5);
   assert.equal(result.prunedByteCount > 0, true);
   assert.equal(result.prunedStageDirectoryCount, 1);
-  assert.equal(result.retainedProtectedCount, 4);
-  assert.equal(result.retainedErroredTerminalCount, 1);
+  assert.equal(result.retainedProtectedCount, 3);
+  assert.equal(result.retainedErroredTerminalCount, 0);
   assert.equal(result.retainedNewestTerminalCount, 0);
-  assert.equal(result.retainedRecentTerminalCount, 1);
+  assert.equal(result.retainedRecentTerminalCount, 0);
   assert.equal(result.retainedStageDirectoryCount, 1);
   assert.equal(result.retainedUncheckpointedTerminalCount, 1);
   assert.equal(result.invalidCount, 0);
@@ -163,12 +163,12 @@ test("pruneTerminalWriteOperationRecords removes only clean committed records co
     await fs.readFile(resolveVaultPath(vaultRoot, "bank/prune-committed.md").absolutePath, "utf8"),
     "committed\n",
   );
-  await assertPresent(vaultRoot, retainedRolledBack.metadataRelativePath);
+  await assertMissing(vaultRoot, retainedRolledBack.metadataRelativePath);
   await assertPresent(vaultRoot, staged.metadataRelativePath);
   await assertPresent(vaultRoot, staged.stageRootRelativePath);
   await assertPresent(vaultRoot, committing.metadataRelativePath);
   await assertPresent(vaultRoot, failed.metadataRelativePath);
-  await assertPresent(vaultRoot, recentCommitted.metadataRelativePath);
+  await assertMissing(vaultRoot, recentCommitted.metadataRelativePath);
   await assertPresent(vaultRoot, uncheckpointedCommitted.metadataRelativePath);
   await assertPresent(vaultRoot, uncheckpointedCommitted.stageRootRelativePath);
   assert.equal(
@@ -181,16 +181,13 @@ test("pruneTerminalWriteOperationRecords removes only clean committed records co
     ),
     "uncheckpointed leftover\n",
   );
-  await assertPresent(vaultRoot, erroredCommitted.metadataRelativePath);
+  await assertMissing(vaultRoot, erroredCommitted.metadataRelativePath);
   await assertMissing(vaultRoot, stageResidueCommitted.metadataRelativePath);
   await assertMissing(vaultRoot, stageResidueCommitted.stageRootRelativePath);
 
   assert.deepEqual((await listWriteOperationMetadataPaths(vaultRoot)).sort(), [
     committing.metadataRelativePath,
-    erroredCommitted.metadataRelativePath,
     failed.metadataRelativePath,
-    recentCommitted.metadataRelativePath,
-    retainedRolledBack.metadataRelativePath,
     staged.metadataRelativePath,
     uncheckpointedCommitted.metadataRelativePath,
   ].sort());
@@ -238,7 +235,7 @@ test("pruneTerminalWriteOperationRecords is inert without checkpoint proof and s
   await assertPresent(vaultRoot, `${WRITE_OPERATION_DIRECTORY}/op_wrong_schema.json`);
 });
 
-test("pruneTerminalWriteOperationRecords retains the newest clean committed records", async () => {
+test("pruneTerminalWriteOperationRecords has no default terminal history retention", async () => {
   const vaultRoot = await makeVaultRoot();
   const operationIds = Array.from({ length: 101 }, (_, index) =>
     `op_clean_committed_${String(index).padStart(3, "0")}`);
@@ -256,12 +253,12 @@ test("pruneTerminalWriteOperationRecords retains the newest clean committed reco
   });
 
   assert.equal(result.scannedCount, 101);
-  assert.equal(result.prunedCount, 1);
-  assert.equal(result.retainedNewestTerminalCount, 100);
+  assert.equal(result.prunedCount, 101);
+  assert.equal(result.retainedNewestTerminalCount, 0);
   assert.equal(result.retainedRecentTerminalCount, 0);
   await assertMissing(vaultRoot, `${WRITE_OPERATION_DIRECTORY}/op_clean_committed_000.json`);
-  await assertPresent(vaultRoot, `${WRITE_OPERATION_DIRECTORY}/op_clean_committed_001.json`);
-  await assertPresent(vaultRoot, `${WRITE_OPERATION_DIRECTORY}/op_clean_committed_100.json`);
+  await assertMissing(vaultRoot, `${WRITE_OPERATION_DIRECTORY}/op_clean_committed_001.json`);
+  await assertMissing(vaultRoot, `${WRITE_OPERATION_DIRECTORY}/op_clean_committed_100.json`);
 });
 
 test("pruneTerminalWriteOperationRecords aborts between candidates with the exact reason", async () => {
@@ -452,7 +449,10 @@ async function createCommittedOperation(
     vaultRoot,
   });
   await batch.stageTextWrite(targetRelativePath, "committed\n");
+  const legacy = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
   await batch.commit();
+  await fs.writeFile(resolveVaultPath(vaultRoot, batch.metadataRelativePath).absolutePath,
+    JSON.stringify({ ...legacy, status: "committed", actions: [] }));
   return batch;
 }
 
@@ -466,7 +466,10 @@ async function createRolledBackOperation(
     vaultRoot,
   });
   await batch.stageTextWrite(targetRelativePath, "rolled back\n");
+  const legacy = await readStoredWriteOperation(vaultRoot, batch.metadataRelativePath);
   await batch.rollback();
+  await fs.writeFile(resolveVaultPath(vaultRoot, batch.metadataRelativePath).absolutePath,
+    JSON.stringify({ ...legacy, status: "rolled_back", actions: [] }));
   return batch;
 }
 
@@ -658,3 +661,19 @@ async function assertMissing(vaultRoot: string, relativePath: string): Promise<v
     (error: unknown) => error instanceof Error && (error as { code?: string }).code === "ENOENT",
   );
 }
+
+
+test("successful commit and rollback retire journals and staging payloads immediately", async () => {
+  const vaultRoot = await makeVaultRoot();
+  for (const terminal of ["commit", "rollback"] as const) {
+    const batch = await WriteBatch.create({ vaultRoot, operationType: "terminal_cleanup", summary: "Synthetic cleanup" });
+    await batch.stageTextWrite(`bank/${terminal}.md`, "synthetic durable content");
+    await assertPresent(vaultRoot, batch.metadataRelativePath);
+    await assertPresent(vaultRoot, batch.stageRootRelativePath);
+    await batch[terminal]();
+    await assertMissing(vaultRoot, batch.metadataRelativePath);
+    await assertMissing(vaultRoot, batch.stageRootRelativePath);
+  }
+  await assertPresent(vaultRoot, "bank/commit.md");
+  await assertMissing(vaultRoot, "bank/rollback.md");
+});

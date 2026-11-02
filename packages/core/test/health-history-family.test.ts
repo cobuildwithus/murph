@@ -1,3 +1,4 @@
+import { observeWriteOperations } from "./helpers/observed-write-operations.ts";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
@@ -32,11 +33,12 @@ import type {
 } from "../src/history/index.ts";
 import { listFamilyMembers, readFamilyMember, upsertFamilyMember } from "../src/family/index.ts";
 import { listGeneticVariants, readGeneticVariant, upsertGeneticVariant } from "../src/genetics/index.ts";
-import { listWriteOperationMetadataPaths, readStoredWriteOperation } from "../src/operations/index.ts";
 
 async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
 }
+
+const { listObservedWriteOperationPaths, readObservedWriteOperation } = observeWriteOperations();
 
 test("health history appends to the shared event ledger and supports list/read flows", async () => {
   const vaultRoot = await makeTempDirectory("murph-history");
@@ -102,8 +104,8 @@ test("health history appends to the shared event ledger and supports list/read f
   assert.equal(read.record.effect, "rash");
 
   const operations = await Promise.all(
-    (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
-      readStoredWriteOperation(vaultRoot, relativePath),
+    (await listObservedWriteOperationPaths(vaultRoot)).map((relativePath) =>
+      readObservedWriteOperation(vaultRoot, relativePath),
     ),
   );
   const historyOperations = operations.filter((operation) => operation.operationType === "history_add");
@@ -295,8 +297,8 @@ test("encounter bundles save linked visit facts without promoting durable proble
   );
 
   const operations = await Promise.all(
-    (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
-      readStoredWriteOperation(vaultRoot, relativePath),
+    (await listObservedWriteOperationPaths(vaultRoot)).map((relativePath) =>
+      readObservedWriteOperation(vaultRoot, relativePath),
     ),
   );
   const bundleOperations = operations.filter(
@@ -1844,8 +1846,8 @@ test("family members are stored as deterministic markdown registry entries", asy
 
   const familyOperations = (
     await Promise.all(
-      (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
-        readStoredWriteOperation(vaultRoot, relativePath),
+      (await listObservedWriteOperationPaths(vaultRoot)).map((relativePath) =>
+        readObservedWriteOperation(vaultRoot, relativePath),
       ),
     )
   ).filter((operation) => operation.operationType === "family_upsert");
@@ -1990,8 +1992,8 @@ test("genetic variants are stored in markdown registries and can link to family 
 
   const geneticOperations = (
     await Promise.all(
-      (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
-        readStoredWriteOperation(vaultRoot, relativePath),
+      (await listObservedWriteOperationPaths(vaultRoot)).map((relativePath) =>
+        readObservedWriteOperation(vaultRoot, relativePath),
       ),
     )
   ).filter((operation) => operation.operationType === "genetics_upsert");

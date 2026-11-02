@@ -1016,12 +1016,6 @@ test("compose preserves stored same-public provider conflict evidence", () => {
   assert.ok(steps);
   assert.deepEqual(steps.confidence.conflictingProviders, ["garmin"]);
   assert.equal(steps.confidence.level, "medium");
-  assert.equal(
-    steps.confidence.reasons.some((reason) =>
-      reason === "Duplicate evidence from Garmin disagreed after source reconciliation."
-    ),
-    true,
-  );
   assert.deepEqual(steps.candidates, []);
   assert.equal(
     composed.activityDays[0]?.summaryConfidence.conflictingMetrics.includes("steps"),
@@ -1039,10 +1033,6 @@ test("compose preserves stored same-public provider conflict evidence", () => {
 
   assert.ok(garminOnlySteps);
   assert.deepEqual(garminOnlySteps.confidence.conflictingProviders, ["garmin"]);
-  assert.equal(
-    garminOnlySteps.confidence.reasons.some((reason) => reason.includes("Junction")),
-    false,
-  );
 });
 
 test("compose rebuilt stored sleep rows drops zeroed Apple HealthKit summary in favor of WHOOP", () => {
@@ -1156,12 +1146,6 @@ test("compose preserves stored same-public sleep-window conflict evidence", () =
   assert.deepEqual(sleep.sessionMinutes.confidence.conflictingProviders, ["garmin"]);
   assert.deepEqual(sleep.timeInBedMinutes.confidence.conflictingProviders, ["garmin"]);
   assert.equal(sleep.sessionMinutes.confidence.level, "medium");
-  assert.equal(
-    sleep.sessionMinutes.confidence.reasons.some((reason) =>
-      reason === "Duplicate evidence from Garmin disagreed after source reconciliation."
-    ),
-    true,
-  );
   assert.equal(sleep.summaryConfidence.conflictingMetrics.includes("sessionMinutes"), true);
   assert.equal(sleep.summaryConfidence.conflictingMetrics.includes("timeInBedMinutes"), true);
   assert.equal(
@@ -1239,14 +1223,14 @@ test("stored wearable summary codec fails open when a no-evidence envelope carri
   const bundle = buildWearableSummaryBundleFromDataset(buildFixtureDataset(["whoop"]));
   const doctored = JSON.parse(stringifyPublicWearableProjectionSummary(bundle.activityDays[0]));
   assert.equal(doctored.dayStrain.selection.resolution, "none");
-  doctored.dayStrain.confidence.reasons = [...doctored.dayStrain.confidence.reasons, "non-canonical detail"];
+  doctored.dayStrain.confidence.extra = ["non-canonical detail"];
 
   const storedJson = stringifyFixtureStoredSummary("activity", doctored);
-  // The null marker would lose the extra reason, so the round-trip
+  // The null marker would lose the extra detail, so the round-trip
   // verification must keep this envelope in full form.
   assert.doesNotMatch(storedJson, /"dayStrain":null/u);
   assert.ok(storedJson.includes('"metric":"dayStrain"'), "expected the envelope to stay in full form");
-  assert.ok(storedJson.includes('"non-canonical detail"'), "expected the extra reason to survive storage");
+  assert.ok(storedJson.includes('"non-canonical detail"'), "expected the extra detail to survive storage");
   assert.equal(
     JSON.stringify(parseStoredWearableSummary("activity", storedJson)),
     stringifyPublicWearableProjectionSummary(doctored),
@@ -1292,7 +1276,6 @@ test("stored wearable summary codec decode discriminates and survives tampered e
       conflictingProviders: [],
       exactDuplicateCount: 0,
       level: "high",
-      reasons: [],
     },
     metric: "steps",
     selection: {
@@ -1413,7 +1396,7 @@ test("empty-envelope writes serialize each actual envelope once, with exact stor
     const second = parseStoredWearableSummary<typeof first>(kind, stored)!;
     for (const metric of keys) {
       assert.notEqual(first[metric], second[metric]);
-      first[metric]!.confidence.reasons.push("synthetic mutation");
+      first[metric]!.confidence.conflictingProviders.push("synthetic mutation");
       first[metric]!.selection.paths.push("synthetic mutation");
     }
     assert.equal(JSON.stringify(second), expectedPublic);
@@ -1425,7 +1408,7 @@ test("empty-marker verification preserves unexpected fields and noncanonical fie
   const empty = resolveMetric("hrv", []);
   const cases = [
     { ...empty, syntheticExtra: "must survive" },
-    { ...empty, confidence: { ...empty.confidence, reasons: ["synthetic extra reason"] } },
+    { ...empty, confidence: { ...empty.confidence, extra: ["synthetic extra detail"] } },
     { selection: empty.selection, metric: empty.metric, confidence: empty.confidence, candidates: [] },
     { ...empty, selection: Object.fromEntries(Object.entries(empty.selection).reverse()) },
   ];

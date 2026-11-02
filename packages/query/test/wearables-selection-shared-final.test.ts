@@ -121,14 +121,6 @@ test("selection helpers cover direct, fallback, agreement, conflict, and tie-bre
   const soloResolved = resolveMetric("steps", [soloMetric], { metricFamily: "activity" });
   assert.equal(soloResolved.selection.provider, "alpha");
   assert.equal(soloResolved.confidence.level, "high");
-  assert.equal(
-    soloResolved.confidence.reasons[0]?.includes("because it scored highest (provider +"),
-    true,
-  );
-  assert.equal(
-    soloResolved.confidence.reasons[0]?.includes("ahead of"),
-    false,
-  );
 
   const fallbackMetric = resolveMetric("totalSleepMinutes", [], { metricFamily: "sleep" });
   const fallbackSource = resolveMetric(
@@ -242,20 +234,6 @@ test("selection helpers cover direct, fallback, agreement, conflict, and tie-bre
   assert.equal(mixedAgreementMetric.selection.provider, "whoop");
   assert.equal(mixedAgreementMetric.confidence.level, "medium");
   assert.deepEqual(mixedAgreementMetric.confidence.conflictingProviders, ["alpha"]);
-  assert.equal(
-    mixedAgreementMetric.confidence.reasons.some((reason) =>
-      reason.includes("Providers agreed within tolerance:") &&
-      reason.includes("beta") &&
-      reason.includes("WHOOP"),
-    ),
-    true,
-  );
-  assert.equal(
-    mixedAgreementMetric.confidence.reasons.some((reason) =>
-      reason.includes("Conflicting values remained from alpha."),
-    ),
-    true,
-  );
 
   const earlierMetric = makeMetricCandidate({
     candidateId: "alpha:steps:earlier",
