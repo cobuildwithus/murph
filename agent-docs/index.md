@@ -1,3 +1,5 @@
+Cold-history write and receipt-replay rollback floor: [completed plan](exec-plans/completed/2026-11-02-ingest-cold-write-floor.md).
+
 Private meal thumbnail delivery, capture-based retention and deletion are owned by
 [`ios-meals.md`](product-specs/ios-meals.md); implementation is tracked in
 [the thumbnail plan](exec-plans/completed/2026-11-02-meal-photo-thumbnails.md).

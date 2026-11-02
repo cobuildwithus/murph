@@ -1,8 +1,13 @@
+import type { HostedWorkspaceArtifactMaterializer } from "../src/hosted-runtime/models.ts";
 import { brotliCompressSync } from "node:zlib";
 import { SqliteDeviceSyncStore } from "@murphai/device-syncd/service";
+import { createHostedArtifactMaterializer } from "../src/hosted-runtime/artifacts.ts";
+import { writeHostedMediaReferenceCatalogue, readHostedMediaReferenceCatalogue } from "../src/hosted-runtime/media-references.ts";
+import type { HostedRuntimeMediaStore } from "../src/hosted-runtime/platform.ts";
 import {
   createPlatform as createV2SnapshotFixturePlatform,
   createSnapshotFixtureRef,
+  createWorkspaceSnapshotV2Ref,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 import assert from "node:assert/strict";
 import { listMetricPoints, rebuildQueryProjection } from "@murphai/query";
@@ -82,7 +87,6 @@ import {
   isActiveCanonicalWriteLockError,
   readIntegrationIngestEntries,
   buildIntegrationIngestRecord,
-  appendJsonlRecord,
   readEvent,
 } from "@murphai/core";
 import { describe, expect, test, vi } from "vitest";
@@ -12084,46 +12088,92 @@ describe("foreground device ingestion", () => {
     } finally { await fixture.cleanup(); }
   });
 
-  test("reader release queues referenced-month imports without acknowledging their payloads", async () => {
+  test.each(["available", "missing", "corrupt"] as const)("historical WHOOP import thaws cold month or retains dirty payload (%s)", async (availability) => {
     const fixture = await createForegroundDeviceFixture(10, {
       now: "2026-11-02T12:00:00.000Z", start: "2026-10-29T22:00:00.000Z", end: "2026-10-30T06:00:00.000Z",
     });
     const failJob = vi.spyOn(SqliteDeviceSyncStore.prototype, "failJobIfOwned");
+    const objects = new Map<string, Uint8Array>();
+    const mediaStore: HostedRuntimeMediaStore = {
+      put: async (entry) => { objects.set(entry.mediaId, entry.bytes); },
+      get: async (entry) => availability === "missing" ? null : availability === "corrupt"
+        ? new Uint8Array(entry.byteSize) : objects.get(entry.mediaId) ?? null,
+    };
     const relativePath = "ledger/integration-ingests/2026/2026-10.jsonl.br";
     try {
       const prior = buildIntegrationIngestRecord({ id: "xfm_prior", provider: "synthetic", source: "device",
         importedAt: "2026-10-01T00:00:00.000Z", parts: [], eventOutputs: [], eventIdsComplete: true,
         sampleIds: [], sampleIdsComplete: true, eventCount: 0, sampleCount: 0 });
-      const bytes = brotliCompressSync(Buffer.from(`${JSON.stringify(prior)}\n`));
       await mkdir(path.dirname(path.join(fixture.vaultRoot, relativePath)), { recursive: true });
-      await writeFile(path.join(fixture.vaultRoot, relativePath), bytes);
-      const cataloguePath = path.join(fixture.vaultRoot, ".runtime/operations/assistant/hosted-media-refs.json");
-      await mkdir(path.dirname(cataloguePath), { recursive: true });
-      const catalogue = { schema: "murph.hosted-media-refs.v1", entries: [{
-        relativePath, mediaKind: "integration-ingest", expiresAt: null, mediaId: "a".repeat(64),
-        sha256: createHash("sha256").update(bytes).digest("hex"), byteSize: bytes.length,
-      }] };
-      await writeFile(cataloguePath, JSON.stringify(catalogue));
+      const original = brotliCompressSync(Buffer.from(`${JSON.stringify(prior)}\n`));
+      await writeFile(path.join(fixture.vaultRoot, relativePath), original);
+      const sha256 = createHash("sha256").update(original).digest("hex");
+      const cold = { relativePath, mediaKind: "integration-ingest" as const, expiresAt: null,
+        mediaId: sha256, sha256, byteSize: original.length,
+        mimeType: "application/octet-stream", recordedAt: "2026-10-01T00:00:00.000Z" };
+      objects.set(cold.mediaId, original);
+      await writeHostedMediaReferenceCatalogue({ vaultRoot: fixture.vaultRoot,
+        catalogue: { schema: "murph.hosted-media-refs.v1", entries: [cold] } });
+      await rm(path.join(fixture.vaultRoot, relativePath));
+      const baseSnapshot = await snapshotHostedBundleRoots({ kind: "vault", roots: [{ root: fixture.vaultRoot, rootKey: "vault" }] });
+      assert.ok(baseSnapshot);
+      fixture.materializeWorkspaceArtifacts = createHostedArtifactMaterializer({
+        vaultRoot: fixture.vaultRoot, operatorHomeRoot: fixture.vaultRoot, mediaStore,
+      });
       fixture.stageDeviceWake();
       await fixture.run(async () => {
         await waitForCondition(() => fixture.effects.length > 0, 5_000);
         return { progressed: false };
       });
-      const failure = failJob.mock.calls.find((call) => call[3] === "HOSTED_COLD_HISTORY_UNAVAILABLE");
-      assert.ok(failure, "reader rejection must reach the job owner as a retryable cold failure");
-      assert.equal(failure[6], true);
-      assert.equal(failure[7], true);
-      const transition = failJob.mock.results[failJob.mock.calls.indexOf(failure)]!;
-      assert.equal(transition.type, "return");
-      assert.equal(transition.value?.disposition, "queued");
-      for (const effect of fixture.effects.splice(0)) await effect();
-      assert.deepEqual(fixture.acks.flatMap((ack) => ack.processedDirtyPayloadIds ?? []), []);
-      await expect(appendJsonlRecord({ vaultRoot: fixture.vaultRoot,
-        relativePath: relativePath.slice(0, -3), record: prior }))
-        .rejects.toMatchObject({ code: "HOSTED_COLD_HISTORY_UNAVAILABLE", retryable: true });
-      assert.deepEqual(await readFile(path.join(fixture.vaultRoot, relativePath)), bytes);
-      assert.deepEqual(JSON.parse(await readFile(cataloguePath, "utf8")), catalogue);
-      assert.deepEqual((await readIntegrationIngestEntries(fixture.vaultRoot)).map((entry) => entry.record), [prior]);
+      assert.equal(fixture.acks.length, 0);
+      if (availability === "available") {
+        assert.equal(failJob.mock.calls.length, 0);
+        const records = await readIntegrationIngestEntries(fixture.vaultRoot);
+        assert.ok(records.some((entry) => entry.record.id === prior.id));
+        assert.ok(records.some((entry) => entry.record.provider === "whoop"));
+        assert.deepEqual((await readHostedMediaReferenceCatalogue({ vaultRoot: fixture.vaultRoot })).entries, []);
+        await rebuildQueryProjection(fixture.vaultRoot);
+        assert.ok((await listMetricPoints(fixture.vaultRoot, { limit: null })).some((point) => point.metricKey === "readiness-score"));
+        for (const effect of fixture.effects.splice(0)) await effect();
+        assert.deepEqual(fixture.acks[0]?.processedDirtyPayloadIds, ["payload_concurrent"]);
+        assert.notEqual(createHash("sha256").update(await readFile(path.join(fixture.vaultRoot, relativePath))).digest("hex"), cold.sha256);
+        assert.deepEqual(Buffer.from(objects.get(cold.mediaId)!), original, "older snapshots retain immutable ciphertext source");
+        await fixture.owner?.quiesce();
+        // A durable append receipt may replay onto the previous sparse snapshot.
+        // Missing history must retain that receipt for retry, never reset it away.
+        const restoreInput = { vaultRoot: fixture.vaultRoot,
+          workspace: createWorkspaceState({ snapshotRef: createWorkspaceSnapshotV2Ref("synthetic-cold-receipt"),
+            redactedStatus: fixture.workspace.redactedStatus }),
+          platform: { ...fixture.platform, mediaStore: { ...mediaStore, get: async () => null },
+            workspaceSnapshotPort: { ...createV2SnapshotFixturePlatform({ mailboxPort: null, workspacePort: null }).workspaceSnapshotPort!,
+              async restoreWorkspaceSnapshot() {
+                await restoreHostedBundleRoots({ bytes: baseSnapshot, expectedKind: "vault", roots: { vault: fixture.vaultRoot } });
+              },
+            },
+          },
+        };
+        await expect(restoreHostedWorkspaceRuntimeJobWorkspace(restoreInput))
+          .rejects.toMatchObject({ code: "HOSTED_COLD_HISTORY_UNAVAILABLE", retryable: true });
+        const recovered = await restoreHostedWorkspaceRuntimeJobWorkspace({ ...restoreInput,
+          platform: { ...restoreInput.platform, mediaStore } });
+        assert.equal(recovered.canonicalWriteReceiptRecoveryFailed, false);
+        assert.ok(recovered.canonicalWriteReceiptCount > 0);
+        assert.deepEqual((await readIntegrationIngestEntries(fixture.vaultRoot)).map((entry) => entry.record), records.map((entry) => entry.record));
+        assert.deepEqual((await readHostedMediaReferenceCatalogue({ vaultRoot: fixture.vaultRoot })).entries, []);
+      } else {
+        const failure = failJob.mock.calls.find((call) => call[3] === "HOSTED_COLD_HISTORY_UNAVAILABLE");
+        assert.ok(failure, "typed cold failure must reach the real job owner");
+        assert.equal(failure[6], true, "failure must be retryable");
+        assert.equal(failure[7], true, "accepted work must survive the retry budget");
+        const transition = failJob.mock.results[failJob.mock.calls.indexOf(failure)]!;
+        assert.equal(transition.type, "return");
+        assert.equal(transition.value?.disposition, "queued");
+        for (const effect of fixture.effects.splice(0)) await effect();
+        assert.deepEqual(fixture.acks.flatMap((ack) => ack.processedDirtyPayloadIds ?? []), [],
+          "revision-only progress cannot acknowledge the unpublished payload");
+        assert.deepEqual((await readHostedMediaReferenceCatalogue({ vaultRoot: fixture.vaultRoot })).entries, [cold]);
+        await assert.rejects(readFile(path.join(fixture.vaultRoot, relativePath)), { code: "ENOENT" });
+      }
     } finally { failJob.mockRestore(); await fixture.cleanup(); }
   });
 
@@ -12484,6 +12534,7 @@ async function createForegroundDeviceFixture(limitPerLane = 10, history?: { now:
     newerDirtyRevision: false, providerAborted: false, conversationImports: 0,
     providerFetches: 0, activeProviderRequests: 0, peakProviderRequests: 0,
     holdBody: false,
+    materializeWorkspaceArtifacts: undefined as HostedWorkspaceArtifactMaterializer | undefined,
     holdProvider: null as ((signal: AbortSignal) => Promise<void>) | null,
     beforeDeviceCheckpoint: null as (() => Promise<void>) | null,
     stageDeviceWake() {
@@ -12546,6 +12597,7 @@ async function createForegroundDeviceFixture(limitPerLane = 10, history?: { now:
           }
           return { status: "imported" };
         },
+        materializeWorkspaceArtifacts: fixture.materializeWorkspaceArtifacts,
         kickSystemWork: () => fixture.owner?.kick(),
         limitPerLane, now: () => now, platform, requestId: "request_concurrent_device",
         runAssistantPhase, runtimeWakeSignal, signal: authority.signal,

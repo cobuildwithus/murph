@@ -1,10 +1,15 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import path from "node:path";
+import { writeFile } from "node:fs/promises";
 import {
   HostedColdHistoryUnavailableError,
   readHostedColdIngestReferences,
+  readHostedMediaReferenceCatalogueValue,
+  parseHostedColdIngestReference,
+  resolveHostedMediaReferenceCataloguePath,
 } from "@murphai/runtime-state/node";
 import { statAndHashVaultFile } from "./raw-artifact-integrity.ts";
+import { prepareFileAtomic } from "./atomic-write.ts";
 
 const materializers = new AsyncLocalStorage<{
   vaultRoot: string;
@@ -44,11 +49,23 @@ export async function materializeIntegrationIngestHistory(
   }
 }
 
-export async function assertIntegrationIngestHistoryWritable(
+// Called by the archived append owner under the canonical write lock. Detach
+// only after verification and before changing bytes, so a crash leaves either a
+// valid referenced shard or an intact inline shard. Old snapshots keep their object.
+export async function thawIntegrationIngestHistoryForAppend(
   vaultRoot: string,
   logicalPath: string,
 ): Promise<void> {
-  if ((await readHostedColdIngestReferences(vaultRoot)).some((entry) => entry.relativePath === `${logicalPath}.br`)) {
+  await materializeIntegrationIngestHistory(vaultRoot, [logicalPath]);
+  const catalogue = await readHostedMediaReferenceCatalogueValue(vaultRoot);
+  const entries = catalogue.entries.filter((entry) =>
+    parseHostedColdIngestReference(entry)?.relativePath !== `${logicalPath}.br`);
+  if (entries.length === catalogue.entries.length) return;
+  try {
+    await prepareFileAtomic(resolveHostedMediaReferenceCataloguePath(vaultRoot), async (tempPath) => {
+      await writeFile(tempPath, `${JSON.stringify({ ...catalogue, entries }, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+    });
+  } catch {
     throw new HostedColdHistoryUnavailableError();
   }
 }
