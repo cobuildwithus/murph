@@ -1125,8 +1125,9 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const first = await startGame(a, b);
     expect(await readGameNoticeRoom(first.gameId, [a, b])).toBeUndefined();
     const second = await startGame(b, a, { terms: { ...TERMS, tasks: [{ seat: 0, text: "Read 20 pages" }, { seat: 1, text: "No phone after 10pm" }] } });
-    expect(await readGameNoticeRoom(first.gameId, [a, b])).toEqual({ tasks: ["100 pushups", "10 min abs"], otherGames: [{ status: "live", tasks: ["Read 20 pages", "No phone after 10pm"] }] });
-    expect((await readGameNoticeRoom(second.gameId, [b, a]))?.tasks).toEqual(["Read 20 pages", "No phone after 10pm"]);
+    // The first game started before the second, so only the second follows an earlier kickoff.
+    expect(await readGameNoticeRoom(first.gameId, [a, b])).toEqual({ tasks: ["100 pushups", "10 min abs"], otherGames: [{ status: "live", tasks: ["Read 20 pages", "No phone after 10pm"] }], startedAfterAnother: false });
+    expect(await readGameNoticeRoom(second.gameId, [b, a])).toEqual({ tasks: ["Read 20 pages", "No phone after 10pm"], otherGames: [{ status: "live", tasks: ["100 pushups", "10 min abs"] }], startedAfterAnother: true });
   });
 
   it("keeps two and ten same-pair games independent and refuses the eleventh", async () => {

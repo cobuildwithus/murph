@@ -181,7 +181,7 @@ describe("game proposal chat delivery", () => {
   });
   it("names the game by its tasks when the pair has other open games", async () => {
     m.game.mockResolvedValue(game("room"));
-    const room = { tasks: ["20 squats", "10 minute stretch"], otherGames: [{ status: "live", tasks: ["Read 20 pages", "No phone after 10pm"] }] };
+    const room = { tasks: ["20 squats", "10 minute stretch"], otherGames: [{ status: "live", tasks: ["Read 20 pages", "No phone after 10pm"] }], startedAfterAnother: false };
     m.room.mockResolvedValue(room);
     await deliverGameChangeProposal("game", "proposal");
     const { instructions } = m.prepareMailbox.mock.calls[0]![0].envelope.notification;

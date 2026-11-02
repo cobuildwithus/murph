@@ -1323,9 +1323,17 @@ export async function readGameRematchNotice(gameId: string, playerMemberIds: rea
 export async function readGameNoticeRoom(gameId: string, playerMemberIds: readonly string[]): Promise<GameNoticeRoom | undefined> {
   const { games } = await readGameChatState("", playerMemberIds);
   const shared = games.find((game) => game.id === gameId);
-  const otherGames = games.filter((game) => game.id !== gameId && (game.status === "live" || game.status === "negotiating"))
-    .map((game) => ({ status: game.status, tasks: game.terms.tasks.map((task) => task.text) }));
-  return shared && otherGames.length > 0 ? { tasks: shared.terms.tasks.map((task) => task.text), otherGames } : undefined;
+  const others = games.filter((game) => game.id !== gameId && (game.status === "live" || game.status === "negotiating"));
+  if (!shared || others.length === 0) return undefined;
+  // Games that went live together each still introduce themselves; only a later start follows an earlier kickoff.
+  const live = others.filter((game) => game.status === "live").map((game) => game.id);
+  const starts = live.length > 0 ? await getPrisma().game.findMany({ where: { id: { in: [gameId, ...live] } }, select: { id: true, startedAt: true } }) : [];
+  const ownStart = starts.find((row) => row.id === gameId)?.startedAt ?? null;
+  return {
+    tasks: shared.terms.tasks.map((task) => task.text),
+    otherGames: others.map((game) => ({ status: game.status, tasks: game.terms.tasks.map((task) => task.text) })),
+    startedAfterAnother: starts.some((row) => row.id !== gameId && row.startedAt !== null && (ownStart === null || row.startedAt < ownStart)),
+  };
 }
 
 /** Shared-chat projection intentionally never calls the viewer-private app view. */

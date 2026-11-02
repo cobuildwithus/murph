@@ -118,7 +118,7 @@ describe("game v1 notification instructions", () => {
     `);
   });
   it("names the game by its tasks when other games share the room, and offers reminders once", () => {
-    const room = { tasks: ["20 squats", "10 minute stretch"], otherGames: [{ status: "live", tasks: ["Read 20 pages", "No phone after 10pm"] }] };
+    const room = { tasks: ["20 squats", "10 minute stretch"], otherGames: [{ status: "live", tasks: ["Read 20 pages", "No phone after 10pm"] }], startedAfterAnother: true };
     const [game] = hostedGameChatStateSchema.parse({ games: [{
       id: "game_synthetic", status: "live", startsOn: null, lengthDays: 7,
       terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: "20 squats" }, { seat: 1, text: "10 minute stretch" }], schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: "prize", item: "coffee run" }] },
@@ -143,9 +143,12 @@ describe("game v1 notification instructions", () => {
     // A second live game in the room gets its own introduction, never a second reminder offer.
     expect(shared[1]).toContain("Skip the reminder offer");
     expect(shared[1]).not.toContain("Briefly offer reminders");
-    const besideInvite = buildGameKickoffInstructions({ kind: "started", game: game!, room: { ...room, otherGames: [{ status: "negotiating", tasks: ["Plank"] }] } });
-    expect(besideInvite).toContain("Briefly offer reminders");
-    expect(besideInvite).toContain("Say which game this is by its tasks");
+    // Games that went live together, or beside an unstarted invite, each still introduce themselves with the offer.
+    for (const first of [{ ...room, startedAfterAnother: false }, { ...room, otherGames: [{ status: "negotiating", tasks: ["Plank"] }], startedAfterAnother: false }]) {
+      const kickoff = buildGameKickoffInstructions({ kind: "started", game: game!, room: first });
+      expect(kickoff).toContain("Briefly offer reminders");
+      expect(kickoff).toContain("Say which game this is by its tasks");
+    }
     // A room with one game reads exactly as before.
     for (const single of [buildGameProposalInstructions(proposal, names), buildGameKickoffInstructions({ kind: "started", game: game! }), buildGameChangeCancelledInstructions(),
       buildGameChangeExpiredInstructions("The schedule changed first."), buildGameRecapInstructions([])]) {

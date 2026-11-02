@@ -45564,7 +45564,7 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-shared-room-e2e-'))
     const permissionHome = await materializeRealCodexHostedPermissionHome(config)
     const { buildGameKickoffInstructions, buildGameProposalInstructions } = await import('@murphai/hosted-execution/runtime-control')
-    const room = { tasks: ['20 squats', '10 minute stretch'], otherGames: [{ status: 'live', tasks: ['Read 20 pages', 'No phone after 10pm'] }] }
+    const room = { tasks: ['20 squats', '10 minute stretch'], otherGames: [{ status: 'live', tasks: ['Read 20 pages', 'No phone after 10pm'] }], startedAfterAnother: true }
     const game = {
       id: 'game_shared_room', status: 'live' as const, lengthDays: 7, startsOn: null,
       terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: '20 squats' }, { seat: 1, text: '10 minute stretch' }], schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: 'prize' as const, item: 'Coffee run' }] },

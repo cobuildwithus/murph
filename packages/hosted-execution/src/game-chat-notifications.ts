@@ -14,7 +14,12 @@ type GameRematchRules = {
 export const GAME_PRIZE_WORDS = "In what you write, call what the loser owes a prize, or a dare when it is one, and say who owes whom, as in \"Ava owes you breakfast in bed.\" Never call it a ticket, bet, wager, stake or winnings, and never say cash in.";
 
 /** The pair's other open games, present only when this game shares its room with them. */
-export type GameNoticeRoom = { tasks: readonly string[]; otherGames: ReadonlyArray<{ status: string; tasks: readonly string[] }> };
+export type GameNoticeRoom = {
+  tasks: readonly string[];
+  otherGames: ReadonlyArray<{ status: string; tasks: readonly string[] }>;
+  /** Another live game started first, so the room has already had its kickoff and reminder offer. */
+  startedAfterAnother: boolean;
+};
 
 /** With several games in one room, a notice must say which game it means. */
 function gameNoticeRoomLines(room: GameNoticeRoom | undefined): string[] {
@@ -46,7 +51,7 @@ export function buildGameProposalInstructions(proposal: { change: HostedGameChan
 /** Canonical shared game context, with no private labels or check-in media. */
 export function buildGameKickoffInstructions(input: { kind: "started"; game: HostedGameChatState["games"][number]; room?: GameNoticeRoom | undefined }): string {
   const { game, room } = input;
-  const alongsideLiveGame = room?.otherGames.some((other) => other.status === "live") === true;
+  const alongsideLiveGame = room?.startedAfterAnother === true;
   return [
     "Both players have agreed to this challenge. Introduce it in one concise, natural group message in your own words.",
     "Explain the agreed tasks, stakes, check-in schedule, duration and start where relevant. Duration means total days, not extra days.",

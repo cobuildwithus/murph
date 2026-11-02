@@ -204,7 +204,7 @@ describe("durable game chat lifecycle", () => {
     expect(m.state).not.toHaveBeenCalled(); expect(m.prepare).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
   });
   it("introduces a second game in a shared room by its tasks without repeating the reminder offer", async () => {
-    const room = { tasks: ["Read a chapter", "Read a chapter"], otherGames: [{ status: "live", tasks: ["50 pushups", "30 minute walk"] }] };
+    const room = { tasks: ["Read a chapter", "Read a chapter"], otherGames: [{ status: "live", tasks: ["50 pushups", "30 minute walk"] }], startedAfterAnother: true };
     m.room.mockResolvedValue(room);
     await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });
     expect(m.room).toHaveBeenCalledExactlyOnceWith("game", players);
