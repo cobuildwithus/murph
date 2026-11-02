@@ -1679,7 +1679,7 @@ async function loadGames(db: Db, gameIds: readonly string[]): Promise<LoadedGame
   });
 }
 
-/** Loads only the media-bearing live entries that can appear in history previews. */
+/** Loads only visible, non-withdrawn, unreported posts that can appear in history previews. */
 async function loadHistoryGames(db: Db, gameIds: readonly string[], viewerId: string): Promise<LoadedGame[]> {
   if (gameIds.length === 0) return [];
   const [rows, entries] = await Promise.all([
@@ -1697,7 +1697,6 @@ async function loadHistoryGames(db: Db, gameIds: readonly string[], viewerId: st
         WHERE entry.game_id IN (${Prisma.join(gameIds)})
           AND entry.attempt > 0
           AND entry.withdrawn_at IS NULL
-          AND cardinality(entry.media_keys) > 0
           AND NOT EXISTS (
             SELECT 1 FROM game_report report
             WHERE report.reporter_member_id = ${viewerId} AND report.entry_id = entry.id

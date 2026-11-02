@@ -1523,6 +1523,41 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(otherSide.people[0]).toMatchObject({ memberId: viewer, record: { won: 1, lost: 2, tied: 1 } });
   });
 
+  it("loads mixed history previews before the cap, excludes invisible words, and signs only photos", async () => {
+    const viewer = await member("WordsViewer", "UTC");
+    const opponent = await member("WordsOpponent", "UTC");
+    const game = await seedSettledGame({ challenger: viewer, opponent, settledAt: new Date(), mediaDays: 6 });
+    // The first six visible posts must include words from both seats.
+    const wordsIndexes = [0, 1, 3, 5, 6, 7];
+    for (const index of wordsIndexes) {
+      const memberId = index % 2 === 0 ? viewer : opponent;
+      const textEncrypted = await sealGameText({ table: "game_entry", field: "text", memberId, rowId: game.entryIds[index] }, `Walk complete ${index}.`);
+      await getPrisma().gameEntry.update({ where: { id: game.entryIds[index] }, data: { kind: "words", mediaKeys: [], textEncrypted } });
+    }
+    await getPrisma().gameReport.create({ data: {
+      id: randomUUID(), reporterMemberId: viewer, reportedMemberId: opponent,
+      gameId: game.gameId, entryId: game.entryIds[1], about: "post", reason: "other",
+    } });
+    await getPrisma().gameEntry.update({ where: { id: game.entryIds[3] }, data: { withdrawnAt: new Date() } });
+    await getPrisma().gameEntry.update({ where: { id: game.entryIds[5] }, data: { attempt: 0, kind: "excuse" } });
+    const history = await readHistory(viewer);
+    const previews = history.people[0].games[0].previews;
+    expect(previews.map(preview => preview.entryId)).toEqual([0, 2, 4, 6, 7, 8].map(index => game.entryIds[index]));
+    expect(previews.map(preview => preview.kind)).toEqual(["words", "photo", "photo", "words", "words", "photo"]);
+    expect(previews[0]).toEqual({ entryId: game.entryIds[0], kind: "words", mediaUrls: [], text: "Walk complete 0.", data: null, mine: true });
+    // Reports are viewer-specific; withdrawn and hidden opponent entries stay out.
+    const otherSide = await readHistory(opponent);
+    expect(otherSide.people[0].games[0].previews.map(preview => preview.entryId)).toEqual([0, 1, 2, 4, 6, 7].map(index => game.entryIds[index]));
+    vi.spyOn(gameMedia, "servesSignedGameMedia").mockReturnValue(true);
+    const delivery = { url: "https://example.com/synthetic-photo", expiresAt: "2030-01-01T00:00:00.000Z" };
+    const sign = vi.spyOn(gameMedia, "gameMediaDelivery").mockResolvedValue(delivery);
+    const signed = await withHistoryPhotoDeliveries(history, viewer);
+    expect(sign.mock.calls.map(([key]) => key)).toEqual([2, 4, 8].map(index => game.mediaKeys[index]));
+    for (const preview of signed.people[0].games[0].previews) {
+      expect(preview.delivery).toEqual(preview.kind === "photo" ? delivery : undefined);
+    }
+  });
+
   it("opens history terms in the existing batch without opening recaps or relationships", async () => {
     const viewer = await member("ProjectionViewer", "UTC");
     const opponent = await member("ProjectionOpponent", "UTC");

@@ -90,7 +90,13 @@ today first, then your other live games, invites, and results.
 `GET /api/game/v1/history` supplies the You tab's Games section: it groups only
 settled 1v1 games by unblocked opponent, orders people and their games by newest
 settlement, returns the viewer's record and score plus up to six authorized
-shot previews per game, and bounds both people and games per person.
+post previews per game, and bounds both people and games per person.
+Previews include words and media posts under the same visibility rules, excluding
+withdrawn, hidden and viewer-reported posts. They keep day, player seat, receipt
+time and entry ID order, capped at six after filtering. Words use the existing
+entry shape: `kind: "words"`, empty `mediaUrls`, and the existing `text` and `data`
+fields. Compatible iOS clients show words in their day-order slot; older builds
+omit previews without pictures.
 Each game also includes `tasks: { mine: string; theirs: string }`, oriented by
 player seat, and `stake: { kind: "prize" | "dare"; item: string } | null`.
 These use the final agreed terms and exactly the task and stake wording in
@@ -108,7 +114,7 @@ query. Older clients may ignore them. Example game fields:
 }
 ```
 
-The latest game's previews for each person may also include `delivery` with a
+The latest game's media previews for each person may also include `delivery` with a
 five-minute signed URL for the small rendition and its ISO `expiresAt`. Keep
 `mediaUrls` as cache identity; if delivery is absent or expired, request the
 stable media route as usual. Signing uses the same media authorization and
