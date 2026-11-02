@@ -57,7 +57,6 @@ describe("hosted execution usage record route", () => {
       provider: "codex-cli",
       schema: ASSISTANT_USAGE_SCHEMA,
       sessionId: "asst_123",
-      stripeMeterSource: "murph",
       turnId: "turn_123",
       usageId: "turn_123.attempt-1",
       usageExtractionVersion: "legacy",
@@ -97,7 +96,6 @@ describe("hosted execution usage record route", () => {
         expect.objectContaining({
           provider: "codex-cli",
           schema: ASSISTANT_USAGE_SCHEMA,
-          stripeMeterSource: "murph",
           usageId: "turn_123.attempt-1",
         }),
       ],
@@ -124,7 +122,6 @@ describe("hosted execution usage record route", () => {
       provider: "codex-cli",
       schema: ASSISTANT_USAGE_SCHEMA,
       sessionId: "asst_123",
-      stripeMeterSource: "murph",
       turnId: "turn_123",
       usageId: "turn_123.attempt-1",
       usageExtractionVersion: "legacy",

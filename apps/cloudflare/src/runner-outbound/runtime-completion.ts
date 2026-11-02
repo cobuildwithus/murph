@@ -53,9 +53,9 @@ export async function handleRunnerRuntimeCompletionRequest(input: {
 
   const state = await commandHostedRuntimeOwner({ source: input.env, userId: input.userId, command: { operation: "reconcile" } });
   const owner = state.owner;
-  if (state.cutover !== "postgres" || owner?.attemptId !== authority.attemptId || owner.generation !== authority.generation || !owner.runnerContainerName) {
+  if (owner?.attemptId !== authority.attemptId || owner.generation !== authority.generation || !owner.runnerContainerName) {
     let reason: HostedRuntimeCompletionReceiptReason = "owner_unconfirmed";
-    if (state.cutover === "postgres" && owner) {
+    if (owner) {
       // Release clears the attempt, but warm reuse can retain the target.
       // Idle alone is not completion evidence; a newer generation proves only
       // supersession, never completion or delivery of this result.

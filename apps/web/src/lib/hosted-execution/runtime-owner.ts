@@ -1,7 +1,7 @@
 import { HOSTED_RUNTIME_REPLICA_POST_STOP_DRAIN_MS } from "@murphai/hosted-execution/runtime-resources";
 import { randomUUID } from "node:crypto";
 
-import { Prisma, type HostedRuntimeOwner, type PrismaClient } from "@prisma/client";
+import { Prisma, type HostedRuntimeOwner as StoredHostedRuntimeOwner, type PrismaClient } from "@prisma/client";
 import type { HostedWorkspaceInvocationProcessingMode } from "@murphai/hosted-execution/runtime-control";
 
 import { activeHostedMemberAccessWithParticipantsWhere, readGameChatAllowanceBeneficiary } from "../hosted-onboarding/member-access";
@@ -9,8 +9,9 @@ import { isGameEnabled } from "../game/access";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import { hostedHealthDataConsentNotRevokedWhere } from "../legal/consent";
-import { resolveHostedRuntimeMemberBackend, type HostedRuntimeBackend } from "@murphai/hosted-execution/runtime-migration";
-import { lockHostedRuntimeMemberCutoverTx } from "./runtime-cutover";
+
+// Migration columns remain in the schema only until contract cleanup.
+export type HostedRuntimeOwner = Omit<StoredHostedRuntimeOwner, "migrationPhase" | "migrationId">;
 
 export interface HostedRuntimeIdentity {
   userId: string;
@@ -28,11 +29,10 @@ export async function claimHostedRuntime(input: {
   now?: Date;
 }): Promise<
   | { cutover: "postgres"; status: "claimed" | "existing"; owner: HostedRuntimeOwner }
-  | { cutover: HostedRuntimeBackend; status: "blocked"; reason: "cutover" | "admission" }
+  | { cutover: "postgres"; status: "blocked"; reason: "admission" }
 > {
   return input.prisma.$transaction(async (tx) => {
-    const cutover = await lockHostedRuntimeMemberCutoverTx(tx, input.userId);
-    if (cutover !== "postgres") return { cutover, status: "blocked", reason: "cutover" };
+    const cutover = "postgres" as const;
     await lockHostedMemberRow(tx, input.userId);
     const now = input.now ?? new Date();
     const admission = await readRuntimeAdmissionTx(tx, input.userId, input.processingMode, now);
@@ -87,8 +87,8 @@ export async function claimHostedRuntime(input: {
 export async function readHostedRuntimeDirectWakeOwner(input: {
   prisma: PrismaClient; userId: string;
 }): Promise<HostedRuntimeOwner | null> {
-  const { cutover, owner } = await readRuntimeEffectOwner(input.prisma, input.userId);
-  if (cutover !== "postgres" || !owner?.runnerContainerName || owner.workspaceVersion === null
+  const owner = await readRuntimeEffectOwner(input.prisma, input.userId);
+  if (!owner?.runnerContainerName || owner.workspaceVersion === null
     || owner.processingMode === "inbox_media_retention") return null;
   return await readRuntimeAdmissionTx(input.prisma, input.userId, "default", new Date()) ? owner : null;
 }
@@ -183,44 +183,6 @@ export async function requireHostedRuntimeOwnerTx(
   tx: OwnerTransaction,
   identity: HostedRuntimeIdentity,
 ): Promise<HostedRuntimeOwner> {
-  if (await lockHostedRuntimeMemberCutoverTx(tx, identity.userId) !== "postgres") throw staleRuntimeError();
-  return requireOwnerAfterCutoverLockTx(tx, identity);
-}
-
-/** Bind even legacy callbacks to the authenticated member. The member lock
- * remains held through canonical publication and fences that member's seal.
- */
-export async function requireHostedRuntimeCallbackTx(
-  tx: OwnerTransaction,
-  userId: string,
-  identity: HostedRuntimeIdentity | null,
-): Promise<HostedRuntimeOwner | null> {
-  if (identity && identity.userId !== userId) throw staleRuntimeError();
-  const backend = await lockHostedRuntimeMemberCutoverTx(tx, userId);
-  if (backend === "legacy") return null;
-  if (backend !== "postgres" || !identity || identity.userId !== userId) throw staleRuntimeError();
-  return requireOwnerAfterCutoverLockTx(tx, identity);
-}
-
-/** Preflight only: a lock released before the handler cannot fence its work.
- * Canonical publications still use requireHostedRuntimeCallbackTx. */
-export async function requireHostedRuntimeCallback(
-  prisma: PrismaClient,
-  userId: string,
-  identity: HostedRuntimeIdentity | null,
-): Promise<void> {
-  if (identity && identity.userId !== userId) throw staleRuntimeError();
-  const { cutover, owner } = await readRuntimeEffectOwner(prisma, userId);
-  if (cutover === "legacy") return;
-  if (cutover !== "postgres" || !identity || !owner
-    || owner.attemptId !== identity.attemptId
-    || owner.generation.toString() !== identity.generation) throw staleRuntimeError();
-}
-
-async function requireOwnerAfterCutoverLockTx(
-  tx: OwnerTransaction,
-  identity: HostedRuntimeIdentity,
-): Promise<HostedRuntimeOwner> {
   const members = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT id FROM hosted_member WHERE id = ${identity.userId} FOR UPDATE
   `;
@@ -233,6 +195,33 @@ async function requireOwnerAfterCutoverLockTx(
   }
   return owner;
 }
+
+/** Bind callbacks to the authenticated member. The member lock
+ * remains held through canonical publication.
+ */
+export async function requireHostedRuntimeCallbackTx(
+  tx: OwnerTransaction,
+  userId: string,
+  identity: HostedRuntimeIdentity | null,
+): Promise<HostedRuntimeOwner> {
+  if (!identity || identity.userId !== userId) throw staleRuntimeError();
+  return requireHostedRuntimeOwnerTx(tx, identity);
+}
+
+/** Preflight only: a lock released before the handler cannot fence its work.
+ * Canonical publications still use requireHostedRuntimeCallbackTx. */
+export async function requireHostedRuntimeCallback(
+  prisma: PrismaClient,
+  userId: string,
+  identity: HostedRuntimeIdentity | null,
+): Promise<void> {
+  if (identity && identity.userId !== userId) throw staleRuntimeError();
+  const owner = await readRuntimeEffectOwner(prisma, userId);
+  if (!identity || !owner
+    || owner.attemptId !== identity.attemptId
+    || owner.generation.toString() !== identity.generation) throw staleRuntimeError();
+}
+
 
 /** Metadata only: never releases or grants runtime authority. The first failure
  * of an exact attempt is durable and duplicate native reports are idempotent. */
@@ -364,8 +353,7 @@ async function readRuntimeAdmissionTx(
 }
 
 const runtimeOwnerColumns = Prisma.sql`
-  owner.user_id AS "userId", owner.migration_phase AS "migrationPhase",
-  owner.migration_id AS "migrationId", owner.generation, owner.attempt_id AS "attemptId", owner.phase,
+  owner.user_id AS "userId", owner.generation, owner.attempt_id AS "attemptId", owner.phase,
   owner.processing_mode AS "processingMode", owner.allocation_id AS "allocationId",
   owner.runner_container_name AS "runnerContainerName", owner.workspace_version AS "workspaceVersion",
   owner.provider_egress_token_hash AS "providerEgressTokenHash",
@@ -386,32 +374,23 @@ export async function lockHostedRuntimeOwnerRowTx(tx: OwnerTransaction, userId: 
 /** External effects cannot hold a database lock through provider I/O. Read their
  * authority in one statement snapshot; canonical publications still lock it. */
 async function readRuntimeEffectOwner(prisma: PrismaClient, userId: string) {
-  type Snapshot = { cutoverPhase: string; memberExists: boolean }
-    & (HostedRuntimeOwner | { [K in keyof HostedRuntimeOwner]: null });
-  const rows = await prisma.$queryRaw<Snapshot[]>`
-    SELECT gate.phase AS "cutoverPhase",
-      EXISTS (SELECT 1 FROM hosted_member WHERE id = ${userId}) AS "memberExists",
-      ${runtimeOwnerColumns}
-    FROM hosted_runtime_cutover AS gate
-    LEFT JOIN hosted_runtime_owner AS owner ON owner.user_id = ${userId}
-    WHERE gate.id = 'runtime'
+  const rows = await prisma.$queryRaw<HostedRuntimeOwner[]>`
+    SELECT ${runtimeOwnerColumns}
+    FROM hosted_runtime_owner AS owner
+    JOIN hosted_member AS member ON member.id = owner.user_id
+    WHERE owner.user_id = ${userId} AND owner.phase IN ('starting', 'active')
   `;
-  const snapshot = rows[0];
-  if (!snapshot) throw new Error("Hosted runtime cutover state is missing.");
-  const { cutoverPhase, memberExists, ...owner } = snapshot;
-  const cutover = resolveHostedRuntimeMemberBackend(cutoverPhase, owner.migrationPhase);
-  return { cutover, owner: cutover === "postgres" && memberExists && owner.userId !== null
-    && (owner.phase === "starting" || owner.phase === "active") ? owner : null };
+  return rows[0] ?? null;
 }
 
 export async function authorizeHostedRuntimeEffect(input: {
   prisma: PrismaClient; userId: string; attemptId: string; generation: string;
   runnerContainerName: string | null; managedAi: boolean;
-}): Promise<{ cutover: HostedRuntimeBackend; owner: HostedRuntimeOwner | null }> {
-  const { cutover, owner } = await readRuntimeEffectOwner(input.prisma, input.userId);
-  if (cutover === "postgres" && (!owner || owner.attemptId !== input.attemptId
-    || owner.generation.toString() !== input.generation)) throw staleRuntimeError();
-  return { cutover, owner: owner && (input.runnerContainerName === null
+}): Promise<{ cutover: "postgres"; owner: HostedRuntimeOwner | null }> {
+  const owner = await readRuntimeEffectOwner(input.prisma, input.userId);
+  if (!owner || owner.attemptId !== input.attemptId
+    || owner.generation.toString() !== input.generation) throw staleRuntimeError();
+  return { cutover: "postgres", owner: owner && (input.runnerContainerName === null
     || owner.runnerContainerName === input.runnerContainerName)
     && (!input.managedAi || owner.platformAiUsageAllowed) ? owner : null };
 }
@@ -429,20 +408,19 @@ function staleRuntimeError() {
 
 export async function authorizeHostedRuntimeProvider(input: {
   prisma: PrismaClient; userId: string; runnerContainerName: string | null; providerEgressTokenHash: string | null; providerKind: string;
-}): Promise<{ cutover: HostedRuntimeBackend; owner: HostedRuntimeOwner | null }> {
-  const { cutover, owner } = await readRuntimeEffectOwner(input.prisma, input.userId);
-  if (!owner?.attemptId || !owner.runnerContainerName || owner.workspaceVersion === null) return { cutover, owner: null };
+}): Promise<{ cutover: "postgres"; owner: HostedRuntimeOwner | null }> {
+  const owner = await readRuntimeEffectOwner(input.prisma, input.userId);
+  if (!owner?.attemptId || !owner.runnerContainerName || owner.workspaceVersion === null) return { cutover: "postgres", owner: null };
   if (input.runnerContainerName !== null) {
-    if (owner.runnerContainerName !== input.runnerContainerName || !["mapbox", "murph_data_api", "openai", "workers_ai_transcribe"].includes(input.providerKind)) return { cutover, owner: null };
-  } else if (!input.providerEgressTokenHash || owner.providerEgressTokenHash !== input.providerEgressTokenHash) return { cutover, owner: null };
-  return { cutover, owner };
+    if (owner.runnerContainerName !== input.runnerContainerName || !["mapbox", "murph_data_api", "openai", "workers_ai_transcribe"].includes(input.providerKind)) return { cutover: "postgres", owner: null };
+  } else if (!input.providerEgressTokenHash || owner.providerEgressTokenHash !== input.providerEgressTokenHash) return { cutover: "postgres", owner: null };
+  return { cutover: "postgres", owner };
 }
 
 /** Trusted native notification after irreversible slot retirement. Exact target
  * matching makes delayed notifications harmless to a replacement assignment. */
 export async function recordHostedRuntimeTargetRetired(input: { prisma: PrismaClient; userId: string; runnerContainerName: string }): Promise<boolean> {
   return input.prisma.$transaction(async tx => {
-    if (await lockHostedRuntimeMemberCutoverTx(tx, input.userId) !== "postgres") return false;
     const current = await lockHostedRuntimeOwnerRowTx(tx, input.userId);
     if (!current || current.runnerContainerName !== input.runnerContainerName) return false;
     await tx.hostedRuntimeOwner.update({ where: { userId: input.userId }, data: {
@@ -461,7 +439,6 @@ export async function recordHostedRuntimeTargetRetired(input: { prisma: PrismaCl
  * An uncertain PUT remains blocking until its adapter completion is recorded. */
 export async function isHostedRuntimeDeletionReady(input: { prisma: PrismaClient; userId: string }): Promise<boolean> {
   return input.prisma.$transaction(async tx => {
-    if (await lockHostedRuntimeMemberCutoverTx(tx, input.userId) !== "postgres") return false;
     const members = await tx.$queryRaw<Array<{ id: string }>>`
       SELECT id FROM hosted_member WHERE id = ${input.userId} FOR UPDATE
     `;

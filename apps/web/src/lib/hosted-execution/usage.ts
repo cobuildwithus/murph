@@ -57,9 +57,6 @@ interface RecordHostedAiUsageWithAllowanceResult extends RecordHostedAiUsageResu
 
 type HostedAiUsageClient = PrismaClient | Prisma.TransactionClient;
 
-const HOSTED_AI_USAGE_STRIPE_EXPORT_DISABLED_MESSAGE =
-  "Hosted AI usage is recorded locally; Stripe usage metering is not configured.";
-
 const HOSTED_AI_USAGE_IMMUTABLE_SELECT = {
   allowanceBeneficiaryMemberId: true,
   operatorTaskId: true,
@@ -89,7 +86,6 @@ const HOSTED_AI_USAGE_IMMUTABLE_SELECT = {
   routeId: true,
   servedModel: true,
   sessionId: true,
-  stripeMeterSource: true,
   surface: true,
   tokenPricingBasis: true,
   totalTokens: true,
@@ -186,7 +182,6 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
           throw new TypeError("Hosted runtime usage member does not match its authority.");
         }
         if (input.runtimeIdentity) {
-          await tx.$queryRaw`SELECT phase FROM hosted_runtime_cutover WHERE id = 'runtime' FOR SHARE`;
           const [funding, recordedFunding] = await Promise.all([
             tx.hostedRuntimeOwner.findUnique({
               where: { userId: memberId }, select: { allowanceBeneficiaryMemberId: true },
@@ -450,10 +445,6 @@ async function persistHostedAiUsageRecordTx(input: {
     record: input.record,
     storedRecord,
   });
-  await markHostedAiUsageStripeExportSkippedTx({
-    id: storedRecord.id,
-    tx: input.tx,
-  });
   return storedRecord.allowanceBeneficiaryMemberId;
 }
 
@@ -566,7 +557,6 @@ function buildHostedAiUsageCreateData(
     gatewayTagsJson: record.gatewayTags,
     reportingUserId: record.reportingUserId,
     surface: record.surface,
-    stripeMeterSource: record.stripeMeterSource,
     tokenPricingBasis: record.tokenPricingBasis,
     triggerKind: record.triggerKind,
     inputTokens: record.inputTokens,
@@ -575,29 +565,7 @@ function buildHostedAiUsageCreateData(
     cachedInputTokens: record.cachedInputTokens,
     cacheWriteTokens: record.cacheWriteTokens,
     totalTokens: record.totalTokens,
-    stripeMeterError: HOSTED_AI_USAGE_STRIPE_EXPORT_DISABLED_MESSAGE,
-    stripeMeterStatus: "skipped",
   };
-}
-
-async function markHostedAiUsageStripeExportSkippedTx(input: {
-  id: string;
-  tx: Prisma.TransactionClient;
-}): Promise<void> {
-  await input.tx.hostedAiUsage.updateMany({
-    where: {
-      id: input.id,
-      stripeMeterSource: "murph",
-      stripeMeterStatus: {
-        in: ["pending", "processing"],
-      },
-    },
-    data: {
-      stripeMeterError: HOSTED_AI_USAGE_STRIPE_EXPORT_DISABLED_MESSAGE,
-      stripeMeterNextAttemptAt: null,
-      stripeMeterStatus: "skipped",
-    },
-  });
 }
 
 function assertStoredHostedAiUsageMatchesRecord(input: {
@@ -673,11 +641,6 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
       "tokenPricingBasis",
       input.storedRecord.tokenPricingBasis,
       expected.tokenPricingBasis,
-    ),
-    compareHostedAiUsageField(
-      "stripeMeterSource",
-      input.storedRecord.stripeMeterSource,
-      expected.stripeMeterSource,
     ),
     compareHostedAiUsageField("triggerKind", input.storedRecord.triggerKind, expected.triggerKind),
     compareHostedAiUsageField("inputTokens", input.storedRecord.inputTokens, expected.inputTokens),

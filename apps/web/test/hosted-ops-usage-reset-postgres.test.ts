@@ -1297,7 +1297,6 @@ function makeIncludedUsageRecord(input: {
     schema: "murph.assistant-usage.v1",
     servedModel: "gpt-6.1-sol",
     sessionId: `session_${input.fixtureId}`,
-    stripeMeterSource: "murph",
     surface: "hosted-runner",
     tokenPricingBasis: "standard",
     totalTokens: 165,

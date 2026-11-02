@@ -362,8 +362,7 @@ export async function handleTestReadActiveRuntimeFenceRoute(
     return boundUserResponse;
   }
 
-  const { owner, cutover } = await commandHostedRuntimeOwner({ source: context.env, userId, command: { operation: "reconcile" } });
-  if (cutover !== "postgres") throw new Error("Local runtime test control requires Postgres ownership.");
+  const { owner } = await commandHostedRuntimeOwner({ source: context.env, userId, command: { operation: "reconcile" } });
   return json(owner?.attemptId ? { attemptId: owner.attemptId, processingMode: owner.processingMode, runnerContainerName: owner.runnerContainerName } : null);
 }
 
@@ -688,7 +687,7 @@ function parseTestPositiveIntegerString(value: string): number | "invalid" {
 
 async function readLocalRuntimeTarget(context: WorkerRouteContext, userId: string): Promise<string> {
   const state = await commandHostedRuntimeOwner({ source: context.env, userId, command: { operation: "reconcile" } });
-  if (state.cutover !== "postgres" || !state.owner?.runnerContainerName) throw new Error("Local runtime test control requires a selected Postgres target.");
+  if (!state.owner?.runnerContainerName) throw new Error("Local runtime test control requires a selected Postgres target.");
   return state.owner.runnerContainerName;
 }
 

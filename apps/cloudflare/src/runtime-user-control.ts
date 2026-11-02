@@ -17,8 +17,8 @@ type RuntimeUserControlSource = Pick<WorkerEnvironmentSource, "BUNDLES" | "GAME_
 export async function controlPostgresRuntimeVoice(
   source: RuntimeUserControlSource, userId: string, request: HostedVoiceControlRequest,
 ): Promise<HostedVoiceControlResponse> {
-  const { owner, cutover } = await commandHostedRuntimeOwner({ source, userId, command: { operation: "reconcile" } });
-  if (cutover !== "postgres" || !owner || owner.attemptId !== request.attemptId
+  const { owner } = await commandHostedRuntimeOwner({ source, userId, command: { operation: "reconcile" } });
+  if (!owner || owner.attemptId !== request.attemptId
     || owner.generation !== request.leaseGeneration || !owner.runnerContainerName
     || owner.phase === "idle") return { kind: "unavailable" };
   if (request.action === "connect" && (owner.phase === "retiring" || !owner.platformAiUsageAllowed)) {
@@ -51,7 +51,7 @@ export async function readPostgresRunnerStatus(source: RuntimeUserControlSource,
     readRuntimeControl(source, userId, HOSTED_RUNTIME_STATUS_PATH,
       options?.logLimit === undefined ? undefined : `?logLimit=${options.logLimit}`).then(parseHostedRuntimeWebStatusResponse),
   ]);
-  if (ownership.cutover !== "postgres" || status.userId !== userId || (status.workspace && status.workspace.userId !== userId)) {
+  if (status.userId !== userId || (status.workspace && status.workspace.userId !== userId)) {
     throw new Error("Runtime status authority is unavailable.");
   }
   return { ...status, inFlight: ownership.owner !== null && ownership.owner.phase !== "idle",
@@ -93,7 +93,6 @@ export async function stopPostgresRuntimeForUser(source: RuntimeUserControlSourc
 
 export async function reconcilePostgresRuntimeConsent(source: RuntimeUserControlSource, userId: string) {
   const ownership = await commandHostedRuntimeOwner({ source, userId, command: { operation: "reconcile" } });
-  if (ownership.cutover !== "postgres") throw new Error("Runtime consent authority is unavailable.");
   const admission = parseHostedRuntimeHealthDataAdmissionResponse(await readRuntimeControl(source, userId, HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH));
   if (admission.userId !== userId) throw new Error("Runtime consent member mismatch.");
   const stopped = admission.processingAllowed
@@ -104,10 +103,9 @@ export async function reconcilePostgresRuntimeConsent(source: RuntimeUserControl
 
 export async function deletePostgresRunnerUserData(source: RuntimeUserControlSource, userId: string) {
   const ownership = await commandHostedRuntimeOwner({ source, userId, command: { operation: "reconcile" } });
-  if (ownership.cutover !== "postgres") throw new Error("Runtime deletion authority is unavailable.");
   await stopPostgresRuntimeForUser(source, userId, ownership.owner);
   const admission = await commandHostedRuntimeOwner({ source, userId, command: { operation: "deletion_ready" } });
-  if (admission.cutover !== "postgres" || admission.status !== "authorized") {
+  if (admission.status !== "authorized") {
     return { ok: false as const, reason: "r2_upload_drain_pending" as const, retryAfterSeconds: 1, userId };
   }
   await deleteGameImagesForUser(source.GAME_IMAGES, userId, source.BUNDLES,

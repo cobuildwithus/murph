@@ -108,7 +108,6 @@ const BASE_USAGE_RECORD = {
   schema: "murph.assistant-usage.v1",
   servedModel: "gpt-5.6-sol",
   sessionId: "asst_123",
-  stripeMeterSource: "murph",
   surface: null,
   tokenPricingBasis: "standard",
   totalTokens: 165,
@@ -161,7 +160,6 @@ const HOSTED_XAI_SEARCH_USAGE_WIRE_FIXTURE = {
     schema: "murph.assistant-usage.v1",
     servedModel: null,
     sessionId: "turn_xai_search_00000000000000000000000000000000",
-    stripeMeterSource: "murph",
     surface: "hosted-runner",
     tokenPricingBasis: "standard",
     totalTokens: null,
@@ -5402,7 +5400,6 @@ function createGatePrisma(input: {
     },
   };
 }
-
 
 describe("operator-funded allowance accounting", () => {
   it.each(["diagnostic", "member_message"])("records %s provider cost without spending allowance or credits, including replay", async (kind) => {

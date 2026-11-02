@@ -47,7 +47,6 @@ export async function commandHostedRuntimeMedia(input: {
   const result = parseHostedRuntimeMediaResponse(JSON.parse(await readHostedWebControlPlaneResponseText({
     response, description: "Hosted runtime media", maxBytes: 16 * 1024, signal: null, timeoutMs: env.webControlTimeoutMs,
   })));
-  if (result.cutover !== "postgres") throw new Error("Hosted runtime media ownership is not active.");
   return result;
 }
 

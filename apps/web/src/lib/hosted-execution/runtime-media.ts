@@ -1,4 +1,3 @@
-import { lockHostedRuntimeMemberCutoverTx } from "./runtime-cutover";
 import { HOSTED_RUNTIME_ORPHAN_GRACE_MS } from "@murphai/hosted-execution/runtime-resources";
 import type { HostedRuntimeMedia, PrismaClient, Prisma } from "@prisma/client";
 import { hostedMediaObjectKey, hostedPrivateMediaObjectKey } from "@murphai/hosted-execution/storage-paths";
@@ -17,9 +16,6 @@ export async function executeHostedRuntimeMediaCommand(input: {
   const objectKey = isPrivate ? await hostedPrivateMediaObjectKey({ userId: input.userId, sha256: mediaId })
     : await hostedMediaObjectKey({ userId: input.userId, mediaId });
   return input.prisma.$transaction(async (tx) => {
-    const cutover = await lockHostedRuntimeMemberCutoverTx(tx, input.userId);
-    const result = (applied: boolean, reason: HostedRuntimeMediaResponse["reason"] = null, purge: HostedRuntimeMediaPurge | null = null): HostedRuntimeMediaResponse => ({ cutover, applied, reason, purge });
-    if (cutover !== "postgres") return result(false);
     if (command.operation === "admit_read" || command.operation === "register" || command.operation === "retire" || command.operation === "admit_put" || command.operation === "admit_private_put") await requireHostedRuntimeOwnerTx(tx, { ...command, userId: input.userId });
     // Also serialize reads/cleanup for resource-only members whose account row
     // has already been deleted. No account FK owns this cleanup obligation.

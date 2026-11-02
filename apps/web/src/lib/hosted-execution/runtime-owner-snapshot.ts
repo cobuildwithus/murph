@@ -1,4 +1,4 @@
-import type { HostedRuntimeOwner } from "@prisma/client";
+import type { HostedRuntimeOwner } from "./runtime-owner";
 
 export function projectHostedRuntimeOwner(owner: HostedRuntimeOwner | null) {
   if (!owner) return null;

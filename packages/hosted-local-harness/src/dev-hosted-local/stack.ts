@@ -1307,15 +1307,7 @@ async function prepareHostedLocalDatabase({
         name: "setup",
         signal: abortSignal,
       });
-      await runCommand("pnpm", [
-        "--dir", "apps/web", "exec", "prisma", "db", "execute",
-        "--file", "scripts/initialize-local-runtime-cutover.sql",
-      ], {
-        cwd: repoRoot,
-        env: runtimeEnv,
-        name: "setup",
-        signal: abortSignal,
-      });
+;
     } else {
       await runCommand("pnpm", ["--dir", "apps/web", "prisma:migrate:deploy"], {
         cwd: repoRoot,

@@ -1,4 +1,3 @@
-import { lockHostedRuntimeMemberCutoverTx } from "./runtime-cutover";
 import { HOSTED_RUNTIME_ORPHAN_GRACE_MS } from "@murphai/hosted-execution/runtime-resources";
 import type { PrismaClient } from "@prisma/client";
 import { Prisma } from "@prisma/client";
@@ -21,7 +20,6 @@ export async function executeHostedRuntimeReplicaPutCommand(input: {
     if (uploads.some(upload => !allowedKeys.has(upload.objectKey))) throw new TypeError("Replica upload is outside its root resource.");
   }
   return input.prisma.$transaction(async tx => {
-    if (await lockHostedRuntimeMemberCutoverTx(tx, input.userId) !== "postgres") return { applied: false };
     if (command.operation === "release" || command.operation === "release_batch") {
       // Only exact completed/confirmed-aborted writes are acknowledged, even
       // after runtime revocation or member deletion. Siblings remain independent.

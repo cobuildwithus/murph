@@ -228,7 +228,6 @@ async function runClaimedHostedAccountDeletionCleanup(input: {
   try {
     const deadline = createCleanupDeadline(attemptTimeoutMs);
     const payload = await decryptCleanupPayload(cleanup, deadline.signal);
-    const runtimeEnrollment = await advanceCleanupRuntimeEnrollment(input.prisma, cleanup, payload);
     if (
       !Number.isSafeInteger(cleanup.temporalNextRuntimeIndex)
       || cleanup.temporalNextRuntimeIndex < 0
@@ -273,9 +272,8 @@ async function runClaimedHostedAccountDeletionCleanup(input: {
     );
     const temporalCompletedAt = cleanup.temporalCompletedAt
       ?? (temporal.completed ? now : null);
-    const cleanupMadeProgress = runtimeEnrollment.madeProgress
-      || temporalNextRuntimeIndex > cleanup.temporalNextRuntimeIndex;
-    let cleanupPending = runtimeEnrollment.pending || [cloudflareCompletedAt,
+    const cleanupMadeProgress = temporalNextRuntimeIndex > cleanup.temporalNextRuntimeIndex;
+    let cleanupPending = [cloudflareCompletedAt,
       runtimeLogsCompletedAt, temporalCompletedAt, stripeCompletedAt].some(at => !at);
 
     if (cleanupPending) {
@@ -431,58 +429,6 @@ export function pendingHostedAccountDeletionCleanupResult(
       stripeCustomer: { errorCode, status: "failed" },
     },
   };
-}
-
-/** Narrow internal projection for the rolling runtime census. The provider
- * call must run outside any transaction; unrelated vendor identifiers never
- * leave this owner. Payload bytes are zeroed by the existing decrypt helper.
- */
-export async function readHostedAccountCleanupRuntimePage(input: {
-  cleanup: Pick<HostedAccountDeletionCleanup, "id" | "environment" | "kmsKeyName" | "payloadCiphertext">;
-  after: number;
-  signal: AbortSignal;
-}) {
-  const payload = await decryptCleanupPayload(input.cleanup, input.signal);
-  return runtimeCleanupPage(payload, input.after);
-}
-
-function runtimeCleanupPage(payload: CleanupPayload, after: number) {
-  if (!Number.isSafeInteger(after) || after < 0 || after >= payload.runtimeMemberIds.length) {
-    throw new TypeError("Runtime cleanup enrollment cursor is invalid.");
-  }
-  const userIds = payload.runtimeMemberIds.slice(after, after + 100);
-  const nextIndex = after + userIds.length;
-  return { userIds, nextIndex: nextIndex < payload.runtimeMemberIds.length ? nextIndex : null };
-}
-
-/** Shared by historical census and ordinary cleanup retries. Its caller owns
- * the shared rolling-campaign lock. No provider work occurs in this transaction.
- */
-export async function retainHostedAccountCleanupRuntimePageTx(tx: Prisma.TransactionClient, prepared: {
-  cleanup: Pick<HostedAccountDeletionCleanup, "id" | "environment" | "kmsKeyName" | "payloadCiphertext" | "runtimeMigrationNextIndex">;
-  userIds: readonly string[]; nextIndex: number | null;
-} | null) {
-  if (!prepared) return;
-  const { cleanup } = prepared;
-  const advanced = await tx.hostedAccountDeletionCleanup.updateMany({
-    where: { id: cleanup.id, environment: cleanup.environment, kmsKeyName: cleanup.kmsKeyName,
-      payloadCiphertext: cleanup.payloadCiphertext, runtimeMigrationNextIndex: cleanup.runtimeMigrationNextIndex },
-    data: { runtimeMigrationNextIndex: prepared.nextIndex },
-  });
-  if (advanced.count) await tx.hostedRuntimeOwner.createMany({ data: prepared.userIds.map(userId => ({ userId })), skipDuplicates: true });
-}
-
-async function advanceCleanupRuntimeEnrollment(prisma: PrismaClient, cleanup: HostedAccountDeletionCleanup, payload: CleanupPayload) {
-  if (typeof cleanup.runtimeMigrationNextIndex !== "number") return { pending: false, madeProgress: false };
-  const page = runtimeCleanupPage(payload, cleanup.runtimeMigrationNextIndex);
-  return prisma.$transaction(async tx => {
-    const gates = await tx.$queryRaw<Array<{ phase: string }>>`SELECT phase FROM hosted_runtime_cutover WHERE id = 'runtime' FOR SHARE`;
-    if (gates[0]?.phase !== "rolling") return { pending: false, madeProgress: false };
-    await retainHostedAccountCleanupRuntimePageTx(tx, { cleanup, ...page });
-    const current = await tx.hostedAccountDeletionCleanup.findUnique({ where: { id: cleanup.id }, select: { runtimeMigrationNextIndex: true } });
-    const cursor = current?.runtimeMigrationNextIndex ?? null;
-    return { pending: cursor !== null, madeProgress: cursor !== cleanup.runtimeMigrationNextIndex };
-  }, { maxWait: 5_000, timeout: 5_000 });
 }
 
 async function decryptCleanupPayload(

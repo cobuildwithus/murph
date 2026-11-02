@@ -44,7 +44,7 @@ pnpm --dir apps/web prisma:generate
 pnpm --dir apps/cloudflare typecheck
 ```
 
-Cloudflare's hosted-runtime migration test helpers import that generated client.
+Cloudflare's hosted-runtime Web test helpers import that generated client.
 Repeat generation after changing the Prisma schema. The root typecheck and
 `pnpm --dir apps/cloudflare verify` already prepare it; app-local `typecheck`
 remains a no-emit check so prepared parallel verification does not regenerate
@@ -188,7 +188,10 @@ cancels readiness before acquiring its retirement lifecycle lock; exact native
 stop and Postgres release must settle before foreground obtains a replacement.
 If background launch preparation already won, foreground wakes that same child.
 See [runtime ownership](../../agent-docs/references/hosted-postgres-runtime.md)
-for the transaction boundary and mixed-version deployment order.
+for the transaction boundary and mixed-version deployment proof. The finished
+migration endpoint has no current Worker or runner caller; owner/resource
+responses retain terminal `cutover: "postgres"` for old readers, allowing either
+deployment order. Existing snapshot and DO cleanup remain active.
 Each claim immediately fills a deficit using any free preparation lane, including
 while another preparation is pending. At most two preparations run concurrently;
 SQLite reservations and recovery alarms retain reset and retry ownership. The

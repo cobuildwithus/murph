@@ -2,11 +2,12 @@
 
 Last verified: 2026-09-04
 
-## Runtime authority cutover
+## Postgres runtime authority
 
 [Hosted Postgres runtime ownership](hosted-postgres-runtime.md) owns execution
-authority, upload recovery, and completed fleet cutover. The UserRunner class,
-binding, source bridge, and temporary capability have been retired. Web/Postgres
+authority, upload recovery, deployment skew and deferred schema cleanup. The UserRunner class,
+binding, source bridge, temporary capability and finished migration state machine
+have been retired. Terminal wire fields remain for deployed readers. Web/Postgres
 owns admission and resources; native containers and Temporal retain execution
 and scheduling responsibilities. The current owner document supersedes older
 coordination details below. Mailbox, workspace, assistant, delivery, and historical

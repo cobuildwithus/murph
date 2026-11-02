@@ -17,7 +17,6 @@ describe.skipIf(!enabled)("local Postgres runtime initialization", () => {
   let admin: Client;
   let db: Client;
   let environment: NodeJS.ProcessEnv;
-  let initialize: string;
   let created = false;
   beforeAll(async () => {
     admin = new Client({ connectionString: databaseUrl });
@@ -29,7 +28,6 @@ describe.skipIf(!enabled)("local Postgres runtime initialization", () => {
     db = new Client({ connectionString: url.toString() }); await db.connect();
     await db.query(await readFile(new URL("../prisma/migrations/20260915151000_hosted_runtime_owner/migration.sql", import.meta.url), "utf8"));
     await db.query("ALTER TABLE hosted_runtime_owner ADD COLUMN migration_phase TEXT NOT NULL DEFAULT 'legacy'; CREATE TABLE hosted_member (id TEXT PRIMARY KEY)");
-    initialize = await readFile(new URL("../scripts/initialize-local-runtime-cutover.sql", import.meta.url), "utf8");
   });
   afterAll(async () => {
     await db?.end();
@@ -37,15 +35,6 @@ describe.skipIf(!enabled)("local Postgres runtime initialization", () => {
     await admin?.end();
   });
 
-  it("refuses to reinterpret an existing legacy namespace from empty SQL tables", async () => {
-    await expect(db.query(initialize)).rejects.toThrow("Complete its migration");
-    expect((await db.query("SELECT phase FROM hosted_runtime_cutover")).rows).toEqual([{ phase: "legacy" }]);
-  });
-  it("selects Postgres for a new local schema and preserves that decision", async () => {
-    await db.query("DELETE FROM hosted_runtime_cutover");
-    await db.query(initialize); await db.query(initialize);
-    expect((await db.query("SELECT phase FROM hosted_runtime_cutover")).rows).toEqual([{ phase: "postgres" }]);
-  });
   it("injects and ages a stale attempt without replacing a retained physical target or a live attempt", async () => {
     await db.query("INSERT INTO hosted_member (id) VALUES ('synthetic-local-member')");
     await db.query(`INSERT INTO hosted_runtime_owner (user_id, migration_phase, phase, generation, allocation_id, runner_container_name, updated_at)

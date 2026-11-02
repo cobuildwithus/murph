@@ -2009,7 +2009,7 @@ describe("handleRunnerOutboundRequest", () => {
     const usage = parseAssistantUsageRecord({
       schema: ASSISTANT_USAGE_SCHEMA, provider: "codex-cli", credentialSource: "platform",
       occurredAt: "2026-09-01T12:00:00.000Z", sessionId: "synthetic-session", turnId: "synthetic-turn",
-      usageId: "synthetic-turn.request-2.attempt-1", attemptCount: 1, stripeMeterSource: "murph",
+      usageId: "synthetic-turn.request-2.attempt-1", attemptCount: 1,
       inputTokens: 53, cachedInputTokens: 7, outputTokens: 29, reasoningTokens: 11,
       totalTokens: 82, cacheWriteTokens: 3, tokenPricingBasis: "openai-flex",
       providerRequestOutcome: "succeeded", providerRequestOrdinal: 2,

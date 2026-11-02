@@ -4,11 +4,10 @@ Last verified: 2026-09-04
 
 ## Current Guardrails
 
-The activated runtime authority and migration boundary are owned by
+Postgres runtime authority is owned by
 [Hosted Postgres runtime ownership](references/hosted-postgres-runtime.md).
-UserRunner-specific coordination below applies only while the durable gate is
-legacy. Existing product admission, delivery, and runtime safety rules continue
-to apply after cutover.
+The finished migration gate and legacy namespace selection are removed.
+Current product admission, delivery and native runtime safety rules remain.
 
 
 - Linq `providerCreatedAt` / `lastReceiptAt` order terminal events; they are not

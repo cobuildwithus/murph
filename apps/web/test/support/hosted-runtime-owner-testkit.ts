@@ -11,23 +11,6 @@ function localTestClient(environment: NodeJS.ProcessEnv): Client {
   return new Client({ connectionString: url.toString() });
 }
 
-/** Empty local namespace fixture only. Fleet migration is proved separately
- * through the real freeze/export/import/activate protocol. */
-export async function initializeEmptyPostgresRuntimeForTest(environment: NodeJS.ProcessEnv): Promise<void> {
-  const client = localTestClient(environment);
-  try {
-    await client.connect();
-    const result = await client.query(`INSERT INTO hosted_runtime_cutover (id, phase, updated_at)
-      SELECT 'runtime', 'postgres', now()
-      WHERE NOT EXISTS (SELECT 1 FROM hosted_member)
-        AND NOT EXISTS (SELECT 1 FROM hosted_runtime_owner)
-      ON CONFLICT (id) DO UPDATE SET phase = 'postgres'
-        WHERE hosted_runtime_cutover.phase IN ('legacy', 'postgres')
-      RETURNING id`);
-    if (result.rowCount !== 1) throw new Error("Postgres runtime fixture requires an empty local database.");
-  } finally { await client.end(); }
-}
-
 export async function readPostgresRuntimeIdentityForTest(environment: NodeJS.ProcessEnv, userId: string): Promise<{
   generation: string; phase: string; target: string | null;
 } | null> {
@@ -51,8 +34,7 @@ export async function startStuckPostgresRuntimeForTest(environment: NodeJS.Proce
     const result = await client.query(`INSERT INTO hosted_runtime_owner
       (user_id, migration_phase, generation, attempt_id, phase, processing_mode, allocation_id, started_at, updated_at)
       SELECT $1, 'postgres', 1, $2, 'starting', 'default', $3, $4, now()
-      WHERE EXISTS (SELECT 1 FROM hosted_runtime_cutover WHERE id = 'runtime' AND phase = 'postgres')
-        AND EXISTS (SELECT 1 FROM hosted_member WHERE id = $1)
+      WHERE EXISTS (SELECT 1 FROM hosted_member WHERE id = $1)
       ON CONFLICT (user_id) DO UPDATE SET generation = hosted_runtime_owner.generation + 1,
         attempt_id = EXCLUDED.attempt_id, phase = 'starting', processing_mode = 'default',
         allocation_id = COALESCE(hosted_runtime_owner.allocation_id, EXCLUDED.allocation_id), workspace_version = NULL,

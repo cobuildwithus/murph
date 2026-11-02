@@ -5096,7 +5096,7 @@ async function signWebCallbackControlRequest(
   return new Request(request, { headers });
 }
 
-function installOidcJwksFetch(delegate?: typeof fetch, ownerResponse: HostedRuntimeOwnerResponse = { cutover: "legacy", status: "blocked", owner: null }): void {
+function installOidcJwksFetch(delegate?: typeof fetch, ownerResponse: HostedRuntimeOwnerResponse = { cutover: "postgres", status: "blocked", owner: null }): void {
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (String(input) === TEST_VERCEL_OIDC_JWKS_URL) {
       return new Response(JSON.stringify({ keys: [TEST_VERCEL_OIDC_PUBLIC_JWK] }), {

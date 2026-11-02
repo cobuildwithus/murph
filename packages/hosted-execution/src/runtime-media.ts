@@ -25,7 +25,7 @@ export type HostedRuntimeMediaCommand =
   | ({ operation: "retire"; mediaId: string } & HostedRuntimeOwnerIdentity)
   | { operation: "acknowledge_purge"; purge: HostedRuntimeMediaPurge };
 export interface HostedRuntimeMediaResponse {
-  cutover: "legacy" | "draining" | "postgres";
+  cutover: "postgres";
   applied: boolean;
   reason: "active" | "descriptor_mismatch" | "expired" | "unregistered" | null;
   purge: HostedRuntimeMediaPurge | null;
@@ -69,7 +69,7 @@ export function parseHostedRuntimeMediaCommand(value: unknown): HostedRuntimeMed
 
 export function parseHostedRuntimeMediaResponse(value: unknown): HostedRuntimeMediaResponse {
   const record = requireObject(value, "Runtime media response");
-  if (record.cutover !== "legacy" && record.cutover !== "draining" && record.cutover !== "postgres") throw new TypeError("Runtime media cutover is invalid.");
+  if (record.cutover !== "postgres") throw new TypeError("Runtime media cutover is invalid.");
   if (typeof record.applied !== "boolean") throw new TypeError("Runtime media outcome is invalid.");
   if (record.reason !== null && record.reason !== "active" && record.reason !== "descriptor_mismatch" && record.reason !== "expired" && record.reason !== "unregistered") throw new TypeError("Runtime media reason is invalid.");
   return { cutover: record.cutover, applied: record.applied, reason: record.reason, purge: record.purge === null ? null : parsePurge(record.purge) };

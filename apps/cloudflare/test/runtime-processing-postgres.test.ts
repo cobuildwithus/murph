@@ -563,14 +563,12 @@ describe("Postgres runtime orchestration", () => {
   });
 
   it.each([
-    ["draining", "cutover_blocked"],
     ["missing-owner", "claim_blocked"],
     ["uncertain-wake", "wake_unconfirmed"],
   ] as const)("records the actual bounded retry reason for %s", async (scenario, reason) => {
     const { source, container } = harness();
     const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
-    if (scenario === "draining") vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce({ cutover: "draining", status: "blocked", owner: null });
-    else vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(scenario === "missing-owner" ? null : owner()));
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(scenario === "missing-owner" ? null : owner()));
     if (scenario === "uncertain-wake") container.ensureProcessing.mockRejectedValueOnce(new Error("synthetic transport failure"));
     await expect(ensurePostgresRuntimeProcessing(source, request, diagnostics)).resolves.toMatchObject({ kind: "retry_later" });
     expect(diagnostics.details.runtimeProcessingRetryReason).toBe(reason);
@@ -594,18 +592,6 @@ describe("Postgres runtime orchestration", () => {
     expect(diagnostics.details.runtimeProcessingRetryReason).toBe(reason);
     expect(commandHostedRuntimeOwner).toHaveBeenCalledOnce();
     expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
-  });
-
-  it.each(["legacy", "draining"] as const)("keeps an unretired %s database closed without calling a legacy object", async cutover => {
-    const { source, container } = harness();
-    const legacy = vi.fn(() => { throw new Error("Legacy namespace must not be accessed."); });
-    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover, status: "blocked", owner: null });
-    expect(await ensurePostgresRuntimeProcessing({ ...source, USER_RUNNER: { getByName: legacy } }, request))
-      .toMatchObject({ kind: "retry_later" });
-    expect(commandHostedRuntimeOwner).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ command: { operation: "claim", processingMode: "default" } }));
-    expect(legacy).not.toHaveBeenCalled();
-    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
-    expect(container.retireStandbySlot).not.toHaveBeenCalled();
   });
 
   it.each([undefined, "false", "true"])("starts a new Postgres member without the retired deployment flag (%s)", async flag => {

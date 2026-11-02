@@ -14,11 +14,9 @@ import type {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type {
   AssistantUsageCredentialSource,
-  AssistantUsageStripeMeterSource,
 } from '@murphai/hosted-execution/assistant-usage'
 import {
   createAssistantUsageReportingUserId as createHostedAssistantUsageReportingUserId,
-  normalizeAssistantUsageStripeMeterSource,
 } from '@murphai/hosted-execution/assistant-usage'
 
 import type { AssistantMessageInput } from './service-contracts.js'
@@ -32,7 +30,6 @@ export interface AssistantUsageAttribution {
   gatewayTags: readonly string[]
   reportingUserId: string | null
   surface: string
-  stripeMeterSource: AssistantUsageStripeMeterSource
   triggerKind: string
 }
 
@@ -43,7 +40,6 @@ export function createAssistantUsageAttribution(input: {
   memberId: string
   reportingSecret?: string | null
   surface: string
-  stripeMeterSource?: AssistantUsageStripeMeterSource | null
   triggerKind: string
 }): AssistantUsageAttribution {
   const environment = normalizeUsageAttributionPart(input.environment) ?? 'development'
@@ -70,7 +66,6 @@ export function createAssistantUsageAttribution(input: {
     gatewayTags,
     reportingUserId,
     surface,
-    stripeMeterSource: normalizeAssistantUsageStripeMeterSource(input.stripeMeterSource),
     triggerKind,
   }
 }

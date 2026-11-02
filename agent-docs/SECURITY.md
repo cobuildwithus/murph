@@ -24,11 +24,10 @@ private payload data while locked. Neither summary nor blur reaches chat or push
 
 ## Non-Negotiable Rules
 
-The activated runtime authority and migration boundary are owned by
+The Postgres-only runtime authority boundary is owned by
 [Hosted Postgres runtime ownership](references/hosted-postgres-runtime.md).
-UserRunner-specific coordination below applies only while the durable gate is
-legacy. Existing product admission, delivery, and runtime safety rules continue
-to apply after cutover.
+UserRunner coordination is historical; no legacy ownership path remains.
+Existing product admission, delivery and runtime safety rules still apply.
 
 - Terminal Linq retry authority comes only from an existing runtime-owned
   failed delivery with exact code `4001` / `Message send failed`, current exact

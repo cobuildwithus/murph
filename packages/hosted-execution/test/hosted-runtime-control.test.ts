@@ -3103,7 +3103,6 @@ function createAssistantUsageRecord(): AssistantUsageRecord {
     schema: ASSISTANT_USAGE_SCHEMA,
     servedModel: "model_test",
     sessionId: "session_123",
-    stripeMeterSource: "murph",
     surface: "hosted-runtime",
     tokenPricingBasis: "standard",
     totalTokens: 15,

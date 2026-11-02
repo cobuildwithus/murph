@@ -2070,7 +2070,6 @@ function createAssistantUsageRecord(
     schema: ASSISTANT_USAGE_SCHEMA,
     servedModel: "gpt-6-sol",
     sessionId: "asst_entrypoint_usage",
-    stripeMeterSource: "murph",
     surface: null,
     tokenPricingBasis: "standard",
     totalTokens: 15,

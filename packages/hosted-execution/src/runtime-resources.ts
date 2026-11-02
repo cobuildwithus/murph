@@ -20,7 +20,7 @@ export type HostedRuntimeSnapshotCommand =
   | { operation: "snapshot_record_replaced"; expectedSession: HostedWorkspaceSnapshotUploadSession; replacedSnapshotRef: NonNullable<HostedWorkspaceSnapshotUploadSession["replacedSnapshotRef"]> };
 
 export interface HostedRuntimeSnapshotResponse {
-  cutover: "legacy" | "draining" | "postgres";
+  cutover: "postgres";
   applied: boolean;
   session: HostedWorkspaceSnapshotUploadSession | null;
   managedUpload?: HostedRuntimeManagedSnapshotUpload | null;
@@ -114,7 +114,7 @@ export function parseHostedRuntimeSnapshotCommand(value: unknown): HostedRuntime
 
 export function parseHostedRuntimeSnapshotResponse(value: unknown): HostedRuntimeSnapshotResponse {
   const record = requireObject(value, "Runtime snapshot response");
-  if (record.cutover !== "legacy" && record.cutover !== "draining" && record.cutover !== "postgres") throw new TypeError("Invalid runtime cutover.");
+  if (record.cutover !== "postgres") throw new TypeError("Invalid runtime cutover.");
   if (typeof record.applied !== "boolean") throw new TypeError("Invalid snapshot outcome.");
   return { cutover: record.cutover, applied: record.applied, session: record.session === null ? null : parseHostedWorkspaceSnapshotUploadSession(record.session),
     ...(record.managedUpload === undefined ? {} : { managedUpload: record.managedUpload === null ? null : parseHostedRuntimeManagedSnapshotUpload(record.managedUpload) }) };
