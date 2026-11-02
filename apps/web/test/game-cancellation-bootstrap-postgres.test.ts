@@ -22,6 +22,9 @@ vi.mock("@/src/lib/hosted-mailbox/store", async (original) => ({
     return { mailboxItemId: id };
   },
 }));
+// Its placeholder terms are not real stored terms, so skip the shared-room label
+// (it reads every game of the pair); game-service-postgres proves that label.
+vi.mock("@/src/lib/game/service", async (original) => ({ ...await original<typeof import("@/src/lib/game/service")>(), readGameNoticeRoom: async () => undefined }));
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: vi.fn(async () => {}) }));
 vi.mock("@/src/lib/game/crypto", () => ({ openGameTexts: async (values: unknown[]) => values.map(() => "Player") }));
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({

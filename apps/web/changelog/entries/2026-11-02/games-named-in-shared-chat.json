@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-11-02",
+  "order": 200,
+  "item": {
+    "id": "games-named-in-shared-chat",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Murph says which game it means",
+    "summary": "When you and a friend have more than one game going, Murph names each game by its tasks in your shared chat.",
+    "details": "Change requests, kickoffs and end-of-game messages say which game they're about, and a new game no longer repeats the reminder offer. Invites and rematches are accepted in the app.",
+    "relevanceTags": [
+      "games"
+    ],
+    "sourcePullRequests": [
+      4444
+    ]
+  }
+}

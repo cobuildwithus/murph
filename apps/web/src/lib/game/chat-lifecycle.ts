@@ -269,13 +269,14 @@ async function deliverCurrentGameChatLifecycle(input: {
 /** Read shared context only for notices that actually describe game terms. */
 async function lifecycleInstructions(game: Pick<Game, "id" | "chatContainerMemberId">, kind: GameChatLifecycleKind, players: readonly string[], proposalId?: string): Promise<string | null> {
   if (kind === "cancelled") return buildGameInviteCancelledInstructions();
+  const { readGameNoticeRoom } = await import("./service");
   if (kind === "recap") {
     if (!game.chatContainerMemberId) return null;
     const { readGameRecapMaterial } = await import("./service");
     const { readGameRecapChatMessages } = await import("./chat-tool");
     const material = await readGameRecapMaterial(game.id, game.chatContainerMemberId, players);
     return material
-      ? buildGameRecapInstructions(await readGameRecapChatMessages({ containerMemberId: game.chatContainerMemberId, material }))
+      ? buildGameRecapInstructions(await readGameRecapChatMessages({ containerMemberId: game.chatContainerMemberId, material }), await readGameNoticeRoom(game.id, players))
       : null;
   }
   if (kind === "rematch") {
@@ -286,13 +287,14 @@ async function lifecycleInstructions(game: Pick<Game, "id" | "chatContainerMembe
   if (kind === "change_expired") {
     const event = await getPrisma().gameEvent.findUnique({ where: { commandKey: `game-change-resolved:${game.id}:${proposalId}` }, select: { type: true, payload: true } });
     return event?.type === "change_expired" && isRecord(event.payload) && typeof event.payload.reason === "string"
-      ? buildGameChangeExpiredInstructions(event.payload.reason) : null;
+      ? buildGameChangeExpiredInstructions(event.payload.reason, await readGameNoticeRoom(game.id, players)) : null;
   }
   const { readGameChatState } = await import("./service");
   const state = await readGameChatState(game.chatContainerMemberId ?? "", players);
   const shared = state.games.find((candidate) => candidate.id === game.id);
   if (!shared || !lifecycleStatuses(kind).includes(shared.status)) return null;
-  return kind === "started" ? buildGameKickoffInstructions({ kind, game: shared }) : buildGameChangeCancelledInstructions();
+  const room = await readGameNoticeRoom(game.id, players);
+  return kind === "started" ? buildGameKickoffInstructions({ kind, game: shared, room }) : buildGameChangeCancelledInstructions(room);
 }
 
 async function enqueueGameLifecycle(input: {

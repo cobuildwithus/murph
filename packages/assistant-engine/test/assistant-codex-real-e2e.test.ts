@@ -45556,7 +45556,120 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
     }
   }, 360_000)
 
-  it('game v1 cancellation announces one withdrawn request without cancelling the challenge', async () => {
+  it.each([
+    { notice: 'app proposal' as const },
+    { notice: 'kickoff' as const },
+  ])('game lifecycle shared-room $notice names its game by task and offers reminders at most once', async ({ notice }) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-shared-room-e2e-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    const { buildGameKickoffInstructions, buildGameProposalInstructions } = await import('@murphai/hosted-execution/runtime-control')
+    const room = { tasks: ['20 squats', '10 minute stretch'], otherGames: [{ status: 'live', tasks: ['Read 20 pages', 'No phone after 10pm'] }], startedAfterAnother: true }
+    const game = {
+      id: 'game_shared_room', status: 'live' as const, lengthDays: 7, startsOn: null,
+      terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: '20 squats' }, { seat: 1, text: '10 minute stretch' }], schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: 'prize' as const, item: 'Coffee run' }] },
+      players: [{ memberId: 'player_sam', seat: 0, firstName: 'Sam', dayOne: '2030-03-04', timeZone: 'UTC' }, { memberId: 'player_maya', seat: 1, firstName: 'Maya', dayOne: '2030-03-04', timeZone: 'UTC' }],
+      pendingChange: null, changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, editableFromDay: 1 },
+    }
+    try {
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
+      const modelTarget = createAssistantModelTarget({
+        approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
+        codexHome: permissionHome.codexHome, model: config.model, modelProvider: config.modelProvider,
+        provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write',
+      })
+      if (!modelTarget) throw new Error('Expected real Codex target.')
+      const events: unknown[] = []
+      const key = notice === 'kickoff' ? 'game-started:game_shared_room' : 'game-change:game_shared_room:proposal_synthetic'
+      const result = await sendAssistantNotificationLocal({
+        actorId: null, bindingDeliveryTarget: 'synthetic-game-thread', channel: 'linq',
+        deliveryDispatchMode: 'queue-only', deliveryTarget: 'synthetic-game-thread',
+        deliveryIdempotencyKey: key, deliveryDedupeToken: key, responsePolicy: { kind: 'require_send' },
+        executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'synthetic-group', userEnvKeys: [] } },
+        identityId: null, instructions: notice === 'kickoff'
+          ? buildGameKickoffInstructions({ kind: 'started', game, room })
+          : buildGameProposalInstructions({ change: { kind: 'edit', lengthDays: 10 }, startsOn: null }, { proposerName: 'Sam', recipientName: 'Maya', lengthDays: 7, room }),
+        threadId: 'synthetic-game-thread', threadIsDirect: false,
+        onTraceEvent: (event) => events.push(event.rawEvent),
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
+        turnTrigger: 'manual-deliver', vault: workingDirectory, workingDirectory,
+      })
+      const reply = result.response ?? ''
+      process.stdout.write(`[game-lifecycle shared-room ${notice}] ${JSON.stringify({ reply, decision: result.decision.kind })}\n`)
+      expect(readCapabilityRoutingActions(events)).toEqual([])
+      expect(result.decision.kind).toBe('send_message')
+      expect(await listAssistantOutboxIntents(workingDirectory)).toHaveLength(1)
+      // The member can tell which of the room's games this is about.
+      expect(reply).toMatch(/squat|stretch/iu)
+      expect(reply).not.toMatch(/read(?:ing)? 20|no phone/iu)
+      expect(reply).not.toMatch(/\bproposals?\b|game_shared_room|[^\s]\s[-–—]\s/iu)
+      if (notice === 'kickoff') {
+        // The room already had a reminder offer with its first game.
+        expect(reply).not.toMatch(/remind|what time|how many days/iu)
+      } else {
+        expect(reply).toMatch(/10|ten/iu)
+        expect(reply).toContain('?')
+      }
+      expect(reply.length).toBeLessThan(400)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
+  it('game chat sends an unaccepted rematch to the app without asking which game', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-rematch-chat-e2e-'))
+    const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    const inputId = 'ain_' + 'c'.repeat(32)
+    const calls: Array<import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest> = []
+    const live = (id: string, tasks: [string, string]) => ({
+      id, status: 'live' as const, lengthDays: 7, startsOn: '2030-03-04',
+      terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: tasks[0] }, { seat: 1, text: tasks[1] }], schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [] },
+      players: [{ memberId: 'player_maya', seat: 0, firstName: 'Maya', dayOne: '2030-03-04', timeZone: 'UTC' }, { memberId: 'player_sam', seat: 1, firstName: 'Sam', dayOne: '2030-03-04', timeZone: 'UTC' }],
+      pendingChange: null, changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, editableFromDay: 3 },
+    })
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'group', currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T16:00:00.000Z', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+        }),
+        dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL], env: config.env,
+        hostedToolContext: {
+          computerToolsAvailable: false, vaultFileSendAvailable: false,
+          groupTool: { request: async (request) => {
+            calls.push(request)
+            if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', state: { games: [live('game_reading', ['Read 20 pages', 'No phone after 10pm']), live('game_soda', ['Walk 8000 steps', 'No soda'])] } } }
+            throw new Error('Rematch requests are accepted only in the app.')
+          } },
+          currentUserActionScope: () => ({ conversationId: 'synthetic-room', inboundMailboxItemIds: [], recipientKey: 'synthetic-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-session', conversationScope: 'group' }),
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send authorized.') },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: `Current accepted message from Sam (Message ref: ${inputId}): lol fine I'm in for the rematch, accept it for me murph`,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const reply = result.finalMessage
+      process.stdout.write(`[game-chat rematch-in-app] ${JSON.stringify({ reply, actions: calls.map((call) => call.action) })}\n`)
+      expect(calls.filter((call) => call.action === 'update_game')).toEqual([])
+      expect(reply).toMatch(/\bapp\b/iu)
+      expect(reply).not.toContain('?')
+      expect(reply).not.toMatch(/(?:don.t|do not|can.t|cannot) (?:see|find)|no (?:pending )?rematch|which (?:game|challenge)/iu)
+      expect(reply.length).toBeLessThan(300)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
+  it.each([
+    { name: 'game v1 cancellation announces one withdrawn request without cancelling the challenge', shared: false },
+    { name: 'game v1 shared-room cancellation names its game without restating the terms', shared: true },
+  ])('$name', async ({ shared }) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-notice-e2e-'))
     const permissionHome = await materializeRealCodexHostedPermissionHome(config)
@@ -45577,7 +45690,9 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
         deliveryDedupeToken: 'game-change-cancelled:game_synthetic:proposal_synthetic',
         responsePolicy: { kind: 'require_send' },
         executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'synthetic-group', userEnvKeys: [] } },
-        identityId: null, instructions: buildGameChangeCancelledInstructions(),
+        identityId: null, instructions: buildGameChangeCancelledInstructions(shared
+          ? { tasks: ['Read 20 pages', 'No phone after 10pm'], otherGames: [{ status: 'live', tasks: ['20 squats', '10 minute stretch'] }], startedAfterAnother: true }
+          : undefined),
         threadId: 'synthetic-game-thread', threadIsDirect: false,
         onTraceEvent: (event) => events.push(event.rawEvent),
         turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
@@ -45597,6 +45712,11 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
       expect(reply).not.toMatch(/(?:challenge|game) (?:is |was |has been )?cancelled|restart|calendar days|remind|do you agree/iu)
       expect(reply).not.toContain('?')
       expect(reply.length).toBeLessThan(350)
+      if (shared) {
+        // Named by its tasks, never confused with the squats game, and no other terms restated.
+        expect(reply).toMatch(/\b(?:read|reading|phone)\b/iu)
+        expect(reply).not.toMatch(/20 pages|squat|stretch|prize|dare|days? total/iu)
+      }
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
     }

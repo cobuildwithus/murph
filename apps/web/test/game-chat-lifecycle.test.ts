@@ -3,13 +3,13 @@ const m = vi.hoisted(() => ({
   event: vi.fn(), receipts: vi.fn(), frozen: vi.fn(), recover: vi.fn(), receiptUpdate: vi.fn(), game: vi.fn(), current: vi.fn(), bind: vi.fn(),
   state: vi.fn(), rematchNotice: vi.fn(), identity: vi.fn(), discover: vi.fn(), exact: vi.fn(), bootstrap: vi.fn(), proposal: vi.fn(),
   destination: vi.fn(), mailbox: vi.fn(), prepare: vi.fn(), append: vi.fn(), signal: vi.fn(), route: vi.fn(),
-  missedBatch: vi.fn(), reserveMissed: vi.fn(), recapMaterial: vi.fn(), recapMessages: vi.fn(), transcript: vi.fn(),
+  missedBatch: vi.fn(), reserveMissed: vi.fn(), recapMaterial: vi.fn(), recapMessages: vi.fn(), transcript: vi.fn(), room: vi.fn(),
 }));
 vi.mock("../src/lib/prisma", () => {
   const db = { gameEvent: { findUnique: m.event }, hostedLinqDelivery: { findMany: (input: { where: { payloadSchema?: string } }) => input.where.payloadSchema ? m.frozen(input) : m.receipts(input), updateMany: m.receiptUpdate }, game: { findUnique: m.game, findFirst: m.current, updateMany: m.bind } };
   return { getPrisma: () => ({ ...db, $transaction: async (fn: (tx: typeof db) => unknown) => fn(db) }) };
 });
-vi.mock("../src/lib/game/service", () => ({ readGameChatState: m.state, readGameMissedCheckInBatch: m.missedBatch, readGameRematchNotice: m.rematchNotice,
+vi.mock("../src/lib/game/service", () => ({ readGameChatState: m.state, readGameNoticeRoom: m.room, readGameMissedCheckInBatch: m.missedBatch, readGameRematchNotice: m.rematchNotice,
   readGameRecapMaterial: m.recapMaterial, reserveDueGameMissedDayCheckIns: m.reserveMissed }));
 vi.mock("../src/lib/game/chat-tool", () => ({ readGameRecapChatMessages: m.recapMessages, readGameChatTranscript: m.transcript }));
 vi.mock("../src/lib/game/chat-membership", () => ({ bindPairGameChat: async (_id: string, _players: string[], candidate: string | null) => candidate, findExistingGameChat: m.discover, requireExactChat: m.exact }));
@@ -202,6 +202,16 @@ describe("durable game chat lifecycle", () => {
     });
     expect(m.recover).toHaveBeenCalledExactlyOnceWith("frozen");
     expect(m.state).not.toHaveBeenCalled(); expect(m.prepare).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
+  });
+  it("introduces a second game in a shared room by its tasks without repeating the reminder offer", async () => {
+    const room = { tasks: ["Read a chapter", "Read a chapter"], otherGames: [{ status: "live", tasks: ["50 pushups", "30 minute walk"] }], startedAfterAnother: true };
+    m.room.mockResolvedValue(room);
+    await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });
+    expect(m.room).toHaveBeenCalledExactlyOnceWith("game", players);
+    const { instructions } = m.prepare.mock.calls[0][0].envelope.notification;
+    expect(instructions).toContain("Skip the reminder offer");
+    expect(instructions).not.toContain("Briefly offer reminders");
+    expect(JSON.parse(instructions.split("\n").at(-1))).toEqual({ thisGameTasks: room.tasks, otherGames: room.otherGames });
   });
   it("publishes one generated kickoff and advances the existing receipt atomically", async () => {
     await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });
