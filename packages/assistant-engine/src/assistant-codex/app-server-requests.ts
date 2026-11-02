@@ -83,6 +83,9 @@ export function buildCodexThreadResumeParams(input: {
 }): Record<string, unknown> {
   return stripUndefinedRpcParams({
     ...buildCodexThreadContextParams(input.input),
+    developerInstructions: supportsCodexTurnDeveloperInstructions(input.input)
+      ? ''
+      : undefined,
     excludeTurns: true,
     threadId: input.codexThreadId,
   })
