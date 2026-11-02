@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { addMeal, initializeVault } from "@murphai/core";
+import { createBrowserVaultCoreQueryClient, splitBrowserVaultReplica } from "@murphai/query/browser-replica";
 import { createBrowserVaultReplica, readVault } from "@murphai/query/browser-replica-server";
 import { NodeNextRequest } from "next/dist/server/base-http/node";
 import { NextRequestAdapter } from "next/dist/server/web/spec-extension/adapters/next-request";
@@ -235,4 +236,26 @@ it("recovers legacy exact automatic upload links in list and detail, then rechec
   mocks.uploadLinks.mockResolvedValue([{ captureId }]);
   mocks.current.mockRejectedValueOnce(hostedOnboardingError({ code: "AUTH_REQUIRED", httpStatus: 401, message: "Sign in again." }));
   expect((await GET(request())).status).toBe(401);
+});
+
+it("recovers a real legacy import from the frozen production core client without changing its snapshot", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "synthetic-meals-frozen-"));
+  try {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const captureId = "b".repeat(64);
+    const imported = await addMeal({ vaultRoot, occurredAt: savedAt, source: "device", note: "Synthetic imported meal",
+      externalRef: { system: "meal-photo-capture", resourceType: "photo", resourceId: captureId } });
+    const typed = await addMeal({ vaultRoot, occurredAt: "2026-10-31T12:00:00Z", note: "Synthetic typed meal" });
+    const replica = await createBrowserVaultReplica({ vault: await readVault(vaultRoot), metricPoints: [], generatedAt: savedAt, sourceBundleHash: "a".repeat(64) });
+    const shards = await splitBrowserVaultReplica(replica);
+    const client = createBrowserVaultCoreQueryClient(shards.core);
+    mocks.decode.mockResolvedValue({ client });
+    mocks.uploadLinks.mockResolvedValue([{ captureId }]);
+    expect(Object.isFrozen(client.replica.meals!.days[0]!.meals[0])).toBe(true);
+    expect(await (await GET(request())).json()).toMatchObject({ days: [{ meals: [{ id: imported.mealId, uploadId: captureId }] }, { meals: [{ id: typed.mealId, uploadId: null }] }] });
+    expect(await (await detail(request(), context(imported.mealId))).json()).toMatchObject({ meal: { uploadId: captureId } });
+    expect(await (await GET(request("?cursor=2026-11-01"))).json()).toMatchObject({ days: [{ meals: [{ id: typed.mealId, uploadId: null }] }] });
+    expect(await (await detail(request(), context(typed.mealId))).json()).toMatchObject({ meal: { uploadId: null } });
+    expect(client.replica.meals!.days[0]!.meals[0]!.uploadId).toBeNull();
+  } finally { await rm(vaultRoot, { recursive: true, force: true }); }
 });

@@ -230,8 +230,8 @@ After writes begin, retain this reader release as the Web/runtime rollback floor
 The reader release emits no new upload metadata, so it can safely coexist with
 the old runtime. The writer accepts both old and linked records. Web can deploy
 the writer before the writer runtime: the converged reader accepts its wake and
-imports it without the link. Such rollout-window meals remain null; there is no
-backfill or forced wake. After the writer runtime deploy, new imports retain the
+imports it without the link. Such rollout-window meals remain canonically unlinked; historical read-time
+recovery above can still supply their ID. There is no vault backfill or forced wake. After the writer runtime deploy, new imports retain the
 link. Both runtime versions can read linked canonical records during rollout.
 
 

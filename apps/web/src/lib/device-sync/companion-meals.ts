@@ -65,7 +65,7 @@ async function loadSavedMeals(memberId: string, signal: AbortSignal): Promise<{
     const loaded = await decodeReadyBrowserVaultSession({ session, privateKeyJwk: keys.privateKeyJwk, expectedMemberId: memberId, signal });
     const replica = loaded.client.replica;
     if (!replica.meals || (replica.generation ?? 0) < 17) throw projectionUnavailable();
-    return { savedAt: replica.generatedAt, projection: replica.meals, entities: replica.entities };
+    return { savedAt: replica.generatedAt, projection: structuredClone(replica.meals), entities: replica.entities };
   } catch {
     // Do not log decrypt errors, meal contents, signed URLs, or private paths.
     throw projectionUnavailable();
