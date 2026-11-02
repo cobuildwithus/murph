@@ -3,21 +3,24 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { getPrisma } from "@/src/lib/prisma";
 import { runGameCommand } from "@/src/lib/game/service";
 import { handleGameChatBootstrapControl, prepareGameChatBootstrap } from "@/src/lib/game/chat-bootstrap";
+import { deliverGameChangeProposal } from "@/src/lib/game/chat-delivery";
+import { requireHostedRuntimeMailboxActiveAccess } from "@/src/lib/hosted-mailbox/runtime-access";
 import { drainGameChatLifecycle } from "@/src/lib/game/chat-lifecycle";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
-import { readHostedMailboxItemByDedupeKey } from "@/src/lib/hosted-mailbox/store";
-const m = vi.hoisted(() => ({ create: vi.fn(), capacity: vi.fn(), lineKey: "", firstPlayer: "" }));
+import { readHostedMailboxItemByDedupeKey, readHostedMailboxWakeByDedupeKey } from "@/src/lib/hosted-mailbox/store";
+const m = vi.hoisted(() => ({ create: vi.fn(), capacity: vi.fn(), activeAccess: vi.fn(), lineKey: "", firstPlayer: "" }));
 // The fixture uses the repository secure-box test codec; no external KMS calls.
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (original) => ({ ...await original<typeof import("@/src/lib/hosted-crypto/domain-root-store")>(),
   unwrapHostedDomainRootForWeb: async () => ({ rootKey: new Uint8Array(32), envelope: { rootKeyId: "synthetic-control-root" } }),
 }));
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: vi.fn() }));
 vi.mock("@/src/lib/hosted-execution/runtime-owner", async (original) => ({ ...await original<typeof import("@/src/lib/hosted-execution/runtime-owner")>(), requireHostedRuntimeCallbackTx: vi.fn() }));
-vi.mock("@/src/lib/hosted-mailbox/runtime-access", async (original) => ({ ...await original<typeof import("@/src/lib/hosted-mailbox/runtime-access")>(), requireHostedRuntimeActiveAccessForUpdateTx: vi.fn() }));
+vi.mock("@/src/lib/hosted-mailbox/runtime-access", async (original) => ({ ...await original<typeof import("@/src/lib/hosted-mailbox/runtime-access")>(), requireHostedRuntimeActiveAccessForUpdateTx: m.activeAccess }));
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({ readHostedMemberIdentity: async ({ memberId }: { memberId: string }) => ({ phoneNumber: memberId === m.firstPlayer ? "+15555550101" : "+15555550102", phoneNumberVerifiedAt: new Date() }) }));
 vi.mock("@/src/lib/hosted-onboarding/linq-line-store", async (original) => ({ ...await original<typeof import("@/src/lib/hosted-onboarding/linq-line-store")>(),
   listHostedLinqHealthyProactiveLines: async () => [{ phoneNumber: "+15555550100", phoneNumberLookupKey: m.lineKey, maxNewConversationsPerDay: 10 }],
   claimHostedLinqProactiveConversationCapacityTx: m.capacity,
+  readHostedLinqIncomingLineState: async () => ({ kind: "assignable", phoneNumberLookupKey: m.lineKey }),
 }));
 vi.mock("@/src/lib/hosted-onboarding/linq-client", async (original) => ({ ...await original<typeof import("@/src/lib/hosted-onboarding/linq-client")>(),
   createHostedLinqChat: m.create,
@@ -31,17 +34,19 @@ const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murph_test_/u.test(process.env.DATABASE_URL ?? "")) throw new Error("Bootstrap recovery proof requires an isolated local test database.");
 const members: string[] = [];
 const receiptIds: string[] = [];
+const lineKeys: string[] = [];
 describe.skipIf(!enabled)("game bootstrap lifecycle recovery against PostgreSQL", () => {
   afterAll(async () => {
     await getPrisma().hostedLinqDelivery.deleteMany({ where: { id: { in: receiptIds } } });
     await getPrisma().hostedThreadContainer.deleteMany({ where: { memberId: { in: members } } });
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: members } } });
-    if (m.lineKey) await getPrisma().hostedLinqLine.deleteMany({ where: { phoneNumberLookupKey: m.lineKey } });
+    await getPrisma().hostedLinqLine.deleteMany({ where: { phoneNumberLookupKey: { in: lineKeys } } });
   });
   it("supersedes an empty queued proposal and permits one valid replacement after local text rejection", async () => {
     const db = getPrisma();
     const a = randomUUID(), b = randomUUID(), gameId = randomUUID();
     m.firstPlayer = a; m.lineKey = `synthetic-line-${randomUUID()}`;
+    lineKeys.push(m.lineKey);
     members.push(a, b);
     await db.hostedMember.createMany({ data: [a,b].map((id) => ({ id, billingStatus: "not_started" })) });
     await db.hostedLinqLine.create({ data: { phoneNumberLookupKey: m.lineKey, phoneNumberHint: "0100", healthStatus: "healthy" } });
@@ -95,6 +100,71 @@ describe.skipIf(!enabled)("game bootstrap lifecycle recovery against PostgreSQL"
     expect(await db.hostedLinqDelivery.findUnique({ where: { id: nextReceipt.id } })).toMatchObject({ status: "accepted", bootstrapRouteAttachedAt: expect.any(Date) });
     await expect(control(nextEvent)).resolves.toMatchObject({ result: { status: "sent" } });
     expect(m.create).toHaveBeenCalledOnce();
+    expect(await db.hostedThreadRoute.count({ where: { containerMemberId: room } })).toBe(1);
+  });
+  it("bootstraps the newer game before draining the deferred older proposal through one route", async () => {
+    const db = getPrisma(), now = new Date();
+    const a = randomUUID(), b = randomUUID(), older = randomUUID(), newer = randomUUID(), room = randomUUID();
+    members.push(a, b, room);
+    m.firstPlayer = a; m.lineKey = `synthetic-line-${randomUUID()}`;
+    lineKeys.push(m.lineKey);
+    await db.hostedLinqLine.create({ data: { phoneNumberLookupKey: m.lineKey, phoneNumberHint: "0100", healthStatus: "healthy" } });
+    m.create.mockClear(); m.capacity.mockClear();
+    const access = await vi.importActual<typeof import("@/src/lib/hosted-mailbox/runtime-access")>("@/src/lib/hosted-mailbox/runtime-access");
+    m.activeAccess.mockImplementation(access.requireHostedRuntimeActiveAccessForUpdateTx);
+    await db.hostedMember.createMany({ data: [a, b, room].map(id => ({ id, billingStatus: "not_started" })) });
+    for (const actorMemberId of [a, b]) await runGameCommand({ actorMemberId, command: { type: "setProfile", firstName: actorMemberId === a ? "Ava" : "Sam", timeZone: "UTC" } });
+    const tokens = new Map<string, string>();
+    for (const [index, gameId] of [older, newer].entries()) {
+      const created = await runGameCommand({ actorMemberId: a, command: { type: "createGame", gameId, inviteeFirstName: "Sam", terms: {
+        tasks: [{ seat: 0, text: "Read" }, { seat: 1, text: "Walk" }], schedule: { days: [0,1,2,3,4] }, stakes: [{ kind: "prize", item: "Choose brunch" }],
+      } } });
+      if (!created.ok || !created.game?.inviteToken) throw new Error("Expected synthetic invite.");
+      tokens.set(gameId, created.game.inviteToken);
+      await db.game.update({ where: { id: gameId }, data: { createdAt: new Date(now.getTime() - 2_000 + index * 1_000) } });
+    }
+    // Reuse the prepared-container fixture; provider routing remains absent.
+    await db.hostedThreadContainer.create({ data: { memberId: room, ownerMemberId: a, participants: {
+      create: [a, b].map(participantMemberId => ({ participantMemberId, handleLookupKey: participantMemberId, firstSeenAt: now, lastSeenAt: now })),
+    } } });
+    const proposals = new Map<string, string>();
+    for (const gameId of [newer, older]) {
+      const proposalId = randomUUID(), eventId = `game-change:${gameId}:${proposalId}`;
+      proposals.set(gameId, proposalId);
+      expect(await runGameCommand({ actorMemberId: b, command: { type: "negotiate", token: tokens.get(gameId)!, proposalId, termsVersion: 1, timeZone: "UTC", change: { kind: "edit", lengthDays: 10 } } })).toMatchObject({ ok: true });
+      if (gameId === newer) await db.game.update({ where: { id: gameId }, data: { chatContainerMemberId: room } });
+      expect(await prepareGameChatBootstrap(gameId, eventId, "Ask about the proposed duration.")).toBe(gameId === newer ? room : null);
+      const receipt = await db.hostedLinqDelivery.findUniqueOrThrow({ where: { idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(eventId)! } });
+      receiptIds.push(receipt.id);
+      expect(receipt).toMatchObject({ status: gameId === newer ? "generation_queued" : "awaiting_generation", payloadSchema: null });
+      expect(await db.game.findUnique({ where: { id: gameId } })).toMatchObject({ chatContainerMemberId: room });
+    }
+    const newerEvent = `game-change:${newer}:${proposals.get(newer)}`;
+    const olderEvent = `game-change:${older}:${proposals.get(older)}`;
+    expect(await readHostedMailboxItemByDedupeKey({ userId: room, dedupeKey: olderEvent, prisma: db })).toBeNull();
+    expect(await readHostedMailboxItemByDedupeKey({ userId: room, dedupeKey: newerEvent, prisma: db })).toMatchObject({ consumedAt: null });
+    expect(await db.hostedThreadRoute.count({ where: { containerMemberId: room } })).toBe(0);
+    await expect(requireHostedRuntimeMailboxActiveAccess(room, { prisma: db })).resolves.toEqual({ isThreadContainer: true });
+    expect(await readHostedMailboxWakeByDedupeKey({ userId: room, dedupeKey: newerEvent, prisma: db })).toMatchObject({ notification: { gameChatBootstrap: { gameId: newer } } });
+    const control = (text?: string) => handleGameChatBootstrapControl({ memberId: room, runtimeIdentity: null,
+      request: { action: "game_chat_bootstrap", gameId: newer, eventId: newerEvent, ...(text === undefined ? { operation: "recover" } : { operation: "send", text }) } });
+    await expect(control()).resolves.toMatchObject({ result: { status: "needs_message" } });
+    m.capacity.mockResolvedValue(true);
+    m.create.mockResolvedValue({ chatId: `synthetic-chat-${randomUUID()}`, messageId: `synthetic-message-${randomUUID()}` });
+    await expect(control("Your 10-day challenge proposal is ready. Does that work for you both?")).resolves.toMatchObject({ result: { status: "sent" } });
+    await expect(control()).resolves.toMatchObject({ result: { status: "sent" } });
+    expect(await db.hostedLinqDelivery.findUnique({ where: { idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(newerEvent)! } })).toMatchObject({
+      status: "accepted", payloadSchema: "game_chat_bootstrap_v1", bootstrapRouteAttachedAt: expect.any(Date),
+    });
+    await db.hostedMailboxItem.updateMany({ where: { userId: room, dedupeKey: newerEvent }, data: { consumedAt: new Date() } });
+    await expect(deliverGameChangeProposal(older, proposals.get(older)!)).resolves.toBe(true);
+    await expect(deliverGameChangeProposal(older, proposals.get(older)!)).resolves.toBe(true);
+    const wake = await readHostedMailboxWakeByDedupeKey({ userId: room, dedupeKey: olderEvent, prisma: db });
+    expect(wake).toMatchObject({ notification: { deliveryDispatchMode: "queue-only", deliveryIdempotencyKey: olderEvent, route: { delivery: { kind: "thread" } } } });
+    if (wake?.kind !== "assistant.notification.requested") throw new Error("Expected proposal wake.");
+    expect(wake.notification.gameChatBootstrap).toBeUndefined();
+    expect(await db.hostedMailboxItem.count({ where: { userId: room, dedupeKey: olderEvent } })).toBe(1);
+    expect(m.create).toHaveBeenCalledOnce(); expect(m.capacity).toHaveBeenCalledOnce();
     expect(await db.hostedThreadRoute.count({ where: { containerMemberId: room } })).toBe(1);
   });
 });

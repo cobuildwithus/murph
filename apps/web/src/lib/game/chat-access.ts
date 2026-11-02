@@ -93,8 +93,26 @@ export async function readGameChatFundingRooms(input: {
             AND NOT EXISTS (SELECT 1 FROM hosted_thread_route route WHERE route.container_member_id = room.id)
             AND EXISTS (SELECT 1 FROM hosted_linq_delivery receipt
               WHERE receipt.payload_owner_member_id = room.id AND receipt.source = 'game_lifecycle'
-                AND ((receipt.status = 'generation_queued' AND (receipt.source_ref = game.id
-                    OR (receipt.template IN ('game_change_cancelled', 'game_change_expired') AND starts_with(receipt.source_ref, game.id || ':'))))
+                AND ((receipt.status = 'generation_queued' AND EXISTS (
+                  -- The pending bootstrap can belong to another game in this same room.
+                  SELECT 1 FROM game bootstrap
+                  WHERE bootstrap.chat_container_member_id = room.id
+                    AND (receipt.source_ref = bootstrap.id
+                      OR (receipt.template IN ('game_change_cancelled', 'game_change_expired') AND starts_with(receipt.source_ref, bootstrap.id || ':')))
+                    -- Keep the selected game's existing settled/cancellation eligibility.
+                    AND (bootstrap.id = game.id OR (
+                      (bootstrap.status = 'live' OR (bootstrap.status IN ('invited', 'negotiating')
+                        AND (bootstrap.invite_expires_at IS NULL OR bootstrap.invite_expires_at > ${input.now})))
+                      AND ((bootstrap.status = 'invited'
+                          AND bootstrap.created_by = ANY(pair.player_ids)
+                          AND bootstrap.invitee_member_id = ANY(pair.player_ids)
+                          AND bootstrap.created_by <> bootstrap.invitee_member_id)
+                        OR (bootstrap.status <> 'invited'
+                          AND EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = bootstrap.id AND p.seat = 0)
+                          AND EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = bootstrap.id AND p.seat = 1)
+                          AND NOT EXISTS (SELECT 1 FROM game_player p
+                            WHERE p.game_id = bootstrap.id AND (p.seat NOT IN (0, 1) OR NOT (p.member_id = ANY(pair.player_ids))))))
+                    ))))
                   OR receipt.payload_schema = 'game_chat_bootstrap_v1')
                 AND receipt.bootstrap_route_attached_at IS NULL AND receipt.skipped_at IS NULL)
             AND NOT EXISTS (SELECT 1 FROM hosted_linq_delivery receipt

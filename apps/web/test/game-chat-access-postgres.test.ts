@@ -124,6 +124,7 @@ describe.skipIf(!enabled)("game chat access PostgreSQL", () => {
     const second = `game_second_${suffix}`;
     const unrelated = `game_unrelated_${suffix}`;
     const gameId = `game_access_${suffix}`;
+    const olderGameId = `game_access_older_${suffix}`;
     const historicalIds = Array.from({ length: 1_000 }, (_, index) => `game_history_${suffix}_${index}`);
     const ids = [room, alternate, first, second, unrelated];
     const now = new Date("2030-01-15T12:00:00Z");
@@ -166,6 +167,7 @@ describe.skipIf(!enabled)("game chat access PostgreSQL", () => {
       })) });
       await prisma.game.create({ data: {
         id: gameId, createdBy: first, status: "negotiating", chatContainerMemberId: room,
+        createdAt: new Date(now.getTime() - 1_000),
         inviteExpiresAt: new Date(now.getTime() + 60_000),
         terms: { v: 1, versions: [] }, termsWordsEncrypted: "synthetic-sealed-terms",
         players: { create: [first, second].map((memberId, seat) => ({
@@ -173,6 +175,22 @@ describe.skipIf(!enabled)("game chat access PostgreSQL", () => {
         })) },
       } });
       await assertRoom(true);
+      // G2 owns the only queued, unfrozen receipt; G1 sorts first after binding.
+      await prisma.game.create({ data: {
+        id: olderGameId, createdBy: first, status: "negotiating", chatContainerMemberId: room,
+        createdAt: new Date(now.getTime() - 2_000), inviteExpiresAt: new Date(now.getTime() + 60_000),
+        terms: { v: 1, versions: [] }, termsWordsEncrypted: "synthetic-sealed-terms",
+        players: { create: [first, second].map((memberId, seat) => ({ memberId, seat, timeZone: "UTC" })) },
+      } });
+      await assertRoom(true);
+      // Even with this room as payload owner, a game bound elsewhere cannot fund bootstrap.
+      await prisma.game.update({ where: { id: gameId }, data: { chatContainerMemberId: alternate } });
+      expect(await readActiveHostedMemberAccess(input)).toBe(false);
+      await prisma.game.update({ where: { id: gameId }, data: { chatContainerMemberId: room, inviteExpiresAt: now } });
+      expect(await readActiveHostedMemberAccess(input)).toBe(false);
+      await prisma.game.update({ where: { id: gameId }, data: { inviteExpiresAt: new Date(now.getTime() + 60_000) } });
+      await assertRoom(true);
+      await prisma.game.delete({ where: { id: olderGameId } });
       await prisma.game.update({ where: { id: gameId }, data: { inviteExpiresAt: now } });
       await assertRoom(false);
       await prisma.game.update({ where: { id: gameId }, data: { inviteExpiresAt: new Date(now.getTime() + 60_000) } });
@@ -285,7 +303,7 @@ describe.skipIf(!enabled)("game chat access PostgreSQL", () => {
       await prisma.game.update({ where: { id: gameId }, data: { chatContainerMemberId: first } });
       expect(await readActiveHostedMemberAccess({ ...input, memberId: first })).toBe(false);
     } finally {
-      await prisma.game.deleteMany({ where: { id: { in: [gameId, ...historicalIds] } } });
+      await prisma.game.deleteMany({ where: { id: { in: [gameId, olderGameId, ...historicalIds] } } });
       await prisma.hostedThreadContainer.deleteMany({ where: { memberId: { in: [room, alternate] } } });
       await prisma.hostedMember.deleteMany({ where: { id: { in: ids } } });
       await prisma.$disconnect();
