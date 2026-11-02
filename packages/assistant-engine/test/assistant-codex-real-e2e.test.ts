@@ -45769,6 +45769,12 @@ describeRealCodex('real Codex game recap e2e', () => {
       expect(intents[0]?.message).toBe(result.response)
       expect(saved[0]?.chatLine).not.toMatch(/https?:\/\//iu)
       expect(saved[0]?.chatLine.length).toBeLessThan(160)
+      const chatLine = saved[0]?.chatLine ?? ''
+      expect(chatLine).toMatch(weekendsOff ? /6\s*(?:[-–—:]|to)\s*6/u : /3\s*(?:[-–—:]|to)\s*2/u)
+      expect(chatLine.split(/[.!?]/u)[0]).toMatch(weekendsOff ? /tie|tied|draw|week|game|finished|over/iu : /Ava/iu)
+      expect(chatLine).not.toMatch(/\b(?:open|watch|swipe|tap|click)\b|recap.{0,10}(?:ready|up)/iu)
+      process.stdout.write(`[game-recap chatLine] ${JSON.stringify({ weekendsOff, regeneration, chatLine })}\n`)
+
       const lore = await readFile(path.join(workingDirectory, 'games', 'lore-0123456789abcdef0123456789abcdef.md'), 'utf8')
       expect(lore).toContain(`Chat line used: ${saved[0]?.chatLine}`)
       expect(lore).not.toContain('Watch the recap:')

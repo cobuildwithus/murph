@@ -200,6 +200,11 @@ this default without deleting other people's private contact choices.
   requests three to six pages, opening on the tasks and prize in plain words,
   with stats only when the number itself is funny. App feedback and game
   bookkeeping are not moments; every claimed event must have game/chat evidence.
+  The group `chatLine` first states that the game ended and the winner or tie
+  with its score, then one specific game moment. It has no invitation to open
+  the recap; the delivery line already supplies the link. Stated score pairs
+  must match the canonical result. Only the opening result through its score
+  is exempt from earlier-line trigram checks; the moment must still be original.
   Legacy `scoreLine` is optional and keeps its validation when present.
   The model never selects a game id: trusted notification authority
   binds the tool to the exact settled game and room, even after a rematch starts.
@@ -219,8 +224,11 @@ this default without deleting other people's private contact choices.
   group delivery use those exact bytes. The sealed recap, `Chat line used:` lore
   and originality checks keep the bare line. `/recap/[gameId]` validates only the
   ID shape and presents a generic, noindex app handoff (`<app scheme>://recap/<gameId>`)
-  with an App Store fallback, without reading game data. Its app scheme shares
-  the invite-page setting.
+  for Apple mobile User-Agents, including recognizable iPadOS desktop UAs.
+  Other User-Agents receive a server-rendered QR of the canonical HTTPS recap
+  URL and an instruction to scan with the iPhone camera. Both views retain the
+  App Store fallback and read no game data. Its app scheme shares the invite-page
+  setting; no client detection or external QR service is used.
   For optional score lines, deploy compatible Web before the runtime writer.
   Web composes queued recap instructions; old runtimes still require the legacy
   line in their tool schema until their deployment.

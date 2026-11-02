@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Importing or reading the game database is forbidden on this public surface.
 vi.mock("@/src/lib/prisma", () => { throw new Error("Public recap must not import the database"); });
@@ -11,7 +11,11 @@ import { gameRecapAppUrl } from "@/src/lib/game/app-links";
 import { gameRecapMessage } from "@/src/lib/game/recap-message";
 import { hostedGameToolResponseSchema } from "@murphai/hosted-execution/runtime-control";
 
+const requestHeaders = vi.hoisted(() => ({ userAgent: "" }));
+vi.mock("next/headers", () => ({ headers: async () => new Headers({ "user-agent": requestHeaders.userAgent }) }));
+const iphoneUa = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1";
 const id = "game_synthetic";
+beforeEach(() => { requestHeaders.userAgent = iphoneUa; });
 afterEach(() => vi.unstubAllEnvs());
 
 describe("public recap handoff", () => {
@@ -42,6 +46,39 @@ describe("public recap handoff", () => {
       },
     });
     expect(JSON.stringify(recapMetadata)).not.toContain(id);
+  });
+
+  it.each([
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/18.0 Safari/605.1.15",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Mobile Safari/537.36",
+    "",
+  ])("renders the desktop QR handoff for UA %s", async (userAgent) => {
+    requestHeaders.userAgent = userAgent;
+    const html = renderToStaticMarkup(await GameRecapPage({ params: Promise.resolve({ gameId: id }) }));
+    expect(html).toContain("Your recap is in Murph.");
+    expect(html).toContain("Scan with your iPhone camera to watch it.");
+    expect(html).toContain("No Murph yet?");
+    expect(html).toContain("Get it on the App Store");
+    expect(html).toContain('<svg');
+    expect(html).toContain('fill="white"');
+    expect(html).toContain('fill="black"');
+    expect(html).not.toContain("Open in Murph");
+    expect(html).not.toContain("ai.withmurph.app://");
+  });
+
+  it.each([
+    iphoneUa,
+    "Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (iPod touch; CPU iPhone OS 15_0 like Mac OS X) Mobile/15E148",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1",
+  ])("preserves the Apple mobile handoff for UA %s", async (userAgent) => {
+    requestHeaders.userAgent = userAgent;
+    const html = renderToStaticMarkup(await GameRecapPage({ params: Promise.resolve({ gameId: id }) }));
+    expect(html).toContain("Open in Murph");
+    expect(html).toContain(`href="ai.withmurph.app://recap/${id}"`);
+    expect(html).not.toContain("<svg");
+    expect(html).not.toContain("Scan with your iPhone camera");
   });
 
   it.each(["short", "a".repeat(65), "game/other", "game?query", "game%2Fother", "game%", "game<script>"])("404s malformed ID %s", async (gameId) => {

@@ -90,6 +90,7 @@
     "next": "16.4.3",
     "openai": "6.45.0",
     "pg": "8.20.0",
+    "qrcode-generator": "2.0.4",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "recharts": "3.8.1",

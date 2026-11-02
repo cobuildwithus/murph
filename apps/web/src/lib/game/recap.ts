@@ -90,13 +90,33 @@ function wordGrams(value: string): Set<string> {
   return new Set(words.slice(0, -2).map((_, index) => words.slice(index, index + 3).join(" ")));
 }
 
-function validateChatLine(input: { chatLine: string; players: readonly string[]; priorChatLines: readonly string[] }, errors: string[]): void {
+const CHAT_SCORE = /\b(\d+)\s*(?:[-–—:]|to)\s*(\d+)\b(?!\s*[ap]\.?m\.?\b)/giu;
+
+function chatLineMoment(value: string, players: readonly string[]): string {
+  // Only exempt an opening result through its score, never the specific moment.
+  const score = [...value.matchAll(CHAT_SCORE)][0];
+  if (!score) return value;
+  const opening = value.slice(0, score.index);
+  const resultOpening = /^(?:(?:the|this|your|our|that's|that’s|that is)\s+)?(?:the\s+)?(?:game|week|tied?|draw|final|finished|ended|over)\b/iu.test(opening.trim());
+  const winnerOpening = players.some((name) => new RegExp(`^${escapeRegExp(name)}\\s+(?:won|wins?)\\b`, "iu").test(opening.trim()));
+  if (/[.!?;]/u.test(opening) || (!resultOpening && !winnerOpening)) return value;
+  return value.slice(score.index + score[0].length);
+}
+
+function validateChatLine(input: { chatLine: string; players: readonly string[]; priorChatLines: readonly string[]; result?: readonly GameRecapCanonicalScore[] }, errors: string[]): void {
   checkText("chatLine", input.chatLine, 160, errors);
-  if (/^\s*(?:the |your )?recap/iu.test(input.chatLine)) errors.push("chatLine: lead with the week's funniest moment, not with the recap being ready.");
+  if (/^\s*(?:the |your )?recap/iu.test(input.chatLine)) errors.push("chatLine: lead with the finished game and its result, not with the recap being ready.");
   if (/made the recap|recap'?s (?:ready|up|in)\b|recap is (?:ready|up|in)\b|your week is ready/iu.test(input.chatLine)) {
-    errors.push("chatLine: that ending is a stock phrase; point them to the recap in your own words.");
+    errors.push("chatLine: skip stock recap phrases and invitations; the next line already supplies the link.");
   }
-  const current = wordGrams(input.chatLine);
+  if (input.result?.length === 2) {
+    const scores = input.result.map((player) => player.score).sort((a, b) => a - b);
+    for (const match of input.chatLine.matchAll(CHAT_SCORE)) {
+      const stated = [Number(match[1]), Number(match[2])].sort((a, b) => a - b);
+      if (stated[0] !== scores[0] || stated[1] !== scores[1]) errors.push(`chatLine: score must match the settled result (${scores.join(" to ")}).`);
+    }
+  }
+  const current = wordGrams(chatLineMoment(input.chatLine, input.players));
   const names = new Set(input.players.map((player) => player.toLowerCase()));
   const repeats = input.priorChatLines.flatMap((line) => [...wordGrams(line)].filter((gram) => current.has(gram) && !gram.split(" ").some((word) => names.has(word)))).sort();
   if (repeats[0]) errors.push(`chatLine: repeats "${repeats[0]}" from an earlier week's chat line in the lore; say it a new way.`);
@@ -154,7 +174,7 @@ export function validateGameRecap(input: { recap: HostedGameRecap; players: read
     if (SECOND_PERSON.test(scoreLine)) errors.push("scoreLine: write about them by name, not you.");
     if (input.result) validateScoreLine(scoreLine, input.result, errors);
   }
-  validateChatLine({ chatLine: input.recap.chatLine, players: input.players, priorChatLines: input.priorChatLines ?? [] }, errors);
+  validateChatLine({ chatLine: input.recap.chatLine, players: input.players, priorChatLines: input.priorChatLines ?? [], result: input.result }, errors);
   return errors;
 }
 
