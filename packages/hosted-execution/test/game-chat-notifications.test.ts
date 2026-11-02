@@ -70,12 +70,15 @@ describe("game v1 notification instructions", () => {
     expect(recap).toContain("- Moments come from the game itself: their posts, misses, excuses and what they said to each other about it. Changing the game (terms, prize wording, schedule, invites) is bookkeeping, never a moment; leave it out, and the same goes for anything said to you about the app itself (feature requests, bugs, feedback). Everything you say happened did: never invent a lead, a comeback or a reason the game and chat don't show.");
     expect(recap).toContain("- The app adds the score card and the result page after your pages; they show the score and who owes whom, so your pages don't need to. Call what the loser owes a prize, or a dare when it is one.");
     expect(recap).not.toContain("scoreLine");
+    expect(recap).toContain("No invitation to open, watch or swipe anything");
+    expect(recap).toContain("Then add one specific thing one of them did or said during the game.");
+    expect(recap).not.toMatch(/Don't restate the score|then nudge them|Lead with one specific thing/u);
     const transcript = [{ playerName: "Ava", text: "My alarm won." }];
     const missed = buildGameMissedDayInstructions({ playerName: "Ava", firstMissedDate: "2030-03-04", missedDates: ["2030-03-04", "2030-03-05"], transcript });
     expect({
       recapOpening: recap.split("\n")[0],
       recapToolOrder: recap.includes("Use murph.read_game first") && recap.includes("then use murph.write_recap"),
-      recapReply: recap.includes("chatLine is your message to the two of them") && recap.includes("Lead with one specific thing one of them did or said during the game"),
+      recapReply: recap.includes("chatLine is your end-of-game message") && recap.includes("who won and the score, or that it was a tie and the score"),
       recapMomentsNotBookkeeping: recap.includes("Changing the game (terms, prize wording, schedule, invites) is bookkeeping, never a moment"),
       recapLore: recap.includes("murph.game_lore") && recap.includes("Chat line used:"),
       recapTranscript: recap.includes('"playerName":"Ava","text":"My alarm won."'),
