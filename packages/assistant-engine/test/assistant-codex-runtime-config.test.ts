@@ -221,7 +221,7 @@ describe('assistant codex runtime', () => {
       approvalPolicy: 'never',
       baseInstructions: 'Do not use this in normal Murph config.',
       cwd: '/workspace',
-      developerInstructions: 'Stable Murph instructions.',
+      developerInstructions: '',
       dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS.map(withCodexToolInputContract),
       experimentalRawEvents: true,
       model: 'gpt-5',
@@ -310,6 +310,8 @@ describe('assistant codex runtime', () => {
     ).toEqual({
       approvalPolicy: 'never',
       cwd: '/workspace',
+      baseInstructions: 'Do not use this in normal Murph config.',
+      developerInstructions: '',
       excludeTurns: true,
       model: 'gpt-5',
       modelProvider: 'hosted-openai',
@@ -332,6 +334,8 @@ describe('assistant codex runtime', () => {
         'features.shell_tool': false,
       },
       cwd: '/workspace',
+      baseInstructions: 'Do not use this in normal Murph config.',
+      developerInstructions: '',
       excludeTurns: true,
       model: 'gpt-5',
       modelProvider: 'hosted-openai',
@@ -354,6 +358,8 @@ describe('assistant codex runtime', () => {
     ).toEqual({
       approvalPolicy: 'never',
       cwd: '/workspace',
+      baseInstructions: 'Do not use this in normal Murph config.',
+      developerInstructions: '',
       excludeTurns: true,
       model: 'gpt-5',
       modelProvider: 'hosted-openai',
@@ -373,6 +379,8 @@ describe('assistant codex runtime', () => {
     ).toEqual({
       approvalPolicy: 'never',
       cwd: '/workspace',
+      baseInstructions: 'Do not use this in normal Murph config.',
+      developerInstructions: '',
       excludeTurns: true,
       model: 'gpt-5',
       modelProvider: 'hosted-openai',
@@ -387,6 +395,7 @@ describe('assistant codex runtime', () => {
       codexThreadId: 'thread-1',
     })
     expect(turnStart).toEqual({
+      collaborationMode: { mode: 'default', settings: { model: 'gpt-5', reasoning_effort: 'high', developer_instructions: 'Stable Murph instructions.' } },
       effort: 'high',
       input: [
         {
@@ -466,7 +475,7 @@ describe('assistant codex runtime', () => {
         'features.multi_agent_v2': false,
       },
       cwd: '/workspace',
-      developerInstructions: 'Stable Murph instructions.',
+      developerInstructions: '',
       dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS.map(withCodexToolInputContract),
       ephemeral: true,
       experimentalRawEvents: true,
@@ -622,6 +631,7 @@ describe('assistant codex runtime', () => {
             method: 'thread/start',
             params: {
               approvalPolicy: 'never',
+              developerInstructions: '',
               cwd: expectedWorkingDirectory,
               dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS.map(withCodexToolInputContract),
               experimentalRawEvents: true,

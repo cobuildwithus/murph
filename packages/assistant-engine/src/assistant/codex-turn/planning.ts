@@ -820,11 +820,14 @@ function resolveRouteNativeResumeThreadId({
     storedAssistantContractFingerprint === assistantContractFingerprint ||
     (
       resumeBinding !== null &&
-      storedAssistantContractFingerprint === buildAssistantCodexContractFingerprint({
-        developerInstructions: threadStartDeveloperInstructions,
-        dynamicTools,
-        routeFingerprint: resumeBinding.routeFingerprint,
-      })
+      [readCodexThreadCompatibilityFingerprint(input.route), resumeBinding.routeFingerprint]
+        .some((routeFingerprint) =>
+          storedAssistantContractFingerprint === buildAssistantCodexContractFingerprint({
+            developerInstructions: threadStartDeveloperInstructions,
+            dynamicTools,
+            routeFingerprint,
+          }),
+        )
     )
   const nativeResumeEnabled =
     input.profile.threadScope === 'session-thread'
@@ -1391,7 +1394,6 @@ export async function resolveAssistantRouteTurnPlan(
       (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',
     )
   const assistantContractFingerprint = buildAssistantCodexContractFingerprint({
-    developerInstructions: threadStartDeveloperInstructions,
     dynamicTools,
     routeFingerprint: readCodexThreadCompatibilityFingerprint(input.route),
   })
@@ -1432,10 +1434,6 @@ export async function resolveAssistantRouteTurnPlan(
           ASSISTANT_CONTEXT_HANDOFF_NOTIFICATION_OUTPUT_CONTRACT,
         ].join('\n\n')
       : threadStartPromptResult.prompt
-  const developerInstructions =
-    resumeCodexThreadId === null
-      ? threadStartDeveloperInstructions
-      : null
   const routePlanningElapsedMs = elapsedSince(routePlanningStartedAt)
   const routePlanningMeasuredElapsedMs = sumRoutePlanningSpanMetrics(
     routePlanningSpans,
@@ -1457,7 +1455,7 @@ export async function resolveAssistantRouteTurnPlan(
     cliEnv: {
       ...input.sharedPlan.cliAccess.env,
     },
-    developerInstructions: normalizeNullableString(developerInstructions),
+    developerInstructions: threadStartDeveloperInstructions,
     dynamicTools,
     environments: outputOnlyTurn ? [] : undefined,
     conversationHistoryMessages:

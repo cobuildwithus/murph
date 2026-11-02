@@ -1754,6 +1754,49 @@ describeRealCodex('real Codex focused sleep-pattern projection e2e', () => {
 })
 
 describeRealCodex('real model canonical production journeys', () => {
+  it('keeps conversational recall and current style across warm and cold instruction updates', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-thread-continuity-'))
+    const codexCommand = normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? 'codex'
+    try {
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({ codexCommand, directory: workingDirectory })
+      let threadId: string | null = null
+      for (const phase of ['initial', 'warm', 'cold'] as const) {
+        if (phase === 'cold') await stopWarmCodexAppServer('continuity-cold-restore')
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand, codexHome: config.codexHome,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: null, channel: 'linq',
+            cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+            conversationScope: 'direct', currentLocalDate: '2026-11-02', currentTimeZone: 'UTC',
+            hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+            assistantTone: phase === 'initial' ? 'formal' : 'casual',
+          }),
+          dynamicTools: resolveMurphDynamicTools({ allowFinishWithoutReply: false }),
+          env: { ...config.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+          model: config.model, modelProvider: config.modelProvider,
+          reasoningEffort: 'low', sandbox: 'read-only', workingDirectory,
+          resumeSessionId: threadId,
+          prompt: phase === 'initial'
+            ? 'For this conversation only, my imaginary walking trail is named Cedar Loop. Acknowledge in one short sentence. Do not save anything or use tools.'
+            : 'What is the name of my imaginary walking trail? One short sentence. Do not use tools.',
+        })
+        if (threadId) expect(result.threadId).toBe(threadId)
+        threadId = result.threadId
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        expect(actions).toEqual([])
+        expect(result.finalMessage).toMatch(/cedar loop/iu)
+        expect(result.finalMessage).not.toMatch(/don.t (?:know|remember)|remind me|saved|updated|deploy|thread/iu)
+        if (phase !== 'initial') expect(result.finalMessage).toBe(result.finalMessage.toLowerCase())
+        process.stdout.write(`[thread-continuity-live] ${JSON.stringify({ phase, model: config.model, actions: actions.length, reply: result.finalMessage })}\n`)
+      }
+    } finally {
+      await stopWarmCodexAppServer('continuity-proof-complete')
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
   it.each(['single message', 'live follow-up', 'split question'] as const)('natural recall inspects photo-only device captures arriving outside a resumed private conversation: %s', async (messageShape) => {
     const config = await resolveRealCodexE2eConfig()
     const fixture = await createCanonicalLiveFixture(config, 'linq')

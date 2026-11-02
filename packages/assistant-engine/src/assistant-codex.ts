@@ -5958,6 +5958,7 @@ async function runCodexAppServerTurnOnProcess(
         input,
         images: input.preparedImages,
         codexThreadId,
+        threadResult,
       }),
     )
     const providerStartedAtMonotonicMs =

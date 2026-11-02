@@ -201,8 +201,13 @@ describe("hosted runner container image contract", () => {
     const productCatalog = parseCodexModelCatalogJson(runJqFilter(patchFilter, nativeCatalog));
     expect(runJqFilter(validationFilter, productCatalog, { slurp: true }).trim()).toBe("true");
     for (const slug of hostedRunnerProductModelSlugs) {
+      const expected = structuredClone(readCodexModel(slug === "gpt-6.1-terra" ? terraCatalog : nativeCatalog, slug));
+      if (typeof expected.model_messages === "object" && expected.model_messages !== null) {
+        Reflect.deleteProperty(expected.model_messages, "collaboration_modes");
+      }
+      expect(readCodexModel(productCatalog, slug)).not.toHaveProperty("model_messages.collaboration_modes");
       expect(readCodexModel(productCatalog, slug)).toMatchObject({
-        ...readCodexModel(slug === "gpt-6.1-terra" ? terraCatalog : nativeCatalog, slug),
+        ...expected,
         service_tiers: expect.any(Array),
         tool_mode: "code_mode",
       });

@@ -2,6 +2,11 @@ Private meal thumbnail delivery, capture-based retention and deletion are owned 
 [`ios-meals.md`](product-specs/ios-meals.md); implementation is tracked in
 [the thumbnail plan](exec-plans/completed/2026-11-02-meal-photo-thumbnails.md).
 
+Codex conversation continuity across instruction-only deploys is recorded in
+[the implementation plan](exec-plans/completed/2026-11-02-codex-thread-continuity.md)
+and [the verification report](../codex-thread-continuity-report.md).
+`../ARCHITECTURE.md` owns the mutable instruction and immutable tool contract.
+
 Historical exact meal-photo association is tracked in
 [the implementation plan](exec-plans/completed/2026-11-02-meal-photos-exact.md);
 `product-specs/ios-meals.md` owns the read-time recovery rule.

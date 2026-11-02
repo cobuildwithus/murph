@@ -9,6 +9,7 @@ const execFileAsync = promisify(execFile)
 export async function writeHostedOpenAiMixedModeModelCatalogJson(input: {
   codexCommand: string
   directory: string
+  dockerfile?: string
   astraAllowed?: boolean
   toolMode?: 'code_mode_only'
 }): Promise<string> {
@@ -16,7 +17,7 @@ export async function writeHostedOpenAiMixedModeModelCatalogJson(input: {
     encoding: 'utf8',
     maxBuffer: 10 * 1024 * 1024,
   })
-  const dockerfile = await readFile(new URL('../../../../Dockerfile.cloudflare-hosted-runner', import.meta.url), 'utf8')
+  const dockerfile = input.dockerfile ?? await readFile(new URL('../../../../Dockerfile.cloudflare-hosted-runner', import.meta.url), 'utf8')
   const patchFilter = /\| jq '([^']+)'/u.exec(dockerfile)?.[1]
   const standardFilter = /&& jq '([^']+)' \/tmp\/murph-codex-model-catalog\.openai-flex\.json/u.exec(dockerfile)?.[1]
   if (!patchFilter || !standardFilter) throw new Error('Image catalog filters are missing.')
