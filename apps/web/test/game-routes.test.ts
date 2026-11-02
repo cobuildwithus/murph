@@ -15,6 +15,7 @@ vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   authorizeMediaRead: vi.fn(),
+  authorizeMediaReads: vi.fn(),
   devAdvanceDays: vi.fn(),
   devSettleNow: vi.fn(),
   devStartNow: vi.fn(),
@@ -32,6 +33,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/game/service", () => ({
   authorizeMediaRead: mocks.authorizeMediaRead,
+  authorizeMediaReads: mocks.authorizeMediaReads,
   devAdvanceDays: mocks.devAdvanceDays,
   devSettleNow: mocks.devSettleNow,
   devStartNow: mocks.devStartNow,
@@ -495,22 +497,22 @@ describe("weekly game routes", () => {
       const delivery = { url: "https://imagedelivery.net/account/image/gameavatar?exp=9999999999&sig=synthetic", expiresAt: "2030-01-01T00:00:00.000Z" };
       vi.stubEnv("VERCEL_ENV", "production");
       mocks.control = { gameImageDelivery: vi.fn(async () => delivery) };
-      mocks.authorizeMediaRead.mockResolvedValue(true);
+      mocks.authorizeMediaReads.mockImplementation(async (_member: string, keys: string[]) => new Set(keys));
       const response = await routes.history.GET(new Request(`${BASE}/history`));
       const result = await response.json();
       expect(result.people[0].games[0].previews).toEqual(previews.map((preview) => ({ ...preview, delivery })));
       expect(result.people[0].games[1]).toEqual(history.people[0].games[1]);
       expect(response.headers.get("cache-control")).toBe("private, no-store");
       expect(response.headers.get("referrer-policy")).toBe("no-referrer");
-      expect(mocks.authorizeMediaRead).toHaveBeenCalledTimes(5);
-      expect(mocks.authorizeMediaRead).toHaveBeenCalledWith(LEO, `game/${LEO}/${"0".repeat(64)}.jpg`);
+      expect(mocks.authorizeMediaReads).toHaveBeenCalledTimes(1);
+      expect(mocks.authorizeMediaReads).toHaveBeenCalledWith(LEO, expect.arrayContaining([`game/${LEO}/${"0".repeat(64)}.jpg`]));
       expect(mocks.control.gameImageDelivery).toHaveBeenCalledTimes(5);
       expect(mocks.control.gameImageDelivery).toHaveBeenCalledWith({ userId: LEO, mediaId: `${"0".repeat(64)}.jpg`, variant: "avatar" });
 
-      mocks.authorizeMediaRead.mockResolvedValue(false);
+      mocks.authorizeMediaReads.mockResolvedValue(new Set());
       expect(await (await routes.history.GET(new Request(`${BASE}/history`))).json()).toEqual({ ok: true, ...history });
       expect(mocks.control.gameImageDelivery).toHaveBeenCalledTimes(5);
-      mocks.authorizeMediaRead.mockResolvedValue(true);
+      mocks.authorizeMediaReads.mockImplementation(async (_member: string, keys: string[]) => new Set(keys));
       mocks.control.gameImageDelivery.mockRejectedValue(new Error("synthetic signing outage"));
       expect(await (await routes.history.GET(new Request(`${BASE}/history`))).json()).toEqual({ ok: true, ...history });
       mocks.control = null;
@@ -519,11 +521,26 @@ describe("weekly game routes", () => {
       expect(await (await routes.history.GET(new Request(`${BASE}/history`))).json()).toEqual({ ok: true, ...history });
     });
 
-    it("caps history signing at 300 calls and four concurrent operations at maximum history size", async () => {
+    it("keeps uploader deliveries when a mixed authorization batch fails", async () => {
+      const history = historyFixture(1, 1);
+      const other = history.people[0].games[0].previews[1];
+      other.mediaUrls = [`/api/game/v1/media/${encodeURIComponent(`game/${AVA}/${"a".repeat(64)}.jpg`)}`];
+      mocks.readHistory.mockResolvedValue(history);
+      vi.stubEnv("VERCEL_ENV", "production");
+      mocks.authorizeMediaReads.mockRejectedValue(new Error("synthetic database failure"));
+      const delivery = { url: "https://imagedelivery.net/account/image/gameavatar?exp=9999999999&sig=synthetic", expiresAt: "2030-01-01T00:00:00.000Z" };
+      mocks.control = { gameImageDelivery: vi.fn(async () => delivery) };
+      const result = await (await routes.history.GET(new Request(`${BASE}/history`))).json();
+      expect(result.people[0].games[0].previews).toEqual(history.people[0].games[0].previews
+        .map(preview => preview === other ? preview : { ...preview, delivery }));
+      expect(mocks.control.gameImageDelivery).toHaveBeenCalledTimes(5);
+    });
+
+    it("caps history signing at 300 calls and six concurrent operations at maximum history size", async () => {
       const history = historyFixture(50, 50);
       mocks.readHistory.mockResolvedValue(history);
       vi.stubEnv("VERCEL_ENV", "production");
-      mocks.authorizeMediaRead.mockResolvedValue(true);
+      mocks.authorizeMediaReads.mockImplementation(async (_member: string, keys: string[]) => new Set(keys));
       let active = 0;
       let peak = 0;
       mocks.control = { gameImageDelivery: vi.fn(async () => {
@@ -535,8 +552,9 @@ describe("weekly game routes", () => {
       }) };
       const result = await (await routes.history.GET(new Request(`${BASE}/history`))).json();
       expect(mocks.control.gameImageDelivery).toHaveBeenCalledTimes(300);
-      expect(mocks.authorizeMediaRead).toHaveBeenCalledTimes(300);
-      expect(peak).toBe(4);
+      expect(mocks.authorizeMediaReads).toHaveBeenCalledTimes(50);
+      expect(mocks.authorizeMediaReads.mock.calls.every(([, keys]) => keys.length <= 6)).toBe(true);
+      expect(peak).toBe(6);
       expect(active).toBe(0);
       expect(result.people.every((person: GameHistoryView["people"][number]) =>
         person.games[0].previews.every((preview) => preview.delivery)
