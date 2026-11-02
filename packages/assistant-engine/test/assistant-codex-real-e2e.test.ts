@@ -45666,7 +45666,10 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
     }
   }, 360_000)
 
-  it('game v1 cancellation announces one withdrawn request without cancelling the challenge', async () => {
+  it.each([
+    { name: 'game v1 cancellation announces one withdrawn request without cancelling the challenge', shared: false },
+    { name: 'game v1 shared-room cancellation names its game without restating the terms', shared: true },
+  ])('$name', async ({ shared }) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-notice-e2e-'))
     const permissionHome = await materializeRealCodexHostedPermissionHome(config)
@@ -45687,7 +45690,9 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
         deliveryDedupeToken: 'game-change-cancelled:game_synthetic:proposal_synthetic',
         responsePolicy: { kind: 'require_send' },
         executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'synthetic-group', userEnvKeys: [] } },
-        identityId: null, instructions: buildGameChangeCancelledInstructions(),
+        identityId: null, instructions: buildGameChangeCancelledInstructions(shared
+          ? { tasks: ['Read 20 pages', 'No phone after 10pm'], otherGames: [{ status: 'live', tasks: ['20 squats', '10 minute stretch'] }], startedAfterAnother: true }
+          : undefined),
         threadId: 'synthetic-game-thread', threadIsDirect: false,
         onTraceEvent: (event) => events.push(event.rawEvent),
         turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
@@ -45707,6 +45712,11 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
       expect(reply).not.toMatch(/(?:challenge|game) (?:is |was |has been )?cancelled|restart|calendar days|remind|do you agree/iu)
       expect(reply).not.toContain('?')
       expect(reply.length).toBeLessThan(350)
+      if (shared) {
+        // Named by its tasks, never confused with the squats game, and no other terms restated.
+        expect(reply).toMatch(/read|phone/iu)
+        expect(reply).not.toMatch(/squat|stretch|prize|dare|days? total/iu)
+      }
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
     }
