@@ -44,9 +44,9 @@ describe('assistant system prompt health record ingestion invariant', () => {
     expect(closeout).toContain('it never authorizes adding a meal')
     expect(closeout).toContain('Read the factual observation back, then follow the existing photo cleanup below')
     expect(closeout).toContain('exclude identified non-food or unconsumed-food records from presentation and questions')
-    expect(closeout).toContain('Any removal failure fails the run')
+    expect(closeout).toContain('Any command failure fails the run')
     const managed = MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions
-    expect(managed).toContain('A removal failure or any selected photo remaining fails the run')
+    expect(managed).toContain('A review-completion failure or any selected pending photo attachment remaining fails the run')
     expect(closeout).not.toContain('defer')
   })
 

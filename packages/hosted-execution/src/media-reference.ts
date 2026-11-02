@@ -18,4 +18,3 @@ export function createHostedMediaReferenceId(input: {
     .update(String(input.byteSize))
     .digest("hex");
 }
-

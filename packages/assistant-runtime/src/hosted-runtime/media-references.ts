@@ -118,7 +118,9 @@ export async function publishHostedWorkspaceMediaReferencesForSnapshot(input: {
   }
 
   return {
-    excludedVaultPaths: entries.map((entry) => entry.relativePath),
+    // Meal CLI/native image tools read local paths. Keep their canonical bytes
+    // in encrypted snapshots; the media store serves only thumbnail delivery.
+    excludedVaultPaths: entries.filter(entry => !entry.relativePath.startsWith(RAW_MEALS_PREFIX)).map(entry => entry.relativePath),
     prunedMediaCount,
     referenceCount: entries.length,
     uploadedMediaCount,
@@ -395,6 +397,7 @@ function collectCaptureHostedMediaCandidates(
     for (const rawRef of collectEventRawReferencePaths(record)) {
       const normalized = normalizeHostedMediaVaultPath(rawRef, record.kind === "meal" ? RAW_MEALS_PREFIX : RAW_CAPTURES_PREFIX);
       const mediaKind = normalized ? readHostedMediaKindFromPath(normalized) : null;
+      if (record.kind === "meal" && normalized !== record.photoThumbnail?.relativePath) continue;
       if (!mediaKind || !normalized) {
         continue;
       }
@@ -402,9 +405,7 @@ function collectCaptureHostedMediaCandidates(
         byteSize: null,
         expiresAt: isGeneratedImageCaptureEvent(record)
           ? new Date(Date.parse(record.recordedAt) + GENERATED_IMAGE_CAPTURE_RETENTION_WINDOW_MS).toISOString()
-          : record.kind === "meal" && record.photoCapturedAt && record.photoThumbnail && normalized !== record.photoThumbnail?.relativePath
-            ? new Date(Date.parse(record.photoCapturedAt) + INBOX_IMAGE_RETENTION_WINDOW_MS).toISOString()
-            : null,
+          : null,
         mediaKind,
         mimeType: readHostedMediaMimeTypeFromPath(normalized),
         recordedAt: normalizeHostedMediaRecordedAt(record.recordedAt),

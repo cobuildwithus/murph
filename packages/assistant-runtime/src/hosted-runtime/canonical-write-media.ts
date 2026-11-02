@@ -44,7 +44,7 @@ export async function externalizeHostedCanonicalWriteMediaPayloads(input: {
   );
   let omittedPayloadCount = 0;
   const actions: HostedCanonicalWriteReceiptAction[] = input.persistence.receipt.actions.map((action) => {
-    if (action.kind !== "raw_upsert" || !action.contentRef) {
+    if (action.kind !== "raw_upsert" || !action.contentRef || action.targetRelativePath.startsWith("raw/meals/")) {
       return action;
     }
     const mediaRef = mediaRefsByPath.get(action.targetRelativePath);
@@ -68,7 +68,9 @@ export async function externalizeHostedCanonicalWriteMediaPayloads(input: {
   const actionPaths = new Set(actions.map((action) => action.targetRelativePath));
   for (const relativePath of referencedPaths) {
     const entry = mediaRefsByPath.get(relativePath);
-    if (entry && !actionPaths.has(relativePath)) {
+    // Keep meal bytes in the receipt for cold CLI/native image reads, and also
+    // retain the delivery-object pointer for cleanup after receipt-only recovery.
+    if (entry && (!actionPaths.has(relativePath) || relativePath.startsWith("raw/meals/"))) {
       actions.push(toHostedMediaReceiptAction(entry));
     }
   }
