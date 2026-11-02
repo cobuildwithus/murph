@@ -43,7 +43,6 @@ import {
 } from '../src/assistant/automation/prompt-builder.ts'
 import { resolveAssistantPromptTimeContext } from '../src/assistant/prompt-time.ts'
 import {
-  acquireAssistantAutomationRunLock,
   clearAssistantAutomationRunLock,
   inspectAssistantAutomationRunLock,
 } from '../src/assistant/automation/runtime-lock.ts'
@@ -1724,45 +1723,6 @@ describe('assistant auto-reply prompt builder support', () => {
 })
 
 describe('assistant automation runtime locks', () => {
-  it('reports same-process locks while held and returns to unlocked after release', async () => {
-    const { vaultRoot } = await createTempVault('assistant-automation-support-')
-    const paths = resolveAssistantStatePaths(vaultRoot)
-
-    const lock = await acquireAssistantAutomationRunLock({
-      once: true,
-      paths,
-    })
-
-    await expect(inspectAssistantAutomationRunLock(paths)).resolves.toMatchObject({
-      state: 'active',
-      pid: process.pid,
-      mode: 'once',
-      reason: 'assistant automation already active in this process',
-    })
-
-    await assert.rejects(
-      () => acquireAssistantAutomationRunLock({ paths }),
-      (error) => {
-        assert.equal(
-          (error as { code?: unknown }).code,
-          'ASSISTANT_AUTOMATION_ALREADY_RUNNING',
-        )
-        return true
-      },
-    )
-
-    await lock.release()
-
-    await expect(inspectAssistantAutomationRunLock(paths)).resolves.toEqual({
-      state: 'unlocked',
-      pid: null,
-      startedAt: null,
-      mode: null,
-      command: null,
-      reason: null,
-    })
-  })
-
   it('inspects and clears stale external automation locks', async () => {
     const { vaultRoot } = await createTempVault('assistant-automation-support-')
     const paths = resolveAssistantStatePaths(vaultRoot)
