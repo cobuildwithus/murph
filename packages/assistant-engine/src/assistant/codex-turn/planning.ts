@@ -1,5 +1,6 @@
 import { GAME_PHOTO_CHAT_GUIDANCE, MURPH_GAME_LORE_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_TOOL } from "../../assistant-codex/dynamic-tools/games.js"
 import { resolveUsageOptimizerFeedbackScope } from '../weekly-usage-optimizer.js'
+import { supportsCodexTurnDeveloperInstructions } from '../../assistant-codex/config.js'
 import { resolveAssistantFollowUpTurnContext } from '../follow-ups.js'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import { resolveXaiApiKey } from '@murphai/operator-config/xai-runtime'
@@ -1394,6 +1395,9 @@ export async function resolveAssistantRouteTurnPlan(
       (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',
     )
   const assistantContractFingerprint = buildAssistantCodexContractFingerprint({
+    developerInstructions: supportsCodexTurnDeveloperInstructions({ env: input.sharedPlan.cliAccess.env })
+      ? undefined
+      : threadStartDeveloperInstructions,
     dynamicTools,
     routeFingerprint: readCodexThreadCompatibilityFingerprint(input.route),
   })

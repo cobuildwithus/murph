@@ -1,7 +1,6 @@
 import { GAME_HOST_BASE_READ_GAME_TOOL, INCOMPLETE_BASE_UPDATE_GAME_TOOL } from './support/game-input-baselines.ts'
 import { GAME_INPUT_BASELINES } from './support/game-input-baselines.ts'
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { rm } from 'node:fs/promises'
 
@@ -15,6 +14,7 @@ import {
   stopWarmCodexAppServer,
 } from '../src/assistant-codex.ts'
 import * as requestBuilders from '../src/assistant-codex/app-server-requests.ts'
+import * as codexConfig from '../src/assistant-codex/config.ts'
 import {
   buildCodexThreadResumeParams,
   buildCodexThreadStartParams,
@@ -276,51 +276,44 @@ function assertRejectsDamagedProof(expected: AssistantProviderDynamicTool, obser
 
 describe('Codex canonical tool input contract upgrade guard', () => {
   afterEach(() => vi.restoreAllMocks())
-  it.skipIf(process.env.MURPH_MEASURE_THREAD_CONTINUITY_INPUT !== '1').each(['direct', 'group'] as const)(
+  it.skipIf(process.env.MURPH_MEASURE_THREAD_CONTINUITY_INPUT !== '1').each(['direct', 'group', 'local'] as const)(
     'thread continuity: complete first provider input (%s)', { timeout: 90_000 }, async (scope) => {
       stub ??= await startScriptedResponsesStub()
       const model = scope === 'direct' ? 'gpt-6.1-terra' : 'gpt-6.1-sol'
       const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths, { model })
       const layers = buildAssistantSystemPromptLayers({
-        assistantCliContract: null, assistantHostedAutomationAvailable: true,
+        assistantCliContract: null, assistantHostedAutomationAvailable: scope !== 'local',
         assistantHostedGroupToolSurface: scope === 'group' ? 'families' : 'none',
         channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
-        conversationScope: scope, currentLocalDate: '2026-11-02', currentInstant: '2026-11-02T16:00:00.000Z', currentTimeZone: 'UTC',
-        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, ordinaryInboundTurn: true,
+        conversationScope: scope === 'local' ? 'direct' : scope, currentLocalDate: '2026-11-02', currentInstant: '2026-11-02T16:00:00.000Z', currentTimeZone: 'UTC',
+        hostedRuntime: scope !== 'local', modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, ordinaryInboundTurn: true,
       })
       const developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
-      const tools = resolveMurphDynamicTools({
+      const tools = resolveMurphDynamicTools(scope === 'local' ? {} : {
         allowFinishWithoutReply: true, automationAvailable: true, imageGenerationAvailable: true,
-        progressUpdatesAvailable: true, progressUpdateMode: scope, gamesAvailable: true,
+        progressUpdatesAvailable: true, progressUpdateMode: scope === 'group' ? 'group' : 'direct', gamesAvailable: true,
         groupSharedReadAvailable: scope === 'group', groupRoomModelAvailable: scope === 'group',
         personalizationAvailable: scope === 'direct', responseCardsAvailable: scope === 'direct',
       })
       const measurements = []
       for (const phase of ['base', 'head'] as const) {
         await stopWarmCodexAppServer()
-        const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
-          codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
-          ...(phase === 'base' ? { dockerfile: execFileSync('git', ['show', '52dbc85e82:Dockerfile.cloudflare-hosted-runner'], { encoding: 'utf8' }) } : {}),
-        })
-        if (phase === 'base') {
-          const start = requestBuilders.buildCodexThreadStartParams
-          const turn = requestBuilders.buildCodexTurnStartParams
-          vi.spyOn(requestBuilders, 'buildCodexThreadStartParams').mockImplementationOnce((input) => ({
-            ...start(input), developerInstructions: input.developerInstructions,
-          }))
-          vi.spyOn(requestBuilders, 'buildCodexTurnStartParams').mockImplementationOnce((input) => {
-            const result = turn(input)
-            delete result.collaborationMode
-            return result
+        const env = { ...scenario.turnInput.env }
+        delete env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]
+        if (scope !== 'local') {
+          env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV] = await writeHostedOpenAiMixedModeModelCatalogJson({
+            codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
           })
         }
+        // PR head 9be902bc52 unconditionally used turn instructions with this catalog.
+        if (phase === 'base') vi.spyOn(codexConfig, 'supportsCodexTurnDeveloperInstructions').mockReturnValue(true)
         stub.markRequestBaseline()
         stub.captureProviderRequestDiagnostics({ completeInput: true })
         stub.queue({ text: CONTRACT_CAPTURE_DONE })
         const result = await executeCodexAppServerTurn({
           ...scenario.turnInput, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS, developerInstructions, dynamicTools: tools,
           groupConversation: scope === 'group', prompt: [layers.dynamicTurnContextPrompt, 'Help me plan a walk.'].join('\n\n'),
-          env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+          env,
         })
         vi.restoreAllMocks()
         const captured = stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
@@ -341,13 +334,17 @@ describe('Codex canonical tool input contract upgrade guard', () => {
     },
   )
 
-  it.each(['gpt-6.1-terra', 'gpt-6.1-sol', 'legacy'])('refreshes developer instructions on the same warm and cold Codex thread: %s', { timeout: 90_000 }, async (variant) => {
-    const model = variant === 'legacy' ? 'gpt-6.1-terra' : variant
+  it.each(['gpt-6.1-terra', 'gpt-6.1-sol', 'legacy', 'local'])('refreshes developer instructions through warm and cold turns: %s', { timeout: 90_000 }, async (variant) => {
+    const model = variant === 'local' ? 'gpt-6.1-sol' : variant === 'legacy' ? 'gpt-6.1-terra' : variant
     stub ??= await startScriptedResponsesStub()
     const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths, { model })
-    const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
-      codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
-    })
+    const env = { ...scenario.turnInput.env }
+    delete env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]
+    if (variant !== 'local') {
+      env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV] = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
+      })
+    }
     const layers = buildAssistantSystemPromptLayers({
       currentLocalDate: '2026-11-02', currentTimeZone: 'UTC', conversationScope: 'direct',
       cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
@@ -357,6 +354,8 @@ describe('Codex canonical tool input contract upgrade guard', () => {
     let threadId: string | null = null
     for (const phase of ['initial', 'unchanged', 'warm', 'cold'] as const) {
       const instructionPhase = phase === 'unchanged' ? 'initial' : phase
+      // The planner rotates instruction-sensitive local threads (proved separately).
+      const rotate = variant === 'local' && (phase === 'warm' || phase === 'cold')
       if (phase === 'cold' || (variant === 'legacy' && phase === 'warm')) await stopWarmCodexAppServer()
       if (variant === 'legacy' && phase === 'initial') {
         const start = requestBuilders.buildCodexThreadStartParams
@@ -375,24 +374,29 @@ describe('Codex canonical tool input contract upgrade guard', () => {
       stub.queue({ text: CONTRACT_CAPTURE_DONE })
       const result = await executeCodexAppServerTurn({
         ...scenario.turnInput,
-        env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+        env,
         baseInstructions: phase === 'cold' ? `${MURPH_CODEX_BASE_INSTRUCTIONS}\nSynthetic updated cold kernel.` : MURPH_CODEX_BASE_INSTRUCTIONS,
         developerInstructions: `${instructions}\nCurrent synthetic release instruction: ${instructionPhase}.`,
         dynamicTools: resolveMurphDynamicTools({}),
-        prompt: phase === 'initial' ? 'Remember the synthetic choice: cedar.' : 'Continue with my earlier choice.',
-        resumeSessionId: threadId,
+        prompt: phase === 'initial' || rotate ? 'Remember the synthetic choice: cedar.' : 'Continue with my earlier choice.',
+        resumeSessionId: rotate ? null : threadId,
       })
       vi.restoreAllMocks()
-      if (threadId) expect(result.threadId).toBe(threadId)
+      if (threadId) {
+        if (rotate) expect(result.threadId).not.toBe(threadId)
+        else expect(result.threadId).toBe(threadId)
+      }
       threadId = result.threadId
       const captured = stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
       assert.ok(captured)
       expect(captured.json.includes(`Current synthetic release instruction: ${instructionPhase}.`), phase).toBe(true)
+      expect(captured.json.includes(JSON.stringify(instructions).slice(1, -1)), 'complete production contract').toBe(true)
       expect(captured.json.includes('cedar')).toBe(true)
-      if (phase === 'cold') expect(captured.json.includes('Synthetic updated cold kernel.')).toBe(true)
-      if (phase === 'unchanged' && variant !== 'legacy') {
-        expect(captured.json.split('Current synthetic release instruction: initial.')).toHaveLength(2)
+      // Legacy migration retains its old generic instruction in native history.
+      if (variant !== 'legacy' || phase !== 'unchanged') {
+        expect(captured.json.split(`Current synthetic release instruction: ${instructionPhase}.`)).toHaveLength(2)
       }
+      if (phase === 'cold') expect(captured.json.includes('Synthetic updated cold kernel.')).toBe(true)
       const request = JSON.parse(captured.json) as { input: { role?: string; content?: { text?: string }[] }[] }
       const latest = request.input.filter((item) => item.role === 'developer' && item.content?.some((part) => part.text?.includes('Current synthetic release instruction:'))).at(-1)
       expect(latest?.content?.some((part) => part.text?.includes(`Current synthetic release instruction: ${instructionPhase}.`))).toBe(true)

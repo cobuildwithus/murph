@@ -13,7 +13,7 @@ export function buildAssistantCodexContractFingerprint(input: {
 }): string {
   return createHash('sha256')
     .update(stableJsonStringify({
-      // Legacy bindings hashed instructions. Read that identity once during migration.
+      // Thread-level launches and legacy hosted bindings include instructions.
       ...(input.developerInstructions !== undefined
         ? {
             baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,

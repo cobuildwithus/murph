@@ -67,6 +67,20 @@ export function withHostedCodexModelCatalogConfigOverride(input: {
   ]
 }
 
+// Only the hosted catalog contract removes Codex's overriding mode messages.
+// An explicit different catalog must retain thread-level instructions.
+export function supportsCodexTurnDeveloperInstructions(input: {
+  configOverrides?: readonly string[]
+  env?: NodeJS.ProcessEnv
+}): boolean {
+  const catalog = normalizeNullableString(
+    input.env?.[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV],
+  )
+  if (!catalog) return false
+  const override = input.configOverrides?.filter(isCodexModelCatalogJsonConfigOverride).at(-1)
+  return override === undefined || override === `model_catalog_json=${JSON.stringify(catalog)}`
+}
+
 // Murph turn steering is a product default, not an inherited upstream default:
 // an admitted follow-up preempts unfinished generation in the same turn, and an
 // interrupted turn stops its code-mode cells and their nested tool calls. These

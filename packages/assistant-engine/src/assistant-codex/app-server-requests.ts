@@ -14,6 +14,7 @@ import type {
 } from './images.js'
 import { stripUndefinedRpcParams } from './app-server-rpc.js'
 import { readCodexNonEmptyString, readCodexRecord } from './app-server-protocol.js'
+import { supportsCodexTurnDeveloperInstructions } from './config.js'
 import { withCodexToolInputContract } from './tool-input-contract.js'
 
 const CODEX_RPC_CLIENT_NAME = 'murph'
@@ -106,8 +107,10 @@ function buildCodexThreadContextParams(
     approvalPolicy: input.approvalPolicy,
     // The module-owned kernel is fixed while warm; cold resume refreshes it.
     baseInstructions: normalizeNullableString(input.baseInstructions),
-    // Current developer guidance is carried by turn/start, including on resume.
-    developerInstructions: '',
+    // Bundled/custom catalogs override turn guidance; keep their thread contract.
+    developerInstructions: supportsCodexTurnDeveloperInstructions(input)
+      ? ''
+      : normalizeNullableString(input.developerInstructions),
     cwd: input.workingDirectory,
     model: normalizeNullableString(input.model),
     modelProvider: normalizeNullableString(input.modelProvider),
@@ -134,7 +137,7 @@ export function buildCodexTurnStartParams(input: {
 }): Record<string, unknown> {
   const thread = readCodexRecord(input.threadResult)
   const params = stripUndefinedRpcParams({
-    collaborationMode: input.input.developerInstructions != null
+    collaborationMode: input.input.developerInstructions != null && supportsCodexTurnDeveloperInstructions(input.input)
       ? {
           mode: 'default',
           settings: {

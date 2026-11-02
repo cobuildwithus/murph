@@ -406,6 +406,8 @@ describe('assistant Codex turn planning', () => {
         dynamicTools: start.dynamicTools,
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }))
+      const { MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON: catalog, ...historicalCliEnv } = plan.cliEnv
+      expect(catalog).toBe('/synthetic/hosted-models.json')
       return createHash('sha256').update(JSON.stringify({
         assistantCliContract: plan.assistantCliContract,
         assistantContractFingerprint: fingerprintThreadDeclarations({
@@ -416,7 +418,7 @@ describe('assistant Codex turn planning', () => {
         }),
         assistantPreferredElevenLabsVoiceId:
           plan.assistantPreferredElevenLabsVoiceId,
-        cliEnv: plan.cliEnv,
+        cliEnv: historicalCliEnv,
         codexContinuation: plan.codexContinuation,
         conversationHistoryMessages: plan.conversationHistoryMessages,
         developerInstructions: plan.developerInstructions,
@@ -607,7 +609,7 @@ describe('assistant Codex turn planning', () => {
         session: createSession(),
         sharedPlan: createSharedPlan({
           cliAccess: {
-            env: input.configured ? { EXA_API_KEY: 'configured-sentinel' } : {},
+            env: { ...createSharedPlan().cliAccess.env, ...(input.configured ? { EXA_API_KEY: 'configured-sentinel' } : {}) },
             rawCommand: 'vault-cli',
             setupCommand: 'murph',
           },
@@ -5497,7 +5499,9 @@ describe('assistant Codex turn planning', () => {
     expect(updated.resume).toEqual(resumes ? { codexThreadId: 'thread-route-compatibility' } : null)
   })
 
-  it('keeps the same thread across releases changing developer instructions', async () => {
+  it.each(['hosted', 'local'] as const)('updates developer instructions across releases safely: %s', async (launch) => {
+    const sharedPlan = createSharedPlan()
+    if (launch === 'local') sharedPlan.cliAccess.env = {}
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValueOnce('old bootstrap')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -5518,7 +5522,7 @@ describe('assistant Codex turn planning', () => {
       },
       route,
       session: createSession(),
-      sharedPlan: createSharedPlan(),
+      sharedPlan,
     })
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValueOnce('new bootstrap')
 
@@ -5542,12 +5546,12 @@ describe('assistant Codex turn planning', () => {
           threadId: 'thread-old-contract',
         },
       }),
-      sharedPlan: createSharedPlan(),
+      sharedPlan,
     })
 
-    expect(plan.resume?.codexThreadId).toBe('thread-old-contract')
+    expect(plan.resume).toEqual(launch === 'hosted' ? { codexThreadId: 'thread-old-contract' } : null)
     expect(plan.developerInstructions).toContain('new bootstrap')
-    expect(plan.assistantContractFingerprint).toBe(oldPlan.assistantContractFingerprint)
+    expect(plan.assistantContractFingerprint === oldPlan.assistantContractFingerprint).toBe(launch === 'hosted')
   })
 
   it('refreshes timezone, product URL and onboarding on the same thread', async () => {
@@ -5589,6 +5593,7 @@ describe('assistant Codex turn planning', () => {
         newSharedPlan: createSharedPlan({
           cliAccess: {
             env: {
+              ...createSharedPlan().cliAccess.env,
               HOSTED_WEB_BASE_URL: 'https://new.example.test',
             },
             rawCommand: 'vault-cli',
@@ -5599,6 +5604,7 @@ describe('assistant Codex turn planning', () => {
         oldSharedPlan: createSharedPlan({
           cliAccess: {
             env: {
+              ...createSharedPlan().cliAccess.env,
               HOSTED_WEB_BASE_URL: 'https://old.example.test',
             },
             rawCommand: 'vault-cli',
@@ -8425,7 +8431,7 @@ function createSharedPlan(
 ): AssistantTurnSharedPlan {
   return {
     cliAccess: {
-      env: {},
+      env: { MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON: '/synthetic/hosted-models.json' },
       rawCommand: 'vault-cli',
       setupCommand: 'murph',
     },

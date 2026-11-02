@@ -19255,7 +19255,7 @@ describeRealCodex('real Codex private Journal capture recovery e2e', () => {
     }
   }, 360_000)
 
-  it('saves a reported symptom without its guessed cause and verifies an empty-page complaint without duplicating it', async () => {
+  it('local bundled catalog saves a reported symptom during advice and verifies it without duplication', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-journal-recovery-e2e-'))
     try {
@@ -19263,28 +19263,30 @@ describeRealCodex('real Codex private Journal capture recovery e2e', () => {
       const binDirectory = path.join(workingDirectory, 'bin')
       const commandLogPath = path.join(workingDirectory, 'commands.log')
       await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
+      const env: NodeJS.ProcessEnv = { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot() }
+      delete env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]
       const input: Omit<CodexAppServerTurnInput, 'prompt'> = {
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
-          channel: 'telegram', conversationScope: 'direct', hostedRuntime: true,
+          channel: 'telegram', conversationScope: 'direct', hostedRuntime: false,
           cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
           currentInstant: '2026-05-18T16:00:00Z', currentLocalDate: '2026-05-18',
           currentTimeZone: 'America/New_York', modelBehaviorProfile: 'gpt5-agentic',
           onboardingGuidance: false,
         }),
         dynamicTools: [],
-        env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
-          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot() },
+        env,
         groupConversation: false,
         model: config.model, modelProvider: config.modelProvider,
         reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
       }
       const first = await executeRealCodexAppServerTurn({
         ...input,
-        prompt: 'My left wrist has felt stiff since I woke up this morning. Maybe it is the weather, but that is only a guess. Keep this in mind when we talk about my routines; I do not need advice right now.',
+        prompt: 'My left wrist has felt mildly stiff since I woke up this morning. Maybe it is the weather, but that is only a guess. How should I adjust today’s typing routine?',
       })
       const initial = await readVaultRawTolerant(workingDirectory)
       const initialFacts = initial.events.filter((event) => event.kind === 'note' || event.kind === 'symptom')

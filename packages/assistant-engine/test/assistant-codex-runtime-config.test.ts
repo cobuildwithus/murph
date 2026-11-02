@@ -1,5 +1,5 @@
 import { withCodexToolInputContract } from '../src/assistant-codex/tool-input-contract.ts'
-import { withCodexAppServerSteeringFeatureOverrides } from '../src/assistant-codex/config.ts'
+import { supportsCodexTurnDeveloperInstructions, withCodexAppServerSteeringFeatureOverrides } from '../src/assistant-codex/config.ts'
 import {
   cliTimingLaunchArgs,
   codexSteeringLaunchArgs,
@@ -208,6 +208,7 @@ describe('assistant codex runtime', () => {
       approvalPolicy: 'never' as const,
       baseInstructions: 'Do not use this in normal Murph config.',
       developerInstructions: 'Stable Murph instructions.',
+      env: { MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON: '/synthetic/hosted-models.json' },
       dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
       model: 'gpt-5',
       modelProvider: 'hosted-openai',
@@ -215,6 +216,16 @@ describe('assistant codex runtime', () => {
       reasoningEffort: 'high',
       sandbox: 'workspace-write' as const,
       workingDirectory: '/workspace',
+    }
+
+    for (const fallback of [
+      { ...baseInput, env: {} },
+      { ...baseInput, configOverrides: ['model_catalog_json="/synthetic/custom.json"'] },
+    ]) {
+      expect(supportsCodexTurnDeveloperInstructions(fallback)).toBe(false)
+      expect(buildCodexThreadStartParams(fallback).developerInstructions).toBe(baseInput.developerInstructions)
+      expect(buildCodexThreadResumeParams({ input: fallback, codexThreadId: 'thread-1' }).developerInstructions).toBe(baseInput.developerInstructions)
+      expect(buildCodexTurnStartParams({ input: fallback, images: [], codexThreadId: 'thread-1' })).not.toHaveProperty('collaborationMode')
     }
 
     expect(buildCodexThreadStartParams(baseInput)).toEqual({
