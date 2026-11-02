@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   PINNED_CODEX_OPENAI_EGRESS_INVENTORY,
 } from "../test/fixtures/codex-openai-egress-routes.ts";
+import { hostedRunnerBaseImageRemoteTag } from "./runner-base-image-contract.ts";
 
 const CODEX_UPSTREAM_URL = "https://github.com/openai/codex.git";
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
@@ -33,6 +34,17 @@ async function main(): Promise<void> {
   );
   if (!dockerfile.includes(`ARG CODEX_UPSTREAM_REVISION=${inventory.upstreamCommit}\n`)) {
     throw new Error("Codex image source does not match the reviewed upstream commit.");
+  }
+  if (!dockerfile.includes(`ARG CODEX_CLI_VERSION=${inventory.version}\n`)
+    || !hostedRunnerBaseImageRemoteTag.endsWith(`-codex${inventory.version}-live1`)) {
+    throw new Error("Codex native build and runner base tag must match the reviewed version.");
+  }
+  const runnerDockerfile = await readFile(
+    path.join(repoRoot, "Dockerfile.cloudflare-hosted-runner"),
+    "utf8",
+  );
+  if (!runnerDockerfile.startsWith(`ARG HOSTED_RUNNER_BASE_IMAGE=${hostedRunnerBaseImageRemoteTag}\n`)) {
+    throw new Error("Codex runner Dockerfile does not match the base-image contract.");
   }
 
   const temporaryRoot = await mkdtemp(

@@ -546,6 +546,8 @@ describe('assistant auto-reply failure observability', () => {
       ['responseTooManyFailedAttempts', null, 'ASSISTANT_CODEX_CONNECTION_LOST', true],
       ['serverOverloaded', 503, 'ASSISTANT_CODEX_FAILED', true],
       ['flexUnavailable', null, 'ASSISTANT_CODEX_FAILED', true],
+      ['policyCapacityUnavailable', null, 'ASSISTANT_CODEX_FAILED', true],
+      ['modelNotFound', null, 'ASSISTANT_CODEX_FAILED', false],
       ['httpConnectionFailed', null, 'ASSISTANT_CODEX_CONNECTION_LOST', true],
       ['httpConnectionFailed', 408, 'ASSISTANT_CODEX_CONNECTION_LOST', true],
       ['httpConnectionFailed', 429, 'ASSISTANT_CODEX_CONNECTION_LOST', true],

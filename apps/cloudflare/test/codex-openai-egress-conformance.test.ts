@@ -102,7 +102,7 @@ describe("pinned Codex OpenAI egress conformance", () => {
       .toContain("pnpm --dir apps/cloudflare verify:codex-upstream-source");
   });
 
-  it("keeps the pinned App Server token-usage notification compatible", async () => {
+  it("keeps the pinned App Server protocol compatible", async () => {
     const temporaryRoot = await mkdtemp(
       path.join(resolveVitestTempRoot(), "codex-app-server-schema-"),
     );
@@ -156,6 +156,24 @@ describe("pinned Codex OpenAI egress conformance", () => {
         "interrupted",
         "completed",
       ]);
+      const review = JSON.parse(await readFile(
+        path.join(schemaRoot, "v2/ReviewStartParams.json"), "utf8",
+      ));
+      expect(review.definitions.ReviewDelivery.enum).toEqual(["inline"]);
+      for (const method of ["TurnStartParams", "TurnSteerParams"]) {
+        const params = JSON.parse(await readFile(
+          path.join(schemaRoot, `v2/${method}.json`), "utf8",
+        ));
+        expect(params.definitions.AdditionalContextEntry.properties.name.type)
+          .toEqual(["string", "null"]);
+        expect(params.definitions.AdditionalContextEntry.required).not.toContain("name");
+      }
+      const completed = JSON.parse(await readFile(
+        path.join(schemaRoot, "v2/TurnCompletedNotification.json"), "utf8",
+      ));
+      const errors = JSON.stringify(completed.definitions.CodexErrorInfo);
+      expect(errors).toContain('"modelNotFound"');
+      expect(errors).toContain('"policyCapacityUnavailable"');
     } finally {
       await rm(temporaryRoot, { force: true, recursive: true });
     }

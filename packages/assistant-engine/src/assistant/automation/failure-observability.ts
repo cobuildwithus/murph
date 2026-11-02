@@ -78,6 +78,8 @@ const SAFE_CODEX_ERROR_INFO_KINDS = new Set([
   'flexUnavailable',
   'httpConnectionFailed',
   'internalServerError',
+  'modelNotFound',
+  'policyCapacityUnavailable',
   'responseStreamConnectionFailed',
   'responseStreamDisconnected',
   'responseTooManyFailedAttempts',

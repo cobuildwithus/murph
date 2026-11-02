@@ -184,6 +184,9 @@ including parity/privacy proof and measured synthetic CPU reduction, is tracked 
 [the projection copy plan](exec-plans/completed/2026-10-07-public-wearable-projection-copy.md);
 `../packages/query/README.md#ordinary-wearable-reads` owns the contract.
 
+Codex CLI 0.166.0 provenance, native patch port and focused verification are recorded in
+[the upgrade record](exec-plans/completed/2026-11-01-codex-cli-0166-upgrade.md).
+
 Codex CLI 0.163.0 candidate verification is recorded in
 [the completed upgrade plan](exec-plans/completed/2026-10-16-codex-cli-0163-upgrade.md).
 

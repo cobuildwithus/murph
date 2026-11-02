@@ -35,6 +35,8 @@ describe('Codex app-server protocol boundary', () => {
       params: {
         completedAtMs: 9,
         item: {
+          startedAtMs: 8,
+          completedAtMs: 9,
           id: 'item-1',
           phase: 'final_answer',
           text: 'Done.',
