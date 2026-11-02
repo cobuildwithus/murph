@@ -212,10 +212,11 @@ its due key without repeating local service; a successful attempt can clear it
 or project a distinct successor. Otherwise the invocation
 remains dirty until the runtime-owned idle-floor—or last-chance shutdown—
 `idle_shutdown` checkpoint succeeds; inherited or committed assistant wakes and
-durability barriers remain checkpoint-first. Successful assistant writes to the canonical event ledger request Browser Vault
-publication after the reply finishes. They use the same idle checkpoint and
-foreground-preemptible replica publisher, but skip the conversation quiet window
-and retained background-work wait so confirmed journal changes appear promptly.
+durability barriers remain checkpoint-first. Successful assistant writes to the
+canonical event ledger request Browser Vault publication after the reply finishes.
+They use the same idle checkpoint and foreground-preemptible replica publisher,
+but skip the conversation quiet window so confirmed journal changes appear
+promptly. Active background work retains its existing wait and successor owners.
 The canonical checkpoint still precedes projection publication. Only newly admitted foreground
 priority work restarts the quiet window. Empty probes and generic maintenance
 do not restart it; cleanup that dirties state after a checkpoint uses the spent

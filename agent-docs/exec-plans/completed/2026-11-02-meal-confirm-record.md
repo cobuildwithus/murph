@@ -1,6 +1,6 @@
 # Preserve photo meal identity through confirmation
 
-Status: active
+Status: completed
 Created: 2026-11-02
 Updated: 2026-11-02
 
@@ -57,7 +57,7 @@ continuation suites passed (50 tests); publication follows reply then durable
 checkpoint without the ten-minute wait. Focused live journey passed on
 gpt-6.1-sol via local subscription: one edit, one meal, dish name and all five
 nutrition totals, with a nutrition card. Reply review: Ready.
-Both affected package typechecks pass. Runtime tests cover 63 import/publication/
+Both affected package typechecks pass. Runtime tests cover 64 import/publication/
 preemption/continuation cases and 22 focused canonical receipt cases. Complexity
 debt and maxima are unchanged. Initial provider instructions/tool descriptions
 are unchanged; only the on-demand food-journal skill body changed.
@@ -66,3 +66,21 @@ delivery with no replica publication, and passes with the fix. The final
 production-derived live journey passed again after reconciling main. Changelog
 generation and archive rendering pass. Review, exact-head CI and deployment
 remain pending on PR #4450.
+
+## Review disposition
+
+ReviewGPT round 1 on 06b2604af6fd found that expedited publication could close an
+accepted image request while its provider was still running. Accepted: image
+work is invocation-owned, and ordinary close does not produce a failure reply.
+The correction preserves all background retention and gates the earlier
+checkpoint on the existing image controller's hasWork state. The publication
+intent remains pending until completion. A deterministic two-scenario runtime
+test covers prompt publication with no image and one correctly routed trusted
+image completion with a separate durable effect pending. No new job owner,
+retry, durable state, or lifecycle mechanism was added. The image-retention
+regression fails without the guard and passes with it; the existing two image
+completion regressions also pass.
+
+Implementation and focused verification are complete. Final review, exact-head
+CI, merge and deployment are tracked on PR #4450 by the completion owner.
+Completed: 2026-11-02

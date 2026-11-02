@@ -4313,9 +4313,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     ): void => {
       browserVaultReplicaRefreshRequested ||=
         passResult.assistantPhaseResult?.browserVaultReplicaRefreshRequested === true;
-      if (browserVaultReplicaRefreshRequested) {
-        // Delivery has finished; publish confirmed journal writes through the
-        // existing checkpoint owner without another conversation quiet window.
+      if (browserVaultReplicaRefreshRequested && !imageGenerationController?.hasWork()) {
+        // Keep accepted image work alive until its completion is staged. Then
+        // publish confirmed journal writes through the existing checkpoint owner.
         setIdleCheckpointStartBy(Date.now());
       }
     };
@@ -6752,8 +6752,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       };
       let pendingCheckpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null = null;
       const readBackgroundCheckpointWaitDeadline = (): number | null => {
-        // Checkpointing pauses retained work and preserves its durable successor.
-        if (browserVaultReplicaRefreshRequested) return null;
         if (options.shutdownSignal?.aborted) return null;
         const backgroundReadDeadline = resolveHostedBackgroundReadCheckpointDeadline({
           assistantAskDeadline: detachedAssistantAskController?.activeDeadline() ?? null,
