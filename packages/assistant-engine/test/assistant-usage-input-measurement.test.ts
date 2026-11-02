@@ -74,7 +74,7 @@ describe.skipIf(process.env.MURPH_MEASURE_USAGE_INPUT !== '1')('usage efficiency
     }).trim()
   })
 
-  it.each(['direct', 'group', 'groupAvailable'] as const)('complete first provider request (%s)', { timeout: 180_000 }, async (fixture) => {
+  it.each(['direct', 'group', 'groupAvailable', 'gameGroup'] as const)('complete first provider request (%s)', { timeout: 180_000 }, async (fixture) => {
     const scope = fixture === 'direct' ? 'direct' : 'group'
     const groupAvailable = fixture === 'groupAvailable'
     const baselineRoot = await materializeUsageInputBaseline(repository, base)
@@ -88,6 +88,7 @@ describe.skipIf(process.env.MURPH_MEASURE_USAGE_INPUT !== '1')('usage efficiency
         allowFinishWithoutReply: true, automationAvailable: true,
         personalizationAvailable: scope === 'direct', groupSharedReadAvailable: fixture === 'group',
         ...(groupAvailable ? { groupAvailable: true } : {}),
+        ...(fixture === 'gameGroup' ? { gamesAvailable: true, gamePhotosAvailable: true, gameLoreAvailable: true } : {}),
         imageGenerationAvailable: false, progressUpdatesAvailable: true, progressUpdateMode: scope,
       }
       const captures = []
@@ -146,6 +147,10 @@ describe.skipIf(process.env.MURPH_MEASURE_USAGE_INPUT !== '1')('usage efficiency
           const visible = observed[0]
           assert.ok(visible)
           assertModelVisibleToolContract(registered, visible)
+        }
+        if (fixture === 'gameGroup') {
+          expect(tools.some((tool) => tool.name === 'game_photo')).toBe(true)
+          expect(capture.json).toContain('game_photo')
         }
         captures.push({
           phase, bytes: Buffer.byteLength(capture.json),

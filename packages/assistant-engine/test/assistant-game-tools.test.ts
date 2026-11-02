@@ -261,3 +261,18 @@ it('teaches one pending change, current-ask-only proposals, plain refusals and o
   expect(description).toContain('is still open, not missed')
   expect(description).not.toMatch(/unposted/u)
 })
+
+
+it('gives game photo refusals a brief truthful reply without another attempt', () => {
+  for (const phrase of ['DAY_CLOSED', 'credit the effort', 'next game day', 'Do not retry', 'claim the post counted or was saved']) expect(MURPH_GAME_PHOTO_TOOL.description).toContain(phrase)
+})
+it('exposes optional member-addressed superlatives with shared grounding', () => {
+  const superlatives = [
+    { memberId: 'player_first', title: 'Give the mat tenure', line: 'That mat earned a regular shift.' },
+    { memberId: 'player_second', title: 'Recruit the laundry basket', line: 'The basket supervised every set.' },
+  ]
+  const recap = { pages: [], chatLine: 'Game over, tied 5 to 5.', superlatives }
+  expect(parse('write_recap', recap)).toMatchObject({ kind: 'game', request: { recap } })
+  expect(MURPH_WRITE_RECAP_TOOL.inputSchema.properties).toHaveProperty('superlatives')
+  for (const phrase of ['both player memberIds', 'text both players can see', '2–6 words', 'differ between players', 'bodies or weight']) expect(MURPH_WRITE_RECAP_TOOL.description).toContain(phrase)
+})

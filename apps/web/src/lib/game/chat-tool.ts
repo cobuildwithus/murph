@@ -3,7 +3,7 @@ import { handleGameChatPhoto } from "./chat-photo";
 import type { Prisma } from "@prisma/client";
 import { isHostedLinqConversationMessageWake, isHostedTelegramConversationMessageWake } from "@murphai/hosted-execution";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
-import { parseGameRecapEventId, gameLiveLoreGuidanceForState, hostedGameChatStateSchema, type HostedGameToolRequest, type HostedGameToolResponse } from "@murphai/hosted-execution/runtime-control";
+import { parseGameRecapEventId, gameLiveLoreGuidanceForState, hostedGameChatStateSchema, type HostedGameToolRequest, type HostedGameToolResponse, type HostedGameRecap } from "@murphai/hosted-execution/runtime-control";
 import type { HostedExecutionExternalThreadRouteAuthority, HostedExecutionConversationMessageWake } from "@murphai/hosted-execution/contracts";
 import { requireHostedRuntimeCallbackTx, type HostedRuntimeIdentity } from "../hosted-execution/runtime-owner";
 import { buildHostedMailboxLiveItemWhere, decodeHostedMailboxStoredPayloads, readHostedMailboxConversationWakeByAssistantInputId } from "../hosted-mailbox/store";
@@ -13,7 +13,7 @@ import { assertHostedThreadRouteEgressAuthority } from "../hosted-routing/thread
 import { getPrisma } from "../prisma";
 import { readGameChatState, readGameRecapMaterial, runGameCommand, sealGameRecap } from "./service";
 import { gameRecapMessage } from "./recap-message";
-import { gameRecapToolResult, validateGameRecap, type GameRecapChatMessage } from "./recap";
+import { gameRecapToolResult, validateGameRecap, withValidGameSuperlatives, type GameRecapChatMessage } from "./recap";
 import { gamePairWhere, readGameChatPlayerIds, requireExactGameChat, sameGamePlayers } from "./chat-membership";
 import { isGameEnabled, isGameOn } from "./access";
 import { gamePairLoreFingerprint } from "./pair-fingerprint";
@@ -119,16 +119,23 @@ async function handleGameRecapTool(input: Input & { request: Extract<HostedGameT
   };
   const replay = await sealGameRecap({ beforeMutationTx: authorizeMutation, containerMemberId: input.memberId,
     eventId, gameId, playerMemberIds: players, recap: null });
-  if (replay) return { action: "write_recap", result: { status: "ok", recapOutcome: gameRecapToolResult([]), recap: replay, chatLine: gameRecapMessage(gameId, replay.chatLine) } };
+  if (replay) return { action: "write_recap", result: { status: "ok", recapOutcome: gameRecapToolResult([]), recap: recapForWriter(replay, input.request.recap), chatLine: gameRecapMessage(gameId, replay.chatLine) } };
   const chatMessages = await readGameRecapChatMessages({ containerMemberId: input.memberId, material });
   const errors = validateGameRecap({ recap: input.request.recap, players: material.players, entries: material.entries,
     chatMessages, priorChatLines: input.request.priorChatLines, result: material.validation.result });
   if (errors.length > 0) return { action: "write_recap", result: { status: "rejected", recapOutcome: gameRecapToolResult(errors) } };
   if (!sameGamePlayers(await requireExactGameChat(input.memberId), players)) return { action: "write_recap", result: { status: "unavailable", error: "recap_authority_unavailable" } };
-  const saved = await sealGameRecap({ beforeMutationTx: authorizeMutation, containerMemberId: input.memberId, eventId, gameId, playerMemberIds: players, recap: input.request.recap });
+  const saved = await sealGameRecap({ beforeMutationTx: authorizeMutation, containerMemberId: input.memberId, eventId, gameId, playerMemberIds: players, recap: withValidGameSuperlatives(input.request.recap, players) });
   return saved
-    ? { action: "write_recap", result: { status: "ok", recapOutcome: gameRecapToolResult([]), recap: saved, chatLine: gameRecapMessage(gameId, saved.chatLine) } }
+    ? { action: "write_recap", result: { status: "ok", recapOutcome: gameRecapToolResult([]), recap: recapForWriter(saved, input.request.recap), chatLine: gameRecapMessage(gameId, saved.chatLine) } }
     : { action: "write_recap", result: { status: "unavailable", error: "recap_authority_unavailable" } };
+}
+
+// Older runtime schemas reject unknown fields, including on replay of a newer story.
+function recapForWriter(saved: HostedGameRecap, submitted: HostedGameRecap): HostedGameRecap {
+  if (submitted.superlatives) return saved;
+  const { superlatives: _superlatives, ...legacy } = saved;
+  return legacy;
 }
 
 export async function readGameRecapChatMessages(input: {

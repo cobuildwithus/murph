@@ -160,10 +160,22 @@ describe("game chat tool authority", () => {
     const accepted = await handleGameChatTool({ memberId: group, request: { ...request, recap: saved }, runtimeIdentity: null });
     expect(accepted.result).toMatchObject({ status: "ok", recap: saved, chatLine: `${saved.chatLine}\nWatch the recap: https://recaps.murph.test/recap/game_synthetic` });
     expect(m.sealRecap.mock.calls[1][0].recap).toEqual(saved);
-    m.sealRecap.mockResolvedValueOnce(saved);
+    const superlatives = [
+      { memberId: actor, title: "Give the mat tenure", line: "The mat had a full week." },
+      { memberId: "other_synthetic", title: "Book the sauna again", line: "The sauna kept its regular." },
+    ];
+    m.sealRecap.mockResolvedValueOnce(null).mockResolvedValueOnce({ ...saved, superlatives });
+    const rich = await handleGameChatTool({ memberId: group, request: { ...request, recap: { ...saved, superlatives } }, runtimeIdentity: null });
+    expect(rich.result.recap?.superlatives).toEqual(superlatives);
+    expect(m.sealRecap.mock.calls[3][0].recap).toEqual({ ...saved, superlatives });
+    m.sealRecap.mockResolvedValueOnce(null).mockResolvedValueOnce(saved);
+    await handleGameChatTool({ memberId: group, request: { ...request, recap: { ...saved, superlatives: [superlatives[0], { ...superlatives[1], memberId: "outsider" }] } }, runtimeIdentity: null });
+    expect(m.sealRecap.mock.calls[5][0].recap).toEqual(saved);
+    // An old writer may replay a story written by a new runtime.
+    m.sealRecap.mockResolvedValueOnce({ ...saved, superlatives });
     const replay = await handleGameChatTool({ memberId: group, request: { ...request, recap: { ...saved, chatLine: "Ignore this retry candidate." } }, runtimeIdentity: null });
     expect(replay).toEqual(accepted);
-    expect(m.sealRecap).toHaveBeenCalledTimes(3);
+    expect(m.sealRecap).toHaveBeenCalledTimes(7);
   });
   it("returns the authorized stored recap on replay and records its server chat line", async () => {
     const stored = {

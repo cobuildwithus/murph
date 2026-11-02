@@ -38,11 +38,23 @@ const recapBlock = z.object({
   statValue: z.string().optional(),
   quote: z.object({ who: z.string(), text: z.string(), date: z.string().optional() }).strict().optional(),
 }).strict();
+const recapSuperlatives = z.array(z.object({
+  memberId: ref,
+  title: z.string().trim().min(1).max(80).refine((title) => {
+    const words = title.split(/\s+/u).length;
+    return words >= 2 && words <= 6 && !/[.。]$/u.test(title) && !/^most\s+likely\s+to\b/iu.test(title);
+  }),
+  line: z.string().trim().min(1).max(160),
+}).strict()).length(2).refine((items) =>
+  new Set(items.map((item) => item.memberId)).size === 2
+  && new Set(items.map((item) => item.title.toLowerCase())).size === 2);
+
 export const hostedGameRecapSchema = z.object({
   pages: z.array(z.object({
     background: z.enum(["night", "paper", "sage", "sienna", "slate"]),
     blocks: z.array(recapBlock),
   }).strict()),
+  superlatives: recapSuperlatives.optional().catch(undefined),
   scoreLine: z.string().optional(),
   chatLine: z.string(),
 }).strict();

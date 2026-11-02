@@ -181,3 +181,11 @@ export function validateGameRecap(input: { recap: HostedGameRecap; players: read
 export function gameRecapToolResult(errors: readonly string[]): string {
   return errors.length === 0 ? "ok: saved. The players will see this recap." : `Not saved. Fix these and call write_recap again:\n- ${errors.join("\n- ")}`;
 }
+
+/** Optional copy must never prevent the story from being saved or read. */
+export function withValidGameSuperlatives(recap: HostedGameRecap, memberIds: readonly string[]): HostedGameRecap {
+  const { superlatives, ...story } = recap;
+  return superlatives?.length === memberIds.length && memberIds.length === 2
+    && superlatives.every((item) => memberIds.includes(item.memberId))
+    ? { ...story, superlatives } : story;
+}

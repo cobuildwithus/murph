@@ -6,7 +6,7 @@ import path from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { GameHistoryView, GameView } from "../src/lib/game/contract";
-import type { RuleEntry, RuleState } from "../src/lib/game/rules";
+import { decidePost, GameRuleError, type RuleEntry, type RuleState } from "../src/lib/game/rules";
 import { buildGameView } from "../src/lib/game/views";
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { buildCurrentHostedConsentDocumentVersions } from "../src/lib/legal/consent";
@@ -160,6 +160,28 @@ describe("weekly game routes", () => {
   afterEach(async () => {
     vi.unstubAllEnvs();
     await rm(mediaDir, { force: true, recursive: true });
+  });
+
+  it("returns the real off-day rule as 409 DAY_CLOSED", async () => {
+    const state: RuleState = {
+      game: { id: GAME_ID, createdBy: LEO, status: "live", lengthDays: 14, seats: 2, startsOn: null, inviteExpiresAt: null,
+        terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: [0, 1, 2, 3, 4] }, stakes: [] }] } },
+      players: [{ memberId: LEO, seat: 0, dayOne: "2030-03-04", timeZone: "America/New_York" }], entries: [],
+    };
+    mocks.runGameCommand.mockImplementationOnce(async () => {
+      try {
+        decidePost(state, { memberId: LEO, kind: "photo", mediaKeys: ["owned/photo"], mediaKeyPrefix: "owned/",
+          captureAgeMs: null, now: new Date("2030-03-09T17:00:00Z") });
+      } catch (error) {
+        if (error instanceof GameRuleError) return { ok: false, status: 409, error: error.error };
+        throw error;
+      }
+      throw new Error("Expected off-day refusal");
+    });
+    const response = await routes.entries.POST(writeRequest("POST", `/games/${GAME_ID}/entries`,
+      { entryId: "entry_off_day", kind: "photo", mediaKeys: ["owned/photo"] }), params({ id: GAME_ID }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: { code: "DAY_CLOSED", message: "Saturday's a day off. Back Monday.", retryable: false } });
   });
 
   describe("auth", () => {

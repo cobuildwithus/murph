@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { HostedGameRecap } from "@murphai/hosted-execution/runtime-control";
-import { gameRecapToolResult, validateGameRecap } from "@/src/lib/game/recap";
+import { hostedGameRecapSchema, type HostedGameRecap } from "@murphai/hosted-execution/runtime-control";
+import { gameRecapToolResult, validateGameRecap, withValidGameSuperlatives } from "@/src/lib/game/recap";
 
 const players = ["Ava", "Leo"];
 const entries = [
@@ -122,5 +122,35 @@ describe("game recap validation", () => {
       "chatLine: lead with the finished game and its result, not with the recap being ready.",
       "chatLine: skip stock recap phrases and invitations; the next line already supplies the link.",
     ]));
+  });
+});
+
+
+describe("optional recap superlatives", () => {
+  const pair = [
+    { memberId: "player_first", title: "Give the mat tenure", line: "The purple mat made every appearance." },
+    { memberId: "player_second", title: "Recruit the laundry basket", line: "The laundry basket supervised every set." },
+  ];
+  const parse = (superlatives: unknown) => withValidGameSuperlatives(hostedGameRecapSchema.parse({ ...valid, superlatives }), ["player_first", "player_second"]);
+  it("retains exactly one per member in either order without changing the story", () => {
+    expect(parse(pair)).toEqual({ ...valid, superlatives: pair });
+    expect(parse([...pair].reverse()).superlatives).toEqual([...pair].reverse());
+    expect(withValidGameSuperlatives(valid, ["player_first", "player_second"])).toEqual(valid);
+  });
+  it.each([
+    null, {}, [], [pair[0]], [...pair, pair[0]], [pair[0], pair[0]],
+    [pair[0], { ...pair[1], memberId: "outsider" }],
+    [pair[0], { ...pair[1], title: pair[0].title.toUpperCase() }],
+    [{ ...pair[0], title: "Most likely to train" }, pair[1]],
+    [{ ...pair[0], title: "Solo" }, pair[1]],
+    [{ ...pair[0], title: "One two three four five six seven" }, pair[1]],
+    [{ ...pair[0], title: "Too long." }, pair[1]],
+    [{ ...pair[0], title: "x".repeat(79) + " y" }, pair[1]],
+    [{ ...pair[0], line: "" }, pair[1]],
+    [{ ...pair[0], line: "x".repeat(161) }, pair[1]],
+    [{ ...pair[0], line: 5 }, pair[1]],
+  ])("drops an invalid pair without failing the recap: %j", (superlatives) => {
+    expect(parse(superlatives)).toEqual(valid);
+    expect(validateGameRecap({ recap: parse(superlatives), players, entries })).toEqual([]);
   });
 });

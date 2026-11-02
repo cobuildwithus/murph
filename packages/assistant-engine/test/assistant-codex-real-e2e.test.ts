@@ -45930,7 +45930,12 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
 })
 
 describeRealCodex('real Codex game recap e2e', () => {
-  it.each([{ weekendsOff: false, regeneration: false }, { weekendsOff: true, regeneration: false }, { weekendsOff: true, regeneration: true }])('game recap notification writes one sealed story and queues its saved chat line exactly; scenario=%j', async ({ weekendsOff, regeneration }) => {
+  it.each([
+    { name: 'game recap notification writes one sealed story and queues its saved chat line exactly', weekendsOff: false, regeneration: false, superlatives: false },
+    { name: 'game recap notification with weekends off', weekendsOff: true, regeneration: false, superlatives: false },
+    { name: 'game recap notification regeneration', weekendsOff: true, regeneration: true, superlatives: false },
+    { name: 'game recap distinct grounded superlatives for similar weeks', weekendsOff: true, regeneration: false, superlatives: true },
+  ])('$name', async ({ weekendsOff, regeneration, superlatives }) => {
     const eventId = `game-recap:game_recap_synthetic${regeneration ? ':synthetic_request' : ''}`
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-recap-e2e-'))
@@ -45960,7 +45965,7 @@ describeRealCodex('real Codex game recap e2e', () => {
           groupTool: { request: async (request): Promise<import('@murphai/hosted-execution/runtime-control').HostedGameToolResponse> => {
             calls.push(request)
             if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', recapGame: {
-              id: 'game_recap_synthetic', players: [{ name: 'Ava', task: '10 minutes of abs' }, { name: 'Leo', task: '100 pushups' }],
+              id: 'game_recap_synthetic', players: [{ ...(superlatives ? { memberId: 'player_first' } : {}), name: 'Ava', task: '10 minutes of abs' }, { ...(superlatives ? { memberId: 'player_second' } : {}), name: 'Leo', task: '100 pushups' }],
               lengthDays: weekendsOff ? 8 : 3, schedule: { days: weekendsOff ? [0, 1, 2, 3, 4] : [0, 1, 2] }, stakes: [{ kind: 'prize', item: 'breakfast in bed' }],
               score: weekendsOff ? [{ name: 'Ava', score: 6 }, { name: 'Leo', score: 6 }] : [{ name: 'Ava', score: 3 }, { name: 'Leo', score: 2 }], days: weekendsOff ? Array.from({ length: 8 }, (_, dayIndex) => ({
                 dayNumber: dayIndex + 1,
@@ -46011,6 +46016,22 @@ describeRealCodex('real Codex game recap e2e', () => {
       expect(calls.filter((call) => call.action === 'write_recap')).toHaveLength(rejectedWrites + 1)
       expect(saved).toHaveLength(1)
       expect(saved[0]).not.toHaveProperty('scoreLine')
+      if (superlatives) {
+        const pair = saved[0].superlatives
+        expect(pair).toHaveLength(2)
+        expect(pair?.map((item) => item.memberId).sort()).toEqual(['player_first', 'player_second'])
+        expect(new Set(pair?.map((item) => item.title.toLowerCase())).size).toBe(2)
+        for (const item of pair ?? []) {
+          expect(item.title.split(/\s+/u).length).toBeGreaterThanOrEqual(2)
+          expect(item.title.split(/\s+/u).length).toBeLessThanOrEqual(6)
+          expect(item.title).not.toMatch(/\.$|^most\s+likely\s+to\b/iu)
+          expect(item.line.length).toBeLessThanOrEqual(160)
+          expect(item.title + ' ' + item.line).toMatch(item.memberId === 'player_first' ? /mat|purple|abs/iu : /laundry|basket|pushups/iu)
+          expect(item.title + ' ' + item.line).not.toMatch(/lazy|fat|weight|ugly|loser|pathetic|body|bodies/iu)
+        }
+        process.stdout.write('[game-recap superlatives] ' + JSON.stringify(pair) + '\n')
+      } else expect(saved[0].superlatives).toBeUndefined()
+
       expect(saved[0]?.pages.length).toBeGreaterThanOrEqual(3)
       expect(JSON.stringify(saved[0])).not.toMatch(/notification toggle|calendar export|feature request/iu)
       if (weekendsOff) {
@@ -46262,6 +46283,7 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
     { name: 'game chat photo repeated unsolicited photo stays quiet', kind: 'quiet' },
     { name: 'game chat photo introduction in another room stays quiet', kind: 'quiet-new-room' },
     { name: 'game chat photo explicit save needs no repeated confirmation', kind: 'save' },
+    { name: 'game chat off day credits effort without retrying or counting', kind: 'off-day' },
     { name: 'game v1 any artifact chat photo save uses one write', kind: 'save-any' },
     { name: 'game chat photo yes saves only pending source', kind: 'yes' },
     { name: 'game chat photo replacement asks before consuming retake', kind: 'replace' },
@@ -46284,6 +46306,10 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
         { memberId: 'player_sam', score: 1, target: 5, currentDayIndex: 1, currentEntryId: 'entry_other', attemptsRemaining: 1, days: [{ dayIndex: 0, date: '2030-03-04', status: 'missed' as const }, { dayIndex: 1, date: '2030-03-05', status: 'posted' as const }] },
       ] },
       result: kind === 'result' ? { scores: [{ memberId: 'player_alex', seat: 0, score: 5, misses: 0 }, { memberId: 'player_sam', seat: 1, score: 3, misses: 2 }], tickets: [{ owedByMemberId: 'player_sam', owedToMemberId: 'player_alex', what: 'Choose the next board game', status: 'open' as const, count: 1 }] } : null,
+    }
+    if (kind === 'off-day') {
+      game.lengthDays = 14
+      game.progress = undefined
     }
     if (kind === 'save-any') delete game.terms.checkInKind
     if (kind === 'window') {
@@ -46313,7 +46339,7 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
         developerInstructions: [buildAssistantSystemPrompt({ assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' }, conversationScope: 'group',
-          currentLocalDate: '2030-03-05', currentInstant: '2030-03-05T12:00:00.000Z', currentTimeZone: 'UTC',
+          currentLocalDate: kind === 'off-day' ? '2030-03-09' : '2030-03-05', currentInstant: kind === 'off-day' ? '2030-03-09T12:00:00.000Z' : '2030-03-05T12:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null }), GAME_PHOTO_CHAT_GUIDANCE].join('\n'),
         dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL], env: config.env,
         hostedToolContext: { computerToolsAvailable: false, vaultFileSendAvailable: false,
@@ -46321,6 +46347,7 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
             calls.push(request)
             if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', state: { games: [game], photoCheckIn: { introductionAvailable: kind === 'offer', hasPendingOffer: kind === 'yes' } } } }
             if (request.action !== 'game_photo') throw new Error('Unexpected game mutation')
+            if (kind === 'off-day') return { action: 'game_photo', result: { status: 'rejected', error: "DAY_CLOSED: Saturday's a day off. Back Monday." } }
             return { action: 'game_photo', result: { status: 'ok', photoOutcome: request.photo.operation === 'offer' ? 'offer' : 'saved' } }
           } }, currentUserActionScope: () => ({ conversationId: 'synthetic-room', inboundMailboxItemIds: [], recipientKey: 'synthetic-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-session', conversationScope: 'group' }),
           currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send.') } },
@@ -46329,7 +46356,16 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
       })
       process.stdout.write(JSON.stringify({ scenario: name, reply: result.finalMessage, actions: calls.map((call) => call.action), finalAction: result.finalAction }) + '\n')
       const photos = calls.filter((call) => call.action === 'game_photo')
-      if (kind === 'offer' || kind === 'save' || kind === 'save-any' || kind === 'yes') {
+      if (kind === 'off-day') {
+        expect(calls.map((call) => call.action)).toEqual(['read_game', 'game_photo'])
+        expect(photos[0]).toMatchObject({ photo: { operation: 'save', gameId: game.id, sourceMessageRef: inputId, attachmentOrdinal: 1 } })
+        expect(result.finalMessage).toMatch(/Saturday|today/iu)
+        expect(result.finalMessage).toMatch(/day off|off day|rest day/iu)
+        expect(result.finalMessage).toMatch(/Monday/iu)
+        expect(result.finalMessage).toMatch(/nice|good|glad|well done|great|still|effort|walk/iu)
+        expect(result.finalMessage).not.toMatch(/(?:I(?:’|')?ve|I|you(?:’|')?re) (?:saved|logged|checked)|it counts|counted toward|try again|use the app/iu)
+        expect(result.finalMessage.length).toBeLessThanOrEqual(220)
+      } else if (kind === 'offer' || kind === 'save' || kind === 'save-any' || kind === 'yes') {
         expect(calls.map((call) => call.action)).toEqual(['read_game', 'game_photo'])
         expect(photos[0]).toMatchObject({ origin: { kind: 'accepted_input', assistantInputId: inputId }, photo: { operation: kind === 'offer' ? 'offer' : 'save', gameId: game.id } })
         if (kind === 'yes') expect(photos[0].photo.sourceMessageRef).toBeUndefined()

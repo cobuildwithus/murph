@@ -169,3 +169,9 @@ describe("game v1 notification instructions", () => {
     expect(gameLiveLoreGuidanceForState({ games: [] })).toBeUndefined();
   });
 });
+
+
+it("composes shared-evidence superlatives guidance without requiring legacy writers", () => {
+  const instructions = buildGameRecapInstructions([]);
+  for (const phrase of ["tool supports superlatives", "both memberIds", "exactly one {memberId, title, line} per player", "2–6 words", "no trailing period", "differs from the other title", "text both players can see", "bodies or weight"]) expect(instructions).toContain(phrase);
+});
