@@ -130,36 +130,46 @@ Pricing: https://developers.cloudflare.com/r2/pricing/
 
 ## Review remediation
 
-Round 1 reviewed e0876a3b1642a3b799f9e21cd4560d0202c03f12 in the Apollo
-lane with GPT-6 Pro and the full attached snapshot. The exact committed turn
-and response were captured with REVIEW_COMPLETE after the wrapper-enforced
-180-second minimum. The substantive source trace was accepted.
+Round 1 reviewed e0876a3b1642a3b799f9e21cd4560d0202c03f12; round 2 reviewed
+a60c4e65b0738edf8cdd61bd7bc500a4cad760c0. Both used Apollo/GPT-6 Pro, full
+attached snapshots and exact-turn REVIEW_COMPLETE capture with the 180-second
+minimum enforced. Round 2 metadata confirmed both ancestor relationships and
+its current-head context anchor; stage evidence showed at least 306 seconds
+waiting for the substantive response.
 
-Accepted finding: a retained non-food stub conflicted with the managed
-closeout instruction requiring removal of every selected image, blocking later
-valid-meal presentation. The existing skill and managed seed now defer an
-identified non-food/unconsumed-food stub from cleanup, presentation and questions
-without blocking other selected meals. No new state, queue, write, retention
-policy or deletion behavior was added. Removal errors still leave retry work
-and must be reported as failure rather than successful closeout.
+Accepted findings: preserving non-food stubs first blocked completion of other
+selected meals; deferring them within the run fixed that case but left a full
+20-item batch able to starve later work permanently. Architecture pressure
+check: remove the introduced deferral instead of adding pagination, exclusions,
+a classification field or a new queue. Final guidance corrects already-imported
+empty stubs with only the supported non-food/non-consumption observation, never
+a dish name or invented nutrition, then uses the existing read-back and photo
+cleanup. Member notes are preserved. Non-food records are excluded from
+presentation/questions. Fresh non-food images never authorize a meal add.
+Managed automation instructions and the selector stay unchanged from main.
 
-Deterministic composed-guidance/managed-seed suites: 80 passes. CI also exposed
-expected prompt snapshot/budget changes and a legacy CLI response fixture;
-updated those expectations against the measured input and additive name field.
-Route-planning 125, model-behavior 57, and CLI handler 3 tests pass. Engine and
-CLI typechecks pass. Complexity remains flat, including existing managed
-automation hotspots 52/28/21. Complete ordinary first-input measurements remain
-+487 bytes individual and zero group; scheduled runs additionally load the
-updated managed instructions and on-demand skill.
+The deterministic 20-item case proves the existing cleanup drains the batch
+and makes later genuine meals selectable on the next occurrence. The existing
+bounded-per-occurrence behavior is preserved; no new same-day unlimited-drain
+promise, backfill or retention policy is introduced. Removal failures retain
+retry evidence and must be reported honestly; the existing notification wire
+contract has send_message/skip, not a new scheduler failure variant.
 
-Live remediation proof passes with GPT-6.1 Sol/local subscription: two successive
-scheduled days preserve the same non-food canonical record, enrich/read back
-and clean the current food capture, and produce a valid nonnumeric closeout.
-A third day injects a removal error: the photo remains, no totals/card work
-runs, and the response explicitly reports incomplete cleanup. No member
-delivery occurs in the harness. Reply review: Ready. This proves preserved
-retry work and an honest failure notice, not a new scheduler failure signal.
-The notification contract only has send_message/skip; no failure variant was
-added. Initial test assertions accidentally included private audit text in a
-member-copy check and disallowed the existing failure-notice response; those
-assertions were corrected to the actual presentation contract.
+CI exposed expected prompt digest/budget changes and a legacy CLI response
+fixture; these were updated against the measured input and additive name field.
+Route-planning 125, model-behavior 57 and CLI handler 3 tests pass. Ordinary
+complete first-input measurements remain +487 bytes individual and zero group.
+
+Main #4436 was merged normally without rewriting published history. Its only
+conflict was the adjacent optional AddMealInput fields; both name and uploadId
+were retained, and each side's independent propagation stayed intact. The
+prepared runtime rebuild passes. Post-merge CLI 24, projection 13, photo-import
+13 and Web Meals-route 31 tests pass. Composed guidance, managed automation and
+20-item eligibility proof pass together (88 tests); Engine typecheck passes.
+
+Final live closeout proof passes with GPT-6.1 Sol/local subscription (three
+provider requests): truthful non-food observation with no dish name/nutrition,
+existing photo cleanup, two successful nonnumeric food closeouts, and a removal
+error that retains its photo and reports incomplete cleanup without totals/card.
+All replies reviewed Ready; no external delivery occurred. The interrupted
+prepared build was rerun successfully before the merged-code verification.

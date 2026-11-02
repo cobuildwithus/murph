@@ -200,10 +200,11 @@ values only for identities the photo supports. An imported photo stub is not
 evidence of consumption. If inspection shows a
 non-food image or food/drink the member did not consume, do not add a meal,
 assign a dish name, or invent ingredients or nutrition. Do not use a generic
-image-review note as a meal description. For an existing stub, preserve it for
-member correction instead of silently deleting it; defer it from cleanup and
-presentation without blocking other eligible meals. Read supported food
-observations back. Clarification is a last resort,
+image-review note as a meal description. For an already-imported stub with an
+empty note, record only the supported non-food or non-consumption fact, without
+a dish name, ingredients, or nutrition. Preserve member-written notes. This
+corrects an existing record; it never authorizes adding a meal. Read the factual
+observation back, then follow the existing photo cleanup below. Clarification is a last resort,
 not a confidence check: ask
 one narrow identity or portion question only when actual attachment inspection
 leaves identity or amount too indeterminate for any meaningful bounded estimate
@@ -253,10 +254,7 @@ On a scheduled run:
 4. Run `vault-cli meal show <meal-id> --format json` for each selected meal and
    inspect the actual attachment for a photo-backed selection. For
    same-occurrence retry evidence, use only the already-saved structured fields
-   and uncertainty. If inspection identifies non-food or known unconsumed food,
-   leave that stub and photo unchanged for member correction and exclude it
-   from this run's cleanup, presentation, and questions. Continue other selected
-   meals; this deferral alone does not fail the run. Enrich the existing meal when supported, apply the bounded
+   and uncertainty. Enrich the existing meal when supported, apply the bounded
    re-identification and single-retry rule above after a failed edit, and read
    the result back. When numeric nutrition is unsupported, save and read back
    the evidence-based observation fallback above. A meal with neither saved
@@ -268,11 +266,12 @@ On a scheduled run:
    fails the run. On retry, combine photos that remain with same-occurrence
    removal revisions so a provider or partial-cleanup failure loses no meal.
 
-After all non-deferred cleanup, stop before any presentation work when no
-non-deferred capture has the occurrence local date. Return
+After all selected cleanup, exclude identified non-food or unconsumed-food
+records from presentation and questions. Stop before any presentation work when
+no remaining selected capture has the occurrence local date. Return
 `{"kind":"skip","privateSummary":"Historical meal cleanup completed."}` and
 run no Goal, totals, card, or clarification work. When current and historical
-captures were selected together, continue with non-deferred current-date captures only.
+captures were selected together, continue with current-date food captures only.
 
 Before step 6, apply the estimation-eligibility rule above to those current-date
 captures. When estimation is skipped, complete photo cleanup and stop with the

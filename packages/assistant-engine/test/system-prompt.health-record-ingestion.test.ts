@@ -39,14 +39,15 @@ describe('assistant system prompt health record ingestion invariant', () => {
     expect(automatic).toMatch(/An imported photo stub is not\s+evidence of consumption/u)
     expect(automatic).not.toContain('record only that the retained image was')
     const closeout = automatic.replace(/\s+/gu, ' ')
-    expect(closeout).toContain('leave that stub and photo unchanged for member correction')
-    expect(closeout).toContain('exclude it from this run\'s cleanup, presentation, and questions')
-    expect(closeout).toContain('this deferral alone does not fail the run')
+    expect(closeout).toContain('record only the supported non-food or non-consumption fact')
+    expect(closeout).toContain('without a dish name, ingredients, or nutrition')
+    expect(closeout).toContain('it never authorizes adding a meal')
+    expect(closeout).toContain('Read the factual observation back, then follow the existing photo cleanup below')
+    expect(closeout).toContain('exclude identified non-food or unconsumed-food records from presentation and questions')
     expect(closeout).toContain('Any removal failure fails the run')
     const managed = MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions
-    expect(managed).toContain('non-food deferral rule without blocking other eligible meals')
-    expect(managed).toContain('A removal failure or any non-deferred selected photo remaining fails the run')
-    expect(managed).not.toContain('any selected photo remaining fails the run')
+    expect(managed).toContain('A removal failure or any selected photo remaining fails the run')
+    expect(closeout).not.toContain('defer')
   })
 
   it('requires uploaded medical records to be structured or durably preserved instead of becoming memory-only notes', () => {

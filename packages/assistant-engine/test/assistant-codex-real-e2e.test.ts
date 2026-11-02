@@ -34537,7 +34537,7 @@ async function materializeRestaurantMealVaultCli(input: {
 }
 
 describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
-  it('defers a non-food stub across closeouts without masking photo-removal failures', { timeout: 1_800_000 }, async () => {
+  it('corrects non-food stubs without blocking meal closeout or masking removal failures', { timeout: 1_800_000 }, async () => {
     const config = await resolveRealCodexE2eConfig()
     const root = await mkdtemp(path.join(tmpdir(), 'murph-nonfood-closeout-e2e-'))
     const vaultRoot = path.join(root, 'vault')
@@ -34552,8 +34552,6 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
       const nonFood = await addMeal({ vaultRoot, source: 'device', occurredAt: '2026-08-23T16:00:00.000Z',
         photoPath: path.join(publicRoot, 'brand-logos/connect/runkeeper.png'),
         externalRef: { system: 'meal-photo-capture', resourceType: 'photo', resourceId: 'nonfood-icon' } })
-      const original = await readAutomaticMealClarificationState({ vaultRoot, mealId: nonFood.mealId })
-      const originalEvents = (await readVaultRawTolerant(vaultRoot)).events.filter(event => event.entityId === nonFood.mealId)
       for (const day of [24, 25, 26]) {
         const failPhotoRemoval = day === 26
         const currentLocalDate = `2026-08-${day}`
@@ -34579,9 +34577,14 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
         })
         const commands = (await readFile(commandLog, 'utf8')).trim().split('\n')
         const state = await readAutomaticMealClarificationState({ vaultRoot, mealId: current.mealId })
-        expect(await readAutomaticMealClarificationState({ vaultRoot, mealId: nonFood.mealId })).toEqual(original)
-        expect((await readVaultRawTolerant(vaultRoot)).events.filter(event => event.entityId === nonFood.mealId)).toEqual(originalEvents)
-        expect(commands.filter(command => isMealRemovePhotoCommand(command, nonFood.mealId))).toHaveLength(0)
+        const corrected = await readAutomaticMealClarificationState({ vaultRoot, mealId: nonFood.mealId })
+        expect(corrected.savedNote).toMatch(/non.food|not food|not.*consum|app icon|logo/iu)
+        expect(corrected.savedCalories).toBeNull()
+        expect(corrected.savedAttachmentCount).toBe(0)
+        const correctedEvent = (await readVaultRawTolerant(vaultRoot)).events.filter(event => event.entityId === nonFood.mealId).at(-1)
+        expect(correctedEvent?.attributes.title).toBe('Meal')
+        expect(correctedEvent?.attributes.nutrition).toBeUndefined()
+        expect(commands.filter(command => isMealRemovePhotoCommand(command, nonFood.mealId))).toHaveLength(day === 24 ? 1 : 0)
         expect(commands.some(command => /meal (?:add|delete|import-json)\b/u.test(command))).toBe(false)
         const edit = commands.findIndex(command => isMealEditMutationCommand(command) && command.includes(current.mealId))
         const readback = commands.findIndex((command, index) => index > edit && command.startsWith(`meal show ${current.mealId}`))
@@ -34607,7 +34610,7 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
           if (decision.kind === 'send_message') expect(decision.text).not.toMatch(/runkeeper|non-food|classifier|calories|\bkcal\b/iu)
         }
         expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
-        process.stdout.write(`[nonfood-closeout-proof] ${JSON.stringify({ day, failPhotoRemoval, retainedNonFood: true, reply: result.finalMessage })}\n`)
+        process.stdout.write(`[nonfood-closeout-proof] ${JSON.stringify({ day, failPhotoRemoval, nonFoodPhotoCleaned: true, reply: result.finalMessage })}\n`)
       }
     } finally {
       await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths])
