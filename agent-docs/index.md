@@ -1,3 +1,7 @@
+Recap desktop QR handoff and Apple mobile preservation are tracked in
+[the implementation plan](exec-plans/completed/2026-11-01-recap-desktop-handoff.md).
+`product-specs/weekly-game.md` owns the public-route contract.
+
 Game history read measurements and equivalence proof are tracked in
 [the performance plan](exec-plans/completed/2026-11-01-game-history-speed.md).
 `../ARCHITECTURE.md` owns the bounded read and media authority contract.

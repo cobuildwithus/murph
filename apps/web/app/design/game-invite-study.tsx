@@ -68,8 +68,11 @@ const LINK_PREVIEWS: ReadonlyArray<{ id: string; label: string; preview: GameInv
 export function GameInviteStudy() {
   return (
     <div className="flex flex-col gap-8" data-design-study="game-invite" id="game-invite">
-      <div id="game-recap" className="max-w-md bg-background px-6 py-7 text-foreground" inert>
+      <div id="game-recap-iphone" className="max-w-md bg-background px-6 py-7 text-foreground" inert>
         <GameRecapView appUrl="ai.withmurph.app://recap/game_synthetic" />
+      </div>
+      <div id="game-recap" className="max-w-md bg-background px-6 py-7 text-foreground" inert>
+        <GameRecapView recapUrl="https://www.withmurph.ai/recap/game_synthetic" />
       </div>
       <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
         The production <code>/g/[token]</code> page a texted weekly-game challenge opens. It shows both

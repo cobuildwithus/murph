@@ -219,8 +219,11 @@ this default without deleting other people's private contact choices.
   group delivery use those exact bytes. The sealed recap, `Chat line used:` lore
   and originality checks keep the bare line. `/recap/[gameId]` validates only the
   ID shape and presents a generic, noindex app handoff (`<app scheme>://recap/<gameId>`)
-  with an App Store fallback, without reading game data. Its app scheme shares
-  the invite-page setting.
+  for Apple mobile User-Agents, including recognizable iPadOS desktop UAs.
+  Other User-Agents receive a server-rendered QR of the canonical HTTPS recap
+  URL and an instruction to scan with the iPhone camera. Both views retain the
+  App Store fallback and read no game data. Its app scheme shares the invite-page
+  setting; no client detection or external QR service is used.
   For optional score lines, deploy compatible Web before the runtime writer.
   Web composes queued recap instructions; old runtimes still require the legacy
   line in their tool schema until their deployment.
