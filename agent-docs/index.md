@@ -1,5 +1,5 @@
 Pre-foreground reply planning attribution is tracked in
-[the timing plan](exec-plans/active/2026-11-01-pre-foreground-reply-timing.md);
+[the timing plan](exec-plans/completed/2026-11-01-pre-foreground-reply-timing.md);
 [`hosted-runtime-protocol.md`](references/hosted-runtime-protocol.md) owns its fixed numeric fields.
 
 Legacy game photo recovery and history card delivery are tracked in
