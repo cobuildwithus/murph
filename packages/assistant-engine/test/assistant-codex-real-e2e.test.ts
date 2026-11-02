@@ -46916,7 +46916,7 @@ describeRealCodex('real Codex game chat setup', () => {
         codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantPollsAvailable: true, assistantHostedGroupToolSurface: 'families',
-          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' }, conversationScope: 'group',
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T12:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
         }),
