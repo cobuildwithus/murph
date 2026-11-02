@@ -1,5 +1,5 @@
 import { withCodexToolInputContract } from '../src/assistant-codex/tool-input-contract.ts'
-import { withCodexAppServerSteeringFeatureOverrides } from '../src/assistant-codex/config.ts'
+import { supportsCodexTurnDeveloperInstructions, withCodexAppServerSteeringFeatureOverrides } from '../src/assistant-codex/config.ts'
 import {
   cliTimingLaunchArgs,
   codexSteeringLaunchArgs,
@@ -208,6 +208,7 @@ describe('assistant codex runtime', () => {
       approvalPolicy: 'never' as const,
       baseInstructions: 'Do not use this in normal Murph config.',
       developerInstructions: 'Stable Murph instructions.',
+      env: { MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON: '/synthetic/hosted-models.json' },
       dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
       model: 'gpt-5',
       modelProvider: 'hosted-openai',
@@ -217,11 +218,22 @@ describe('assistant codex runtime', () => {
       workingDirectory: '/workspace',
     }
 
+    for (const fallback of [
+      { ...baseInput, env: {} },
+      { ...baseInput, configOverrides: ['model_catalog_json="/synthetic/custom.json"'] },
+    ]) {
+      expect(supportsCodexTurnDeveloperInstructions(fallback)).toBe(false)
+      expect(buildCodexThreadStartParams(fallback).developerInstructions).toBe(baseInput.developerInstructions)
+      // As on main: local resume relies on the persisted thread contract, so it re-sends nothing.
+      expect(buildCodexThreadResumeParams({ input: fallback, codexThreadId: 'thread-1' })).not.toHaveProperty('developerInstructions')
+      expect(buildCodexTurnStartParams({ input: fallback, images: [], codexThreadId: 'thread-1' })).not.toHaveProperty('collaborationMode')
+    }
+
     expect(buildCodexThreadStartParams(baseInput)).toEqual({
       approvalPolicy: 'never',
       baseInstructions: 'Do not use this in normal Murph config.',
       cwd: '/workspace',
-      developerInstructions: 'Stable Murph instructions.',
+      developerInstructions: '',
       dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS.map(withCodexToolInputContract),
       experimentalRawEvents: true,
       model: 'gpt-5',
@@ -310,6 +322,8 @@ describe('assistant codex runtime', () => {
     ).toEqual({
       approvalPolicy: 'never',
       cwd: '/workspace',
+      baseInstructions: 'Do not use this in normal Murph config.',
+      developerInstructions: '',
       excludeTurns: true,
       model: 'gpt-5',
       modelProvider: 'hosted-openai',
@@ -332,6 +346,8 @@ describe('assistant codex runtime', () => {
         'features.shell_tool': false,
       },
       cwd: '/workspace',
+      baseInstructions: 'Do not use this in normal Murph config.',
+      developerInstructions: '',
       excludeTurns: true,
       model: 'gpt-5',
       modelProvider: 'hosted-openai',
@@ -354,6 +370,8 @@ describe('assistant codex runtime', () => {
     ).toEqual({
       approvalPolicy: 'never',
       cwd: '/workspace',
+      baseInstructions: 'Do not use this in normal Murph config.',
+      developerInstructions: '',
       excludeTurns: true,
       model: 'gpt-5',
       modelProvider: 'hosted-openai',
@@ -373,6 +391,8 @@ describe('assistant codex runtime', () => {
     ).toEqual({
       approvalPolicy: 'never',
       cwd: '/workspace',
+      baseInstructions: 'Do not use this in normal Murph config.',
+      developerInstructions: '',
       excludeTurns: true,
       model: 'gpt-5',
       modelProvider: 'hosted-openai',
@@ -387,6 +407,7 @@ describe('assistant codex runtime', () => {
       codexThreadId: 'thread-1',
     })
     expect(turnStart).toEqual({
+      collaborationMode: { mode: 'default', settings: { model: 'gpt-5', reasoning_effort: 'high', developer_instructions: 'Stable Murph instructions.' } },
       effort: 'high',
       input: [
         {
@@ -466,7 +487,7 @@ describe('assistant codex runtime', () => {
         'features.multi_agent_v2': false,
       },
       cwd: '/workspace',
-      developerInstructions: 'Stable Murph instructions.',
+      developerInstructions: '',
       dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS.map(withCodexToolInputContract),
       ephemeral: true,
       experimentalRawEvents: true,
@@ -622,6 +643,7 @@ describe('assistant codex runtime', () => {
             method: 'thread/start',
             params: {
               approvalPolicy: 'never',
+              developerInstructions: '',
               cwd: expectedWorkingDirectory,
               dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS.map(withCodexToolInputContract),
               experimentalRawEvents: true,

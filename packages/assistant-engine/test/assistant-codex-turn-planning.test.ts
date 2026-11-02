@@ -6,6 +6,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { buildCodexThreadStartParams } from '../src/assistant-codex/app-server-requests.ts'
+import { withCodexToolInputContract } from '../src/assistant-codex/tool-input-contract.ts'
 import { MURPH_CODEX_BASE_INSTRUCTIONS } from '../src/assistant/codex-base-instructions.ts'
 import { buildUpcomingContextPrompt } from '../src/assistant/upcoming-context.ts'
 import { fingerprintThreadDeclarations } from './support/codex-contract-fingerprint-oracle.ts'
@@ -189,7 +190,7 @@ import {
   assistantChannelDeliverySchema,
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.js'
+import { buildCodexThreadIdentity, type CodexThreadIdentity } from '../src/assistant/codex-thread-route.js'
 
 // Minimal synthetic prior advertisement with types factored outside action branches.
 const priorFactoredAutomationSchema = {
@@ -402,11 +403,11 @@ describe('assistant Codex turn planning', () => {
       // snapshot below retains its pre-adapter identity projection so no
       // unrelated planner output is rebaselined or exempted by this migration.
       expect(plan.assistantContractFingerprint).toBe(fingerprintThreadDeclarations({
-        baseInstructions: start.baseInstructions as string,
-        developerInstructions: start.developerInstructions as string | null,
         dynamicTools: start.dynamicTools,
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }))
+      const { MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON: catalog, ...historicalCliEnv } = plan.cliEnv
+      expect(catalog).toBe('/synthetic/hosted-models.json')
       return createHash('sha256').update(JSON.stringify({
         assistantCliContract: plan.assistantCliContract,
         assistantContractFingerprint: fingerprintThreadDeclarations({
@@ -417,7 +418,7 @@ describe('assistant Codex turn planning', () => {
         }),
         assistantPreferredElevenLabsVoiceId:
           plan.assistantPreferredElevenLabsVoiceId,
-        cliEnv: plan.cliEnv,
+        cliEnv: historicalCliEnv,
         codexContinuation: plan.codexContinuation,
         conversationHistoryMessages: plan.conversationHistoryMessages,
         developerInstructions: plan.developerInstructions,
@@ -608,7 +609,7 @@ describe('assistant Codex turn planning', () => {
         session: createSession(),
         sharedPlan: createSharedPlan({
           cliAccess: {
-            env: input.configured ? { EXA_API_KEY: 'configured-sentinel' } : {},
+            env: { ...createSharedPlan().cliAccess.env, ...(input.configured ? { EXA_API_KEY: 'configured-sentinel' } : {}) },
             rawCommand: 'vault-cli',
             setupCommand: 'murph',
           },
@@ -645,7 +646,7 @@ describe('assistant Codex turn planning', () => {
     for (const group of [false, true]) {
       const configured = await resolvePlan({ configured: true, group })
       const unavailable = await resolvePlan({ configured: false, group })
-      expect(configured.assistantContractFingerprint).not.toBe(unavailable.assistantContractFingerprint)
+      expect(configured.assistantContractFingerprint).toBe(unavailable.assistantContractFingerprint)
     }
 
     const directProgressPlan = await resolvePlan({
@@ -1574,7 +1575,7 @@ describe('assistant Codex turn planning', () => {
     expect(scheduledNewsletterPlan.developerInstructions).not.toBe(
       scheduledWithoutPersonaPlan.developerInstructions,
     )
-    expect(scheduledNewsletterPlan.assistantContractFingerprint).not.toBe(
+    expect(scheduledNewsletterPlan.assistantContractFingerprint).toBe(
       scheduledWithoutPersonaPlan.assistantContractFingerprint,
     )
 
@@ -2242,7 +2243,7 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
-  it('keeps the absent-persona contract stable and rotates for explicit persona defaults', async () => {
+  it('keeps the thread and refreshes explicit persona defaults', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
     )
@@ -2314,8 +2315,8 @@ describe('assistant Codex turn planning', () => {
       }),
     })
 
-    expect(personaPlan.resume).toBeNull()
-    expect(personaPlan.assistantContractFingerprint).not.toBe(
+    expect(personaPlan.resume?.codexThreadId).toBe('thread-before-persona-change')
+    expect(personaPlan.assistantContractFingerprint).toBe(
       baseline.assistantContractFingerprint,
     )
     expect(personaPlan.developerInstructions).toContain(
@@ -2348,7 +2349,7 @@ describe('assistant Codex turn planning', () => {
     expect(staleVoicePlan.assistantPreferredElevenLabsVoiceId).toBeNull()
   })
 
-  it('reads sparse personality preferences and rotates the interactive thread contract', async () => {
+  it('reads sparse personality preferences without rotating the interactive thread', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -2429,8 +2430,8 @@ describe('assistant Codex turn planning', () => {
         session: resumedSession,
       })
 
-      expect(updatedAttemptPlan.routePlan.resume).toBeNull()
-      expect(updatedAttemptPlan.routePlan.assistantContractFingerprint).not.toBe(
+      expect(updatedAttemptPlan.routePlan.resume?.codexThreadId).toBe('thread-before-personality-change')
+      expect(updatedAttemptPlan.routePlan.assistantContractFingerprint).toBe(
         initialAttemptPlan.routePlan.assistantContractFingerprint,
       )
       expect(updatedAttemptPlan.routePlan.developerInstructions).toContain(
@@ -2603,7 +2604,7 @@ describe('assistant Codex turn planning', () => {
     })
 
     expect(resumedPlan.resume?.codexThreadId).toBe('thread-resume')
-    expect(resumedPlan.developerInstructions).toBeNull()
+    expect(resumedPlan.developerInstructions).toEqual(expect.any(String))
     expect(resumedPlan.sessionContext).toBeUndefined()
     expect(resumedPlan.turnContextPrompt).toContain(turnContext)
     expect(resumedPlan.planningDiagnostics).toMatchObject({
@@ -2959,7 +2960,7 @@ describe('assistant Codex turn planning', () => {
     expect(resumedPlan.resume?.codexThreadId).toBe(
       'thread-delivery-posture',
     )
-    expect(resumedPlan.developerInstructions).toBeNull()
+    expect(resumedPlan.developerInstructions).toEqual(expect.any(String))
     expect(resumedPlan.assistantContractFingerprint).toBe(
       initialPlan.assistantContractFingerprint,
     )
@@ -3120,7 +3121,7 @@ describe('assistant Codex turn planning', () => {
           replacementThreadId,
         )
         expect(secondPostDeployPlan.conversationHistoryMessages).toBeUndefined()
-        expect(secondPostDeployPlan.developerInstructions).toBeNull()
+        expect(secondPostDeployPlan.developerInstructions).toEqual(expect.any(String))
       } finally {
         await rm(vault, { force: true, recursive: true })
       }
@@ -3159,7 +3160,6 @@ describe('assistant Codex turn planning', () => {
     )
     expect(first.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
-        developerInstructions: first.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
@@ -3932,7 +3932,6 @@ describe('assistant Codex turn planning', () => {
 
     expect(telegramReplyPlan.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
-        developerInstructions: telegramReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
@@ -3983,7 +3982,6 @@ describe('assistant Codex turn planning', () => {
 
     expect(linqReplyPlan.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
-        developerInstructions: linqReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
@@ -4081,8 +4079,6 @@ describe('assistant Codex turn planning', () => {
 
     expect(linqCurrentMessageNotReactionEligiblePlan.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
-        developerInstructions:
-          linqCurrentMessageNotReactionEligiblePlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
@@ -4112,7 +4108,6 @@ describe('assistant Codex turn planning', () => {
 
     expect(telegramBusinessReplyPlan.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
-        developerInstructions: telegramBusinessReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
@@ -4140,7 +4135,6 @@ describe('assistant Codex turn planning', () => {
 
     expect(telegramInferredBindingPlan.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
-        developerInstructions: telegramInferredBindingPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
@@ -4220,7 +4214,6 @@ describe('assistant Codex turn planning', () => {
 
     expect(plan.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
-        developerInstructions: plan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
@@ -5471,7 +5464,7 @@ describe('assistant Codex turn planning', () => {
     })
 
     expect(plan.resume?.codexThreadId).toBe('thread-date-change')
-    expect(plan.developerInstructions).toBeNull()
+    expect(plan.developerInstructions).toEqual(expect.any(String))
     expect(plan.turnContextPrompt).toBe(
       'Today\'s date for the user is May 5, 2026.',
     )
@@ -5480,7 +5473,35 @@ describe('assistant Codex turn planning', () => {
     )
   })
 
-  it('starts a fresh thread when stable developer instructions change', async () => {
+  it.each([
+    { change: { modelProvider: 'hosted-openai' }, resumes: false },
+    { change: { sandbox: 'read-only' as const }, resumes: false },
+    { change: { model: 'gpt-6.1-sol' }, resumes: true },
+  ])('preserves only compatible native routes: $change', async ({ change, resumes }) => {
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportsNativeResume: true })
+    const target = { provider: 'codex-cli' as const, model: 'gpt-6.1-terra', modelProvider: 'openai', sandbox: 'workspace-write' as const }
+    const route = buildCodexThreadIdentity(normalizeAssistantProviderConfig(target))
+    const common = {
+      executionContext: null, input: createMessageInput(),
+      profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
+      promptTimeContext: { currentLocalDate: '2026-11-02', currentTimeZone: 'UTC' },
+      sharedPlan: createSharedPlan(),
+    } as const
+    const initial = await resolveAssistantRouteTurnPlan({ ...common, route, session: createSession() })
+    const updated = await resolveAssistantRouteTurnPlan({
+      ...common, route: buildCodexThreadIdentity(normalizeAssistantProviderConfig({ ...target, ...change })),
+      session: createSession({ resumeState: {
+        assistantContractFingerprint: initial.assistantContractFingerprint,
+        routeFingerprint: route.routeId, threadCompatibilityFingerprint: route.threadCompatibilityFingerprint,
+        threadId: 'thread-route-compatibility',
+      } }),
+    })
+    expect(updated.resume).toEqual(resumes ? { codexThreadId: 'thread-route-compatibility' } : null)
+  })
+
+  it.each(['hosted', 'local'] as const)('updates developer instructions across releases safely: %s', async (launch) => {
+    const sharedPlan = createSharedPlan()
+    if (launch === 'local') sharedPlan.cliAccess.env = {}
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValueOnce('old bootstrap')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -5501,7 +5522,7 @@ describe('assistant Codex turn planning', () => {
       },
       route,
       session: createSession(),
-      sharedPlan: createSharedPlan(),
+      sharedPlan,
     })
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValueOnce('new bootstrap')
 
@@ -5525,15 +5546,15 @@ describe('assistant Codex turn planning', () => {
           threadId: 'thread-old-contract',
         },
       }),
-      sharedPlan: createSharedPlan(),
+      sharedPlan,
     })
 
-    expect(plan.resume).toBeNull()
+    expect(plan.resume).toEqual(launch === 'hosted' ? { codexThreadId: 'thread-old-contract' } : null)
     expect(plan.developerInstructions).toContain('new bootstrap')
-    expect(plan.assistantContractFingerprint).not.toBe(oldPlan.assistantContractFingerprint)
+    expect(plan.assistantContractFingerprint === oldPlan.assistantContractFingerprint).toBe(launch === 'hosted')
   })
 
-  it('starts a fresh thread when thread-stable context changes', async () => {
+  it('refreshes timezone, product URL and onboarding on the same thread', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -5572,6 +5593,7 @@ describe('assistant Codex turn planning', () => {
         newSharedPlan: createSharedPlan({
           cliAccess: {
             env: {
+              ...createSharedPlan().cliAccess.env,
               HOSTED_WEB_BASE_URL: 'https://new.example.test',
             },
             rawCommand: 'vault-cli',
@@ -5582,6 +5604,7 @@ describe('assistant Codex turn planning', () => {
         oldSharedPlan: createSharedPlan({
           cliAccess: {
             env: {
+              ...createSharedPlan().cliAccess.env,
               HOSTED_WEB_BASE_URL: 'https://old.example.test',
             },
             rawCommand: 'vault-cli',
@@ -5632,14 +5655,14 @@ describe('assistant Codex turn planning', () => {
         sharedPlan: scenario.newSharedPlan,
       })
 
-      expect(plan.resume, scenario.name).toBeNull()
+      expect(plan.resume?.codexThreadId, scenario.name).toBe(`thread-old-${scenario.name}`)
       expect(plan.developerInstructions, scenario.name).toContain(
         scenario.expectedDeveloperText,
       )
       expect(plan.turnContextPrompt, scenario.name).not.toContain(
         scenario.unexpectedTurnText,
       )
-      expect(plan.assistantContractFingerprint, scenario.name).not.toBe(
+      expect(plan.assistantContractFingerprint, scenario.name).toBe(
         oldPlan.assistantContractFingerprint,
       )
     }
@@ -5698,7 +5721,7 @@ describe('assistant Codex turn planning', () => {
     })
 
     expect(plan.resume?.codexThreadId).toBe('thread-old-snapshot')
-    expect(plan.developerInstructions).toBeNull()
+    expect(plan.developerInstructions).toEqual(expect.any(String))
     expect(plan.turnContextPrompt).toContain(
       'Updated assistant context snapshot.',
     )
@@ -6090,7 +6113,7 @@ describe('assistant Codex turn planning', () => {
     })
 
     expect(resumedPlan.resume?.codexThreadId).toBe('thread-sensitive-resume')
-    expect(resumedPlan.developerInstructions).toBeNull()
+    expect(resumedPlan.developerInstructions).toEqual(expect.any(String))
     expect(resumedPlan.turnContextPrompt).toContain(
       'Current assistant context snapshot.',
     )
@@ -7687,7 +7710,7 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
-  it('accepts a legacy contract fingerprint during a compatible model switch', async () => {
+  it.each(['route-before-model-switch', 'thread-compatible-route'])('accepts a legacy contract fingerprint during a compatible model switch: %s', async (legacyRouteFingerprint) => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -7713,10 +7736,11 @@ describe('assistant Codex turn planning', () => {
       session: createSession(),
       sharedPlan: createPrivateSharedPlan(),
     })
-    const legacyContractFingerprint = buildAssistantCodexContractFingerprint({
+    const legacyContractFingerprint = fingerprintThreadDeclarations({
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
       developerInstructions: initialPlan.developerInstructions,
-      dynamicTools: initialPlan.dynamicTools,
-      routeFingerprint: 'route-before-model-switch',
+      dynamicTools: initialPlan.dynamicTools.map(withCodexToolInputContract),
+      routeFingerprint: legacyRouteFingerprint,
     })
     const switchedRoute = createRoute({
       routeFingerprint: 'route-after-model-switch',
@@ -8407,7 +8431,7 @@ function createSharedPlan(
 ): AssistantTurnSharedPlan {
   return {
     cliAccess: {
-      env: {},
+      env: { MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON: '/synthetic/hosted-models.json' },
       rawCommand: 'vault-cli',
       setupCommand: 'murph',
     },

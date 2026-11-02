@@ -1,5 +1,6 @@
 import { GAME_PHOTO_CHAT_GUIDANCE, MURPH_GAME_LORE_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_TOOL } from "../../assistant-codex/dynamic-tools/games.js"
 import { resolveUsageOptimizerFeedbackScope } from '../weekly-usage-optimizer.js'
+import { supportsCodexTurnDeveloperInstructions } from '../../assistant-codex/config.js'
 import { resolveAssistantFollowUpTurnContext } from '../follow-ups.js'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import { resolveXaiApiKey } from '@murphai/operator-config/xai-runtime'
@@ -820,11 +821,14 @@ function resolveRouteNativeResumeThreadId({
     storedAssistantContractFingerprint === assistantContractFingerprint ||
     (
       resumeBinding !== null &&
-      storedAssistantContractFingerprint === buildAssistantCodexContractFingerprint({
-        developerInstructions: threadStartDeveloperInstructions,
-        dynamicTools,
-        routeFingerprint: resumeBinding.routeFingerprint,
-      })
+      [readCodexThreadCompatibilityFingerprint(input.route), resumeBinding.routeFingerprint]
+        .some((routeFingerprint) =>
+          storedAssistantContractFingerprint === buildAssistantCodexContractFingerprint({
+            developerInstructions: threadStartDeveloperInstructions,
+            dynamicTools,
+            routeFingerprint,
+          }),
+        )
     )
   const nativeResumeEnabled =
     input.profile.threadScope === 'session-thread'
@@ -1391,7 +1395,9 @@ export async function resolveAssistantRouteTurnPlan(
       (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',
     )
   const assistantContractFingerprint = buildAssistantCodexContractFingerprint({
-    developerInstructions: threadStartDeveloperInstructions,
+    developerInstructions: supportsCodexTurnDeveloperInstructions({ env: input.sharedPlan.cliAccess.env })
+      ? undefined
+      : threadStartDeveloperInstructions,
     dynamicTools,
     routeFingerprint: readCodexThreadCompatibilityFingerprint(input.route),
   })
@@ -1432,10 +1438,6 @@ export async function resolveAssistantRouteTurnPlan(
           ASSISTANT_CONTEXT_HANDOFF_NOTIFICATION_OUTPUT_CONTRACT,
         ].join('\n\n')
       : threadStartPromptResult.prompt
-  const developerInstructions =
-    resumeCodexThreadId === null
-      ? threadStartDeveloperInstructions
-      : null
   const routePlanningElapsedMs = elapsedSince(routePlanningStartedAt)
   const routePlanningMeasuredElapsedMs = sumRoutePlanningSpanMetrics(
     routePlanningSpans,
@@ -1457,7 +1459,7 @@ export async function resolveAssistantRouteTurnPlan(
     cliEnv: {
       ...input.sharedPlan.cliAccess.env,
     },
-    developerInstructions: normalizeNullableString(developerInstructions),
+    developerInstructions: threadStartDeveloperInstructions,
     dynamicTools,
     environments: outputOnlyTurn ? [] : undefined,
     conversationHistoryMessages:
