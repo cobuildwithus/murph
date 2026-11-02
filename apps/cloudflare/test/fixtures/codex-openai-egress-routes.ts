@@ -245,6 +245,12 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
       reason: "The 0.166.0 Linux release joins the /v1/realtime normalization literal with adjacent scheme literals and the sideband URL error in realtime_websocket/methods.rs.",
     },
     {
+      candidate: "/v1/realtimewswsshttpsquicksilverintentmodelinternal",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "The patched 0.166.0 Linux source build in the hosted runner base image joins the /v1/realtime normalization literal with adjacent scheme, quicksilver intent, and short query-key literals from the realtime websocket and call owners; the reviewed route is /v1/realtime.",
+    },
+    {
       candidate: "/v1/user-auth-credential/whoamisk-proj-fedramp-sk-svcacct-fedramp-auth.lock",
       disposition: "binary_false_positive",
       owner: "codex-auth",

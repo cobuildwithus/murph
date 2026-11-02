@@ -148,7 +148,7 @@ describe("runner base image preparation", () => {
     expect(nativeStages).toContain(" AS codex-package");
     expect(nativeStages).toContain(" AS codex-builder");
     expect(nativeStages).not.toMatch(/NODE_VERSION|NODE_IMAGE_DIGEST|npm install/u);
-    expect(nativeStages).toContain("ADD --checksum=sha256:30efc97738b975940d78b59a9bea115fa34040b732807d54ec35ae6b7528de94");
+    expect(nativeStages).toContain("ADD --checksum=sha256:cbc00a26d3d0e2ceefc4be8891f8a81ef1e349b3b175bc0ae308762bc001fd93");
     expect(nativeStages).toContain("https://registry.npmjs.org/@openai/codex/-/codex-${CODEX_CLI_VERSION}-linux-x64.tgz");
   });
 
