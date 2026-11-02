@@ -43,9 +43,9 @@ test("public recap handoff and design proof", async ({ page }) => {
     }
     await expect(page.getByRole("link", { name: "Get it on the App Store" })).toHaveAttribute("href", "https://apps.apple.com/us/app/murph-ai/id6786145859");
     await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", /noindex/);
-    await expect(page.locator('meta[property="og:title"]')).toHaveAttribute("content", "Your recap is in Murph");
-    await expect(page.locator('meta[property="og:description"]')).toHaveAttribute("content", "Open Murph to watch your recap.");
-    await expect(page.locator('meta[property="og:image"]')).toHaveAttribute("content", /^https?:\/\/[^/]+\/opengraph-image$/);
+    await expect(page.locator('meta[property="og:title"]')).toHaveAttribute("content", "Watch your recap in Murph");
+    await expect(page.locator('meta[property="og:description"]')).toHaveAttribute("content", "Who won, who owes, and the best of it.");
+    await expect(page.locator('meta[property="og:image"]')).toHaveAttribute("content", /^https?:\/\/[^/]+\/recap-preview\.png$/);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.evaluate(async () => { await document.fonts.ready; await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))); });
     if (process.env.DESIGN_PROOF_OUTPUT_DIR) {
