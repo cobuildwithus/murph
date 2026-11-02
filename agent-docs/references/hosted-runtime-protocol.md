@@ -5029,6 +5029,17 @@ request. A later failed request still clears an earlier parsed result. Consumers
 must accept these optional fields before new Web, Worker, or runtime producers
 emit the expanded strict timing shape. These fields grant no execution authority.
 
+The existing Web direct-ensure failure warning adds `transportErrorCode`: a
+closed Node/Undici transport code or `unknown`. The private extractor inspects at
+most four cause-chain objects, including the outer error, through own data
+properties only. Missing, unsupported, cyclic, accessor-backed, or unreadable
+evidence stays unknown; messages, addresses, socket metadata, headers, bodies,
+and arbitrary codes are excluded. This field distinguishes connection or
+transport failures without changing wake deadlines, retries, authority, or
+warning frequency. It adds no I/O and does not prove the cause of an older
+warning that lacked the field. The composed webhook wake tests cover the
+diagnostic alongside unchanged Temporal handoff and failure isolation.
+
 Replacement traces also carry same-call elapsed
 scalars for the active wake and exact fence clear. Fresh-start traces carry
 elapsed scalars for the parallel workspace read and runtime-store ensure, and
