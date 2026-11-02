@@ -2240,7 +2240,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
         vaultRoot: restoredVaultRoot,
       });
 
-      assert.equal(automationPassCount, 2);
+      assert.equal(automationPassCount, 1);
       assert.ok(
         restoredCheckpointRequests.some((request) =>
           request.reason === "idle_shutdown"

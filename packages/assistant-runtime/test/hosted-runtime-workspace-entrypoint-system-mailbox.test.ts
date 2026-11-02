@@ -620,14 +620,12 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
 
       assert.deepEqual(fetchRequests.map((request) => request.lanes.map((lane) => lane.lane)), [
         ["system", "conversation"],
-        ["conversation"],
-        ["system"],
       ]);
       assert.deepEqual(imported, [
         "system:member.activated",
         "conversation:conversation.message",
       ]);
-      assert.deepEqual(assistantWorkspaceVersions, ["1", "2"]);
+      assert.deepEqual(assistantWorkspaceVersions, ["1"]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "canonical_runtime_commit",
         "idle_shutdown",
@@ -3788,29 +3786,26 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         vaultRoot,
       });
 
-      const result = await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
+      const artifactBytesByHash = new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]);
+      const runtimeJob = createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_system_mailbox_approval_owner",
             processingMode: "system_mailbox",
             workspaceVersion: "0",
           },
           resolvedConfig: createDeviceSyncResolvedConfig(),
-        }),
-        {
+        });
+      const runtimeOptions: Parameters<typeof runHostedWorkspaceRuntimeJobInProcess>[1] = {
           async createCheckpointSnapshot() {
-            return {
-              snapshotRef: createSnapshotFixtureRef({
-                hash: "9".repeat(64),
-                size: 512,
-              }),
-            };
+            const snapshot = await createVaultSnapshotBundle({ vaultRoot });
+            artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+            return { snapshotRef: snapshot.snapshotRef };
           },
           async importItem() {
             throw new Error("Already-imported approval work should not import a new row.");
           },
           platform: createPlatform({
-            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+            artifactBytesByHash,
             deviceSyncPort,
             mailboxPort: createMailboxPort({
               events,
@@ -3835,10 +3830,25 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             });
           },
           vaultRoot,
-        },
-      );
-
-      assert.ok(assistantPhaseCalls >= 2);
+        };
+      const firstResult = await runHostedWorkspaceRuntimeJobInProcess(runtimeJob, runtimeOptions);
+      assert.equal(assistantPhaseCalls, 1);
+      assert.equal(firstResult.status, "scheduled");
+      const checkpoint = checkpointRequests.at(-1);
+      assert.ok(checkpoint?.snapshotRef);
+      const workspace = createWorkspaceState({
+        version: String(BigInt(checkpoint.expectedWorkspaceVersion) + 1n),
+        snapshotRef: checkpoint.snapshotRef,
+        nextWakeAt: checkpoint.nextWakeAt ?? null,
+        nextWakeReason: checkpoint.nextWakeReason ?? null,
+        redactedStatus: checkpoint.redactedStatus ?? null,
+      });
+      const result = await runHostedWorkspaceRuntimeJobInProcess({ ...runtimeJob,
+        request: { ...runtimeJob.request, attemptId: "attempt_approval_successor",
+          processingMode: "default", workspaceVersion: workspace.version },
+      }, { ...runtimeOptions, platform: { ...runtimeOptions.platform,
+        workspacePort: createWorkspacePort({ checkpointRequests, events, workspace }) } });
+      assert.equal(assistantPhaseCalls, 2);
       assert.deepEqual(
         mocks.collectHostedAssistantDeliverySideEffects.mock.calls.map(
           ([input]) => input.preferredEffectIds ?? [],

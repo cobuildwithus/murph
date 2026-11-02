@@ -4455,7 +4455,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("projected runtime wakes use projected wake state before the idle checkpoint", async () => {
+  test("checkpoint-gated runtime wakes retain projected state for the successor", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -4535,14 +4535,14 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.equal(result.status, "scheduled");
       assert.ok(fetchRequests.length > 1);
-      assert.ok(assistantPhaseCalls > 1);
+      assert.equal(assistantPhaseCalls, 1);
       assert.deepEqual(
         events
           .filter((event) => event.startsWith("assistant.phase:"))
           .filter((event) => event.includes(staleWakeAt)),
         [`assistant.phase:1:${staleWakeAt}`],
       );
-      assert.ok(events.includes(`assistant.phase:2:${projectedWakeAt}`));
+      assert.ok(!events.includes(`assistant.phase:2:${projectedWakeAt}`));
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "idle_shutdown",
       ]);

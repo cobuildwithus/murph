@@ -1,6 +1,20 @@
 import { lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { setTimeout as realDelay } from "node:timers/promises";
+import { initializeVault } from "@murphai/core";
+import {
+  HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+  type HostedMailboxItem,
+  type HostedWorkspaceState,
+} from "@murphai/hosted-execution/runtime-control";
+import {
+  HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
+  HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+} from "@murphai/hosted-execution/workspace-snapshot-v2";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -428,6 +442,141 @@ describe("runHostedWorkspaceInvocation", () => {
     expect(providerRequest.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(
       job.request.userId,
     );
+  });
+
+  it("services a second conversation wake after a checkpoint hint renews the ten-minute window", async () => {
+    type InvocationInput = Parameters<typeof import("@murphai/assistant-runtime/hosted-invocation").runHostedWorkspaceInvocation>[0];
+    const runtime = await vi.importActual<typeof import("@murphai/assistant-runtime")>("@murphai/assistant-runtime");
+    const now = "2026-04-27T00:00:00.000Z";
+    const idleTtlMs = 10 * 60 * 1_000;
+    const events: string[] = [];
+    const imported: string[] = [];
+    const serviced: string[] = [];
+    const onRuntimeWakeReady = vi.fn();
+    const shutdown = new AbortController();
+    const job = createWorkspaceJob({ forwardedEnv: {
+      HOSTED_ASSISTANT_MODEL: "gpt-synthetic", HOSTED_ASSISTANT_PROVIDER: "openai",
+      OPENAI_API_KEY: "synthetic-key", NODE_ENV: "production",
+    } }, { workspaceVersion: "0" });
+    const conversation = (seq: number): HostedMailboxItem => ({
+      createdAt: now, updatedAt: now, occurredAt: now, expiresAt: null,
+      id: `conversation_${seq}`, dedupeKey: `conversation_${seq}`,
+      kind: "conversation.message", lane: "conversation", laneSeq: String(seq),
+      payloadBytes: 128, payloadInlineCiphertext: "synthetic-ciphertext", payloadRef: null,
+      payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA, userId: job.request.userId,
+    });
+    const items = [conversation(1)];
+    let workspace: HostedWorkspaceState = {
+      createdAt: now, updatedAt: now, checkpointedAt: now,
+      inboxMediaRetentionWakeAt: null, nextWakeAt: null, nextWakeReason: null,
+      redactedStatus: null, snapshotRef: null, userId: job.request.userId, version: "0",
+    };
+    let checkpoints = 0;
+    const waitFor = async (predicate: () => boolean) => {
+      for (let attempt = 0; attempt < 500; attempt += 1) {
+        if (predicate()) return;
+        await realDelay(10);
+      }
+      throw new Error(`Runtime did not reach the expected state: ${events.join(",")}`);
+    };
+    mocks.runPackageHostedWorkspaceInvocation.mockImplementation(async (input: InvocationInput) => {
+      await initializeVault({ createdAt: now, vaultRoot: input.vaultRoot });
+      // Preserve the host's actual wake signal and admission callback wiring.
+      // Only storage, snapshot transport, and assistant work are fixtures.
+      return runtime.runHostedWorkspaceRuntimeJobInProcess({
+        ...input.job, request: { ...input.job.request, runnerIdleTtlMs: idleTtlMs },
+      }, {
+        ...input,
+        platform: {
+          artifactStore: { async get() { return null; }, async put() {} },
+          effectsPort: { async readRawEmailMessage() { return null; }, async sendEmail() {} },
+          mailboxPort: {
+            async fetch(request) {
+              events.push("mailbox.fetch");
+              return {
+                fetchedAt: now, userId: job.request.userId,
+                items: request.lanes.flatMap((lane) => items.filter((item) =>
+                  item.lane === lane.lane && BigInt(item.laneSeq) > BigInt(lane.importedSeq))),
+                maxSeqByLane: request.lanes.map((lane) => ({
+                  lane: lane.lane, maxSeq: lane.lane === "conversation" ? String(items.length) : lane.importedSeq,
+                })),
+              };
+            },
+            async fetchPayload() { throw new Error("Inline fixture needs no payload fetch."); },
+          },
+          workspacePort: {
+            async read() { return { fetchedAt: now, workspace }; },
+            async checkpoint(request) {
+              checkpoints += 1;
+              events.push(`checkpoint:${checkpoints}`);
+              if (checkpoints === 1) items.push(conversation(2));
+              workspace = { ...workspace, snapshotRef: request.snapshotRef,
+                version: String(checkpoints), redactedStatus: request.redactedStatus ?? null,
+                nextWakeAt: request.nextWakeAt ?? null, nextWakeReason: request.nextWakeReason ?? null };
+              return { checkpointed: true, conversationInputAhead: checkpoints === 1, workspace };
+            },
+          },
+        },
+        async importItem(item) {
+          imported.push(item.item.id);
+          events.push(`import:${item.item.id}`);
+          return { status: "imported" };
+        },
+        async runAssistantPhase() {
+          serviced.push(imported.at(-1)!);
+          events.push(`assistant:${serviced.at(-1)}`);
+          return { progressed: true, checkpointReason: "assistant_runtime_commit" };
+        },
+        async createCheckpointSnapshot() {
+          const snapshotId = "synthetic-admission-snapshot";
+          const objectKey = `users/${job.request.userId}/workspace-snapshots/${snapshotId}.snapshot.enc`;
+          return { snapshotRef: {
+            archive: { compression: HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
+              encryptedByteSize: 1, encryptedObjectSha256: "1".repeat(64), fileCount: 1,
+              format: "tar", plaintextArchiveSha256: "2".repeat(64), totalPlainBytes: 1 },
+            createdAt: now,
+            encryption: {
+              aad: { objectKey, purpose: HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE,
+                schema: HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA, snapshotId, userId: job.request.userId },
+              ivBase64: "AAAAAAAAAAAAAAAA", rootKeyId: "synthetic-root-key",
+              scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+              wrappedDataKey: "synthetic-wrapped-data-key",
+            },
+            objectKey, schema: HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+            snapshotId, upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND, userId: job.request.userId,
+          } };
+        },
+      });
+    });
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    vi.setSystemTime(new Date(now));
+    const result = runHostedWorkspaceInvocation(job, {
+      onRuntimeWakeReady, shutdownSignal: shutdown.signal, waitForBackgroundAssistantWork,
+      supervisorEnv: { HOSTED_ASSISTANT_MODEL: "gpt-synthetic", HOSTED_ASSISTANT_PROVIDER: "openai", NODE_ENV: "production" },
+    });
+    // Observe rejection immediately, while retaining the original promise for cleanup.
+    void result.catch(() => undefined);
+    try {
+      await waitFor(() => serviced.includes("conversation_1") && vi.getTimerCount() > 0);
+      await vi.advanceTimersByTimeAsync(idleTtlMs);
+      await waitFor(() => serviced.includes("conversation_2") && vi.getTimerCount() > 0);
+      // The hint's foreground pass has finished and renewed the idle window.
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(checkpoints).toBe(1);
+      const followUpAt = Date.now();
+      items.push(conversation(3));
+      const sendWake = onRuntimeWakeReady.mock.calls[0]![0];
+      expect(sendWake(), "foreground continuation must keep host wake admission open").toBe(true);
+      await waitFor(() => serviced.includes("conversation_3"));
+      expect(Date.now()).toBe(followUpAt);
+      expect(checkpoints).toBe(1);
+      expect(serviced).toEqual(["conversation_1", "conversation_2", "conversation_3"]);
+    } finally {
+      shutdown.abort();
+      vi.useRealTimers();
+      await result;
+    }
+    expect(onRuntimeWakeReady.mock.calls[0]![0]()).toBe(false);
   });
 
   it("does not lose a runtime wake accepted after the package's final drain", async () => {

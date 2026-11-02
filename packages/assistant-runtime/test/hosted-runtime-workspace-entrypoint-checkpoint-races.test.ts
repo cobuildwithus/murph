@@ -551,7 +551,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         () => events.join(","),
       );
 
-      assert.equal(assistantPass, 4);
+      assert.equal(assistantPass, 3);
       assert.equal(durableEffect.mock.calls.length, 1);
       assert.ok(
         requireEventIndex(
@@ -593,14 +593,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         requireEventIndex(events, "mailbox.afterCheckpoint:done")
           < requireEventIndex(events, "workspace.checkpoint:1:idle_shutdown:accept"),
       );
-      assert.ok(
-        requireEventIndex(events, "workspace.checkpoint:1:idle_shutdown:accept")
-          < requireEventIndex(events, "assistant:4"),
-      );
-      assert.ok(
-        requireEventIndex(events, "assistant:4")
-          < requireEventIndex(events, "snapshot:idle_shutdown:2"),
-      );
+      assert.ok(!events.includes("assistant:4"));
       assert.deepEqual(checkpointRequests.map((request) => [
         request.expectedWorkspaceVersion,
         request.reason,
@@ -609,10 +602,9 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
       ]), [
         ["0", "idle_shutdown", null, null],
         ["1", "idle_shutdown", dueWakeAt, "assistant"],
-        ["2", "idle_shutdown", null, null],
       ]);
-      assert.equal(result.status, "idle");
-      assert.equal(result.nextWakeAt, null);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, dueWakeAt);
     } finally {
       foregroundAfterCheckpointGate.resolve();
       await resultPromise?.catch(() => undefined);
@@ -1478,7 +1470,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
     }
   });
 
-  test("a committed checkpoint response lost to its self-wake does not defer due assistant work for another idle window", async () => {
+  test("a committed checkpoint response lost to its self-wake hands off due assistant work without another idle window", async () => {
     const workspaceRoot = await mkdtemp(
       path.join(tmpdir(), "murph-runtime-committed-checkpoint-self-wake-"),
     );
@@ -1737,12 +1729,11 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         15_000,
         () => events.join(","),
       );
-      await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
-
-      assert.ok(
-        requireEventIndex(events, "snapshot.complete:2")
-          < requireEventIndex(events, `assistant.phase:2:${TEST_NOW}:assistant`),
-      );
+      const result = await withRealTimeout(resultPromise, 15_000, () => events.join(","));
+      assert.equal(assistantPhaseCalls, 1);
+      assert.equal(result.nextWakeAt, TEST_NOW);
+      assert.equal(result.status, "scheduled");
+      assert.ok(events.includes("snapshot.complete:2"));
       assert.ok(
         requireEventIndex(events, "remote.commit:5")
           < requireEventIndex(events, "snapshot.response-lost:1"),
@@ -1752,22 +1743,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
           instanceof HostedRuntimeCheckpointInterruptedByWakeError,
       );
       assert.equal(checkpointRequests.length, 0);
-      if (firstRemoteCommitAtMs === null || assistantServicedAtMs === null) {
-        throw new Error(`Missing latency timestamp: ${events.join(",")}`);
-      }
-      const assistantDelayAfterRemoteCommitMs =
-        assistantServicedAtMs - firstRemoteCommitAtMs;
-      assert.ok(
-        assistantDelayAfterRemoteCommitMs < runnerIdleTtlMs,
-        "A remotely committed checkpoint response lost to its self-wake "
-          + "must not make due assistant work wait for another idle window: "
-          + JSON.stringify({
-            events,
-            firstRemoteCommitAtMs: firstRemoteCommitAtMs - startedAtMs,
-            assistantDelayAfterRemoteCommitMs,
-            assistantServicedAtMs: assistantServicedAtMs - startedAtMs,
-          }),
-      );
+      assert.equal(Date.now(), startedAtMs + runnerIdleTtlMs);
     } finally {
       shutdownController.abort(new Error("Test cleanup."));
       await resultPromise?.catch(() => undefined);
