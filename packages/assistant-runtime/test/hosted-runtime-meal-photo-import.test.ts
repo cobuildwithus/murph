@@ -118,10 +118,10 @@ describe("hosted meal photo mailbox import", () => {
     const stored = await findEventByExternalRef({ resourceId: CAPTURE_ID, resourceType: "photo", system: "meal-photo-capture", vaultRoot });
     if (!stored || stored.kind !== "meal") throw new Error("Expected imported synthetic meal");
     expect(stored.uploadId).toBe(uploadId);
-    await editMealRecord({ vault: vaultRoot, lookup: stored.mealId, set: ["note=Synthetic grain bowl", "nutrition.totals.calories=500"] });
+    await editMealRecord({ vault: vaultRoot, lookup: stored.mealId, set: ["title=Roasted vegetable bowl", "note=One bowl", "nutrition.totals.calories=500", "nutrition.totals.proteinGrams=20", "nutrition.totals.carbsGrams=60", "nutrition.totals.fatGrams=20", "nutrition.totals.fiberGrams=10"] });
     expect(await importHostedMealPhotoCapturedMailboxItem(input)).toMatchObject({ status: "imported" });
     const project = async () => createBrowserVaultReplica({ vault: await readVault(vaultRoot), metricPoints: [], generatedAt: CAPTURED_AT, sourceBundleHash: "a".repeat(64) });
-    expect((await project()).meals?.days[0]?.meals).toEqual([expect.objectContaining({ id: stored.mealId, name: "Synthetic grain bowl", calories: 500, uploadId: uploadId ?? null })]);
+    expect((await project()).meals?.days[0]?.meals).toEqual([expect.objectContaining({ id: stored.mealId, name: "Roasted vegetable bowl", calories: 500, proteinGrams: 20, uploadId: uploadId ?? null })]);
     await deleteMealRecord({ vault: vaultRoot, lookup: stored.mealId });
     expect((await project()).meals?.days).toEqual([]);
   });

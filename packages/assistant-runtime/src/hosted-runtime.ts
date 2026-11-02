@@ -4313,6 +4313,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     ): void => {
       browserVaultReplicaRefreshRequested ||=
         passResult.assistantPhaseResult?.browserVaultReplicaRefreshRequested === true;
+      if (browserVaultReplicaRefreshRequested) {
+        // Delivery has finished; publish confirmed journal writes through the
+        // existing checkpoint owner without another conversation quiet window.
+        setIdleCheckpointStartBy(Date.now());
+      }
     };
     const unservicedRecheckWakeKeys = new Set<string>();
     const recordUnservicedRecheckWake = (
@@ -4587,7 +4592,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           stage: "foreground.pass",
           status: "done",
         });
-        recordBrowserVaultReplicaRefreshIntent(passResult);
         if (
           passResult.runtimeStateDirty
           && (
@@ -4602,6 +4606,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           passResult,
           foregroundPriorityWorkOrdinal > foregroundPriorityWorkOrdinalBeforePass,
         );
+        recordBrowserVaultReplicaRefreshIntent(passResult);
         return passResult;
       } catch (error) {
         emitPhaseLog({
@@ -6747,6 +6752,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       };
       let pendingCheckpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null = null;
       const readBackgroundCheckpointWaitDeadline = (): number | null => {
+        // Checkpointing pauses retained work and preserves its durable successor.
+        if (browserVaultReplicaRefreshRequested) return null;
         if (options.shutdownSignal?.aborted) return null;
         const backgroundReadDeadline = resolveHostedBackgroundReadCheckpointDeadline({
           assistantAskDeadline: detachedAssistantAskController?.activeDeadline() ?? null,
