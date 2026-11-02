@@ -10,6 +10,19 @@ import type {
 } from "@murphai/hosted-execution";
 import { sanitizeHostedExecutionStructuredLogDetails } from "@murphai/hosted-execution";
 
+export const HOSTED_ASSISTANT_PRE_FOREGROUND_TIMING_FIELDS = [
+  "turnTimingPreForegroundMs",
+  "turnTimingPreForegroundPreludeMs",
+  "turnTimingDeviceWakeProjectionMs",
+  "turnTimingDeviceWakeModuleLoadMs",
+  "turnTimingSystemMailboxWakeProjectionMs",
+  "turnTimingProviderCleanupPlanningMs",
+] as const;
+
+export type HostedAssistantPreForegroundTiming = Partial<Record<
+  typeof HOSTED_ASSISTANT_PRE_FOREGROUND_TIMING_FIELDS[number], number
+>>;
+
 const HOSTED_ASSISTANT_TURN_TIMING_STAGES = new Set([
   "provider-result-returned",
   "usage-recorded",
@@ -129,6 +142,10 @@ export function readHostedAssistantTurnTimingTrace(
   for (const key of HOSTED_ASSISTANT_PERSISTENCE_TIMING_FIELDS) {
     const value = readHostedTurnTimingNonnegativeNumber(record, key);
     if (value !== undefined) details[key] = value;
+  }
+  for (const key of HOSTED_ASSISTANT_PRE_FOREGROUND_TIMING_FIELDS) {
+    const value = readHostedTurnTimingNonnegativeNumber(record, key);
+    if (typeof value === "number") details[key] = value;
   }
   return details;
 }

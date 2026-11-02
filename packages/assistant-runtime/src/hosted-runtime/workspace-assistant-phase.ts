@@ -1,3 +1,8 @@
+import {
+  HOSTED_ASSISTANT_PRE_FOREGROUND_TIMING_FIELDS,
+  type HostedAssistantPreForegroundTiming,
+} from "./turn-timing-diagnostics.js";
+
 import type { HostedMemberChannelBarrierTiming } from "./delivery-latency-trace.ts";
 import type { WearableHapticAction } from "@murphai/hosted-execution/wearable-haptics";
 import { HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS } from "./workspace-system-work.ts";
@@ -2213,6 +2218,7 @@ export async function runHostedWorkspaceAssistantPhase(
       managedAutomationsResult,
       systemMailboxMaintenance,
     });
+    let postAutomationStartedAt = performance.now();
     let currentTurnDeliveryIntentIds =
       assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds ?? [];
     let foregroundAssistantPass = isHostedForegroundAssistantDeliveryPass({
@@ -2271,6 +2277,7 @@ export async function runHostedWorkspaceAssistantPhase(
         managedAutomationsResult: null,
         systemMailboxMaintenance: deferredPendingSystemMailboxMaintenance,
       });
+      postAutomationStartedAt = performance.now();
       currentTurnDeliveryIntentIds =
         assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds ?? [];
       foregroundAssistantPass = isHostedForegroundAssistantDeliveryPass({
@@ -2310,17 +2317,28 @@ export async function runHostedWorkspaceAssistantPhase(
       backgroundMaintenanceYielded = backgroundMaintenanceYielded
         || shadowedDeviceSyncMaintenance.backgroundMaintenanceYielded;
     }
+    const deviceWakeProjectionStartedAt = performance.now();
+    const preForegroundTiming: HostedAssistantPreForegroundTiming = {
+      turnTimingPreForegroundPreludeMs: deviceWakeProjectionStartedAt - postAutomationStartedAt,
+    };
     const deviceSyncFollowUpWake = await resolveHostedDeviceSyncFollowUpWake({
       input,
       pendingAssistantInputWakeAt: systemMailboxMaintenance.pendingAssistantInputWakeAt,
+      timing: preForegroundTiming,
     });
+    preForegroundTiming.turnTimingDeviceWakeProjectionMs =
+      performance.now() - deviceWakeProjectionStartedAt;
+    const systemMailboxWakeStartedAt = performance.now();
     const systemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
       vaultRoot: input.restored.vaultRoot,
     });
+    preForegroundTiming.turnTimingSystemMailboxWakeProjectionMs =
+      performance.now() - systemMailboxWakeStartedAt;
     const systemMailboxWakeAt = systemMailboxWake.at;
     const initialProviderCleanupCheckpoint =
       deferredPendingSystemMailboxMaintenance?.initialProviderCleanupCheckpoint
       ?? systemMailboxMaintenance.initialProviderCleanupCheckpoint;
+    const providerCleanupPlanningStartedAt = performance.now();
     const providerCleanupPlan = await prepareHostedProviderCleanupPlan({
       deferred:
         backgroundMaintenanceYielded
@@ -2334,6 +2352,8 @@ export async function runHostedWorkspaceAssistantPhase(
         assistantMetrics.assistantAutomationTerminalLinqCleanup ?? null,
       vaultRoot: input.restored.vaultRoot,
     });
+    preForegroundTiming.turnTimingProviderCleanupPlanningMs =
+      performance.now() - providerCleanupPlanningStartedAt;
     const providerCleanupOwnedByPostCheckpointDelivery =
       postCheckpointDeliveryResultOwnsProviderCleanup(continuingSystemMailboxResult);
     const currentLinqDeliveryContexts = resolveHostedCurrentLinqDeliveryContexts(
@@ -2356,6 +2376,10 @@ export async function runHostedWorkspaceAssistantPhase(
         foregroundAssistantPass,
         input,
         stage: "foreground-delivery-phase-started",
+        preForegroundTiming: {
+          ...preForegroundTiming,
+          turnTimingPreForegroundMs: performance.now() - postAutomationStartedAt,
+        },
       });
       const foregroundAssistantPhaseStartedAt = Date.now();
       const foregroundDeliveryPhaseStartedAtMonotonicMs = performance.now();
@@ -7577,10 +7601,14 @@ function resolveSkippedDeviceSyncWake(input: {
 async function resolveHostedDeviceSyncFollowUpWake(input: {
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   pendingAssistantInputWakeAt: string | null;
+  timing?: HostedAssistantPreForegroundTiming;
 }): Promise<HostedRuntimeWakeCandidate | null> {
   let localDeviceSyncScheduledWake: HostedRuntimeWakeCandidate | null;
   try {
-    localDeviceSyncScheduledWake = await resolveHostedLocalDeviceSyncScheduledWake(input.input);
+    localDeviceSyncScheduledWake = await resolveHostedLocalDeviceSyncScheduledWake(
+      input.input,
+      input.timing,
+    );
   } catch (error) {
     if (!isHostedDeviceSyncMaintenanceModuleLoadError(error)) {
       throw error;
@@ -7685,15 +7713,22 @@ async function writeHostedDeviceSyncFollowUpWakeProjectionModuleLoadFailureRunti
 
 async function resolveHostedLocalDeviceSyncScheduledWake(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
+  timing?: HostedAssistantPreForegroundTiming,
 ): Promise<HostedRuntimeWakeCandidate | null> {
   if (!hasHostedDeviceSyncRuntimeConfigured(input)) {
     return null;
   }
 
-  const {
-    resolveHostedDeviceSyncNextWakeAt,
-  } = await loadHostedDeviceSyncMaintenanceModule();
-  const nextWakeAt = resolveHostedDeviceSyncNextWakeAt({
+  const moduleLoadStartedAt = performance.now();
+  let maintenance: Awaited<ReturnType<typeof loadHostedDeviceSyncMaintenanceModule>>;
+  try {
+    maintenance = await loadHostedDeviceSyncMaintenanceModule();
+  } finally {
+    if (timing) {
+      timing.turnTimingDeviceWakeModuleLoadMs = performance.now() - moduleLoadStartedAt;
+    }
+  }
+  const nextWakeAt = maintenance.resolveHostedDeviceSyncNextWakeAt({
     deviceSyncConfig: input.runtime.resolvedConfig.deviceSync,
     platform: input.runtime.platform,
     vaultRoot: input.restored.vaultRoot,
@@ -7807,6 +7842,7 @@ function writeHostedAssistantTurnTimingRuntimeLog(input: {
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   stage: HostedAssistantTurnTimingStage;
   stepElapsedMs?: number | null;
+  preForegroundTiming?: HostedAssistantPreForegroundTiming;
 }): void {
   const redactedJson: HostedRuntimeRedactedJson = {
     currentTurnDeliveryIntentCount: input.currentTurnDeliveryIntentCount ?? null,
@@ -7820,6 +7856,13 @@ function writeHostedAssistantTurnTimingRuntimeLog(input: {
       ? {}
       : { turnTimingStepElapsedMs: input.stepElapsedMs }),
   };
+
+  for (const key of HOSTED_ASSISTANT_PRE_FOREGROUND_TIMING_FIELDS) {
+    const value = input.preForegroundTiming?.[key];
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+      redactedJson[key] = value;
+    }
+  }
 
   void writeHostedRuntimeLogBestEffort({
     entry: {

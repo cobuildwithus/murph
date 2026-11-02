@@ -91,6 +91,10 @@ Final reply post-generation delivery telemetry and alerting are owned by
 implementation is recorded in
 [the completed delivery latency plan](exec-plans/completed/2026-10-19-post-generation-delivery-latency.md).
 
+Pre-foreground reply planning attribution is tracked in
+[the timing plan](exec-plans/completed/2026-11-01-pre-foreground-reply-timing.md);
+[`hosted-runtime-protocol.md`](references/hosted-runtime-protocol.md) owns its fixed numeric fields.
+
 Environment removal validation follow-up: [missing-version feedback](exec-plans/completed/2026-10-19-environment-validation-feedback.md).
 
 Environment removal compatibility review: [timestamp preservation](exec-plans/completed/2026-10-19-environment-timestamp-compatibility.md).

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { readHostedAssistantTurnTimingTrace } from "../src/hosted-runtime/turn-timing-diagnostics.ts";
+import { HOSTED_ASSISTANT_PRE_FOREGROUND_TIMING_FIELDS, readHostedAssistantTurnTimingTrace } from "../src/hosted-runtime/turn-timing-diagnostics.ts";
 
 function readRaw(rawEvent: Record<string, unknown>) {
   return readHostedAssistantTurnTimingTrace({
@@ -85,6 +85,31 @@ describe("persistence child timing compatibility", () => {
       schema: "murph.assistant-turn-timing.v1",
       type: "assistant.turn.timing",
       turnTimingStage: "reply-dispatched",
+    });
+  });
+});
+
+
+describe("pre-foreground timing compatibility", () => {
+  it.each(HOSTED_ASSISTANT_PRE_FOREGROUND_TIMING_FIELDS)("preserves finite %s and rejects invalid values", (key) => {
+    expect(readRaw({ [key]: 1.25 })).toHaveProperty(key, 1.25);
+    expect(readRaw({ [key]: 0 })).toHaveProperty(key, 0);
+    for (const invalid of [-1, Number.NaN, Infinity, "1", null, { ms: 1 }]) {
+      expect(readRaw({ [key]: invalid })).not.toHaveProperty(key);
+    }
+    expect(readRaw({})).not.toHaveProperty(key);
+  });
+
+  it("keeps the existing stage and ignores unapproved fields", () => {
+    expect(readRaw({
+      turnTimingStage: "foreground-delivery-phase-started",
+      turnTimingDeviceWakeProjectionMs: 8,
+      deviceWakePayload: "synthetic private content",
+    })).toEqual({
+      schema: "murph.assistant-turn-timing.v1",
+      type: "assistant.turn.timing",
+      turnTimingStage: "foreground-delivery-phase-started",
+      turnTimingDeviceWakeProjectionMs: 8,
     });
   });
 });
