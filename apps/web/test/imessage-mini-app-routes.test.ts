@@ -570,6 +570,7 @@ describe("iMessage mini-app routes", () => {
       tx: transactionClient,
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member-1",
       knownCheckpoint: {
         lane: "system",

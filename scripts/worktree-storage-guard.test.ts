@@ -40,8 +40,8 @@ type Harness = {
   tempRoot: string
 }
 
-function runGit(cwd: string, args: string[]): string {
-  const result = spawnSync('git', args, { cwd, encoding: 'utf8' })
+function runGit(cwd: string, args: string[], env?: NodeJS.ProcessEnv): string {
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8', env })
   if (result.status !== 0) {
     throw new Error(`git ${args.join(' ')} failed: ${result.stderr}`)
   }
@@ -1516,7 +1516,7 @@ git add .metadata_never_index
     )
     writeFileSync(path.join(harness.primary, 'cleanup-hook-probe.txt'), 'probe\n')
     runGit(harness.primary, ['add', '.gitattributes', 'cleanup-hook-probe.txt'])
-    runGit(harness.primary, ['commit', '-m', 'add cleanup hook marker probe'])
+    runGit(harness.primary, ['commit', '-m', 'add cleanup hook marker probe'], guardEnvironment(harness))
     executable(
       path.join(harness.primary, '.githooks', 'post-checkout'),
       `#!/bin/sh
@@ -1938,7 +1938,7 @@ touch ${JSON.stringify(hookInvoked)}
     )
     writeFileSync(path.join(harness.primary, 'interrupted-probe.txt'), 'probe\n')
     runGit(harness.primary, ['add', '.gitattributes', 'interrupted-probe.txt'])
-    runGit(harness.primary, ['commit', '-m', 'add interrupted materialization probe'])
+    runGit(harness.primary, ['commit', '-m', 'add interrupted materialization probe'], guardEnvironment(harness))
 
     const creation = await interruptScriptAfterPath(
       harness,

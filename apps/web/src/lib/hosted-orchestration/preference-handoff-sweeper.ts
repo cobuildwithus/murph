@@ -220,6 +220,7 @@ function createHostedPreferenceHandoffCandidateStore(
           LEFT JOIN "hosted_workspace" AS "workspace"
             ON "workspace"."user_id" = "item"."user_id"
           WHERE "item"."kind" IN (
+              'member.action.requested',
               'device-sync.wake',
               'health.daily-metric.reported',
               'runtime.browser-vault-refresh-requested',

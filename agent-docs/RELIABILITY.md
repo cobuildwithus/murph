@@ -3762,7 +3762,10 @@ It requires a saved generation-17 Meals projection before sending the new action
 old runtimes cannot produce that projection. Runtime calls `deleteMealRecord`
 and the canonical event lifecycle tombstone, so removal changes nutrition truth.
 The API returns accepted after durable append, not completion. Bounded best-effort
-signaling leaves failed handoff to the existing sweeper. iOS can optimistically
+signaling leaves failed handoff to the existing sweeper, whose runtime-control
+candidate kinds include `member.action.requested`. It retains the 60-second
+recovery grace, per-member limit, active-access recheck and imported-frontier
+cutoff. iOS can optimistically
 hide a meal and later show it again from a stale projection or rejected action.
 See [iOS Meals](product-specs/ios-meals.md) for the wire contract and rollback floor.
 
