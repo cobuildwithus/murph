@@ -206,7 +206,6 @@ describe("release verification executable lanes", () => {
           "packages/hosted-execution",
           "packages/importers",
           "packages/inbox-services",
-          "packages/openclaw-plugin",
           "packages/operator-config",
         ],
         "platform-b": [

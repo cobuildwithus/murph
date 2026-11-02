@@ -40,16 +40,7 @@ murph status
 
 `vault-cli` is still available as a secondary alias for the operator surface, but `murph` is the primary command this package installs.
 
-## OpenClaw
-
-If you already run OpenClaw, install the first-party Murph bundle after `murph onboard`:
-
-```bash
-openclaw plugins install @murphai/openclaw-plugin
-openclaw gateway restart
-```
-
-That bundle teaches OpenClaw to call `vault-cli` directly against the same configured vault. It does not create a second Murph assistant runtime inside OpenClaw.
+## Vault operations
 
 When you need to read from the vault, use this chooser:
 
@@ -154,7 +145,7 @@ source on the same automation; its activity cursor restarts at the edit time.
 - inbox capture, assistant attachment evidence, and parser-driven audio/video transcription through runtime services
 - optional local device sync through the bundled workspace-private `packages/device-syncd` runtime
 
-`@murphai/murph` is the installable local Murph product entrypoint. The wider monorepo also contains hosted control and execution apps plus many workspace-private owner packages, but the public npm surface is intentionally small: `@murphai/murph`, `@murphai/openclaw-plugin`, `@murphai/contracts`, `@murphai/hosted-execution`, and `@murphai/gateway-core`.
+`@murphai/murph` is the installable local Murph product entrypoint. The wider monorepo also contains hosted control and execution apps plus many workspace-private owner packages, but the public npm surface is intentionally small: `@murphai/murph`, `@murphai/contracts`, `@murphai/hosted-execution`, and `@murphai/gateway-core`.
 
 ## From source
 

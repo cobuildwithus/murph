@@ -14,7 +14,6 @@ import importersProject from "./packages/importers/vitest.config.ts";
 import inboxServicesProject from "./packages/inbox-services/vitest.config.ts";
 import inboxdProject from "./packages/inboxd/vitest.config.ts";
 import messagingIngressProject from "./packages/messaging-ingress/vitest.config.ts";
-import openclawPluginProject from "./packages/openclaw-plugin/vitest.config.ts";
 import operatorConfigProject from "./packages/operator-config/vitest.config.ts";
 import {
   cliVitestProjectSpecs,
@@ -121,11 +120,6 @@ const ROOT_REPO_PROJECTS: RootRepoProject[] = [
   {
     config: messagingIngressProject,
     root: "packages/messaging-ingress",
-    include: ["test/**/*.test.ts"],
-  },
-  {
-    config: openclawPluginProject,
-    root: "packages/openclaw-plugin",
     include: ["test/**/*.test.ts"],
   },
   {

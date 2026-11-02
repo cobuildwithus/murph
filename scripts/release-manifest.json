@@ -21,10 +21,6 @@
     {
       "name": "@murphai/murph",
       "path": "packages/cli"
-    },
-    {
-      "name": "@murphai/openclaw-plugin",
-      "path": "packages/openclaw-plugin"
     }
   ]
 }

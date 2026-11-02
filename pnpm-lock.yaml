@@ -1071,8 +1071,6 @@ importers:
 
   packages/messaging-ingress: {}
 
-  packages/openclaw-plugin: {}
-
   packages/operator-config:
     dependencies:
       '@elevenlabs/elevenlabs-js':

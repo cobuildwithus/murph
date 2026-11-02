@@ -3422,7 +3422,7 @@ CI build is added. From the repository root on supported Node/pnpm:
 
 ```sh
 set -eu
-pnpm --filter @murphai/murph... --filter @murphai/openclaw-plugin... build
+pnpm --filter @murphai/murph... build
 export MURPH_CLI_TIMING_ARTIFACT_ROOT="$(mktemp -d /tmp/murph-cli-timing.XXXXXX)"
 node scripts/pack-publishables.mjs \
   --out-dir "$MURPH_CLI_TIMING_ARTIFACT_ROOT/tarballs" \
@@ -3437,7 +3437,6 @@ mkdirSync(install);
 writeFileSync(path.join(install, 'package.json'), '{"private":true}\n');
 const manifest = JSON.parse(readFileSync(path.join(root, 'pack-output.json'), 'utf8'));
 const tarballs = manifest.packages
-  .filter(entry => entry.name !== '@murphai/openclaw-plugin')
   .map(entry => path.resolve(entry.tarball));
 execFileSync('npm', ['install', '--prefix', install, '--omit=dev',
   '--ignore-scripts', '--no-audit', '--no-fund', ...tarballs], { stdio: 'inherit' });

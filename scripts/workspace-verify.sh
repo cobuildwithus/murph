@@ -120,7 +120,6 @@ readonly typecheck_package_dirs=(
   "packages/messaging-ingress"
   "packages/gateway-core"
   "packages/cli"
-  "packages/openclaw-plugin"
   "packages/assistant-runtime"
   "packages/vault-usecases"
   "apps/web"
@@ -864,7 +863,7 @@ wait_for_background_jobs_allow_failures() {
 }
 
 run_test_packages_common() {
-  # The contracts and OpenClaw Vitest suites already run inside the root
+  # The contracts Vitest suite already runs inside the root
   # multi-project Vitest lane, so the only prerequisite here is the contracts
   # artifact verification, which rebuilds the shared contracts dist that
   # built-runtime consumers import and must finish before that lane starts.

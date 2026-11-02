@@ -48,7 +48,6 @@ repo/
     cloudflare-hosted-control/
     hosted-local-harness/
     cli/
-    openclaw-plugin/
   fixtures/
     minimal-vault/
     sample-imports/
@@ -64,7 +63,7 @@ repo/
 - Keep each package's `exports` map intentionally small and semantic. When a package starts wanting many file-shaped subpaths or compatibility wrappers, that is a signal to split ownership or add one clearer owner seam rather than turning `package.json` into a directory listing.
 - Re-export another package's surface only when this package is the real owner-level API. Otherwise callers should import from the true owner package directly.
 - Compatibility shims are temporary migration tools, not permanent architecture. Remove pass-through files and subpath aliases once callers have moved.
-- Only `@murphai/contracts`, `@murphai/hosted-execution`, `@murphai/gateway-core`, `@murphai/murph`, and `@murphai/openclaw-plugin` are published. Other `packages/*` entries are workspace-private owner packages that may be bundled into published tarballs when needed.
+- Only `@murphai/contracts`, `@murphai/hosted-execution`, `@murphai/gateway-core`, and `@murphai/murph` are published. Other `packages/*` entries are workspace-private owner packages that may be bundled into published tarballs when needed.
 - `packages/contracts` defines the shared language: canonical Zod contracts, TypeScript types, parse helpers, generated JSON Schema artifacts, and the shared vault-family registry/layout/query-source metadata consumed by core, query, and inboxd.
 - `packages/hosted-execution` owns shared hosted runtime-control contracts, route builders, auth canonicalization helpers, redacted runtime-log/status codecs, and vendor-neutral hosted env names while deployed topology and auth adapters stay app-local.
 - `packages/runtime-state` defines canonical local-state taxonomy and paths (`.runtime/operations/**`, `.runtime/projections/**`, `.runtime/cache/**`, `.runtime/tmp/**`), aggregates subsystem-owned operational descriptor manifests for portability policy, and provides shared JSON/SQLite versioning helpers and migration defaults.
@@ -88,7 +87,6 @@ repo/
 - `packages/cloudflare-hosted-control` owns private Cloudflare processing/status/browser-vault control contracts shared between hosted web and Cloudflare without widening `packages/hosted-execution`.
 - `packages/hosted-local-harness` owns the local hosted-development and hosted E2E harness, including profile selection, redacted state files, runner-bundle prep, diagnostics, and cleanup.
 - `packages/cli` exposes the published `vault-cli` / `murph` shell, composes the command graph, consumes `packages/vault-usecases` for neutral vault usecase services, owns CLI-only device/control-plane composition, and must not bypass core for canonical writes.
-- `packages/openclaw-plugin` exposes the published OpenClaw-compatible skill bundle that teaches OpenClaw to call the existing Murph CLI rather than running a second assistant runtime.
 - `apps/web` owns the hosted Next.js control plane, hosted Postgres product/control facts, encrypted mailbox rows, hosted workspace checkpoint metadata, usage ledger, onboarding, billing, consent, and device-sync authority.
 - `apps/cloudflare` owns the hosted execution plane: signed Temporal `ensure-processing` requests, status/browser-vault control, Durable Object coordination, encrypted runtime blobs, and the native runner-container path over `packages/assistant-runtime`.
 

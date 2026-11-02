@@ -4712,7 +4712,6 @@ exit 1
       '@murphai/hosted-execution',
       '@murphai/gateway-core',
       '@murphai/murph',
-      '@murphai/openclaw-plugin',
     ].sort())
 
     expect(summary.packages).toContainEqual(expect.objectContaining({
@@ -4898,17 +4897,6 @@ exit 1
   it.skipIf(process.env.MURPH_CLI_RELEASE_TARBALL_TEST !== '1')(
     'regenerates and verifies the assistant CLI surface contract in the real release tarball',
     () => {
-      const openClawBuild = spawnSync(
-        'pnpm',
-        ['--dir', 'packages/openclaw-plugin', 'build'],
-        {
-          cwd: repoRoot,
-          encoding: 'utf8',
-          env: withoutNodeV8Coverage(),
-        },
-      )
-      expect(openClawBuild.status, openClawBuild.stderr || openClawBuild.stdout).toBe(0)
-
       const outDir = mkdtempSync(path.join(os.tmpdir(), 'murph-release-cli-surface-'))
       const packOutputPath = path.join(outDir, 'pack-output.json')
       const assistantDistDirectory = path.join(
