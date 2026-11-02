@@ -224,7 +224,8 @@ describe('assistant codex runtime', () => {
     ]) {
       expect(supportsCodexTurnDeveloperInstructions(fallback)).toBe(false)
       expect(buildCodexThreadStartParams(fallback).developerInstructions).toBe(baseInput.developerInstructions)
-      expect(buildCodexThreadResumeParams({ input: fallback, codexThreadId: 'thread-1' }).developerInstructions).toBe(baseInput.developerInstructions)
+      // As on main: local resume relies on the persisted thread contract, so it re-sends nothing.
+      expect(buildCodexThreadResumeParams({ input: fallback, codexThreadId: 'thread-1' })).not.toHaveProperty('developerInstructions')
       expect(buildCodexTurnStartParams({ input: fallback, images: [], codexThreadId: 'thread-1' })).not.toHaveProperty('collaborationMode')
     }
 
