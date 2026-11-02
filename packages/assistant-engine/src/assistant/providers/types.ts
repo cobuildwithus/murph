@@ -65,22 +65,6 @@ export function supportsAnyAssistantRichUserMessageContent(
   return supportedTypes.some((type) => type !== 'text')
 }
 
-export interface AssistantModelCapabilities {
-  images: boolean
-  pdf: boolean
-  reasoning: boolean
-  streaming: boolean
-  tools: boolean
-}
-
-export interface AssistantCatalogModel {
-  capabilities: AssistantModelCapabilities
-  description: string
-  id: string
-  label: string
-  source: 'current' | 'static'
-}
-
 export interface AssistantProviderCapabilities {
   supportedUserMessageContentTypes: readonly AssistantUserMessageContentType[]
   supportsNativeResume: boolean

@@ -101,13 +101,6 @@ export async function postHostedDeviceSyncSnapshotForTest(request: Request): Pro
 }
 
 // Mixed-version callbacks use the real Web authentication and canonical consumer.
-export async function postHostedCodexAuthUpdateForTest(request: Request): Promise<Response> {
-  const routeModuleSpecifier = new URL(
-    "../../app/api/internal/hosted-runtime/codex-auth/route.ts", import.meta.url,
-  ).href;
-  const { POST } = await import(routeModuleSpecifier);
-  return POST(request);
-}
 
 // The same pre-parse body limit as usage ingestion, without callback auth or DB
 // effects. Keep cross-app contract tests on this existing public testkit seam.

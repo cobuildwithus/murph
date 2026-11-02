@@ -6,6 +6,10 @@ This package exists so hosted runtimes such as `apps/cloudflare` do not need to 
 
 Current responsibilities:
 
+- skip retired member ChatGPT-linking mailbox work before payload loading and
+  discard saved pending linking work before parsing removed checkpoint records;
+  preserve platform-managed and local/operator Codex authentication
+
 - configure hosted assistant execution for OpenAI models, including managed API
   credentials, local OpenAI test stubs, and local ChatGPT subscription auth
 

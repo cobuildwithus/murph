@@ -167,6 +167,7 @@ export const HOSTED_RETIRED_MAILBOX_KINDS = [
   "environment-interview.completed",
   "environment-voice.captured",
   "group-newsletter.email-needed",
+  "runtime.codex-auth-requested",
 ] as const;
 
 export type HostedRetiredMailboxKind =
@@ -1057,7 +1058,6 @@ export function isHostedUsageOptimizationAuditFeedback(
     && (feedback.summary.length <= 1800 || reject("summary_too_long"))
     && (feedback.summary.slice(HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX.length).trim().length > 0 || reject("empty_report"));
 }
-
 
 export function isHostedProductSupportEscalationSummary(
   value: string | null | undefined,
@@ -2336,29 +2336,6 @@ export type HostedRuntimeAssistantConfigurationToolResponse =
         status: HostedRuntimeAssistantConfigurationUpdateStatus;
       };
     };
-
-// Retained for callbacks from deployed pre-retirement runners; no new producers.
-export type HostedCodexAuthUpdate =
-  | {
-      attemptId: string;
-      phase: "device_code";
-      userCode: string;
-      verificationUrl: string;
-    }
-  | {
-      attemptId: string;
-      phase: "connected" | "disconnected" | "failed";
-    };
-
-export type HostedCodexAuthUpdateResponseStatus =
-  | "applied"
-  | "already_applied"
-  | "superseded";
-
-export interface HostedCodexAuthUpdateResponse {
-  applied: boolean;
-  status: HostedCodexAuthUpdateResponseStatus;
-}
 
 export interface HostedRuntimeIssueExportRequest {
   issues: AssistantRuntimeIssueRecord[];

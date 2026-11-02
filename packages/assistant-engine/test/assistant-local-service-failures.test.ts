@@ -63,9 +63,7 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
   mocks.recordAssistantDiagnosticEvent
     .mockResolvedValueOnce(undefined)
     .mockRejectedValueOnce(new Error('ignore failed diagnostics'))
-  mocks.refreshAssistantStatusSnapshotLocal.mockRejectedValueOnce(
-    new Error('ignore failed status refresh'),
-  )
+
   mocks.maybeRunAssistantRuntimeMaintenance.mockRejectedValueOnce(
     new Error('ignore failed post-turn maintenance'),
   )
@@ -161,7 +159,6 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
     },
   )
   assert.equal(mocks.normalizeAssistantDeliveryError.mock.calls.length, 1)
-  assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 1)
 })
 
 test('sendAssistantMessageLocal saves progress-materialized sessions after terminal provider failures', async () => {
@@ -995,7 +992,6 @@ test('sendAssistantMessageLocal returns deferred delivery results and keeps typi
   assert.equal(startTypingIndicator.mock.calls[0]?.[1]?.startTelegramTyping, startTelegramTyping)
   assert.equal(stopTyping.mock.calls.length, 1)
   assert.deepEqual(stopTyping.mock.calls[0], [{ providerStop: false }])
-  assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 0)
 })
 
 test('sendAssistantMessageLocal anchors hosted reply timing to the queued delivery intent', async () => {
@@ -1248,7 +1244,6 @@ test('sendAssistantMessageLocal ignores typing-indicator startup failures', asyn
   expect(startTypingIndicator).toHaveBeenCalledOnce()
   assert.equal(result.status, 'completed')
   assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
-  assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 1)
 })
 
 test('sendAssistantMessageLocal skips typing indicators when delivery is not requested or unavailable', async () => {

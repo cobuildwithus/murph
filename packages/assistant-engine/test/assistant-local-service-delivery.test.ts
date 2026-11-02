@@ -90,7 +90,7 @@ test('sendAssistantMessageLocal completes a successful group turn and persists u
   assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
   assert.equal(mocks.finalizeDeliveredAssistantTurn.mock.calls.length, 1)
   assert.equal(mocks.recordAssistantDiagnosticEvent.mock.calls.length, 0)
-  assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 1)
+
   expect(mocks.getAssistantChannelAdapter).not.toHaveBeenCalled()
   expect(stopTyping).not.toHaveBeenCalled()
   assert.deepEqual(mocks.maybeRunAssistantRuntimeMaintenance.mock.calls[0]?.[0], {

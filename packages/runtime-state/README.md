@@ -214,3 +214,7 @@ entrypoint tests in `packages/cli/test/cli-timing-subprocess.test.ts` separately
 cover domain/validation rejection and nearby successes with isolated synthetic
 state, fake food lookup and byte-identical output/exit checks. They neither
 identify historical production arguments nor require a real-model journey.
+
+Assistant status snapshots are retired. New snapshots omit the old `status.json`
+projection; historical hot-state exclusions remain defensive. Hosted workspace
+progress and runtime logs have separate owners and do not read that file.

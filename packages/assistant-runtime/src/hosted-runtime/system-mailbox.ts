@@ -28,7 +28,6 @@ import {
 import {
   bootstrapHostedMemberContext,
 } from "./context.ts";
-import { removeHostedCodexAuthJson } from "./events/codex-auth.ts";
 import {
   executeHostedMailboxEvent,
 } from "./events.ts";
@@ -1737,15 +1736,6 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
         newerRevisionPending: false,
         nextWakeAt: null,
         recorded: 1,
-        stillDirty: false,
-      };
-    }
-    case "codex-auth.updated": {
-      await removeHostedCodexAuthJson(input.operatorHomeRoot);
-      return {
-        newerRevisionPending: false,
-        nextWakeAt: null,
-        recorded: 0,
         stillDirty: false,
       };
     }

@@ -17,7 +17,6 @@ import {
   relayAbort,
   sanitizeRawMetadata,
   toIsoTimestamp,
-  waitForAbortOrTimeout,
 } from "./shared-runtime.ts";
 
 export {
@@ -27,7 +26,6 @@ export {
   relayAbort,
   sanitizeRawMetadata,
   toIsoTimestamp,
-  waitForAbortOrTimeout,
 } from "./shared-runtime.ts";
 
 export function generatePrefixedId(prefix: string, now = Date.now()): string {

@@ -1,12 +1,8 @@
 import assert from "node:assert/strict";
-import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
@@ -388,85 +384,6 @@ describe("hosted runtime event coverage", () => {
         processedRevision: "rev_123",
       },
     });
-  });
-
-  it.each(["connect", "disconnect"] as const)(
-    "retires legacy Codex auth %s wakes by deleting local credentials",
-    async (action) => {
-      const operatorHomeRoot = await mkdtemp(path.join(tmpdir(), "murph-codex-auth-retired-"));
-      const authPath = path.join(operatorHomeRoot, ".codex-hosted", "auth.json");
-      const wake = buildHostedExecutionCodexAuthRequestedWake({
-        action,
-        attemptId: "hca_retiredattempt",
-        eventId: "runtime-control:codex-auth-retired",
-        occurredAt: "2026-04-08T00:15:00.000Z",
-        userId: "member_123",
-      });
-      try {
-        await mkdir(path.dirname(authPath), { recursive: true });
-        await writeFile(authPath, '{"auth_mode":"chatgpt"}\n');
-        const input = {
-          executionContext,
-          operatorHomeRoot,
-          runtime: createRuntime(),
-          runtimeEnv: {},
-          vaultRoot: "/tmp/assistant-runtime-events-coverage",
-          wake,
-        };
-        await expect(executeHostedMailboxEvent(input)).resolves.toMatchObject({
-          mailboxLane: "runtime-control",
-          postCheckpointRecord: null,
-        });
-        await expect(access(authPath)).rejects.toMatchObject({ code: "ENOENT" });
-        await expect(executeHostedMailboxEvent(input)).resolves.toMatchObject({
-          mailboxLane: "runtime-control",
-          postCheckpointRecord: null,
-        });
-      } finally {
-        await rm(operatorHomeRoot, { force: true, recursive: true });
-      }
-    },
-  );
-
-  it("does not finish a retired auth wake without an operator home root", async () => {
-    await expect(executeHostedMailboxEvent({
-      executionContext,
-      runtime: createRuntime(),
-      runtimeEnv: {},
-      vaultRoot: "/tmp/assistant-runtime-events-coverage",
-      wake: buildHostedExecutionCodexAuthRequestedWake({
-        action: "disconnect",
-        attemptId: "hca_retiredattempt",
-        eventId: "runtime-control:codex-auth-retired",
-        occurredAt: "2026-04-08T00:15:00.000Z",
-        userId: "member_123",
-      }),
-    })).rejects.toThrow("Hosted Codex auth cleanup requires an operator home root.");
-  });
-
-  it("does not finish a retired auth wake when local credential deletion fails", async () => {
-    const operatorHomeRoot = await mkdtemp(path.join(tmpdir(), "murph-codex-auth-retired-"));
-    const authPath = path.join(operatorHomeRoot, ".codex-hosted", "auth.json");
-    try {
-      await mkdir(authPath, { recursive: true });
-      await expect(executeHostedMailboxEvent({
-        executionContext,
-        operatorHomeRoot,
-        runtime: createRuntime(),
-        runtimeEnv: {},
-        vaultRoot: "/tmp/assistant-runtime-events-coverage",
-        wake: buildHostedExecutionCodexAuthRequestedWake({
-          action: "connect",
-          attemptId: "hca_retiredattempt",
-          eventId: "runtime-control:codex-auth-retired",
-          occurredAt: "2026-04-08T00:15:00.000Z",
-          userId: "member_123",
-        }),
-      })).rejects.toThrow();
-      await expect(access(authPath)).resolves.toBeUndefined();
-    } finally {
-      await rm(operatorHomeRoot, { force: true, recursive: true });
-    }
   });
 
   it("fails closed on unexpected wake kinds", async () => {

@@ -761,7 +761,6 @@ describe("hosted execution coverage gaps", () => {
       "runtime.pending-effects-reconcile-requested",
       "runtime.maintenance-requested",
       "runtime.browser-vault-refresh-requested",
-      "runtime.codex-auth-requested",
       "runtime.device-sync-recovery-requested",
       "runtime.mailbox-lag-observed",
     ]);
@@ -815,12 +814,10 @@ describe("hosted execution coverage gaps", () => {
       "./connected-apps",
       "./contracts",
       "./conversation-polls",
-      "./dashboard-replica",
       "./env",
       "./hosted-codex-subscription-auth",
       "./hosted-email",
       "./labs",
-      "./legacy-dashboard-replica",
       "./observability",
       "./orchestration-control",
       "./parsers",
@@ -868,12 +865,7 @@ describe("hosted execution coverage gaps", () => {
     const clinicalRecordsModule = (await import(
       "@murphai/hosted-execution/clinical-records"
     )) as Record<string, unknown>;
-    const legacyDashboardReplicaModule = await import(
-      "@murphai/hosted-execution/legacy-dashboard-replica"
-    );
-    const legacyDashboardReplicaCompatibilityModule = await import(
-      "@murphai/hosted-execution/dashboard-replica"
-    );
+
     const routeModule = (await import(
       "@murphai/hosted-execution/routes"
     )) as Record<string, unknown>;
@@ -945,27 +937,7 @@ describe("hosted execution coverage gaps", () => {
     expect(typeof browserVaultModule.shouldScheduleBrowserVaultRefresh).toBe(
       "function",
     );
-    expect(
-      typeof legacyDashboardReplicaModule.getDashboardReplicaFreshness,
-    ).toBe("function");
-    expect(
-      legacyDashboardReplicaModule.getDashboardReplicaFreshness({
-        replicaRef: null,
-        snapshotRef: null,
-      }),
-    ).toBe("stale");
-    expect(
-      legacyDashboardReplicaModule.shouldScheduleDashboardReplicaRefresh({
-        currentReplicaRef: null,
-        currentSnapshotRef: null,
-      }),
-    ).toBeNull();
-    expect(
-      legacyDashboardReplicaModule.readDashboardReplicaSourceStateHash(null),
-    ).toBeNull();
-    expect(
-      typeof legacyDashboardReplicaCompatibilityModule.getDashboardReplicaFreshness,
-    ).toBe("function");
+
     expect("getDashboardReplicaFreshness" in rootModule).toBe(false);
     expect("shouldScheduleDashboardReplicaRefresh" in rootModule).toBe(false);
     expect("HOSTED_MAILBOX_LANES" in rootModule).toBe(false);
@@ -1017,7 +989,6 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH",
       "HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH",
       "HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH",
-      "HOSTED_RUNTIME_CODEX_AUTH_PATH",
       "HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH",
       "HOSTED_RUNTIME_CRYPTO_ROOT_PATH",
       "HOSTED_RUNTIME_DATA_API_PATHS",

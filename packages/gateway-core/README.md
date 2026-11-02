@@ -1,6 +1,6 @@
 # @murphai/gateway-core
 
-Transport-neutral gateway contracts, route helpers, and opaque ids for Murph.
+Transport-neutral reply-route inference and route vocabulary for Murph.
 The package does not depend on assistant, inbox, or local runtime-state owners.
 
 ## Breaking API removal

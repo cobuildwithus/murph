@@ -49,7 +49,6 @@ import {
   relayAbort,
   sanitizeRawMetadata,
   toIsoTimestamp,
-  waitForAbortOrTimeout,
 } from "../src/shared-runtime.ts";
 
 afterEach(() => {
@@ -136,7 +135,7 @@ test("shared-runtime helpers cover sensitive redaction and abort fast paths", as
   vi.useFakeTimers();
   const alreadyAborted = new AbortController();
   alreadyAborted.abort();
-  await waitForAbortOrTimeout(alreadyAborted.signal, 5_000);
+
   assert.equal(vi.getTimerCount(), 0);
 });
 

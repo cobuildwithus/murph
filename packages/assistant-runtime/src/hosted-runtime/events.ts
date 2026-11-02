@@ -417,14 +417,6 @@ async function executeHostedSystemWake(input: {
           ? { kind: "vault-share.projection" }
           : null,
       });
-    case "runtime.codex-auth-requested": {
-      const { executeHostedCodexAuthWake } = await import(
-        "./events/codex-auth.ts"
-      );
-      return await executeHostedCodexAuthWake({
-        operatorHomeRoot: input.operatorHomeRoot,
-      });
-    }
     case "assistant.ask.requested":
       // The detached controller is the only owner of requested asks. Running
       // one through serial foreground maintenance would grant reply authority

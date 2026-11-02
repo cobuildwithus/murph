@@ -64,7 +64,6 @@ import {
   executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
   preinitializeCodexAppServer,
   readCodexAppServerTurnFailureContext,
-  resolveCodexDisplayOptions,
   stopWarmCodexAppServer,
   waitForWarmCodexBackgroundWork,
 } from '../src/assistant-codex.ts'
@@ -519,52 +518,6 @@ describe('assistant codex runtime', () => {
     ).toThrowError(
       'Codex app-server requests cannot combine named permissions with a legacy sandbox.',
     )
-  })
-
-  it('resolves display options from config files and explicit overrides', async () => {
-    const configRoot = await createTempDir('assistant-codex-config-')
-    const configPath = path.join(configRoot, 'config.toml')
-
-    await writeFile(
-      configPath,
-      [
-        '# comment',
-        'model = "root-model"',
-        'model_reasoning_effort = "medium"',
-        'profile = "daily"',
-        '[profiles.daily]',
-        'model = "daily-model"',
-        'model_reasoning_effort = "high"',
-        '[profiles.empty]',
-        'model = ""',
-      ].join('\n'),
-      'utf8',
-    )
-
-    await expect(resolveCodexDisplayOptions({ configPath })).resolves.toEqual({
-      model: 'daily-model',
-      reasoningEffort: 'high',
-    })
-
-    await expect(
-      resolveCodexDisplayOptions({
-        configPath,
-        model: 'manual-model',
-        profile: 'daily',
-      }),
-    ).resolves.toEqual({
-      model: 'manual-model',
-      reasoningEffort: 'high',
-    })
-
-    await expect(
-      resolveCodexDisplayOptions({
-        configPath: path.join(configRoot, 'missing.toml'),
-      }),
-    ).resolves.toEqual({
-      model: null,
-      reasoningEffort: null,
-    })
   })
 
   it.each([

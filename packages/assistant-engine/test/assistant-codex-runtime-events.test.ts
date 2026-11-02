@@ -40,7 +40,6 @@ import {
   executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
   preinitializeCodexAppServer,
   readCodexAppServerTurnFailureContext,
-  resolveCodexDisplayOptions,
   stopWarmCodexAppServer,
   waitForWarmCodexBackgroundWork,
 } from '../src/assistant-codex.ts'

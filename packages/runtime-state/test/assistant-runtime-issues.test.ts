@@ -510,20 +510,20 @@ test("assistant runtime issue path helpers reject invalid ids before touching si
       record: validRecord,
     });
 
-    await writeFile(paths.statusPath, JSON.stringify({ schema: "murph.assistant-status.v1" }), "utf8");
+    await writeFile(path.join(paths.assistantStateRoot, "unrelated.json"), JSON.stringify({ schema: "synthetic-unrelated-file" }), "utf8");
 
     assert.throws(
-      () => resolvePendingAssistantRuntimeIssuePath(paths, "../../status"),
+      () => resolvePendingAssistantRuntimeIssuePath(paths, "../../unrelated"),
       /issueId must match the assistant runtime issue id format\./u,
     );
     await assert.rejects(
-      () => deletePendingAssistantRuntimeIssueRecord({ issueId: "../../status", paths }),
+      () => deletePendingAssistantRuntimeIssueRecord({ issueId: "../../unrelated", paths }),
       /issueId must match the assistant runtime issue id format\./u,
     );
 
     assert.equal(
-      await readFile(paths.statusPath, "utf8"),
-      JSON.stringify({ schema: "murph.assistant-status.v1" }),
+      await readFile(path.join(paths.assistantStateRoot, "unrelated.json"), "utf8"),
+      JSON.stringify({ schema: "synthetic-unrelated-file" }),
     );
     assert.deepEqual(
       JSON.parse(await readFile(resolvePendingAssistantRuntimeIssuePath(paths, validIssueId), "utf8")),

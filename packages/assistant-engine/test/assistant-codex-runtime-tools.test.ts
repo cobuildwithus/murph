@@ -37,7 +37,6 @@ import {
   executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
   preinitializeCodexAppServer,
   readCodexAppServerTurnFailureContext,
-  resolveCodexDisplayOptions,
   stopWarmCodexAppServer,
   waitForWarmCodexBackgroundWork,
 } from '../src/assistant-codex.ts'
@@ -3105,7 +3104,6 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
     }
   })
 
-
   it('does not mistake another Codex cleanup listener for a graceful shutdown owner', () => {
     if (process.platform === 'win32') return
     const prependSpy = vi.spyOn(process, 'prependListener')
@@ -3122,7 +3120,6 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
       secondCleanup()
     }
   })
-
 
   it('defers before a one-shot host signal listener is consumed by Node event delivery', () => {
     if (process.platform === 'win32') return

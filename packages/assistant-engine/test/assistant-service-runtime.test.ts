@@ -35,10 +35,8 @@ const seamMocks = vi.hoisted(() => ({
   createAssistantUsageId: vi.fn(),
   isAssistantSessionNotFoundError: vi.fn(),
   local: {
-    openAssistantConversationLocal: vi.fn(),
     sendAssistantNotificationLocal: vi.fn(),
     sendAssistantMessageLocal: vi.fn(),
-    updateAssistantSessionOptionsLocal: vi.fn(),
   },
   markAssistantFirstContactSeen: vi.fn(),
   normalizeAssistantDeliveryError: vi.fn(),
@@ -49,11 +47,7 @@ const seamMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../src/assistant/local-service.js", () => ({
-  openAssistantConversationLocal:
-    seamMocks.local.openAssistantConversationLocal,
   sendAssistantMessageLocal: seamMocks.local.sendAssistantMessageLocal,
-  updateAssistantSessionOptionsLocal:
-    seamMocks.local.updateAssistantSessionOptionsLocal,
 }));
 vi.mock("../src/assistant/notification-turn.js", () => ({
   sendAssistantNotificationLocal: seamMocks.local.sendAssistantNotificationLocal,
@@ -205,10 +199,10 @@ beforeEach(() => {
           error.code === "ASSISTANT_SESSION_NOT_FOUND"
       )
     );
-  seamMocks.local.openAssistantConversationLocal.mockReset();
+
   seamMocks.local.sendAssistantNotificationLocal.mockReset();
   seamMocks.local.sendAssistantMessageLocal.mockReset();
-  seamMocks.local.updateAssistantSessionOptionsLocal.mockReset();
+
   seamMocks.markAssistantFirstContactSeen
     .mockReset()
     .mockResolvedValue(undefined);
@@ -263,24 +257,13 @@ afterEach(async () => {
 });
 
 describe("assistant service wrapper seam", () => {
-  it("delegates conversation and message flows to the local service", async () => {
-    const conversationResult = {
-      session: createAssistantSession(),
-    };
+  it("delegates message flows to the local service", async () => {
     const messageResult = {
       response: "done",
     };
-    seamMocks.local.openAssistantConversationLocal.mockResolvedValue(
-      conversationResult
-    );
+
     seamMocks.local.sendAssistantMessageLocal.mockResolvedValue(messageResult);
 
-    await expect(
-      assistantService.openAssistantConversation({
-        sessionId: "session-1",
-        vault: "/vault",
-      })
-    ).resolves.toBe(conversationResult);
     await expect(
       assistantService.sendAssistantMessage({
         prompt: "hello",
@@ -288,19 +271,13 @@ describe("assistant service wrapper seam", () => {
       })
     ).resolves.toBe(messageResult);
 
-    expect(seamMocks.local.openAssistantConversationLocal).toHaveBeenCalledWith(
-      {
-        sessionId: "session-1",
-        vault: "/vault",
-      }
-    );
     expect(seamMocks.local.sendAssistantMessageLocal).toHaveBeenCalledWith({
       prompt: "hello",
       vault: "/vault",
     });
   });
 
-  it("delegates notification and session option updates to the local service", async () => {
+  it("delegates notifications to the local service", async () => {
     const notificationInput = {
       channel: "telegram",
       identityId: "identity-1",
@@ -316,45 +293,18 @@ describe("assistant service wrapper seam", () => {
       response: "Welcome to Murph, your personal health assistant.",
       session: createAssistantSession(),
     };
-    const updatedSession = createAssistantSession({
-      providerOptions: createProviderOptions({
-        model: "gpt-5-mini",
-      }),
-    });
     seamMocks.local.sendAssistantNotificationLocal.mockResolvedValue(
       notificationResult
-    );
-    seamMocks.local.updateAssistantSessionOptionsLocal.mockResolvedValue(
-      updatedSession
     );
 
     await expect(
       assistantService.sendAssistantNotification(notificationInput)
     ).resolves.toBe(notificationResult);
-    await expect(
-      assistantService.updateAssistantSessionOptions({
-        providerOptions: {
-          provider: "codex-cli",
-          model: "gpt-5-mini",
-        },
-        sessionId: "session-1",
-        vault: "/vault",
-      })
-    ).resolves.toBe(updatedSession);
 
     expect(
       seamMocks.local.sendAssistantNotificationLocal
     ).toHaveBeenCalledWith(notificationInput);
-    expect(
-      seamMocks.local.updateAssistantSessionOptionsLocal
-    ).toHaveBeenCalledWith({
-      providerOptions: {
-        provider: "codex-cli",
-        model: "gpt-5-mini",
-      },
-      sessionId: "session-1",
-      vault: "/vault",
-    });
+
   });
 });
 
@@ -801,7 +751,6 @@ describe("assistant usage recording seam", () => {
       }),
     );
   });
-
 
   it("records failure usage with the provider request outcome", async () => {
     vi.useFakeTimers();

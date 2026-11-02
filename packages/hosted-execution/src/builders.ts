@@ -41,8 +41,6 @@ import type {
   HostedExecutionRuntimeControlWake,
   HostedExecutionPlainRuntimeControlWakeKind,
   HostedExecutionPendingEffectsReconcileRequestedWake,
-  HostedExecutionCodexAuthRequestedWake,
-  HostedCodexAuthAction,
   HostedExecutionTelegramMessage,
   HostedExecutionTelegramExternalThreadRouteAuthority,
   HostedExecutionVaultShareDeliveryWake,
@@ -936,23 +934,6 @@ export function buildHostedExecutionPendingEffectsReconcileRequestedWake(input: 
     effectId: input.effectId,
     eventId: input.eventId,
     kind: "runtime.pending-effects-reconcile-requested",
-    occurredAt: input.occurredAt,
-    userId: input.userId,
-  };
-}
-
-export function buildHostedExecutionCodexAuthRequestedWake(input: {
-  action: HostedCodexAuthAction;
-  attemptId: string;
-  eventId: string;
-  occurredAt: string;
-  userId: string;
-}): HostedExecutionCodexAuthRequestedWake {
-  return {
-    action: input.action,
-    attemptId: input.attemptId,
-    eventId: input.eventId,
-    kind: "runtime.codex-auth-requested",
     occurredAt: input.occurredAt,
     userId: input.userId,
   };

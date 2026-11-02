@@ -251,8 +251,4 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
     ".runtime/operations/assistant/secrets",
     "Assistant local secret sidecars never travel in hosted snapshots.",
   ),
-  definePortableAssistantFile(
-    ".runtime/operations/assistant/status.json",
-    "Assistant status snapshots move with hosted debugging continuity.",
-  ),
 ] as const;

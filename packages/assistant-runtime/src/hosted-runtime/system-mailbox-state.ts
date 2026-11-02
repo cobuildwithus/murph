@@ -1535,27 +1535,6 @@ function parseHostedSystemMailboxRecordRequest(
     };
   }
 
-  if (record.kind === "codex-auth.updated") {
-    assertHostedSystemMailboxRecordKeys(
-      record,
-      ["attemptId", "kind", "phase"],
-      "hosted system mailbox Codex auth postCheckpointRecord",
-    );
-    if (record.phase !== "connected" && record.phase !== "disconnected") {
-      throw new TypeError(
-        "hosted system mailbox Codex auth postCheckpointRecord phase is invalid.",
-      );
-    }
-    return {
-      attemptId: readRequiredString(
-        record.attemptId,
-        "hosted system mailbox Codex auth postCheckpointRecord attemptId",
-      ),
-      kind: "codex-auth.updated",
-      phase: record.phase,
-    };
-  }
-
   if (record.kind === "member-action.outcome-recorded") {
     assertHostedSystemMailboxRecordKeys(
       record,

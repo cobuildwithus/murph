@@ -899,10 +899,6 @@ async function writeHostedPhaseExperimentSource(vaultRoot: string): Promise<void
   );
 }
 
-
-
-
-
 async function runRealForegroundApprovalAdmissionScenario(input: {
   deliveryEffect: boolean;
   wake: "due-exact" | "due-unrelated" | "future-exact";
@@ -2060,28 +2056,6 @@ function createAssistantAskCompletionSystemMailboxItem() {
   };
 }
 
-function createCodexAuthSystemMailboxItem() {
-  return {
-    ...createSystemMailboxItem(),
-    itemId: "system_mailbox_item_codex_auth",
-    mailboxDedupeKey: "dedupe_system_mailbox_item_codex_auth",
-    postCheckpointRecord: {
-      attemptId: "hca_abcdefghijklmnop",
-      kind: "codex-auth.updated" as const,
-      phase: "connected" as const,
-    },
-    routeAction: "apply-runtime-control-request" as const,
-    wake: {
-      action: "connect" as const,
-      attemptId: "hca_abcdefghijklmnop",
-      eventId: "runtime-control:codex-auth",
-      kind: "runtime.codex-auth-requested" as const,
-      occurredAt: "2026-04-27T00:00:00.000Z",
-      userId: "member_synthetic_phase",
-    },
-  };
-}
-
 function createVaultShareProjectionSystemMailboxItem() {
   return {
     ...createSystemMailboxItem(),
@@ -2105,7 +2079,6 @@ export {
   createAssistantAskCompletionSystemMailboxItem,
   createAssistantUsageRecord,
   createBrowserVaultRefreshSystemMailboxItem,
-  createCodexAuthSystemMailboxItem,
   createDeliveryEffect,
   createDueAssistantWorkspace,
   createExternalCompletionSystemMailboxItem,

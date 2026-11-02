@@ -102,30 +102,6 @@ export function relayAbort(signal: AbortSignal, controller: AbortController): ()
   return () => signal.removeEventListener("abort", onAbort);
 }
 
-export async function waitForAbortOrTimeout(
-  signal: AbortSignal,
-  milliseconds: number,
-): Promise<void> {
-  if (signal.aborted) {
-    return;
-  }
-
-  await new Promise<void>((resolve) => {
-    const timeout = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }, milliseconds);
-
-    const onAbort = () => {
-      clearTimeout(timeout);
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    };
-
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-}
-
 export function createCaptureCheckpoint(capture: {
   occurredAt: string;
   externalId: string;

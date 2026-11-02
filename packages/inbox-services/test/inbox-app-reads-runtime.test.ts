@@ -30,26 +30,6 @@ const promotionMocks = vi.hoisted(() => ({
   readPromotionsByCapture: vi.fn(),
 }))
 
-const connectorMocks = vi.hoisted(() => ({
-  instantiateConnector: vi.fn(),
-}))
-
-const daemonMocks = vi.hoisted(() => ({
-  createProcessSignalBridge: vi.fn(),
-  normalizeDaemonState: vi.fn(),
-  verifyDaemonStateForExpectedOwner: vi.fn(),
-  writeDaemonState: vi.fn(),
-}))
-
-const processKillMocks = vi.hoisted(() => ({
-  captureProcessIdentity: vi.fn(),
-  tryKillProcess: vi.fn(),
-}))
-
-const linqRuntimeMocks = vi.hoisted(() => ({
-  resolveLinqWebhookSecret: vi.fn(),
-}))
-
 vi.mock('../src/inbox-services/state.js', async () => {
   const actual = await vi.importActual<typeof import('../src/inbox-services/state.js')>(
     '../src/inbox-services/state.js',

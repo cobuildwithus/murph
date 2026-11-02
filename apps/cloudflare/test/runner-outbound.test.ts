@@ -241,21 +241,6 @@ type HostedSystemProgressProjection = Required<Pick<
 >>;
 const ALLOWLISTED_WEB_CONTROL_CASES = [
   {
-    body: {
-      attemptId: "hca_abcdefghijklmnop",
-      phase: "device_code",
-      userCode: "SYNTHETIC-CODE",
-      verificationUrl: "https://auth.openai.com/codex/device",
-    },
-    name: "legacy member ChatGPT device-code callback",
-    path: "/api/internal/hosted-runtime/codex-auth",
-  },
-  ...["connected", "disconnected", "failed"].map((phase) => ({
-    body: { attemptId: "hca_abcdefghijklmnop", phase },
-    name: `legacy member ChatGPT ${phase} callback`,
-    path: "/api/internal/hosted-runtime/codex-auth",
-  })),
-  {
     body: { days: 7, limit: 10 },
     name: "hosted usage diagnostics",
     path: HOSTED_RUNTIME_USAGE_DIAGNOSTICS_PATH,
@@ -896,8 +881,7 @@ describe("handleRunnerOutboundRequest", () => {
       expect(headers.get("x-hosted-execution-signature")).not.toBe("child-signature");
       expect(headers.get("x-hosted-runner-bound-user-id")).toBeNull();
       if (
-        path === "/api/internal/hosted-runtime/codex-auth"
-        || path === HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH
+        path === HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH
         || path === HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH
         || path === HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH
       ) {
@@ -1120,7 +1104,6 @@ describe("handleRunnerOutboundRequest", () => {
   });
 
   it.each([
-    "/api/internal/hosted-runtime/codex-auth",
     HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH,
     HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
     HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
@@ -11714,7 +11697,10 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects the retired Linq contact-card callback before proxying", async () => {
+  it.each([
+    "/api/internal/hosted-runtime/linq/contact-card/share-after-outbound",
+    "/api/internal/hosted-runtime/codex-auth",
+  ])("rejects retired callbacks before proxying: %s", async (callbackPath) => {
     const fetchMock = vi.fn(async (
       ..._args: Parameters<typeof fetch>
     ): Promise<Response> => new Response("unexpected", { status: 200 }));
@@ -11722,7 +11708,7 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
 
     const response = await handleRunnerOutboundRequest(
       new Request(
-        "http://web-control.worker/api/internal/hosted-runtime/linq/contact-card/share-after-outbound",
+        `http://web-control.worker${callbackPath}`,
         {
           body: JSON.stringify({
             authority: {

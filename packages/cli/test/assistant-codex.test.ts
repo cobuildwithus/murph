@@ -27,7 +27,6 @@ import {
   executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
   extractCodexTraceUpdates,
   resolveMurphDynamicTools,
-  resolveCodexDisplayOptions,
   stopWarmCodexAppServer,
   type CodexAppServerTurnInput,
 } from '@murphai/assistant-engine/assistant-codex'
@@ -88,41 +87,6 @@ test('buildCodexAppServerArgs keeps sandbox and approval out of process args', (
     'primary',
     'app-server',
   ])
-})
-
-test('resolveCodexDisplayOptions still honors config defaults and explicit overrides', async () => {
-  const configRoot = await createTempDir('assistant-codex-cli-config-')
-  const configPath = path.join(configRoot, 'config.toml')
-
-  await writeFile(
-    configPath,
-    [
-      '# comment',
-      'model = "root-model"',
-      'model_reasoning_effort = "medium"',
-      'profile = "daily"',
-      '[profiles.daily]',
-      'model = "daily-model"',
-      'model_reasoning_effort = "high"',
-    ].join('\n'),
-    'utf8',
-  )
-
-  assert.deepEqual(await resolveCodexDisplayOptions({ configPath }), {
-    model: 'daily-model',
-    reasoningEffort: 'high',
-  })
-  assert.deepEqual(
-    await resolveCodexDisplayOptions({
-      configPath,
-      model: 'manual-model',
-      profile: 'daily',
-    }),
-    {
-      model: 'manual-model',
-      reasoningEffort: 'high',
-    },
-  )
 })
 
 test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed assistant output', async () => {
@@ -875,11 +839,3 @@ function requireMockChildProcess(
   assert.ok(child)
   return child
 }
-
-test('resolveCodexDisplayOptions defaults to nulls when the config file is missing', async () => {
-  const configPath = path.join(homedir(), '.codex', 'definitely-missing-config.toml')
-  assert.deepEqual(await resolveCodexDisplayOptions({ configPath }), {
-    model: null,
-    reasoningEffort: null,
-  })
-})
