@@ -5568,12 +5568,24 @@ History keeps `mediaUrls` as stable cache identities and adds optional
 `delivery: { url, expiresAt }` to the previews in each person's latest game.
 These use the five-minute `avatar`/`gameavatar` rendition. The HTTP layer applies
 the same media-read authorization after history's existing viewer filters,
-deduplicates content keys and processes four authorization/delivery chains at
-once, outside transactions. At 50 people and six previews this is at most 300
+deduplicates content keys and processes six deliveries at once, outside
+transactions. Each six-key batch revalidates current media authority in one
+set-based query, including blocks, profile sharing, reports and visible uses.
+At 50 people and six previews this is at most 300
 normal Worker calls; a missing object uses two calls and a successful legacy
-repair uses four (delivery, legacy read, upload, delivery). Each distinct key
-adds zero database reads for the uploader, or at most five for the existing
-other-player authorization path. A legacy repair also uses the existing
+repair uses four (delivery, legacy read, upload, delivery). Uploader-only batches
+need no database reads; a mixed batch needs one, so the
+maximum is 50 authorization queries with one database connection at a time.
+The single-media route uses this same predicate. History hydration retains its
+eight set-based queries (including the database clock and player relation), at
+most four in flight, and decrypts names, labels and visible entry payloads;
+unused terms, recap stories and relationships are not opened. The history route
+reuses the existing request-scoped root unwrap owner across native auth and
+hydration; exact roots are zeroized before signing. Session rows and revocation
+are still read on every request. Root-envelope metadata and provider unwraps
+remain with the existing batch crypto owner. A card's six independent signatures
+share one wave; normal signing uses no database connection, while six concurrent
+legacy repairs can each use the existing root lookup/unwrap. A legacy repair also uses the existing
 member-root lookup/unwrap once. Older games, local storage, denied reads and
 failed signing omit the optional field. History responses are private/no-store;
 capabilities are never persisted. No preview ordering or selection changes.

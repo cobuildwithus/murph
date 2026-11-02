@@ -2,6 +2,10 @@ Pre-foreground reply planning attribution is tracked in
 [the timing plan](exec-plans/completed/2026-11-01-pre-foreground-reply-timing.md);
 [`hosted-runtime-protocol.md`](references/hosted-runtime-protocol.md) owns its fixed numeric fields.
 
+Game history read measurements and equivalence proof are tracked in
+[the performance plan](exec-plans/completed/2026-11-01-game-history-speed.md).
+`../ARCHITECTURE.md` owns the bounded read and media authority contract.
+
 Legacy game photo recovery and history card delivery are tracked in
 [the implementation plan](exec-plans/completed/2026-10-31-game-history-photo-delivery.md).
 `../ARCHITECTURE.md` and `product-specs/weekly-game.md` own the contract.

@@ -10,7 +10,7 @@ import {
   readGameMedia,
   servesSignedGameMedia,
 } from "../media";
-import { authorizeMediaRead, mediaKeyPrefixFor } from "../service";
+import { authorizeMediaRead, authorizeMediaReads, mediaKeyPrefixFor } from "../service";
 import { gameMediaKeyOf } from "../views";
 import { readRawBodyBuffer } from "../../http";
 import { gameHttpError, invalidGameRequest } from "./errors";
@@ -81,7 +81,7 @@ export async function withUnlockedPhotoDeliveries(game: GameView, input: { entry
 }
 
 /** Sign the card's latest game per person, after the normal history filters.
- * At most 50 people × 6 previews; deduplicate keys and authorize/sign four at
+ * At most 50 people × 6 previews; deduplicate keys and authorize/sign six at
  * a time. Missing or unavailable delivery leaves the stable media URL intact.
  */
 export async function withHistoryPhotoDeliveries(history: GameHistoryView, memberId: string): Promise<GameHistoryView> {
@@ -92,11 +92,12 @@ export async function withHistoryPhotoDeliveries(history: GameHistoryView, membe
     return key ? [key] : [];
   }))];
   const deliveries = new Map<string, { url: string; expiresAt: string }>();
-  for (let offset = 0; offset < keys.length; offset += 4) {
-    await Promise.all(keys.slice(offset, offset + 4).map(async (key) => {
-      const delivery = await isViewable(memberId, key)
-        .then((viewable) => viewable ? gameMediaDelivery(key, "avatar") : null)
-        .catch(() => null);
+  for (let offset = 0; offset < keys.length; offset += 6) {
+    const batch = keys.slice(offset, offset + 6).filter(isGameMediaKey);
+    const allowed = await authorizeMediaReads(memberId, batch)
+      .catch(() => new Set(batch.filter((key) => key.startsWith(mediaKeyPrefixFor(memberId)))));
+    await Promise.all(batch.map(async (key) => {
+      const delivery = allowed.has(key) ? await gameMediaDelivery(key, "avatar").catch(() => null) : null;
       if (delivery) deliveries.set(key, delivery);
     }));
   }

@@ -2014,44 +2014,63 @@ export async function readInvitePreview(token: string): Promise<GameInvitePrevie
  * settle); private contact photos never acquire access from their label.
  */
 export async function authorizeMediaRead(memberId: string, mediaKey: string): Promise<boolean> {
-  const ownerId = mediaKeyOwner(mediaKey);
-  if (!ownerId) return false;
-  if (ownerId === memberId) return true;
-  const prisma = getPrisma();
-  // Blocked either way: nothing of theirs, as if they'd left.
-  if (await areGamePlayersBlocked(prisma, memberId, ownerId)) return false;
-  const profile = await prisma.gameProfile.findUnique({ select: { photoKey: true }, where: { memberId: ownerId } });
-  // A player you reported keeps their photo from you.
-  if (profile?.photoKey === mediaKey && !(await readReportedBy(memberId, { players: [ownerId] })).players.has(ownerId)) {
-    const participant = (id: string) => ({ OR: [
-      { players: { some: { memberId: id } } },
-      { inviteeMemberId: id, status: "invited" },
-    ] });
-    const sharedGame = await prisma.game.findFirst({
-      select: { id: true },
-      where: { AND: [participant(memberId), participant(ownerId), gameOnWhere()] },
-    });
-    if (sharedGame) return true;
+  return (await authorizeMediaReads(memberId, [mediaKey])).has(mediaKey);
+}
+
+/** The same live authority check for a bounded delivery batch, in one round trip. */
+export async function authorizeMediaReads(memberId: string, mediaKeys: readonly string[]): Promise<Set<string>> {
+  const allowed = new Set<string>();
+  const others: Array<{ key: string; owner: string }> = [];
+  for (const key of new Set(mediaKeys)) {
+    const owner = mediaKeyOwner(key);
+    if (owner === memberId) allowed.add(key);
+    else if (owner) others.push({ key, owner });
   }
-  // The other-player branch of visibleEntryIds, applied before LIMIT. A key
-  // may appear in any number of games; authorization needs one visible use,
-  // no payload decryption or truncated candidate window.
-  const entries = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-    SELECT entry.id FROM game_entry entry
-    JOIN game ON game.id = entry.game_id
-    JOIN game_player viewer ON viewer.game_id = game.id AND viewer.member_id = ${memberId}
-    WHERE entry.member_id = ${ownerId} AND entry.media_keys @> ARRAY[${mediaKey}]::text[]
-      AND entry.attempt > 0 AND entry.withdrawn_at IS NULL
-      AND ${gameOnSql("game")}
-      AND NOT EXISTS (SELECT 1 FROM game_report report
-        WHERE report.entry_id = entry.id AND report.reporter_member_id = ${memberId})
-      AND (game.status = 'settled' OR EXISTS (
-        SELECT 1 FROM game_entry own WHERE own.game_id = game.id
-          AND own.member_id = ${memberId} AND own.day_index = entry.day_index AND own.attempt > 0
-      ))
-    LIMIT 1
+  if (others.length === 0) return allowed;
+  const rows = await getPrisma().$queryRaw<Array<{ key: string }>>(Prisma.sql`
+    WITH requested(key, owner) AS (
+      VALUES ${Prisma.join(others.map(({ key, owner }) => Prisma.sql`(${key}::text, ${owner}::text)`))}
+    )
+    SELECT requested.key FROM requested
+    WHERE NOT EXISTS (
+      SELECT 1 FROM game_block blocked
+      WHERE (blocked.blocker_member_id = ${memberId} AND blocked.blocked_member_id = requested.owner)
+        OR (blocked.blocker_member_id = requested.owner AND blocked.blocked_member_id = ${memberId})
+    ) AND (
+      EXISTS (
+        SELECT 1 FROM game_profile profile
+        WHERE profile.member_id = requested.owner AND profile.photo_key = requested.key
+          AND NOT EXISTS (SELECT 1 FROM game_report report
+            WHERE report.reporter_member_id = ${memberId} AND report.about = 'player'
+              AND report.reported_member_id = requested.owner)
+          AND EXISTS (
+            SELECT 1 FROM game
+            WHERE ${gameOnSql("game")}
+              AND (EXISTS (SELECT 1 FROM game_player player
+                WHERE player.game_id = game.id AND player.member_id = ${memberId})
+                OR (game.status = 'invited' AND game.invitee_member_id = ${memberId}))
+              AND (EXISTS (SELECT 1 FROM game_player player
+                WHERE player.game_id = game.id AND player.member_id = requested.owner)
+                OR (game.status = 'invited' AND game.invitee_member_id = requested.owner))
+          )
+      ) OR EXISTS (
+        SELECT 1 FROM game_entry entry
+        JOIN game ON game.id = entry.game_id
+        JOIN game_player viewer ON viewer.game_id = game.id AND viewer.member_id = ${memberId}
+        WHERE entry.member_id = requested.owner AND entry.media_keys @> ARRAY[requested.key]::text[]
+          AND entry.attempt > 0 AND entry.withdrawn_at IS NULL
+          AND ${gameOnSql("game")}
+          AND NOT EXISTS (SELECT 1 FROM game_report report
+            WHERE report.entry_id = entry.id AND report.reporter_member_id = ${memberId})
+          AND (game.status = 'settled' OR EXISTS (
+            SELECT 1 FROM game_entry own WHERE own.game_id = game.id
+              AND own.member_id = ${memberId} AND own.day_index = entry.day_index AND own.attempt > 0
+          ))
+      )
+    )
   `);
-  return entries.length > 0;
+  for (const { key } of rows) allowed.add(key);
+  return allowed;
 }
 
 // ------------------------------------------------------------ view assembly
@@ -2147,8 +2166,8 @@ async function buildViewInputs(
     requests.push({ ...target, value });
     return requests.length - 1;
   };
-  const wordsAt = games.map((game) => ask(gameTarget(game.row, "terms_words"), game.row.termsWordsEncrypted));
-  const recapAt = games.map((game, index) => game.row.recapEncrypted && !recapSuppressed[index]
+  const wordsAt = games.map((game) => history ? null : ask(gameTarget(game.row, "terms_words"), game.row.termsWordsEncrypted));
+  const recapAt = games.map((game, index) => !history && game.row.recapEncrypted && !recapSuppressed[index]
     ? ask(gameTarget(game.row, "recap"), game.row.recapEncrypted)
     : null);
   // A player who left: the name the viewer, the only member left, knew them by.
@@ -2158,10 +2177,11 @@ async function buildViewInputs(
   });
   const profileNameAt = new Map(profiles.map((profile) => [
     profile.memberId,
-    ask({ field: "first_name", memberId: profile.memberId, rowId: profile.memberId, table: "game_profile" }, profile.firstNameEncrypted),
+    ask({ field: "first_name", memberId: profile.memberId, rowId: profile.memberId, table: "game_profile" },
+      history && profile.memberId === viewerId ? null : profile.firstNameEncrypted),
   ]));
   const labelNameAt = new Map(labels.map((label) => [label.subjectMemberId, ask(labelTarget(viewerId, "name"), label.nameEncrypted)]));
-  const labelRelationshipAt = new Map(labels.map((label) => [
+  const labelRelationshipAt = new Map((history ? [] : labels).map((label) => [
     label.subjectMemberId,
     ask(labelTarget(viewerId, "relationship"), label.relationshipEncrypted),
   ]));
@@ -2258,7 +2278,7 @@ async function buildViewInputs(
       state: states[index],
       tickets: tickets.filter((ticket) => ticket.gameId === game.row.id).map((ticket) => withoutHidden(toTicketRow(ticket), blocks)),
       viewerId,
-      words: parseTermWords(plain[wordsAt[index]] ?? ""),
+      words: wordsAt[index] === null ? { v: 1, versions: [] } : parseTermWords(plain[wordsAt[index]] ?? ""),
     };
   });
 }
