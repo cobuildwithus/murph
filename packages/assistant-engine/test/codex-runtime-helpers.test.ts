@@ -54,10 +54,7 @@ import {
 import {
   MURPH_CODEX_BASE_INSTRUCTIONS,
 } from '../src/assistant/codex-base-instructions.ts'
-import {
-  DEFAULT_CODEX_MODEL_CAPABILITIES,
-  createCatalogModel,
-} from '../src/assistant/providers/catalog.ts'
+
 import {
   buildAssistantCodexTurnProfileJson as buildExactAssistantCodexTurnProfileJson,
   extractCodexAssistantProviderUsage as extractExactCodexAssistantProviderUsage,
@@ -3747,29 +3744,6 @@ describe('Codex assistant registry helpers', () => {
     expect(serializedDiagnostic).not.toContain('thread-private')
   })
 
-  it('clones catalog capabilities', () => {
-    const capabilities = {
-      ...DEFAULT_CODEX_MODEL_CAPABILITIES,
-    }
-    const model = createCatalogModel({
-      capabilities,
-      description: 'Test model',
-      id: 'test-model',
-      source: 'current',
-    })
-
-    capabilities.tools = false
-
-    expect(model).toEqual({
-      capabilities: DEFAULT_CODEX_MODEL_CAPABILITIES,
-      description: 'Test model',
-      id: 'test-model',
-      label: 'test-model',
-      source: 'current',
-    })
-  })
-
-
   it('merges progress activity labels into successful delegated execution attempts', async () => {
     const executionResult: AssistantProviderTurnExecutionResult = {
       provider: 'codex-cli',
@@ -4115,7 +4089,6 @@ describe('Codex assistant registry helpers', () => {
     ])
     expect(attempt.result.responseDeliveryContextOrdinal).toBe(0)
   })
-
 
   it('never passes a multi_agent_v2 CLI override on hosted turns', async () => {
     // Hosted config.toml owns [features.multi_agent_v2] (including
@@ -5170,7 +5143,6 @@ describe('Codex assistant registry helpers', () => {
     expect(JSON.stringify(traceEvents)).not.toContain('HbA1c')
     expect(JSON.stringify(traceEvents)).not.toContain('example.invalid')
   })
-
 
   it('returns failed delegated execution attempts with merged labels from emitted progress', async () => {
     const expectedError = new Error('provider crashed')

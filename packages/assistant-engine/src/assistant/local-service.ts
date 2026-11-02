@@ -12,7 +12,6 @@ import {
 } from '@murphai/operator-config/assistant-response-cards'
 import {
   assistantBackendTargetToProviderConfigInput,
-  createAssistantModelTarget,
   createDefaultLocalAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
 import {
@@ -80,9 +79,7 @@ import {
   resolveAssistantProviderResumeStateAction,
   resolveAssistantResumeStateFromProviderTurn,
 } from './turn-finalizer.js'
-import {
-  bindAssistantResumeStateToThreadCompatibility,
-} from './codex-resume-binding.js'
+
 import {
   readAssistantCodexResume,
 } from './conversation-persistence.js'
@@ -91,10 +88,7 @@ import {
   createAssistantTurnReceipt,
   finalizeAssistantTurnReceipt,
 } from './turns.js'
-import {
-  mergeAssistantProviderConfigs,
-  serializeAssistantProviderSessionOptions,
-} from '@murphai/operator-config/assistant/provider-config'
+
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   normalizeAssistantExecutionContext,
@@ -187,7 +181,6 @@ import {
 import type {
   AssistantMessageInput,
   AssistantDeliveryOutcome,
-  AssistantSessionResolutionFields,
   AssistantTurnSharedPlan,
   ExecutedAssistantProviderTurnResult,
   PersistedUserTurn,
@@ -608,19 +601,6 @@ async function completeUnverifiedExternalAudienceTurn(input: {
       vault: input.message.vault,
     }),
   }
-}
-
-export async function openAssistantConversationLocal(
-  input: AssistantSessionResolutionFields,
-) {
-  const defaults = await resolveAssistantOperatorDefaults()
-  return resolveAssistantSession(
-    buildResolveAssistantSessionInput(
-      input,
-      defaults,
-      createDefaultLocalAssistantModelTarget(),
-    ),
-  )
 }
 
 export async function sendAssistantMessageLocal(
@@ -2815,53 +2795,6 @@ function normalizeAssistantDeliveryMatchChannel(
 ): string | null {
   const normalized = value?.trim().toLowerCase() ?? ''
   return normalized.length > 0 ? normalized : null
-}
-
-export async function updateAssistantSessionOptionsLocal(input: {
-  providerOptions: Pick<AssistantSession['providerOptions'], 'provider'> &
-    Partial<Omit<AssistantSession['providerOptions'], 'provider'>>
-  sessionId: string
-  vault: string
-}): Promise<AssistantSession> {
-  const session = await resolveAssistantSession({
-    vault: input.vault,
-    conversation: {
-      sessionId: input.sessionId,
-    },
-    createIfMissing: false,
-  })
-
-  const providerConfig = mergeAssistantProviderConfigs(
-    // Persisted targets carry the full durable provider config. Session
-    // providerOptions are a derived runtime projection and omit target-only
-    // fields such as the Codex executable path.
-    assistantBackendTargetToProviderConfigInput(session.session.target),
-    input.providerOptions,
-  )
-  const nextTarget =
-    createAssistantModelTarget(providerConfig) ?? session.session.target
-  const nextProviderOptions = serializeAssistantProviderSessionOptions(providerConfig)
-  const continuityChanged =
-    session.session.providerOptions.continuityFingerprint !==
-    nextProviderOptions.continuityFingerprint
-  const currentResumeState = bindAssistantResumeStateToThreadCompatibility({
-    resumeState: readAssistantCodexResume(session.session),
-    route: resolveAssistantExecutionPlan({
-      defaults: null,
-      sessionTarget: session.session.target,
-    }).codexRoute,
-  })
-
-  return saveAssistantSession(input.vault, {
-    ...session.session,
-    codexResume: continuityChanged ? null : currentResumeState,
-    codexTarget: nextTarget,
-    provider: nextTarget.adapter,
-    providerOptions: nextProviderOptions,
-    resumeState: continuityChanged ? null : currentResumeState,
-    target: nextTarget,
-    updatedAt: new Date().toISOString(),
-  })
 }
 
 function applyAssistantProgressDeliveredSession(input: {

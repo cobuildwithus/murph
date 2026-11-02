@@ -51,10 +51,6 @@
       "types": "./dist/assistant-provider.d.ts",
       "default": "./dist/assistant-provider.js"
     },
-    "./assistant-provider-catalog": {
-      "types": "./dist/assistant-provider-catalog.d.ts",
-      "default": "./dist/assistant-provider-catalog.js"
-    },
     "./assistant-runtime": {
       "types": "./dist/assistant-runtime.d.ts",
       "default": "./dist/assistant-runtime.js"

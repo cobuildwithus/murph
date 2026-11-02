@@ -1,13 +1,10 @@
 // Local-only assistant orchestration surface for headless consumers.
-import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
+
 import type {
   AssistantMessageInput,
-  AssistantSessionResolutionFields,
 } from './service-contracts.js'
 import {
-  openAssistantConversationLocal,
   sendAssistantMessageLocal,
-  updateAssistantSessionOptionsLocal,
 } from './local-service.js'
 import {
   sendAssistantNotificationLocal as sendAssistantNotificationTurnLocal,
@@ -18,9 +15,7 @@ import { sendAssistantAskContinuationLocal as sendAssistantAskContinuationTurnLo
 
 export { buildResolveAssistantSessionInput } from './session-resolution.js'
 export {
-  openAssistantConversationLocal,
   sendAssistantMessageLocal,
-  updateAssistantSessionOptionsLocal,
 } from './local-service.js'
 export {
   ASSISTANT_ASK_CONTINUATION_TURN_PROFILE,
@@ -56,18 +51,6 @@ export type {
   AssistantAskContinuationResult,
 } from './ask-continuation.js'
 
-export type AssistantSessionOptionsPatch = Pick<
-  AssistantSession['providerOptions'],
-  'provider'
-> &
-  Partial<Omit<AssistantSession['providerOptions'], 'provider'>>
-
-export async function openAssistantConversation(
-  input: AssistantSessionResolutionFields,
-) {
-  return openAssistantConversationLocal(input)
-}
-
 export async function sendAssistantMessage(
   input: AssistantMessageInput,
 ) {
@@ -90,12 +73,4 @@ export async function sendAssistantAskContinuation(
   input: import('./ask-continuation.js').AssistantAskContinuationInput,
 ) {
   return sendAssistantAskContinuationTurnLocal(input)
-}
-
-export async function updateAssistantSessionOptions(input: {
-  providerOptions: AssistantSessionOptionsPatch
-  sessionId: string
-  vault: string
-}): Promise<AssistantSession> {
-  return updateAssistantSessionOptionsLocal(input)
 }

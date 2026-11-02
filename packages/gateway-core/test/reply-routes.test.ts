@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  gatewayBindingDeliveryFromRoute,
-  gatewayConversationRouteCanSend,
   inferGatewayReplyRouteForChannel,
 } from '@murphai/gateway-core'
 
@@ -113,99 +111,5 @@ describe('inferGatewayReplyRouteForChannel', () => {
       kind: 'thread',
       target: 'group-thread',
     })
-  })
-})
-
-describe('gateway route integration', () => {
-  it('marks linq conversations without a thread as unsendable', () => {
-    expect(
-      gatewayBindingDeliveryFromRoute({
-        channel: 'linq',
-        participantId: 'linq-user',
-      }),
-    ).toBeNull()
-
-    expect(
-      gatewayConversationRouteCanSend({
-        channel: 'linq',
-        participantId: 'linq-user',
-      }),
-    ).toBe(false)
-
-    expect(
-      gatewayBindingDeliveryFromRoute({
-        channel: 'linq',
-        participantId: 'linq-user',
-        reply: {
-          kind: 'participant',
-          target: 'linq-user',
-        },
-      }),
-    ).toEqual({
-      kind: 'participant',
-      target: 'linq-user',
-    })
-
-    expect(
-      gatewayConversationRouteCanSend({
-        channel: 'linq',
-        participantId: 'linq-user',
-        reply: {
-          kind: 'participant',
-          target: 'linq-user',
-        },
-      }),
-    ).toBe(false)
-  })
-
-  it('keeps linq thread routes sendable', () => {
-    expect(
-      gatewayBindingDeliveryFromRoute({
-        channel: 'linq',
-        threadId: 'linq-thread',
-      }),
-    ).toEqual({
-      kind: 'thread',
-      target: 'linq-thread',
-    })
-
-    expect(
-      gatewayConversationRouteCanSend({
-        channel: 'linq',
-        threadId: 'linq-thread',
-      }),
-    ).toBe(true)
-  })
-
-  it('allows explicit linq participant routes for first-contact materialization', () => {
-    const route = {
-      channel: 'linq',
-      participantId: 'linq-user',
-      reply: {
-        kind: 'participant' as const,
-        target: 'linq-user',
-      },
-      threadId: 'linq-thread',
-    }
-
-    expect(
-      inferGatewayReplyRouteForChannel({
-        channel: route.channel,
-        conversation: {
-          participantId: route.participantId,
-          threadId: route.threadId,
-        },
-        deliveryKind: route.reply.kind,
-        deliveryTarget: route.reply.target,
-      }),
-    ).toEqual({
-      kind: 'participant',
-      target: 'linq-user',
-    })
-    expect(gatewayBindingDeliveryFromRoute(route)).toEqual({
-      kind: 'participant',
-      target: 'linq-user',
-    })
-    expect(gatewayConversationRouteCanSend(route)).toBe(true)
   })
 })

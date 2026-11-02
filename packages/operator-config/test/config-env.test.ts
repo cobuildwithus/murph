@@ -4,7 +4,6 @@ import * as z from '@murphai/contracts/zod-runtime'
 import { test } from 'vitest'
 
 import {
-  assistantBackendTargetsEqual,
   createAssistantBackendTarget,
   normalizeAssistantBackendTarget,
 } from '../src/assistant-backend.ts'
@@ -41,7 +40,6 @@ import {
 } from '../src/hosted-assistant-config.ts'
 import { normalizeHostedAssistantConfig } from '../src/assistant/hosted-config.ts'
 
-
 import {
   timeZoneSchema,
   workoutFormatListResultSchema,
@@ -74,14 +72,6 @@ async function withTemporaryProcessEnv(
     }
   }
 }
-
-
-
-
-
-
-
-
 
 test('command helpers normalize top-level tokens and request ids', () => {
   assert.deepEqual(emptyArgsSchema.parse({}), {})
@@ -193,22 +183,6 @@ test('assistant backend targets trim config input and strip sensitive headers be
     sandbox: 'workspace-write',
   })
 
-  assert.equal(
-    assistantBackendTargetsEqual(
-      normalizedCodexTarget,
-      createAssistantBackendTarget({
-        approvalPolicy: 'never',
-        codexCommand: 'codex',
-        codexHome: '/tmp/codex-home',
-        model: 'gpt-4o',
-        oss: false,
-        profile: 'default',
-        provider: 'codex-cli',
-        sandbox: 'workspace-write',
-      }),
-    ),
-    true,
-  )
 })
 
 test('representative contract schemas stay wired to the owned setup/operator seams', () => {

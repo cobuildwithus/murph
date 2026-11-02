@@ -1703,3 +1703,7 @@ records the retry plumbing moved into the reader release and supersedes the
 earlier device-ingestion rollback restriction.
 
 Local product retirement: the CLI owns hosted onboarding; verification inventories exclude the retired setup and assistant wrapper packages. Inbox owners retain hosted normalization, storage, and repair without polling daemons. Release verification package discovery skips leftover `packages/*` folders that have no manifest.
+
+| `agent-docs/exec-plans/active/2026-11-02-remove-dead-local-residue.md` | Four-slice deletion of unsupported APIs, status projection, stale support material, and retired ChatGPT linking consumers. | Task execution plan | High | 2026-11-02 |
+| `packages/gateway-core/README.md` | Transport-neutral reply-route inference and shared route vocabulary. | Gateway API boundary | Medium | 2026-11-02 |
+| `packages/operator-config/README.md` | Operator configuration reads, hosted writes, provider normalization and channel contracts. | Operator configuration boundary | Medium | 2026-11-02 |
