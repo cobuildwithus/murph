@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { executeMurphDynamicToolRequest, resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tools.js'
-import { MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL } from '../src/assistant-codex/dynamic-tools/games.js'
+import { MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL, GAME_SELECTION_GUIDANCE } from '../src/assistant-codex/dynamic-tools/games.js'
 import { resolveAssistantGameHostDynamicTools } from '../src/assistant/codex-turn/planning.js'
 import { MURPH_FINISH_WITHOUT_REPLY_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.js'
 import { createAssistantHostedToolContext, type AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
@@ -36,7 +36,8 @@ describe('game dynamic tools', () => {
     expect(resolveMurphDynamicTools({ gamesAvailable: true })).not.toContain(MURPH_WRITE_RECAP_TOOL)
     expect(MURPH_UPDATE_GAME_TOOL.description).toContain('ordinary conversational agreement')
     expect(MURPH_UPDATE_GAME_TOOL.description).toContain('do not demand special words')
-    expect(MURPH_READ_GAME_TOOL.description).toContain('call what the loser owes a prize')
+    expect(MURPH_READ_GAME_TOOL.description).toContain('Call what the loser owes a prize')
+    expect(MURPH_READ_GAME_TOOL.description).toContain('a two-player game is a game, as the players and the app call it, never a challenge.')
     expect(MURPH_READ_GAME_TOOL.description).toContain('Never call it a ticket, bet, wager, stake or winnings')
   })
   it('advertises v1 limits and stakes without suggesting a legacy graph for every game', () => {
@@ -79,9 +80,14 @@ describe('game dynamic tools', () => {
     expect(port).not.toHaveBeenCalled()
     expect(JSON.stringify(result.rpcResult)).toMatch(/gameId|which task/)
   })
-  it.each([1, 2])('adds selection guidance only when several games are active: %s', async (count) => {
-    const games = Array.from({ length: count }, (_, index) => ({
-      id: `game_synthetic_${index}`, status: 'live' as const, lengthDays: 7, startsOn: null,
+  it.each([
+    { statuses: ['live'] as const, guided: false },
+    { statuses: ['live', 'settled'] as const, guided: false },
+    { statuses: ['live', 'live'] as const, guided: true },
+    { statuses: ['live', 'negotiating'] as const, guided: true },
+  ])('adds selection guidance only when several games are active: $statuses', async ({ statuses, guided }) => {
+    const games = statuses.map((status, index) => ({
+      id: `game_synthetic_${index}`, status, lengthDays: 7, startsOn: null,
       terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: index ? 'Read' : 'Walk' }], schedule: { days: [0, 1] }, stakes: [] },
       players: [], pendingChange: null, changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, editableFromDay: 1 },
     }))
@@ -89,9 +95,18 @@ describe('game dynamic tools', () => {
     const request = parse('read_game', {})!
     const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: { ...context(), groupTool: { request: async () => response } }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     const text = result.rpcResult.contentItems[0]?.text
-    if (count === 1) expect(text).toBe(JSON.stringify(response))
+    if (!guided) expect(text).toBe(JSON.stringify(response))
     else {
-      expect(text).toContain('ask which task before making any move')
+      expect(text).toContain(GAME_SELECTION_GUIDANCE)
+      // A move names its game only from the speaker's own words or the one game it can apply to; otherwise one question and no write.
+      expect(GAME_SELECTION_GUIDANCE).toContain('for marking a day not done, games where the speaker has a post that date; for restoring a day, games where that date does not show as posted, since a day marked not done reads as unposted')
+      // Photo silence and consent rules outrank the selection question.
+      expect(GAME_SELECTION_GUIDANCE).toContain('The photo rules still decide whether a photo gets any reply or save: a photo they keep quiet stays quiet.')
+      // What a photo shows narrows only unsolicited offers; an explicit save goes to the game the player names.
+      expect(GAME_SELECTION_GUIDANCE).toContain('for an unsolicited photo offer, the speaker’s games whose task it shows; for an explicit save, the game they name or the photo offer waiting on them.')
+      expect(GAME_SELECTION_GUIDANCE).toContain('for a change, games it would actually change')
+      expect(GAME_SELECTION_GUIDANCE).toContain('Never pick by which game came up last, a recent notice, the other player’s messages, or the newest or first game.')
+      expect(GAME_SELECTION_GUIDANCE).toContain('If exactly one game fits, act on it. If several fit, make no update_game or game_photo call: ask once, in one short question naming only those games by their tasks')
       expect(text).toContain('game_synthetic_0')
       expect(text).toContain('game_synthetic_1')
       expect(text).toContain('Read')
@@ -260,6 +275,8 @@ it('teaches one pending change, current-ask-only proposals, plain refusals and o
   expect(description).toContain('error gives a code, then the rule or next step')
   expect(description).toContain('is still open, not missed')
   expect(description).not.toMatch(/unposted/u)
+  expect(description).toContain('When a player asks to, say once and plainly that they stay as agreed for this game, then offer what can still change: its length or schedule from the next unstarted day, marking their own day not done, or new tasks or a new prize in their next game. Do not repeat their request back or ask it again.')
+  expect(description).toContain('Say a player asked for or wants a change, as in “Ava wants 14 days instead of 7”, never that they proposed it.')
 })
 
 

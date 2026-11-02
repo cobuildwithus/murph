@@ -522,7 +522,7 @@ async function assertPairCapacity(tx: Tx, first: string, second: string, now: Da
     where: { ...openPairWhere(first, second, now), ...(excludeId ? { id: { not: excludeId } } : {}) },
     select: { id: true }, take: GAME_MAX_OPEN_PER_PAIR,
   });
-  if (games.length >= GAME_MAX_OPEN_PER_PAIR) reject("TOO_MANY_GAMES", `You two already have ${GAME_MAX_OPEN_PER_PAIR} open games. Finish or cancel one before starting another.`);
+  if (games.length >= GAME_MAX_OPEN_PER_PAIR) reject("TOO_MANY_GAMES", `You two already have ${GAME_MAX_OPEN_PER_PAIR} open games. Finish one or cancel an unstarted invite before starting another.`);
 }
 
 async function maintainPair(first: string, second: string): Promise<void> {
@@ -1287,16 +1287,19 @@ export async function readGameRematchNotice(gameId: string, playerMemberIds: rea
     || !rematch.row.createdBy || !rematch.row.inviteeMemberId
     || !sameGamePlayers([rematch.row.createdBy, rematch.row.inviteeMemberId], playerMemberIds)
     || !sameGamePlayers(previous.row.players.map((player) => player.memberId), playerMemberIds)) return null;
-  const profile = await prisma.gameProfile.findUnique({
-    where: { memberId: rematch.row.createdBy }, select: { firstNameEncrypted: true },
+  const requesterId = rematch.row.createdBy;
+  const inviteeId = rematch.row.inviteeMemberId;
+  const profiles = await prisma.gameProfile.findMany({
+    where: { memberId: { in: [requesterId, inviteeId] } }, select: { memberId: true, firstNameEncrypted: true },
   });
-  if (!profile) return null;
+  const sealedNames = new Map(profiles.map((profile) => [profile.memberId, profile.firstNameEncrypted]));
+  // A missing profile opens as null, so either absent name withholds the notice.
   const plain = await openGameTexts([
     { ...gameTarget(previous.row, "terms_words"), value: previous.row.termsWordsEncrypted },
     { ...gameTarget(rematch.row, "terms_words"), value: rematch.row.termsWordsEncrypted },
-    { field: "first_name", table: "game_profile", rowId: rematch.row.createdBy, memberId: rematch.row.createdBy, value: profile.firstNameEncrypted },
+    ...[requesterId, inviteeId].map((memberId) => ({ field: "first_name", table: "game_profile" as const, rowId: memberId, memberId, value: sealedNames.get(memberId) })),
   ]);
-  if (!plain[0] || !plain[1] || !plain[2]) return null;
+  if (!plain[0] || !plain[1] || !plain[2] || !plain[3]) return null;
   const rules = (game: LoadedGame, wordsJson: string, membersBySeat: ReadonlyMap<number, string>) => {
     const terms = termsView(game.state, parseTermWords(wordsJson));
     const tasks = terms.tasks.map((task) => ({ memberId: membersBySeat.get(task.seat), text: task.text }));
@@ -1310,10 +1313,10 @@ export async function readGameRematchNotice(gameId: string, playerMemberIds: rea
     };
   };
   const previousRules = rules(previous, plain[0], new Map(previous.row.players.map((player) => [player.seat, player.memberId])));
-  const rematchRules = rules(rematch, plain[1], new Map([[0, rematch.row.createdBy], [1, rematch.row.inviteeMemberId]]));
+  const rematchRules = rules(rematch, plain[1], new Map([[0, requesterId], [1, inviteeId]]));
   if (!previousRules || !rematchRules) return null;
   return {
-    requesterName: plain[2],
+    players: [{ memberId: requesterId, name: plain[2], requester: true }, { memberId: inviteeId, name: plain[3], requester: false }],
     previous: previousRules,
     rematch: rematchRules,
     startsOn: fromDbDate(rematch.row.startsOn),

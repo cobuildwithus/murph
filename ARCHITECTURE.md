@@ -5764,8 +5764,9 @@ the model cannot name another actor or move the primary destination. Discovery
 returns all ten possible negotiating/live games before filling remaining room
 with up to five recent settled games, within the existing ten-game transport
 limit. Shared reads expose IDs and task words; every mutation requires an ID.
-Multi-game responses instruct Murph to ask which task when selection is
-ambiguous. Single-game instructions and responses keep their existing form.
+Multi-game responses instruct Murph to act only on the one game a move can
+apply to and otherwise ask once, naming only the candidate games. Single-game
+instructions and responses keep their existing form.
 
 Task and stake proposals prepare the next encrypted `terms_words` envelope outside the
 transaction, and compare the original envelope plus terms version under the

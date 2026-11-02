@@ -1,31 +1,63 @@
 import { describe, expect, it } from "vitest";
 import { hostedGameChatStateSchema } from "../src/game-tools.ts";
-import { GAME_LIVE_LORE_GUIDANCE, GAME_PRIZE_WORDS, buildGameChangeExpiredInstructions, buildGameChangeCancelledInstructions, buildGameKickoffInstructions, buildGameMissedDayInstructions, buildGameProposalInstructions, buildGameRecapInstructions, buildGameRematchInstructions, gameLiveLoreGuidanceForState } from "../src/game-chat-notifications.ts";
+import { GAME_LIVE_LORE_GUIDANCE, GAME_PRIZE_WORDS, buildGameChangeExpiredInstructions, buildGameChangeCancelledInstructions, buildGameInviteCancelledInstructions, buildGameKickoffInstructions, buildGameMissedDayInstructions, buildGameProposalInstructions, buildGameRecapInstructions, buildGameRematchInstructions, gameLiveLoreGuidanceForState } from "../src/game-chat-notifications.ts";
 
 describe("game v1 notification instructions", () => {
-  it("keeps a rematch short, app-controlled and free of link or lifecycle jargon", () => {
+  it("keeps a rematch short, app-controlled, named and free of link, emoji or lifecycle jargon", () => {
     const rules = { checkInKind: "photo" as const, lengthDays: 7, schedule: { days: [0, 1, 2, 3, 4] },
       stakes: [{ kind: "prize" as const, item: "breakfast" }], tasksByMember: { member_maya: "Walk", member_sam: "Walk" } };
-    const instructions = buildGameRematchInstructions({ requesterName: "Maya", previous: rules,
-      rematch: { ...rules, lengthDays: 10 }, startsOn: null });
-    expect(instructions).toContain("one short, natural message");
+    const players = [{ memberId: "member_sam", name: "Sam", requester: false }, { memberId: "member_maya", name: "Maya", requester: true }];
+    const instructions = buildGameRematchInstructions({ players, previous: rules, rematch: { ...rules, lengthDays: 10 }, startsOn: null });
+    expect(instructions).toContain("one short, natural message in Murph's usual warm, playful voice, with no emoji.");
+    expect(instructions).toContain("Name each change against the previous game, as in \"10 days instead of 7\". When tasks change, say who does what by name, as in \"Sam takes the stretch and Maya takes 25 squats\", never \"whoever had\" a task.");
     expect(instructions).toContain("Shake on it in the Murph app or suggest changes there");
-    expect(instructions).toContain("never call it the same game or the same challenge");
+    expect(instructions).toContain("never call it the same game.");
     expect(instructions).toContain("Do not include a link");
     expect(instructions).toContain("never use the words invite, round or token");
+    const { tasksByMember: _tasks, ...terms } = rules;
     expect(JSON.parse(instructions.split("\n").at(-1)!)).toEqual({
-      requester: "Maya", sameGame: false, previous: rules, rematch: { ...rules, lengthDays: 10 }, startsOn: null,
+      requester: "Maya", sameGame: false, startsOn: null, previous: terms, rematch: { ...terms, lengthDays: 10 },
+      players: [{ name: "Maya", requester: true, previousTask: "Walk", rematchTask: "Walk" }, { name: "Sam", requester: false, previousTask: "Walk", rematchTask: "Walk" }],
     });
+    // Names stand in for member keys, so no internal ID reaches the model.
+    expect(instructions).not.toContain("member_");
   });
   it("compares asymmetric rematch tasks by person when the requester changes seats", () => {
     const shared = { checkInKind: "photo" as const, lengthDays: 7, schedule: { days: [0, 1, 2, 3, 4] }, stakes: [] };
-    const instructions = buildGameRematchInstructions({ requesterName: "Sam", startsOn: null,
+    const players = [{ memberId: "member_sam", name: "Sam", requester: true }, { memberId: "member_alex", name: "Alex", requester: false }];
+    const same = JSON.parse(buildGameRematchInstructions({ players, startsOn: null,
       previous: { ...shared, tasksByMember: { member_alex: "Run", member_sam: "Lift" } },
-      rematch: { ...shared, tasksByMember: { member_sam: "Lift", member_alex: "Run" } } });
-    const data = JSON.parse(instructions.split("\n").at(-1)!);
-    expect(data.sameGame).toBe(true);
-    expect(data.previous.tasksByMember).toEqual({ member_alex: "Run", member_sam: "Lift" });
-    expect(data.rematch.tasksByMember).toEqual(data.previous.tasksByMember);
+      rematch: { ...shared, tasksByMember: { member_sam: "Lift", member_alex: "Run" } } }).split("\n").at(-1)!);
+    expect(same.sameGame).toBe(true);
+    const swapped = JSON.parse(buildGameRematchInstructions({ players, startsOn: null,
+      previous: { ...shared, tasksByMember: { member_alex: "Run", member_sam: "Lift" } },
+      rematch: { ...shared, tasksByMember: { member_alex: "Lift", member_sam: "Run" } } }).split("\n").at(-1)!);
+    expect(swapped.sameGame).toBe(false);
+    expect(swapped.players).toEqual([
+      { name: "Sam", requester: true, previousTask: "Lift", rematchTask: "Run" },
+      { name: "Alex", requester: false, previousTask: "Run", rematchTask: "Lift" },
+    ]);
+  });
+  it("words every notice as a game and an ask, and opens a missed day with the plain fact", () => {
+    const [game] = hostedGameChatStateSchema.parse({ games: [{
+      id: "game_synthetic", status: "live", startsOn: null, lengthDays: 7, pendingChange: null,
+      terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: "Steps" }, { seat: 1, text: "Plank" }], schedule: { count: 5 }, stakes: [] },
+      players: [{ memberId: "member_maya", seat: 0, firstName: "Maya", dayOne: "2030-03-04", timeZone: "UTC" }, { memberId: "member_sam", seat: 1, firstName: "Sam", dayOne: "2030-03-04", timeZone: "UTC" }],
+      changeControls: { canStartNow: false, canEdit: false, canEditSchedule: false, canEditStartDate: false, editableFromDay: null },
+    }] }).games;
+    const rules = { checkInKind: "photo" as const, lengthDays: 7, schedule: { count: 5 }, stakes: [], tasksByMember: { member_maya: "Steps", member_sam: "Plank" } };
+    const proposal = buildGameProposalInstructions({ change: { kind: "edit", lengthDays: 10 }, startsOn: null }, { proposerName: "Sam", recipientName: "Maya", lengthDays: 7 });
+    const missed = buildGameMissedDayInstructions({ playerName: "Maya", firstMissedDate: "2030-03-04", missedDates: ["2030-03-04"], transcript: [] });
+    const notices = [proposal, missed, buildGameKickoffInstructions({ kind: "started", game: game! }), buildGameChangeCancelledInstructions(), buildGameChangeExpiredInstructions("The schedule changed first."),
+      buildGameInviteCancelledInstructions(), buildGameRematchInstructions({ players: [{ memberId: "member_maya", name: "Maya", requester: true }, { memberId: "member_sam", name: "Sam", requester: false }], previous: rules, rematch: rules, startsOn: null })];
+    expect(GAME_PRIZE_WORDS).toContain("a two-player game is a game, as the players and the app call it, never a challenge.");
+    expect(GAME_PRIZE_WORDS).toContain("Join clauses with a comma, colon or full stop, never an em dash or a spaced hyphen.");
+    // The one rule that names the word is the only place it appears.
+    for (const notice of notices) expect(notice.replaceAll(GAME_PRIZE_WORDS, "")).not.toMatch(/challenge/iu);
+    expect(proposal).toContain("A player asked for a change to this game from the app.");
+    expect(proposal).toContain("Say the player wants or asked for the change, as in \"Sam wants to make it 10 days\", never that they proposed it or that it is a proposal.");
+    expect(proposal).not.toContain("proposed a challenge change");
+    expect(missed).toContain("Open by saying plainly whose post is missing and for which day, as in \"Maya, no steps post from you yesterday\"; any joke comes after that plain fact and never stands in for it, so no riddles or metaphors about the miss.");
   });
   it("explains a refused approval once without claiming the game ended", () => {
     const reason = "The proposed start date has passed. Propose a new date.";
@@ -33,9 +65,10 @@ describe("game v1 notification instructions", () => {
     expect(instructions).toContain("one brief, plain line");
     expect(instructions).toContain("could not apply and why");
     expect(instructions).toContain("Do not say the game was cancelled or changed");
+    expect(instructions).toContain("call it the requested change, never a proposal");
     expect(JSON.parse(instructions.split("\n").at(-1)!)).toEqual({reason});
   });
-  it("distinguishes a cancelled request from the challenge and a later request", () => {
+  it("distinguishes a cancelled request from the game and a later request", () => {
     const instructions = buildGameChangeCancelledInstructions();
     expect(instructions).toContain("one brief, natural group message");
     expect(instructions).toContain("did not alter the game");
