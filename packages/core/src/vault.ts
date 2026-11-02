@@ -3,6 +3,8 @@ import { listAuditShardPaths } from "./audit-storage.ts";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
+import { HostedColdHistoryUnavailableError } from "@murphai/runtime-state/node";
+
 import {
   collectEventRawReferencePaths,
   experimentDocumentRelativePath,
@@ -605,6 +607,7 @@ async function validateIntegrationIngestValidationFamily(
     await readIntegrationIngestEntries(vaultRoot);
     return [];
   } catch (error) {
+    if (error instanceof HostedColdHistoryUnavailableError) throw error;
     const relativePath = error instanceof VaultError && typeof error.details.relativePath === "string"
       ? error.details.relativePath
       : family.directory;

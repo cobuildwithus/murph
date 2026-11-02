@@ -816,8 +816,14 @@ async function runOfficialStripeCheckoutFixture(input: {
         ? /^Running fixture for: (payment_page|payment_method|payment_page_confirm)\r?\n$/u
           .exec(lastRun)?.[1] ?? "unknown"
         : "unknown";
-      const status = /^Request failed, status=([3-5][0-9]{2}), body=/u
-        .exec(stderr.text)?.[1] ?? "unknown";
+      const requestError = /^Request failed, status=([3-5][0-9]{2}), body=/u
+        .exec(stderr.text);
+      const status = requestError?.[1] ?? "unknown";
+      const details = formatStripeFixtureRejection(
+        stderr.state === "complete" && requestError
+          ? stderr.text.slice(requestError[0].length)
+          : null,
+      );
       const response = status === "unknown" ? "not_observed" : "http_rejection";
       const processState = signal !== null ? "signal" : code === null ? "unknown" : "exit";
       const exitCode = code !== null && Number.isInteger(code) && code >= 0 && code <= 255
@@ -825,11 +831,46 @@ async function runOfficialStripeCheckoutFixture(input: {
       reject(new HostedStripeBillingLiveError(
         `Official Stripe Checkout fixture ${timedOut ? "timed out" : "failed"} `
         + `(step=${step}, response=${response}, http_status=${status}, `
-        + `process=${processState}, exit_code=${exitCode}, `
+        + `${details}, process=${processState}, exit_code=${exitCode}, `
         + `stdout=${stdout.state}, stderr=${stderr.state}).`,
       ));
     });
   });
+}
+
+function formatStripeFixtureRejection(body: string | null): string {
+  const unknownDetails = "error_type=unknown, error_code=unknown, error_param=unknown";
+  if (body === null) return unknownDetails;
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (
+      !parsed
+      || typeof parsed !== "object"
+      || Array.isArray(parsed)
+      || !("error" in parsed)
+    ) {
+      return unknownDetails;
+    }
+    const error = parsed.error;
+    if (!error || typeof error !== "object" || Array.isArray(error)) {
+      return unknownDetails;
+    }
+    const type = [
+      "api_error", "card_error", "idempotency_error", "invalid_request_error",
+    ].find((value) => "type" in error && error.type === value) ?? "unknown";
+    const code = [
+      "parameter_missing", "parameter_unknown", "parameter_invalid_integer",
+      "resource_missing", "card_declined", "authentication_required",
+      "payment_intent_unexpected_state",
+    ].find((value) => "code" in error && error.code === value) ?? "unknown";
+    const param = [
+      "expected_amount", "payment_method",
+    ].find((value) => "param" in error && error.param === value) ?? "unknown";
+    return `error_type=${type}, error_code=${code}, error_param=${param}`;
+  } catch {
+    // JSON.parse errors can include private response text; discard them.
+    return unknownDetails;
+  }
 }
 
 function collectStripeFixtureOutput(stream: NodeJS.ReadableStream) {

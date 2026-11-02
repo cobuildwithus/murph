@@ -72,7 +72,7 @@ export function buildGameKickoffInstructions(input: { kind: "started"; game: Hos
   ].join("\n");
 }
 
-/** An addressed rematch stays in the pair's existing room and remains app-controlled. */
+/** An addressed rematch stays in the pair's room and can be agreed in chat or the app. */
 export function buildGameRematchInstructions(input: {
   /** Both players, keyed as in tasksByMember; the requester asked for the rematch. */
   players: ReadonlyArray<{ memberId: string; name: string; requester: boolean }>;
@@ -95,7 +95,7 @@ export function buildGameRematchInstructions(input: {
     "A player requested a rematch from the app. Tell the group in one short, natural message in Murph's usual warm, playful voice, with no emoji.",
     "Say that the requester wants a rematch. If sameGame is true, say it is the same game. If sameGame is false, briefly name only what changed between previous and rematch and never call it the same game.",
     "Name each change against the previous game, as in \"10 days instead of 7\". When tasks change, say who does what by name, as in \"Sam takes the stretch and Maya takes 25 squats\", never \"whoever had\" a task.",
-    "Tell the other player they can Shake on it in the Murph app or suggest changes there.",
+    "Tell the other player they can say yes right here or Shake on it in the Murph app, or ask for changes here or in the app.",
     "Do not include a link. In the message, never use the words invite, round or token, and do not mention internal IDs, delivery details or implementation details.",
     "An optional startsOn is the requested start date for the rematch. Mention it briefly when present, but it does not by itself make sameGame false.",
     GAME_PRIZE_WORDS,

@@ -1,3 +1,5 @@
+Cold-history write and receipt-replay rollback floor: [completed plan](exec-plans/completed/2026-11-02-ingest-cold-write-floor.md).
+
 Private meal thumbnail delivery, capture-based retention and deletion are owned by
 [`ios-meals.md`](product-specs/ios-meals.md); implementation is tracked in
 [the thumbnail plan](exec-plans/completed/2026-11-02-meal-photo-thumbnails.md).
@@ -7,9 +9,14 @@ Codex conversation continuity across instruction-only deploys is recorded in
 and [the verification report](../codex-thread-continuity-report.md).
 `../ARCHITECTURE.md` owns the mutable instruction and immutable tool contract.
 
+Cold-history retry allowance and rollback proof: [implementation plan](exec-plans/active/2026-11-02-cold-history-retry-allowance.md).
+
 Historical exact meal-photo association is tracked in
 [the implementation plan](exec-plans/completed/2026-11-02-meal-photos-exact.md);
 `product-specs/ios-meals.md` owns the read-time recovery rule.
+
+Two-person chat game setup and its parity/eval proof are tracked in
+[the implementation plan](exec-plans/completed/2026-11-02-game-chat-setup.md).
 
 Game history task/stake API fields and bounded hydration proof are tracked in
 [the implementation plan](exec-plans/completed/2026-11-02-game-history-terms.md).
@@ -826,6 +833,10 @@ notification retries retain their existing guarantees. Owners are
 `agent-docs/RELIABILITY.md` and `apps/cloudflare/README.md`; focused scenarios
 are indexed in `agent-docs/references/testing-ci-map.md`.
 
+Bounded Stripe fixture rejection categories and composed privacy proof are recorded in
+[the implementation plan](exec-plans/completed/2026-11-02-stripe-fixture-rejection-diagnostics.md);
+current verification ownership remains in `references/testing-ci-map.md`.
+
 The completed canary authority diagnostic plan is
 [`2026-09-13-canary-authority-reason-telemetry.md`](exec-plans/completed/2026-09-13-canary-authority-reason-telemetry.md).
 The canary runtime-authority and WebSocket queue-bound correction is tracked in
@@ -1013,7 +1024,7 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/feature-user-story-audit/testing-errors.md` | Test errors captured during the feature user-story audit. | Point-in-time feature audit | Low | 2026-06-21 |
 | `agent-docs/references/README.md` | Reference-pack overview and maintenance rules. | Reference pack conventions | Medium | 2026-03-12 |
 | `agent-docs/references/repo-scope.md` | Concrete repo scope and routing boundaries. | Repo ownership boundary | High | 2026-04-06 |
-| `agent-docs/references/testing-ci-map.md` | Verification map for packages, apps, locked usage-period acquisition, full canonical Codex tool-contract/CLI-upgrade guards and payload captures, hosted media follow-up proof, smoke flows, cancellation-config parity, exact-head PR CI, protected-main runtime proof, deferred-tool advertisement fixtures, canonical executors, shared runtime fixture preparation, compiler cache policy, and current coverage owners after OpenClaw and local setup retirement, including composed vault-share deadline, device dirty-payload classification/reconnect PostgreSQL proof, encrypted v2 hosted-local snapshot fixtures and canonical assertion readers with marked Docker bridge admission and canonical base64url IV validation, and independent system-work checkpoint ownership, active replica content, and metadata-only checkpoint timing with exact future-continuation owner release, accepted-runtime admission observation for reminder/device fairness, real Junction replay through a retained consumer wake and strict hosted completion with progress/auth checks, restored system-work completion after foreground replacement with real retry and second-message preemption proof, structural provider-stub failure diagnostics, shared Linq fixture CDN origins that preserve canonical metadata authentication, standby deadline fixtures, contention-aware PostgreSQL milestone proof, and monotonic foreground mailbox frontiers with same-user successor continuation evidence. Includes explicit native-binary selection, bounded live selector diagnostics, read-only exact-name discovery, selectable latency-query correctness and stress proof, migrated-database setup for the composed usage-denial proof, and bounded signed Linq webhook redelivery proof, plus deployed-binary Codex WebSocket acknowledgement and stall proof, and real-binary SSE/WebSocket instant-steering proof. Includes bounded official Stripe fixture step/status diagnostics and composed sanitizer proof. | Testing and CI truth | High | 2026-10-18 |
+| `agent-docs/references/testing-ci-map.md` | Verification map for packages, apps, locked usage-period acquisition, full canonical Codex tool-contract/CLI-upgrade guards and payload captures, hosted media follow-up proof, smoke flows, cancellation-config parity, exact-head PR CI, protected-main runtime proof, deferred-tool advertisement fixtures, canonical executors, shared runtime fixture preparation, compiler cache policy, and current coverage owners after OpenClaw and local setup retirement, including composed vault-share deadline, device dirty-payload classification/reconnect PostgreSQL proof, encrypted v2 hosted-local snapshot fixtures and canonical assertion readers with marked Docker bridge admission and canonical base64url IV validation, and independent system-work checkpoint ownership, active replica content, and metadata-only checkpoint timing with exact future-continuation owner release, accepted-runtime admission observation for reminder/device fairness, real Junction replay through a retained consumer wake and strict hosted completion with progress/auth checks, restored system-work completion after foreground replacement with real retry and second-message preemption proof, structural provider-stub failure diagnostics, shared Linq fixture CDN origins that preserve canonical metadata authentication, standby deadline fixtures, contention-aware PostgreSQL milestone proof, and monotonic foreground mailbox frontiers with same-user successor continuation evidence. Includes explicit native-binary selection, bounded live selector diagnostics, read-only exact-name discovery, selectable latency-query correctness and stress proof, migrated-database setup for the composed usage-denial proof, and bounded signed Linq webhook redelivery proof, plus deployed-binary Codex WebSocket acknowledgement and stall proof, and real-binary SSE/WebSocket instant-steering proof. Includes bounded official Stripe fixture step/status and closed provider rejection categories with composed sanitizer proof. | Testing and CI truth | High | 2026-10-18 |
 | `packages/core/bench/README.md` | Secret-free Docker import and hydration reproduction, required one-vCPU latency CI budgets, and sizing evidence limits. | Container CPU benchmark | Medium | 2026-09-04 |
 | `packages/core/bench/container-sizing.md` | Synthetic Docker CPU/RAM sizing matrix, foreground profiling, and limits of production downsizing evidence. | Container sizing investigation | Medium | 2026-09-09 |
 | `packages/query/bench/README.md` | Reproduce synthetic query resource measurements through public canonical and query APIs in constrained Docker containers. | Query resource benchmarks | Medium | 2026-09-09 |
@@ -1674,5 +1685,21 @@ Meal dish naming and photo-retention investigation are tracked in
 Legacy meal naming repair and shared write validation are tracked in
 [the active plan](exec-plans/active/2026-11-02-meal-legacy-names.md);
 `product-specs/ios-meals.md` owns its bounds, preservation and removal condition.
+
+Lazy closed-month integration-ingest storage, verification and rollout evidence are
+tracked in [the implementation report](exec-plans/completed/2026-11-02-ingest-cold-storage.md).
+`../ARCHITECTURE.md` and `../docs/hosted-account-data-deletion-export.md` own the
+reader, checkpoint and privacy contracts.
+
+The [reader-first split follow-up](exec-plans/active/2026-11-02-ingest-cold-storage-split.md)
+supersedes the original cold-storage report's deployment guidance and records the
+independent reader and producer commit verification.
+
+The [historical ingest write correction](exec-plans/active/2026-11-02-ingest-historical-write-fix.md)
+tracks the reader backfill regression and producer thaw/retry proof.
+
+The [retry-safe reader floor follow-up](exec-plans/active/2026-11-02-ingest-reader-retry-floor.md)
+records the retry plumbing moved into the reader release and supersedes the
+earlier device-ingestion rollback restriction.
 
 Local product retirement: the CLI owns hosted onboarding; verification inventories exclude the retired setup and assistant wrapper packages. Inbox owners retain hosted normalization, storage, and repair without polling daemons. Release verification package discovery skips leftover `packages/*` folders that have no manifest.

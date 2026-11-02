@@ -30,7 +30,12 @@ import {
   listInboxAttachmentRetentionRecords,
 } from "@murphai/inboxd/retention";
 import {
-  resolveAssistantStatePaths,
+  HOSTED_MEDIA_REFS_SCHEMA,
+  hostedColdIngestMonth,
+  readHostedMediaReferenceCatalogueValue,
+  readHostedColdIngestReferences,
+  HostedColdHistoryUnavailableError,
+  resolveHostedMediaReferenceCataloguePath,
 } from "@murphai/runtime-state/node";
 
 import { toHostedArtifactPathKey } from "./artifact-paths.ts";
@@ -39,9 +44,7 @@ import type {
   HostedRuntimeMediaStore,
 } from "./platform.ts";
 
-export const HOSTED_MEDIA_REFS_RELATIVE_PATH =
-  ".runtime/operations/assistant/hosted-media-refs.json";
-export const HOSTED_MEDIA_REFS_SCHEMA = "murph.hosted-media-refs.v1";
+export { HOSTED_MEDIA_REFS_RELATIVE_PATH, HOSTED_MEDIA_REFS_SCHEMA } from "@murphai/runtime-state/node";
 
 const RAW_INBOX_PREFIX = `${VAULT_LAYOUT.rawInboxDirectory}/`;
 const RAW_MEALS_PREFIX = `${VAULT_LAYOUT.rawMealsDirectory}/`;
@@ -86,6 +89,7 @@ export async function publishHostedWorkspaceMediaReferencesForSnapshot(input: {
   vaultRoot: string;
 }): Promise<PublishHostedWorkspaceMediaReferencesResult> {
   if (!input.mediaStore) {
+    if ((await readHostedColdIngestReferences(input.vaultRoot)).length > 0) throw new HostedColdHistoryUnavailableError();
     return {
       excludedVaultPaths: [],
       prunedMediaCount: 0,
@@ -160,7 +164,12 @@ async function prepareHostedWorkspaceMediaReferences(input: {
     existingCatalogue.entries.map((entry) => [entry.relativePath, entry]),
   );
   const candidates = await collectHostedMediaCandidates(input.vaultRoot, input.signal);
-  const nextEntries: HostedMediaReference[] = [];
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  const nextEntries: HostedMediaReference[] = existingCatalogue.entries.filter((entry) => entry.mediaKind === "integration-ingest");
+  // A clock rollback must never externalize the current/future month.
+  if (nextEntries.some((entry) => (hostedColdIngestMonth(entry.relativePath) ?? "") >= currentMonth)) {
+    throw new Error("Cold ingest month is not closed; retry with a current workspace clock.");
+  }
   let uploadedMediaCount = 0;
 
   for (const candidate of candidates) {
@@ -308,15 +317,7 @@ export async function materializeHostedWorkspaceMediaReferences(input: {
 export async function readHostedMediaReferenceCatalogue(input: {
   vaultRoot: string;
 }): Promise<HostedMediaReferenceCatalogue> {
-  try {
-    const raw = await readFile(resolveHostedMediaReferenceCataloguePath(input.vaultRoot), "utf8");
-    return parseHostedMediaReferenceCatalogue(JSON.parse(raw) as unknown);
-  } catch {
-    return {
-      entries: [],
-      schema: HOSTED_MEDIA_REFS_SCHEMA,
-    };
-  }
+  return parseHostedMediaReferenceCatalogue(await readHostedMediaReferenceCatalogueValue(input.vaultRoot));
 }
 
 async function collectHostedMediaCandidates(
@@ -642,13 +643,6 @@ export async function writeHostedMediaReferenceCatalogue(input: {
   }
 }
 
-function resolveHostedMediaReferenceCataloguePath(vaultRoot: string): string {
-  return path.join(
-    resolveAssistantStatePaths(path.resolve(vaultRoot)).assistantStateRoot,
-    "hosted-media-refs.json",
-  );
-}
-
 function parseHostedMediaReferenceCatalogue(
   value: unknown,
 ): HostedMediaReferenceCatalogue {
@@ -676,7 +670,7 @@ function parseHostedMediaReference(value: unknown): HostedMediaReference | null 
   const sha256 = normalizeHostedMediaSha256(value.sha256);
   const byteSize = normalizeHostedMediaByteSize(value.byteSize);
   const expiresAt = normalizeHostedMediaExpiresAt(value.expiresAt);
-  const mediaKind = value.mediaKind === "image" || value.mediaKind === "video"
+  const mediaKind = value.mediaKind === "image" || value.mediaKind === "video" || value.mediaKind === "integration-ingest"
     ? value.mediaKind
     : null;
   const recordedAt = normalizeHostedMediaRecordedAt(value.recordedAt);
@@ -831,6 +825,7 @@ function normalizeHostedMediaCataloguePath(value: unknown): string | null {
       normalized.startsWith(RAW_INBOX_PREFIX)
       || normalized.startsWith(RAW_CAPTURES_PREFIX)
       || normalized.startsWith(RAW_MEALS_PREFIX)
+      || hostedColdIngestMonth(normalized) !== null
     ) {
       return normalized;
     }

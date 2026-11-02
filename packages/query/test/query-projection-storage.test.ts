@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
@@ -247,6 +247,31 @@ test("full publication rolls back metric references together and clears retired 
     } finally {
       replaced.close();
     }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("cold ingest absence leaves the existing query database and freshness unchanged", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "murph-query-cold-ingests-"));
+  try {
+    await initializeVault({ vaultRoot: root });
+    const shard = path.join(root, "ledger/integration-ingests/2020/2020-01.jsonl.br");
+    await mkdir(path.dirname(shard), { recursive: true });
+    await writeFile(shard, "synthetic compressed history");
+    await addMeal({ vaultRoot: root, occurredAt: "2026-09-01T12:00:00Z", note: "Synthetic meal" });
+    await rebuildQueryProjection(root);
+    const manifest = await listCanonicalSourceManifest(root);
+    const status = await getQueryProjectionStatus(root);
+    const location = currentQueryProjectionLocation(root);
+    const before = await readFile(location.absolutePath);
+    assert.equal(status.fresh, true);
+    await rm(shard);
+    assert.deepEqual(await listCanonicalSourceManifest(root), manifest);
+    assert.deepEqual(await getQueryProjectionStatus(root), status);
+    await listCanonicalEntitiesRuntime(root);
+    assert.deepEqual(await readFile(location.absolutePath), before);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-11-02",
+  "order": 100,
+  "item": {
+    "id": "game-chat-setup",
+    "kind": "feature",
+    "priority": 4,
+    "title": "Set up a game in your chat",
+    "summary": "Ask Murph to set up a one-on-one game in a chat with just you, the other player and Murph.",
+    "details": "Choose your tasks, days, length, start day and a prize or dare. Murph lays out the terms, and the other player agrees in chat before the game starts. You can also accept a Play again rematch in that chat. Both players need a game profile in the Murph app. Games remain invite only.",
+    "relevanceTags": [
+      "games",
+      "group-chat"
+    ],
+    "sourcePullRequests": []
+  }
+}

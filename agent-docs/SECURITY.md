@@ -396,6 +396,12 @@ to apply after cutover.
   owner-scoped hosted media references before excluding them from the portable
   archive and receipt payload artifacts. A sparse raw receipt must carry its
   external media identity; receipt replay restores metadata before selected use.
+  Closed integration-ingest shards use this same encrypted media lane and
+  member-bound AAD, with hashed object identities and no retention deadline.
+  Only canonical monthly Brotli paths qualify; invalid cold catalogues fail
+  closed. Incomplete uploads retain the existing temporary orphan deadline,
+  while registered, unretired history cannot expire. Account erasure still
+  deletes the entire member media prefix without downloading plaintext.
   Durable captures do not inherit inbox TTLs. The existing runner SQL owner
   claims irreversible retirement before network deletion, rejects preservation
   of retired identities, and keeps retry evidence until ciphertext is purged.

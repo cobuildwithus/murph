@@ -106,6 +106,13 @@ const hostedWebPrismaPredeployHistoricalMigrationIds = new Set([
 
 const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
   [
+    "20261102120000_hosted_cold_ingest_media",
+    // Widens media_kind with integration-ingest and adds a check that only
+    // constrains that new kind; every existing row and old writer stays valid.
+    // Atomic NOT VALID replacement bounds the metadata lock before validation.
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
+  [
     "20261021180000_game_heart_rate_entry",
     // Only widens photo/excuse to include heart_rate; all old rows and writers
     // remain valid. Atomic NOT VALID replacement bounds the metadata lock;

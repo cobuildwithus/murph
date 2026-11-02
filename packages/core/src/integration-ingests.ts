@@ -10,6 +10,9 @@ import {
   inflateRawSync,
 } from "node:zlib";
 
+import { HostedColdHistoryUnavailableError } from "@murphai/runtime-state/node";
+import { materializeIntegrationIngestHistory, thawIntegrationIngestHistoryForAppend } from "./integration-ingest-cold-storage.ts";
+
 import {
   integrationIngestReceiptSchema,
   integrationIngestRecordSchema,
@@ -913,7 +916,8 @@ export async function selectNovelIntegrationIngestEvidence(
       input.vaultRoot,
       [integrationIngestShardPath(input.importedAt)],
     );
-  } catch {
+  } catch (error) {
+    if (error instanceof HostedColdHistoryUnavailableError) throw error;
     return failOpenSelection();
   }
 
@@ -1291,6 +1295,7 @@ export async function prepareLiveIntegrationIngestAppendPayload(
   targetRelativePath: string,
   payload: string,
 ): Promise<string> {
+  await materializeIntegrationIngestHistory(vaultRoot, [targetRelativePath]);
   const target = resolveVaultPath(vaultRoot, targetRelativePath);
   if (!(await pathExists(target.absolutePath))) {
     return payload;
@@ -1950,6 +1955,7 @@ export async function appendArchivedIntegrationIngestShard({
   targetRelativePath,
   vaultRoot,
 }: AppendArchivedIntegrationIngestShardInput): Promise<AppendArchivedIntegrationIngestShardResult> {
+  await thawIntegrationIngestHistoryForAppend(vaultRoot, targetRelativePath);
   const source = await readArchivedIntegrationIngestShardSource(vaultRoot, targetRelativePath);
   const payloadBytes = Buffer.from(payload, "utf8");
   const records = await parseIntegrationIngestAppendPayload(payload, targetRelativePath);
@@ -2056,6 +2062,7 @@ export async function truncateArchivedIntegrationIngestShard({
   targetRelativePath,
   vaultRoot,
 }: TruncateArchivedIntegrationIngestShardInput): Promise<void> {
+  await materializeIntegrationIngestHistory(vaultRoot, [targetRelativePath]);
   const source = await readArchivedIntegrationIngestShardSource(vaultRoot, targetRelativePath);
   const inspection = await inspectIntegrationIngestSourceBytes(vaultRoot, source, {
     prefixByteLength: expectedBaseByteLength,
@@ -2304,6 +2311,7 @@ async function openIntegrationIngestLineStream(
 async function listIntegrationIngestRowSources(
   vaultRoot: string,
 ): Promise<IntegrationIngestRowSource[]> {
+  await materializeIntegrationIngestHistory(vaultRoot);
   const extensions = [".jsonl", ...INTEGRATION_INGEST_ARCHIVE_SUFFIXES.map((suffix) => `.jsonl${suffix}`)];
   const paths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.integrationIngestLedgerDirectory);
   return resolveIntegrationIngestShardRepresentations(
@@ -2329,6 +2337,7 @@ async function readIntegrationIngestShardSources(
   vaultRoot: string,
   logicalPath: string,
 ): Promise<IntegrationIngestRowSource[]> {
+  await materializeIntegrationIngestHistory(vaultRoot, [logicalPath]);
   const sources: IntegrationIngestRowSource[] = [];
   for (const sourcePath of [logicalPath, ...INTEGRATION_INGEST_ARCHIVE_SUFFIXES.map((suffix) => `${logicalPath}${suffix}`)]) {
     if (await pathExists(resolveVaultPath(vaultRoot, sourcePath).absolutePath)) {

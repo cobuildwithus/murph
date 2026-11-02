@@ -1,6 +1,13 @@
+import type { HostedWorkspaceArtifactMaterializer } from "../src/hosted-runtime/models.ts";
+import { brotliCompressSync } from "node:zlib";
+import { SqliteDeviceSyncStore } from "@murphai/device-syncd/service";
+import { createHostedArtifactMaterializer } from "../src/hosted-runtime/artifacts.ts";
+import { writeHostedMediaReferenceCatalogue, readHostedMediaReferenceCatalogue } from "../src/hosted-runtime/media-references.ts";
+import type { HostedRuntimeMediaStore } from "../src/hosted-runtime/platform.ts";
 import {
   createPlatform as createV2SnapshotFixturePlatform,
   createSnapshotFixtureRef,
+  createWorkspaceSnapshotV2Ref,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 import assert from "node:assert/strict";
 import { listMetricPoints, rebuildQueryProjection } from "@murphai/query";
@@ -78,6 +85,9 @@ import {
   applyCanonicalWriteBatch,
   initializeVault,
   isActiveCanonicalWriteLockError,
+  readIntegrationIngestEntries,
+  buildIntegrationIngestRecord,
+  readEvent,
 } from "@murphai/core";
 import { describe, expect, test, vi } from "vitest";
 import { persistCanonicalInboxCapture } from "@murphai/inboxd";
@@ -12046,6 +12056,127 @@ describe("foreground device ingestion", () => {
     }
   });
 
+  test.each(["absent", "empty"] as const)("publishes historical WHOOP data before acknowledging payload with %s cold catalogue", async (catalogue) => {
+    const fixture = await createForegroundDeviceFixture(10, {
+      now: "2026-11-02T12:00:00.000Z", start: "2026-10-29T22:00:00.000Z", end: "2026-10-30T06:00:00.000Z",
+    });
+    try {
+      if (catalogue === "empty") {
+        const refs = path.join(fixture.vaultRoot, ".runtime/operations/assistant/hosted-media-refs.json");
+        await mkdir(path.dirname(refs), { recursive: true });
+        await writeFile(refs, JSON.stringify({ schema: "murph.hosted-media-refs.v1", entries: [] }));
+      }
+      fixture.stageDeviceWake();
+      await fixture.run(async () => {
+        await waitForCondition(() => fixture.effects.length > 0, 5_000);
+        return { progressed: false };
+      });
+      const ingests = await readIntegrationIngestEntries(fixture.vaultRoot);
+      assert.ok(ingests.length > 0, "historical provider evidence must publish before acknowledgement");
+      assert.ok(ingests.some((entry) => entry.record.importedAt.startsWith("2026-10")));
+      assert.ok((await readFile(path.join(fixture.vaultRoot, "ledger/integration-ingests/2026/2026-10.jsonl"), "utf8")).length > 0);
+      const eventId = ingests.flatMap((entry) => entry.record.outputs.events.map((event) => event.id))[0];
+      assert.ok(eventId);
+      assert.ok(await readEvent({ vaultRoot: fixture.vaultRoot, eventId }));
+      await rebuildQueryProjection(fixture.vaultRoot);
+      assert.ok((await listMetricPoints(fixture.vaultRoot, { limit: null })).some((point) => point.metricKey === "readiness-score"));
+      assert.ok(fixture.receiptCounts.length > 0, "canonical publication must be durable before ack");
+      assert.equal(fixture.acks.length, 0);
+      for (const effect of fixture.effects.splice(0)) await effect();
+      assert.equal(fixture.acks.length, 1);
+      assert.deepEqual(fixture.acks[0]?.processedDirtyPayloadIds, ["payload_concurrent"]);
+    } finally { await fixture.cleanup(); }
+  });
+
+  test.each(["available", "missing", "corrupt"] as const)("historical WHOOP import thaws cold month or retains dirty payload (%s)", async (availability) => {
+    const fixture = await createForegroundDeviceFixture(10, {
+      now: "2026-11-02T12:00:00.000Z", start: "2026-10-29T22:00:00.000Z", end: "2026-10-30T06:00:00.000Z",
+    });
+    const failJob = vi.spyOn(SqliteDeviceSyncStore.prototype, "failJobIfOwned");
+    const objects = new Map<string, Uint8Array>();
+    const mediaStore: HostedRuntimeMediaStore = {
+      put: async (entry) => { objects.set(entry.mediaId, entry.bytes); },
+      get: async (entry) => availability === "missing" ? null : availability === "corrupt"
+        ? new Uint8Array(entry.byteSize) : objects.get(entry.mediaId) ?? null,
+    };
+    const relativePath = "ledger/integration-ingests/2026/2026-10.jsonl.br";
+    try {
+      const prior = buildIntegrationIngestRecord({ id: "xfm_prior", provider: "synthetic", source: "device",
+        importedAt: "2026-10-01T00:00:00.000Z", parts: [], eventOutputs: [], eventIdsComplete: true,
+        sampleIds: [], sampleIdsComplete: true, eventCount: 0, sampleCount: 0 });
+      await mkdir(path.dirname(path.join(fixture.vaultRoot, relativePath)), { recursive: true });
+      const original = brotliCompressSync(Buffer.from(`${JSON.stringify(prior)}\n`));
+      await writeFile(path.join(fixture.vaultRoot, relativePath), original);
+      const sha256 = createHash("sha256").update(original).digest("hex");
+      const cold = { relativePath, mediaKind: "integration-ingest" as const, expiresAt: null,
+        mediaId: sha256, sha256, byteSize: original.length,
+        mimeType: "application/octet-stream", recordedAt: "2026-10-01T00:00:00.000Z" };
+      objects.set(cold.mediaId, original);
+      await writeHostedMediaReferenceCatalogue({ vaultRoot: fixture.vaultRoot,
+        catalogue: { schema: "murph.hosted-media-refs.v1", entries: [cold] } });
+      await rm(path.join(fixture.vaultRoot, relativePath));
+      const baseSnapshot = await snapshotHostedBundleRoots({ kind: "vault", roots: [{ root: fixture.vaultRoot, rootKey: "vault" }] });
+      assert.ok(baseSnapshot);
+      fixture.materializeWorkspaceArtifacts = createHostedArtifactMaterializer({
+        vaultRoot: fixture.vaultRoot, operatorHomeRoot: fixture.vaultRoot, mediaStore,
+      });
+      fixture.stageDeviceWake();
+      await fixture.run(async () => {
+        await waitForCondition(() => fixture.effects.length > 0, 5_000);
+        return { progressed: false };
+      });
+      assert.equal(fixture.acks.length, 0);
+      if (availability === "available") {
+        assert.equal(failJob.mock.calls.length, 0);
+        const records = await readIntegrationIngestEntries(fixture.vaultRoot);
+        assert.ok(records.some((entry) => entry.record.id === prior.id));
+        assert.ok(records.some((entry) => entry.record.provider === "whoop"));
+        assert.deepEqual((await readHostedMediaReferenceCatalogue({ vaultRoot: fixture.vaultRoot })).entries, []);
+        await rebuildQueryProjection(fixture.vaultRoot);
+        assert.ok((await listMetricPoints(fixture.vaultRoot, { limit: null })).some((point) => point.metricKey === "readiness-score"));
+        for (const effect of fixture.effects.splice(0)) await effect();
+        assert.deepEqual(fixture.acks[0]?.processedDirtyPayloadIds, ["payload_concurrent"]);
+        assert.notEqual(createHash("sha256").update(await readFile(path.join(fixture.vaultRoot, relativePath))).digest("hex"), cold.sha256);
+        assert.deepEqual(Buffer.from(objects.get(cold.mediaId)!), original, "older snapshots retain immutable ciphertext source");
+        await fixture.owner?.quiesce();
+        // A durable append receipt may replay onto the previous sparse snapshot.
+        // Missing history must retain that receipt for retry, never reset it away.
+        const restoreInput = { vaultRoot: fixture.vaultRoot,
+          workspace: createWorkspaceState({ snapshotRef: createWorkspaceSnapshotV2Ref("synthetic-cold-receipt"),
+            redactedStatus: fixture.workspace.redactedStatus }),
+          platform: { ...fixture.platform, mediaStore: { ...mediaStore, get: async () => null },
+            workspaceSnapshotPort: { ...createV2SnapshotFixturePlatform({ mailboxPort: null, workspacePort: null }).workspaceSnapshotPort!,
+              async restoreWorkspaceSnapshot() {
+                await restoreHostedBundleRoots({ bytes: baseSnapshot, expectedKind: "vault", roots: { vault: fixture.vaultRoot } });
+              },
+            },
+          },
+        };
+        await expect(restoreHostedWorkspaceRuntimeJobWorkspace(restoreInput))
+          .rejects.toMatchObject({ code: "HOSTED_COLD_HISTORY_UNAVAILABLE", retryable: true });
+        const recovered = await restoreHostedWorkspaceRuntimeJobWorkspace({ ...restoreInput,
+          platform: { ...restoreInput.platform, mediaStore } });
+        assert.equal(recovered.canonicalWriteReceiptRecoveryFailed, false);
+        assert.ok(recovered.canonicalWriteReceiptCount > 0);
+        assert.deepEqual((await readIntegrationIngestEntries(fixture.vaultRoot)).map((entry) => entry.record), records.map((entry) => entry.record));
+        assert.deepEqual((await readHostedMediaReferenceCatalogue({ vaultRoot: fixture.vaultRoot })).entries, []);
+      } else {
+        const failure = failJob.mock.calls.find((call) => call[3] === "HOSTED_COLD_HISTORY_UNAVAILABLE");
+        assert.ok(failure, "typed cold failure must reach the real job owner");
+        assert.equal(failure[6], true, "failure must be retryable");
+        assert.equal(failure[7], true, "accepted work must survive the retry budget");
+        const transition = failJob.mock.results[failJob.mock.calls.indexOf(failure)]!;
+        assert.equal(transition.type, "return");
+        assert.equal(transition.value?.disposition, "queued");
+        for (const effect of fixture.effects.splice(0)) await effect();
+        assert.deepEqual(fixture.acks.flatMap((ack) => ack.processedDirtyPayloadIds ?? []), [],
+          "revision-only progress cannot acknowledge the unpublished payload");
+        assert.deepEqual((await readHostedMediaReferenceCatalogue({ vaultRoot: fixture.vaultRoot })).entries, [cold]);
+        await assert.rejects(readFile(path.join(fixture.vaultRoot, relativePath)), { code: "ENOENT" });
+      }
+    } finally { failJob.mockRestore(); await fixture.cleanup(); }
+  });
+
   test("imports newly staged device data while the model is held and preserves one receipt chain", async () => {
     const fixture = await createForegroundDeviceFixture();
     const modelStarted = createDeferred<void>();
@@ -12287,9 +12418,10 @@ describe("foreground device ingestion", () => {
   });
 });
 
-async function createForegroundDeviceFixture(limitPerLane = 10) {
+async function createForegroundDeviceFixture(limitPerLane = 10, history?: { now: string; start: string; end: string }) {
+  const now = history?.now ?? TEST_NOW;
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "synthetic-concurrent-device-"));
-  await initializeVault({ createdAt: TEST_NOW, vaultRoot, timezone: "UTC" });
+  await initializeVault({ createdAt: now, vaultRoot, timezone: "UTC" });
   const authority = new AbortController();
   const items: HostedMailboxItem[] = [];
   const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
@@ -12302,10 +12434,10 @@ async function createForegroundDeviceFixture(limitPerLane = 10) {
   const wake: HostedExecutionDeviceSyncWake = {
     connectionId: "connection_concurrent",
     eventId: "device-sync.wake:concurrent",
-    expectedConnectedAt: TEST_NOW,
+    expectedConnectedAt: now,
     hint: { reason: "dirty" },
     kind: "device-sync.wake",
-    occurredAt: TEST_NOW,
+    occurredAt: now,
     provider: "whoop",
     reason: "webhook_hint",
     userId: TEST_USER_ID,
@@ -12313,7 +12445,7 @@ async function createForegroundDeviceFixture(limitPerLane = 10) {
   const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
     async createConnectLink() { throw new Error("No connection creation in ingestion"); },
     async applyUpdates(request) {
-      return { appliedAt: TEST_NOW, userId: TEST_USER_ID, updates: request.updates.map((update) => ({
+      return { appliedAt: now, userId: TEST_USER_ID, updates: request.updates.map((update) => ({
         connection: null, connectionId: update.connectionId, status: "updated" as const,
         tokenUpdate: "unchanged" as const, writeUpdate: "applied" as const,
       })) };
@@ -12323,7 +12455,7 @@ async function createForegroundDeviceFixture(limitPerLane = 10) {
         connections: [{
           connection: {
             accessTokenExpiresAt: "2099-01-01T00:00:00.000Z",
-            connectedAt: TEST_NOW, createdAt: TEST_NOW, updatedAt: TEST_NOW,
+            connectedAt: now, createdAt: now, updatedAt: now,
             displayName: "Synthetic device", externalAccountId: "synthetic_device",
             id: "connection_concurrent", metadata: {}, provider: "whoop",
             scopes: ["offline", "read:sleep", "read:recovery"], status: "active",
@@ -12340,7 +12472,7 @@ async function createForegroundDeviceFixture(limitPerLane = 10) {
           },
           sources: [],
         }],
-        generatedAt: TEST_NOW, userId: TEST_USER_ID,
+        generatedAt: now, userId: TEST_USER_ID,
       };
     },
     async fetchDirtyStates() {
@@ -12352,7 +12484,7 @@ async function createForegroundDeviceFixture(limitPerLane = 10) {
             payload: { resourceType: "recovery", resourceId: "sleep_concurrent" },
             resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop",
             windowEnd: null, windowStart: null }],
-          eventCount: "1", latestDirtyAt: TEST_NOW, provider: "whoop",
+          eventCount: "1", latestDirtyAt: now, provider: "whoop",
           resourceCategoryCounts: { summary: 1 }, sourceProviderCounts: { whoop: 1 },
           userId: TEST_USER_ID, windowEnd: null, windowStart: null,
         }],
@@ -12364,7 +12496,7 @@ async function createForegroundDeviceFixture(limitPerLane = 10) {
         connectionId: request.connectionId,
         dirtyRevision: fixture.newerDirtyRevision ? "8" : request.processedRevision,
         processedRevision: request.processedRevision, recorded: true,
-        stillDirty: fixture.newerDirtyRevision, nextWakeAt: fixture.newerDirtyRevision ? TEST_NOW : null,
+        stillDirty: fixture.newerDirtyRevision, nextWakeAt: fixture.newerDirtyRevision ? now : null,
         userId: TEST_USER_ID,
       };
     },
@@ -12379,7 +12511,7 @@ async function createForegroundDeviceFixture(limitPerLane = 10) {
     deviceSyncPort,
   };
   const ownerInput: Parameters<typeof createHostedWorkspaceSystemWork>[0]["preparation"] = {
-    now: () => TEST_NOW,
+    now: () => now,
     operatorHomeRoot: path.join(vaultRoot, ".runtime", "synthetic-operator"),
     runtime: {
       commitTimeoutMs: null, forwardedEnv: {}, platform, platformEnv: {}, userEnv: {},
@@ -12402,6 +12534,7 @@ async function createForegroundDeviceFixture(limitPerLane = 10) {
     newerDirtyRevision: false, providerAborted: false, conversationImports: 0,
     providerFetches: 0, activeProviderRequests: 0, peakProviderRequests: 0,
     holdBody: false,
+    materializeWorkspaceArtifacts: undefined as HostedWorkspaceArtifactMaterializer | undefined,
     holdProvider: null as ((signal: AbortSignal) => Promise<void>) | null,
     beforeDeviceCheckpoint: null as (() => Promise<void>) | null,
     stageDeviceWake() {
@@ -12464,8 +12597,9 @@ async function createForegroundDeviceFixture(limitPerLane = 10) {
           }
           return { status: "imported" };
         },
+        materializeWorkspaceArtifacts: fixture.materializeWorkspaceArtifacts,
         kickSystemWork: () => fixture.owner?.kick(),
-        limitPerLane, now: () => TEST_NOW, platform, requestId: "request_concurrent_device",
+        limitPerLane, now: () => now, platform, requestId: "request_concurrent_device",
         runAssistantPhase, runtimeWakeSignal, signal: authority.signal,
         trackLocalWorkspaceMutationCompletion: (completion) => { if (completion) tracked.push(completion); },
         vaultRoot, workspace: fixture.workspace,
@@ -12510,8 +12644,8 @@ async function createForegroundDeviceFixture(limitPerLane = 10) {
         }));
       }
       const response = url.pathname.endsWith("/recovery")
-        ? { sleep_id: "sleep_concurrent", updated_at: TEST_NOW, score: { recovery_score: 72, resting_heart_rate: 54 } }
-        : { id: "sleep_concurrent", cycle_id: "cycle_concurrent", start: "2026-04-24T22:00:00.000Z", end: "2026-04-25T06:00:00.000Z", updated_at: TEST_NOW };
+        ? { sleep_id: "sleep_concurrent", updated_at: now, score: { recovery_score: 72, resting_heart_rate: 54 } }
+        : { id: "sleep_concurrent", cycle_id: "cycle_concurrent", start: history?.start ?? "2026-04-24T22:00:00.000Z", end: history?.end ?? "2026-04-25T06:00:00.000Z", updated_at: now };
       return new Response(JSON.stringify(response), { headers: { "content-type": "application/json" } });
     } finally {
       fixture.activeProviderRequests -= 1;

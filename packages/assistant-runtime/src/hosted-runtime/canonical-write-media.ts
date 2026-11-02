@@ -143,6 +143,7 @@ function readCanonicalEventMediaReferencePaths(
 function toHostedMediaReceiptAction(
   entry: HostedMediaReference,
 ): Extract<HostedCanonicalWriteReceiptAction, { kind: "raw_upsert" }> {
+  if (entry.mediaKind === "integration-ingest") throw new Error("Cold history cannot become a raw media receipt.");
   return {
     kind: "raw_upsert",
     targetRelativePath: entry.relativePath,

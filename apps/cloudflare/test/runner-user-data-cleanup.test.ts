@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   hostedBundleUserPrefix,
+  hostedMediaObjectKey,
   hostedGameMediaObjectKey,
   hostedMealPhotoUserPrefix,
   hostedPrivateMediaUserPrefix,
@@ -37,6 +38,20 @@ describe("hosted runner user data cleanup", () => {
   afterEach(() => {
     hostedExecutionMocks.emitHostedExecutionStructuredLog.mockReset();
     vi.restoreAllMocks();
+  });
+
+  it("deletes cold history through the existing media prefix without downloading it", async () => {
+    const bucket = new ListableMemoryEncryptedR2Bucket();
+    const mediaId = "a".repeat(64);
+    const coldKey = await hostedMediaObjectKey({ userId: USER_ID, mediaId });
+    const otherKey = await hostedMediaObjectKey({ userId: "synthetic_other", mediaId });
+    await bucket.put(coldKey, "sealed-cold-history");
+    await bucket.put(otherKey, "sealed-other-history");
+    const read = vi.spyOn(bucket, "get");
+    await deleteHostedUserR2DataBeforeStateDeletion({ bucket, userId: USER_ID });
+    expect(bucket.objects.has(coldKey)).toBe(false);
+    expect(bucket.objects.has(otherKey)).toBe(true);
+    expect(read).not.toHaveBeenCalledWith(coldKey);
   });
 
   it("deletes staged meal photos during user erasure", async () => {

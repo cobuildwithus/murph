@@ -678,6 +678,24 @@ describe("hosted web production migration guard", () => {
     }
   });
 
+  test("limits the cold-ingest media expansion to constraint replacement", async () => {
+    const migrationsDir = await mkdtemp(path.join(tmpdir(), "hosted-web-prisma-migrations-"));
+    const migrationId = "20261102120000_hosted_cold_ingest_media";
+    try {
+      const sql = await readFile(path.join(appRoot, "prisma", "migrations", migrationId, "migration.sql"), "utf8");
+      await writeMigrationSql(migrationsDir, migrationId, sql);
+      assert.deepEqual(await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir), []);
+      await writeMigrationSql(migrationsDir, migrationId, `${sql}\nALTER TABLE hosted_runtime_media DROP COLUMN expires_at;`);
+      assert.deepEqual(
+        (await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir))
+          .map(({ migrationId: id, reason }) => ({ migrationId: id, reason })),
+        [{ migrationId, reason: "DROP COLUMN" }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
   test("limits many-game compatibility to the two obsolete roster guards", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "game-many-migration-"));
     const migrationId = "20261101230000_game_many_per_pair";

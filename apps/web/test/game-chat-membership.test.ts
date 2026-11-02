@@ -8,7 +8,7 @@ vi.mock("../src/lib/hosted-routing/assistant-notification-destination", () => ({
 vi.mock("../src/lib/hosted-onboarding/linq-client", () => ({ getHostedLinqChatSummary: m.chat }));
 vi.mock("../src/lib/hosted-onboarding/linq-line-store", () => ({ readHostedLinqIncomingLineState: async () => ({ kind: "assignable" }) }));
 
-import { gamePairWhere, readGameChatCandidateIds, requireExactGameChat } from "../src/lib/game/chat-membership";
+import { addressedGameRematchWhere, gamePairWhere, readGameChatCandidateIds, requireExactGameChat } from "../src/lib/game/chat-membership";
 
 const players = ["player-a", "player-b"];
 const phones = ["+15555550101", "+15555550102"];
@@ -38,7 +38,7 @@ describe("game pair discovery", () => {
   it("reads a bounded canonical history for the exact pair including finished games", async () => {
     await expect(readGameChatCandidateIds(players)).resolves.toEqual(["active-game", "finished-game"]);
     expect(m.games).toHaveBeenCalledWith({
-      where: { ...gamePairWhere(players), status: { in: ["negotiating", "live"] } },
+      where: { OR: [{ ...gamePairWhere(players), status: { in: ["negotiating", "live"] } }, expect.objectContaining({ ...addressedGameRematchWhere(players), AND: expect.any(Array) })] },
       orderBy: [{ createdAt: "desc" }, { id: "asc" }], take: 10, select: { id: true },
     });
     expect(m.games.mock.calls[0][0].where).not.toHaveProperty("chatContainerMemberId");

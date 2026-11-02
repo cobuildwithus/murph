@@ -1248,6 +1248,7 @@ describe("hosted Prisma baseline migration", () => {
       "20261030120000_game_recap",
       "20261031230000_hosted_phone_call_linq_result_notification_channel",
       "20261101230000_game_many_per_pair",
+      "20261102120000_hosted_cold_ingest_media",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(

@@ -3,14 +3,14 @@ import { hostedGameChatStateSchema } from "../src/game-tools.ts";
 import { GAME_LIVE_LORE_GUIDANCE, GAME_PRIZE_WORDS, buildGameChangeExpiredInstructions, buildGameChangeCancelledInstructions, buildGameInviteCancelledInstructions, buildGameKickoffInstructions, buildGameMissedDayInstructions, buildGameProposalInstructions, buildGameRecapInstructions, buildGameRematchInstructions, gameLiveLoreGuidanceForState } from "../src/game-chat-notifications.ts";
 
 describe("game v1 notification instructions", () => {
-  it("keeps a rematch short, app-controlled, named and free of link, emoji or lifecycle jargon", () => {
+  it("keeps a rematch short, chat-or-app controlled, named and free of link, emoji or lifecycle jargon", () => {
     const rules = { checkInKind: "photo" as const, lengthDays: 7, schedule: { days: [0, 1, 2, 3, 4] },
       stakes: [{ kind: "prize" as const, item: "breakfast" }], tasksByMember: { member_maya: "Walk", member_sam: "Walk" } };
     const players = [{ memberId: "member_sam", name: "Sam", requester: false }, { memberId: "member_maya", name: "Maya", requester: true }];
     const instructions = buildGameRematchInstructions({ players, previous: rules, rematch: { ...rules, lengthDays: 10 }, startsOn: null });
     expect(instructions).toContain("one short, natural message in Murph's usual warm, playful voice, with no emoji.");
     expect(instructions).toContain("Name each change against the previous game, as in \"10 days instead of 7\". When tasks change, say who does what by name, as in \"Sam takes the stretch and Maya takes 25 squats\", never \"whoever had\" a task.");
-    expect(instructions).toContain("Shake on it in the Murph app or suggest changes there");
+    expect(instructions).toContain("say yes right here or Shake on it in the Murph app, or ask for changes here or in the app");
     expect(instructions).toContain("never call it the same game.");
     expect(instructions).toContain("Do not include a link");
     expect(instructions).toContain("never use the words invite, round or token");

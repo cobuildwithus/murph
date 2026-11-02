@@ -2002,9 +2002,14 @@ as bounded provider audit history.
 
 The official Checkout fixture helper drains both CLI streams and retains at most
 8 KiB per stream in memory. Sanitized failures expose only a fixed fixture step,
-HTTP rejection status (300–599), process category, bounded exit code, and capture
-state. Partial or truncated progress remains unknown; `response=not_observed`
-does not prove that no response arrived. `hosted-billing-live-support.test.ts`
+HTTP rejection status (300–599), process category, bounded exit code, capture
+state, and closed allowlists for provider error type/code and fixture parameter.
+Structured categories come only from a complete, untruncated, anchored JSON error
+body; malformed, unsupported, partial, and truncated evidence stays unknown.
+Messages, URLs, identifiers, nested provider objects, and unrecognized values are
+never copied into the failure. Partial or truncated progress remains unknown;
+`response=not_observed` does not prove that no response arrived.
+`hosted-billing-live-support.test.ts`
 exercises the sandbox, child-process boundary, and sanitizer with synthetic
 streams and fake timers; no raw CLI output becomes an error or artifact.
 

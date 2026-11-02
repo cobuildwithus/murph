@@ -57,7 +57,7 @@ describe("durable game chat lifecycle", () => {
     await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });
     const notification = m.prepare.mock.calls[0][0].envelope.notification;
     expect(notification).toMatchObject({ deliveryIdempotencyKey: "game-rematch:game", responsePolicy: { kind: "require_send" } });
-    expect(notification.instructions).toContain("Shake on it in the Murph app or suggest changes there");
+    expect(notification.instructions).toContain("say yes right here or Shake on it in the Murph app, or ask for changes here or in the app");
     expect(m.rematchNotice).toHaveBeenCalledExactlyOnceWith("game", players);
     expect(m.exact).toHaveBeenCalledExactlyOnceWith("room", ["+15555550101", "+15555550102"]);
     expect(m.current).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "game", status: { in: ["invited"] }, chatContainerMemberId: "room" } }));

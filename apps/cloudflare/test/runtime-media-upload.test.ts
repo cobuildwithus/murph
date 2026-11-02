@@ -1,3 +1,4 @@
+import { MemoryEncryptedR2Bucket } from "./test-helpers.ts";
 import { abortRuntimeMultipartUpload } from "../src/runtime-object-upload.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRuntimeMediaWriteBucket } from "../src/runtime-media.ts";
@@ -27,12 +28,12 @@ function harness() {
 afterEach(() => vi.restoreAllMocks());
 
 describe("recoverable runtime media uploads", () => {
-  it("persists upload identity before bytes and releases only after complete", async () => {
+  it.each(["image", "integration-ingest"] as const)("persists %s upload identity before bytes and releases only after complete", async (mediaKind) => {
     const h = harness();
     const { createHash } = await import("node:crypto");
     const bytes = new Uint8Array([1, 2, 3, 4]);
     const digest = createHash("sha256").update(bytes).digest("hex");
-    const matchingDescriptor = { ...descriptor, sha256: digest };
+    const matchingDescriptor = { ...descriptor, mediaKind, sha256: digest };
     const bucket = createRuntimeMediaWriteBucket({ source: h.source, ...identity, media: { descriptor: matchingDescriptor } });
     const store = createHostedMediaStore({ bucket, key: new Uint8Array(32).fill(1), keyId: "synthetic-key", userId });
     await store.writeMedia({ ...matchingDescriptor, plaintext: bytes });
@@ -71,4 +72,23 @@ describe("recoverable runtime media uploads", () => {
     expect(h.events).toEqual(["admit_private_put", "part", "complete", "release_put"]);
     expect(h.commands.mock.calls.at(-1)?.[0].command).toMatchObject({ scope: "private_media" });
   });
+});
+
+
+it("encrypts cold ingests with member-bound media AAD and verifies the descriptor", async () => {
+  const { createHash } = await import("node:crypto");
+  const bucket = new MemoryEncryptedR2Bucket();
+  const key = new Uint8Array(32).fill(3);
+  const store = createHostedMediaStore({ bucket, key, keyId: "synthetic-key", userId });
+  const bytes = new TextEncoder().encode("synthetic closed ingest history");
+  const cold = { mediaId: "d".repeat(64), mediaKind: "integration-ingest" as const,
+    byteSize: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") };
+  await store.writeMedia({ ...cold, plaintext: bytes });
+  expect(await store.readMedia(cold)).toEqual(bytes);
+  expect([...bucket.objects.values()][0]).not.toContain("synthetic closed ingest history");
+  await expect(store.readMedia({ ...cold, mediaKind: "image" })).rejects.toThrow();
+  await expect(store.readMedia({ ...cold, sha256: "0".repeat(64) })).rejects.toThrow();
+  await expect(store.readMedia({ ...cold, byteSize: bytes.length + 1 })).rejects.toThrow();
+  const other = createHostedMediaStore({ bucket, key, keyId: "synthetic-key", userId: "synthetic_other" });
+  expect(await other.readMedia(cold)).toBeNull();
 });
