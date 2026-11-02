@@ -15,10 +15,19 @@ export const hostedGameChangeSchema = z.discriminatedUnion("kind", [
     stakesApplyToWholeGame: z.literal(true).optional(),
   }).strict(),
 ]);
+export const hostedGameCreateTermsSchema = z.object({
+  tasks: z.array(z.object({ memberId: ref, text: z.string().min(1).max(200) }).strict()).length(2),
+  schedule: hostedGameScheduleSchema,
+  stakes: z.array(z.object({ kind: z.enum(["prize", "dare"]), item: z.string().min(1).max(200) }).strict()).length(1),
+  lengthDays: z.number().int().min(3).max(365).optional(),
+  startsOn: date.optional(),
+}).strict();
 export const hostedGameUpdateSchema = z.discriminatedUnion("operation", [
+  z.object({ operation: z.literal("create"), gameId, terms: hostedGameCreateTermsSchema, previousGameId: gameId.optional() }).strict(),
   z.object({ operation: z.enum(["mark_incomplete", "restore_day"]), gameId, date }).strict(),
   z.object({ operation: z.literal("propose"), gameId, proposalId: gameId, expectedTermsVersion: z.number().int().min(1), change: hostedGameChangeSchema }).strict(),
-  z.object({ operation: z.enum(["approve", "decline", "cancel"]), gameId, proposalId: gameId }).strict(),
+  z.object({ operation: z.literal("approve"), gameId, proposalId: gameId.optional(), expectedTermsVersion: z.number().int().min(1).optional() }).strict().refine(value => (value.proposalId !== undefined) !== (value.expectedTermsVersion !== undefined), "Approval needs proposalId or expectedTermsVersion."),
+  z.object({ operation: z.enum(["decline", "cancel"]), gameId, proposalId: gameId }).strict(),
   z.object({ operation: z.literal("cancel_game"), gameId }).strict(),
 ]);
 export type HostedGameUpdate = z.infer<typeof hostedGameUpdateSchema>;
@@ -60,7 +69,7 @@ export const hostedGameRecapSchema = z.object({
 }).strict();
 export type HostedGameRecap = z.infer<typeof hostedGameRecapSchema>;
 export const hostedGameToolRequestSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("read_game"), origin: z.union([acceptedInputOrigin, gameRecapOrigin]) }).strict(),
+  z.object({ action: z.literal("read_game"), origin: z.union([acceptedInputOrigin, gameRecapOrigin]), includePlayers: z.literal(true).optional() }).strict(),
   z.object({ action: z.literal("game_photo"), origin: acceptedInputOrigin, photo: hostedGamePhotoSchema }).strict(),
   z.object({ action: z.literal("update_game"), origin: acceptedInputOrigin, update: hostedGameUpdateSchema }).strict(),
   z.object({ action: z.literal("write_recap"), origin: gameRecapOrigin, recap: hostedGameRecapSchema,
@@ -92,7 +101,9 @@ const result = z.object({
   scores: z.array(z.object({ memberId: ref, seat: z.number().int(), score: z.number().int(), misses: z.number().int() }).strict()).max(2),
   tickets: z.array(z.object({ owedByMemberId: ref, owedToMemberId: ref, what: z.string().max(500), status: z.enum(["open", "redeemed", "expired"]), count: z.number().int().min(1) }).strict()).max(48),
 }).strict();
-export const hostedGameChatStateSchema = z.object({ games: z.array(z.object({
+export const hostedGameChatStateSchema = z.object({
+  players: z.array(z.object({ memberId: ref, firstName: z.string().max(200).nullable(), timeZone: z.string().max(100).nullable(), isSender: z.boolean() }).strict()).length(2).optional(),
+  games: z.array(z.object({
   id: ref, status: z.enum(["invited", "negotiating", "live", "settled", "void"]), terms,
   startsOn: date.nullable(), lengthDays: z.number().int().min(1).max(365),
   players: z.array(z.object({ memberId: ref, seat: z.number().int(), firstName: z.string().max(200), dayOne: date.nullable(), timeZone: z.string().max(100) }).strict()).max(2),

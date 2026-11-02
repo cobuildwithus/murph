@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { executeMurphDynamicToolRequest, resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tools.js'
-import { MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL, GAME_SELECTION_GUIDANCE } from '../src/assistant-codex/dynamic-tools/games.js'
+import { GAME_SETUP_CHAT_GUIDANCE, MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL, GAME_SELECTION_GUIDANCE } from '../src/assistant-codex/dynamic-tools/games.js'
 import { resolveAssistantGameHostDynamicTools } from '../src/assistant/codex-turn/planning.js'
 import { MURPH_FINISH_WITHOUT_REPLY_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.js'
 import { createAssistantHostedToolContext, type AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
@@ -46,6 +46,21 @@ describe('game dynamic tools', () => {
     expect(change.schedule.properties.count.maximum).toBe(365)
     expect(change.stakes.items.properties.kind.enum).toEqual(['prize', 'dare'])
     expect(MURPH_GAME_PHOTO_TOOL.description).not.toContain('Heart-rate games still require the app graph')
+  })
+  it('round-trips create and initial agreement without accepting an actor selector', async () => {
+    const terms = { tasks: [{ memberId: 'player_sam', text: 'Read' }, { memberId: 'player_ava', text: 'Walk' }], schedule: { count: 3 }, stakes: [{ kind: 'dare', item: 'Sing' }], lengthDays: 7 }
+    for (const update of [{ operation: 'create', gameId: 'game_setup', terms }, { operation: 'approve', gameId: 'game_setup', expectedTermsVersion: 1 }]) {
+      port.mockClear()
+      expect((await execute({ messageRef: inputId, ...update })).rpcResult.success).toBe(true)
+      expect(port).toHaveBeenCalledExactlyOnceWith(parseHostedRuntimeGroupToolRequest({ action: 'update_game', origin, update }))
+      expect(parse('update_game', { messageRef: inputId, ...update, actorMemberId: 'player_sam' })?.kind).toBe('invalid-game-arguments')
+    }
+    expect(parse('update_game', { messageRef: inputId, operation: 'create', gameId: 'game_setup', terms: { ...terms, stakes: [{ kind: 'per_miss', item: 'Lunch' }] } })?.kind).toBe('invalid-game-arguments')
+    expect(GAME_SETUP_CHAT_GUIDANCE).toContain('never the other person’s')
+    expect(GAME_SETUP_CHAT_GUIDANCE).toContain('Never approve for the requester or from a poll vote')
+    expect(GAME_SETUP_CHAT_GUIDANCE).toContain('read its results')
+    expect(MURPH_UPDATE_GAME_TOOL.description).not.toContain(GAME_SETUP_CHAT_GUIDANCE)
+    expect(MURPH_UPDATE_GAME_TOOL.description).toContain('follow its setup guidance')
   })
   it('binds the selected accepted message instead of using a model actor or last speaker', async () => {
     port.mockClear()
@@ -95,7 +110,8 @@ describe('game dynamic tools', () => {
     const request = parse('read_game', {})!
     const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: { ...context(), groupTool: { request: async () => response } }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     const text = result.rpcResult.contentItems[0]?.text
-    if (!guided) expect(text).toBe(JSON.stringify(response))
+    expect(text).toContain(GAME_SETUP_CHAT_GUIDANCE)
+    if (!guided) expect(text).toBe(JSON.stringify(response) + '\n' + GAME_SETUP_CHAT_GUIDANCE)
     else {
       expect(text).toContain(GAME_SELECTION_GUIDANCE)
       // A move names its game only from the speaker's own words or the one game it can apply to; otherwise one question and no write.
@@ -113,6 +129,17 @@ describe('game dynamic tools', () => {
       expect(text).toContain('Walk')
     }
   })
+  it.each(['ok', 'unavailable', 'rejected'] as const)('returns setup guidance on every successful ordinary read, status=%s', async status => {
+    const response = { action: 'read_game' as const, result: status === 'ok'
+      ? { status, state: { games: [] } } : { status, error: 'Use a chat with just the two players and Murph.' } }
+    const ctx = { ...context(), groupTool: { request: async () => response } }
+    for (let i = 0; i < 2; i++) {
+      const result = await executeMurphDynamicToolRequest({ request: parse('read_game', {})!, hostedToolContext: ctx, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+      expect(result.rpcResult.contentItems[0]?.text).toBe(JSON.stringify(response) + (status === 'ok' ? '\n' + GAME_SETUP_CHAT_GUIDANCE : ''))
+    }
+    const update = await execute(approval)
+    expect(update.rpcResult.contentItems[0]?.text).not.toContain(GAME_SETUP_CHAT_GUIDANCE)
+  })
   it('makes uncertainty truthful and does not retry a mutation', async () => {
     port.mockClear(); port.mockRejectedValueOnce(new Error('Synthetic interrupted response'))
     const result = await execute(approval)
@@ -126,7 +153,7 @@ describe('game dynamic tools', () => {
     expect(parseHostedRuntimeGroupToolRequest(request)).toEqual(request)
     expect(MURPH_UPDATE_GAME_TOOL.description).toContain('Stakes and tasks are locked once the game has started')
     expect(MURPH_UPDATE_GAME_TOOL.description).not.toContain('including earlier misses')
-    expect(MURPH_UPDATE_GAME_TOOL.description).toContain('Negotiating games have no active obligations')
+    expect(GAME_SETUP_CHAT_GUIDANCE).toContain('Negotiating games have no active obligations')
     expect(parse('update_game',{...approval,operation:'propose',expectedTermsVersion:1,change})?.kind).toBe('game')
     expect(parse('update_game',{...approval,operation:'propose',expectedTermsVersion:1,change:{...change,stakesApplyToWholeGame:false}})?.kind).toBe('invalid-game-arguments')
   })
@@ -176,7 +203,9 @@ describe('game recap dynamic contract', () => {
     for (const [tool, args] of [['read_game', {}], ['write_recap', recap]] as const) {
       const request = parse(tool, args)
       if (!request) throw new Error('Expected recap request')
-      expect((await executeMurphDynamicToolRequest({ request, hostedToolContext: recapContext, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })).rpcResult.success).toBe(true)
+      const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: recapContext, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+      expect(result.rpcResult.success).toBe(true)
+      expect(result.rpcResult.contentItems[0]?.text).not.toContain(GAME_SETUP_CHAT_GUIDANCE)
     }
     const requests = recapPort.mock.calls.map(([request]) => request)
     expect(requests).toEqual([
@@ -224,7 +253,7 @@ describe('game photo dynamic contract', () => {
     const request = parse('read_game', { messageRef: inputId })
     if (!request) throw new Error('Expected game read')
     await executeMurphDynamicToolRequest({ request, hostedToolContext: context(), env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
-    expect(port).toHaveBeenCalledExactlyOnceWith({ action: 'read_game', origin })
+    expect(port).toHaveBeenCalledExactlyOnceWith({ action: 'read_game', origin, includePlayers: true })
   })
   it('rejects a stale consent message without forwarding', async () => {
     port.mockClear()

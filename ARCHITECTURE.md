@@ -5720,6 +5720,43 @@ backfill or new state owner is needed.
 
 ### Weekly game chat changes
 
+Chat setup extends the existing `update_game` operation union with `create`.
+`runGameChatUpdate` maps stable member-keyed tasks onto creator/invitee seats,
+requires both existing GameProfiles, then calls the ordinary `createGame`
+command with trusted exact-pair context. It creates both seats in `negotiating`,
+without pendingChange, private labels or a duplicate lifecycle announcement.
+The creator has agreed; the other person's initial `approve` carries
+expectedTermsVersion instead of proposalId and translates to ordinary `join`.
+Counters still use propose/respond; whole-game refusal uses cancelInvite.
+The existing join/negotiation helpers own locks, cap, chain admission and kickoff.
+Creation checks gameId again under `lockGamePair` before admission, so concurrent
+retries do not consume another slot. No new stored state or native wire field.
+
+Signed message authority and exact provider membership are checked before and
+inside the write. Exact-pair reads may return no games; create is the only write
+allowed before a game exists. Task/stake moderation and app rule validation remain
+shared. Chat continues to bypass the HTTP current-terms gate. A native poll can
+settle a shared choice, never consent; the game tool owns the short setup/poll
+guidance and the generic challenge fallback explicitly defers to these tools.
+Only brief setup/poll triggers enter the initial tool catalog. The engine appends
+the full setup guidance to each successful accepted-input read_game result,
+alongside GAME_SELECTION_GUIDANCE when several games are active. Recap reads
+remain isolated and retain their own memberId-keyed superlatives contract.
+
+New reads request `includePlayers: true` and receive two profile references plus
+isSender for task ownership. Existing membership model results strip identifiers
+and room memory is not an identity roster. Unmarked game responses retain their
+old strict-reader shape. Deploy Web first; remove this transport marker only
+after old readers/warm runtimes drain, as specified in weekly-game deployment
+notes. Old runners never send create. The iOS GameView remains unchanged.
+
+Exact-pair discovery also includes unexpired addressed app rematches, with the
+creator seated and the known invitee unseated. Authority compares their combined
+identities before and inside mutation. Only the invitee can approve via join;
+a chat counter maps to the app’s negotiate command with chat-origin delivery.
+Unaddressed bearer links remain app-only, and unseated invitees cannot cancel.
+The old strict reader already accepts this invited/one-player shape.
+
 Invitees may submit a concrete counterproposal through `negotiate` instead of
 accepting the original terms. The game enters `negotiating`, occupies one of the
 pair's ten open slots,

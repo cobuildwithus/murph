@@ -39,12 +39,29 @@ export function gamePairWhere(playerMemberIds: readonly string[]): Prisma.GameWh
   };
 }
 
+/** An addressed rematch has one seated creator and one known, unseated invitee. */
+export function addressedGameRematchWhere(players: readonly string[], now = new Date()): Prisma.GameWhereInput {
+  if (!sameGamePlayers(players, players)) return { id: { in: [] } };
+  return { status: "invited", previousGameId: { not: null },
+    AND: [{ OR: [{ inviteExpiresAt: null }, { inviteExpiresAt: { gt: now } }] }],
+    OR: players.map((createdBy, index) => ({ createdBy, inviteeMemberId: players[1 - index],
+      players: { some: { memberId: createdBy, seat: 0 }, every: { memberId: createdBy } } })),
+  };
+}
+
+/** Shared-chat authority includes the known addressee, never an unclaimed bearer link. */
+export function gameChatPlayerIds(game: { status: string; previousGameId: string | null; createdBy: string | null; inviteeMemberId: string | null; players: readonly { memberId: string }[] }): string[] {
+  const seated = game.players.map(player => player.memberId);
+  return game.status === "invited" && game.previousGameId && game.inviteeMemberId && seated.length === 1 && seated[0] === game.createdBy
+    ? [...seated, game.inviteeMemberId] : seated;
+}
+
 /** Bounded canonical games for the pair, independent of their announcement room. */
 export async function readGameChatCandidateIds(playerMemberIds: readonly string[]): Promise<string[]> {
   if (!sameGamePlayers(playerMemberIds, playerMemberIds) || !isGamePairOn(playerMemberIds)) return [];
   const prisma = getPrisma();
   const [active, settled] = await Promise.all([
-    prisma.game.findMany({ where: { ...gamePairWhere(playerMemberIds), status: { in: ["negotiating", "live"] } },
+    prisma.game.findMany({ where: { OR: [{ ...gamePairWhere(playerMemberIds), status: { in: ["negotiating", "live"] } }, addressedGameRematchWhere(playerMemberIds)] },
       orderBy: [{ createdAt: "desc" }, { id: "asc" }], take: GAME_MAX_OPEN_PER_PAIR, select: { id: true } }),
     prisma.game.findMany({ where: { ...gamePairWhere(playerMemberIds), status: "settled" },
       orderBy: [{ settledAt: "desc" }, { id: "asc" }], take: 5, select: { id: true } }),

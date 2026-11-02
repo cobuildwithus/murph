@@ -1,4 +1,5 @@
 import { listCanonicalWriteEvidence, readCanonicalAuditRecords } from './canonical-audit-test-helpers.js'
+import { GAME_CHAT_SETUP_SCENARIOS, SETUP_PLAYERS, SETUP_TERMS } from './support/game-chat-setup-scenarios.js'
 import { buildBluetoothHelpInstructions } from './support/bluetooth-help.js'
 import { readHostedDelegationHintOverrides } from './support/hosted-delegation-hints.js'
 import { materializeRegimenLabelFixture, REGIMEN_FUZZY_FOOD_NAMES, REGIMEN_LABEL_SCENARIOS, REGIMEN_SHAKE_TOTALS } from './support/supplement-regimen-label-fixture.js'
@@ -45583,7 +45584,7 @@ describeRealCodex('real Codex game chat adjustment e2e', () => {
 })
 
 describeRealCodex('real Codex game lifecycle messaging e2e', () => {
-  it('game lifecycle rematch notice names the requester, who takes which task and app choices', async () => {
+  it('game lifecycle rematch notice names the requester, tasks and chat or app agreement', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-rematch-notice-e2e-'))
     const permissionHome = await materializeRealCodexHostedPermissionHome(config)
@@ -45625,7 +45626,8 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
       expect(reply).toMatch(/10|ten/iu)
       expect(reply).toMatch(/7|seven|longer/iu)
       expect(reply).toMatch(/Shake/iu)
-      expect(reply).toMatch(/suggest.*change|change.*suggest/iu)
+      expect(reply).toMatch(/yes.*here|here.*yes/iu)
+      expect(reply).toMatch(/suggest.*change|change.*suggest|ask.*change/iu)
       expect(reply).not.toMatch(/same (?:game|challenge)|https?:\/\/|\binvite\b|\bround\b|\btoken\b|internal|notification|delivery/iu)
       // The swap is told by name, with no emoji, and the game is a game.
       // Each new task is tied to its player, in either word order, without crossing the other name.
@@ -45749,7 +45751,7 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
     }
   }, 360_000)
 
-  it('game chat sends an unaccepted rematch to the app without asking which game', async () => {
+  it('game chat keeps an unaddressed bearer invite in the app', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-rematch-chat-e2e-'))
     const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
@@ -45778,17 +45780,17 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
           groupTool: { request: async (request) => {
             calls.push(request)
             if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', state: { games: [live('game_reading', ['Read 20 pages', 'No phone after 10pm']), live('game_soda', ['Walk 8000 steps', 'No soda'])] } } }
-            throw new Error('Rematch requests are accepted only in the app.')
+            throw new Error('Unaddressed bearer links are accepted only in the app.')
           } },
           currentUserActionScope: () => ({ conversationId: 'synthetic-room', inboundMailboxItemIds: [], recipientKey: 'synthetic-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-session', conversationScope: 'group' }),
           currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send authorized.') },
         },
         model: config.model, modelProvider: config.modelProvider,
-        prompt: `Current accepted message from Sam (Message ref: ${inputId}): lol fine I'm in for the rematch, accept it for me murph`,
+        prompt: `Current accepted message from Sam (Message ref: ${inputId}): Murph, accept that unaddressed invite link Maya sent me. Nobody has opened it yet.`,
         reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
       })
       const reply = result.finalMessage
-      process.stdout.write(`[game-chat rematch-in-app] ${JSON.stringify({ reply, actions: calls.map((call) => call.action) })}\n`)
+      process.stdout.write(`[game-chat bearer-in-app] ${JSON.stringify({ reply, actions: calls.map((call) => call.action) })}\n`)
       expect(calls.filter((call) => call.action === 'update_game')).toEqual([])
       expect(reply).toMatch(/\bapp\b/iu)
       expect(reply).not.toContain('?')
@@ -46840,5 +46842,144 @@ describeRealCodex('Bluetooth wearable help', () => {
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }
+  }, 360_000)
+})
+
+describeRealCodex('real Codex game chat setup', () => {
+  it.each(GAME_CHAT_SETUP_SCENARIOS)('game chat setup eval: $name', async scenario => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-setup-e2e-'))
+    const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    const { MURPH_POLL_TOOL } = await import('../src/assistant-codex/dynamic-tools/conversation-polls.js')
+    const { hostedGameToolResponseSchema } = await import('@murphai/hosted-execution/runtime-control')
+    const inputId = 'ain_' + 'a'.repeat(32)
+    const origin = { kind: 'accepted_input' as const, assistantInputId: inputId }
+    const calls: import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest[] = []
+    const polls: import('@murphai/hosted-execution/conversation-polls').ConversationPollRequest[] = []
+    type SharedGame = import('@murphai/hosted-execution/runtime-control').HostedGameChatState['games'][number]
+    const game: SharedGame = {
+      id: 'game_existing', status: scenario.state === 'waiting' ? 'negotiating' : scenario.state === 'settled' ? 'settled' : scenario.state === 'invited' ? 'invited' : 'live',
+      lengthDays: 7, startsOn: scenario.change?.kind === 'start_now' ? '2030-03-07' : null,
+      terms: { schedule: SETUP_TERMS.schedule, stakes: SETUP_TERMS.stakes, n: 1, fromDay: 0, tasks: SETUP_TERMS.tasks.map((task, seat) => ({ seat, text: task.text })) },
+      players: SETUP_PLAYERS.slice(0, scenario.state === 'invited' ? 1 : 2).map((player, seat) => ({ ...player, seat, dayOne: ['waiting', 'invited'].includes(scenario.state ?? '') ? null : scenario.change?.kind === 'start_now' ? '2030-03-07' : '2030-03-04' })),
+      pendingChange: null, changeControls: { canStartNow: scenario.state !== 'invited' && scenario.change?.kind === 'start_now', canEdit: scenario.state !== 'invited', canEditSchedule: scenario.state !== 'invited', canEditStartDate: scenario.state !== 'invited', canEditTasks: scenario.state === 'waiting', canEditStakes: scenario.state === 'waiting', editableFromDay: 0 },
+    }
+    const existingGames: SharedGame[] = scenario.state ? [game] : []
+    if (scenario.otherLiveGame) existingGames.push({ ...game, id: 'game_other_existing', terms: { ...game.terms, tasks: [{ seat: 0, text: 'Stretch' }, { seat: 1, text: 'Drink water' }] } })
+    let games = [...existingGames]
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: true, groupConversation: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantPollsAvailable: true, assistantHostedGroupToolSurface: 'families',
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' }, conversationScope: 'group',
+          currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T12:00:00.000Z', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+        }),
+        dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_POLL_TOOL, ...resolveMurphDynamicTools({}).filter(tool => tool.name === 'finish_without_reply')],
+        hostedToolContext: {
+          computerToolsAvailable: false, vaultFileSendAvailable: false,
+          groupTool: { request: async request => {
+            calls.push(request)
+            if (request.action !== 'read_game' && request.action !== 'update_game') throw new Error('Unexpected game effect')
+            if (scenario.unavailable) return { action: request.action, result: { status: 'unavailable', error: 'Games are one-on-one. Use a chat with just the two players and Murph, or the app.' } }
+            if (request.action === 'update_game') {
+              if (scenario.error) return { action: request.action, result: { status: 'rejected', error: scenario.error } }
+              const update = request.update
+              if (update.operation === 'approve' && !update.proposalId && scenario.speaker !== 'Sam') return { action: request.action, result: { status: 'rejected', error: 'NOT_A_PLAYER: That is your own invite.' } }
+              if (update.operation === 'create' && update.terms.startsOn && update.terms.startsOn > '2030-05-05') return { action: request.action, result: { status: 'rejected', error: 'INVALID_REQUEST: Pick a start from tomorrow through 60 days out.' } }
+              if (update.operation === 'create') {
+                if (scenario.poll === 'read') expect(polls.map(p => p.request.action)).toEqual(['read'])
+                const actor = scenario.speaker === 'Sam' ? 'player_sam' : 'player_ava'
+                const players = [SETUP_PLAYERS.find(p => p.memberId === actor)!, SETUP_PLAYERS.find(p => p.memberId !== actor)!]
+                games = [...games, { ...game, id: update.gameId, status: 'negotiating', lengthDays: update.terms.lengthDays ?? 7, startsOn: update.terms.startsOn ?? null,
+                  terms: { schedule: update.terms.schedule, stakes: update.terms.stakes, n: 1, fromDay: 0, tasks: players.map((p, seat) => ({ seat, text: update.terms.tasks.find(t => t.memberId === p.memberId)!.text })) },
+                  players: players.map((p, seat) => ({ ...p, seat, dayOne: null })), pendingChange: null }]
+              } else if (update.operation === 'approve') games = [{ ...game, status: 'live', players: SETUP_PLAYERS.map((p, seat) => ({ ...p, seat, dayOne: '2030-03-06' })), pendingChange: null }]
+              else if (update.operation === 'cancel_game') games = [{ ...game, status: 'void', pendingChange: null }]
+              else if (update.operation === 'propose') games = [{ ...game, status: game.status === 'invited' ? 'negotiating' : game.status, players: SETUP_PLAYERS.map((p, seat) => ({ ...p, seat, dayOne: null })), pendingChange: { id: update.proposalId, proposedByMemberId: scenario.speaker === 'Sam' ? 'player_sam' : 'player_ava', expectedTermsVersion: 1, change: update.change, effectiveFromDay: 0, origin: 'chat', deliveryStatus: 'conversation', startsOn: null } }]
+              else throw new Error('Unexpected game operation')
+            }
+            return hostedGameToolResponseSchema.parse({ action: request.action, result: { status: 'ok', state: { games, ...(request.action === 'read_game' ? { players: SETUP_PLAYERS.map(p => ({ ...p, firstName: scenario.error?.startsWith('PROFILE_REQUIRED') && p.firstName === 'Sam' ? null : p.firstName, isSender: p.firstName === (scenario.speaker ?? 'Ava') })) } : {}) } } })
+          } },
+          pollTool: { request: async request => {
+            polls.push(request)
+            const reading = request.request.action === 'read'
+            return { status: reading ? 'results' : 'sent', polls: [{
+              pollRef: 'poll_' + 'a'.repeat(32), channel: 'linq', question: 'How long?',
+              options: (scenario.options ?? ['7 days', '30 days']).map((text, index) => ({ text, votes: reading ? scenario.poll === 'tie' ? 1 : index === 1 ? 2 : 0 : 0 })),
+              totalVoters: reading ? 2 : 0, anonymous: false, multipleAnswers: true, closed: false,
+              observedAt: '2030-03-06T12:00:00.000Z', freshness: reading ? 'provider_read' : 'creation',
+            }] }
+          } },
+          currentUserActionScope: () => ({ conversationId: 'synthetic-room', inboundMailboxItemIds: [], recipientKey: 'synthetic-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-session', conversationScope: 'group' }),
+          currentInvocationScope: () => ({ origin: { ...origin, sessionId: 'synthetic-session' }, conversationScope: 'group' }),
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send authorized') },
+        },
+        prompt: `Group participants: Ava (ava@example.test), Sam (sam@example.test)${scenario.unavailable ? ', Lee (player_lee)' : ''}, and Murph.\n${scenario.history ?? ''}\nCurrent accepted message from ${scenario.speaker ?? 'Ava'} (Message ref: ${inputId}, Occurred at: 2030-03-06T12:00:00.000Z): ${scenario.message}`,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const reply = result.finalMessage.trim()
+      process.stdout.write(`[game chat setup eval: ${scenario.name}] ${JSON.stringify({ reply, calls: calls.map(c => c.action === 'update_game' ? c.update : c.action), polls: polls.map(p => p.request) })}\n`)
+      const rawCalls = readCapabilityRoutingActions(result.jsonEvents).filter(action => action.kind === 'dynamic' && ['read_game', 'update_game', 'poll'].includes(action.tool))
+      expect(rawCalls).toHaveLength(calls.length + polls.length)
+      const writes = calls.filter(c => c.action === 'update_game')
+      expect(writes).toHaveLength(scenario.create || scenario.operation ? 1 : 0)
+      expect(calls.filter(c => c.action === 'read_game').length).toBeLessThanOrEqual(1)
+      for (const call of calls) {
+        expect(call).toMatchObject({ origin })
+        if (call.action === 'read_game') expect(call).toEqual({ action: 'read_game', origin, includePlayers: true })
+      }
+      expect(calls.filter(c => c.action !== 'read_game' && c.action !== 'update_game')).toHaveLength(0)
+      if (scenario.create && !scenario.error) {
+        if (!scenario.create.startsOn) expect(reply).toMatch(/start|begin|kick.?off/i)
+        else expect(reply).toMatch(scenario.create.startsOn === '2030-03-07' ? /tomorrow|March 0?7|Mar\.? 0?7|2030-03-07/i : /March 12|Mar\.? 12|2030-03-12/i)
+        expect(reply).toMatch(new RegExp(`\\b(?:${scenario.create.lengthDays ?? 7}|${({ 3: 'three', 7: 'seven', 30: 'thirty', 365: 'three hundred sixty.five' } as Record<number, string>)[scenario.create.lengthDays ?? 7]})[ -]days?`, 'i'))
+        const schedule = scenario.create.schedule
+        if ('count' in schedule) expect(reply).toMatch(/any (?:3|three) days/i)
+        else if (schedule.days.length === 7) expect(reply).toMatch(/every day|daily/i)
+        else if (schedule.days.length === 5) expect(reply).toMatch(/weekdays|Monday.*Friday/i)
+        else expect(reply).toMatch(/Monday.*Wednesday.*Friday/i)
+      }
+      if (writes.length) {
+        expect(calls.filter(c => c.action !== 'read_current')[0]?.action).toBe('read_game')
+        const update = writes[0]!.update
+        if (scenario.create) {
+          expect(update.operation).toBe('create')
+          if (update.operation !== 'create') throw new Error('Expected create')
+          expect(update.gameId).toMatch(/^game_[a-z0-9]{20,59}$/u)
+          expect(update.gameId).not.toMatch(/ava|sam|2030|0306|walk|read|chapter|film|karaoke/iu)
+          expect(existingGames.map(g => g.id)).not.toContain(update.gameId)
+          for (const existing of existingGames) expect(games.find(g => g.id === existing.id)).toEqual(existing)
+          const normalize = (terms: typeof update.terms) => ({ ...terms, lengthDays: terms.lengthDays ?? 7,
+            tasks: terms.tasks.map(t => ({ ...t, text: t.text.toLowerCase() })).sort((a, b) => a.memberId.localeCompare(b.memberId)),
+            stakes: terms.stakes.map(s => ({ ...s, item: s.item.toLowerCase() })),
+            schedule: 'days' in terms.schedule ? { days: [...terms.schedule.days].sort() } : terms.schedule,
+          })
+          expect(normalize(update.terms)).toEqual(normalize(scenario.create))
+          expect(update.previousGameId).toBe(scenario.previousGameId)
+        } else if (scenario.operation === 'approve') expect(update).toEqual({ operation: 'approve', gameId: game.id, expectedTermsVersion: 1 })
+        else if (scenario.operation === 'cancel_game') expect(update).toEqual({ operation: 'cancel_game', gameId: game.id })
+        else expect(update).toEqual({ operation: 'propose', gameId: game.id, proposalId: expect.stringMatching(/^[A-Za-z0-9_-]{8,64}$/u), expectedTermsVersion: 1, change: scenario.change })
+      }
+      expect(polls).toHaveLength(scenario.poll ? 1 : 0)
+      if (scenario.poll === 'create') {
+        expect(calls.filter(c => c.action === 'read_game')).toHaveLength(1)
+        expect(rawCalls[0]).toMatchObject({ kind: 'dynamic', tool: 'read_game' })
+      }
+      if (scenario.poll === 'create') expect(polls[0]).toEqual({ assistantInputId: inputId, request: { action: 'create', question: expect.any(String), options: scenario.options } })
+      else if (scenario.poll) expect(polls[0]).toEqual({ assistantInputId: inputId, request: { action: 'read', pollRef: 'poll_' + 'a'.repeat(32) } })
+      for (const pattern of scenario.reply) expect(reply).toMatch(pattern)
+      if (scenario.forbidden) expect(reply).not.toMatch(scenario.forbidden)
+      if (scenario.quiet) expect(reply).toBe('')
+      if (scenario.error) {
+        expect(reply.length).toBeLessThan(200)
+        expect(reply).not.toMatch(/walk(?:s|ing)? (?:twenty|20)|read(?:s|ing)? (?:a|one) chapter/i)
+      }
+      expect(reply).not.toMatch(/gameId|proposal|negotiating|\btool\b|player_ava|player_sam|game_existing|PROFILE_REQUIRED|TOO_MANY_GAMES|GAME_DISABLED|CONTENT_NOT_ALLOWED|REMATCH_OUTDATED|ALREADY_IN_A_GAME/iu)
+      expect(reply.length).toBeLessThan(650)
+    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
   }, 360_000)
 })

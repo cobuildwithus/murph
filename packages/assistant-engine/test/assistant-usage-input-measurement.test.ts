@@ -87,7 +87,7 @@ describe.skipIf(process.env.MURPH_MEASURE_USAGE_INPUT !== '1')('usage efficiency
       const baselineInstructions: typeof import('../src/assistant/codex-base-instructions.ts') = await import(pathToFileURL(`${baselineRoot}/src/assistant/codex-base-instructions.ts`).href)
       const baselineAutomation: typeof import('../src/assistant/managed-automations.ts') = await import(pathToFileURL(`${baselineRoot}/src/assistant/managed-automations.ts`).href)
       const availability: Parameters<typeof resolveMurphDynamicTools>[0] = {
-        allowFinishWithoutReply: true, automationAvailable: true,
+        allowFinishWithoutReply: true, automationAvailable: true, gamesAvailable: scope === 'group',
         personalizationAvailable: scope === 'direct', groupSharedReadAvailable: fixture === 'group',
         ...(groupAvailable ? { groupAvailable: true } : {}),
         ...(fixture === 'gameGroup' ? { gamesAvailable: true, gamePhotosAvailable: true, gameLoreAvailable: true } : {}),

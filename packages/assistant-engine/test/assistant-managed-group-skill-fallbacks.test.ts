@@ -130,8 +130,10 @@ describe("managed hosted group skill boundary", () => {
     const normalized = raw.replace(/\s+/gu, " ");
 
     expect(normalized).toContain(
-      "Do not create, score, settle, or announce a challenge in this build.",
+      "Outside those two-player game tools, do not create, score, settle, or announce a managed group challenge in this build.",
     );
+    expect(normalized).toContain("`murph.update_game` when those tools are available");
+    expect(normalized).toContain("exactly two people and Murph");
     expect(normalized).toContain(
       "perform no effect and state one plain capability limitation",
     );
