@@ -128,12 +128,16 @@ describe.skipIf(!enabled)("late settled-game recap PostgreSQL proof", () => {
     await expect(assertGameProposalDeliveryCurrentTx({ tx: db, containerMemberId: room, playerMemberIds: players, deliveryIdempotencyKey: eventId })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
 
-  it("dry runs, admits concurrent retries once, and replaces only on acceptance without touching the rematch", async () => {
-    const { db, gameId, newerId, room, players, eventId, sealInput } = await fixture();
+  it.each(["accepted", "sent_no_receipt_expected"])("regenerates after %s once, replacing only on acceptance without touching the rematch", async (sentStatus) => {
+    const { db, gameId, newerId, room, players, eventId, key, sealInput } = await fixture();
     await reserveGameChatLifecycleTx({ gameId, kind: "recap", now: new Date(), tx: db });
     await markGameChatGenerationQueuedTx(eventId, db, room);
     await sealGameRecap(sealInput);
-    await db.hostedLinqDelivery.updateMany({ where: { sourceRef: gameId }, data: { status: "accepted" } });
+    const priorDelivery = await db.hostedLinqDelivery.update({ where: { idempotencyKey: key }, data: {
+      source: "hosted_runtime_linq_delivery", targetKind: "thread", threadIsDirect: false,
+      status: sentStatus, acceptedAt: new Date(),
+    } });
+    deliveries.push(priorDelivery.id);
     const before = await db.game.findUniqueOrThrow({ where: { id: gameId } });
     const newer = await db.game.findUniqueOrThrow({ where: { id: newerId } });
     const request = { gameId, regenerationId: "synthetic_request", execute: false, operatorMemberId: "system" };
@@ -175,7 +179,13 @@ describe.skipIf(!enabled)("late settled-game recap PostgreSQL proof", () => {
     await Promise.all([dispatch(), dispatch()]);
     expect(postToGroup).toHaveBeenCalledOnce();
     expect((await db.hostedLinqDelivery.findUniqueOrThrow({ where: { idempotencyKey: deliveryKey } })).id).toBe(reserved.id);
-    await db.hostedLinqDelivery.update({ where: { idempotencyKey: deliveryKey }, data: { status: "accepted" } });
+    await db.hostedLinqDelivery.update({ where: { idempotencyKey: deliveryKey }, data: {
+      status: sentStatus, targetKind: "thread", threadIsDirect: false, acceptedAt: new Date(),
+    } });
+    await dispatch();
+    expect(postToGroup).toHaveBeenCalledOnce();
+    expect(await requestGameRecapRegeneration({ ...request, regenerationId: "next_request" }))
+      .toMatchObject({ outcome: "would_regenerate", dryRun: true });
     expect(await requestGameRecapRegeneration({ ...request, execute: true })).toMatchObject({ outcome: "already_requested" });
     // Receipt retention cannot turn an operator retry into another send.
     await db.hostedLinqDelivery.delete({ where: { idempotencyKey: deliveryKey } });
