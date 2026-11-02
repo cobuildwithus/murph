@@ -10,7 +10,6 @@ import { INBOX_CAPTURE_TEXT_MAX_LENGTH } from "@murphai/contracts";
 import {
   applyCanonicalWriteBatch,
   initializeVault,
-  listWriteOperationMetadataPaths,
   readJsonlRecords,
   readStoredWriteOperation,
   validateVault,
@@ -603,59 +602,21 @@ test("inbox envelope migration blocks a nonterminal envelope-delete operation", 
     externalId: "msg-envelope-active-operation",
     vaultRoot,
   });
-  await applyCanonicalWriteBatch({
-    vaultRoot,
+  const relativePath = ".runtime/operations/op_interrupted_envelope_delete.json";
+  const operation = {
+    schemaVersion: "murph.write-operation.v1",
+    operationId: "op_interrupted_envelope_delete",
     operationType: "test_interrupted_legacy_envelope_delete",
-    summary: "Delete a legacy envelope before simulating an interruption.",
-    audit: {
-      action: "vault_repair",
-      commandName: "test.interruptedLegacyEnvelopeDelete",
-      summary: "Deleted a legacy envelope before simulating an interruption.",
-    },
-    deletes: [
-      {
-        allowRaw: true,
-        expectedTargetReceipt: {
-          byteLength: Buffer.byteLength(fixture.envelopeContent),
-          sha256: createHash("sha256").update(fixture.envelopeContent).digest("hex"),
-        },
-        relativePath: fixture.envelopePath,
-      },
-    ],
-  });
-  await fs.mkdir(path.dirname(path.join(vaultRoot, fixture.envelopePath)), {
-    recursive: true,
-  });
-  await fs.writeFile(
-    path.join(vaultRoot, fixture.envelopePath),
-    fixture.envelopeContent,
-    "utf8",
-  );
-  const activeOperationEntry = (
-    await Promise.all(
-      (await listWriteOperationMetadataPaths(vaultRoot)).map(async (relativePath) => ({
-        relativePath,
-        operation: await readStoredWriteOperation(vaultRoot, relativePath),
-      })),
-    )
-  ).find(
-    (entry) =>
-      entry.operation.operationType === "test_interrupted_legacy_envelope_delete",
-  );
-  assert.ok(activeOperationEntry);
-  assert.equal(
-    activeOperationEntry.operation.actions.some(
-      (action) =>
-        action.kind === "delete" && action.targetRelativePath === fixture.envelopePath,
-    ),
-    true,
-  );
-  const operationPath = path.join(vaultRoot, activeOperationEntry.relativePath);
-  const operation = JSON.parse(await fs.readFile(operationPath, "utf8")) as {
-    status: string;
+    summary: "Pending deletion of a legacy envelope.",
+    status: "committing",
+    createdAt: "2026-03-12T12:00:00.000Z",
+    updatedAt: "2026-03-12T12:00:00.000Z",
+    occurredAt: "2026-03-12T12:00:00.000Z",
+    actions: [{ kind: "delete", state: "staged", targetRelativePath: fixture.envelopePath, allowRaw: true }],
   };
-  operation.status = "committing";
-  await fs.writeFile(operationPath, `${JSON.stringify(operation, null, 2)}\n`, "utf8");
+  await fs.mkdir(path.dirname(path.join(vaultRoot, relativePath)), { recursive: true });
+  await fs.writeFile(path.join(vaultRoot, relativePath), JSON.stringify(operation));
+  assert.equal((await readStoredWriteOperation(vaultRoot, relativePath)).status, "committing");
 
   const result = await runInboxEnvelopeMigration({ apply: true, vaultRoot });
   assert.equal(result.activeOperationCount, 1);

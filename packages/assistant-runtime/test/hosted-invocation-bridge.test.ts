@@ -1756,12 +1756,12 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vi.mocked(snapshotArchiveBuilder.buildEncryptedSnapshot).mock.calls[0]?.[0]
         .archiveEntries ?? [];
     expect(archiveEntries.some((entry) => entry.relativePath === staleOperationPaths.oldest)).toBe(false);
-    expect(archiveEntries.some((entry) => entry.relativePath === staleOperationPaths.newest)).toBe(true);
+    expect(archiveEntries.some((entry) => entry.relativePath === staleOperationPaths.newest)).toBe(false);
     expect(archiveEntries.some((entry) => entry.relativePath === activeOperationPath)).toBe(true);
     expect(archiveEntries.some((entry) => entry.relativePath === uncheckpointedCommittedOperationPath)).toBe(true);
     expect(archiveEntries.some((entry) => entry.relativePath === uncheckpointedCommittedPayloadPath)).toBe(true);
     await expectMissing(path.join(vaultRoot, staleOperationPaths.oldest));
-    await expectPresent(path.join(vaultRoot, staleOperationPaths.newest));
+    await expectMissing(path.join(vaultRoot, staleOperationPaths.newest));
     await expectPresent(path.join(vaultRoot, activeOperationPath));
     await expectPresent(path.join(vaultRoot, uncheckpointedCommittedOperationPath));
     await expectPresent(path.join(vaultRoot, uncheckpointedCommittedStageRoot));
