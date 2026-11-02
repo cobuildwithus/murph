@@ -423,7 +423,7 @@ test('scopeAssistantCliSurfaceContractForAssistant removes hosted-invalid action
     '- `device provider list`: List supported providers.',
     'Command index:',
     '- `automation`: `edit`, `import-json`, `list`, `save`, `scaffold`, `set-status`, `show`.',
-    '- `device`: `account disconnect`, `account list`, `account reconcile`, `account show`, `connect`, `daemon start`, `daemon status`, `daemon stop`, `provider list`.',
+    '- `device`: `account disconnect`, `account list`, `account reconcile`, `account show`, `connect`, `provider list`.',
   ].join('\n')
 
   assert.equal(

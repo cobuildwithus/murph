@@ -44,16 +44,10 @@ describe("hosted device connect intent route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client");
-    vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-secret");
     vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
     vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
     vi.stubEnv("JUNCTION_ENV", "sandbox");
     vi.stubEnv("JUNCTION_REGION", "us");
-    vi.stubEnv("OURA_CLIENT_ID", "");
-    vi.stubEnv("OURA_CLIENT_SECRET", "");
-    vi.stubEnv("STRAVA_CLIENT_ID", "");
-    vi.stubEnv("STRAVA_CLIENT_SECRET", "");
     mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
       member: {
         id: "member_123",
@@ -142,11 +136,7 @@ describe("hosted device connect intent route", () => {
     });
   });
 
-  it("rejects existing Strava intents while direct and Junction provider support remain configured", async () => {
-    vi.stubEnv("WHOOP_CLIENT_ID", "");
-    vi.stubEnv("WHOOP_CLIENT_SECRET", "");
-    vi.stubEnv("STRAVA_CLIENT_ID", "strava-client");
-    vi.stubEnv("STRAVA_CLIENT_SECRET", "strava-secret");
+  it("rejects existing Strava intents while Junction provider support remains configured", async () => {
     vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
     vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
     vi.stubEnv("JUNCTION_ENV", "sandbox");

@@ -898,3 +898,346 @@ Every recorded verification invocation (including failed migration iterations):
 | `assistant-runtime-full-test-complete` | `pnpm --dir packages/assistant-runtime test` | 0 / PASS |
 
 Final candidate review: only the intended 30 test/plan files changed. The retained branch-touched assistant-engine file inventory matches the 21-file focused run exactly. AST inspection found zero `as any` or `as unknown` casts in changed TypeScript files; added-content privacy inspection passed. The commit is local only and uses the owner-requested co-author trailer.
+
+
+## PR 4469 CI repair and full-suite verification amendment
+
+Owner-authorized amendment to this completed plan. Starting head: `e52cde83b9`;
+stacked base: `c04ccc04cc`. This repair changes test fixtures and this ledger only.
+No production behavior change, push, publishing, production access, or work in
+another checkout is authorized or performed. No member-visible changelog is needed.
+
+### Managed-registry decrement proof
+
+Compared `src/assistant/managed-automations.ts`, `managed-automation-ids.ts`,
+and the imported usage-optimizer seed at the exact base and starting head.
+The registered seed inventory is:
+
+| Seed | ID | Base | Head |
+| --- | --- | --- | --- |
+| weekly usage optimizer | `automation_01K7A8B9C0D1E2F3G4H5J6K7MN` | seeded | seeded |
+| journal connected context morning | `automation_01M1J7C8M0RN1NGC0NT3XT7D2A` | seeded | seeded |
+| weekly health digest | `automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FY` | seeded | seeded |
+| weekly health insight | `automation_X3GPAWV2CCHNCYHAAJ4CE2M144` | seeded | seeded |
+| monthly improvement coach | `automation_01K2WKKY3F8Q4R5S6T7V8W9XAB` | seeded | seeded |
+| weekly health research scout | `automation_01K0EXA5C0VT9F7X3KG6JMPZ5A` | seeded | retired tombstone |
+| overnight memory consolidation | `automation_01K4Y0Q5C8M9N2P3R4S5T6V7WX` | seeded | seeded |
+| group room model consolidation | `automation_01K4Z8RMM6F7G8H9J0K1P2M3N4` | seeded | seeded |
+
+Set difference is exactly `automation_01K0EXA5C0VT9F7X3KG6JMPZ5A` (research scout);
+no IDs were added or otherwise removed. The separate automatic-meal-closeout
+maintenance seed `automation_01KZZM3A9C7P4R6T8V2W5X0YQZ` is unchanged.
+The support-gap tests use a non-hosted private route: the unchanged eligible
+recurring seeds are digest, insight, and monthly coach. Scout made four at the
+base; retirement makes three. Adding the dynamic support-gap one-shot therefore
+changes five to four; reconciling an existing one-shot changes four skipped
+recurring seeds to three. Hosted-only seeds and group-only ownership are unchanged.
+
+### Failing-test disposition
+
+- `hosted-account-data-service.test.ts`: removed the unused mock of the deleted
+  Strava export. OAuth cleanup fixtures use `synthetic_oauth` and its corresponding
+  label, retaining every export, deletion, credential, refresh-lease, confirmation,
+  revoke-hook, webhook-authority, and retry assertion. Junction cleanup remains.
+- Reconnect-link test `refuses an ambiguous WHOOP target when direct and Junction
+  routes are configured`: deleted because its only subject was the retired
+  two-transport configuration. Inspected the full route catalog and target
+  collector. The apparent two-route Fitbit alternative is also not a live
+  ambiguity: `fitbit` normalizes to `google_health` and the filter deduplicates.
+  WHOOP source-slug resolution, disabled Strava, and intent creation remain tested.
+- Connect-page `surfaces reauthorization-required sources as reconnectable`: uses
+  a Junction connection with explicit WHOOP source identity; retains reconnect
+  copy, needs-access state, and absence of connect/disconnect actions.
+- Connect-page `keeps disconnected sources quiet and connectable`: uses the same
+  Junction routing; retains idle state, Connect action, and no reconnect warning
+  or disconnect action.
+- Connect-page `surfaces active sources with reconnect action as reconnectable`:
+  migrates the active primary-action fixture to Junction and retains all seven
+  state, copy, and action assertions.
+- Both neutral recovery failures (`connected=false`, `CALLBACK_PROOF_INVALID` and
+  `OAUTH_STATE_INVALID`): configure Junction Oura and return Junction callback
+  metadata. All four parameterized cases remain, including `connected=true`,
+  neutral status copy, no false disconnection claim, and the correct card action.
+- `Vital disclosure follows reconnect and fresh providers across local
+  disconnects`: both Oura and WHOOP now reconnect through Junction and require
+  Vital disclosure before and after local disconnect. Retains all source, route,
+  disclosure, and preflight assertions with current route expectations. The
+  dedicated Fitbit disclosure exemption remains covered.
+- Support-gap `installs the one-shot idempotently through the managed registry`:
+  created/skipped 5 becomes 4; schedule, route, active state, tags, and title remain.
+- `requires a managed occurrence to match the current completion window`:
+  skipped 4 becomes 3; updated 1, matching window, and reconciled schedule remain.
+- `keeps an installed catch-up and its original private route stable`: created
+  and skipped 5 become 4; original catch-up time and private route remain asserted.
+- `retires a superseded active 21-day check instead of sending stale support`:
+  created 4 becomes 3; updated 1 and retirement assertions remain.
+- `does not reactivate` paused and archived support-gap one-shots: skipped 5
+  becomes 4 in each variant; both lifecycle assertions remain.
+- `keeps unrelated managed setup alive when onboarding state is malformed`:
+  created 4 becomes 3; unrelated setup and malformed-state handling remain.
+
+### Additional fixture audit
+
+Scanned all 2,778 JS/TS/shell test and script files under `apps/**/test`,
+`packages/**/test`, `scripts/**`, and `e2e/**`. Compared static imports, dynamic
+imports, requires, and module mocks against 105 deleted paths and six removed
+package exports between the base and starting head: zero removed-module imports
+remain after this repair. Also searched provider credentials, direct-provider
+fixtures, research-scout, Exa, daemon, HTTP, and bin references.
+
+- Migrated remaining connect-page matching and recovery fixtures to explicit
+  Junction source identities; moved immediate intent redemption and the one-click
+  no-Vital case to the retained dedicated Fitbit flow. Kept all action assertions.
+- Removed unused direct OAuth credentials from settings-route, internal-connect,
+  connect-intent, and connect-page fixtures already exercising Junction; updated
+  misleading test titles. Public source labels in route responses remain intact.
+- Removed retired daemon commands from the synthetic assistant CLI contract while
+  preserving hosted action filtering and the non-hosted equality assertion.
+- Changed the runner boot-closure forbidden-provider fixture from the deleted
+  Oura module to the retained Junction module; kept the exclusion assertion.
+- Migrated the opt-in hosted-local device-wake E2E fixture to Junction and removed
+  unused direct-WHOOP credentials. Its live full-stack execution was not run;
+  Cloudflare typecheck validates the fixture.
+- Retained provider-labelled normalizers, wearable data provenance, historical
+  OAuth/Prisma storage, synthetic defensive snapshot cases, retired-scout
+  tombstones, forbidden-secret tests, and negative module-boundary examples.
+  Those are live retained contracts, not imports or configuration of deleted
+  transports. Exa negative forwarding assertions and scout retirement coverage
+  are intentional. No production source was edited.
+
+### Full-suite verification ledger
+
+Commands below ran from the authorized worktree. `MURPH_VITEST_MAX_WORKERS=2`
+bounds local concurrency without selecting a subset. Web used the same
+`apps/web/vitest.workspace.ts` and all five projects as Release Web tests:
+`hosted-web-onboarding-integrations`, `hosted-web-onboarding-core`,
+`hosted-web-execution`, `hosted-web-sync-settings`, and `hosted-web-store-config`.
+The aggregate run covers all four CI shards. `*.db.test.ts` is excluded by that
+CI workspace itself. No PostgreSQL proof opt-ins were enabled locally.
+
+Coverage gates retain their configured values: statements/lines 80%,
+functions 80%, branches 70%; CLI uses functions 70% and branches 55%. No gate
+was changed. Both statements and lines exceeded 80% in every completed package run.
+
+| Command | Passed / failed / skipped | Coverage statements / branches / functions / lines |
+| --- | --- | --- |
+| `env MURPH_VITEST_MAX_WORKERS=2 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage` | 13719 / 0 / 1533 | not requested |
+| `env MURPH_VITEST_FILE_PARALLELISM=1 MURPH_VITEST_MAX_WORKERS=2 pnpm --dir packages/assistant-engine test:coverage` | 5950 / 0 / 710 | 91.38% / 85.83% / 95.25% / 91.58% |
+| `pnpm exec vitest run --config scripts/vitest.config.ts --no-coverage` | 864 / 27 / 0 | not requested |
+| `env MURPH_VITEST_MAX_WORKERS=2 pnpm --dir packages/device-syncd test:coverage` | 1456 / 0 / 0 | 90.51% / 83.92% / 94.66% / 90.65% |
+| `env MURPH_VITEST_MAX_WORKERS=2 pnpm --dir packages/operator-config test:coverage` | 439 / 0 / 0 | 90.82% / 80.77% / 93.87% / 90.95% |
+| `env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS=2 pnpm exec vitest run --config packages/cli/vitest.workspace.ts --coverage` | 1293 / 0 / 0 | 89.28% / 79.59% / 93.29% / 89.66% |
+| `env MURPH_VITEST_MAX_WORKERS=2 pnpm --dir packages/contracts test:coverage` | 403 / 0 / 0 | 89.27% / 78.91% / 91.69% / 89.4% |
+| `env MURPH_VITEST_MAX_WORKERS=2 pnpm --dir packages/query test:coverage` | 808 / 0 / 1 | 91.26% / 81.55% / 95.39% / 91.91% |
+| `env MURPH_VITEST_MAX_WORKERS=2 pnpm --dir packages/importers test:coverage` | 753 / 0 / 0 | 91.99% / 85.24% / 96.71% / 92.64% |
+| `env MURPH_VITEST_MAX_WORKERS=2 pnpm --dir packages/runtime-state test:coverage` | 302 / 0 / 19 | 86.91% / 82.55% / 94.15% / 87.19% |
+| `env MURPH_VITEST_MAX_WORKERS=2 pnpm --dir packages/hosted-execution test:coverage` | 891 / 0 / 3 | 82.98% / 77.14% / 85.43% / 83.75% |
+| `env MURPH_VITEST_MAX_WORKERS=2 pnpm --dir packages/assistant-runtime test:coverage` | 3893 / 2 / 7 | 91.15% / 86.63% / 94.45% / 91.61% |
+
+Repo-tools reproduced exactly 27 known local privacy-hook failures (20 dependency
+context and seven native context cases), with 864 passing and no skips. Both
+`scripts/review-gpt-dependency-context.test.ts` and
+`scripts/review-gpt-native-context.test.ts`, plus their corresponding implementation
+scripts, are byte-for-byte identical to `origin/main` at `1491685af1`. The hook
+rejects the synthetic `fixture@example.invalid` commit email before the tests'
+subject executes. No hook or fixture was weakened. This is source-identity proof
+against origin/main, not a claim of running tests in another checkout.
+
+The first runtime coverage run failed two of five dirty-ack follow-up variants
+with `HOSTED_VAULT_SHARE_PROJECTION_FAILED`; coverage still exceeded all gates.
+The exact five-case focused rerun passed unchanged (5 passed, 78 filtered skips).
+The affected projection and system-mailbox production owners are unchanged from
+the stacked base. The final full coverage rerun passed unchanged, as recorded below.
+No production regression has been established by this transient failure.
+
+Focused repaired Web verification: 286/0/0 across six complete test files.
+Focused assistant-engine verification: 39/0/0 across support-gap and CLI bootstrap
+files. Runner boot-closure verification: 40/0/0. Web, assistant-engine, and
+Cloudflare typechecks passed. The initial Cloudflare focused invocation named a
+nonexistent config and failed before collection; the corrected root command used
+`--config apps/cloudflare/vitest.node.workspace.ts` and passed all 40 tests.
+Early repair iterations exposed six then one fixture mismatch; all are superseded
+by the focused green runs and full Web result above.
+
+Final full reruns:
+
+| Command | Passed / failed / skipped | Result |
+| --- | --- | --- |
+| `env MURPH_VITEST_MAX_WORKERS=2 pnpm --dir packages/assistant-runtime test:coverage` | 3895 / 0 / 7 | PASS; statements 91.13%, branches 86.61%, functions 94.43%, lines 91.59% |
+| `env MURPH_VITEST_MAX_WORKERS=2 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage --reporter=verbose` | 13719 / 0 / 1533 | PASS; 849 passing files, 132 wholly skipped files; verbose rerun closes the exact skip-inventory evidence gap |
+| `pnpm docs:drift` | not a test-case suite | PASS |
+| `pnpm complexity:diff` | not a test-case suite | PASS; no production complexity added by this repair |
+| `pnpm --dir apps/web typecheck` | not a test-case suite | PASS |
+| `pnpm --dir packages/assistant-engine typecheck` | not a test-case suite | PASS |
+| `pnpm --dir apps/cloudflare typecheck` | not a test-case suite | PASS |
+
+The transient runtime failure is recorded in
+`.agents/friction-log/20261102172154-mailbox-dirty-ack/friction.md`; no claim of
+a deterministic reproduction or proven concurrency cause is made. No new
+production regression was found. Review of the final diff found zero production
+source edits, zero added unsafe casts, and no added personal identifiers.
+
+Final assertion-site audit: every edited test file retains its original number
+of `expect`/`assert` sites except the reconnect-link file, which loses exactly the
+two assertions belonging to the single retired direct-versus-Junction ambiguity
+case. Connect-page retains 733 sites, account-data 433, and support-gap 48.
+
+Commit is prepared but pending resolution of an explicit scope conflict:
+`scripts/committer` calls `scripts/install-git-hooks`, which invokes the primary
+checkout's storage guard and its read-only Git metadata queries. The task forbids
+Git in other checkouts. No guard bypass, cross-checkout query, or commit was
+attempted while awaiting the owner's narrow decision. No push was performed.
+
+### Exact Web skipped-case inventory
+
+The final verbose full run reported 1,533 skipped cases in 142 files (132 wholly
+skipped files and ten files containing both executed and skipped cases). Of
+these, 1,482 cases in 136 files require opted-in PostgreSQL proof. The remaining
+51 cases require browser/live-service/build fixtures or are explicitly skipped
+instrumentation cases. The table names every file and skipped-case count; names
+are relative to `apps/web/test/`. `*.db.test.ts` files are outside this CI suite.
+
+| Test file | Skipped cases | Gate |
+| --- | ---: | --- |
+| `approval-passkey-postgres-concurrency.test.ts` | 10 | PostgreSQL opt-in |
+| `better-auth-adapter-postgres-concurrency.test.ts` | 20 | PostgreSQL opt-in |
+| `better-auth-member-postgres-concurrency.test.ts` | 107 | PostgreSQL opt-in |
+| `better-auth-sms-postgres-concurrency.test.ts` | 7 | PostgreSQL opt-in |
+| `better-auth-telegram-postgres-concurrency.test.ts` | 23 | PostgreSQL opt-in |
+| `browser-assertion-nonce-postgres-concurrency.test.ts` | 3 | PostgreSQL opt-in |
+| `clinical-records-account-deletion-postgres-concurrency.test.ts` | 18 | PostgreSQL opt-in |
+| `companion-meal-upload-links-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `device-sync-companion-meal-photo-capture-access-postgres-concurrency.test.ts` | 8 | PostgreSQL opt-in |
+| `device-sync-companion-meal-photo-capture-authority-migration-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `device-sync-db-spike-resilience-postgres.test.ts` | 8 | PostgreSQL opt-in |
+| `device-sync-dirty-account-deletion-concurrency.test.ts` | 14 | PostgreSQL opt-in |
+| `device-sync-dirty-admission-consent-postgres.test.ts` | 4 | PostgreSQL opt-in |
+| `device-sync-dirty-payload-contract-migration-postgres.test.ts` | 5 | PostgreSQL opt-in |
+| `device-sync-dirty-reconnect-ack-postgres.test.ts` | 2 | PostgreSQL opt-in |
+| `device-sync-dirty-reconnect-consent-postgres.test.ts` | 2 | PostgreSQL opt-in |
+| `device-sync-dirty-reconnect-retention-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `device-sync-prepared-webhook-authority-postgres.test.ts` | 17 | PostgreSQL opt-in |
+| `device-sync-scheduled-wake-retention-postgres.test.ts` | 43 | PostgreSQL opt-in |
+| `device-sync-webhook-preparation-contention-postgres.test.ts` | 4 | PostgreSQL opt-in |
+| `game-account-deletion-postgres.test.ts` | 10 | PostgreSQL opt-in |
+| `game-api-postgres.test.ts` | 8 | PostgreSQL opt-in |
+| `game-cancellation-bootstrap-postgres.test.ts` | 2 | PostgreSQL opt-in |
+| `game-change-cancelled-postgres.test.ts` | 13 | PostgreSQL opt-in |
+| `game-changes-postgres.test.ts` | 33 | PostgreSQL opt-in |
+| `game-chat-access-postgres.test.ts` | 4 | PostgreSQL opt-in |
+| `game-chat-allowance-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `game-chat-bootstrap-recovery-postgres.test.ts` | 2 | PostgreSQL opt-in |
+| `game-chat-progress-postgres.test.ts` | 4 | PostgreSQL opt-in |
+| `game-chat-setup-postgres.test.ts` | 16 | PostgreSQL opt-in |
+| `game-day-incomplete-postgres.test.ts` | 4 | PostgreSQL opt-in |
+| `game-late-recap-postgres.test.ts` | 16 | PostgreSQL opt-in |
+| `game-negotiation-postgres.test.ts` | 18 | PostgreSQL opt-in |
+| `game-report-block-postgres.test.ts` | 11 | PostgreSQL opt-in |
+| `game-service-postgres.test.ts` | 62 | PostgreSQL opt-in |
+| `hosted-accepted-attempt-recheck-postgres-concurrency.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-ai-usage-overshoot-alert-monitor-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-assistant-ask-retention-postgres.test.ts` | 2 | PostgreSQL opt-in |
+| `hosted-automation-loss-alert-monitor-postgres.test.ts` | 7 | PostgreSQL opt-in |
+| `hosted-billing-browser-hydration.test.ts` | 3 | browser opt-in |
+| `hosted-callback-request-nonce-postgres-concurrency.test.ts` | 6 | PostgreSQL opt-in |
+| `hosted-checkpoint-recovery-postgres.test.ts` | 5 | PostgreSQL opt-in |
+| `hosted-cold-ingest-migration.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-current-sender-assistant-ask-postgres.test.ts` | 10 | PostgreSQL opt-in |
+| `hosted-email-public-bootstrap-postgres-concurrency.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-execution-usage-period-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-execution-usage-postgres-concurrency.test.ts` | 4 | PostgreSQL opt-in |
+| `hosted-feedback-task-migration-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-group-join-outreach-reply-recovery-postgres.test.ts` | 40 | PostgreSQL opt-in |
+| `hosted-group-private-observations-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-group-start-recovery-postgres.test.ts` | 6 | PostgreSQL opt-in |
+| `hosted-growth-aggregate-migration.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-headed-browser-smoke.test.ts` | 17 | headed browser opt-in |
+| `hosted-linq-invite-deletion-contract-migration-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-linq-live-invite-source-ref-postgres.test.ts` | 2 | PostgreSQL opt-in |
+| `hosted-linq-provider-health-contract-migration-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-linq-reaction-exact-consume-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-linq-rich-link-partial-postgres.test.ts` | 27 | PostgreSQL opt-in |
+| `hosted-local-runtime-initialization-postgres.test.ts` | 3 | PostgreSQL opt-in |
+| `hosted-mailbox-content-retention-migration-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-mailbox-engagement-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-mailbox-progress-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-mailbox-usage-denial-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-member-access-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-onboarding-companion-enrollment-postgres.test.ts` | 4 | PostgreSQL opt-in |
+| `hosted-onboarding-linq-chat-health-inventory-postgres.test.ts` | 3 | PostgreSQL opt-in |
+| `hosted-onboarding-linq-email-identity-migration-postgres.test.ts` | 8 | PostgreSQL opt-in |
+| `hosted-onboarding-linq-home-routing-postgres.test.ts` | 33 | PostgreSQL opt-in |
+| `hosted-onboarding-linq-instant-first-turn-real-model.test.ts` | 18 | real-model opt-in |
+| `hosted-onboarding-linq-opening-history-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-onboarding-linq-participant-addition-concurrency.test.ts` | 25 | PostgreSQL opt-in |
+| `hosted-onboarding-linq-phone-number-inventory-postgres.test.ts` | 12 | PostgreSQL opt-in |
+| `hosted-onboarding-linq-production-canary-reset-postgres.test.ts` | 3 | PostgreSQL opt-in |
+| `hosted-onboarding-linq-recent-message-load-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-onboarding-linq-terminal-retry-postgres.test.ts` | 81 | PostgreSQL opt-in |
+| `hosted-onboarding-member-lock-postgres.test.ts` | 31 | PostgreSQL opt-in |
+| `hosted-onboarding-telegram-activation-postgres.test.ts` | 2 | PostgreSQL opt-in |
+| `hosted-onboarding-telegram-routing-postgres.test.ts` | 5 | PostgreSQL opt-in |
+| `hosted-operator-task-retention-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-ops-app-review-game-postgres.test.ts` | 9 | PostgreSQL opt-in |
+| `hosted-ops-app-review-member-postgres.test.ts` | 6 | PostgreSQL opt-in |
+| `hosted-ops-growth-canary-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-ops-growth-sponsorship-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-ops-usage-reset-postgres.test.ts` | 10 | PostgreSQL opt-in |
+| `hosted-paid-usage-legacy-period-cutover-migration.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-pending-group-setup-postgres-concurrency.test.ts` | 4 | PostgreSQL opt-in |
+| `hosted-phone-welcome.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-preference-handoff-sweeper-postgres.test.ts` | 15 | PostgreSQL opt-in |
+| `hosted-production-500-regressions-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-retention-control-artifacts-postgres-concurrency.test.ts` | 8 | PostgreSQL opt-in |
+| `hosted-runtime-access-postgres-concurrency.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-runtime-callback-query-load-postgres.test.ts` | 2 | PostgreSQL opt-in |
+| `hosted-runtime-cleanup-enrollment-postgres.test.ts` | 10 | PostgreSQL opt-in |
+| `hosted-runtime-final-reply-delivery-alert-postgres.test.ts` | 2 | PostgreSQL opt-in |
+| `hosted-runtime-latency-alert-query-postgres.test.ts` | 3 | PostgreSQL opt-in |
+| `hosted-runtime-latency-postgres-concurrency.test.ts` | 10 | PostgreSQL opt-in |
+| `hosted-runtime-log-postgres-concurrency.test.ts` | 12 | PostgreSQL opt-in |
+| `hosted-runtime-materialization-postgres.test.ts` | 19 | PostgreSQL opt-in |
+| `hosted-runtime-member-cutover-postgres.test.ts` | 16 | PostgreSQL opt-in |
+| `hosted-runtime-member-migration-postgres.test.ts` | 8 | PostgreSQL opt-in |
+| `hosted-runtime-migration-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-runtime-owner-postgres.test.ts` | 91 | PostgreSQL opt-in |
+| `hosted-runtime-progress-alert-monitor-postgres.test.ts` | 14 | PostgreSQL opt-in |
+| `hosted-runtime-query-load-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-runtime-retirement-cardinality-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-runtime-runaway-alert-monitor-postgres.test.ts` | 22 | PostgreSQL opt-in |
+| `hosted-runtime-typing-alert-postgres.test.ts` | 22 | PostgreSQL opt-in |
+| `hosted-signup-notification-context-migration-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-signup-referral-postgres-concurrency.test.ts` | 8 | PostgreSQL opt-in |
+| `hosted-starter-usage-migration-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-stripe-webhook-entitlement-postgres.test.ts` | 14 | PostgreSQL opt-in |
+| `hosted-thread-container-participant-reconcile-postgres.test.ts` | 2 | PostgreSQL opt-in |
+| `hosted-tool-failure-health-postgres.test.ts` | 28 | PostgreSQL opt-in |
+| `hosted-usage-allowance-postgres.test.ts` | 6 | PostgreSQL opt-in |
+| `hosted-usage-credit-account-deletion-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-usage-credit-postgres-concurrency.test.ts` | 46 | PostgreSQL opt-in |
+| `hosted-usage-diagnostics-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-usage-plan-reset-postgres.test.ts` | 7 | PostgreSQL opt-in |
+| `hosted-usage-plan-transition-bridge-migration-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-usage-referral-recovery-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-vault-share-grant-lifecycle-postgres-concurrency.test.ts` | 1 | PostgreSQL opt-in |
+| `hosted-vault-share-projection-deadline-postgres.test.ts` | 2 | PostgreSQL opt-in |
+| `hosted-workspace-checkpoint-postgres.test.ts` | 6 | PostgreSQL opt-in |
+| `initial-onboarding-postgres-concurrency.test.ts` | 3 | PostgreSQL opt-in |
+| `instrumentation.test.ts` | 2 | explicit skip |
+| `legal-consent-postgres.test.ts` | 6 | PostgreSQL opt-in |
+| `linq-line-lock-order-diagnostic.test.ts` | 7 | PostgreSQL opt-in |
+| `next-config-workflow.test.ts` | 1 | build-manifest opt-in |
+| `openai-only-contract-migration-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `outbound-message-volume-postgres-concurrency.test.ts` | 1 | PostgreSQL opt-in |
+| `phone-calls-game-allowance-postgres.test.ts` | 2 | PostgreSQL opt-in |
+| `phone-calls-legacy-deletion-postgres.test.ts` | 19 | PostgreSQL opt-in |
+| `physical-notes-postgres-concurrency.test.ts` | 18 | PostgreSQL opt-in |
+| `prisma-database-retry-postgres.test.ts` | 15 | PostgreSQL opt-in |
+| `prisma-store-pool-timing-postgres.test.ts` | 4 | PostgreSQL opt-in |
+| `prisma-timezone-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `runtime-recheck-verification-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `settings-privacy-delete-postgres.test.ts` | 1 | PostgreSQL opt-in |
+| `starter-growth-activity-postgres.test.ts` | 2 | PostgreSQL opt-in |
+| `supplements-search-live.test.ts` | 10 | live labels database opt-in |
+| `supplements-search-postgres.test.ts` | 142 | PostgreSQL opt-in |
+| `terra-model-reset-postgres.test.ts` | 1 | PostgreSQL opt-in |

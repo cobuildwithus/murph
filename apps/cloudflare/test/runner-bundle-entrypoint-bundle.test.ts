@@ -433,8 +433,8 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ],
     [
       "device-sync provider graph",
-      ".deploy/runner-bundle/node_modules/@murphai/device-syncd/dist/providers/oura.js",
-      /node_modules\/@murphai\/device-syncd\/dist\/providers\/oura\.js/,
+      ".deploy/runner-bundle/node_modules/@murphai/device-syncd/dist/providers/junction.js",
+      /node_modules\/@murphai\/device-syncd\/dist\/providers\/junction\.js/,
     ],
     [
       "importers",

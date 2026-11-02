@@ -14,7 +14,6 @@ const userId = `member_local_device_sync_wake_${runId}`;
 const connectionId = `dsc_local_device_sync_wake_${runId}`;
 const productionLikeAssistantModel = "gpt-6.1-sol";
 const deviceSyncPublicBaseUrl = "https://device-sync.example.test/api/device-sync";
-const whoopBaseUrl = "https://whoop-oauth.example.test";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -32,9 +31,6 @@ describe("hosted local device-sync wake e2e", () => {
         HOSTED_ASSISTANT_PROVIDER: "openai",
         MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
         OPENAI_API_KEY: "stub-local-openai-key",
-        WHOOP_BASE_URL: whoopBaseUrl,
-        WHOOP_CLIENT_ID: "synthetic-whoop-client",
-        WHOOP_CLIENT_SECRET: "synthetic-whoop-secret",
       },
       localDatabaseUrl,
       persistDirOverride: workerPersistDirOverride,
@@ -116,7 +112,7 @@ function buildDeviceSyncWake() {
       reason: "scheduled-reconcile",
     },
     occurredAt,
-    provider: "whoop",
+    provider: "junction",
     reason: "reconcile_due",
     userId,
   });

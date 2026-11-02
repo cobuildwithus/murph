@@ -35,16 +35,10 @@ describe("device sync internal connect-link route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client");
-    vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-secret");
     vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
     vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
     vi.stubEnv("JUNCTION_ENV", "sandbox");
     vi.stubEnv("JUNCTION_REGION", "us");
-    vi.stubEnv("OURA_CLIENT_ID", "");
-    vi.stubEnv("OURA_CLIENT_SECRET", "");
-    vi.stubEnv("STRAVA_CLIENT_ID", "");
-    vi.stubEnv("STRAVA_CLIENT_SECRET", "");
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
     mocks.isHostedThreadContainerMember.mockResolvedValue(false);
     mocks.createHostedDeviceConnectIntent.mockResolvedValue({
@@ -105,10 +99,6 @@ describe("device sync internal connect-link route", () => {
   });
 
   it("does not issue a hosted connect link for configured Strava routes", async () => {
-    vi.stubEnv("WHOOP_CLIENT_ID", "");
-    vi.stubEnv("WHOOP_CLIENT_SECRET", "");
-    vi.stubEnv("STRAVA_CLIENT_ID", "strava-client");
-    vi.stubEnv("STRAVA_CLIENT_SECRET", "strava-secret");
     vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
     vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
     vi.stubEnv("JUNCTION_ENV", "sandbox");
@@ -161,8 +151,6 @@ describe("device sync internal connect-link route", () => {
   });
 
   it("resolves Junction-backed public connect targets at the web boundary", async () => {
-    vi.stubEnv("WHOOP_CLIENT_ID", "");
-    vi.stubEnv("WHOOP_CLIENT_SECRET", "");
     vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
     vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret-value");
     vi.stubEnv("JUNCTION_ENV", "sandbox");

@@ -274,8 +274,6 @@ describe("device sync settings routes", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-03T12:00:00.000Z"));
     vi.clearAllMocks();
-    vi.stubEnv("OURA_CLIENT_ID", "oura-client");
-    vi.stubEnv("OURA_CLIENT_SECRET", "oura-secret");
     vi.stubEnv(
       "HOSTED_DEVICE_ROUTING_INDEX_KEY",
       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -1328,9 +1326,7 @@ describe("device sync settings routes", () => {
     expect(mocks.findManyDeviceConnections).not.toHaveBeenCalled();
   });
 
-  it("rejects Strava source starts even when direct and Junction credentials are configured", async () => {
-    vi.stubEnv("STRAVA_CLIENT_ID", "strava-client-id");
-    vi.stubEnv("STRAVA_CLIENT_SECRET", "strava-client-secret");
+  it("rejects Strava source starts when Junction credentials are configured", async () => {
     vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
     vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
     vi.stubEnv("JUNCTION_ENV", "sandbox");
@@ -1395,8 +1391,6 @@ describe("device sync settings routes", () => {
   });
 
   it("uses an explicit provider selector for a provider-labelled Junction source", async () => {
-    vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
-    vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
     vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
     vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
     vi.stubEnv("JUNCTION_ENV", "sandbox");
@@ -1453,8 +1447,6 @@ describe("device sync settings routes", () => {
   });
 
   it("rejects a new member when current WHOOP capacity is full", async () => {
-    vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
-    vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
     mocks.queryWhoopMembers.mockResolvedValueOnce(
       Array.from({ length: 98 }, (_, index) => ({
         userId: `member_existing_${index + 1}`,
@@ -1487,8 +1479,6 @@ describe("device sync settings routes", () => {
   });
 
   it("allows a new member to take the 98th tracked WHOOP slot through Junction", async () => {
-    vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
-    vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
     mocks.queryWhoopMembers.mockResolvedValueOnce(
       Array.from({ length: 97 }, (_, index) => ({
         userId: `member_existing_${index + 1}`,
@@ -1522,8 +1512,6 @@ describe("device sync settings routes", () => {
   });
 
   it("allows an existing WHOOP member to reconnect when capacity is full", async () => {
-    vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
-    vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
     mocks.findFirstDeviceConnection.mockResolvedValueOnce({
       id: "dsc_whoop_existing",
     });
@@ -1556,8 +1544,6 @@ describe("device sync settings routes", () => {
   });
 
   it("uses the preferred source target when a visible source selector omits provider", async () => {
-    vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
-    vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
     vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
     vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
     vi.stubEnv("JUNCTION_ENV", "sandbox");
