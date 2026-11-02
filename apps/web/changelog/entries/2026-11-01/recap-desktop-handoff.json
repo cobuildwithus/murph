@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-01",
+  "order": 110,
+  "item": {
+    "id": "recap-desktop-handoff",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Open a recap from your computer",
+    "summary": "Recap links opened on a computer now show a QR code to scan with your iPhone camera.",
+    "details": "The code opens the same recap link on your phone. iPhone and iPad visitors keep the Open in Murph button, and the App Store link stays available.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": []
+  }
+}
