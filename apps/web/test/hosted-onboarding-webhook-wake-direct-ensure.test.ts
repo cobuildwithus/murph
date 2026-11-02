@@ -94,6 +94,13 @@ function buildWakeHandoff(
   };
 }
 
+function buildTransportTypeError(cause?: unknown): TypeError {
+  return new TypeError(
+    "synthetic private failure mentioning UND_ERR_CONNECT_TIMEOUT",
+    cause === undefined ? undefined : { cause },
+  );
+}
+
 describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -668,50 +675,172 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     }
   });
 
-  it("keeps the Temporal signal and handoff result intact when the direct ensure fails", async () => {
+  it.each<{
+    name: string;
+    buildError: (unsafeRead: () => never) => TypeError;
+    transportErrorCode: string;
+    synchronous?: boolean;
+  }>([
+    ...[
+      "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT",
+      "UND_ERR_SOCKET", "ECONNRESET", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ETIMEDOUT",
+    ].map((transportErrorCode) => ({
+      name: transportErrorCode,
+      buildError: () => buildTransportTypeError(Object.assign(new Error("synthetic private cause"), {
+        code: transportErrorCode,
+        url: "https://synthetic-private.invalid/transport",
+        address: "synthetic private address",
+        socket: { remoteAddress: "synthetic private socket" },
+        headers: { authorization: "synthetic private header" },
+        body: "synthetic private body",
+      })),
+      transportErrorCode,
+    })),
+    {
+      name: "synchronous own code",
+      buildError: () => Object.assign(buildTransportTypeError(), { code: "ECONNRESET" }),
+      transportErrorCode: "ECONNRESET",
+      synchronous: true,
+    },
+    { name: "missing cause", buildError: () => buildTransportTypeError(), transportErrorCode: "unknown" },
+    { name: "null cause", buildError: () => buildTransportTypeError(null), transportErrorCode: "unknown" },
+    { name: "string cause", buildError: () => buildTransportTypeError("ECONNRESET"), transportErrorCode: "unknown" },
+    {
+      name: "private code stops classification",
+      buildError: () => buildTransportTypeError({ code: "synthetic private code", cause: { code: "ECONNRESET" } }),
+      transportErrorCode: "unknown",
+    },
+    {
+      name: "numeric code",
+      buildError: () => buildTransportTypeError({ code: 123 }),
+      transportErrorCode: "unknown",
+    },
+    {
+      name: "code is never coerced",
+      buildError: (unsafeRead) => buildTransportTypeError({ code: { toString: unsafeRead, [Symbol.toPrimitive]: unsafeRead } }),
+      transportErrorCode: "unknown",
+    },
+    {
+      name: "code at the fourth node",
+      buildError: () => buildTransportTypeError({ cause: { cause: { code: "ETIMEDOUT" } } }),
+      transportErrorCode: "ETIMEDOUT",
+    },
+    {
+      name: "fifth node is never inspected",
+      buildError: (unsafeRead) => buildTransportTypeError({ cause: { cause: { cause:
+        new Proxy({ code: "ETIMEDOUT" }, { getOwnPropertyDescriptor: unsafeRead }),
+      } } }),
+      transportErrorCode: "unknown",
+    },
+    {
+      name: "cyclic cause",
+      buildError: () => {
+        const cause: { cause?: unknown } = {};
+        cause.cause = cause;
+        return buildTransportTypeError(cause);
+      },
+      transportErrorCode: "unknown",
+    },
+    {
+      name: "inherited code and cause",
+      buildError: () => buildTransportTypeError(Object.setPrototypeOf({}, { code: "ECONNRESET", cause: { code: "ENOTFOUND" } })),
+      transportErrorCode: "unknown",
+    },
+    ...(["code", "cause"] as const).flatMap((property) => [
+      {
+        name: `outer ${property} accessor`,
+        buildError: (unsafeRead: () => never) => Object.defineProperty(buildTransportTypeError(), property, { get: unsafeRead }),
+        transportErrorCode: "unknown",
+      },
+      {
+        name: `nested ${property} accessor`,
+        buildError: (unsafeRead: () => never) => buildTransportTypeError(Object.defineProperty({}, property, { get: unsafeRead })),
+        transportErrorCode: "unknown",
+      },
+      {
+        name: `${property} reflection failure`,
+        buildError: () => buildTransportTypeError(new Proxy({}, {
+          getOwnPropertyDescriptor(_target, key) {
+            if (key === property) throw new Error("synthetic private reflection failure");
+            return undefined;
+          },
+        })),
+        transportErrorCode: "unknown",
+      },
+    ]),
+    {
+      name: "no property reads, enumeration, or prototype traversal",
+      buildError: (unsafeRead) => buildTransportTypeError(new Proxy({ code: "UND_ERR_SOCKET" }, {
+        get: unsafeRead, getPrototypeOf: unsafeRead, ownKeys: unsafeRead,
+      })),
+      transportErrorCode: "UND_ERR_SOCKET",
+    },
+    {
+      name: "revoked cause",
+      buildError: () => {
+        const { proxy, revoke } = Proxy.revocable({}, {});
+        revoke();
+        return buildTransportTypeError(proxy);
+      },
+      transportErrorCode: "unknown",
+    },
+    {
+      name: "array cause",
+      buildError: () => buildTransportTypeError(Object.assign([], { code: "ECONNRESET" })),
+      transportErrorCode: "unknown",
+    },
+    {
+      name: "function cause",
+      buildError: (unsafeRead) => buildTransportTypeError(Object.assign(unsafeRead, { code: "ECONNRESET" })),
+      transportErrorCode: "unknown",
+    },
+    {
+      name: "aggregate members are not traversed",
+      buildError: () => buildTransportTypeError(new AggregateError([{ code: "ECONNRESET" }], "synthetic private aggregate")),
+      transportErrorCode: "unknown",
+    },
+  ])("keeps the Temporal handoff intact and classifies only transport codes: $name", async ({ buildError, transportErrorCode, synchronous = false }) => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    mocks.ensureRuntimeProcessing.mockRejectedValue(new Error("cloudflare unreachable"));
-
-    await expect(maybeHandoffHostedExecutionWebhookWake({
-      response,
-      wakeHandoff: buildWakeHandoff(),
-    })).resolves.toMatchObject({
-      reason: "temporal-signaled",
-      signalAccepted: true,
+    const tasks: Array<() => Promise<void>> = [];
+    const unsafeRead = vi.fn((): never => { throw new Error("synthetic private accessor or coercion"); });
+    const error = buildError(unsafeRead);
+    let orchestrationAttemptId: string | undefined;
+    mocks.ensureRuntimeProcessing.mockImplementationOnce((input: DirectEnsureInput) => {
+      orchestrationAttemptId = input.orchestrationAttemptId;
+      if (synchronous) throw error;
+      return Promise.reject(error);
     });
 
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
-    expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
-    await vi.waitFor(() => {
-      expect(consoleWarn).toHaveBeenCalledWith(
-        "Hosted direct ensure wake failed.",
-        expect.objectContaining({ source: "linq" }),
-      );
-    });
-    consoleWarn.mockRestore();
-  });
+    try {
+      await expect(maybeHandoffHostedExecutionWebhookWake({
+        response,
+        scheduleAfterResponse: (task) => { tasks.push(task); },
+        wakeHandoff: buildWakeHandoff(),
+      })).resolves.toEqual({
+        reason: "temporal-signaled",
+        signalAccepted: true,
+        started: true,
+        workflowId: "hosted-user-runtime:member_123",
+      });
+      expect(tasks).toHaveLength(2);
+      await expect(Promise.all(tasks.map((task) => task()))).resolves.toEqual([undefined, undefined]);
 
-  it("keeps the Temporal signal authoritative when the direct ensure throws synchronously", async () => {
-    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    mocks.ensureRuntimeProcessing.mockImplementationOnce(() => {
-      throw new Error("control client failed before returning a promise");
-    });
-
-    await expect(maybeHandoffHostedExecutionWebhookWake({
-      response,
-      wakeHandoff: buildWakeHandoff(),
-    })).resolves.toMatchObject({
-      reason: "temporal-signaled",
-      signalAccepted: true,
-    });
-
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
-    expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
-    expect(consoleWarn).toHaveBeenCalledWith(
-      "Hosted direct ensure wake failed.",
-      expect.objectContaining({ source: "linq" }),
-    );
-    consoleWarn.mockRestore();
+      expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledOnce();
+      expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledOnce();
+      expect(mocks.recordHostedIngressDirectEnsureTiming).not.toHaveBeenCalled();
+      expect(orchestrationAttemptId).toEqual(expect.stringMatching(/^web-ingress-[0-9a-f-]{36}$/u));
+      expect(consoleWarn).toHaveBeenCalledExactlyOnceWith("Hosted direct ensure wake failed.", {
+        errorName: "TypeError",
+        orchestrationAttemptId,
+        source: "linq",
+        transportErrorCode,
+      });
+      expect(unsafeRead).not.toHaveBeenCalled();
+      expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain("synthetic private");
+      expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain("synthetic-private.invalid");
+    } finally {
+      consoleWarn.mockRestore();
+    }
   });
 
   it("never puts the direct ensure on the webhook response path, even with no scheduler", async () => {

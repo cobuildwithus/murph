@@ -28,11 +28,24 @@ export type HostedDirectRuntimeWakeSource =
   | "linq"
   | "telegram";
 
+type HostedDirectRuntimeWakeTransportErrorCode =
+  | "UND_ERR_CONNECT_TIMEOUT"
+  | "UND_ERR_HEADERS_TIMEOUT"
+  | "UND_ERR_BODY_TIMEOUT"
+  | "UND_ERR_SOCKET"
+  | "ECONNRESET"
+  | "ECONNREFUSED"
+  | "ENOTFOUND"
+  | "EAI_AGAIN"
+  | "ETIMEDOUT"
+  | "unknown";
+
 const HOSTED_DIRECT_RUNTIME_WAKE_DEADLINE_MS = 29_000;
 const HOSTED_DIRECT_RUNTIME_WAKE_COMMAND_TIMEOUT_MS = 25_000;
 const HOSTED_DIRECT_RUNTIME_WAKE_MAX_ATTEMPTS = 2;
 // Optional owner reads must not stall dispatch behind database or pool delays.
 const HOSTED_DIRECT_RUNTIME_WAKE_OWNER_READ_TIMEOUT_MS = 250;
+const HOSTED_DIRECT_RUNTIME_WAKE_ERROR_MAX_NODES = 4;
 
 /**
  * Starts the control-only Cloudflare latency hint and always settles. Temporal
@@ -72,6 +85,7 @@ export function startHostedDirectRuntimeWakeBestEffort(input: {
   } catch (error) {
     console.warn("Hosted direct ensure wake failed.", {
       errorName: describeHostedExecutionSafeLogErrorCode(error),
+      transportErrorCode: readHostedDirectRuntimeWakeTransportErrorCode(error),
       source: wakeSource,
     });
     return Promise.resolve();
@@ -209,6 +223,7 @@ async function runHostedDirectRuntimeWakeBestEffort(input: {
   } catch (error) {
     console.warn("Hosted direct ensure wake failed.", {
       errorName: describeHostedExecutionSafeLogErrorCode(error),
+      transportErrorCode: readHostedDirectRuntimeWakeTransportErrorCode(error),
       orchestrationAttemptId,
       source: wakeSource,
     });
@@ -225,6 +240,49 @@ async function runHostedDirectRuntimeWakeBestEffort(input: {
       }
     }
   }
+}
+
+function readHostedDirectRuntimeWakeTransportErrorCode(
+  error: unknown,
+): HostedDirectRuntimeWakeTransportErrorCode {
+  const seen = new Set<object>();
+  let current: unknown = error;
+  try {
+    // Four nodes total, including the outer error; only own data code/cause.
+    for (let depth = 0; depth < HOSTED_DIRECT_RUNTIME_WAKE_ERROR_MAX_NODES; depth += 1) {
+      if (typeof current !== "object" || current === null || Array.isArray(current) || seen.has(current)) {
+        return "unknown";
+      }
+      seen.add(current);
+      const codeDescriptor = Object.getOwnPropertyDescriptor(current, "code");
+      if (codeDescriptor) {
+        if (!Object.hasOwn(codeDescriptor, "value")) return "unknown";
+        const code: unknown = codeDescriptor.value;
+        // https://github.com/nodejs/undici/blob/main/docs/docs/api/Errors.md
+        // https://nodejs.org/api/errors.html#common-system-errors
+        switch (code) {
+          case "UND_ERR_CONNECT_TIMEOUT":
+          case "UND_ERR_HEADERS_TIMEOUT":
+          case "UND_ERR_BODY_TIMEOUT":
+          case "UND_ERR_SOCKET":
+          case "ECONNRESET":
+          case "ECONNREFUSED":
+          case "ENOTFOUND":
+          case "EAI_AGAIN":
+          case "ETIMEDOUT":
+            return code;
+          default:
+            return "unknown";
+        }
+      }
+      const causeDescriptor = Object.getOwnPropertyDescriptor(current, "cause");
+      if (!causeDescriptor || !Object.hasOwn(causeDescriptor, "value")) return "unknown";
+      current = causeDescriptor.value;
+    }
+  } catch {
+    // Reflection failures must not turn diagnostics into another wake failure.
+  }
+  return "unknown";
 }
 
 function waitForHostedDirectRuntimeWakeRetry(
