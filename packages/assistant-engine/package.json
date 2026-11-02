@@ -75,10 +75,6 @@
       "types": "./dist/assistant-state.d.ts",
       "default": "./dist/assistant-state.js"
     },
-    "./assistant-status": {
-      "types": "./dist/assistant-status.d.ts",
-      "default": "./dist/assistant-status.js"
-    },
     "./assistant-store": {
       "types": "./dist/assistant-store.d.ts",
       "default": "./dist/assistant-store.js"

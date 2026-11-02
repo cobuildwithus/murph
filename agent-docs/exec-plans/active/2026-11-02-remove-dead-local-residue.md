@@ -54,3 +54,11 @@ Updated: 2026-11-02
 - Model catalog, display config, conversation-open/session-options, operator setup/self-target writers and equality/header-normalization helpers are detached from Web, Cloudflare, runner, CLI and hosted prompts/skills. Retained hosted config persistence, default-vault reads, strict self-target reads and header redaction/persistence.
 - Replaced test-only setup writers with synthetic config fixtures; kept hosted provider-routing tests inside the former mixed catalog suite.
 - Build, four touched-owner typechecks, operator-config tests (454), focused engine tests (273), and focused CLI tests passed. Initial deletion-induced missing-export type errors were fixed; gateway test failure was an empty suite left by removed route APIs, confirmed against the nonempty base suite.
+
+## Slice 2 evidence
+
+- No production reads of `status.json`, status service methods, or `status.snapshot.refreshed` remain in Web/Ops/scripts, Cloudflare, hosted runtime projections, logs, CLI or hosted instructions. Web workspace `redacted_status_json` comes from the hosted invocation/mailbox progress projection, not the removed file.
+- Removed portable status descriptor, writer/read API, service status members, and status-only schemas. Retained hot-snapshot exclusion and historical runtime-event/quarantine vocabulary so old logs remain readable; retained live outbox summary type.
+- Automation lock has no producer after the stacked removal; runtime-write lock remains the sole maintained lock. Generic process identity/kill helpers, polling wait and old auto-reply reconciliation have no production callers.
+- Full snapshots also used a broad assistant continuity copy; added the retired file to its existing exclusion list and proved omission on restore. Portability and warning assertions initially failed because they expected the deleted behavior, confirmed against the base assertions.
+- Slice 2 build and five touched-owner typechecks passed. Runtime-state (297 passed, 21 skipped), inboxd (194 passed, 3 skipped), operator-config, 13 focused engine files (519 tests after targeted correction), and two focused CLI files (34 tests) passed.

@@ -13,7 +13,6 @@ import {
 } from '../src/assistant/provider-config.ts'
 import {
   assistantSessionIdSchema,
-  assistantStatusAutomationSchema,
   parseAssistantSessionRecord,
 } from '../src/assistant-cli-contracts.ts'
 import {
@@ -282,35 +281,7 @@ test('representative contract schemas stay wired to the owned setup/operator sea
     resumeKind: 'codex-thread',
     sandbox: 'danger-full-access',
   })
-  assert.deepEqual(
-    assistantStatusAutomationSchema.parse({
-      autoReply: [
-        {
-          channel: 'telegram',
-          enabledAt: '2026-04-08T12:05:00.000Z',
-          eligibleAfter: {
-            createdAt: null,
-            inputId: 'input-1',
-            occurredAt: '2026-04-08T12:05:00.000Z',
-            sourceKind: 'inbox-capture',
-          },
-        },
-      ],
-      updatedAt: '2026-04-08T12:10:00.000Z',
-    }).autoReply,
-    [
-      {
-        channel: 'telegram',
-        enabledAt: '2026-04-08T12:05:00.000Z',
-        eligibleAfter: {
-          createdAt: null,
-          inputId: 'input-1',
-          occurredAt: '2026-04-08T12:05:00.000Z',
-          sourceKind: 'inbox-capture',
-        },
-      },
-    ],
-  )
+
   assert.deepEqual(
     parseAssistantSessionRecord({
       alias: null,

@@ -67,7 +67,6 @@ type LocalServiceMockName =
   | 'recordAdditionalAssistantUsageEvents'
   | 'recordAssistantDiagnosticEvent'
   | 'recordAssistantUsageEvent'
-  | 'refreshAssistantStatusSnapshotLocal'
   | 'resolveAssistantAcceptedMessageTarget'
   | 'resolveAssistantExecutionDefaultTarget'
   | 'resolveAssistantMessageSession'
@@ -165,7 +164,7 @@ afterEach(async () => {
   vi.doUnmock('../src/assistant/store.js')
   vi.doUnmock('../src/assistant/outbox.js')
   vi.doUnmock('../src/assistant/diagnostics.js')
-  vi.doUnmock('../src/assistant/status.js')
+
   vi.doUnmock('../src/assistant/turn-plan.js')
   vi.doUnmock('../src/assistant/session-resolution.js')
   vi.doUnmock('../src/assistant/delivery-service.js')
@@ -683,7 +682,7 @@ export async function loadLocalServiceModule(input?: {
       ) => undefined,
     ),
     redactAssistantDisplayPath: vi.fn(() => '<redacted-vault>'),
-    refreshAssistantStatusSnapshotLocal: vi.fn(async () => undefined),
+
     saveAssistantSession: vi.fn(
       async (
         _vault: Parameters<
@@ -807,9 +806,7 @@ export async function loadLocalServiceModule(input?: {
   vi.doMock('../src/assistant/diagnostics.js', () => ({
     recordAssistantDiagnosticEvent: mocks.recordAssistantDiagnosticEvent,
   }))
-  vi.doMock('../src/assistant/status.js', () => ({
-    refreshAssistantStatusSnapshotLocal: mocks.refreshAssistantStatusSnapshotLocal,
-  }))
+
   vi.doMock('../src/assistant/turn-plan.js', () => ({
     resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
   }))

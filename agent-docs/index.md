@@ -1135,7 +1135,7 @@ Package verifier worker-exit result preservation is tracked in
 | `packages/hosted-execution/README.md` | Shared hosted execution contracts, auth, env, and client seam. | `packages/hosted-execution/**` | Medium | 2026-03-28 |
 | `packages/messaging-ingress/README.md` | Shared stateless messaging ingress boundary. | `packages/messaging-ingress/**` | Medium | 2026-04-02 |
 | `packages/query/README.md` | Query projection ownership, strict source-health snapshot capture, provider-projected parity and no-publication fast paths. | `packages/query/**` | Medium | 2026-09-13 |
-| `packages/runtime-state/README.md` | `.runtime` taxonomy, portability, generated-delivery ref ownership, hosted state rules, and hosted Codex rollout snapshot scope without ChatGPT auth portability. | `packages/runtime-state/**` | Medium | 2026-07-16 |
+| `packages/runtime-state/README.md` | `.runtime` taxonomy, portability, generated-delivery ref ownership, hosted state rules, and hosted Codex rollout snapshot scope without ChatGPT auth portability or retired assistant status projection. | `packages/runtime-state/**` | Medium | 2026-07-16 |
 | `packages/vault-usecases/README.md` | CLI/headless vault usecase orchestration boundary over core, importers, and query. | `packages/vault-usecases/**` | Medium | 2026-05-02 |
 
 The completed Home account-check optimization and local proof are recorded in

@@ -27,7 +27,6 @@ export interface AssistantStatePaths {
   runtimeEventsPath: string;
   sessionsDirectory: string;
   stateDirectory: string;
-  statusPath: string;
   transcriptsDirectory: string;
   turnsDirectory: string;
 }
@@ -73,7 +72,6 @@ export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePat
     runtimeEventsPath: path.join(journalsDirectory, "runtime-events.jsonl"),
     sessionsDirectory: path.join(rootPath, "sessions"),
     stateDirectory: path.join(rootPath, "state"),
-    statusPath: path.join(rootPath, "status.json"),
     transcriptsDirectory: path.join(rootPath, "transcripts"),
     turnsDirectory,
   };

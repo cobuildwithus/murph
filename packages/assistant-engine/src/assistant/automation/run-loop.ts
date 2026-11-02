@@ -22,7 +22,7 @@ import type { AssistantProviderProgressEvent } from '../provider-progress.js'
 import type { AssistantTurnEnvironment } from '../service-contracts.js'
 import { buildAssistantOutboxSummary } from '../outbox/summary.js'
 import { maybeRunAssistantRuntimeMaintenance } from '../runtime-budgets.js'
-import { refreshAssistantStatusSnapshot } from '../status.js'
+
 import {
   readAssistantAutomationState,
   saveAssistantAutomationState,
@@ -261,18 +261,6 @@ export async function runAssistantAutomationPass(
         processed: 0,
         succeeded: 0,
       }
-
-  const skipStatusRefresh =
-    executionContext?.hosted != null
-    && input.deliveryDispatchMode === 'queue-only'
-  if (!skipStatusRefresh) {
-    await refreshAssistantStatusSnapshot(input.vault).catch((error) => {
-      warnAssistantBestEffortFailure({
-        error,
-        operation: 'status snapshot refresh',
-      })
-    })
-  }
 
   const stateProgressed = didAssistantAutomationStateProgress(
     stateBeforeScan,

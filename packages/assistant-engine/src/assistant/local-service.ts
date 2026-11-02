@@ -36,7 +36,7 @@ import {
   resolveAssistantGeneratedImageDelivery,
 } from './response-media.js'
 import { recordAssistantDiagnosticEvent } from './diagnostics.js'
-import { refreshAssistantStatusSnapshotLocal } from './status.js'
+
 import {
   resolveAssistantTurnSharedPlan as buildAssistantTurnSharedPlan,
 } from './turn-plan.js'
@@ -2722,17 +2722,7 @@ export async function sendAssistantMessageLocal(
         await stopAssistantChannelTypingIndicator(typingIndicator, {
           providerStop: !deliverySupersededTypingIndicator,
         })
-        if (
-          !(
-            executionContext?.hosted != null
-            && input.deliveryDispatchMode === 'queue-only'
-            && input.turnTrigger === 'automation-auto-reply'
-          )
-        ) {
-          await runAssistantTurnBestEffort(() =>
-            refreshAssistantStatusSnapshotLocal(input.vault),
-          )
-        }
+
       }
     },
   })

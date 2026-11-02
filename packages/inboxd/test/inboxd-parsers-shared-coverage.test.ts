@@ -48,7 +48,6 @@ import {
   createCaptureCheckpoint,
   normalizeTextValue,
   relayAbort,
-  waitForAbortOrTimeout,
   redactSensitivePaths,
   sanitizeRawMetadata,
   toIsoTimestamp,
@@ -202,31 +201,4 @@ test("relayAbort propagates aborts and its cleanup detaches the relay listener",
   const alreadyTarget = new AbortController();
   relayAbort(alreadyAborted.signal, alreadyTarget);
   assert.equal(alreadyTarget.signal.aborted, true);
-});
-
-test("waitForAbortOrTimeout resolves on either timeout or abort without hanging", async () => {
-  vi.useFakeTimers();
-
-  const timeoutController = new AbortController();
-  const timeoutPromise = waitForAbortOrTimeout(timeoutController.signal, 250);
-  let timeoutSettled = false;
-  void timeoutPromise.then(() => {
-    timeoutSettled = true;
-  });
-
-  await vi.advanceTimersByTimeAsync(249);
-  assert.equal(timeoutSettled, false);
-
-  await vi.advanceTimersByTimeAsync(1);
-  await timeoutPromise;
-  assert.equal(timeoutSettled, true);
-
-  const abortedController = new AbortController();
-  const abortedPromise = waitForAbortOrTimeout(abortedController.signal, 250);
-  abortedController.abort();
-  await abortedPromise;
-
-  const preAborted = new AbortController();
-  preAborted.abort();
-  await waitForAbortOrTimeout(preAborted.signal, 250);
 });

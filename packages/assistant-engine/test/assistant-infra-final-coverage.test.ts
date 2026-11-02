@@ -29,7 +29,7 @@ import {
   searchKnowledgePages,
   tailKnowledgeLog,
 } from '../src/knowledge/service.ts'
-import { tryKillProcess } from '@murphai/runtime-state/node'
+
 import { createTempVaultContext } from './test-helpers.ts'
 
 const tempRoots: string[] = []
@@ -41,7 +41,7 @@ afterEach(async () => {
   vi.doUnmock('../src/assistant/store.js')
   vi.doUnmock('../src/assistant/outbox.js')
   vi.doUnmock('../src/assistant/runtime-write-lock.js')
-  vi.doUnmock('../src/assistant/automation/runtime-lock.js')
+
   await Promise.all(
     tempRoots.splice(0).map((rootPath) =>
       rm(rootPath, {
@@ -181,10 +181,6 @@ describe('assistant infra final coverage', () => {
       state: 'stale' as const,
     }))
     const clearAssistantRuntimeWriteLock = vi.fn(async () => undefined)
-    const inspectAssistantAutomationRunLock = vi.fn(async () => ({
-      state: 'stale' as const,
-    }))
-    const clearAssistantAutomationRunLock = vi.fn(async () => undefined)
 
     vi.doMock('../src/assistant/runtime-write-lock.js', async () => {
       const actual = await vi.importActual<
@@ -200,16 +196,6 @@ describe('assistant infra final coverage', () => {
         ),
       }
     })
-    vi.doMock('../src/assistant/automation/runtime-lock.js', async () => {
-      const actual = await vi.importActual<
-        typeof import('../src/assistant/automation/runtime-lock.ts')
-      >('../src/assistant/automation/runtime-lock.ts')
-      return {
-        ...actual,
-        clearAssistantAutomationRunLock,
-        inspectAssistantAutomationRunLock,
-      }
-    })
 
     const runtimeBudgets = await import('../src/assistant/runtime-budgets.ts')
     const snapshot = await runtimeBudgets.runAssistantRuntimeMaintenance({
@@ -217,11 +203,11 @@ describe('assistant infra final coverage', () => {
       vault: 'ignored-by-mock',
     })
 
-    expect(snapshot.maintenance.staleLocksCleared).toBe(2)
+    expect(snapshot.maintenance.staleLocksCleared).toBe(1)
     expect(snapshot.maintenance.staleQuarantinePruned).toBe(1)
-    expect(snapshot.maintenance.notes).toContain('2 stale runtime lock(s) were cleared.')
+    expect(snapshot.maintenance.notes).toContain('1 stale runtime lock(s) were cleared.')
     expect(clearAssistantRuntimeWriteLock).toHaveBeenCalledOnce()
-    expect(clearAssistantAutomationRunLock).toHaveBeenCalledOnce()
+
     await expect(stat(payloadPath)).rejects.toMatchObject({
       code: 'ENOENT',
     })
@@ -255,10 +241,6 @@ describe('assistant infra final coverage', () => {
       state: 'active' as const,
     }))
     const clearAssistantRuntimeWriteLock = vi.fn(async () => undefined)
-    const inspectAssistantAutomationRunLock = vi.fn(async () => ({
-      state: 'active' as const,
-    }))
-    const clearAssistantAutomationRunLock = vi.fn(async () => undefined)
 
     vi.doMock('../src/assistant/runtime-write-lock.js', async () => {
       const actual = await vi.importActual<
@@ -272,16 +254,6 @@ describe('assistant infra final coverage', () => {
           async (_vault: string, run: (lockedPaths: typeof paths) => Promise<unknown>) =>
             await run(paths),
         ),
-      }
-    })
-    vi.doMock('../src/assistant/automation/runtime-lock.js', async () => {
-      const actual = await vi.importActual<
-        typeof import('../src/assistant/automation/runtime-lock.ts')
-      >('../src/assistant/automation/runtime-lock.ts')
-      return {
-        ...actual,
-        clearAssistantAutomationRunLock,
-        inspectAssistantAutomationRunLock,
       }
     })
 
@@ -299,7 +271,6 @@ describe('assistant infra final coverage', () => {
     })
 
     expect(clearAssistantRuntimeWriteLock).not.toHaveBeenCalled()
-    expect(clearAssistantAutomationRunLock).not.toHaveBeenCalled()
 
     await writeFile(paths.resourceBudgetPath, '{bad-json', 'utf8')
     const recovered = await runtimeBudgets.readAssistantRuntimeBudgetStatus(
@@ -476,57 +447,6 @@ describe('assistant infra final coverage', () => {
     })
   })
 
-  it('covers ESRCH swallow and non-ESRCH rethrow in process kill helper', () => {
-    const killProcess = vi.fn()
-    expect(() =>
-      tryKillProcess(killProcess, 321, 'SIGTERM'),
-    ).not.toThrow()
-    expect(killProcess).toHaveBeenCalledWith(321, 'SIGTERM')
-
-    expect(() =>
-      tryKillProcess(
-        () => {
-          throw Object.assign(new Error('gone'), {
-            code: 'ESRCH',
-          })
-        },
-        123,
-        'SIGTERM',
-      ),
-    ).not.toThrow()
-
-    expect(() =>
-      tryKillProcess(
-        () => {
-          throw Object.assign(new Error('permission denied'), {
-            code: 'EPERM',
-          })
-        },
-        123,
-        'SIGTERM',
-      ),
-    ).toThrow('permission denied')
-
-    expect(() =>
-      tryKillProcess(
-        () => {
-          throw new Error('plain error')
-        },
-        123,
-        'SIGTERM',
-      ),
-    ).toThrow('plain error')
-
-    expect(() =>
-      tryKillProcess(
-        () => {
-          throw 'boom'
-        },
-        123,
-        'SIGTERM',
-      ),
-    ).toThrow('boom')
-  })
 })
 
 async function createAssistantPaths(prefix: string) {

@@ -83,7 +83,7 @@ const runLoopMocks = vi.hoisted(() => ({
   readAssistantAutomationState: vi.fn(),
   recordAssistantDiagnosticEvent: vi.fn(),
   redactAssistantDisplayPath: vi.fn(),
-  refreshAssistantStatusSnapshot: vi.fn(),
+
   resolveAssistantStatePaths: vi.fn(),
   saveAssistantAutomationState: vi.fn(),
   scanAssistantAutomationOnce: vi.fn(),
@@ -217,10 +217,6 @@ vi.mock('../src/assistant/runtime-budgets.ts', () => ({
 vi.mock('../src/assistant/runtime-residue.ts', () => ({
   maintainAssistantAutoReplyRouteState:
     runLoopMocks.maintainAssistantAutoReplyRouteState,
-}))
-
-vi.mock('../src/assistant/status.ts', () => ({
-  refreshAssistantStatusSnapshot: runLoopMocks.refreshAssistantStatusSnapshot,
 }))
 
 vi.mock('../src/assistant/shared.ts', async () => {
@@ -1126,7 +1122,7 @@ beforeEach(() => {
   runLoopMocks.redactAssistantDisplayPath
     .mockReset()
     .mockImplementation((vault: string) => vault.replace('/tmp/', '/redacted/'))
-  runLoopMocks.refreshAssistantStatusSnapshot.mockReset().mockResolvedValue(undefined)
+
   runLoopMocks.resolveAssistantStatePaths.mockReset().mockReturnValue({
     lockPath: '/tmp/assistant.lock',
   })
@@ -7435,7 +7431,6 @@ describe('assistant auto-reply runtime', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(runLoopMocks.refreshAssistantStatusSnapshot).not.toHaveBeenCalled()
   })
 
   it('defers cron scanning and status before fresh hosted queue-only reply delivery', async () => {
@@ -9838,7 +9833,6 @@ describe('assistant auto-reply runtime', () => {
         inputIds: [initial.event.inputId],
       }))
   })
-
 
   it('keeps each mixed-group Linq message bound to its own explicit reply context', async () => {
     const firstInput = createCapturelessAssistantInputCandidate({
@@ -14100,7 +14094,6 @@ describe('assistant auto-reply runtime', () => {
     ).rejects.toThrow('terminal evidence write failed')
   })
 })
-
 
 describe('assistant automation pass', () => {
   it('runs the normal scanner before due cron jobs in a pass', async () => {
