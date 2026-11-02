@@ -8,6 +8,7 @@ import {
   resolveAssistantSkillsRoot,
 } from '../src/assistant-skill-assets.js'
 import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
+import { MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION } from '../src/assistant/managed-automations.js'
 
 function buildPrompt(): string {
   return buildAssistantSystemPrompt({
@@ -37,6 +38,15 @@ describe('assistant system prompt health record ingestion invariant', () => {
     expect(food).toContain('meal edit --name')
     expect(automatic).toMatch(/An imported photo stub is not\s+evidence of consumption/u)
     expect(automatic).not.toContain('record only that the retained image was')
+    const closeout = automatic.replace(/\s+/gu, ' ')
+    expect(closeout).toContain('leave that stub and photo unchanged for member correction')
+    expect(closeout).toContain('exclude it from this run\'s cleanup, presentation, and questions')
+    expect(closeout).toContain('this deferral alone does not fail the run')
+    expect(closeout).toContain('Any removal failure fails the run')
+    const managed = MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions
+    expect(managed).toContain('non-food deferral rule without blocking other eligible meals')
+    expect(managed).toContain('A removal failure or any non-deferred selected photo remaining fails the run')
+    expect(managed).not.toContain('any selected photo remaining fails the run')
   })
 
   it('requires uploaded medical records to be structured or durably preserved instead of becoming memory-only notes', () => {

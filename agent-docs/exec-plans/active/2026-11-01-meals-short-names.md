@@ -127,3 +127,39 @@ Pricing: https://developers.cloudflare.com/r2/pricing/
   the hook-generated CLI config/types/skill hash. Final ReviewGPT and required
   exact-head CI remain external delivery gates, followed by authorized merge
   and protected-main Cloudflare deployment.
+
+## Review remediation
+
+Round 1 reviewed e0876a3b1642a3b799f9e21cd4560d0202c03f12 in the Apollo
+lane with GPT-6 Pro and the full attached snapshot. The exact committed turn
+and response were captured with REVIEW_COMPLETE after the wrapper-enforced
+180-second minimum. The substantive source trace was accepted.
+
+Accepted finding: a retained non-food stub conflicted with the managed
+closeout instruction requiring removal of every selected image, blocking later
+valid-meal presentation. The existing skill and managed seed now defer an
+identified non-food/unconsumed-food stub from cleanup, presentation and questions
+without blocking other selected meals. No new state, queue, write, retention
+policy or deletion behavior was added. Removal errors still leave retry work
+and must be reported as failure rather than successful closeout.
+
+Deterministic composed-guidance/managed-seed suites: 80 passes. CI also exposed
+expected prompt snapshot/budget changes and a legacy CLI response fixture;
+updated those expectations against the measured input and additive name field.
+Route-planning 125, model-behavior 57, and CLI handler 3 tests pass. Engine and
+CLI typechecks pass. Complexity remains flat, including existing managed
+automation hotspots 52/28/21. Complete ordinary first-input measurements remain
++487 bytes individual and zero group; scheduled runs additionally load the
+updated managed instructions and on-demand skill.
+
+Live remediation proof passes with GPT-6.1 Sol/local subscription: two successive
+scheduled days preserve the same non-food canonical record, enrich/read back
+and clean the current food capture, and produce a valid nonnumeric closeout.
+A third day injects a removal error: the photo remains, no totals/card work
+runs, and the response explicitly reports incomplete cleanup. No member
+delivery occurs in the harness. Reply review: Ready. This proves preserved
+retry work and an honest failure notice, not a new scheduler failure signal.
+The notification contract only has send_message/skip; no failure variant was
+added. Initial test assertions accidentally included private audit text in a
+member-copy check and disallowed the existing failure-notice response; those
+assertions were corrected to the actual presentation contract.

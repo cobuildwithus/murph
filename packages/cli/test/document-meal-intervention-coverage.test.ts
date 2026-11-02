@@ -793,6 +793,7 @@ test('document and meal command handlers exercise nullish fallbacks directly', a
     photoPath: null,
     audioPath: null,
     manifestFile: 'raw/meals/meal_01JNV422Y2M5ZBV64ZP4N1DRB1/manifest.json',
+    name: null,
     note: 'Normalized direct meal note',
     source: 'derived',
     ingredients: ['salmon', 'rice'],
@@ -807,6 +808,9 @@ test('document and meal command handlers exercise nullish fallbacks directly', a
   })
   assert.deepEqual(addMealMock.mock.calls.at(-1)?.[0], {
     vaultRoot,
+    audioPath: undefined,
+    photoPath: undefined,
+    name: undefined,
     note: 'Flag override note',
     source: 'derived',
     ingredients: ['salmon', 'rice'],

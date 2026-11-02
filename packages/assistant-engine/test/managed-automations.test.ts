@@ -1277,7 +1277,7 @@ describe('applyMurphManagedAutomations', () => {
       'preceding 31 local days',
     )
     expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).toContain(
-      'A removal failure or any selected photo remaining fails the run',
+      'A removal failure or any non-deferred selected photo remaining fails the run',
     )
     expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).toContain(
       'For eligible current-date work, return the compact unresolved-capture question when required.',

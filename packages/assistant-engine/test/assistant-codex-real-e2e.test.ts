@@ -34537,6 +34537,83 @@ async function materializeRestaurantMealVaultCli(input: {
 }
 
 describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
+  it('defers a non-food stub across closeouts without masking photo-removal failures', { timeout: 1_800_000 }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-nonfood-closeout-e2e-'))
+    const vaultRoot = path.join(root, 'vault')
+    const binDirectory = path.join(root, 'bin')
+    const skillsRoot = path.join(root, 'skills')
+    const commandLog = path.join(root, 'commands.log')
+    const publicRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../apps/web/public')
+    try {
+      await initializeVault({ vaultRoot, timezone: 'America/New_York' })
+      await Promise.all((['automatic-meal-capture', 'food-journal'] as const).map(slug =>
+        materializeAssistantSkill({ skillsRoot, slug })))
+      const nonFood = await addMeal({ vaultRoot, source: 'device', occurredAt: '2026-08-23T16:00:00.000Z',
+        photoPath: path.join(publicRoot, 'brand-logos/connect/runkeeper.png'),
+        externalRef: { system: 'meal-photo-capture', resourceType: 'photo', resourceId: 'nonfood-icon' } })
+      const original = await readAutomaticMealClarificationState({ vaultRoot, mealId: nonFood.mealId })
+      const originalEvents = (await readVaultRawTolerant(vaultRoot)).events.filter(event => event.entityId === nonFood.mealId)
+      for (const day of [24, 25, 26]) {
+        const failPhotoRemoval = day === 26
+        const currentLocalDate = `2026-08-${day}`
+        const scheduledOccurrenceAt = `2026-08-${day + 1}T01:00:00.000Z`
+        const current = await addMeal({ vaultRoot, source: 'device', occurredAt: `${currentLocalDate}T16:00:00.000Z`,
+          photoPath: path.join(publicRoot, 'meal-snap-2.jpg'),
+          externalRef: { system: 'meal-photo-capture', resourceType: 'photo', resourceId: `food-${day}` } })
+        await materializeAutomaticMealClarificationVaultCli({ binDirectory, commandLog, vaultRoot, failPhotoRemoval })
+        await writeFile(commandLog, '', 'utf8')
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildAutomaticMealCloseoutDeveloperInstructions({ currentLocalDate, scheduledOccurrenceAt }),
+          env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot },
+          fixtureBinDirectory: binDirectory, groupConversation: false,
+          model: config.model, modelProvider: config.modelProvider,
+          reasoningEffort: 'low', sandbox: 'workspace-write', vaultRoot, workingDirectory: vaultRoot,
+          prompt: [MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions,
+            `Scheduled occurrence context: Occurrence local date: ${currentLocalDate}. Occurrence instant: ${scheduledOccurrenceAt}.`,
+            'The member prefers nonnumeric tracking. The current capture is food they ate; the older capture may be a classifier mistake. Inspect the actual attachments. There are no duplicate meals.',
+          ].join('\n\n'),
+        })
+        const commands = (await readFile(commandLog, 'utf8')).trim().split('\n')
+        const state = await readAutomaticMealClarificationState({ vaultRoot, mealId: current.mealId })
+        expect(await readAutomaticMealClarificationState({ vaultRoot, mealId: nonFood.mealId })).toEqual(original)
+        expect((await readVaultRawTolerant(vaultRoot)).events.filter(event => event.entityId === nonFood.mealId)).toEqual(originalEvents)
+        expect(commands.filter(command => isMealRemovePhotoCommand(command, nonFood.mealId))).toHaveLength(0)
+        expect(commands.some(command => /meal (?:add|delete|import-json)\b/u.test(command))).toBe(false)
+        const edit = commands.findIndex(command => isMealEditMutationCommand(command) && command.includes(current.mealId))
+        const readback = commands.findIndex((command, index) => index > edit && command.startsWith(`meal show ${current.mealId}`))
+        const remove = commands.findIndex(command => isMealRemovePhotoCommand(command, current.mealId))
+        expect(edit).toBeGreaterThanOrEqual(0)
+        expect(readback).toBeGreaterThan(edit)
+        expect(remove).toBeGreaterThan(readback)
+        expect(state.savedNote).toBeTruthy()
+        expect(state.savedCalories).toBeNull()
+        expect(state.savedAttachmentCount).toBe(failPhotoRemoval ? 1 : 0)
+        if (failPhotoRemoval) {
+          const decision = parseAssistantNotificationDecision(result.finalMessage)
+          expect(decision.privateSummary).toMatch(/fail|couldn|unable|error/iu)
+          if (decision.kind === 'send_message') {
+            expect(decision.text).toMatch(/could not|couldn['’]t|unable|failed/iu)
+            expect(decision.text).not.toMatch(/photo (?:has been|was) removed|closeout complete/iu)
+          }
+          expect(result.responseCard).toBeNull()
+          expect(commands.some(command => command.startsWith('meal totals '))).toBe(false)
+        } else {
+          const decision = parseAssistantNotificationDecision(result.finalMessage)
+          expect(decision.kind).toBe('send_message')
+          if (decision.kind === 'send_message') expect(decision.text).not.toMatch(/runkeeper|non-food|classifier|calories|\bkcal\b/iu)
+        }
+        expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+        process.stdout.write(`[nonfood-closeout-proof] ${JSON.stringify({ day, failPhotoRemoval, retainedNonFood: true, reply: result.finalMessage })}\n`)
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths])
+    }
+  })
+
   it('recovers one automatic meal edit and retains unresolved photos', {
     timeout: 900_000,
   }, async () => {
@@ -37965,6 +38042,7 @@ async function materializeAutomaticMealClarificationVaultCli(input: {
   binDirectory: string
   commandLog: string
   vaultRoot: string
+  failPhotoRemoval?: boolean
 }): Promise<void> {
   await mkdir(input.binDirectory, { recursive: true })
   const executablePath = path.join(input.binDirectory, 'vault-cli')
@@ -37974,6 +38052,7 @@ async function materializeAutomaticMealClarificationVaultCli(input: {
       '#!/bin/sh',
       'set -eu',
       `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLog)}`,
+      ...(input.failPhotoRemoval ? ['if [ "$1 $2" = "meal remove-photo" ]; then printf \'synthetic photo removal failure\\n\' >&2; exit 1; fi'] : []),
       `exec ${quoteNutritionShellLiteral(process.execPath)} --import ${quoteNutritionShellLiteral(VAULT_E2E_TSX_LOADER)} ${quoteNutritionShellLiteral(VAULT_E2E_CLI_ENTRYPOINT)} "$@" --vault ${quoteNutritionShellLiteral(input.vaultRoot)}`,
       '',
     ].join('\n'),
