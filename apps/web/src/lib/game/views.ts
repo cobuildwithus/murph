@@ -204,7 +204,7 @@ export function buildGameHistoryView(input: GameViewInput): BuiltGameHistoryView
   const visible = visibleEntryIds(input.state, input.viewerId, input.hiddenEntryIds);
   const seats = new Map(input.state.players.map((player) => [player.memberId, player.seat]));
   const previews = input.state.entries
-    .filter((entry) => visible.has(entry.id) && entry.mediaKeys.length > 0)
+    .filter((entry) => visible.has(entry.id))
     .sort((a, b) => a.dayIndex - b.dayIndex
       || (seats.get(a.memberId) ?? 0) - (seats.get(b.memberId) ?? 0)
       || a.receivedAt.getTime() - b.receivedAt.getTime()

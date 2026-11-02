@@ -111,9 +111,6 @@
       "@murphai/hosted-execution/computer-use": [
         "./packages/hosted-execution/src/computer-use.ts"
       ],
-      "@murphai/hosted-execution/dashboard-replica": [
-        "./packages/hosted-execution/src/dashboard-replica.ts"
-      ],
       "@murphai/hosted-execution/env": [
         "./packages/hosted-execution/src/env.ts"
       ],
@@ -122,9 +119,6 @@
       ],
       "@murphai/hosted-execution/hosted-codex-subscription-auth": [
         "./packages/hosted-execution/src/hosted-codex-subscription-auth.ts"
-      ],
-      "@murphai/hosted-execution/legacy-dashboard-replica": [
-        "./packages/hosted-execution/src/legacy-dashboard-replica.ts"
       ],
       "@murphai/hosted-execution/orchestration-control": [
         "./packages/hosted-execution/src/orchestration-control.ts"

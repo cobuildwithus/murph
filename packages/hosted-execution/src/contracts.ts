@@ -56,7 +56,6 @@ export const HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS = [
   "runtime.pending-effects-reconcile-requested",
   "runtime.maintenance-requested",
   "runtime.browser-vault-refresh-requested",
-  "runtime.codex-auth-requested",
   "runtime.device-sync-recovery-requested",
   "runtime.mailbox-lag-observed",
 ] as const;
@@ -64,17 +63,9 @@ export const HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS = [
 export type HostedExecutionRuntimeControlWakeKind =
   (typeof HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS)[number];
 
-export const HOSTED_CODEX_AUTH_ACTIONS = [
-  "connect",
-  "disconnect",
-] as const;
-
-export type HostedCodexAuthAction =
-  (typeof HOSTED_CODEX_AUTH_ACTIONS)[number];
-
 export type HostedExecutionPlainRuntimeControlWakeKind = Exclude<
   HostedExecutionRuntimeControlWakeKind,
-  "runtime.codex-auth-requested" | "runtime.pending-effects-reconcile-requested"
+  "runtime.pending-effects-reconcile-requested"
 >;
 
 export const HOSTED_EXECUTION_EVENT_KINDS = [
@@ -629,17 +620,9 @@ export interface HostedExecutionPendingEffectsReconcileRequestedEvent
   kind: "runtime.pending-effects-reconcile-requested";
 }
 
-export interface HostedExecutionCodexAuthRequestedEvent
-  extends HostedExecutionBaseEvent {
-  action: HostedCodexAuthAction;
-  attemptId: string;
-  kind: "runtime.codex-auth-requested";
-}
-
 export type HostedExecutionRuntimeControlRequestedEvent =
   | HostedExecutionPlainRuntimeControlRequestedEvent
-  | HostedExecutionPendingEffectsReconcileRequestedEvent
-  | HostedExecutionCodexAuthRequestedEvent;
+  | HostedExecutionPendingEffectsReconcileRequestedEvent;
 
 export type HostedExecutionEvent =
   | HostedExecutionMemberActivatedEvent
@@ -999,16 +982,9 @@ export interface HostedExecutionPendingEffectsReconcileRequestedWake
   kind: "runtime.pending-effects-reconcile-requested";
 }
 
-export interface HostedExecutionCodexAuthRequestedWake extends HostedExecutionBaseWake {
-  action: HostedCodexAuthAction;
-  attemptId: string;
-  kind: "runtime.codex-auth-requested";
-}
-
 export type HostedExecutionRuntimeControlWake =
   | HostedExecutionPlainRuntimeControlWake
-  | HostedExecutionPendingEffectsReconcileRequestedWake
-  | HostedExecutionCodexAuthRequestedWake;
+  | HostedExecutionPendingEffectsReconcileRequestedWake;
 
 export interface HostedExecutionRuntimeTimerWake extends HostedExecutionBaseWake {
   kind: "runtime.timer";

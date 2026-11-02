@@ -108,6 +108,11 @@ describe("hosted mailbox routing", () => {
         lane: "system",
       },
       {
+        action: "skip-retired-mailbox-item",
+        kind: "runtime.codex-auth-requested",
+        lane: "system",
+      },
+      {
         action: "apply-runtime-control-request",
         kind: "runtime.manual-requested",
         lane: "system",

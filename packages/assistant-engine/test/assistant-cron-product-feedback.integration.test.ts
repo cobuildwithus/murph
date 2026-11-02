@@ -32,7 +32,7 @@ vi.mock('../src/assistant/runtime-state-service.js', () => ({
     diagnostics: { recordEvent: vi.fn(async () => undefined) },
     outbox: { deliverMessage: boundary.deliver },
     sessions: { save: vi.fn(async (session) => session) },
-    status: { refreshSnapshot: vi.fn(async () => undefined) },
+
     transcripts: { append: vi.fn(async () => []) },
     turns: { createReceipt: vi.fn(async () => undefined), finalizeReceipt: boundary.finalize },
   }),

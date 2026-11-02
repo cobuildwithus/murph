@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, test } from 'vitest'
-import { resolveDefaultVault, saveDefaultVaultConfig } from '@murphai/operator-config/operator-config'
+import { resolveDefaultVault, resolveOperatorConfigPath } from '@murphai/operator-config/operator-config'
 import { formatStructuredErrorMessage } from '@murphai/operator-config/text/shared'
 import { collectVaultCliDescriptorRootCommandNames, collectVaultRequiredCliDescriptorRootCommandNames } from '../src/vault-cli-command-manifest.js'
 const cleanupPaths: string[] = []
@@ -53,7 +53,9 @@ test.sequential(
     process.chdir(cwdRoot)
 
     try {
-      await saveDefaultVaultConfig(staleVaultRoot, homeRoot)
+      const configPath = resolveOperatorConfigPath(homeRoot)
+      await mkdir(path.dirname(configPath), { recursive: true })
+      await writeFile(configPath, JSON.stringify({ schema: 'murph.operator-config.v1', defaultVault: staleVaultRoot, updatedAt: '2026-11-02T12:00:00.000Z' }))
 
       assert.equal(await resolveDefaultVault(homeRoot), path.resolve('vault'))
     } finally {

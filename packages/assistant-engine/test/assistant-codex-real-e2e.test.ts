@@ -887,6 +887,8 @@ describeRealCodex('real Codex event-list family isolation', () => {
         expect(instructions).toMatch(/^- `event`: .*`list`/mu)
         expect(instructions).toContain('read `vault-cli <command> --help`')
       }
+      expect(developerInstructions).toContain('Use `vault-cli` directly as the canonical Murph runtime surface.')
+      expect(developerInstructions).not.toContain('runtime surface in this privileged local route')
       await initializeVault({ vaultRoot, timezone: 'America/New_York' })
       for (const [title, day, tag] of [
         ['The spare key is in the blue pouch.', '2026-04-10', 'trip-log'],

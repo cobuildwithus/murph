@@ -17,8 +17,8 @@ export interface HostedColdIngestReference {
 export class HostedColdHistoryUnavailableError extends Error {
   readonly code = "HOSTED_COLD_HISTORY_UNAVAILABLE";
   readonly retryable = true;
-  constructor() {
-    super("Cold integration-ingest history is unavailable or failed integrity verification. Retry with the hosted workspace materializer before reading or exporting history.");
+  constructor(options?: ErrorOptions) {
+    super("Cold integration-ingest history is unavailable or failed integrity verification. Retry with the hosted workspace materializer before reading or exporting history.", options);
     this.name = "HostedColdHistoryUnavailableError";
   }
 }

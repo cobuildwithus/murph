@@ -4,7 +4,6 @@ import * as z from '@murphai/contracts/zod-runtime'
 import { test } from 'vitest'
 
 import {
-  assistantBackendTargetsEqual,
   createAssistantBackendTarget,
   normalizeAssistantBackendTarget,
 } from '../src/assistant-backend.ts'
@@ -14,7 +13,6 @@ import {
 } from '../src/assistant/provider-config.ts'
 import {
   assistantSessionIdSchema,
-  assistantStatusAutomationSchema,
   parseAssistantSessionRecord,
 } from '../src/assistant-cli-contracts.ts'
 import {
@@ -40,7 +38,6 @@ import {
   tryParseHostedAssistantConfig,
 } from '../src/hosted-assistant-config.ts'
 import { normalizeHostedAssistantConfig } from '../src/assistant/hosted-config.ts'
-
 
 import {
   timeZoneSchema,
@@ -74,14 +71,6 @@ async function withTemporaryProcessEnv(
     }
   }
 }
-
-
-
-
-
-
-
-
 
 test('command helpers normalize top-level tokens and request ids', () => {
   assert.deepEqual(emptyArgsSchema.parse({}), {})
@@ -193,22 +182,6 @@ test('assistant backend targets trim config input and strip sensitive headers be
     sandbox: 'workspace-write',
   })
 
-  assert.equal(
-    assistantBackendTargetsEqual(
-      normalizedCodexTarget,
-      createAssistantBackendTarget({
-        approvalPolicy: 'never',
-        codexCommand: 'codex',
-        codexHome: '/tmp/codex-home',
-        model: 'gpt-4o',
-        oss: false,
-        profile: 'default',
-        provider: 'codex-cli',
-        sandbox: 'workspace-write',
-      }),
-    ),
-    true,
-  )
 })
 
 test('representative contract schemas stay wired to the owned setup/operator seams', () => {
@@ -308,35 +281,7 @@ test('representative contract schemas stay wired to the owned setup/operator sea
     resumeKind: 'codex-thread',
     sandbox: 'danger-full-access',
   })
-  assert.deepEqual(
-    assistantStatusAutomationSchema.parse({
-      autoReply: [
-        {
-          channel: 'telegram',
-          enabledAt: '2026-04-08T12:05:00.000Z',
-          eligibleAfter: {
-            createdAt: null,
-            inputId: 'input-1',
-            occurredAt: '2026-04-08T12:05:00.000Z',
-            sourceKind: 'inbox-capture',
-          },
-        },
-      ],
-      updatedAt: '2026-04-08T12:10:00.000Z',
-    }).autoReply,
-    [
-      {
-        channel: 'telegram',
-        enabledAt: '2026-04-08T12:05:00.000Z',
-        eligibleAfter: {
-          createdAt: null,
-          inputId: 'input-1',
-          occurredAt: '2026-04-08T12:05:00.000Z',
-          sourceKind: 'inbox-capture',
-        },
-      },
-    ],
-  )
+
   assert.deepEqual(
     parseAssistantSessionRecord({
       alias: null,

@@ -1,5 +1,4 @@
 import {
-  createCodexAuthSystemMailboxItem,
   createDeliveryEffect,
   createDueAssistantWorkspace,
   createExternalCompletionSystemMailboxItem,
@@ -9,6 +8,7 @@ import {
   createPreparedDispatchesForDeliveryEffect,
   createSentDeliveryOutcome,
   createSystemMailboxItem,
+  createVaultShareProjectionSystemMailboxItem,
   createTerminalFailureOutboxIntent,
   expectAssistantLaneCallWithoutDeviceSyncOptions,
   loadHostedSystemMailboxRealImplementation,
@@ -4316,8 +4316,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       .mockResolvedValueOnce(staleSystemMailboxWakeAt)
       .mockResolvedValue(null);
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
-      item: createCodexAuthSystemMailboxItem(),
-      itemId: "system_mailbox_item_codex_auth",
+      item: createVaultShareProjectionSystemMailboxItem(),
+      itemId: "system_mailbox_item_vault_share_projection",
       metrics: {
         bootstrapResult: null,
         conversationMetrics: null,

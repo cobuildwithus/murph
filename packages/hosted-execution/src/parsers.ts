@@ -78,7 +78,6 @@ import type {
   HostedExecutionLinqConversationMessagePayload,
   HostedExecutionRedactedLogEntry,
   HostedExecutionPlainRuntimeControlWakeKind,
-  HostedCodexAuthAction,
 } from "./contracts.ts";
 import {
   parseHostedExecutionAssistantAskCompletedPayload,
@@ -110,7 +109,6 @@ import {
   buildHostedExecutionMemberActionRequestedWake,
   buildHostedExecutionMemberActionCompletedWake,
   buildHostedExecutionConversationMessageWake,
-  buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionPendingEffectsReconcileRequestedWake,
   buildHostedExecutionRuntimeControlWake,
@@ -192,7 +190,6 @@ export {
   parseHostedIngressLatencySource,
   parseHostedRuntimeIssueExportRequest,
   parseHostedRuntimeIssueExportResponse,
-  parseHostedCodexAuthUpdate,
   parseHostedRuntimeLatencyTraceBatchRequest,
   parseHostedRuntimeLatencyTraceBatchResponse,
   parseHostedRuntimeLatencyTraceEvent,
@@ -585,22 +582,6 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
       return buildHostedExecutionRuntimeControlWake({
         eventId,
         kind,
-        occurredAt,
-        userId: wireUserId,
-      });
-    case "runtime.codex-auth-requested":
-      assertExactHostedExecutionKeys(record, [
-        "action",
-        "attemptId",
-        "eventId",
-        "kind",
-        "occurredAt",
-        "userId",
-      ], "Hosted execution runtime.codex-auth-requested wake");
-      return buildHostedExecutionCodexAuthRequestedWake({
-        action: parseHostedCodexAuthAction(record.action),
-        attemptId: parseHostedCodexAuthAttemptId(record.attemptId),
-        eventId,
         occurredAt,
         userId: wireUserId,
       });
@@ -1506,19 +1487,6 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         kind: kind as HostedExecutionPlainRuntimeControlWakeKind,
         userId,
       };
-    case "runtime.codex-auth-requested":
-      assertExactHostedExecutionKeys(record, [
-        "action",
-        "attemptId",
-        "kind",
-        "userId",
-      ], "Hosted execution runtime.codex-auth-requested event");
-      return {
-        action: parseHostedCodexAuthAction(record.action),
-        attemptId: parseHostedCodexAuthAttemptId(record.attemptId),
-        kind,
-        userId,
-      };
     default:
       throw new TypeError(`Unsupported hosted execution event kind: ${kind}`);
   }
@@ -2196,22 +2164,6 @@ function assertExactHostedClinicalRecordsKeys(
       throw new TypeError(`${label} contains unsupported field ${JSON.stringify(key)}.`);
     }
   }
-}
-
-function parseHostedCodexAuthAction(value: unknown): HostedCodexAuthAction {
-  const action = requireString(value, "Hosted Codex auth action");
-  if (action === "connect" || action === "disconnect") {
-    return action;
-  }
-  throw new TypeError("Hosted Codex auth action is invalid.");
-}
-
-function parseHostedCodexAuthAttemptId(value: unknown): string {
-  const attemptId = requireString(value, "Hosted Codex auth attemptId");
-  if (!/^hca_[A-Za-z0-9_-]{16,64}$/u.test(attemptId)) {
-    throw new TypeError("Hosted Codex auth attemptId is invalid.");
-  }
-  return attemptId;
 }
 
 function assertExactHostedExecutionKeys(

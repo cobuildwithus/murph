@@ -77,8 +77,9 @@ test.each(["empty", "conversation after empty"] as const)("independent completio
           const state = await readHostedSystemMailboxState(vaultRoot);
           if (state.pending.length === 0) {
             injectedWakes += 1;
+            assert.ok(injectedWakes <= 3, JSON.stringify(events));
             runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
-            if (scenario === "conversation after empty") {
+            if (scenario === "conversation after empty" && invocation > 0) {
               await withRealTimeout(emptyWakeChecked.promise, 2_000, () => "Empty wake was not checked.");
               await setImmediate();
               mailboxItems.push(conversationItem);
@@ -137,11 +138,12 @@ test.each(["empty", "conversation after empty"] as const)("independent completio
           },
         }),
       });
-      if (scenario === "conversation after empty") {
+      if (scenario === "conversation after empty" && invocation > 0) {
         await assert.rejects(run, (error) => error === foregroundReached);
         assert.equal(interruptedCompletions, 1);
         assert.equal(wakeChecks, 2);
-        assert.equal(workspace.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "0");
+        assert.equal(workspace.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "1",
+          "The preceding invocation already durably published completion metadata.");
         return;
       }
       const result = await run;

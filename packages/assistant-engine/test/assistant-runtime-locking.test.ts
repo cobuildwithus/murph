@@ -11,10 +11,6 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 
 import {
-  clearAssistantAutomationRunLock,
-  inspectAssistantAutomationRunLock,
-} from '../src/assistant/automation/runtime-lock.ts'
-import {
   clearAssistantRuntimeWriteLock,
   inspectAssistantRuntimeWriteLock,
   withAssistantRuntimeWriteLock,
@@ -368,70 +364,6 @@ test('assistant runtime write lock surfaces held external metadata as a VaultCli
       return true
     },
   )
-})
-
-test('assistant automation run lock distinguishes external active and stale holders', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'murph-assistant-automation-external-lock-',
-  )
-  cleanupPaths.push(parentRoot)
-
-  const paths = resolveAssistantStatePaths(vaultRoot)
-  await mkdir(path.join(paths.assistantStateRoot, '.automation-run.lock'), {
-    recursive: true,
-  })
-  await writeFile(
-    path.join(paths.assistantStateRoot, '.automation-run.lock', 'owner.json'),
-    JSON.stringify({
-      command: 'existing-automation-runner',
-      mode: 'continuous',
-      pid: process.pid,
-      startedAt: '2026-04-08T12:34:56.000Z',
-    }),
-    'utf8',
-  )
-
-  const active = await inspectAssistantAutomationRunLock(paths)
-  assert.deepEqual(active, {
-    state: 'active',
-    pid: process.pid,
-    startedAt: '2026-04-08T12:34:56.000Z',
-    mode: 'continuous',
-    command: 'existing-automation-runner',
-    reason: null,
-  })
-
-  await writeFile(
-    path.join(paths.assistantStateRoot, '.automation-run.lock', 'owner.json'),
-    JSON.stringify({
-      command: 'stale-automation-runner',
-      mode: 'once',
-      pid: 999_999,
-      startedAt: '2026-04-08T13:00:00.000Z',
-    }),
-    'utf8',
-  )
-
-  const stale = await inspectAssistantAutomationRunLock(paths)
-  assert.deepEqual(stale, {
-    state: 'stale',
-    pid: 999_999,
-    startedAt: '2026-04-08T13:00:00.000Z',
-    mode: 'once',
-    command: 'stale-automation-runner',
-    reason: 'Process 999999 is no longer running.',
-  })
-
-  await clearAssistantAutomationRunLock(paths)
-
-  assert.deepEqual(await inspectAssistantAutomationRunLock(paths), {
-    state: 'unlocked',
-    pid: null,
-    startedAt: null,
-    mode: null,
-    command: null,
-    reason: null,
-  })
 })
 
 function createLockTestSession(sessionId: string): AssistantSession {

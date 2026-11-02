@@ -856,12 +856,6 @@ export async function sendAssistantNotificationLocal(
               vault: input.vault,
             })
           }
-          await state.status.refreshSnapshot().catch((error) => {
-            warnAssistantBestEffortFailure({
-              error,
-              operation: 'status snapshot refresh',
-            })
-          })
 
           if (deliveryOutcome.kind === 'failed') {
             throw annotateAssistantNotificationError(
@@ -972,12 +966,6 @@ export async function sendAssistantNotificationLocal(
             vault: input.vault,
           })
         }
-        await state.status.refreshSnapshot().catch((error) => {
-          warnAssistantBestEffortFailure({
-            error,
-            operation: 'status snapshot refresh',
-          })
-        })
 
         acceptCommittedNotificationProductFeedback(executionContext, providerResult, { conversationScope, messageInput })
         return withPostTurnDeliveryExpectations({
@@ -1339,13 +1327,6 @@ async function sendAssistantExactTextNotificationLocal(input: {
       vault: input.input.vault,
     })
   }
-
-  await state.status.refreshSnapshot().catch((error) => {
-    warnAssistantBestEffortFailure({
-      error,
-      operation: 'status snapshot refresh',
-    })
-  })
 
   return {
     decision: {
@@ -2329,7 +2310,6 @@ function tryExtractAssistantNotificationDecisionObject(
 
   return value.slice(firstBrace, lastBrace + 1).trim()
 }
-
 
 function startAssistantNotificationTyping(input: {
   input: AssistantNotificationInput

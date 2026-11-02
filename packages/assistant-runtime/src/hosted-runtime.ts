@@ -33,6 +33,7 @@ import {
 import {
   CURRENT_VAULT_FORMAT_VERSION,
   runIntegrationIngestMigration,
+  withIntegrationIngestMaterializer,
   VaultError,
 } from "@murphai/core";
 import {
@@ -1445,7 +1446,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   input: HostedAssistantWorkspaceRuntimeJobInput,
   options: HostedWorkspaceRuntimeJobOptions,
 ): Promise<HostedWorkspaceInvocationResult> {
-  const result = await runHostedWorkspaceRuntimeJobInProcessImpl(input, options);
+  // Restore preparation can precede this invocation and owns its receipt-replay
+  // scope. Once adopted, every invocation lane shares the restored materializer.
+  let materialize: HostedWorkspaceArtifactMaterializer | undefined;
+  const result = await withIntegrationIngestMaterializer(
+    options.vaultRoot,
+    async (paths) => { await materialize?.(paths); },
+    () => runHostedWorkspaceRuntimeJobInProcessImpl(input, options, (restoredMaterializer) => {
+      materialize = restoredMaterializer;
+    }),
+  );
   const runtimeReleaseSha = options.runtimeIssueProvenance?.releaseSha ?? null;
   void writeHostedRuntimeLogBestEffort({
     entry: {
@@ -1574,6 +1584,7 @@ function buildInvocationBaseRuntimeEnv(
 async function runHostedWorkspaceRuntimeJobInProcessImpl(
   input: HostedAssistantWorkspaceRuntimeJobInput,
   options: HostedWorkspaceRuntimeJobOptions,
+  adoptMaterializer: (materialize: HostedWorkspaceArtifactMaterializer) => void,
 ): Promise<HostedWorkspaceInvocationResult> {
   const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime, options.platform);
   const mailboxPort = runtime.platform.mailboxPort ?? null;
@@ -2012,6 +2023,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       workspaceRead,
       workspaceRestoreDoneAt,
     } = await workspaceRestorePreparation.promise;
+    adoptMaterializer(restored.materializeWorkspaceArtifacts);
     assertRuntimeNotAborted();
     initialAssistantInputLatencyMilestones.workspaceRestoreDoneAt = workspaceRestoreDoneAt;
     // Attach the in-memory cold-start phase breakdown to the SAME staged-milestone
@@ -2975,7 +2987,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         runtimeStateDirty = true;
         ensureIdleCheckpointTimerAfterDirtyWork();
         if (completion.afterDurableCheckpoint) {
-          pendingDurableCheckpointEffects.push(...(typeof completion.afterDurableCheckpoint === "function"
+          const effects = completion.alreadyCheckpointed
+            ? readyDurableCheckpointEffects : pendingDurableCheckpointEffects;
+          effects.push(...(typeof completion.afterDurableCheckpoint === "function"
             ? [completion.afterDurableCheckpoint] : completion.afterDurableCheckpoint));
         }
         committedWorkspace = checkpointRequestBuilder.latestWorkspace() ?? committedWorkspace;
@@ -3073,16 +3087,15 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         vaultRoot: restored.vaultRoot,
       });
       let systemMailboxPostRecordWake: HostedRuntimeWakeCandidate | null = null;
+      let independentCompletionMetadataPending: "record" | "replay" | null = null;
       const rememberSystemMailboxPostRecordWake = (
         candidate: HostedRuntimeWakeCandidate,
       ) => {
-        if (!candidate.at) {
-          return;
-        }
-        systemMailboxPostRecordWake = selectHostedRuntimeWakeCandidate([
-          systemMailboxPostRecordWake,
-          candidate,
-        ]);
+        const wake = selectHostedRuntimeWakeAfterSystemWork({
+          nextWakeAt: systemMailboxPostRecordWake?.at ?? null,
+          nextWakeReason: systemMailboxPostRecordWake?.reason ?? null,
+        }, candidate);
+        systemMailboxPostRecordWake = createHostedRuntimeWakeCandidate(wake.nextWakeAt, wake.nextWakeReason);
       };
       const resolveCurrentSystemMailboxModeWake = async (
         extraCandidates: readonly HostedRuntimeWakeCandidate[] = [],
@@ -3407,6 +3420,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               && options.shutdownSignal?.aborted !== true,
             runtimeWakeSignal: options.runtimeWakeSignal ?? null,
             async shouldInterrupt(notification) {
+              if (independentCompletionMetadataPending) {
+                return await qualifySystemMailboxForegroundWake(true);
+              }
               return notification.requestedProcessingMode !== "system_mailbox"
                 && options.shutdownSignal?.aborted !== true && !hostAbortObserved;
             },
@@ -3443,7 +3459,40 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           }
         }
       };
-      const finishIndependentSystemWorkAfterCheckpoint = async (): Promise<void> => {
+      const checkpointSystemMailboxCompletion = async (
+        wake: Awaited<ReturnType<typeof resolveCurrentSystemMailboxModeWake>>,
+      ): Promise<void> => {
+        if (!independentCompletionMetadataPending || !checkpointed || runtimeStateDirty) return;
+        const cleanupWasSaved = independentCompletionMetadataPending === "replay";
+        if (cleanupWasSaved && activeWorkspace?.nextWakeAt === wake.nextWakeAt
+          && activeWorkspace.nextWakeReason === wake.nextWakeReason
+          && activeWorkspace.nextDefaultProcessingWakeAt === wake.nextDefaultProcessingWakeAt
+          && activeWorkspace.nextDefaultProcessingWakeReason === wake.nextDefaultProcessingWakeReason
+          && !await hasRestoredSystemMailboxProgressAheadOfWorkspace({
+            importedSeq: latestMailboxImport.state.watermarks.system,
+            redactedStatus: activeWorkspace.redactedStatus ?? null,
+            vaultRoot: restored.vaultRoot,
+          })) return;
+        // Publish the final wake/progress after completion and derived-index
+        // maintenance, retaining the archive and its durable replay journal.
+        const checkpoint = await checkpointRuntimeRedactedStatus({
+          ...wake,
+          reason: "canonical_runtime_commit",
+          redactedStatus: currentRedactedStatus,
+          workspace: activeWorkspace,
+        });
+        activeWorkspace = checkpoint.workspace;
+        currentRedactedStatus = checkpoint.workspace.redactedStatus ?? {};
+      };
+      const saveIndependentCompletion = async (signal: AbortSignal | null): Promise<void> => {
+        await importSystemMailboxCompletionTail();
+        if (runtimeStateDirty) {
+          await checkpointSystemMailboxMode("system_mailbox.checkpoint.independent_completion", [], signal);
+        }
+      };
+      const finishIndependentSystemWorkAfterCheckpoint = async (
+        checkpointAfterEffects = true,
+      ): Promise<void> => {
         if (systemMailboxForegroundWakePrefetch || readyDurableCheckpointEffects.length === 0) return;
         const completionWakeSignal = createCoalescingRuntimeWakeSignal();
         // A hint may already have been consumed during the preceding checkpoint.
@@ -3491,16 +3540,16 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               vaultShareProjectionResult: projection.result,
             });
             readyDurableCheckpointEffects.shift();
-            runtimeStateDirty = true;
+            const effectResult = readHostedWorkspaceDurableCheckpointEffectResult(completion, true);
+            independentCompletionMetadataPending = effectResult.requiresFollowUpCheckpoint
+              && independentCompletionMetadataPending !== "record" ? "replay" : "record";
+            runtimeStateDirty ||= effectResult.requiresFollowUpCheckpoint;
             rememberSystemMailboxPostRecordWake(createHostedRuntimeWakeCandidate(
-              completion?.nextWakeAt ?? null,
-              completion?.nextWakeReason ?? null,
+              effectResult.nextWakeAt,
+              effectResult.nextWakeReason,
             ));
           }
-          await importSystemMailboxCompletionTail();
-          await checkpointSystemMailboxMode(
-            "system_mailbox.checkpoint.independent_completion", [], interruption.signal,
-          );
+          if (checkpointAfterEffects) await saveIndependentCompletion(interruption.signal);
         } catch (error) {
           if (!interruption.signal?.aborted) throw error;
         } finally {
@@ -3517,6 +3566,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       ): Promise<HostedWorkspaceInvocationResult> => {
         if (assistantCronDeadlineMs !== null
           && Date.now() >= assistantCronDeadlineMs) await prefetchSystemMailboxAssistantWork();
+        if (independentCompletionMetadataPending && readyDurableCheckpointEffects.length === 0) {
+          await importSystemMailboxCompletionTail();
+        }
         const checkpointStage = resolveHostedSystemMailboxReturnCheckpointStage({
           canonicalWritePending:
             canonicalWriteCheckpointCoalescer.pendingCheckpoint() !== null,
@@ -3534,6 +3586,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           extraCandidates,
           systemMailboxState,
         );
+        await checkpointSystemMailboxCompletion(projectedWake);
         const defaultOwnerAuthorityObserved =
           defaultOwnerWakeObserved
           || checkpointReportedConversationInputAhead;
@@ -4139,6 +4192,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           return await returnSystemMailboxModeResult();
         }
 
+        // Replay already-durable journals before new work, so one idle save
+        // carries both cleanup and the next bounded pass. Never restart after it.
+        await finishIndependentSystemWorkAfterCheckpoint(false);
         workspaceSystemWork.resume();
         workspaceSystemWork.kick(HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS);
         const foregroundArrived = await workspaceSystemWork.waitForCompletion(
@@ -4185,6 +4241,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         }
 
         const projectedWake = await resolveCurrentSystemMailboxModeWake();
+        await checkpointSystemMailboxCompletion(projectedWake);
         if (
           importOrStartupCheckpointPending
           || (!checkpointed && activeWorkspace?.systemMailboxProgressGeneration == null)
@@ -4891,16 +4948,16 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                         outcome: guardedRuntime.platform.vaultSharePort ? "error" : "no-port",
                       },
                   });
-            requiresFollowUpCheckpoint ||= effectResult?.requiresFollowUpCheckpoint === true;
             if (effectResult?.redactedStatus) {
               redactedStatus = mergeHostedWorkspaceInvocationRedactedStatus(
                 redactedStatus,
                 effectResult.redactedStatus,
               );
             }
-            const effectWake = readHostedWorkspaceDurableCheckpointEffectWake(effectResult);
+            await checkpointReplayableDeviceCompletion(effectResult);
+            const effectWake = readHostedWorkspaceDurableCheckpointEffectResult(effectResult);
+            requiresFollowUpCheckpoint ||= effectWake.requiresFollowUpCheckpoint;
             if (effectWake.nextWakeAt) {
-              requiresFollowUpCheckpoint = true;
               const selectedWake = selectEarliestHostedRuntimeWake([
                 {
                   at: durableWake.nextWakeAt,
@@ -5041,6 +5098,22 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         mailboxBudgetExhausted: mailboxBudgetExhausted(),
         nextWakeAt: pendingWake.nextWakeAt,
       });
+    };
+    const checkpointReplayableDeviceCompletion = async (
+      result: HostedWorkspaceDurableCheckpointEffectResult | null | void,
+    ): Promise<void> => {
+      if (result?.requiresFollowUpCheckpoint !== false) return;
+      const wake = selectHostedRuntimeWakeAfterSystemWork(pendingWake, {
+        at: result.nextWakeAt ?? null,
+        reason: result.nextWakeReason ?? null,
+      });
+      const checkpoint = await checkpointRuntimeRedactedStatus({
+        ...wake,
+        reason: "canonical_runtime_commit",
+        redactedStatus,
+        workspace: committedWorkspace,
+      });
+      rebaseCommittedWorkspace(checkpoint.workspace);
     };
     const stageDurableCheckpointFollowUp = (
       workspace: HostedWorkspaceState | null,
@@ -6714,7 +6787,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         let cleanVaultShareProjectionResult:
           HostedVaultShareProjectionOfferResult | undefined;
         let cleanVaultShareProjectionIncomplete = false;
-        if (!runtimeStateDirty) {
+        const drainRestoredEffects = !runtimeStateDirty || readyDurableCheckpointEffects.length > 0;
+        if (drainRestoredEffects) {
           const vaultShareOpportunity =
             await offerHostedVaultShareProjectionDuringIdle();
           cleanVaultShareProjectionResult = vaultShareOpportunity.result;
@@ -6733,7 +6807,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             });
           }
         }
-        if (!runtimeStateDirty) {
+        if (drainRestoredEffects) {
           // Replay-only mailbox consume acks are already backed by the restored
           // durable checkpoint. If the ack fails and returns a retry wake, route
           // that wake through the same follow-up checkpoint path as dirty turns.
@@ -9432,20 +9506,26 @@ function selectHostedRetentionOnlyCheckpointWake(input: {
     : null;
 }
 
-function readHostedWorkspaceDurableCheckpointEffectWake(
+function readHostedWorkspaceDurableCheckpointEffectResult(
   result: HostedWorkspaceDurableCheckpointEffectResult | null | void,
+  defaultRequiresFollowUpCheckpoint = Boolean(result?.nextWakeAt),
 ): {
   nextWakeAt: string | null;
   nextWakeReason: string | null;
+  requiresFollowUpCheckpoint: boolean;
 } {
+  const requiresFollowUpCheckpoint = result?.requiresFollowUpCheckpoint
+    ?? defaultRequiresFollowUpCheckpoint;
   if (!result?.nextWakeAt) {
     return {
+      requiresFollowUpCheckpoint,
       nextWakeAt: null,
       nextWakeReason: null,
     };
   }
 
   return {
+    requiresFollowUpCheckpoint,
     nextWakeAt: result.nextWakeAt,
     nextWakeReason: result.nextWakeReason ?? null,
   };

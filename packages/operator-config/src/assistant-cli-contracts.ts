@@ -196,11 +196,6 @@ export const assistantDiagnosticComponentValues = [
   'automation',
   'status',
 ] as const
-export const assistantStatusRunLockStateValues = [
-  'unlocked',
-  'active',
-  'stale',
-] as const
 
 export const assistantQuarantineArtifactKindValues = [
   'session',
@@ -682,36 +677,6 @@ export const assistantTurnReceiptSchema = z
   })
   .strict()
 
-export const assistantTurnReceiptSummaryTimelineEventSchema = z
-  .object({
-    at: isoTimestampSchema,
-    kind: z.enum(assistantTurnTimelineEventKindValues),
-    detail: z.string().nullable(),
-  })
-  .strict()
-
-export const assistantTurnReceiptSummarySchema = z
-  .object({
-    schema: z.literal('murph.assistant-turn-receipt-summary.v1'),
-    turnId: assistantTurnIdSchema,
-    sessionId: assistantSessionIdSchema,
-    provider: z.enum(assistantChatProviderValues),
-    providerModel: z.string().min(1).nullable(),
-    promptPreview: z.string().nullable(),
-    responsePreview: z.string().nullable(),
-    status: z.enum(assistantTurnReceiptStatusValues),
-    deliveryRequested: z.boolean(),
-    deliveryDisposition: z.enum(assistantTurnDeliveryDispositionValues),
-    deliveryIntentId: assistantOutboxIntentIdSchema.nullable(),
-    startedAt: isoTimestampSchema,
-    updatedAt: isoTimestampSchema,
-    completedAt: isoTimestampSchema.nullable(),
-    lastError: assistantDeliveryErrorSchema.nullable(),
-    timelineEventCount: z.number().int().nonnegative(),
-    latestTimelineEvent: assistantTurnReceiptSummaryTimelineEventSchema.nullable(),
-  })
-  .strict()
-
 export const assistantOutboxIntentStatusValues = assistantOutboxStatusValues
 const assistantPrivateCompletionContinuitySchema = z.discriminatedUnion(
   'status',
@@ -1042,32 +1007,6 @@ export const assistantRuntimeEventSchema = z
   })
   .strict()
 
-export const assistantStatusRunLockSchema = z
-  .object({
-    state: z.enum(assistantStatusRunLockStateValues),
-    pid: z.number().int().positive().nullable(),
-    startedAt: isoTimestampSchema.nullable(),
-    mode: z.enum(['continuous', 'once']).nullable(),
-    command: z.string().min(1).nullable(),
-    reason: z.string().nullable(),
-  })
-  .strict()
-
-export const assistantStatusAutomationSchema = z
-  .object({
-    autoReply: z.array(
-      z
-        .object({
-          channel: z.string().min(1),
-          enabledAt: isoTimestampSchema,
-          eligibleAfter: z.lazy(() => assistantInputCursorSchema).nullable(),
-        })
-        .strict(),
-    ),
-    updatedAt: isoTimestampSchema.nullable(),
-  })
-  .strict()
-
 export const assistantStatusOutboxSummarySchema = z
   .object({
     total: z.number().int().nonnegative(),
@@ -1079,26 +1018,6 @@ export const assistantStatusOutboxSummarySchema = z
     abandoned: z.number().int().nonnegative(),
     oldestPendingAt: isoTimestampSchema.nullable(),
     nextAttemptAt: isoTimestampSchema.nullable(),
-  })
-  .strict()
-
-export const assistantStatusResultSchema = z
-  .object({
-    vault: pathSchema,
-    stateRoot: pathSchema,
-    statusPath: pathSchema,
-    outboxRoot: pathSchema,
-    diagnosticsPath: pathSchema,
-    turnsRoot: pathSchema,
-    generatedAt: isoTimestampSchema,
-    runLock: assistantStatusRunLockSchema,
-    automation: assistantStatusAutomationSchema,
-    outbox: assistantStatusOutboxSummarySchema,
-    diagnostics: assistantDiagnosticsSnapshotSchema,
-    quarantine: assistantQuarantineSummarySchema,
-    runtimeBudget: assistantRuntimeBudgetSnapshotSchema,
-    recentTurns: z.array(assistantTurnReceiptSummarySchema),
-    warnings: z.array(z.string()),
   })
   .strict()
 
@@ -1646,9 +1565,7 @@ export type AssistantTurnTimelineEvent = z.infer<
   typeof assistantTurnTimelineEventSchema
 >
 export type AssistantTurnReceipt = z.infer<typeof assistantTurnReceiptSchema>
-export type AssistantTurnReceiptSummary = z.infer<
-  typeof assistantTurnReceiptSummarySchema
->
+
 export type AssistantOutboxIntent = z.infer<typeof assistantOutboxIntentSchema>
 export type AssistantOutboxAutomationAuthority = z.infer<
   typeof assistantOutboxAutomationAuthoritySchema
@@ -1761,18 +1678,11 @@ export type AssistantOnboardingResult = z.infer<
 export type AssistantOnboardingResumeContextResult = z.infer<
   typeof assistantOnboardingResumeContextResultSchema
 >
-export type AssistantStatusRunLock = z.infer<
-  typeof assistantStatusRunLockSchema
->
-export type AssistantStatusAutomation = z.infer<
-  typeof assistantStatusAutomationSchema
->
+
 export type AssistantStatusOutboxSummary = z.infer<
   typeof assistantStatusOutboxSummarySchema
 >
-export type AssistantStatusResult = z.infer<
-  typeof assistantStatusResultSchema
->
+
 export type AssistantDoctorCheck = z.infer<typeof assistantDoctorCheckSchema>
 export type AssistantDoctorResult = z.infer<
   typeof assistantDoctorResultSchema
@@ -1823,8 +1733,7 @@ export type AssistantDiagnosticLevel =
   (typeof assistantDiagnosticLevelValues)[number]
 export type AssistantDiagnosticComponent =
   (typeof assistantDiagnosticComponentValues)[number]
-export type AssistantStatusRunLockState =
-  (typeof assistantStatusRunLockStateValues)[number]
+
 export type AssistantDoctorCheckStatus =
   (typeof assistantDoctorCheckStatusValues)[number]
 export type AssistantProviderSessionOptions = z.infer<

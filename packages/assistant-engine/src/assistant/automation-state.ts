@@ -13,30 +13,6 @@ export function normalizeAssistantAutoReplyChannels(
   )
 }
 
-export function reconcileAssistantAutoReplyState(input: {
-  current: readonly AssistantAutoReplyChannelState[]
-  enabledAt: string
-  enabledChannels: readonly string[]
-  eligibleAfter: AssistantInputCursor | null
-}): AssistantAutoReplyChannelState[] {
-  const currentByChannel = new Map(
-    input.current.map((entry) => [entry.channel, entry] as const),
-  )
-
-  return normalizeAssistantAutoReplyChannels(input.enabledChannels).map((channel) => {
-    const existing = currentByChannel.get(channel)
-    if (existing) {
-      return existing
-    }
-
-    return {
-      channel,
-      eligibleAfter: input.eligibleAfter,
-      enabledAt: input.enabledAt,
-    }
-  })
-}
-
 export function hasAssistantAutoReplyChannel(
   autoReply: readonly AssistantAutoReplyChannelState[],
   channel: string,

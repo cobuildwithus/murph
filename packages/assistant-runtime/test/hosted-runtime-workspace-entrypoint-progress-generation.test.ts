@@ -259,7 +259,11 @@ test.each(["completed", "quiesced", "no-progress"] as const)(
       assert.equal(phaseCalls, 2);
       assert.equal(versionConflicts, 0, "The snapshot uses the latest expected version; no CAS retry is involved.");
       assert.equal(controlPlaneSyncAborted, scenario === "quiesced");
-      const statusRequests = checkpointRequests.filter((request) => request.reason === "canonical_runtime_commit");
+      // Completion metadata follows the archive; inspect canonical writes
+      // before that archive when proving its generation and receipt log.
+      const firstSnapshotIndex = checkpointRequests.findIndex((request) => request.reason === "idle_shutdown");
+      const statusRequests = checkpointRequests.slice(0, firstSnapshotIndex)
+        .filter((request) => request.reason === "canonical_runtime_commit");
       const foregroundGeneration = scenario === "completed" ? "8" : "7";
       assert.deepEqual(statusRequests.slice(-2).map((request) => request.systemMailboxProgressGeneration), [foregroundGeneration, foregroundGeneration]);
       const snapshotRequests = checkpointRequests.filter((request) => request.reason === "idle_shutdown");

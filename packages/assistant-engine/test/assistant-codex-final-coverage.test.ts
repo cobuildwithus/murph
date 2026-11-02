@@ -135,17 +135,6 @@ import {
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
 import type { AssistantCodexContinuation } from '../src/assistant/active-turn-input-journal.ts'
-import {
-  DEFAULT_CODEX_CHAT_MODEL_OPTIONS,
-  DEFAULT_CODEX_REASONING_OPTIONS,
-  findCodexCatalogModelOptionIndex,
-  findCodexCatalogReasoningOptionIndex,
-  resolveCodexAssistantProfile,
-  resolveCodexCatalogReasoningOptions,
-  resolveCodexModelCapabilities,
-  resolveCodexModelCatalog,
-  resolveCodexTargetCapabilities,
-} from '../src/assistant/provider-catalog.ts'
 import { executeCodexTurnWithRecovery } from '../src/assistant/codex-turn-runner.ts'
 import type {
   AssistantCodexAttemptPlan,
@@ -405,146 +394,7 @@ function createProviderAttemptResult(): AssistantProviderTurnAttemptResult {
   }
 }
 
-describe('Codex model catalog', () => {
-  it('uses Codex default as the first chat-model option', () => {
-    expect(DEFAULT_CODEX_CHAT_MODEL_OPTIONS).toEqual([
-      {
-        value: '',
-        description: 'Use the model configured by Codex.',
-      },
-    ])
-  })
-
-  it('forwards provider capability resolution through the registry helpers', () => {
-    providerMocks.resolveCodexAssistantCapabilities.mockReturnValueOnce({
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsReasoningEffort: true,
-    })
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValueOnce({
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsReasoningEffort: false,
-    })
-
-    expect(resolveCodexModelCapabilities()).toEqual({
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsReasoningEffort: true,
-    })
-    expect(
-      resolveCodexTargetCapabilities({
-        provider: 'codex-cli',
-      }),
-    ).toEqual({
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsReasoningEffort: false,
-    })
-  })
-
-  it('normalizes provider profiles and displays only the explicit current model', () => {
-    providerMocks.resolveCodexAssistantLabel.mockReturnValue('Codex CLI')
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsReasoningEffort: true,
-    })
-
-    const profile = resolveCodexAssistantProfile({
-      provider: 'codex-cli',
-    })
-    expect(profile).toMatchObject({
-      target: {
-        model: null,
-        modelProvider: null,
-      },
-      providerLabel: 'Codex CLI',
-    })
-
-    const catalog = resolveCodexModelCatalog({
-      currentModel: ' custom-current ',
-      currentReasoningEffort: 'high',
-      provider: 'codex-cli',
-    })
-
-    expect(catalog.providerLabel).toBe('Codex CLI')
-    expect(catalog.models.map((model) => model.id)).toEqual([
-      'custom-current',
-    ])
-    expect(catalog.selectedModel?.id).toBe('custom-current')
-    expect(catalog.reasoningOptions).toEqual(DEFAULT_CODEX_REASONING_OPTIONS)
-    expect(catalog.modelOptions).toEqual([
-      {
-        value: '',
-        description: 'Use the model configured by Codex.',
-      },
-      {
-        value: 'custom-current',
-        description: 'Current Codex model.',
-      },
-    ])
-  })
-
-  it('keeps Codex default selected when no model is explicitly configured', () => {
-    providerMocks.resolveCodexAssistantLabel.mockReturnValue('Codex CLI')
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsReasoningEffort: true,
-    })
-
-    const catalog = resolveCodexModelCatalog({
-      currentModel: null,
-      provider: 'codex-cli',
-    })
-
-    expect(catalog.selectedModel).toBeNull()
-    expect(catalog.modelOptions[0]).toEqual({
-      value: '',
-      description: 'Use the model configured by Codex.',
-    })
-    expect(catalog.models).toEqual([])
-    expect(catalog.modelOptions).toHaveLength(1)
-    expect(catalog.reasoningOptions).toEqual(DEFAULT_CODEX_REASONING_OPTIONS)
-  })
-
-  it('finds stable fallback indexes for model and reasoning selections', () => {
-    expect(
-      findCodexCatalogModelOptionIndex('missing', [
-        { value: 'gpt-5.4', description: 'Frontier' },
-        { value: 'gpt-5.4-mini', description: 'Mini' },
-      ]),
-    ).toBe(0)
-    expect(
-      findCodexCatalogModelOptionIndex(' gpt-5.4-mini ', [
-        { value: 'gpt-5.4', description: 'Frontier' },
-        { value: 'gpt-5.4-mini', description: 'Mini' },
-      ]),
-    ).toBe(1)
-
-    expect(findCodexCatalogReasoningOptionIndex(null, [])).toBe(0)
-    expect(
-      findCodexCatalogReasoningOptionIndex('missing', DEFAULT_CODEX_REASONING_OPTIONS),
-    ).toBe(1)
-    expect(
-      findCodexCatalogReasoningOptionIndex('high', DEFAULT_CODEX_REASONING_OPTIONS),
-    ).toBe(2)
-  })
-
-  it('handles empty Codex catalogs and uses the Codex current-model description branch', () => {
-    providerMocks.resolveCodexAssistantLabel.mockReturnValue('Codex CLI')
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsReasoningEffort: true,
-    })
-    const catalog = resolveCodexModelCatalog({
-      currentModel: 'custom-codex',
-      provider: 'codex-cli',
-    })
-    expect(catalog.models).toEqual([expect.objectContaining({
-      id: 'custom-codex',
-      description: 'Current Codex model.',
-    })])
-    expect(catalog.selectedModel?.id).toBe('custom-codex')
-    expect(resolveCodexCatalogReasoningOptions(null)).toEqual([])
-    expect(findCodexCatalogModelOptionIndex(null, [])).toBe(0)
-  })
-
+describe('Codex provider routing', () => {
   it('emits only the final provider reasoning effort after routing overrides resolve', async () => {
     const baseAutomationTarget = createAssistantModelTarget({
       model: 'gpt-6.1-sol',
@@ -2934,7 +2784,6 @@ describe('Codex model catalog', () => {
     expect(providerTurnRunnerMocks.recordCodexAttemptFailed).not.toHaveBeenCalled()
   })
 })
-
 
 describe('attested reaction routing through the admitted provider turn', () => {
   it.each(['quiet', 'quiet-cold', 'escalate', 'failed-leaf', 'aborted-leaf', 'mixed'] as const)('preserves billing, admission, and terminal ownership for %s', async (decision) => {

@@ -3138,6 +3138,7 @@ function createHostedWorkspaceArtifactRef(bytes: Uint8Array): HostedBundleArtifa
 }
 
 const ASSISTANT_RUNTIME_EXCLUDED_PATH_PREFIXES = [
+  `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/status.json`,
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/secrets`,
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/quarantine`,
   `${ASSISTANT_RUNTIME_ROOT_RELATIVE_PATH}/outbox/.quarantine`,

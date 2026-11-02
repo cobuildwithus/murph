@@ -4,7 +4,6 @@ import { test } from 'vitest'
 
 import { isValidAssistantOpaqueId } from '@murphai/runtime-state/assistant-ids'
 import {
-  assistantModelTargetsEqual,
   assistantModelTargetToProviderConfigInput,
   createAssistantModelTarget,
   createDefaultLocalAssistantModelTarget,
@@ -21,11 +20,8 @@ import {
   resolveHostedAssistantProfileLabel,
 } from '../src/assistant/hosted-config.ts'
 import {
-  assistantProviderConfigsEqual,
   compactAssistantProviderConfigInput,
   mergeAssistantProviderConfigs,
-  normalizeAssistantHeaders,
-  normalizeAssistantPersistedHeaders,
   normalizeAssistantProviderConfig,
   serializeAssistantProviderOperatorDefaults,
   serializeAssistantProviderSessionOptions,
@@ -116,21 +112,7 @@ test('assistant backend helpers cover Codex persistence branches and legacy fail
     reasoningEffort: 'low',
     sandbox: null,
   })
-  assert.equal(
-    assistantModelTargetsEqual(codexTarget, {
-      adapter: 'codex-cli',
-      approvalPolicy: null,
-      codexCommand: null,
-      codexHome: ' /tmp/codex ',
-      model: null,
-      modelProvider: 'openai',
-      oss: false,
-      profile: null,
-      reasoningEffort: null,
-      sandbox: null,
-    }),
-    true,
-  )
+
   assert.throws(
     () =>
       createAssistantModelTarget({
@@ -144,10 +126,7 @@ test('assistant backend helpers cover Codex persistence branches and legacy fail
 test('assistant provider helpers cover Codex inference and serialization branches', () => {
   assert.equal(compactAssistantProviderConfigInput(null), null)
   assert.equal(compactAssistantProviderConfigInput({ provider: null }), null)
-  assert.deepEqual(normalizeAssistantHeaders({ ' --- ': 'value', 'x-empty': '   ' }), {
-    '': 'value',
-  })
-  assert.deepEqual(normalizeAssistantPersistedHeaders(null), null)
+
   assert.deepEqual(splitAssistantHeadersForPersistence({ 'X-Trace-Id': 'trace-123' }), {
     persistedHeaders: { 'X-Trace-Id': 'trace-123' },
     secretHeaders: null,
@@ -209,10 +188,7 @@ test('assistant provider helpers cover Codex inference and serialization branche
     reasoningEffort: 'low',
     sandbox: null,
   })
-  assert.equal(
-    assistantProviderConfigsEqual({ provider: 'codex-cli', model: 'gpt-5' }, null),
-    false,
-  )
+
   assert.throws(
     () =>
       normalizeAssistantProviderConfig({

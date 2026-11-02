@@ -2408,7 +2408,7 @@ test("hosted execution snapshots collapse into one workspace bundle and external
         path: ".runtime/operations/assistant/hosted-vault-share-publications.json",
         root: "vault",
       },
-      { expected: "{\"status\":\"running\"}\n", path: ".runtime/operations/assistant/status.json", root: "vault" },
+      { expected: null, path: ".runtime/operations/assistant/status.json", root: "vault" },
       { expected: null, path: ".runtime/operations/assistant/diagnostics/events.jsonl", root: "vault" },
       { expected: null, path: ".runtime/operations/assistant/diagnostics/events.jsonl.old", root: "vault" },
       { expected: "{\"status\":\"healthy\"}\n", path: ".runtime/operations/assistant/diagnostics/snapshot.json", root: "vault" },
@@ -2665,9 +2665,9 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "hosted-vault-share-publications.json"), "utf8"),
       "{\"schema\":\"murph.hosted-vault-share.projection-publications.v2\",\"schemaVersion\":2,\"value\":{\"publicationsByProjectionScopeKey\":{\"profile-name.v0\":{\"contentDigest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"generationToken\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"sourceWorkspaceVersion\":\"7\"}}}}\n",
     );
-    assert.equal(
-      await readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "status.json"), "utf8"),
-      "{\"status\":\"running\"}\n",
+    await assert.rejects(
+      readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "status.json"), "utf8"),
+      { code: "ENOENT" },
     );
     await assert.rejects(
       readFile(path.join(restored.vaultRoot, ".runtime", "operations", "assistant", "diagnostics", "events.jsonl"), "utf8"),
@@ -4781,7 +4781,7 @@ test("runtime-state portability defaults operational paths to machine-local unle
   });
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/status.json")).toMatchObject({
     classification: "operational",
-    portability: "portable",
+    portability: "machine_local",
   });
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/indexes.json")).toMatchObject({
     classification: "operational",

@@ -3115,36 +3115,32 @@ workspace may still hit the runtime's format gate on its next wake, so the
 operator rollout gate is zero known v1 hosted snapshots before returning to
 normal traffic.
 
-Member ChatGPT account linking is retired. New Web code no longer creates linking
-attempts or auth-request mailbox work, and the new runtime performs no member OAuth or
-remote logout. The temporary authenticated consumer at
-`POST /api/internal/hosted-runtime/codex-auth` and its exact Worker outbound
-allowlist entry remain for deployed old Worker/native images that still emit
-device-code and terminal callbacks. The consumer only updates existing connection
-rows: it preserves the signed callback and active runtime write fence, exact
-member/auth-attempt binding, 4,096-byte request limit, strict phase/key/verification
-URL validation, and bounded compare-and-set transitions with truthful
-`applied`, `already_applied`, and `superseded` receipts. Failed canonical writes
-remain failures; neither the callback nor its transport starts OAuth, selects
-authentication, calls a provider, or creates attempts or mailbox work.
+Member ChatGPT account linking is retired. Web creates no linking attempts or
+`runtime.codex-auth-requested` work. The callback at
+`POST /api/internal/hosted-runtime/codex-auth`, its wire validators, and its Worker
+egress allowance are removed. The runtime performs no member OAuth, remote
+logout, or mailbox-driven local credential cleanup. Platform-managed and
+local/operator Codex authentication still use the normal bootstrap policy.
 
-Deploy the consumer-retaining Web revision first to stop new attempt creation,
-then retire the Worker/native producers while keeping the callback transport
-available to any warm old runner.
+`runtime.codex-auth-requested` is retired mailbox metadata, not an executable
+wake. Import skips it before loading its payload, records `mailbox.kind_retired`,
+and advances the system watermark so later items proceed. Snapshot restoration
+drops this kind before parsing removed actions or `codex-auth.updated` records,
+including pending, sending, and recording stages. Unknown kinds retain the
+existing unsupported-kind skip behavior.
 
-Remove that consumer, its required wire validators/types, and its Worker
-allowlist entry only in a separate reviewed change after operational confirmation
-that all callback-producing old Workers/native images and in-flight old Web
-producers have drained. Automatic Web promotion and gradual Worker/image rollout,
-including warm old runners behind a new Worker, do not establish that drain.
+A new runner with an older Web/Worker creates no callbacks. At the preceding
+retirement revision, old runners only clean local credentials and create no
+callbacks either. Earlier callback-producing images against new Web receive
+404; against the new Worker their removed egress route is rejected with 404
+before forwarding. Those older binaries control any retry behavior, so retiring
+warm callback-producing images remains an operational rollout concern. Zero
+connection/mailbox rows do not prove those images have drained.
 
-Legacy `runtime.codex-auth-requested` wakes and
-`codex-auth.updated` checkpoint records remain readable solely to delete local
-`auth.json`; deletion failures retain retryable mailbox work. Remove those
-readers only after retained mailbox records and snapshots have drained. Existing
-connection rows remain available to account export/deletion and retirement
-cleanup. No schema drop, billing change, or ordinary provider-selection change
-is part of this retirement; local/operator authentication remains supported.
+The connection table, columns, relation, primary key, foreign key, and historical
+migrations remain. Account export/deletion still owns retained data cleanup.
+No schema or enum drop, billing change, or ordinary provider-selection change
+is part of this retirement.
 
 Hosted device-sync webhook freshness is owned by web dirty state, not mailbox
 completion. The route claims the exact provider trace, writes sparse

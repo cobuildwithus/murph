@@ -483,7 +483,6 @@ test.each(['linq', 'telegram'] as const)('group %s notifications deliver with a 
 test('sendAssistantNotificationLocal persists the turn before outbound delivery and forwards the dedupe token', async () => {
   const persistedBeforeOutbound: string[] = []
   const traceEvents: unknown[] = []
-  const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
   const stopTyping = vi.fn(async () => undefined)
   const startTelegramTyping = vi.fn(async () => undefined)
   const startTypingIndicator = vi.fn<
@@ -565,11 +564,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
       outbox: {
         deliverMessage,
       },
-      status: {
-        refreshSnapshot: vi.fn(async () => {
-          throw new Error('status refresh failed')
-        }),
-      },
+
       turns: {
         createReceipt: vi.fn(async () => undefined),
         finalizeReceipt: vi.fn(async () => undefined),
@@ -726,9 +721,6 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
   )
   assert.equal(result.response, 'Raw notification text')
   assert.deepEqual(result.session, deliveredSession)
-  expect(warnSpy).toHaveBeenCalledWith(
-    'Assistant best-effort status snapshot refresh failed (Error).',
-  )
   assert.equal(startTypingIndicator.mock.calls.length, 1)
   assert.equal(
     startTypingIndicator.mock.calls[0]?.[1]?.startTelegramTyping,
@@ -1012,9 +1004,7 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
     outbox: {
       deliverMessage,
     },
-    status: {
-      refreshSnapshot: vi.fn(async () => undefined),
-    },
+
     transcripts: {
       append: vi.fn(async () => {
         order.push('transcript')
@@ -1281,9 +1271,7 @@ test('sendAssistantNotificationLocal converges a deferred exact-text retry after
     outbox: {
       deliverMessage,
     },
-    status: {
-      refreshSnapshot: vi.fn(async () => undefined),
-    },
+
     transcripts: {
       append: vi.fn(async () => []),
     },
@@ -1520,9 +1508,7 @@ test('sendAssistantNotificationLocal keeps a queued exact-text welcome when the 
     outbox: {
       deliverMessage,
     },
-    status: {
-      refreshSnapshot: vi.fn(async () => undefined),
-    },
+
     transcripts: {
       append: vi.fn(async () => []),
     },
@@ -1695,9 +1681,7 @@ test('an organic same-route reply supersedes the exact-text signup welcome throu
     outbox: {
       deliverMessage,
     },
-    status: {
-      refreshSnapshot: vi.fn(async () => undefined),
-    },
+
     turns: {
       createReceipt: vi.fn(async () => undefined),
       finalizeReceipt: vi.fn(async () => undefined),
@@ -1896,9 +1880,7 @@ test('sendAssistantNotificationLocal derives hosted Linq deterministic delivery 
       outbox: {
         deliverMessage,
       },
-      status: {
-        refreshSnapshot: vi.fn(async () => undefined),
-      },
+
       turns: {
         createReceipt: vi.fn(async () => undefined),
         finalizeReceipt: vi.fn(async () => undefined),
@@ -2076,9 +2058,7 @@ test('sendAssistantNotificationLocal derives hosted notification keys from resol
       outbox: {
         deliverMessage,
       },
-      status: {
-        refreshSnapshot: vi.fn(async () => undefined),
-      },
+
       turns: {
         createReceipt: vi.fn(async () => undefined),
         finalizeReceipt: vi.fn(async () => undefined),
@@ -2259,9 +2239,7 @@ test('sendAssistantNotificationLocal passes user-facing provider text through be
       outbox: {
         deliverMessage,
       },
-      status: {
-        refreshSnapshot: vi.fn(async () => undefined),
-      },
+
       turns: {
         createReceipt: vi.fn(async () => undefined),
         finalizeReceipt: vi.fn(async () => undefined),
@@ -2422,9 +2400,7 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
       outbox: {
         deliverMessage,
       },
-      status: {
-        refreshSnapshot: vi.fn(async () => undefined),
-      },
+
       turns: {
         createReceipt: vi.fn(async () => undefined),
         finalizeReceipt: vi.fn(async () => undefined),
@@ -4864,9 +4840,7 @@ test('sendAssistantNotificationLocal keeps a queued model reply when the termina
     outbox: {
       deliverMessage,
     },
-    status: {
-      refreshSnapshot: vi.fn(async () => undefined),
-    },
+
     turns: {
       createReceipt: vi.fn(async () => undefined),
       finalizeReceipt,
@@ -5137,9 +5111,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
           kind: 'failed',
         })),
       },
-      status: {
-        refreshSnapshot: vi.fn(async () => undefined),
-      },
+
       turns: {
         createReceipt: vi.fn(async () => undefined),
         finalizeReceipt: vi.fn(async () => undefined),
@@ -5306,9 +5278,7 @@ test('sendAssistantNotificationLocal forwards provider response media to deliver
       outbox: {
         deliverMessage,
       },
-      status: {
-        refreshSnapshot: vi.fn(async () => undefined),
-      },
+
       turns: {
         createReceipt: vi.fn(async () => undefined),
         finalizeReceipt: vi.fn(async () => undefined),
@@ -5697,9 +5667,7 @@ test('sendAssistantNotificationLocal drops generated email thread subjects befor
       outbox: {
         deliverMessage,
       },
-      status: {
-        refreshSnapshot: vi.fn(async () => undefined),
-      },
+
       turns: {
         createReceipt: vi.fn(async () => undefined),
         finalizeReceipt: vi.fn(async () => undefined),
@@ -6388,9 +6356,7 @@ async function loadNotificationTurnHarness(input: {
       outbox: {
         deliverMessage,
       },
-      status: {
-        refreshSnapshot: vi.fn(async () => undefined),
-      },
+
       turns: {
         createReceipt: vi.fn(async () => undefined),
         finalizeReceipt: vi.fn(async () => undefined),
@@ -6629,7 +6595,6 @@ function createCodexCommandCompletedEvent(command: string): unknown {
     },
   }
 }
-
 
 describe('game bootstrap notification delivery', () => {
   const message = 'Your daily walk challenge is on. Want reminders here for the first few days?'

@@ -173,14 +173,6 @@ test.each(scenarios)(
             signal: controller.signal,
             shutdownSignal: invocation === 0 ? shutdownController.signal : null,
             async createCheckpointSnapshot(_input, context) {
-              if (stage === "before-completion" && !injected) {
-                injected = true;
-                if (shutdown) {
-                  shutdownController.abort(new DOMException("Synthetic container shutdown.", "AbortError"));
-                } else {
-                  runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
-                }
-              }
               if ((await readHostedSystemMailboxState(vaultRoot)).pending.length === 0) {
                 await injectWake("checkpoint", context?.signal);
               }
@@ -282,7 +274,17 @@ test.each(scenarios)(
               },
               workspacePort: {
                 ...baseWorkspacePort,
-                async read() { return { fetchedAt: TEST_NOW, workspace }; },
+                async read() {
+                  if (stage === "before-completion" && !injected) {
+                    injected = true;
+                    if (shutdown) {
+                      shutdownController.abort(new DOMException("Synthetic container shutdown.", "AbortError"));
+                    } else {
+                      runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
+                    }
+                  }
+                  return { fetchedAt: TEST_NOW, workspace };
+                },
                 async checkpoint(request) {
                   const response = await baseWorkspacePort.checkpoint(request);
                   workspace = response.workspace;

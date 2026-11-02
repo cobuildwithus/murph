@@ -13,12 +13,9 @@ import {
   serializeHostedAssistantConfigForWrite,
 } from '../src/assistant/hosted-config.ts'
 import {
-  assistantProviderConfigsEqual,
   compactAssistantProviderConfigInput,
   DEFAULT_MURPH_CODEX_REASONING_EFFORT,
   mergeAssistantProviderConfigs,
-  normalizeAssistantHeaders,
-  normalizeAssistantPersistedHeaders,
   normalizeAssistantProviderConfig,
   serializeAssistantProviderOperatorDefaults,
   serializeAssistantProviderSessionOptions,
@@ -30,17 +27,15 @@ import {
   mergeAssistantHeaders,
   splitAssistantHeadersForPersistence,
 } from '../src/assistant/redaction.ts'
-test('assistant header helpers canonicalize, dedupe, sort, and redact persistence-unsafe values', () => {
-  const normalizedHeaders = normalizeAssistantHeaders({
-    authorization: 'Bearer kept-secret-value',
-    'x-api-key': 'opaque-api-key',
-    'x-custom-token': 'custom-token',
-    'x-empty': '   ',
-    'x-trace-id': ' trace-id ',
-    'x-zeta': 'z',
+test('assistant header helpers redact persistence-unsafe values', () => {
+  const normalizedHeaders = {
+    Authorization: 'Bearer kept-secret-value',
+    'X-Api-Key': 'opaque-api-key',
+    'X-Custom-Token': 'custom-token',
     'X-Trace-Id': 'replacement-trace-id',
-    ' x-user ': '  user-123  ',
-  })
+    'X-User': 'user-123',
+    'X-Zeta': 'z',
+  }
 
   assert.deepEqual(normalizedHeaders, {
     Authorization: 'Bearer kept-secret-value',
@@ -75,11 +70,6 @@ test('assistant header helpers canonicalize, dedupe, sort, and redact persistenc
     mergeAssistantHeaders(split.persistedHeaders, split.secretHeaders),
     normalizedHeaders,
   )
-  assert.deepEqual(normalizeAssistantPersistedHeaders(normalizedHeaders), {
-    'X-Trace-Id': 'replacement-trace-id',
-    'X-User': 'user-123',
-    'X-Zeta': 'z',
-  })
 })
 
 test('assistant provider config helpers merge, compact, and serialize Codex targets only', () => {
@@ -132,18 +122,6 @@ test('assistant provider config helpers merge, compact, and serialize Codex targ
   assert.equal(
     normalizeAssistantProviderConfig({ provider: 'codex-cli' }).policy.reasoningEffort,
     DEFAULT_MURPH_CODEX_REASONING_EFFORT,
-  )
-  assert.equal(
-    assistantProviderConfigsEqual(
-      {
-        provider: 'codex-cli',
-        modelProvider: ' OpenAI ',
-      },
-      {
-        modelProvider: 'openai',
-      },
-    ),
-    true,
   )
 
   assert.deepEqual(serializeAssistantProviderSessionOptions(mergedCodex), {

@@ -380,7 +380,8 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
       } else {
         assert.ok(events.indexOf("device.receipt.uploaded") > events.lastIndexOf("reply.sent"));
         const lastCanonicalCheckpoint = checkpointRequests.filter(
-          (checkpoint) => checkpoint.reason === "canonical_runtime_commit",
+          (checkpoint) => checkpoint.reason === "canonical_runtime_commit"
+            && checkpoint.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
         ).at(-1);
         const receiptLog = listHostedCanonicalWriteReceiptLogArtifacts(artifactBytesByHash).find(
           (log) => log.sha256 === lastCanonicalCheckpoint?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,

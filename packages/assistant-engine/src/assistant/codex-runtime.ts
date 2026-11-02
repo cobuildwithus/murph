@@ -20,10 +20,8 @@ import {
   startCodexAssistantVoice,
   resolveCodexAssistantLabel as resolveCodexAssistantConfigLabel,
 } from './providers/codex-cli.js'
-import { createCatalogModel } from './providers/catalog.js'
+
 import type {
-  AssistantCatalogModel,
-  AssistantModelCapabilities,
   AssistantProviderAttemptMetadata,
   AssistantProviderCapabilities,
   AssistantProviderTurnAttemptResult,
@@ -169,10 +167,7 @@ function toAssistantProviderTurnExecutionInput(
   }
 }
 
-export { createCatalogModel }
 export type {
-  AssistantCatalogModel,
-  AssistantModelCapabilities,
   AssistantProviderAttemptMetadata,
   AssistantProviderCapabilities,
   AssistantProviderTurnAttemptResult,

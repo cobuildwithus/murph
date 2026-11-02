@@ -235,9 +235,9 @@ export {
   listMurphDynamicToolNames,
   resolveMurphDynamicTools,
 } from './assistant-codex/dynamic-tool-catalog.js'
-export { resolveCodexDisplayOptions } from './assistant-codex/config.js'
+
 export type { CodexProgressEvent } from './assistant-codex-events.js'
-export type { CodexDisplayOptions } from './assistant-codex/config.js'
+
 export type { CodexAppServerImageInput } from './assistant-codex/images.js'
 export type {
   VoiceMemoToolRuntime,

@@ -42,10 +42,7 @@ import {
   type TelegramAutoReplyMetadata,
 } from '../src/assistant/automation/prompt-builder.ts'
 import { resolveAssistantPromptTimeContext } from '../src/assistant/prompt-time.ts'
-import {
-  clearAssistantAutomationRunLock,
-  inspectAssistantAutomationRunLock,
-} from '../src/assistant/automation/runtime-lock.ts'
+
 import { resolveAssistantInboxArtifactPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { createTempVaultContext } from './test-helpers.ts'
@@ -1718,54 +1715,6 @@ describe('assistant auto-reply prompt builder support', () => {
           type: 'text',
         },
       ],
-    })
-  })
-})
-
-describe('assistant automation runtime locks', () => {
-  it('inspects and clears stale external automation locks', async () => {
-    const { vaultRoot } = await createTempVault('assistant-automation-support-')
-    const paths = resolveAssistantStatePaths(vaultRoot)
-    const metadataPath = path.join(
-      paths.assistantStateRoot,
-      '.automation-run.lock',
-      'owner.json',
-    )
-    const lockPath = path.join(
-      paths.assistantStateRoot,
-      '.automation-run.lock',
-    )
-
-    await mkdir(lockPath, { recursive: true })
-
-    await writeFile(
-      metadataPath,
-      JSON.stringify({
-        command: 'stale-automation-runner',
-        mode: 'continuous',
-        pid: 999_999,
-        startedAt: '2026-04-08T01:23:45.000Z',
-      }),
-      'utf8',
-    )
-    await expect(inspectAssistantAutomationRunLock(paths)).resolves.toEqual({
-      state: 'stale',
-      pid: 999_999,
-      startedAt: '2026-04-08T01:23:45.000Z',
-      mode: 'continuous',
-      command: 'stale-automation-runner',
-      reason: 'Process 999999 is no longer running.',
-    })
-
-    await clearAssistantAutomationRunLock(paths)
-
-    await expect(inspectAssistantAutomationRunLock(paths)).resolves.toEqual({
-      state: 'unlocked',
-      pid: null,
-      startedAt: null,
-      mode: null,
-      command: null,
-      reason: null,
     })
   })
 })

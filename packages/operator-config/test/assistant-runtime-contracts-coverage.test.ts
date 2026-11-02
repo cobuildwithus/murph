@@ -3,7 +3,6 @@ import assert from 'node:assert/strict'
 import { test } from 'vitest'
 
 import {
-  assistantStatusAutomationSchema,
   parseAssistantSessionRecord,
 } from '../src/assistant-cli-contracts.ts'
 import {
@@ -90,45 +89,6 @@ test('assistant session parsing resolves Codex modelProvider and status automati
   assert.equal(parsedSession.providerOptions.executionDriver, 'codex-app-server')
   assert.equal(parsedSession.providerOptions.modelProvider, 'openai')
   assert.equal(parsedSession.providerOptions.resumeKind, 'codex-thread')
-
-  const statusAutomation = assistantStatusAutomationSchema.parse({
-    autoReply: [
-      {
-        channel: 'telegram',
-        enabledAt: '2026-04-08T12:00:00.000Z',
-        eligibleAfter: null,
-      },
-      {
-        channel: 'email',
-        enabledAt: '2026-04-08T12:01:00.000Z',
-        eligibleAfter: {
-          createdAt: null,
-          inputId: 'input-2',
-          occurredAt: '2026-04-08T12:06:00.000Z',
-          sourceKind: 'inbox-capture',
-        },
-      },
-    ],
-    updatedAt: '2026-04-08T12:10:00.000Z',
-  })
-
-  assert.equal(statusAutomation.autoReply[0]?.eligibleAfter, null)
-  assert.equal(statusAutomation.autoReply[1]?.eligibleAfter?.inputId, 'input-2')
-
-  assert.throws(() =>
-    assistantStatusAutomationSchema.parse({
-      autoReply: [
-        {
-          channel: 'telegram',
-          cursor: {
-            captureId: 'capture-legacy',
-            occurredAt: '2026-04-08T12:05:00.000Z',
-          },
-        },
-      ],
-      updatedAt: '2026-04-08T12:10:00.000Z',
-    }),
-  )
 })
 
 test('assistant session parsing fails closed for unsupported persisted sessions', () => {

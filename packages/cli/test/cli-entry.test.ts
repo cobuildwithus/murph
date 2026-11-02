@@ -98,7 +98,6 @@ function mockCliActionModules(input: {
     ...input.codexLifecycleModule,
   }));
   vi.doMock("@murphai/operator-config/operator-config", () => ({
-    resolveConfiguredDefaultVault: vi.fn(async () => null),
     resolveEffectiveTopLevelToken: vi.fn(
       (argv: readonly string[]) => argv.find((token) => !token.startsWith("-")) ?? null,
     ),
@@ -534,7 +533,6 @@ test("runMurphCliAction keeps scoped routing when Incur skills are installed", a
 test("runMurphCliAction injects the resolved default vault for non-setup invocations", async () => {
   const serve = vi.fn(async () => undefined);
   const resolveDefaultVault = vi.fn(async () => "/vaults/default");
-  const resolveConfiguredDefaultVault = vi.fn(async () => null);
   const vaultContextRef: { value: { current: string | null } | null } = {
     value: null,
   };
@@ -546,7 +544,6 @@ test("runMurphCliAction injects the resolved default vault for non-setup invocat
     },
     operatorConfigModule: {
       expandConfiguredVaultPath: vi.fn(),
-      resolveConfiguredDefaultVault,
       resolveEffectiveTopLevelToken: vi.fn(
         (argv: readonly string[]) => argv.find((token) => !token.startsWith("-")) ?? null,
       ),
@@ -558,7 +555,6 @@ test("runMurphCliAction injects the resolved default vault for non-setup invocat
   await runMurphCliAction(["model"]);
 
   assert.deepEqual(resolveDefaultVault.mock.calls, [["/operator-home"]]);
-  assert.deepEqual(resolveConfiguredDefaultVault.mock.calls, []);
   assert.ok(vaultContextRef.value);
   assert.equal(vaultContextRef.value.current, "/vaults/default");
   assert.deepEqual(serve.mock.calls, [
@@ -635,7 +631,6 @@ for (const jsonArgv of [
 
 test("runMurphCliAction allows vault-cli init to target an explicit vault", async () => {
   const serve = vi.fn(async () => undefined);
-  const resolveConfiguredDefaultVault = vi.fn(async () => null);
   const resolveDefaultVault = vi.fn(async () => "/vaults/from-env");
   const vaultContextRef: { value: { current: string | null } | null } = {
     value: null,
@@ -648,7 +643,6 @@ test("runMurphCliAction allows vault-cli init to target an explicit vault", asyn
     },
     operatorConfigModule: {
       expandConfiguredVaultPath: vi.fn(),
-      resolveConfiguredDefaultVault,
       resolveDefaultVault,
       resolveEffectiveTopLevelToken: vi.fn(() => "init"),
       resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
@@ -658,7 +652,6 @@ test("runMurphCliAction allows vault-cli init to target an explicit vault", asyn
   await runMurphCliAction(["init", "--vault", "/vaults/new"], {
   });
 
-  assert.deepEqual(resolveConfiguredDefaultVault.mock.calls, []);
   assert.deepEqual(resolveDefaultVault.mock.calls, []);
   assert.ok(vaultContextRef.value);
   assert.equal(vaultContextRef.value.current, "/vaults/new");
@@ -699,7 +692,6 @@ test("runMurphCliEntrypoint installs env loading and sqlite warning filtering be
     cli: { serve },
     operatorConfigModule: {
       expandConfiguredVaultPath: vi.fn(),
-      resolveConfiguredDefaultVault: vi.fn(async () => null),
       resolveDefaultVault: vi.fn(async () => "/vaults/default"),
       resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
     },
@@ -754,7 +746,6 @@ test("runMurphCliEntrypoint does not mask command failure when warm Codex shutdo
     cli: { serve },
     operatorConfigModule: {
       expandConfiguredVaultPath: vi.fn(),
-      resolveConfiguredDefaultVault: vi.fn(async () => null),
       resolveDefaultVault: vi.fn(async () => "/vaults/default"),
       resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
     },
@@ -786,7 +777,6 @@ test("runMurphCliEntrypoint preserves command failure when warm Codex shutdown a
     cli: { serve },
     operatorConfigModule: {
       expandConfiguredVaultPath: vi.fn(),
-      resolveConfiguredDefaultVault: vi.fn(async () => null),
       resolveDefaultVault: vi.fn(async () => "/vaults/default"),
       resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
     },
@@ -810,7 +800,6 @@ test("runMurphCliEntrypoint surfaces warm Codex shutdown failure after success",
     cli: { serve },
     operatorConfigModule: {
       expandConfiguredVaultPath: vi.fn(),
-      resolveConfiguredDefaultVault: vi.fn(async () => null),
       resolveDefaultVault: vi.fn(async () => "/vaults/default"),
       resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
     },

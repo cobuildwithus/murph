@@ -47,32 +47,35 @@ describe("retired system work in saved snapshots", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-retired-system-state-"));
     try {
       const active = buildPendingRuntimeControlMailboxItem({
-        itemId: "active", mailboxLaneSeq: "3",
+        itemId: "active", mailboxLaneSeq: "4",
         mailboxDedupeKey: "runtime-control:refresh", wakeKind: "runtime.browser-vault-refresh-requested",
       });
       await updateHostedSystemMailboxState(vaultRoot, () => ({ pending: [active] }));
       const statePath = path.join(resolveAssistantStatePaths(vaultRoot).assistantStateRoot, "hosted-system-mailbox.json");
       const envelope = JSON.parse(await readFile(statePath, "utf8"));
-      const retired = ["environment-interview.completed", "environment-voice.captured"].map((kind, index) => ({
+      const retired = ["environment-interview.completed", "environment-voice.captured", "runtime.codex-auth-requested"].map((kind, index) => ({
         ...active,
         itemId: `retired_${index}`, mailboxLaneSeq: String(index + 1),
         mailboxDedupeKey: `${kind}:retired`,
-        routeAction: index === 0 ? "run-environment-interview" : "run-environment-voice",
-        wake: { kind },
+        routeAction: index === 0 ? "run-environment-interview"
+          : index === 1 ? "run-environment-voice" : "apply-runtime-control-request",
+        wake: { kind, ...(index === 2 ? { action: "connect", attemptId: "hca_retired_synthetic" } : {}) },
         status,
         postCheckpointRecord: index === 1 && status === "recording"
-          ? { kind: "environment-voice.audio-delete", audioId: "expired-audio" } : null,
+          ? { kind: "environment-voice.audio-delete", audioId: "expired-audio" }
+          : index === 2 && status === "recording"
+            ? { kind: "codex-auth.updated", phase: "connected", attemptId: "hca_retired_synthetic" } : null,
       }));
       // Restore obsolete wire shapes directly; active writers cannot produce them.
       envelope.value.pending = [...retired, ...envelope.value.pending];
       await writeFile(statePath, JSON.stringify(envelope));
       const restored = await readHostedSystemMailboxState(vaultRoot);
       expect(restored.pending.map((item) => item.itemId)).toEqual(["active"]);
-      expect(resolveHostedSystemMailboxHandledThroughSeq({ importedSeq: "3", state: restored })).toBe("2");
+      expect(resolveHostedSystemMailboxHandledThroughSeq({ importedSeq: "4", state: restored })).toBe("3");
       await removeHostedSystemMailboxPendingItemIfCurrent({ item: restored.pending[0]!, vaultRoot });
       expect(await readHostedSystemMailboxState(vaultRoot)).toEqual({ pending: [] });
-      expect(resolveHostedSystemMailboxHandledThroughSeq({ importedSeq: "3", state: await readHostedSystemMailboxState(vaultRoot) })).toBe("3");
-      expect(await readFile(statePath, "utf8")).not.toContain("environment-");
+      expect(resolveHostedSystemMailboxHandledThroughSeq({ importedSeq: "4", state: await readHostedSystemMailboxState(vaultRoot) })).toBe("4");
+      expect(await readFile(statePath, "utf8")).not.toMatch(/environment-|codex-auth/);
     } finally {
       await rm(vaultRoot, { recursive: true, force: true });
     }
@@ -693,11 +696,11 @@ describe("hosted runtime system mailbox state", () => {
       mailboxLaneSeq: "2",
       wakeKind: "runtime.maintenance-requested",
     });
-    const codexDisconnect = buildPendingRuntimeControlMailboxItem({
-      itemId: "pending_codex_disconnect",
-      mailboxDedupeKey: "runtime-control:codex-auth:disconnect",
+    const manualRequest = buildPendingRuntimeControlMailboxItem({
+      itemId: "pending_manual_request",
+      mailboxDedupeKey: "runtime-control:manual:disconnect",
       mailboxLaneSeq: "3",
-      wakeKind: "runtime.codex-auth-requested",
+      wakeKind: "runtime.manual-requested",
     });
     const browserVaultRefresh = buildPendingRuntimeControlMailboxItem({
       itemId: "pending_browser_vault_refresh",
@@ -709,13 +712,13 @@ describe("hosted runtime system mailbox state", () => {
     expect(findNextHostedSystemMailboxQueueItem({
       allowedRouteActions: ["apply-runtime-control-request"],
       now: "2026-04-27T00:00:00.000Z",
-      state: { pending: [projectionRetry, laterProjection, codexDisconnect] },
-    })).toEqual(codexDisconnect);
+      state: { pending: [projectionRetry, laterProjection, manualRequest] },
+    })).toEqual(manualRequest);
 
     expect(findNextHostedSystemMailboxQueueItem({
       allowedRouteActions: ["apply-runtime-control-request"],
       now: "2026-04-27T00:01:00.000Z",
-      state: { pending: [projectionRetry, laterProjection, codexDisconnect] },
+      state: { pending: [projectionRetry, laterProjection, manualRequest] },
     })).toEqual(projectionRetry);
 
     expect(findNextHostedSystemMailboxQueueItem({
@@ -733,7 +736,7 @@ describe("hosted runtime system mailbox state", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
     try {
       await updateHostedSystemMailboxState(vaultRoot, () => ({
-        pending: [projectionRetry, laterProjection, codexDisconnect],
+        pending: [projectionRetry, laterProjection, manualRequest],
       }));
       await expect(resolveHostedSystemMailboxNextWakeCandidate({
         allowedRouteActions: ["apply-runtime-control-request"],
@@ -746,7 +749,7 @@ describe("hosted runtime system mailbox state", () => {
       });
 
       await updateHostedSystemMailboxState(vaultRoot, () => ({
-        pending: [maintenanceRetry, codexDisconnect],
+        pending: [maintenanceRetry, manualRequest],
       }));
       await expect(resolveHostedSystemMailboxWakeCandidates({
         allowedRouteActions: ["apply-runtime-control-request"],
@@ -769,17 +772,12 @@ describe("hosted runtime system mailbox state", () => {
   });
 
   it("uses the ready approved continuation as the default item and wake authority", async () => {
-    const codexRetry = buildPendingRuntimeControlMailboxItem({
-      itemId: "pending_codex_retry",
-      mailboxDedupeKey: "runtime-control:codex-auth:retry",
+    const manualRetry = buildPendingRuntimeControlMailboxItem({
+      itemId: "pending_manual_retry",
+      mailboxDedupeKey: "runtime-control:manual:retry",
       mailboxLaneSeq: "1",
       nextAttemptAt: "2026-04-27T00:01:00.000Z",
-      postCheckpointRecord: {
-        attemptId: "hca_abcdefghijklmnop",
-        kind: "codex-auth.updated",
-        phase: "connected",
-      },
-      wakeKind: "runtime.codex-auth-requested",
+      wakeKind: "runtime.manual-requested",
     });
     const deviceWake = buildPendingDeviceSyncMailboxItem({
       itemId: "pending_device_sync",
@@ -797,7 +795,7 @@ describe("hosted runtime system mailbox state", () => {
     });
     const state = {
       pending: [
-        codexRetry,
+        manualRetry,
         deviceWake,
         approvedContinuationA,
         approvedContinuationB,
@@ -879,7 +877,7 @@ describe("hosted runtime system mailbox state", () => {
       });
 
       await updateHostedSystemMailboxState(vaultRoot, () => ({
-        pending: [codexRetry, deviceWake],
+        pending: [manualRetry, deviceWake],
       }));
       await expect(resolveHostedSystemMailboxNextWakeCandidate({
         now: () => "2026-04-27T00:00:00.000Z",
@@ -970,9 +968,9 @@ describe("hosted runtime system mailbox state", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
     const earlierDefaultOwned = buildPendingRuntimeControlMailboxItem({
       itemId: "pending_earlier_default_owned",
-      mailboxDedupeKey: "runtime-control:codex-auth:connect",
+      mailboxDedupeKey: "runtime-control:manual:connect",
       mailboxLaneSeq: "1",
-      wakeKind: "runtime.codex-auth-requested",
+      wakeKind: "runtime.manual-requested",
     });
     const browserVaultRefresh = buildPendingRuntimeControlMailboxItem({
       itemId: "pending_browser_vault_refresh",
@@ -982,9 +980,9 @@ describe("hosted runtime system mailbox state", () => {
     });
     const laterDefaultOwned = buildPendingRuntimeControlMailboxItem({
       itemId: "pending_default_owned",
-      mailboxDedupeKey: "runtime-control:codex-auth:disconnect",
+      mailboxDedupeKey: "runtime-control:manual:disconnect",
       mailboxLaneSeq: "3",
-      wakeKind: "runtime.codex-auth-requested",
+      wakeKind: "runtime.manual-requested",
     });
 
     try {
@@ -1066,7 +1064,7 @@ describe("hosted runtime system mailbox state", () => {
     const foreground = approved
       ? buildPendingApprovalContinuationMailboxItem({ effectId: "synthetic_effect", itemId: "foreground", mailboxLaneSeq: "3" })
       : buildPendingRuntimeControlMailboxItem({ itemId: "foreground", mailboxLaneSeq: "3",
-        mailboxDedupeKey: "runtime-control:synthetic-auth", wakeKind: "runtime.codex-auth-requested" });
+        mailboxDedupeKey: "runtime-control:synthetic-manual", wakeKind: "runtime.manual-requested" });
     try {
       await writeHostedMailboxImportState({ vaultRoot, state: {
         ...createEmptyHostedMailboxImportState(), watermarks: { conversation: "0", system: "3" },
@@ -1865,24 +1863,15 @@ function buildPendingRuntimeControlMailboxItem(input: {
   postCheckpointRecord?: HostedSystemMailboxPendingItem["postCheckpointRecord"];
   wakeKind:
     | "runtime.browser-vault-refresh-requested"
-    | "runtime.codex-auth-requested"
+    | "runtime.manual-requested"
     | "runtime.maintenance-requested";
 }): HostedSystemMailboxPendingItem {
-  const wake = input.wakeKind === "runtime.codex-auth-requested"
-    ? {
-        action: "disconnect" as const,
-        attemptId: "hca_abcdefghijklmnop",
-        eventId: input.mailboxDedupeKey,
-        kind: input.wakeKind,
-        occurredAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_123",
-      }
-    : {
-        eventId: input.mailboxDedupeKey,
-        kind: input.wakeKind,
-        occurredAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_123",
-      };
+  const wake = {
+    eventId: input.mailboxDedupeKey,
+    kind: input.wakeKind,
+    occurredAt: "2026-04-27T00:00:00.000Z",
+    userId: "member_123",
+  };
   return {
     attemptCount: 1,
     itemId: input.itemId,

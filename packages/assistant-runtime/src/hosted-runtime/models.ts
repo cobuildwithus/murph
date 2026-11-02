@@ -174,12 +174,6 @@ export type HostedSystemMailboxPostCheckpointRecord =
       retainedWake?: HostedExecutionDeviceSyncWake;
       records: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
     }
-  | {
-      attemptId: string;
-      kind: "codex-auth.updated";
-      nextWakeAt?: null;
-      phase: "connected" | "disconnected";
-    }
     | {
       kind: "member-action.outcome-recorded";
       nextWakeAt?: null;

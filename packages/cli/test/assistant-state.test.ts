@@ -15,7 +15,7 @@ import {
   resolveAssistantStatePaths,
   saveAssistantSession,
 } from '@murphai/assistant-engine/assistant-state'
-import { getAssistantStatus } from '@murphai/assistant-engine/assistant-status'
+
 import { createAssistantBackendTarget } from '@murphai/operator-config/assistant-backend'
 import {
   readAssistantRuntimeBudgetStatus,
@@ -1478,32 +1478,6 @@ test('assistant runtime budget snapshots are quarantined, recreated, and fully p
   assert.equal(remainingEntries.includes(path.basename(metadataPath)), false)
   assert.equal(remainingEntries.includes(path.basename(payloadPath)), false)
   assert.equal(remainingEntries.includes(path.basename(orphanPayloadPath)), false)
-})
-
-test('assistant status includes runtime-budget quarantine details on the same recovery read', async () => {
-  const { vaultRoot } = await createAssistantStateVault('murph-assistant-status-runtime-budget-')
-
-  const paths = resolveAssistantStatePaths(vaultRoot)
-  await mkdir(path.dirname(paths.resourceBudgetPath), {
-    recursive: true,
-  })
-  await writeFile(
-    paths.resourceBudgetPath,
-    JSON.stringify({
-      schema: 'murph.assistant-runtime-budget.v1',
-      updatedAt: 42,
-    }),
-    'utf8',
-  )
-
-  const status = await getAssistantStatus(vaultRoot)
-  assert.equal(status.runtimeBudget.schema, 'murph.assistant-runtime-budget.v1')
-  assert.equal(status.quarantine.byKind['runtime-budget'], 1)
-  assert.equal(status.quarantine.total >= 1, true)
-  assert.equal(
-    status.warnings.some((warning) => warning.includes('quarantined for repair')),
-    true,
-  )
 })
 
 test('unsupported assistant targets fail closed before session secret sidecars are written', async () => {

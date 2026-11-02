@@ -2300,7 +2300,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         "snapshot:idle_shutdown",
         "workspace.checkpoint",
         ...(input.nextWakeReason === "device-sync.reconcile"
-          ? ["snapshot:idle_shutdown", "workspace.checkpoint"]
+          ? ["workspace.checkpoint"]
           : []),
       ];
       assert.deepEqual(events, expectedEvents);
@@ -2309,7 +2309,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
       assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 0);
       assert.equal(checkpointRequests.length, shouldRunDeviceSync ? 3 : 1);
       const terminalCheckpoint = checkpointRequests.at(-1);
-      assert.equal(terminalCheckpoint?.reason, "idle_shutdown");
+      assert.equal(terminalCheckpoint?.reason, shouldRunDeviceSync ? "canonical_runtime_commit" : "idle_shutdown");
       assert.equal(terminalCheckpoint?.nextWakeAt, null);
       assert.equal(terminalCheckpoint?.nextWakeReason, null);
       if (shouldRunDeviceSync) {
