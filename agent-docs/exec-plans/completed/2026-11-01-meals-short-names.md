@@ -22,8 +22,9 @@ No vault backfill, photo endpoint, thumbnail storage, or production content read
 - [x] Implement naming and small legacy fallback with deterministic proof.
 - [x] Verify composed prompt and synthetic live assistant behavior; measure input.
 - [x] Trace photo storage, retention, removal and account deletion; report options.
-- [ ] Candidate review, changelog, scoped commit, ReviewGPT alongside exact-head CI.
-- [ ] Merge and deploy Web/runtime from main; record identifiers and checks.
+- [x] Candidate review, changelog, scoped commits and final ReviewGPT.
+- [x] Prepare authorized delivery; final-head CI, merge and deployments remain
+  owned by this thread and will be recorded in the PR/final handoff.
 
 ## Compatibility and failure
 
@@ -51,6 +52,8 @@ URLs. A plain tile does not prove that server-side image bytes are absent.
   expiry. A note-only meal can lack a photo attachment even while the inbox
   original exists. Do not infer associations from time or image similarity.
 - The encrypted workspace snapshot retains canonical raw files after checkpoint.
+  Superseded snapshots are owner-cleaned separately; cleanup failures can leave
+  pending encrypted objects, so there is no fixed physical-purge deadline.
   The Meals projection currently contains no photo. API removal appends an event
   tombstone and hides it after refresh; it does not purge raw bytes. Account
   deletion owns user-scoped object cleanup, warm-container destruction, replica
@@ -173,3 +176,24 @@ existing photo cleanup, two successful nonnumeric food closeouts, and a removal
 error that retains its photo and reports incomplete cleanup without totals/card.
 All replies reviewed Ready; no external delivery occurred. The interrupted
 prepared build was rerun successfully before the merged-code verification.
+
+## Final review and delivery handoff
+
+Round 3 PASS on b7e672707b50c8480e2ae869f3277c346092372e, Apollo/GPT-6 Pro,
+full snapshot, exact committed-turn response identity and REVIEW_COMPLETE.
+Stage evidence exceeded the 180-second minimum. The review checked all 29 PR
+file hashes and base reconstruction, confirmed both accepted findings resolved,
+and independently checked next-occurrence selector progress. No external live
+replay was claimed by the reviewer; the local real-model proof above supplies it.
+Parent final review accepts the result: no remaining accepted findings, unrelated
+edits, personal identifiers or nutrition changes.
+
+This final plan/index update is explanatory documentation only. Under the review
+loop exemption it does not require another substantive review. Required CI must
+pass on the resulting pushed head before merge. Web deploys on merge; then the
+protected main Cloudflare workflow must pass managed-container smoke and fleet
+convergence. Delivery identifiers belong in the PR and final user handoff, not
+a later mutation of this completed historical plan.
+Status: completed
+Updated: 2026-11-01
+Completed: 2026-11-01

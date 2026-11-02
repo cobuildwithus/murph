@@ -1641,5 +1641,5 @@ specific moment; the contract remains in `product-specs/weekly-game.md`. Proof:
 [recap chat result](exec-plans/completed/2026-11-01-recap-chat-line-result.md).
 
 Meal dish naming and photo-retention investigation are tracked in
-[the meal naming plan](exec-plans/active/2026-11-01-meals-short-names.md);
+[the meal naming plan](exec-plans/completed/2026-11-01-meals-short-names.md);
 `product-specs/ios-meals.md` owns the app naming contract.
