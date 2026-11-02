@@ -834,12 +834,7 @@ test("hosted runtime resolved config derives typed channel and device-sync state
     telegramBotConfigured: true,
   });
   assert.deepEqual(resolved.deviceSync, {
-    providerConfigs: {
-      whoop: {
-        clientId: "whoop-client",
-        clientSecret: "whoop-secret",
-      },
-    },
+    providerConfigs: {},
     publicBaseUrl: "https://device-sync.example.test",
     secret: "secret_123",
   });
@@ -1134,86 +1129,21 @@ test("hosted platform-backed env strips non-platform entries from platform env",
 
 test("hosted runtime config deep-clones resolved device-sync provider config", () => {
   const platform = createHostedRuntimePlatformStub();
-  const ouraScopes = ["daily", "sleep"];
+  const providerFilter = ["garmin", "oura", "whoop"];
   const resolvedConfig = createHostedRuntimeResolvedConfig({
     deviceSync: {
-      providerConfigs: {
-        junction: {
-          environment: "sandbox",
-          providerFilter: ["garmin"],
-          region: "us",
-        },
-        oura: {
-          clientId: "oura-client",
-          clientSecret: "oura-secret",
-          scopes: ouraScopes,
-        },
-        whoop: {
-          clientId: "whoop-client",
-          clientSecret: "whoop-secret",
-          scopes: ["read:profile", "offline"],
-        },
-      },
+      providerConfigs: { junction: { environment: "sandbox", providerFilter, region: "us" } },
       publicBaseUrl: "https://device-sync.example.test",
       secret: "secret_123",
     },
   });
-  const normalized = normalizeHostedAssistantRuntimeConfig(
-    {
-      resolvedConfig,
-    },
-    platform,
-  );
-
-  assert.deepEqual(
-    normalized.resolvedConfig.channelCapabilities,
-    resolvedConfig.channelCapabilities,
-  );
-  assert.equal(
-    normalized.resolvedConfig.deviceSync?.publicBaseUrl,
-    resolvedConfig.deviceSync?.publicBaseUrl,
-  );
-  assert.equal(
-    normalized.resolvedConfig.deviceSync?.secret,
-    resolvedConfig.deviceSync?.secret,
-  );
-  assert.deepEqual(
-    normalized.resolvedConfig.deviceSync?.providerConfigs.junction,
-    {
-      environment: "sandbox",
-      providerFilter: ["garmin"],
-      region: "us",
-    },
-  );
-  assert.deepEqual(
-    normalized.resolvedConfig.deviceSync?.providerConfigs.oura,
-    {
-      clientId: "oura-client",
-      clientSecret: "oura-secret",
-      scopes: ["daily", "sleep"],
-    },
-  );
-  assert.deepEqual(
-    normalized.resolvedConfig.deviceSync?.providerConfigs.whoop,
-    resolvedConfig.deviceSync?.providerConfigs.whoop,
-  );
+  const normalized = normalizeHostedAssistantRuntimeConfig({ resolvedConfig }, platform);
+  assert.deepEqual(normalized.resolvedConfig, resolvedConfig);
   assert.notEqual(normalized.resolvedConfig.deviceSync, resolvedConfig.deviceSync);
-  assert.notEqual(
-    normalized.resolvedConfig.deviceSync?.providerConfigs,
-    resolvedConfig.deviceSync?.providerConfigs,
-  );
-  assert.notEqual(
-    normalized.resolvedConfig.deviceSync?.providerConfigs.oura?.scopes,
-    resolvedConfig.deviceSync?.providerConfigs.oura?.scopes,
-  );
-  assert.notEqual(
-    normalized.resolvedConfig.deviceSync?.providerConfigs.whoop?.scopes,
-    resolvedConfig.deviceSync?.providerConfigs.whoop?.scopes,
-  );
-  assert.notEqual(
-    normalized.resolvedConfig.deviceSync?.providerConfigs.oura?.scopes,
-    ouraScopes,
-  );
+  assert.notEqual(normalized.resolvedConfig.deviceSync?.providerConfigs, resolvedConfig.deviceSync?.providerConfigs);
+  assert.notEqual(normalized.resolvedConfig.deviceSync?.providerConfigs.junction?.providerFilter, providerFilter);
+  providerFilter.push("strava");
+  assert.deepEqual(normalized.resolvedConfig.deviceSync?.providerConfigs.junction?.providerFilter, ["garmin", "oura", "whoop"]);
 });
 
 test("withHostedProcessEnvironment restores overwritten and newly introduced env values", async () => {

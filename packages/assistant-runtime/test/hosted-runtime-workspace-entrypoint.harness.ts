@@ -648,8 +648,6 @@ function readCapturedRuntimePhaseLogs(input: {
     );
 }
 
-
-
 interface OpenAiHttpsProbeResult {
   body?: string;
   caConfigured: boolean;
@@ -2100,13 +2098,7 @@ function createDeviceSyncResolvedConfig(): HostedAssistantRuntimeResolvedConfig 
       telegramBotConfigured: false,
     },
     deviceSync: {
-      providerConfigs: {
-        whoop: {
-          baseUrl: "https://whoop.example.test",
-          clientId: "synthetic-whoop-client",
-          clientSecret: "synthetic-whoop-secret",
-        },
-      },
+      providerConfigs: { junction: { environment: "sandbox", region: "us" } },
       publicBaseUrl: "https://device-sync.example.test",
       secret: "synthetic-device-sync-secret",
     },

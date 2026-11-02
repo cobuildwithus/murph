@@ -1902,12 +1902,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           now: () => now,
           operatorHomeRoot,
           resolvedDeviceSync: {
-            providerConfigs: {
-              whoop: {
-                clientId: "synthetic-whoop-client",
-                clientSecret: "synthetic-whoop-secret",
-              },
-            },
+            providerConfigs: { junction: { environment: "sandbox", region: "us" } },
             publicBaseUrl: "https://device-sync.example.test",
             secret: "synthetic-device-sync-secret",
           },
@@ -1958,12 +1953,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         now: () => now,
         operatorHomeRoot,
         resolvedDeviceSync: {
-          providerConfigs: {
-            whoop: {
-              clientId: "synthetic-whoop-client",
-              clientSecret: "synthetic-whoop-secret",
-            },
-          },
+          providerConfigs: { junction: { environment: "sandbox", region: "us" } },
           publicBaseUrl: "https://device-sync.example.test",
           secret: "synthetic-device-sync-secret",
         },

@@ -377,11 +377,8 @@ pnpm test:coverage
 
 ## Current reference providers
 
-Use the existing providers as concrete examples of different integration shapes:
-- Junction: shared OAuth/proxy target for configured sources such as Garmin and Fitbit
-- Garmin: Junction-backed OAuth plus polling-first reconcile, activity detail descriptors, and women-health support
-- WHOOP: OAuth plus webhooks, recovery and workout payloads, and delete fan-in
-- Oura: OAuth plus polling-first reconcile, optional webhook verification and admin support, and rich daily readiness or sleep families
-- Strava: direct OAuth plus activity/workout imports and direct webhook signing
-
-Study those implementations before inventing a new provider-specific pattern.
+Junction owns hosted connection, polling, webhook verification, and ingestion.
+WHOOP, Oura, Strava, and Garmin descriptors retain identity, normalization, and
+source priority for Junction payloads and historical vault reads. They do not
+register direct OAuth/API transports. Fitbit migration remains source-data
+migration machinery, not a direct connection provider.

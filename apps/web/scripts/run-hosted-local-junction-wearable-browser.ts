@@ -128,10 +128,6 @@ const SENSITIVE_BROWSER_ENVIRONMENT_KEYS = [
   "MURPH_E2E_WHOOP_EMAIL",
   "MURPH_E2E_WHOOP_OTP",
   "MURPH_E2E_WHOOP_PASSWORD",
-  "WHOOP_CLIENT_ID",
-  "WHOOP_CLIENT_SECRET",
-  "OURA_CLIENT_ID",
-  "OURA_CLIENT_SECRET",
 ] as const;
 
 let stage: WearableStage = "configuration";
@@ -144,7 +140,6 @@ function setStage(nextStage: WearableStage): void {
   stage = nextStage;
   writeWearableStage(nextStage);
 }
-
 
 async function main(): Promise<void> {
   setStage("configuration");

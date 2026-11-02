@@ -1521,12 +1521,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       resolvedDeviceSync: {
-        providerConfigs: {
-          whoop: {
-            clientId: "synthetic-whoop-client",
-            clientSecret: "synthetic-whoop-secret",
-          },
-        },
+        providerConfigs: { junction: { environment: "sandbox", region: "us" } },
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
@@ -2087,12 +2082,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const outboxWakeAt = "2026-04-27T00:00:05.000Z";
     const deviceSyncContinuationAt = "2026-04-27T00:00:30.000Z";
     const resolvedDeviceSync = {
-      providerConfigs: {
-        whoop: {
-          clientId: "synthetic-whoop-client",
-          clientSecret: "synthetic-whoop-secret",
-        },
-      },
+      providerConfigs: { junction: { environment: "sandbox", region: "us" } },
       publicBaseUrl: "https://device-sync.example.test",
       secret: "synthetic-device-sync-secret",
     } as const;
@@ -2300,12 +2290,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       importedCount: 1,
       now: () => "2026-04-27T00:00:00.000Z",
       resolvedDeviceSync: {
-        providerConfigs: {
-          whoop: {
-            clientId: "synthetic-whoop-client",
-            clientSecret: "synthetic-whoop-secret",
-          },
-        },
+        providerConfigs: { junction: { environment: "sandbox", region: "us" } },
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
@@ -2361,12 +2346,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       logRequests,
       now: () => "2026-04-27T00:00:00.000Z",
       resolvedDeviceSync: {
-        providerConfigs: {
-          whoop: {
-            clientId: "synthetic-whoop-client",
-            clientSecret: "synthetic-whoop-secret",
-          },
-        },
+        providerConfigs: { junction: { environment: "sandbox", region: "us" } },
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
@@ -2424,12 +2404,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       importedCount: 1,
       now: () => "2026-04-27T00:00:00.000Z",
       resolvedDeviceSync: {
-        providerConfigs: {
-          whoop: {
-            clientId: "synthetic-whoop-client",
-            clientSecret: "synthetic-whoop-secret",
-          },
-        },
+        providerConfigs: { junction: { environment: "sandbox", region: "us" } },
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },

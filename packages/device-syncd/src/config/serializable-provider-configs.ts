@@ -63,71 +63,8 @@ export const JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA =
     },
   });
 
-export const OURA_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA =
-  defineSerializableConfiguredDeviceSyncProviderSchema<"oura">({
-    serializableFields: {
-      apiBaseUrl: "string",
-      authBaseUrl: "string",
-      backfillDays: "number",
-      clientId: "string",
-      clientSecret: "string",
-      reconcileDays: "number",
-      reconcileIntervalMs: "number",
-      requestTimeoutMs: "number",
-      scopes: "string[]",
-      webhookTimestampToleranceMs: "number",
-    },
-    disallowedSerializableFields: {
-      ...DEFAULT_DISALLOWED_SERIALIZABLE_FIELDS,
-      webhookVerificationToken:
-        "is a provider-owned admin secret and is not supported in serialized runtime config.",
-    },
-  });
-
-export const WHOOP_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA =
-  defineSerializableConfiguredDeviceSyncProviderSchema<"whoop">({
-    serializableFields: {
-      backfillDays: "number",
-      baseUrl: "string",
-      clientId: "string",
-      clientSecret: "string",
-      reconcileDays: "number",
-      reconcileIntervalMs: "number",
-      requestTimeoutMs: "number",
-      scopes: "string[]",
-      webhookTimestampToleranceMs: "number",
-    },
-    disallowedSerializableFields: DEFAULT_DISALLOWED_SERIALIZABLE_FIELDS,
-  });
-
-export const STRAVA_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA =
-  defineSerializableConfiguredDeviceSyncProviderSchema<"strava">({
-    serializableFields: {
-      apiBaseUrl: "string",
-      authBaseUrl: "string",
-      backfillDays: "number",
-      clientId: "string",
-      clientSecret: "string",
-      reconcileDays: "number",
-      reconcileIntervalMs: "number",
-      requestTimeoutMs: "number",
-      scopes: "string[]",
-      webhookTimestampToleranceMs: "number",
-    },
-    disallowedSerializableFields: {
-      ...DEFAULT_DISALLOWED_SERIALIZABLE_FIELDS,
-      webhookSigningSecret:
-        "is a provider-owned webhook signing secret and is not supported in serialized runtime config.",
-      webhookVerifyToken:
-        "is a provider-owned admin secret and is not supported in serialized runtime config.",
-    },
-  });
-
 export const serializableConfiguredDeviceSyncProviderSchemaByKey = Object.freeze({
   junction: JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA,
-  oura: OURA_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA,
-  whoop: WHOOP_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA,
-  strava: STRAVA_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA,
 });
 
 export function getSerializableConfiguredDeviceSyncProviderSchema<

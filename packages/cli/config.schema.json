@@ -3458,7 +3458,7 @@
                                 "provider": {
                                   "type": "string",
                                   "minLength": 1,
-                                  "description": "Live device-sync provider key such as junction, whoop, or oura."
+                                  "description": "Hosted device-sync provider key (junction)."
                                 },
                                 "source-provider": {
                                   "type": "string",

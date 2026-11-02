@@ -40,7 +40,6 @@ export {
   isDeviceConnectSourceAvailableForConnection,
   listDefaultJunctionLinkProviderSlugs,
   listConfiguredDeviceSyncConnectTargets,
-  listDirectDeviceConnectRouteEntries,
   listDeviceSyncProviderCatalog,
   listJunctionDeviceConnectRouteEntries,
   listJunctionLinkDeviceConnectRouteEntries,
@@ -57,13 +56,9 @@ export {
   readConfiguredDeviceSyncRuntimeConfig,
   readConfiguredDeviceSyncProviderConfigs,
   readConfiguredJunctionDeviceSyncProviderConfig,
-  readConfiguredOuraDeviceSyncProviderConfig,
-  readConfiguredStravaDeviceSyncProviderConfig,
-  readConfiguredWhoopDeviceSyncProviderConfig,
   requireConfiguredDeviceSyncProviderManifest,
   resolveConfiguredDeviceSyncConnectTarget,
   resolveDeviceConnectSourceById,
-  resolveDirectDeviceConnectRouteByProvider,
   resolveConfiguredDeviceSyncProviderManifest,
   resolveJunctionDeviceConnectRouteByProviderSlug,
   resolveJunctionLinkDeviceConnectRouteByProviderSlug,
@@ -75,7 +70,6 @@ export type {
   ConfiguredDeviceSyncProviderConfigs,
   ConfiguredDeviceSyncProviderKey,
   ConfiguredDeviceSyncRuntimeConfig,
-  DeviceConnectDirectRoute,
   DeviceConnectJunctionLinkRoute,
   DeviceConnectJunctionSdkRoute,
   DeviceConnectRoute,
@@ -95,7 +89,6 @@ export type {
   SerializableConfigFieldKind,
   SerializableConfiguredDeviceSyncProviderConfigByKey,
   SerializableConfiguredDeviceSyncProviderConfigs,
-  DirectDeviceConnectProvider,
 } from "./config.ts";
 export { SqliteDeviceSyncStore } from "./store.ts";
 export {
@@ -129,34 +122,4 @@ export type {
   JunctionClientConfig,
   JunctionProviderConnection,
 } from "./providers/junction-client.ts";
-export { createOuraDeviceSyncProvider, resolveOuraWebhookPreflightResponse } from "./providers/oura.ts";
-export type { OuraDeviceSyncProviderConfig } from "./config/provider-types.ts";
-export { createStravaDeviceSyncProvider, resolveStravaWebhookPreflightResponse } from "./providers/strava.ts";
-export type { StravaDeviceSyncProviderConfig } from "./config/provider-types.ts";
-export {
-  createOuraWebhookSubscriptionClient,
-  OURA_DEFAULT_WEBHOOK_DATA_TYPES,
-  OURA_DEFAULT_WEBHOOK_TARGETS,
-  OURA_WEBHOOK_EVENT_TYPES,
-} from "./providers/oura-webhooks.ts";
-export type {
-  CreateOuraWebhookSubscriptionClientInput,
-  OuraWebhookDataType,
-  OuraWebhookEnsureResult,
-  OuraWebhookOperation,
-  OuraWebhookSubscription,
-  OuraWebhookSubscriptionClient,
-  OuraWebhookTarget,
-} from "./providers/oura-webhooks.ts";
-export {
-  createStravaWebhookSubscriptionClient,
-} from "./providers/strava-webhooks.ts";
-export type {
-  CreateStravaWebhookSubscriptionClientInput,
-  StravaWebhookEnsureResult,
-  StravaWebhookSubscription,
-  StravaWebhookSubscriptionClient,
-} from "./providers/strava-webhooks.ts";
-export { createWhoopDeviceSyncProvider } from "./providers/whoop.ts";
-export type { WhoopDeviceSyncProviderConfig } from "./config/provider-types.ts";
 export * from "./types.ts";

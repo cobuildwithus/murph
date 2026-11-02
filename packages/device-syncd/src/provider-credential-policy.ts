@@ -10,7 +10,7 @@ import type { ConfiguredDeviceSyncProviderKey } from "./config/provider-types.ts
 
 export const configuredDeviceSyncProviderCredentialPolicies = Object.freeze(
   Object.fromEntries(
-    (["junction", "oura", "whoop", "strava"] satisfies ConfiguredDeviceSyncProviderKey[])
+    (["junction"] satisfies ConfiguredDeviceSyncProviderKey[])
       .map((provider) => [
         provider,
         Object.freeze({ ...resolveConfiguredDeviceSyncProviderManifest(provider)!.credentialPolicy }),

@@ -5,55 +5,19 @@ import {
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
   normalizeJunctionResourceName,
 } from "@murphai/contracts";
-import {
-  JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
-  OURA_DEVICE_PROVIDER_DESCRIPTOR,
-  STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
-  WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
-  normalizeDeviceProviderKey,
-  requireDeviceProviderSyncDescriptor,
-  resolveDeviceProviderConnectionDescriptor,
-  type DeviceProviderDescriptor,
-} from "@murphai/importers/device-providers/provider-descriptors";
+import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR, normalizeDeviceProviderKey, requireDeviceProviderSyncDescriptor, resolveDeviceProviderConnectionDescriptor, type DeviceProviderDescriptor } from "@murphai/importers/device-providers/provider-descriptors";
 
-import {
-  readConfiguredJunctionDeviceSyncProviderConfig,
-  readConfiguredOuraDeviceSyncProviderConfig,
-  readConfiguredStravaDeviceSyncProviderConfig,
-  readConfiguredWhoopDeviceSyncProviderConfig,
-} from "./provider-configs.ts";
+import { readConfiguredJunctionDeviceSyncProviderConfig } from "./provider-configs.ts";
 import {
   configuredDeviceSyncProviderKeys,
   listConfiguredDeviceSyncProviderNames,
 } from "./provider-keys.ts";
-import {
-  JUNCTION_DEVICE_SYNC_PROVIDER_ENV_SPEC,
-  OURA_DEVICE_SYNC_PROVIDER_ENV_SPEC,
-  STRAVA_DEVICE_SYNC_PROVIDER_ENV_SPEC,
-  WHOOP_DEVICE_SYNC_PROVIDER_ENV_SPEC,
-  type DeviceSyncProviderEnvSpec,
-} from "./provider-env.ts";
-import {
-  JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA,
-  OURA_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA,
-  STRAVA_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA,
-  WHOOP_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA,
-  type SerializableConfigFieldKind,
-} from "./serializable-provider-configs.ts";
+import { JUNCTION_DEVICE_SYNC_PROVIDER_ENV_SPEC, type DeviceSyncProviderEnvSpec } from "./provider-env.ts";
+import { JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA, type SerializableConfigFieldKind } from "./serializable-provider-configs.ts";
 import { normalizeJunctionProviderFilter } from "./junction-connect-sources.ts";
 import { normalizeString } from "../shared.ts";
 
-import type {
-  ConfiguredDeviceSyncProviderConfigByKey,
-  ConfiguredDeviceSyncProviderKey,
-  ConfiguredDeviceSyncProviderPresence,
-  DeviceSyncEnvSource,
-  JunctionDeviceSyncProviderConfig,
-  OuraDeviceSyncProviderConfig,
-  SerializableConfiguredDeviceSyncProviderConfigByKey,
-  StravaDeviceSyncProviderConfig,
-  WhoopDeviceSyncProviderConfig,
-} from "./provider-types.ts";
+import type { ConfiguredDeviceSyncProviderConfigByKey, ConfiguredDeviceSyncProviderKey, ConfiguredDeviceSyncProviderPresence, DeviceSyncEnvSource, JunctionDeviceSyncProviderConfig, SerializableConfiguredDeviceSyncProviderConfigByKey } from "./provider-types.ts";
 import type { DeviceSyncProviderCredentialPolicy } from "../types.ts";
 
 export type { SerializableConfigFieldKind } from "./serializable-provider-configs.ts";
@@ -139,35 +103,7 @@ export interface DeviceSyncConfiguredProviderManifestByKey {
     ConfiguredDeviceSyncProviderConfigByKey["junction"],
     SerializableConfiguredDeviceSyncProviderConfigByKey["junction"]
   >;
-  oura: DeviceSyncConfiguredProviderManifest<
-    "oura",
-    ConfiguredDeviceSyncProviderConfigByKey["oura"],
-    SerializableConfiguredDeviceSyncProviderConfigByKey["oura"]
-  >;
-  whoop: DeviceSyncConfiguredProviderManifest<
-    "whoop",
-    ConfiguredDeviceSyncProviderConfigByKey["whoop"],
-    SerializableConfiguredDeviceSyncProviderConfigByKey["whoop"]
-  >;
-  strava: DeviceSyncConfiguredProviderManifest<
-    "strava",
-    ConfiguredDeviceSyncProviderConfigByKey["strava"],
-    SerializableConfiguredDeviceSyncProviderConfigByKey["strava"]
-  >;
 }
-
-const OURA_CONNECTION = OURA_DEVICE_PROVIDER_DESCRIPTOR.connection;
-const OURA_SYNC = requireDeviceProviderSyncDescriptor(OURA_DEVICE_PROVIDER_DESCRIPTOR);
-const OURA_DEFAULT_SCOPES = Object.freeze([...OURA_CONNECTION.defaultScopes]);
-
-const STRAVA_CONNECTION = STRAVA_DEVICE_PROVIDER_DESCRIPTOR.connection;
-const STRAVA_SYNC = requireDeviceProviderSyncDescriptor(STRAVA_DEVICE_PROVIDER_DESCRIPTOR);
-const STRAVA_DEFAULT_SCOPES = Object.freeze([...STRAVA_CONNECTION.defaultScopes]);
-
-const WHOOP_CONNECTION = WHOOP_DEVICE_PROVIDER_DESCRIPTOR.connection;
-const WHOOP_SYNC = requireDeviceProviderSyncDescriptor(WHOOP_DEVICE_PROVIDER_DESCRIPTOR);
-const WHOOP_DEFAULT_SCOPES = Object.freeze([...WHOOP_CONNECTION.defaultScopes]);
-const WHOOP_REQUIRED_SCOPES = Object.freeze(["offline", "read:profile"] as const);
 
 const JUNCTION_SYNC = requireDeviceProviderSyncDescriptor(
   JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
@@ -275,192 +211,8 @@ const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProvide
   jobs: freezeConfiguredDeviceSyncProviderJobDefinitions(JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS),
 });
 
-const OURA_DEVICE_SYNC_JOB_DEFINITIONS = {
-  backfill: {
-    payload: {
-      includePersonalInfo: booleanJobField({ includeInHostedHint: true }),
-      windowEnd: stringJobField({ includeInHostedHint: true }),
-      windowStart: stringJobField({ includeInHostedHint: true }),
-    },
-  },
-  reconcile: {
-    payload: {
-      includePersonalInfo: booleanJobField({ includeInHostedHint: true }),
-      windowEnd: stringJobField({ includeInHostedHint: true }),
-      windowStart: stringJobField({ includeInHostedHint: true }),
-    },
-  },
-  resource: {
-    payload: {
-      dataType: stringJobField({ includeInHostedHint: true }),
-      includePersonalInfo: booleanJobField({ includeInHostedHint: true }),
-      objectId: stringJobField({ includeInHostedHint: true }),
-      occurredAt: stringJobField({ includeInHostedHint: true }),
-      windowEnd: stringJobField({ includeInHostedHint: true }),
-      windowStart: stringJobField({ includeInHostedHint: true }),
-    },
-  },
-  delete: {
-    payload: {
-      dataType: stringJobField({ includeInHostedHint: true, required: true }),
-      objectId: stringJobField({ includeInHostedHint: true, required: true }),
-      occurredAt: stringJobField({ includeInHostedHint: true }),
-      sourceEventType: stringJobField({ includeInHostedHint: true }),
-    },
-  },
-} satisfies DeviceSyncProviderJobDefinitionMap;
-
-export type OuraDeviceSyncJobPayloads = {
-  [Kind in keyof typeof OURA_DEVICE_SYNC_JOB_DEFINITIONS]: DeviceSyncJobPayloadOf<
-    (typeof OURA_DEVICE_SYNC_JOB_DEFINITIONS)[Kind]
-  >;
-};
-
-const OURA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderManifest<
-  "oura",
-  ConfiguredDeviceSyncProviderConfigByKey["oura"],
-  SerializableConfiguredDeviceSyncProviderConfigByKey["oura"]
->({
-  provider: "oura",
-  credentialPolicy: {
-    kind: "oauth_tokens",
-  },
-  descriptor: OURA_DEVICE_PROVIDER_DESCRIPTOR,
-  env: OURA_DEVICE_SYNC_PROVIDER_ENV_SPEC,
-  readConfig: readConfiguredOuraDeviceSyncProviderConfig,
-  serializableFields: OURA_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.serializableFields,
-  disallowedSerializableFields:
-    OURA_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.disallowedSerializableFields,
-  jobs: freezeConfiguredDeviceSyncProviderJobDefinitions(OURA_DEVICE_SYNC_JOB_DEFINITIONS),
-});
-
-const WHOOP_DEVICE_SYNC_JOB_DEFINITIONS = {
-  backfill: {
-    payload: {
-      windowEnd: stringJobField({ includeInHostedHint: true }),
-      windowStart: stringJobField({ includeInHostedHint: true }),
-    },
-  },
-  reconcile: {
-    payload: {
-      windowEnd: stringJobField({ includeInHostedHint: true }),
-      windowStart: stringJobField({ includeInHostedHint: true }),
-    },
-  },
-  resource: {
-    payload: {
-      eventType: stringJobField({ includeInHostedHint: true }),
-      occurredAt: stringJobField({ includeInHostedHint: true }),
-      resourceId: stringJobField({ includeInHostedHint: true, required: true }),
-      resourceType: stringJobField({ includeInHostedHint: true, required: true }),
-    },
-  },
-  delete: {
-    payload: {
-      eventType: stringJobField({ includeInHostedHint: true }),
-      occurredAt: stringJobField({ includeInHostedHint: true }),
-      resourceId: stringJobField({ includeInHostedHint: true, required: true }),
-      resourceType: stringJobField({ includeInHostedHint: true, required: true }),
-    },
-  },
-} satisfies DeviceSyncProviderJobDefinitionMap;
-
-export type WhoopDeviceSyncJobPayloads = {
-  [Kind in keyof typeof WHOOP_DEVICE_SYNC_JOB_DEFINITIONS]: DeviceSyncJobPayloadOf<
-    (typeof WHOOP_DEVICE_SYNC_JOB_DEFINITIONS)[Kind]
-  >;
-};
-
-const WHOOP_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderManifest<
-  "whoop",
-  ConfiguredDeviceSyncProviderConfigByKey["whoop"],
-  SerializableConfiguredDeviceSyncProviderConfigByKey["whoop"]
->({
-  provider: "whoop",
-  credentialPolicy: {
-    kind: "oauth_tokens",
-  },
-  descriptor: WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
-  env: WHOOP_DEVICE_SYNC_PROVIDER_ENV_SPEC,
-  readConfig: readConfiguredWhoopDeviceSyncProviderConfig,
-  serializableFields: WHOOP_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.serializableFields,
-  disallowedSerializableFields:
-    WHOOP_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.disallowedSerializableFields,
-  jobs: freezeConfiguredDeviceSyncProviderJobDefinitions(WHOOP_DEVICE_SYNC_JOB_DEFINITIONS),
-});
-
-const STRAVA_DEVICE_SYNC_JOB_DEFINITIONS = {
-  backfill: {
-    payload: {
-      includeAthlete: booleanJobField(),
-      windowEnd: stringJobField({ includeInHostedHint: true }),
-      windowKind: stringJobField(),
-      windowStart: stringJobField({ includeInHostedHint: true }),
-    },
-  },
-  reconcile: {
-    payload: {
-      includeAthlete: booleanJobField(),
-      windowEnd: stringJobField({ includeInHostedHint: true }),
-      windowKind: stringJobField(),
-      windowStart: stringJobField({ includeInHostedHint: true }),
-    },
-  },
-  resource: {
-    payload: {
-      eventType: stringJobField({ includeInHostedHint: true }),
-      occurredAt: stringJobField({ includeInHostedHint: true }),
-      resourceId: stringJobField({ includeInHostedHint: true, required: true }),
-      resourceType: stringJobField({ includeInHostedHint: true, required: true }),
-    },
-  },
-  delete: {
-    payload: {
-      eventType: stringJobField({ includeInHostedHint: true }),
-      occurredAt: stringJobField({ includeInHostedHint: true }),
-      resourceId: stringJobField({ includeInHostedHint: true, required: true }),
-      resourceType: stringJobField({ includeInHostedHint: true }),
-    },
-  },
-  deauthorize: {
-    payload: {
-      eventType: stringJobField({ includeInHostedHint: true }),
-      occurredAt: stringJobField({ includeInHostedHint: true }),
-      resourceId: stringJobField({ includeInHostedHint: true, required: true }),
-      resourceType: stringJobField({ includeInHostedHint: true, required: true }),
-    },
-  },
-} satisfies DeviceSyncProviderJobDefinitionMap;
-
-export type StravaDeviceSyncJobPayloads = {
-  [Kind in keyof typeof STRAVA_DEVICE_SYNC_JOB_DEFINITIONS]: DeviceSyncJobPayloadOf<
-    (typeof STRAVA_DEVICE_SYNC_JOB_DEFINITIONS)[Kind]
-  >;
-};
-
-const STRAVA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderManifest<
-  "strava",
-  ConfiguredDeviceSyncProviderConfigByKey["strava"],
-  SerializableConfiguredDeviceSyncProviderConfigByKey["strava"]
->({
-  provider: "strava",
-  credentialPolicy: {
-    kind: "oauth_tokens",
-  },
-  descriptor: STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
-  env: STRAVA_DEVICE_SYNC_PROVIDER_ENV_SPEC,
-  readConfig: readConfiguredStravaDeviceSyncProviderConfig,
-  serializableFields: STRAVA_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.serializableFields,
-  disallowedSerializableFields:
-    STRAVA_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.disallowedSerializableFields,
-  jobs: freezeConfiguredDeviceSyncProviderJobDefinitions(STRAVA_DEVICE_SYNC_JOB_DEFINITIONS),
-});
-
 export const deviceSyncProviderManifestByKey = Object.freeze({
   junction: JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST,
-  oura: OURA_DEVICE_SYNC_PROVIDER_MANIFEST,
-  whoop: WHOOP_DEVICE_SYNC_PROVIDER_MANIFEST,
-  strava: STRAVA_DEVICE_SYNC_PROVIDER_MANIFEST,
 } as const satisfies DeviceSyncConfiguredProviderManifestByKey);
 
 export { configuredDeviceSyncProviderKeys };
@@ -568,18 +320,6 @@ export function buildConfiguredDeviceSyncProviderRuntimeDescriptor<
       return buildJunctionDeviceSyncRuntimeDescriptor(
         config as ConfiguredDeviceSyncProviderConfigByKey["junction"],
       );
-    case "oura":
-      return buildOuraDeviceSyncRuntimeDescriptor(
-        config as ConfiguredDeviceSyncProviderConfigByKey["oura"],
-      );
-    case "whoop":
-      return buildWhoopDeviceSyncRuntimeDescriptor(
-        config as ConfiguredDeviceSyncProviderConfigByKey["whoop"],
-      );
-    case "strava":
-      return buildStravaDeviceSyncRuntimeDescriptor(
-        config as ConfiguredDeviceSyncProviderConfigByKey["strava"],
-      );
   }
 }
 
@@ -664,139 +404,6 @@ export function normalizeJunctionClientUserIdNamespace(
   }
 
   return normalizedNamespace;
-}
-
-export function buildOuraDeviceSyncScopes(input: string[] | undefined): string[] {
-  const requested = [...OURA_DEFAULT_SCOPES, ...(input ?? [])];
-  return [...new Set(
-    requested
-      .map((scope) => scope.trim())
-      .filter((scope) => scope && !isDeprecatedOuraScope(scope)),
-  )];
-}
-
-export function buildOuraDeviceSyncRuntimeDescriptor(
-  config: OuraDeviceSyncProviderConfig,
-): DeviceProviderDescriptor {
-  const backfillDays = Math.max(1, config.backfillDays ?? OURA_SYNC.windows.backfillDays);
-  const reconcileDays = Math.max(1, config.reconcileDays ?? OURA_SYNC.windows.reconcileDays);
-  const reconcileIntervalMs = Math.max(
-    60_000,
-    config.reconcileIntervalMs ?? OURA_SYNC.windows.reconcileIntervalMs,
-  );
-
-  return {
-    ...getConfiguredDeviceSyncProviderDescriptor("oura"),
-    connection: {
-      ...OURA_CONNECTION,
-      defaultScopes: buildOuraDeviceSyncScopes(config.scopes),
-    },
-    sync: {
-      ...OURA_SYNC,
-      windows: {
-        backfillDays,
-        reconcileDays,
-        reconcileIntervalMs,
-      },
-    },
-  };
-}
-
-export function normalizeStravaDeviceSyncScopes(value: unknown): string[] {
-  if (!Array.isArray(value) && typeof value !== "string") {
-    return [];
-  }
-
-  const rawScopes = Array.isArray(value) ? value : [value];
-  const deduped = new Set<string>();
-
-  for (const entry of rawScopes) {
-    if (typeof entry !== "string") {
-      continue;
-    }
-
-    for (const scope of entry.split(/[\s,]+/u)) {
-      const normalized = scope.trim();
-
-      if (normalized) {
-        deduped.add(normalized);
-      }
-    }
-  }
-
-  return [...deduped];
-}
-
-export function buildStravaDeviceSyncScopes(input: string[] | undefined): string[] {
-  const scopes = normalizeStravaDeviceSyncScopes(input);
-  return scopes.length > 0 ? scopes : [...STRAVA_DEFAULT_SCOPES];
-}
-
-export function buildStravaDeviceSyncRuntimeDescriptor(
-  config: StravaDeviceSyncProviderConfig,
-): DeviceProviderDescriptor {
-  const backfillDays = Math.max(1, config.backfillDays ?? STRAVA_SYNC.windows.backfillDays);
-  const reconcileDays = Math.max(1, config.reconcileDays ?? STRAVA_SYNC.windows.reconcileDays);
-  const reconcileIntervalMs = Math.max(
-    60_000,
-    config.reconcileIntervalMs ?? STRAVA_SYNC.windows.reconcileIntervalMs,
-  );
-
-  return {
-    ...getConfiguredDeviceSyncProviderDescriptor("strava"),
-    connection: {
-      ...STRAVA_CONNECTION,
-      defaultScopes: buildStravaDeviceSyncScopes(config.scopes),
-    },
-    sync: {
-      ...STRAVA_SYNC,
-      windows: {
-        backfillDays,
-        reconcileDays,
-        reconcileIntervalMs,
-      },
-    },
-  };
-}
-
-export function buildWhoopDeviceSyncScopes(input: string[] | undefined): string[] {
-  const requested = input === undefined ? [...WHOOP_DEFAULT_SCOPES] : input;
-  return [...new Set(
-    [...WHOOP_REQUIRED_SCOPES, ...requested]
-      .map((scope) => scope.trim())
-      .filter(Boolean),
-  )];
-}
-
-export function buildWhoopDeviceSyncRuntimeDescriptor(
-  config: WhoopDeviceSyncProviderConfig,
-): DeviceProviderDescriptor {
-  const backfillDays = Math.max(1, config.backfillDays ?? WHOOP_SYNC.windows.backfillDays);
-  const reconcileDays = Math.max(1, config.reconcileDays ?? WHOOP_SYNC.windows.reconcileDays);
-  const reconcileIntervalMs = Math.max(
-    60_000,
-    config.reconcileIntervalMs ?? WHOOP_SYNC.windows.reconcileIntervalMs,
-  );
-
-  return {
-    ...getConfiguredDeviceSyncProviderDescriptor("whoop"),
-    connection: {
-      ...WHOOP_CONNECTION,
-      defaultScopes: buildWhoopDeviceSyncScopes(config.scopes),
-    },
-    sync: {
-      ...WHOOP_SYNC,
-      windows: {
-        backfillDays,
-        reconcileDays,
-        reconcileIntervalMs,
-      },
-    },
-  };
-}
-
-function isDeprecatedOuraScope(scope: string): boolean {
-  return scope.replace(/^extapi:/u, "") === "heartrate";
 }
 
 function normalizeRequiredJunctionResourceList(

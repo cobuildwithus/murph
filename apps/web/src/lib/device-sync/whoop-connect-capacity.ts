@@ -104,6 +104,5 @@ export async function assertHostedWhoopConnectCapacityAvailable(input: {
 }
 
 function isHostedWhoopConnectTarget(target: DeviceSyncConnectTarget): boolean {
-  return target.provider === "whoop"
-    || (target.provider === "junction" && target.sourceProviderSlug === "whoop_v2");
+  return target.provider === "junction" && target.sourceProviderSlug === "whoop_v2";
 }

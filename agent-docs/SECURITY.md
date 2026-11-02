@@ -30,7 +30,6 @@ UserRunner-specific coordination below applies only while the durable gate is
 legacy. Existing product admission, delivery, and runtime safety rules continue
 to apply after cutover.
 
-
 - Terminal Linq retry authority comes only from an existing runtime-owned
   failed delivery with exact code `4001` / `Message send failed`, current exact
   chat/sender routing, consent-aware access, line/chat egress policy and a bounded
@@ -762,7 +761,6 @@ to apply after cutover.
   Web writer rollback floor are owned by `docs/hosted-contact-privacy-rotation.md`.
 - First-party login resolves canonical contact ownership before member creation and compares that exact snapshot under contact/member locks before committing. A contact claimed by another member or a disagreement among phone, verified email, Linq handle or Telegram owners fails closed; there is no automatic member transfer or scaffold deletion. Retryable product completion cannot rebind credentials. App Review operations may activate an existing, verified first-party account through canonical product owners; they may not create credentials, return fixed codes or bypass contact proof.
 
-
 - Rebuildable inbox-derived artifacts can still contain sensitive health data and must be treated as high-sensitivity runtime material. Never persist provider secrets alongside those artifacts.
 - Hosted clinical-record retrieval is a web-owned credential and provider-egress boundary. Web alone stores encrypted FHIR access tokens, resolves the provider base URL, follows same-base pagination, and returns bounded FHIR pages and ticket-authorized document bytes through signed, active-write-fenced runtime callbacks. The system mailbox and Temporal signal contain only `{runId, generation}`; runtime descriptors contain only opaque ids and hashes. Never put tokens, raw patient ids, raw FHIR base/page URLs, authorization headers, raw page bodies, or clinical values in Postgres, Temporal state, assistant session state, model prompts, diagnostics, or logs. `@murphai/vault-usecases/clinical-records` may atomically stage only the already-bounded sanitized pages in private `.runtime/operations/clinical-records/**` state so the encrypted hosted workspace can resume after foreground preemption; that non-canonical checkpoint is portable, schema- and run-bound, and removed on terminal completion or rejection. Full semantic validation still precedes final raw-page/manifest persistence. Web current-run authority is rechecked immediately before the raw batch and again before canonical mutation. Repeat authorization keeps the same member/provider source and encrypted patient binding, with at most eight authorization runs per source and twenty sources per member. Temporary patient context and access tokens are erased at terminal completion or disconnect; the binding remains encrypted with existing member/connection/epoch AAD. Acquisition and callback persistence recheck live consent under the shared member lock, and callback persistence rechecks suspension. Withdrawal schedules clinical cleanup before the runtime stop barrier; cleanup skips a renewed grant. A terminal `authorization-required` response clears access and keeps `needs_reauth`; a same-generation runtime may finalize saved counts without reactivating it.
 - Clinical document reads accept an encrypted, run/generation-bound ticket,
@@ -1105,7 +1103,7 @@ to apply after cutover.
   validation. Once scheduled-method clients ship, keep web and runtime support
   until those clients and all staged envelopes have drained. Roll back in
   reverse order, draining staged work before runtime support is removed.
-- Direct Strava webhook POST delivery must fail closed unless the provider-owned signing secret verifies the `X-Strava-Signature` timestamp and HMAC over the raw body. The Strava GET verify token is only a subscription-challenge/admin secret, not POST delivery authentication. Junction-backed device sync uses Junction's own webhook signature boundary and must not depend on direct Strava webhook trust.
+- Junction webhook delivery uses Junction signature verification. Retired direct WHOOP, Oura, and Strava transports are not registered.
 - Personal Starter image generation and editing require subscription access
   from the canonical usage gate. A saved payment card alone grants no access.
   The signed, runtime-member-bound Web callback is enforced before Cloudflare
@@ -1812,7 +1810,6 @@ expiry owner without disclosure metadata or a review turn. A message is restrict
 route; Web reauthorizes the member-bound task immediately before model work and
 again at the normal notification/outbox boundary. Neither path creates
 first-contact or group-delivery authority.
-
 
 Feedback diagnostic admission accepts only a feedback id and bounded question
 under existing Ops authentication and same-origin mutation checks. The server

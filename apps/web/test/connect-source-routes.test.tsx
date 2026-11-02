@@ -19,7 +19,7 @@ test("listVisibleConnectSources covers every hosted-visible device source with U
     ...DEVICE_CONNECT_SOURCES
     .filter((source) =>
       displayOnlySourceIds.has(source.connectSourceId)
-      || source.routes.some((route) => route.kind === "direct" || route.kind === "junction_link"),
+      || source.routes.some((route) => route.kind === "junction_link"),
     )
     .map((source) => source.connectSourceId),
   ]

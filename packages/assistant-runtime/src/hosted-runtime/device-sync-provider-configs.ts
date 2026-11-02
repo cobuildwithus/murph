@@ -27,18 +27,6 @@ export function resolveHostedRuntimeDeviceSyncProviderConfigs(
     }
   }
 
-  if (providerConfigs.oura) {
-    runtimeProviderConfigs.oura = providerConfigs.oura;
-  }
-
-  if (providerConfigs.whoop) {
-    runtimeProviderConfigs.whoop = providerConfigs.whoop;
-  }
-
-  if (providerConfigs.strava) {
-    runtimeProviderConfigs.strava = providerConfigs.strava;
-  }
-
   return runtimeProviderConfigs;
 }
 

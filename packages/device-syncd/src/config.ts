@@ -28,9 +28,6 @@ export {
   listConfiguredDeviceSyncProviderNames,
   readConfiguredDeviceSyncProviderConfigs,
   readConfiguredJunctionDeviceSyncProviderConfig,
-  readConfiguredOuraDeviceSyncProviderConfig,
-  readConfiguredStravaDeviceSyncProviderConfig,
-  readConfiguredWhoopDeviceSyncProviderConfig,
 } from "./config/provider-configs.ts";
 export {
   deviceSyncProviderManifests,
@@ -77,14 +74,12 @@ export {
   DEVICE_CONNECT_SOURCE_BY_ID,
   DEVICE_CONNECT_SOURCES,
   listDefaultJunctionLinkProviderSlugs,
-  listDirectDeviceConnectRouteEntries,
   listJunctionDeviceConnectRouteEntries,
   listJunctionLinkDeviceConnectRouteEntries,
   normalizeDeviceConnectSourceId,
   normalizeJunctionLinkProviderFilter,
   normalizeJunctionProviderSlug,
   resolveDeviceConnectSourceById,
-  resolveDirectDeviceConnectRouteByProvider,
   resolveJunctionDeviceConnectRouteByProviderSlug,
   resolveJunctionLinkDeviceConnectRouteByProviderSlug,
 } from "./config/connect-routes.ts";
@@ -106,14 +101,12 @@ export type {
   DeviceSyncConnectTarget,
 } from "./config/connect-targets.ts";
 export type {
-  DeviceConnectDirectRoute,
   DeviceConnectJunctionLinkRoute,
   DeviceConnectJunctionSdkRoute,
   DeviceConnectRoute,
   DeviceConnectRouteEntry,
   DeviceConnectSource,
   DeviceConnectUnavailableRoute,
-  DirectDeviceConnectProvider,
 } from "./config/connect-routes.ts";
 export type {
   JunctionConnectSourceTarget,

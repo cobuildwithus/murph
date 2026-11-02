@@ -39,7 +39,7 @@ spine owner; device jobs, wakes, and hosted transports carry no parallel
 conflict state or overwrite preference.
 
 Current providers:
-- Direct runtime providers: Oura, Strava, and WHOOP.
+- Junction is the only hosted runtime provider. WHOOP, Oura, Strava, Garmin, and other source labels retain their importers and read filters.
 - Junction-backed sources come from `DEVICE_CONNECT_SOURCES`. `JUNCTION_PROVIDER_FILTER`
   selects Link targets such as Garmin and Fitbit; recognized Junction SDK sources such
   as Apple Health participate independently of that Link-only filter.
@@ -248,7 +248,7 @@ the provider parser exposes it as `providerSentAt`. This is distinct from the
 provider event's `occurredAt` and the shared ingress receipt time. Generic
 ingress carries only those typed timestamps and the stripped webhook summary;
 it never forwards signature headers or raw provider payloads as observability
-metadata. Junction, Oura, WHOOP, and Strava currently expose verified send
+metadata. Junction exposes verified send
 times. Provider adapters likewise omit top-level `occurredAt` when the signed
 payload does not identify the event time, even if an import window needs a
 receipt-time fallback internally. A missing timestamp means the provider did
@@ -433,11 +433,6 @@ completion that overlaps provider cleanup advances the same exact-source
 operation and performs another idempotent target-only deregistration before the
 initiating operation can converge on success.
 
-WHOOP uses OAuth plus webhooks.
-Strava uses OAuth, polling, and optional app-global webhooks.
-
-Oura uses OAuth plus refresh tokens and works well in a polling-first mode, so the basic Murph setup does not require Oura webhooks. Once the operator configures the Oura client ID and secret, the end-user flow is just connect once and let scheduled sync keep the account fresh.
-
 The companion WHOOP 5/MG overnight-PRV lane is not another provider scheduler.
 After one explicit mobile enrollment, iOS continuously subscribes and owns the
 fixed local `00:00–08:00` reduction using
@@ -499,50 +494,13 @@ provider-generic, and its route layer should keep using the shared
 
 Provider-readiness checkpoint:
 - a normal provider addition should stop at the descriptor, transport module, importer adapter, boot-safe serialization schema, and provider-manifest registration
-- generic hosted or local ingress should not gain provider-specific webhook secrets, provider-specific route branching, or provider-specific persistence tables
+- generic hosted ingress should not gain provider-specific webhook secrets, provider-specific route branching, or provider-specific persistence tables
 - if a provider seems to need edits outside those seams, treat it as an architecture review instead of routine provider wiring
 
 ## Environment
 
 Hosted runtime configuration retains `DEVICE_SYNC_PUBLIC_BASE_URL` and
 `DEVICE_SYNC_SECRET`; signed Web routes own control-plane authentication.
-
-WHOOP settings:
-- `WHOOP_CLIENT_ID`
-- `WHOOP_CLIENT_SECRET`
-- `WHOOP_BASE_URL`
-- `WHOOP_SCOPES`
-- `WHOOP_BACKFILL_DAYS`
-- `WHOOP_RECONCILE_DAYS`
-- `WHOOP_RECONCILE_INTERVAL_MS`
-- `WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS`
-- `WHOOP_REQUEST_TIMEOUT_MS`
-
-Oura settings:
-- `OURA_CLIENT_ID`
-- `OURA_CLIENT_SECRET`
-- `OURA_AUTH_BASE_URL`
-- `OURA_API_BASE_URL`
-- `OURA_SCOPES`
-- `OURA_BACKFILL_DAYS`
-- `OURA_RECONCILE_DAYS`
-- `OURA_RECONCILE_INTERVAL_MS`
-- `OURA_REQUEST_TIMEOUT_MS`
-- `OURA_WEBHOOK_VERIFICATION_TOKEN` when you want the Oura provider config to answer webhook preflight challenges and run connect-time Oura webhook subscription upkeep
-
-Strava settings:
-- `STRAVA_CLIENT_ID`
-- `STRAVA_CLIENT_SECRET`
-- `STRAVA_AUTH_BASE_URL`
-- `STRAVA_API_BASE_URL`
-- `STRAVA_SCOPES`
-- `STRAVA_BACKFILL_DAYS`
-- `STRAVA_RECONCILE_DAYS`
-- `STRAVA_RECONCILE_INTERVAL_MS`
-- `STRAVA_REQUEST_TIMEOUT_MS`
-- `STRAVA_WEBHOOK_SIGNING_SECRET` when direct Strava webhook POST delivery is enabled; Strava POST events fail closed without a valid `X-Strava-Signature`
-- `STRAVA_WEBHOOK_TIMESTAMP_TOLERANCE_MS`
-- `STRAVA_WEBHOOK_VERIFY_TOKEN` when you want the Strava provider config to answer webhook preflight challenges and maintain the single app-global Strava webhook subscription
 
 ### Provider execution scope
 

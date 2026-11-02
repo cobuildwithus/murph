@@ -986,12 +986,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     expect(runtime.resolvedConfig).toBeDefined();
     expect(runtime.resolvedConfig?.channelCapabilities.telegramBotConfigured).toBe(true);
     expect(runtime.resolvedConfig?.deviceSync).toEqual({
-      providerConfigs: {
-        oura: {
-          clientId: "oura-client",
-          clientSecret: "oura-secret",
-        },
-      },
+      providerConfigs: {},
       publicBaseUrl: "https://murph.example/api/device-sync",
       secret: "runtime-codec-secret",
     });
@@ -1099,19 +1094,14 @@ describe("buildHostedRuntimeResolvedConfig", () => {
         telegramBotConfigured: false,
       },
       deviceSync: {
-        providerConfigs: {
-          whoop: {
-            clientId: "whoop-client",
-            clientSecret: "whoop-secret",
-          },
-        },
+        providerConfigs: {},
         publicBaseUrl: "https://device-sync.example.test",
         secret: "secret_123",
       },
     });
   });
 
-  it("reuses the shared device-sync runtime config helper and strips provider-only fields", () => {
+  it("ignores credentials for retired direct providers", () => {
     const resolved = buildHostedRuntimeResolvedConfig({
       DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
       DEVICE_SYNC_SECRET: "secret_123",
@@ -1126,17 +1116,12 @@ describe("buildHostedRuntimeResolvedConfig", () => {
         telegramBotConfigured: false,
       },
       deviceSync: {
-        providerConfigs: {
-          oura: {
-            clientId: "oura-client",
-            clientSecret: "oura-secret",
-          },
-        },
+        providerConfigs: {},
         publicBaseUrl: "https://device-sync.example.test",
         secret: "secret_123",
       },
     });
-    expect(resolved.deviceSync?.providerConfigs.oura).not.toHaveProperty("webhookVerificationToken");
+    expect(resolved.deviceSync?.providerConfigs).toEqual({});
   });
 });
 
@@ -1186,7 +1171,7 @@ describe("hosted deploy automation device-sync surface", () => {
       expect.arrayContaining([
         "HOSTED_ASSISTANT_PROVIDER",
         "MURPH_ANDROID_APP_ENABLED",
-        "WHOOP_SCOPES",
+        "JUNCTION_PROVIDER_FILTER",
       ]),
     );
     for (const retiredWhatsAppVar of [

@@ -4,9 +4,6 @@ import {
 } from "./provider-manifests.ts";
 import { readConfiguredDeviceSyncProviderConfigs } from "./provider-configs.ts";
 import { createJunctionDeviceSyncProvider } from "../providers/junction.ts";
-import { createOuraDeviceSyncProvider } from "../providers/oura.ts";
-import { createStravaDeviceSyncProvider } from "../providers/strava.ts";
-import { createWhoopDeviceSyncProvider } from "../providers/whoop.ts";
 
 import type {
   ConfiguredDeviceSyncProviderConfigByKey,
@@ -66,18 +63,6 @@ function createConfiguredDeviceSyncProviderFromConfig<
     case "junction":
       return createJunctionDeviceSyncProvider(
         config as ConfiguredDeviceSyncProviderConfigByKey["junction"],
-      );
-    case "oura":
-      return createOuraDeviceSyncProvider(
-        config as ConfiguredDeviceSyncProviderConfigByKey["oura"],
-      );
-    case "whoop":
-      return createWhoopDeviceSyncProvider(
-        config as ConfiguredDeviceSyncProviderConfigByKey["whoop"],
-      );
-    case "strava":
-      return createStravaDeviceSyncProvider(
-        config as ConfiguredDeviceSyncProviderConfigByKey["strava"],
       );
   }
 }

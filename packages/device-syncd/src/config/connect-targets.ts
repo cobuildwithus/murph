@@ -1,11 +1,8 @@
-import { formatDeviceSyncProviderLabel } from "../provider-label.ts";
 import {
   normalizeDeviceConnectSourceId,
   normalizeJunctionLinkProviderFilter,
-  resolveDirectDeviceConnectRouteByProvider,
   resolveJunctionLinkDeviceConnectRouteByProviderSlug,
 } from "./connect-routes.ts";
-import { listConfiguredDeviceSyncProviderNames } from "./provider-keys.ts";
 
 import type {
   ConfiguredDeviceSyncProviderKey,
@@ -24,7 +21,6 @@ type DeviceSyncConnectTargetProviderConfigs = ConfiguredDeviceSyncProviderPresen
   junction?: { providerFilter?: string[] };
 };
 
-const JUNCTION_PREFERRED_CONNECT_SOURCE_IDS = new Set(["whoop"]);
 // Keep provider ingestion configured for existing accounts while this product
 // gate controls whether a fresh user-facing connection can be started.
 const DISABLED_DEVICE_CONNECT_SOURCE_IDS = new Set(["strava", "dexcom", "google-fit"]);
@@ -72,45 +68,6 @@ function collectConfiguredDeviceSyncConnectTargets(
   const junctionSourceProviderSlugs = junctionConfig
     ? normalizeJunctionLinkProviderFilter(junctionConfig.providerFilter)
     : [];
-  const junctionPreferredConnectSourceIds = new Set<string>();
-
-  if (options.dedupeBySourceId) {
-    for (const sourceProviderSlug of junctionSourceProviderSlugs) {
-      const junctionRoute = resolveJunctionLinkDeviceConnectRouteByProviderSlug(sourceProviderSlug);
-      const connectSourceId = junctionRoute
-        ? normalizeDeviceConnectSourceId(junctionRoute.source.connectSourceId)
-        : null;
-
-      if (connectSourceId && JUNCTION_PREFERRED_CONNECT_SOURCE_IDS.has(connectSourceId)) {
-        junctionPreferredConnectSourceIds.add(connectSourceId);
-      }
-    }
-  }
-
-  for (const provider of listConfiguredDeviceSyncProviderNames(providerConfigs)) {
-    if (provider === "junction") {
-      continue;
-    }
-
-    const directRoute = resolveDirectDeviceConnectRouteByProvider(provider);
-    const directConnectSourceId = directRoute?.source.connectSourceId ?? provider;
-    const normalizedDirectConnectSourceId =
-      normalizeDeviceConnectSourceId(directConnectSourceId);
-    if (
-      normalizedDirectConnectSourceId
-      && junctionPreferredConnectSourceIds.has(normalizedDirectConnectSourceId)
-    ) {
-      continue;
-    }
-
-    addDeviceSyncConnectTarget(targets, targetsBySourceId, {
-      connectSourceId: directConnectSourceId,
-      connectTarget: directRoute?.route.connectTarget ?? provider,
-      label: directRoute?.source.label ?? formatDeviceSyncProviderLabel(provider),
-      provider,
-    }, options);
-  }
-
   if (junctionConfig) {
     for (const sourceProviderSlug of junctionSourceProviderSlugs) {
       const junctionRoute = resolveJunctionLinkDeviceConnectRouteByProviderSlug(sourceProviderSlug);

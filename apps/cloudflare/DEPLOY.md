@@ -2209,31 +2209,6 @@ paused main Queue instead of being deleted. Keep both Queues at the configured
 
 Native parser binaries are owned by the runner image and passed to the hosted runtime through explicit parser toolchain config, not deploy-time env overrides. Hosted audio transcription has no in-image model: the parser toolchain points at the Worker-mediated `murph-transcribe.worker` host and the Worker calls the Workers AI `AI` binding (`@cf/openai/whisper-large-v3-turbo`).
 
-Device-sync provider runtime overrides:
-
-- `OURA_API_BASE_URL`
-- `OURA_AUTH_BASE_URL`
-- `OURA_BACKFILL_DAYS`
-- `OURA_RECONCILE_DAYS`
-- `OURA_RECONCILE_INTERVAL_MS`
-- `OURA_REQUEST_TIMEOUT_MS`
-- `OURA_SCOPES`
-- `OURA_WEBHOOK_TIMESTAMP_TOLERANCE_MS`
-- `STRAVA_API_BASE_URL`
-- `STRAVA_AUTH_BASE_URL`
-- `STRAVA_BACKFILL_DAYS`
-- `STRAVA_RECONCILE_DAYS`
-- `STRAVA_RECONCILE_INTERVAL_MS`
-- `STRAVA_REQUEST_TIMEOUT_MS`
-- `STRAVA_SCOPES`
-- `WHOOP_BACKFILL_DAYS`
-- `WHOOP_BASE_URL`
-- `WHOOP_RECONCILE_DAYS`
-- `WHOOP_RECONCILE_INTERVAL_MS`
-- `WHOOP_REQUEST_TIMEOUT_MS`
-- `WHOOP_SCOPES`
-- `WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS`
-
 If the selected GitHub environment already defines container sizing overrides, update these existing vars there as well:
 
 - `CF_CONTAINER_INSTANCE_TYPE={"vcpu":2,"memory_mib":6144,"disk_mb":6000}`
@@ -2285,13 +2260,7 @@ Opt-in execution integrations:
 - `JUNCTION_WEBHOOK_SECRET`
 - `LINQ_WEBHOOK_SECRET`
 - `MAPBOX_ACCESS_TOKEN`
-- `OURA_CLIENT_ID`
-- `OURA_CLIENT_SECRET`
-- `STRAVA_CLIENT_ID`
-- `STRAVA_CLIENT_SECRET`
 - `TELEGRAM_BOT_TOKEN`
-- `WHOOP_CLIENT_ID`
-- `WHOOP_CLIENT_SECRET`
 The documented deploy surface is intentionally limited to the vars and secrets above for the narrowed execution plane and its opt-in runtime integrations.
 
 ### Inbound message-content retention rollout
@@ -2994,7 +2963,6 @@ artifact cleanup, canonical write receipt recovery, and the omitted
 pointer drain does not prove those independent stores empty. After rollout,
 confirm normal managed-container smoke and supported v2 cold restore/checkpoint
 behavior; an unsupported-ref rejection means the pointer/writer gate failed.
-
 
 ## Private weekly game images
 
