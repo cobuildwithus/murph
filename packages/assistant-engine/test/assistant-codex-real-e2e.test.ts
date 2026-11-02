@@ -35909,6 +35909,96 @@ describeRealCodex('real Codex interactive nutrition-card meal recovery e2e', () 
     },
   )
 
+  it('confirms an app photo meal on the same record with a dish name and nutrition', { timeout: 900_000 }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-photo-confirmation-'))
+    try {
+      const vaultRoot = path.join(root, 'vault')
+      const skillsRoot = path.join(root, 'skills')
+      const binDirectory = path.join(root, 'bin')
+      const commandLog = path.join(root, 'commands.log')
+      const photoPath = path.join(root, 'synthetic-photo.jpg')
+      await initializeVault({ timezone: 'America/New_York', vaultRoot })
+      await Promise.all([
+        ...(['food-journal', 'automatic-meal-capture', 'nutrition-strategy'] as const)
+          .map(slug => materializeAssistantSkill({ skillsRoot, slug })),
+        writeFile(commandLog, '', 'utf8'),
+        writeFile(photoPath, 'Synthetic image with insufficient dish detail.\n', 'utf8'),
+      ])
+      const capture = await addMeal({
+        externalRef: { resourceId: 'synthetic-confirmation-photo', resourceType: 'photo', system: 'meal-photo-capture', version: '8'.repeat(64) },
+        uploadId: 'synthetic-confirmation-upload',
+        occurredAt: '2026-08-21T16:10:00.000Z',
+        photoPath, source: 'device', vaultRoot,
+      })
+      await materializeAutomaticMealClarificationVaultCli({ binDirectory, commandLog, vaultRoot })
+      const shared = {
+        approvalPolicy: 'never' as const,
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+        env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          PATH: `${binDirectory}${path.delimiter}${config.env.PATH ?? ''}` },
+        groupConversation: false,
+        model: config.model, modelProvider: config.modelProvider,
+        reasoningEffort: 'medium' as const,
+        sandbox: 'workspace-write' as const,
+        workingDirectory: vaultRoot,
+      }
+      const first = await executeRealCodexAppServerTurn({
+        ...shared,
+        developerInstructions: buildAutomaticMealClarificationDeveloperInstructions({
+          currentLocalDate: '2026-08-21', manualSubmission: true, protectedContext: false, scheduled: false,
+        }),
+        prompt: buildManualMealEstimationInstructions({ mealId: capture.mealId, capturedAt: '2026-08-21T16:10:00.000Z' }),
+      })
+      const decision = parseAssistantNotificationDecision(first.finalMessage)
+      expect(decision.kind).toBe('send_message')
+      const question = decision.kind === 'send_message' ? decision.text : ''
+      expect(question).toMatch(/\?/u)
+      expect(question).toMatch(/what|which|dish|food|meal/iu)
+      const beforeConfirmation = (await readFile(commandLog, 'utf8')).trim().split('\n').filter(Boolean)
+      // App notifications and ordinary replies can use different provider threads.
+      // Carry the visible exchange, not the notification's hidden meal-id prompt.
+      const second = await executeRealCodexAppServerTurn({
+        ...shared,
+        developerInstructions: buildAutomaticMealClarificationDeveloperInstructions({
+          currentLocalDate: '2026-08-21', protectedContext: false, scheduled: false,
+        }),
+        prompt: [
+          `Earlier today you replied to my app meal photo: ${question}`,
+          'It was tomato lentil soup. I ate two cups. The carton says each cup has 180 calories, 9 g protein, 28 g carbs, 4 g fat, and 7 g fiber.',
+        ].join('\n'),
+      })
+      const commands = expandRecordedVaultCommands((await readFile(commandLog, 'utf8')).trim().split('\n').filter(Boolean))
+      const followupCommands = expandRecordedVaultCommands((await readFile(commandLog, 'utf8')).trim().split('\n').filter(Boolean).slice(beforeConfirmation.length))
+      expect(commands.filter(command => /^(?:meal add|meal import-json)\b/u.test(command) && !isRecordedVaultHelpCommand(command))).toEqual([])
+      const edits = followupCommands.filter(isMealEditMutationCommand)
+      expect(edits).toHaveLength(1)
+      expect(edits[0]).toContain(`meal edit ${capture.mealId} `)
+      expect(edits[0]).toContain('--name')
+      const vault = await readVaultRawTolerant(vaultRoot)
+      const meals = vault.events.filter(event => event.kind === 'meal')
+      expect(new Set(meals.map(event => event.entityId))).toEqual(new Set([capture.mealId]))
+      const saved = [...meals].reverse().find(event => event.entityId === capture.mealId)
+      expect(saved?.title).toMatch(/(?:tomato|lentil).*soup/iu)
+      expect(saved?.title?.length).toBeLessThanOrEqual(40)
+      expect(saved?.attributes.uploadId).toBe('synthetic-confirmation-upload')
+      expect(saved?.attributes.nutrition).toMatchObject({ totals: {
+        calories: 360, proteinGrams: 18, carbsGrams: 56, fatGrams: 8, fiberGrams: 14,
+      } })
+      process.stdout.write(`[photo-confirmation-e2e] ${JSON.stringify({
+        question, reply: second.finalMessage, cardAttached: second.responseCard !== null,
+        mealCount: new Set(meals.map(event => event.entityId)).size, name: saved?.title,
+      })}\n`)
+      expect(second.finalMessage).not.toMatch(/\?|vault-cli|meal_[A-Za-z0-9]|database|projection/iu)
+      expect(second.responseCard !== null || /saved|updated|logged/iu.test(second.finalMessage)).toBe(true)
+    } finally {
+      await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths])
+    }
+  })
+
   it.each([
     { name: 'asks about an incomplete earlier meal during ordinary meal logging', manualSubmission: false, supportedEvidence: false, protectedContext: false },
     { name: 'estimates an incomplete earlier meal during ordinary meal logging', manualSubmission: false, supportedEvidence: true, protectedContext: false },

@@ -967,6 +967,7 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/product-specs/captures.md` | Capture behavior. | Capture behavior | High | 2026-08-10 |
 | `agent-docs/exec-plans/completed/2026-11-01-v2-meals-api.md` | Approved encrypted-projection Meals API implementation, canonical removal, failed-wake recovery, HTTP transport proof and resolved ReviewGPT ledger. | Meals delivery evidence | Medium | 2026-11-01 |
 | `agent-docs/exec-plans/completed/2026-11-01-v2-meals-api-boundary.md` | v2 iOS Meals boundary investigation and existing endpoint verification. | Meals investigation evidence | Medium | 2026-11-01 |
+| `agent-docs/exec-plans/completed/2026-11-02-meal-confirm-record.md` | Confirmed photo meal identity, nutrition, and prompt publication through the existing checkpoint owner. | Meal confirmation delivery proof | Medium | 2026-11-02 |
 | `agent-docs/product-specs/ios-meals.md` | v2 iOS Meals list/detail/queued-delete contract, encrypted projection ownership, errors, phone upload linkage, reader-first rollout, native thumbnail lookup, and existing contact/profile/Apple Health endpoints. | iOS Meals API contract | High | 2026-11-01 |
 | `agent-docs/product-specs/companion-app.md` | Companion app plan. | Companion app plan | High | 2026-08-13 |
 | `agent-docs/product-specs/query-metric-universality.md` | Universal metric queryability invariant: every metric-bearing canonical event yields a query metric point through the generic extraction rule. | Query metric product spec | High | 2026-07-22 |

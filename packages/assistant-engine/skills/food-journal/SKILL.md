@@ -129,7 +129,12 @@ vault-cli meal add --with-daily-totals --format json \
 Use `--name` for a sentence-case dish name: 2–5 words, at most 40 characters.
 Keep portions, uncertainty, brands, and places in `--note`; omit meal-type
 prefixes and photo-review language from the name. Use `meal edit --name` when
-enriching an existing meal. Never log a meal from a non-food image or food/drink
+enriching an existing meal. When a member identifies a photo meal or gives its
+portion, edit that same meal: set its dish name and supported nutrition together,
+then read it back. Preserve its photo; do not add a second meal. Choose the most
+specific honest short name supported by the image or confirmation, such as
+"Green smoothie" rather than "Blended drink" or "Vegetable soup" rather than
+"Prepared food". Never log a meal from a non-food image or food/drink
 that the member did not consume.
 
 Nutrition source is `user`, `label`, `database`, `inherited`, or `estimated`;

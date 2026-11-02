@@ -770,6 +770,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     },
   );
   let assistantContextSnapshotDirty = false;
+  let assistantJournalChanged = false;
   let assistantAutomationScheduleChanged = false;
   let runtimeRedactedStatus: HostedRuntimeRedactedJson | null = null;
   const mergeRuntimeRedactedStatus = (status: HostedRuntimeRedactedJson): void => {
@@ -791,6 +792,11 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   const createAssistantCanonicalWritePort = (
     generatedImageRetentionWakeAt?: string | null,
   ): HostedCanonicalWritePort => createHostedWorkspaceCanonicalWritePort({
+    onCanonicalWritePersisted: (receipt) => {
+      assistantJournalChanged ||= receipt.actions.some((action) =>
+        action.targetRelativePath.startsWith(`${VAULT_LAYOUT.eventLedgerDirectory}/`)
+      );
+    },
     onAssistantAutomationScheduleChanged: () => {
       assistantAutomationScheduleChanged = true;
     },
@@ -1459,7 +1465,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
 
   return {
     afterDurableCheckpoint,
-    assistantPhaseResult,
+    assistantPhaseResult: withJournalPublicationIntent(assistantPhaseResult, assistantJournalChanged),
     pendingEffectsContinuationWakeAt,
     initialMailboxImport,
     latestMailboxImport: checkpointRequestSession.latestMailboxImport()
@@ -1473,6 +1479,16 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     runtimeRedactedStatus,
     runtimeStateDirty: checkpointRequestSession.hasRuntimeStateDirty(),
   };
+}
+
+// Keep the publication request on the completed pass, after delivery and
+// successful canonical persistence, rather than on each foreground tool call.
+function withJournalPublicationIntent(
+  result: HostedWorkspaceRunnerAssistantPhaseResult | null,
+  journalChanged: boolean,
+): HostedWorkspaceRunnerAssistantPhaseResult | null {
+  if (journalChanged && result) result.browserVaultReplicaRefreshRequested = true;
+  return result;
 }
 
 const HOSTED_DEFERRED_CANONICAL_WRITE_CHECKPOINT_LIMIT = 8;
@@ -2972,6 +2988,7 @@ function createHostedWorkspaceCanonicalWritePort(input: {
   deferRuntimeStatusCheckpoint?: boolean;
   generatedImageRetentionWakeAt?: string | null;
   input: HostedWorkspaceRunnerInput;
+  onCanonicalWritePersisted?: (receipt: HostedCanonicalWriteReceipt) => void;
   onAssistantAutomationScheduleChanged?: (() => void) | null;
   onAssistantContextSnapshotDirty?: (() => void) | null;
   readPreviousRedactedStatus: () => HostedRuntimeRedactedJson | null;
@@ -2979,6 +2996,7 @@ function createHostedWorkspaceCanonicalWritePort(input: {
 }): HostedCanonicalWritePort & {
   flushDeferredRuntimeStatusCheckpoint(): Promise<void>;
 } {
+  const onCanonicalWritePersisted = input.onCanonicalWritePersisted ?? (() => {});
   const readCurrentStatus = (): HostedRuntimeRedactedJson | null =>
     mergeHostedRuntimeRedactedStatusValues(
       input.readPreviousRedactedStatus(),
@@ -3193,6 +3211,7 @@ function createHostedWorkspaceCanonicalWritePort(input: {
           reason: "canonical_runtime_commit",
           runtimeLogContext: input.input.runtimeLogContext,
         });
+        onCanonicalWritePersisted(writeInput.receipt);
         if (assistantAutomationScheduleChanged) {
           input.onAssistantAutomationScheduleChanged?.();
         }

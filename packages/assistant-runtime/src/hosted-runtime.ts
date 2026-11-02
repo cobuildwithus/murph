@@ -4313,6 +4313,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     ): void => {
       browserVaultReplicaRefreshRequested ||=
         passResult.assistantPhaseResult?.browserVaultReplicaRefreshRequested === true;
+      if (browserVaultReplicaRefreshRequested && !imageGenerationController?.hasWork()) {
+        // Keep accepted image work alive until its completion is staged. Then
+        // publish confirmed journal writes through the existing checkpoint owner.
+        setIdleCheckpointStartBy(Date.now());
+      }
     };
     const unservicedRecheckWakeKeys = new Set<string>();
     const recordUnservicedRecheckWake = (
@@ -4587,7 +4592,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           stage: "foreground.pass",
           status: "done",
         });
-        recordBrowserVaultReplicaRefreshIntent(passResult);
         if (
           passResult.runtimeStateDirty
           && (
@@ -4602,6 +4606,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           passResult,
           foregroundPriorityWorkOrdinal > foregroundPriorityWorkOrdinalBeforePass,
         );
+        recordBrowserVaultReplicaRefreshIntent(passResult);
         return passResult;
       } catch (error) {
         emitPhaseLog({
