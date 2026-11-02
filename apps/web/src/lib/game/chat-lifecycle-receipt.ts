@@ -41,6 +41,9 @@ export function gameMissedDayEventId(gameId: string, memberId: string, firstMiss
   return `game-missed:${gameId}:${memberId}:${firstMissedDate}`;
 }
 
+/** Two players' due times for one date fall within 26 hours (UTC-12 to UTC+14). */
+const MISSED_DATE_CLAIM_LOOKBACK_MS = 26 * 60 * 60 * 1000;
+
 /** Existing receipts deduplicate one pair/day batch, including concurrent sweeps. */
 export async function reserveGameMissedDayTx(input: {
   gameId: string; memberId: string; playerMemberIds: readonly string[]; firstMissedDate: string; dueAt: Date; tx: Prisma.TransactionClient;
@@ -51,21 +54,18 @@ export async function reserveGameMissedDayTx(input: {
   const active = await tx.game.findMany({ where: { ...gamePairWhere(players), status: "live" }, select: { id: true }, take: GAME_MAX_OPEN_PER_PAIR });
   const current = await tx.game.findFirst({ where: { id: input.gameId, status: "live", chatContainerMemberId: { not: null } }, select: { chatContainerMemberId: true } });
   if (!current?.chatContainerMemberId) return false;
-  // Read through the existing room-owner index, not all delivery history.
-  // Keep the single-game identity. With several games, either
-  // player's first due miss claims the pair's one daily message.
-  const prior = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-    SELECT receipt.id FROM hosted_linq_delivery receipt
-    JOIN game_player first_player ON first_player.game_id = split_part(receipt.source_ref, ':', 1)
-    WHERE receipt.payload_owner_member_id = ${current.chatContainerMemberId}
-      AND receipt.source = 'game_lifecycle' AND receipt.template = 'game_missed'
-      AND first_player.member_id = ${players[0]}
-      AND EXISTS (SELECT 1 FROM game_player second_player
-        WHERE second_player.game_id = first_player.game_id AND second_player.member_id = ${players[1]})
-      AND split_part(receipt.source_ref, ':', 3) = ${input.firstMissedDate}
-      AND (${active.length > 1} OR split_part(receipt.source_ref, ':', 2) = ${input.memberId})
-    LIMIT 1`);
-  if (prior.length) return false;
+  // A game that settled after this date's first miss came due may already have
+  // claimed it, so it still counts as one of the pair's games for this date.
+  const ended = await tx.game.findMany({ where: { ...gamePairWhere(players), status: "settled", settledAt: { gte: new Date(input.dueAt.getTime() - MISSED_DATE_CLAIM_LOOKBACK_MS) } },
+    select: { id: true }, take: GAME_MAX_OPEN_PER_PAIR });
+  const games = [...active, ...ended].map((game) => game.id);
+  // Keep the single-game identity. With several games, either player's first
+  // due miss claims the pair's one daily message for both players. Look it up
+  // by delivery key: sending rewrites a receipt's source and template, never its key.
+  const [gameIds, memberIds] = games.length > 1 ? [games, players] : [[input.gameId], [input.memberId]];
+  const keys = gameIds.flatMap((gameId) => memberIds.map((memberId) => createHostedLinqDeliveryIdempotencyLookupKey(gameMissedDayEventId(gameId, memberId, input.firstMissedDate))))
+    .filter((key): key is string => key !== null);
+  if (await tx.hostedLinqDelivery.findFirst({ where: { idempotencyKey: { in: keys } }, select: { id: true } })) return false;
   const eventId = gameMissedDayEventId(input.gameId, input.memberId, input.firstMissedDate);
   const key = createHostedLinqDeliveryIdempotencyLookupKey(eventId);
   if (!key) throw new Error("Game missed-day delivery identity is unavailable.");
