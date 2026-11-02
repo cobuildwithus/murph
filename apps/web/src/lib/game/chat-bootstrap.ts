@@ -18,7 +18,8 @@ import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboardi
 import { createHostedLinqParticipantContactLookupKey } from "../hosted-onboarding/linq-participant-contact";
 import { attachHostedThreadContainerBootstrapRouteTx, createHostedGameThreadContainerTx, prepareHostedThreadContainerBootstrap, prepareHostedThreadContainerDeliveryRoute } from "../hosted-routing/thread-container-service";
 import { getPrisma } from "../prisma";
-import { isExactGameChat } from "./chat-membership";
+import { bindPairGameChat, readPairGameChatTx, isExactGameChat } from "./chat-membership";
+import { GAME_MAX_OPEN_PER_PAIR } from "./rules";
 import { parsePendingGameChange } from "./changes";
 import { isGameOn } from "./access";
 import { markGameChatGenerationQueuedTx } from "./chat-lifecycle-receipt";
@@ -41,14 +42,21 @@ export async function prepareGameChatBootstrap(gameId: string, eventId: string, 
     const game = await readBootstrapGame(gameId);
     if (!game || !bootstrapEventCurrent(game, eventId)) return null;
     if (game.chatContainerMemberId) return queueExistingBootstrap(gameId, eventId, instructions, game.chatContainerMemberId);
+    const existingRoom = await bindPairGameChat(gameId, game.players.map((player) => player.memberId), null);
+    if (existingRoom) return queueExistingBootstrap(gameId, eventId, instructions, existingRoom);
     const phones = await readPlayerPhones(game.players.map((player) => player.memberId));
     const prepared = await prepareHostedThreadContainerBootstrap({ prisma });
     const now = new Date();
     const result = await prisma.$transaction((tx) => runWithHostedDomainRootProviderCallsDisabled(async () => {
+      const pairRoom = await readPairGameChatTx(tx, game.players.map((player) => player.memberId));
       await lockGame(tx, gameId);
       const current = await tx.game.findUnique({ where: { id: gameId }, include: { players: { select: { memberId: true, seat: true }, orderBy: { seat: "asc" }, take: 3 } } });
       if (!current || !bootstrapEventCurrent(current, eventId) || !samePlayers(current.players, game.players)) return null;
       if (current.chatContainerMemberId) return null;
+      if (pairRoom) {
+        await tx.game.update({ where: { id: gameId }, data: { chatContainerMemberId: pairRoom } });
+        return { containerMemberId: pairRoom, mailboxIds: [] };
+      }
       const created = await createHostedGameThreadContainerTx({ gameId, ownerMemberId: game.players[0]!.memberId, occurredAt: now, prepared, prisma: tx });
       await tx.hostedThreadContainerParticipant.createMany({ data: game.players.map((player, index) => {
         const handleLookupKey = createHostedLinqParticipantContactLookupKey({ kind: "phone", value: phones[index]! });
@@ -84,13 +92,18 @@ function readOtherFrozenBootstrap(memberId: string, eventId: string, prisma: Pri
     select: { id: true },
   });
 }
-function readOtherPendingBootstrap(game: { id: string; status: string; pendingChange: unknown }, memberId: string, eventId: string, prisma: Prisma.TransactionClient) {
-  const proposal = parsePendingGameChange(game.pendingChange);
-  const keys = [...(game.status === "live" ? [`game-started:${game.id}`] : []), ...(proposal ? [`game-change:${game.id}:${proposal.id}`] : [])];
+async function readOtherPendingBootstrap(memberId: string, eventId: string, prisma: Prisma.TransactionClient) {
+  const games = await prisma.game.findMany({ where: { chatContainerMemberId: memberId, status: { in: ["live", "negotiating"] } },
+    select: { id: true, status: true, pendingChange: true }, take: GAME_MAX_OPEN_PER_PAIR });
+  const keys = games.flatMap((game) => {
+    const proposal = parsePendingGameChange(game.pendingChange);
+    return [...(game.status === "live" ? [`game-started:${game.id}`] : []), ...(proposal ? [`game-change:${game.id}:${proposal.id}`] : [])];
+  });
   return prisma.hostedMailboxItem.findFirst({ where: { userId: memberId, kind: "assistant.notification.requested", consumedAt: null,
-    dedupeKey: { not: eventId }, OR: [{ dedupeKey: { in: keys } }, { dedupeKey: { startsWith: `game-change-cancelled:${game.id}:` } }],
+    dedupeKey: { not: eventId }, OR: [{ dedupeKey: { in: keys } }, ...games.map((game) => ({ dedupeKey: { startsWith: `game-change-cancelled:${game.id}:` } }))],
   }, select: { id: true } });
 }
+
 async function queueExistingBootstrap(gameId: string, eventId: string, instructions: string, containerMemberId: string): Promise<string | null> {
   const prisma = getPrisma();
   if (await readOtherFrozenBootstrap(containerMemberId, eventId)) return null;
@@ -100,10 +113,12 @@ async function queueExistingBootstrap(gameId: string, eventId: string, instructi
     return containerMemberId;
   }
   const prepared = await prepareHostedMailboxEnvelopeAppend({ prisma, envelope: buildBootstrapWake(gameId, eventId, instructions, containerMemberId, new Date()) });
+  const players = (await readBootstrapGame(gameId))?.players.map((player) => player.memberId) ?? [];
   const appended = await prisma.$transaction(async (tx) => {
+    await readPairGameChatTx(tx, players);
     await lockGame(tx, gameId);
     const game = await tx.game.findUnique({ where: { id: gameId }, include: { players: { select: { memberId: true }, take: 3 } } });
-    if (!game || game.chatContainerMemberId !== containerMemberId || !bootstrapEventCurrent(game, eventId) || await readOtherFrozenBootstrap(containerMemberId, eventId, tx) || await readOtherPendingBootstrap(game, containerMemberId, eventId, tx)) return null;
+    if (!game || game.chatContainerMemberId !== containerMemberId || !bootstrapEventCurrent(game, eventId) || await readOtherFrozenBootstrap(containerMemberId, eventId, tx) || await readOtherPendingBootstrap(containerMemberId, eventId, tx)) return null;
     const route = await tx.hostedThreadRoute.findFirst({ where: { containerMemberId }, select: { containerMemberId: true } });
     if (route) return null;
     const result = await appendPreparedHostedMailboxEnvelopeTx({ prepared, tx });

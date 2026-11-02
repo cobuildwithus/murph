@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { Game, GamePlayer, Prisma } from "@prisma/client";
+import type { Game, GamePlayer } from "@prisma/client";
 import { buildHostedExecutionAssistantNotificationRequestedWake } from "@murphai/hosted-execution";
 import { appendPreparedHostedMailboxEnvelopeTx, prepareHostedMailboxEnvelopeAppend, readHostedMailboxItemByDedupeKey } from "../hosted-mailbox/store";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
@@ -15,7 +15,7 @@ export { buildGameProposalInstructions } from "@murphai/hosted-execution/runtime
 import { openGameTexts } from "./crypto";
 import { isGameInviteExpired } from "./rules";
 
-import { findExistingGameChat, requireExactChat, requireExactGameChat } from "./chat-membership";
+import { bindPairGameChat, findExistingGameChat, requireExactChat, requireExactGameChat } from "./chat-membership";
 export { isExactGameChat, requireExactGameChat } from "./chat-membership";
 import { prepareGameChatBootstrap } from "./chat-bootstrap";
 import { markGameChatGenerationQueuedTx } from "./chat-lifecycle-receipt";
@@ -31,23 +31,12 @@ export async function deliverGameChangeProposal(gameId: string, proposalId: stri
   if (proposal.deliveryStatus === "sent") return true;
   if (proposal.origin === "chat") return false;
   const { phones, message } = await prepareGameChatPlayers(game, proposal);
-  // A bound chat can never silently drift to an audience with additional people.
-  let containerMemberId = game.chatContainerMemberId;
-  if (containerMemberId) {
-    const destination = await resolveHostedAssistantNotificationDestination({ memberId: containerMemberId, prisma });
-    if (!destination) {
-      return (await prepareGameChatBootstrap(gameId, `game-change:${gameId}:${proposal.id}`, message)) !== null;
-    }
-    await requireExactChat(containerMemberId, phones);
-  } else {
-    containerMemberId = await findExistingGameChat(game.players.map((player) => player.memberId), phones);
-    if (containerMemberId) {
-      const bound = await prisma.game.updateMany({ where: pendingWhere(gameId, proposalId, null, now), data: { chatContainerMemberId: containerMemberId } });
-      if (bound.count !== 1) return false;
-    } else {
-      return (await prepareGameChatBootstrap(gameId, `game-change:${gameId}:${proposal.id}`, message)) !== null;
-    }
-  }
+  const players = game.players.map((player) => player.memberId);
+  const containerMemberId = game.chatContainerMemberId
+    ?? await bindPairGameChat(gameId, players, await findExistingGameChat(players, phones));
+  const destination = containerMemberId ? await resolveHostedAssistantNotificationDestination({ memberId: containerMemberId, prisma }) : null;
+  if (!containerMemberId || !destination) return (await prepareGameChatBootstrap(gameId, `game-change:${gameId}:${proposal.id}`, message)) !== null;
+  await requireExactChat(containerMemberId, phones);
   return enqueueProposal(gameId, proposal, containerMemberId, message);
 }
 
@@ -66,12 +55,6 @@ async function prepareGameChatPlayers(game: Game & { players: GamePlayer[] }, pr
   const message = buildGameProposalInstructions(proposal, { proposerName: nameFor(proposal.proposedByMemberId), recipientName: nameFor(other.memberId), lengthDays: game.lengthDays });
   return { phones, message };
 }
-
-function pendingWhere(gameId: string, proposalId: string, containerMemberId?: string | null, now = new Date()): Prisma.GameWhereInput {
-  return { id: gameId, OR: [{ status: "live" }, { status: "negotiating", OR: [{ inviteExpiresAt: null }, { inviteExpiresAt: { gt: now } }] }],
-    ...(containerMemberId === undefined ? {} : { chatContainerMemberId: containerMemberId }), pendingChange: { path: ["id"], equals: proposalId } };
-}
-
 
 /** Revalidate the audience outside the existing provider dispatch transaction. */
 export async function readGameProposalDeliveryPlayers(key: string | null, containerMemberId: string): Promise<readonly string[] | undefined> {

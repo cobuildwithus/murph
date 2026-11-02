@@ -1,7 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { canScheduleMissedDayCheckIn, firstDatesOfMissRuns, isMissedCheckInDueNow, missedCheckInDueAt, visitGameMissedCheckInPages, type MissedCheckInDay } from "@/src/lib/game/missed-check-in";
+import { canScheduleMissedDayCheckIn, gameMissedCheckInRuns, firstDatesOfMissRuns, isMissedCheckInDueNow, missedCheckInDueAt, visitGameMissedCheckInPages, type MissedCheckInDay } from "@/src/lib/game/missed-check-in";
 
 describe("game missed-day check-ins", () => {
+  it("derives batch misses from artifacts, excluding self-reported incomplete days and any-days games", () => {
+    const state: import("@/src/lib/game/rules").RuleState = {
+      game: { id: "task", status: "live", createdBy: "person-a", seats: 2, lengthDays: 7,
+        inviteExpiresAt: null, startsOn: null,
+        terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [] }] } },
+      players: ["person-a", "person-b"].map((memberId, seat) => ({ memberId, seat, dayOne: "2030-03-04", timeZone: "UTC" })),
+      entries: [{ id: "artifact", memberId: "person-a", dayIndex: 0, attempt: 1, kind: "words", mediaKeys: [],
+        incomplete: true, blurHash: null, withdrawnAt: null, receivedAt: new Date("2030-03-04T12:00:00Z") }],
+    };
+    const now = new Date("2030-03-05T09:00:00Z");
+    expect(gameMissedCheckInRuns(state, now)).toEqual([{ memberId: "person-b", firstMissedDate: "2030-03-04",
+      missedDates: ["2030-03-04"], dueAt: now }]);
+    state.game.terms.versions[0]!.schedule = { count: 3 };
+    expect(gameMissedCheckInRuns(state, now)).toEqual([]);
+  });
   it("folds consecutive misses and breaks runs on off, incomplete, posted and open days", () => {
     const days: MissedCheckInDay[] = [
       { date: "2030-03-01", status: "missed" }, { date: "2030-03-02", status: "missed" },

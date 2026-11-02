@@ -1,3 +1,5 @@
+import { currentTerms, isScheduledDay, liveEntry, type RuleState } from "./rules";
+import { addDays, dayStartInstant, GAME_GRACE_MS } from "./time";
 import { resolveFloatingIsoTimestampInTimeZone } from "@murphai/contracts";
 
 export type MissedCheckInDay = { date: string; status: "posted" | "missed" | "off" | "incomplete" | "open" };
@@ -47,4 +49,21 @@ export function missedCheckInDueAt(firstMissedDate: string, timeZone: string): D
   const date = next.toISOString().slice(0, 10);
   const resolved = resolveFloatingIsoTimestampInTimeZone(`${date}T09:00:00`, timeZone);
   return resolved ? new Date(resolved.timestamp) : null;
+}
+
+/** Canonical misses exclude incomplete artifacts and any-days capacity. */
+export function gameMissedCheckInRuns(state: RuleState, now: Date) {
+  if (state.game.status !== "live" || !("days" in currentTerms(state.game.terms).schedule)) return [];
+  return state.players.flatMap((player) => {
+    if (!player.dayOne) return [];
+    const days: MissedCheckInDay[] = Array.from({ length: state.game.lengthDays }, (_, dayIndex) => {
+      const date = addDays(player.dayOne!, dayIndex);
+      if (!isScheduledDay(state, dayIndex)) return { date, status: "off" };
+      const entry = liveEntry(state.entries, player.memberId, dayIndex);
+      if (entry) return { date, status: entry.incomplete ? "incomplete" : "posted" };
+      const closed = now.getTime() >= dayStartInstant(addDays(date, 1), player.timeZone).getTime() + GAME_GRACE_MS;
+      return { date, status: closed ? "missed" : "open" };
+    });
+    return firstDatesOfMissRuns(days).map((run) => ({ ...run, memberId: player.memberId, dueAt: missedCheckInDueAt(run.firstMissedDate, player.timeZone) }));
+  });
 }

@@ -5,7 +5,7 @@ const m = vi.hoisted(() => ({
   writeMetadata: vi.fn(), markReceipt: vi.fn(), countReceipt: vi.fn(), attached: false, skipped: false, game: vi.fn(), updateGame: vi.fn(), receipt: vi.fn(), otherReceipt: vi.fn(), route: vi.fn(), saveReceipt: vi.fn(), wake: vi.fn(), runtime: vi.fn(), access: vi.fn(), identities: vi.fn(), create: vi.fn(), chat: vi.fn(), lines: vi.fn(), capacity: vi.fn(), claim: vi.fn(), accepted: vi.fn(), prepareMailbox: vi.fn(), enqueue: vi.fn(), mailbox: vi.fn(), pendingMailbox: vi.fn(), prepareContainer: vi.fn(), createContainer: vi.fn(), prepareRoute: vi.fn(), attachRoute: vi.fn(), append: vi.fn(), signal: vi.fn(), participants: vi.fn(), sequence: [] as string[], frozen: null as null | Record<string, unknown>,
 }));
 vi.mock("../src/lib/prisma", () => {
-  const tx = { $queryRaw: vi.fn(), $executeRaw: m.writeMetadata, game: { findFirst: m.game, findUnique: m.game, update: m.updateGame }, hostedMember: { count: async () => 2 }, hostedThreadRoute: { findFirst: m.route }, hostedMailboxItem: { findFirst: m.pendingMailbox }, hostedLinqDelivery: { count: m.countReceipt, findFirst: m.otherReceipt, findUnique: m.receipt, update: m.saveReceipt, updateMany: m.markReceipt }, hostedThreadContainerParticipant: { createMany: m.participants } };
+  const tx = { $queryRaw: vi.fn(), $executeRaw: m.writeMetadata, game: { findMany: async () => [await m.game()], findFirst: m.game, findUnique: m.game, update: m.updateGame }, hostedMember: { count: async () => 2 }, hostedThreadRoute: { findFirst: m.route }, hostedMailboxItem: { findFirst: m.pendingMailbox }, hostedLinqDelivery: { count: m.countReceipt, findFirst: m.otherReceipt, findUnique: m.receipt, update: m.saveReceipt, updateMany: m.markReceipt }, hostedThreadContainerParticipant: { createMany: m.participants } };
   return { getPrisma: () => ({ ...tx, $transaction: async (fn: (value: typeof tx) => unknown) => fn(tx) }) };
 });
 vi.mock("../src/lib/hosted-crypto/domain-root-unwrap-cache", () => ({ runWithHostedDomainRootUnwrapCache: (fn: () => unknown) => fn(), runWithHostedDomainRootProviderCallsDisabled: (fn: () => unknown) => fn() }));
@@ -25,7 +25,7 @@ vi.mock("../src/lib/hosted-onboarding/linq-observability-identifiers", () => ({ 
 vi.mock("../src/lib/hosted-onboarding/linq-participant-contact", () => ({ createHostedLinqParticipantContactLookupKey: () => "phone-key" }));
 vi.mock("../src/lib/hosted-routing/thread-container-service", () => ({ prepareHostedThreadContainerBootstrap: m.prepareContainer, createHostedGameThreadContainerTx: m.createContainer, prepareHostedThreadContainerDeliveryRoute: m.prepareRoute, attachHostedThreadContainerBootstrapRouteTx: m.attachRoute }));
 vi.mock("../src/lib/game/access", () => ({ isGameOn: () => true }));
-vi.mock("../src/lib/game/chat-membership", () => ({ isExactGameChat: (chat: { exact: boolean }) => chat.exact }));
+vi.mock("../src/lib/game/chat-membership", () => ({ bindPairGameChat: async () => null, readPairGameChatTx: async () => null, isExactGameChat: (chat: { exact: boolean }) => chat.exact }));
 import { handleGameChatBootstrapControl, prepareGameChatBootstrap, reconcileFrozenGameChatBootstrap, reconcileFrozenGameChatBootstrapReceipt } from "../src/lib/game/chat-bootstrap";
 const gameId = "game_sample";
 const eventId = `game-started:${gameId}`;

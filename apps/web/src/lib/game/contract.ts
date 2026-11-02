@@ -352,8 +352,10 @@ export interface GameView {
   pendingChange: GamePendingChange | null;
   id: string;
   status: GameStatus;
-  /** 1 for the first game between these people, then 2, 3… */
+  /** 1 for a new game, then 2, 3… along its rematch chain. */
   round: number;
+  /** The settled game this one rematches; null for a new game. */
+  previousGameId: string | null;
   terms: GameTermsVersion;
   /** The picked Day 1, if the challenger chose one. */
   startsOn: string | null;
@@ -466,9 +468,11 @@ export type GameErrorCode =
   | "INVITE_USED"
   | "INVITE_EXPIRED"
   | "TERMS_CHANGED"
-  /** These same people already have a live game (or an open rematch) together. */
+  /** An open rematch of this same game already exists. */
   | "ALREADY_IN_A_GAME"
-  /** A rematch named an older game when the same people have a newer one. */
+  /** These two players already have ten open games together. */
+  | "TOO_MANY_GAMES"
+  /** A later game in this rematch chain has already settled. */
   | "REMATCH_OUTDATED"
   | "NOT_A_PLAYER"
   | "GAME_NOT_LIVE"

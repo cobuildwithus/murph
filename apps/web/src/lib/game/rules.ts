@@ -118,10 +118,13 @@ export function isTicketExpired(ticket: { status: string; createdAt: Date }, now
   return ticket.status === "open" && now.getTime() > ticketUseBy(ticket.createdAt).getTime();
 }
 export const GAME_POSTS_PER_DAY = 2;
+export const GAME_MAX_OPEN_PER_PAIR = 10;
+
 export const GAME_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const GAME_ERROR_STATUS: Record<GameErrorCode, number> = {
   ALREADY_IN_A_GAME: 409,
+  TOO_MANY_GAMES: 409,
   CHANGE_PENDING: 409,
   CHANGE_EXPIRED: 409,
   CHAT_UNAVAILABLE: 503,
@@ -255,14 +258,6 @@ export function isGameInviteExpired(game: { status: string; inviteExpiresAt: Dat
 /** This player's last day is over: the game is done for them, whatever the other player's clock says. */
 export function hasFinishedGame(state: RuleState, player: RulePlayer, now: Date): boolean {
   return (dayIndexAt(player, now) ?? -1) >= state.game.lengthDays;
-}
-
-/**
- * Who's playing, as one key: the sorted member ids joined by ":". A live game
- * holds its roster's key, so the same people can't have two going at once.
- */
-export function liveRosterKey(memberIds: readonly string[]): string {
-  return [...memberIds].sort().join(":");
 }
 
 /** A live game is waiting on this player today: a scheduled day they haven't posted yet. */

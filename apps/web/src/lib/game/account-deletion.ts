@@ -174,7 +174,7 @@ export async function applyGameAccountDeletionTx(input: { memberIds: readonly st
         departedPlayer: toPrismaJsonObject({ ...departed }),
         recapEncrypted: null,
         // Called off: no winner and no tickets. A finished game keeps its result.
-        ...(active ? { status: "void", liveRosterKey: null, pendingChange: Prisma.DbNull } : {}),
+        ...(active ? { status: "void", pendingChange: Prisma.DbNull } : {}),
         // Cleared here, before the member row goes, so the creator cascade never reaches a kept game.
         ...(leftCreator ? { createdBy: null, termsWordsEncrypted: departure.termsWordsEncrypted ?? row.termsWordsEncrypted, inviteTokenEncrypted: null, pendingLabel: Prisma.DbNull } : {}),
         ...(leftInvitee ? { inviteeMemberId: null } : {}),

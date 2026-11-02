@@ -122,7 +122,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     })) });
     const game = await observer.game.create({ data: {
       id: `runtime_funding_${randomUUID()}`, createdBy: firstPlayer, status: "live",
-      liveRosterKey: [firstPlayer, secondPlayer].sort().join(":"), chatContainerMemberId: primary,
+      chatContainerMemberId: primary,
       terms: { v: 1, versions: [] }, termsWordsEncrypted: "synthetic-sealed-terms",
       players: { create: [firstPlayer, secondPlayer].map((memberId, seat) => ({
         memberId, seat, timeZone: "UTC", dayOne: now,
@@ -273,7 +273,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       expect(next.owner.allowanceBeneficiaryMemberId).toBe(duplicate);
 
       // Completion accounting retains the beneficiary after game access ends.
-      await observer.game.update({ where: { id: game.id }, data: { status: "void", liveRosterKey: null } });
+      await observer.game.update({ where: { id: game.id }, data: { status: "void", } });
       const nextIdentity = identity(next.owner);
       const frozen = await first.$transaction(tx => requireHostedRuntimeOwnerTx(tx, nextIdentity));
       expect(frozen.allowanceBeneficiaryMemberId).toBe(duplicate);

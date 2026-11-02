@@ -260,6 +260,13 @@ const gameNegotiationCompatibleStatements = new Set([
   `ALTER TABLE "game" ADD CONSTRAINT "game_live_roster_check" CHECK (("live_roster_key" IS NULL) = ("status" NOT IN ('negotiating', 'live'))) NOT VALID`,
 ]);
 
+// Retire only the redundant roster guards; old writers remain valid while
+// the nullable column survives until postdeploy cleanup.
+const gameManyPerPairCompatibleStatements = new Set([
+  'ALTER TABLE "game" DROP CONSTRAINT IF EXISTS "game_live_roster_check"',
+  'DROP INDEX IF EXISTS "game_live_roster_key_key"',
+]);
+
 // V1 only widens existing checks. No other constraint changes are exempt.
 const gameV1CompatibleStatements = new Set([
   'ALTER TABLE "game" DROP CONSTRAINT "game_length_days_check"',
@@ -472,7 +479,9 @@ export async function findHostedWebPrismaPredeployDestructiveMigrations(
       .filter((statement) => entry.name !== "20261022071000_game_negotiation"
         || !gameNegotiationCompatibleStatements.has(statement.replace(/\s+/gu, " ").trim()))
       .filter((statement) => entry.name !== "20261022220000_game_v1"
-        || !gameV1CompatibleStatements.has(statement.replace(/\s+/gu, " ").trim()));
+        || !gameV1CompatibleStatements.has(statement.replace(/\s+/gu, " ").trim()))
+      .filter((statement) => entry.name !== "20261101230000_game_many_per_pair"
+        || !gameManyPerPairCompatibleStatements.has(statement.replace(/\s+/gu, " ").trim()));
     const compatibleReasons =
       hostedWebPrismaPredeployCompatibleMigrationReasons.get(entry.name);
     const destructivePattern = incompatiblePredeploySqlPatterns.find(

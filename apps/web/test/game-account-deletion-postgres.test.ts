@@ -75,11 +75,13 @@ describe.skipIf(!runPostgresProof)("weekly game when a player deletes their acco
     const leo = await member("Leo");
     const ava = await member("Ava");
     const gameId = await live(leo, ava);
+    const secondGame = await live(leo, ava);
     await words(leo, gameId, "Leo day one");
     await words(ava, gameId, "Ava day one");
     await getPrisma().game.update({ where: { id: gameId }, data: { recapEncrypted: "synthetic-must-clear" } });
     const [gone, stays] = leaver === "creator" ? [leo, ava] : [ava, leo];
-    expect(await deleteAccount(gone)).toEqual({ calledOff: 1, deleted: 0, kept: 1 });
+    expect(await deleteAccount(gone)).toEqual({ calledOff: 2, deleted: 0, kept: 2 });
+    expect(await readGame(secondGame, stays)).toMatchObject({ status: "void" });
 
     const view = (await readGame(gameId, stays))!;
     expect(view).toMatchObject({ status: "void", result: null, tickets: [], settlesAt: null });
@@ -92,7 +94,7 @@ describe.skipIf(!runPostgresProof)("weekly game when a player deletes their acco
     expect(view.days[0].mine).toMatchObject({ text: stays === leo ? "Leo day one" : "Ava day one" });
     expect(view.days[0].others).toEqual([]);
     expect(await getPrisma().gameEntry.count({ where: { gameId, memberId: gone } })).toBe(0);
-    expect(await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } })).toMatchObject({ liveRosterKey: null, createdBy: leaver === "creator" ? null : leo });
+    expect(await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } })).toMatchObject({ createdBy: leaver === "creator" ? null : leo });
     expect((await readHome(stays)).games.map((game) => game.id)).toContain(gameId);
     // Nothing more can happen in it.
     expect(await run(stays, { entryId: randomUUID(), gameId, kind: "words", mediaKeys: [], text: "again", type: "post" })).toMatchObject({ ok: false, error: { code: "GAME_NOT_LIVE" } });

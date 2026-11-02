@@ -25,7 +25,7 @@ describe("game pair discovery", () => {
     m.identity.mockImplementation(async ({ memberId }: { memberId: string }) => ({ phoneNumber: phones[players.indexOf(memberId)], phoneNumberVerifiedAt: new Date() }));
     m.route.mockImplementation(async ({ containerMemberIds }: { containerMemberIds: string[] }) => ({ authorities: new Map(containerMemberIds.map((id) => [id, { threadId: id, channel: "linq" }])) }));
     m.chat.mockResolvedValue(chat);
-    m.games.mockResolvedValue([{ id: "active-game" }, { id: "finished-game" }]);
+    m.games.mockImplementation(async ({ where }) => where.status === "settled" ? [{ id: "finished-game" }] : [{ id: "active-game" }]);
   });
 
   it("proves the same pair in either room without requiring a game binding", async () => {
@@ -37,9 +37,9 @@ describe("game pair discovery", () => {
 
   it("reads a bounded canonical history for the exact pair including finished games", async () => {
     await expect(readGameChatCandidateIds(players)).resolves.toEqual(["active-game", "finished-game"]);
-    expect(m.games).toHaveBeenCalledExactlyOnceWith({
-      where: { ...gamePairWhere(players), status: { in: ["negotiating", "live", "settled"] } },
-      orderBy: [{ createdAt: "desc" }, { id: "asc" }], take: 5, select: { id: true },
+    expect(m.games).toHaveBeenCalledWith({
+      where: { ...gamePairWhere(players), status: { in: ["negotiating", "live"] } },
+      orderBy: [{ createdAt: "desc" }, { id: "asc" }], take: 10, select: { id: true },
     });
     expect(m.games.mock.calls[0][0].where).not.toHaveProperty("chatContainerMemberId");
   });

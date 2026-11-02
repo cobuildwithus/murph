@@ -2820,9 +2820,6 @@ model Game {
   // The challenger's picked Day 1, used when later than acceptance's eligible day.
   startsOn             DateTime?    @map("starts_on") @db.Date
   startedAt            DateTime?    @map("started_at")
-  // The players' sorted member ids joined by ":" while negotiating or live, else
-  // null. Unique, so the same people can't have two live games at once.
-  liveRosterKey        String?      @unique @map("live_roster_key")
   // Dev time travel only: added to the database clock for this game. Null (no
   // shift) everywhere else; production never writes it.
   devClockOffsetMs     BigInt?      @map("dev_clock_offset_ms")
@@ -2841,6 +2838,7 @@ model Game {
   reports              GameReport[]
 
   @@index([chatContainerMemberId])
+  @@index([previousGameId])
   @@index([createdBy])
   @@index([inviteeMemberId])
   @@map("game")

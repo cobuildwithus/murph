@@ -47,11 +47,17 @@ export async function readGameChatFundingRooms(input: {
                 AND receipt.status IN ('awaiting_generation', 'generation_queued')
                 AND receipt.skipped_at IS NULL)
           ORDER BY rematch.created_at DESC, rematch.id LIMIT 1),
-        -- A live/negotiating pair is uniquely reserved. Resolve it directly;
-        -- repeated prior games do not add work to the active-game path.
-        (SELECT id FROM game WHERE live_roster_key = array_to_string(pair.player_ids, ':')
-          AND (status = 'live' OR (status = 'negotiating'
-            AND (invite_expires_at IS NULL OR invite_expires_at > ${input.now})))),
+        -- Derive the pair from the indexed seats. Select one established
+        -- primary room even when several games are live or still unbound.
+        (SELECT active.id FROM game_player first_player
+          JOIN game active ON active.id = first_player.game_id
+          WHERE first_player.member_id = pair.player_ids[1]
+            AND active.chat_container_member_id IS NOT NULL
+            AND (active.status = 'live' OR (active.status = 'negotiating'
+              AND (active.invite_expires_at IS NULL OR active.invite_expires_at > ${input.now})))
+            AND EXISTS (SELECT 1 FROM game_player second_player
+              WHERE second_player.game_id = active.id AND second_player.member_id = pair.player_ids[2])
+          ORDER BY active.created_at, active.id LIMIT 1),
         (SELECT recent.id FROM game_player first_player
           JOIN game recent ON recent.id = first_player.game_id
           WHERE first_player.member_id = pair.player_ids[1]
@@ -59,7 +65,7 @@ export async function readGameChatFundingRooms(input: {
             AND EXISTS (SELECT 1 FROM game_player second_player
               WHERE second_player.game_id = recent.id AND second_player.member_id = pair.player_ids[2])
           ORDER BY recent.settled_at DESC, recent.id LIMIT 1),
-        -- Cancellation releases the pair but keeps its already-bound room
+        -- Cancellation releases its slot but keeps its already-bound room
         -- available until the reserved notice reaches provider dispatch.
         (SELECT cancelled.id FROM game cancelled
           WHERE cancelled.chat_container_member_id = room.id AND cancelled.status = 'void'
@@ -87,8 +93,26 @@ export async function readGameChatFundingRooms(input: {
             AND NOT EXISTS (SELECT 1 FROM hosted_thread_route route WHERE route.container_member_id = room.id)
             AND EXISTS (SELECT 1 FROM hosted_linq_delivery receipt
               WHERE receipt.payload_owner_member_id = room.id AND receipt.source = 'game_lifecycle'
-                AND ((receipt.status = 'generation_queued' AND (receipt.source_ref = game.id
-                    OR (receipt.template IN ('game_change_cancelled', 'game_change_expired') AND starts_with(receipt.source_ref, game.id || ':'))))
+                AND ((receipt.status = 'generation_queued' AND EXISTS (
+                  -- The pending bootstrap can belong to another game in this same room.
+                  SELECT 1 FROM game bootstrap
+                  WHERE bootstrap.chat_container_member_id = room.id
+                    AND (receipt.source_ref = bootstrap.id
+                      OR (receipt.template IN ('game_change_cancelled', 'game_change_expired') AND starts_with(receipt.source_ref, bootstrap.id || ':')))
+                    -- Keep the selected game's existing settled/cancellation eligibility.
+                    AND (bootstrap.id = game.id OR (
+                      (bootstrap.status = 'live' OR (bootstrap.status IN ('invited', 'negotiating')
+                        AND (bootstrap.invite_expires_at IS NULL OR bootstrap.invite_expires_at > ${input.now})))
+                      AND ((bootstrap.status = 'invited'
+                          AND bootstrap.created_by = ANY(pair.player_ids)
+                          AND bootstrap.invitee_member_id = ANY(pair.player_ids)
+                          AND bootstrap.created_by <> bootstrap.invitee_member_id)
+                        OR (bootstrap.status <> 'invited'
+                          AND EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = bootstrap.id AND p.seat = 0)
+                          AND EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = bootstrap.id AND p.seat = 1)
+                          AND NOT EXISTS (SELECT 1 FROM game_player p
+                            WHERE p.game_id = bootstrap.id AND (p.seat NOT IN (0, 1) OR NOT (p.member_id = ANY(pair.player_ids))))))
+                    ))))
                   OR receipt.payload_schema = 'game_chat_bootstrap_v1')
                 AND receipt.bootstrap_route_attached_at IS NULL AND receipt.skipped_at IS NULL)
             AND NOT EXISTS (SELECT 1 FROM hosted_linq_delivery receipt

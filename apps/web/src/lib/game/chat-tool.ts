@@ -139,7 +139,7 @@ export async function readGameRecapChatMessages(input: {
     containerMemberId: input.containerMemberId,
     playerNamesByMemberId: input.material.validation.playerNamesByMemberId,
     since: input.material.validation.startedAt,
-    // The game's own chat: a recap written later never reads the next game's.
+    // Bound transcript by this game's dates; concurrent tasks still share the room.
     until: input.material.validation.settledAt ?? undefined,
   });
 }

@@ -8,7 +8,7 @@ import { appendPreparedHostedMailboxEnvelopeTx, prepareHostedMailboxEnvelopeAppe
 import { assertHostedAssistantNotificationRouteAuthority, bindHostedAssistantNotificationDestination, resolveHostedAssistantNotificationDestination } from "../hosted-routing/assistant-notification-destination";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
-import { findExistingGameChat, requireExactChat } from "./chat-membership";
+import { bindPairGameChat, findExistingGameChat, requireExactChat } from "./chat-membership";
 import { prepareGameChatBootstrap, reconcileFrozenGameChatBootstrapReceipt } from "./chat-bootstrap";
 import { gameChatLifecycleEventId, gameMissedDayEventId, markGameChatGenerationQueuedTx, type GameChatLifecycleKind } from "./chat-lifecycle-receipt";
 import { isGameOn } from "./access";
@@ -211,7 +211,7 @@ async function deliverGameMissedDayLifecycle(gameId: string, memberId: string, f
   const players = game?.players.map((player) => player.memberId) ?? [];
   const statuses = lifecycleStatuses("missed");
   if (!game || !game.chatContainerMemberId || !statuses.includes(game.status) || players.length !== 2 || !players.includes(memberId)) return false;
-  const { readGameChatState } = await import("./service");
+  const { readGameChatState, readGameMissedCheckInBatch } = await import("./service");
   const state = await readGameChatState(game.chatContainerMemberId, players);
   const shared = state.games.find((candidate) => candidate.id === gameId);
   if (!shared) return false;
@@ -227,7 +227,16 @@ async function deliverGameMissedDayLifecycle(gameId: string, memberId: string, f
     playerNamesByMemberId: shared.players.map((candidate) => ({ memberId: candidate.memberId, name: candidate.firstName })),
     since: new Date(`${firstMissedDate}T00:00:00.000Z`),
   });
-  const instructions = buildGameMissedDayInstructions({ playerName: player.firstName, firstMissedDate, missedDates: run?.missedDates ?? [firstMissedDate], transcript });
+  const active = state.games.filter((candidate) => candidate.status === "live");
+  const misses = active.length > 1 ? await readGameMissedCheckInBatch(active.map((candidate) => candidate.id), firstMissedDate) : [];
+  const missedGames = misses.flatMap((miss) => {
+    const candidate = active.find((game) => game.id === miss.gameId);
+    const person = candidate?.players.find((player) => player.memberId === miss.memberId);
+    return candidate && person ? [{ gameId: candidate.id, playerName: person.firstName,
+      task: candidate.terms.tasks.find((task) => task.seat === person.seat)?.text ?? "", missedDates: miss.missedDates }] : [];
+  });
+  const instructions = buildGameMissedDayInstructions({ playerName: player.firstName, firstMissedDate, missedDates: run?.missedDates ?? [firstMissedDate], transcript,
+    ...(active.length > 1 ? { missedGames } : {}) });
   return deliverCurrentGameChatLifecycle({ boundOnly: true, eventId: gameMissedDayEventId(gameId, memberId, firstMissedDate), game, gameId, instructions, kind: "missed", players, prisma, statuses });
 }
 
@@ -242,17 +251,13 @@ async function deliverCurrentGameChatLifecycle(input: {
   prisma: PrismaClient;
   statuses: string[];
 }): Promise<boolean> {
-  const { boundOnly, eventId, game, gameId, instructions, kind, players, prisma, statuses } = input;
+  const { boundOnly, eventId, game, gameId, instructions, kind, players, prisma } = input;
   const identities = await Promise.all(players.map((memberId) => readHostedMemberIdentity({ memberId, prisma })));
   const phones = identities.flatMap((identity) => identity?.phoneNumberVerifiedAt && identity.phoneNumber ? [identity.phoneNumber] : []);
   if (phones.length !== 2 || new Set(phones).size !== 2) throw new Error("Game chat requires verified players.");
   let containerMemberId = game.chatContainerMemberId;
   if (!containerMemberId) {
-    containerMemberId = await findExistingGameChat(players, phones);
-    if (containerMemberId) {
-      const bound = await prisma.game.updateMany({ where: { id: gameId, status: { in: statuses }, chatContainerMemberId: null }, data: { chatContainerMemberId: containerMemberId } });
-      if (bound.count !== 1) return false;
-    }
+    containerMemberId = await bindPairGameChat(gameId, players, await findExistingGameChat(players, phones));
   }
   const destination = containerMemberId ? await resolveHostedAssistantNotificationDestination({ memberId: containerMemberId, prisma }) : null;
   if (!destination) return boundOnly ? false : (await prepareGameChatBootstrap(gameId, eventId, instructions)) !== null;

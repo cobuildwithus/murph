@@ -30,6 +30,13 @@ describe("game photo accepted-source bridge", () => {
     authorize.mockResolvedValue({ actor: "player_synthetic", wake: wake() });
   });
   afterEach(() => vi.useRealTimers());
+  it("does not dismiss another game's pending offer", async () => {
+    m.profile.mockResolvedValue({ chatPhotoIntroducedAt: now, chatPhotoOffer: offer });
+    const request = input("dismiss", false);
+    expect(await handleGameChatPhoto({ ...request, photo: { ...request.photo, gameId: "another_game" } })).toMatchObject({ status: "rejected" });
+    expect(m.update).not.toHaveBeenCalled();
+    expect(await handleGameChatPhoto(request)).toMatchObject({ status: "ok", photoOutcome: "dismissed" });
+  });
   it("offers once per person and stores one exact photo without downloading or posting", async () => {
     expect(await handleGameChatPhoto(input())).toEqual({ status: "ok", photoOutcome: "offer" });
     expect(m.update).toHaveBeenCalledWith({ where: { memberId: "player_synthetic" }, data: { chatPhotoIntroducedAt: now, chatPhotoOffer: offer } });

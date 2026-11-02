@@ -71,7 +71,7 @@ const rawPhotoArguments = hostedGamePhotoSchema.extend({ messageRef: z.string().
 const rawUpdateArguments = z.object({ messageRef: z.string().min(1).max(128), operation: z.unknown(), gameId: z.unknown(), proposalId: z.unknown().optional(), date: z.unknown().optional(), expectedTermsVersion: z.unknown().optional(), change: z.unknown().optional() }).strict().transform((value, ctx) => {
   const { messageRef, ...update } = value
   const parsed = hostedGameUpdateSchema.safeParse(update)
-  if (!parsed.success) { ctx.addIssue({ code: 'custom', message: 'Invalid game change operation' }); return z.NEVER }
+  if (!parsed.success) { ctx.addIssue({ code: 'custom', message: 'Name the gameId from read_game and supply the fields for this operation. If the game is unclear, ask which task.' }); return z.NEVER }
   return { messageRef, update: parsed.data }
 })
 export type GameDynamicRequest = { action: 'read_game'; messageRef?: string } | { action: 'update_game'; messageRef: string; update: HostedGameUpdate } | { action: 'game_photo'; messageRef: string; photo: HostedGamePhoto } | { action: 'write_recap'; recap: HostedGameRecap } | { action: 'game_lore'; operation: 'read' | 'replace'; content?: string }
@@ -184,7 +184,11 @@ async function executeOrdinaryGameTool(input: {
   const origin = { kind: 'accepted_input' as const, assistantInputId }
   try {
     const result = await tool.request(input.request.action === 'read_game' ? { action: 'read_game', origin } : input.request.action === 'game_photo' ? { action: 'game_photo', origin, photo: input.request.photo } : { action: 'update_game', origin, update: input.request.update })
-    return toolTextResult(true, JSON.stringify(result))
+    const games = 'state' in result.result ? result.result.state?.games ?? [] : []
+    const selection = games.filter(game => game.status === 'live' || game.status === 'negotiating').length > 1
+      ? '\nSeveral games share this chat. Select the exact gameId by its task words for every photo, day correction or proposal. If the current request or agreement could mean more than one game, ask which task before making any move. Never choose the newest or first game by default. Discuss progress per named task; lore remains shared by the pair.'
+      : ''
+    return toolTextResult(true, JSON.stringify(result) + selection)
   } catch (error) {
     return toolTextResult(false, 'The game action could not be confirmed. Read the game to check its current state before claiming a change applied.', 'handler_exception', error)
   }

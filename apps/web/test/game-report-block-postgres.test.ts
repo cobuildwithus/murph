@@ -84,12 +84,14 @@ describe.skipIf(!runPostgresProof)("weekly game report and block", () => {
     const leo = await member("Leo");
     const ava = await member("Ava");
     const gameId = await live(leo, ava);
+    const secondGame = await live(leo, ava);
     await words(leo, gameId, "Leo day one");
     await words(ava, gameId, "Ava day one");
 
     expect(await ok(leo, { memberId: ava, type: "block" })).toBeNull();
 
-    expect(await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } })).toMatchObject({ status: "void", liveRosterKey: null, result: null });
+    expect(await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } })).toMatchObject({ status: "void", result: null });
+    expect(await getPrisma().game.findUniqueOrThrow({ where: { id: secondGame } })).toMatchObject({ status: "void", result: null, chatContainerMemberId: null });
     expect(await getPrisma().gameTicket.count({ where: { gameId } })).toBe(0);
     expect(await getPrisma().gameEvent.findFirst({ where: { gameId, type: "blocked" } })).toMatchObject({ actor: leo });
     // Ava sees exactly what a player leaving looks like: no one told her it was a block.

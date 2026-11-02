@@ -46040,6 +46040,103 @@ describeRealCodex('real Codex game bootstrap e2e', () => {
 })
 
 describeRealCodex('real Codex game progress and photo journeys', () => {
+  it('game concurrent missed tasks deliver one combined daily message', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-many-games-missed-e2e-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    const { buildGameMissedDayInstructions } = await import('@murphai/hosted-execution/runtime-control')
+    const events: unknown[] = []
+    const scope = { gameId: 'game_walking', eventId: 'game-missed:game_walking:player_alex:2030-03-04',
+      memberId: 'player_alex', firstMissedDate: '2030-03-04', pairFingerprint: '0123456789abcdef0123456789abcdef' }
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
+      await mkdir(path.join(workingDirectory, 'games'), { recursive: true })
+      await writeFile(path.join(workingDirectory, 'games', `lore-${scope.pairFingerprint}.md`), '# Alex & Sam\n\n- Used bit: the couch won a medal.\n', 'utf8')
+      const modelTarget = createAssistantModelTarget({ approvalPolicy: 'never',
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND), codexHome: permissionHome.codexHome,
+        model: config.model, modelProvider: config.modelProvider, provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write' })
+      if (!modelTarget) throw new Error('Expected real Codex target.')
+      const result = await sendAssistantNotificationLocal({
+        onTraceEvent: (event) => events.push(event.rawEvent),
+        actorId: null, bindingDeliveryTarget: 'synthetic-game-thread', channel: 'linq',
+        deliveryDispatchMode: 'queue-only', deliveryTarget: 'synthetic-game-thread',
+        deliveryIdempotencyKey: scope.eventId, deliveryDedupeToken: scope.eventId,
+        executionContext: { hosted: { defaultTarget: modelTarget, gameMissedCheckInScope: scope,
+          memberId: 'synthetic-group', userEnvKeys: [] } },
+        identityId: null, instructions: buildGameMissedDayInstructions({ playerName: 'Alex',
+          firstMissedDate: scope.firstMissedDate, missedDates: [scope.firstMissedDate], transcript: [],
+          missedGames: [{ gameId: 'game_walking', playerName: 'Alex', task: 'Walk for 20 minutes', missedDates: [scope.firstMissedDate] },
+            { gameId: 'game_reading', playerName: 'Sam', task: 'Read for 20 minutes', missedDates: [scope.firstMissedDate] }] }),
+        responsePolicy: { kind: 'game_missed_check_in', ...scope }, threadId: 'synthetic-game-thread', threadIsDirect: false,
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
+        turnTrigger: 'manual-deliver', vault: workingDirectory, workingDirectory,
+      })
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      process.stdout.write(JSON.stringify({ scenario: 'concurrent-games-daily-batch', reply: result.response, intents: intents.length }) + '\n')
+      expect(result.decision.kind).toBe('send_message')
+      expect(intents).toHaveLength(1)
+      expect(intents[0]?.message).toBe(result.response)
+      expect(result.response).toMatch(/Alex/iu)
+      expect(result.response).toMatch(/Sam/iu)
+      expect(result.response).toMatch(/walk/iu)
+      expect(result.response).toMatch(/read|book|page/iu)
+      expect(result.response).not.toMatch(/score|game_walking|game_reading|why|\?/iu)
+      expect((result.response ?? '').length).toBeLessThan(400)
+    } catch (error) {
+      process.stdout.write(JSON.stringify({ scenario: 'concurrent-games-daily-batch-failure', messages: readCompletedAgentMessages(events) }) + '\n')
+      throw error
+    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths]) }
+  }, 360_000)
+
+  it.each(['named', 'ambiguous'] as const)('game chat concurrent tasks selects safely: %s', async (selection) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-many-games-e2e-'))
+    const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    const inputId = 'ain_' + 'd'.repeat(32)
+    const calls: Array<import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest> = []
+    const games: import('@murphai/hosted-execution/runtime-control').HostedGameChatState['games'] = ['Walk', 'Read'].map((task, index) => ({
+      id: index ? 'game_reading' : 'game_walking', status: 'live', lengthDays: 7, startsOn: '2030-03-04',
+      terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: `${task} for 20 minutes` }, { seat: 1, text: `${task} for 20 minutes` }], schedule: { days: [0,1,2,3,4] }, stakes: [] },
+      players: [{ memberId: 'player_alex', seat: 0, firstName: 'Alex', dayOne: '2030-03-04', timeZone: 'UTC' }, { memberId: 'player_sam', seat: 1, firstName: 'Sam', dayOne: '2030-03-04', timeZone: 'UTC' }],
+      pendingChange: null, changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, editableFromDay: 2 },
+      progress: { checkedAt: '2030-03-05T12:00:00Z', players: [{ memberId: 'player_alex', score: 1, target: 5, currentDayIndex: 1, currentEntryId: null, attemptsRemaining: 2, days: [{ dayIndex: 0, date: '2030-03-04', status: 'posted' }] }] },
+    }))
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({ assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' }, conversationScope: 'group',
+          currentLocalDate: '2030-03-05', currentInstant: '2030-03-05T12:00:00.000Z', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null }),
+        dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL], env: config.env,
+        hostedToolContext: { computerToolsAvailable: false, vaultFileSendAvailable: false,
+          groupTool: { request: async (request) => {
+            calls.push(request)
+            if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', state: { games } } }
+            if (request.action !== 'update_game') throw new Error('Unexpected action')
+            return { action: 'update_game', result: { status: 'ok', dayOutcome: { date: '2030-03-04', status: 'marked_incomplete' } } }
+          } }, currentUserActionScope: () => ({ conversationId: 'synthetic-room', inboundMailboxItemIds: [], recipientKey: 'synthetic-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-session', conversationScope: 'group' }),
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send.') } },
+        model: config.model, modelProvider: config.modelProvider, reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        prompt: `Current accepted message from Alex (Occurred at: 2030-03-05T12:00:00Z; Message ref: ${inputId}): Murph, mark yesterday incomplete${selection === 'named' ? ' in our reading game' : ''}.`,
+      })
+      process.stdout.write(JSON.stringify({ scenario: `concurrent-games-${selection}`, reply: result.finalMessage, actions: calls.map(call => call.action) }) + '\n')
+      if (selection === 'named') {
+        expect(calls.map(call => call.action)).toEqual(['read_game', 'update_game'])
+        expect(calls[1]).toMatchObject({ origin: { assistantInputId: inputId }, update: { operation: 'mark_incomplete', gameId: 'game_reading', date: '2030-03-04' } })
+        expect(result.finalMessage).toMatch(/incomplete|not done/iu)
+        expect(result.finalMessage).not.toContain('?')
+      } else {
+        expect(calls.map(call => call.action)).toEqual(['read_game'])
+        expect(result.finalMessage).toContain('?')
+        expect(result.finalMessage).toMatch(/walk|read|which/iu)
+        expect(result.finalMessage).not.toMatch(/marked|updated|saved/iu)
+      }
+      expect(result.finalMessage).not.toMatch(/game_reading|game_walking|score|Sam.*incomplete/iu)
+    } finally { await rm(workingDirectory, { force: true, recursive: true }) }
+  }, 720_000)
+
   it.each([
     { name: 'game chat photo first introduction asks once without saving', kind: 'offer' },
     { name: 'game chat photo repeated unsolicited photo stays quiet', kind: 'quiet' },

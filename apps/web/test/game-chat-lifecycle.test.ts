@@ -3,16 +3,16 @@ const m = vi.hoisted(() => ({
   event: vi.fn(), receipts: vi.fn(), frozen: vi.fn(), recover: vi.fn(), receiptUpdate: vi.fn(), game: vi.fn(), current: vi.fn(), bind: vi.fn(),
   state: vi.fn(), rematchNotice: vi.fn(), identity: vi.fn(), discover: vi.fn(), exact: vi.fn(), bootstrap: vi.fn(), proposal: vi.fn(),
   destination: vi.fn(), mailbox: vi.fn(), prepare: vi.fn(), append: vi.fn(), signal: vi.fn(), route: vi.fn(),
-  reserveMissed: vi.fn(), recapMaterial: vi.fn(), recapMessages: vi.fn(), transcript: vi.fn(),
+  missedBatch: vi.fn(), reserveMissed: vi.fn(), recapMaterial: vi.fn(), recapMessages: vi.fn(), transcript: vi.fn(),
 }));
 vi.mock("../src/lib/prisma", () => {
   const db = { gameEvent: { findUnique: m.event }, hostedLinqDelivery: { findMany: (input: { where: { payloadSchema?: string } }) => input.where.payloadSchema ? m.frozen(input) : m.receipts(input), updateMany: m.receiptUpdate }, game: { findUnique: m.game, findFirst: m.current, updateMany: m.bind } };
   return { getPrisma: () => ({ ...db, $transaction: async (fn: (tx: typeof db) => unknown) => fn(db) }) };
 });
-vi.mock("../src/lib/game/service", () => ({ readGameChatState: m.state, readGameRematchNotice: m.rematchNotice,
+vi.mock("../src/lib/game/service", () => ({ readGameChatState: m.state, readGameMissedCheckInBatch: m.missedBatch, readGameRematchNotice: m.rematchNotice,
   readGameRecapMaterial: m.recapMaterial, reserveDueGameMissedDayCheckIns: m.reserveMissed }));
 vi.mock("../src/lib/game/chat-tool", () => ({ readGameRecapChatMessages: m.recapMessages, readGameChatTranscript: m.transcript }));
-vi.mock("../src/lib/game/chat-membership", () => ({ findExistingGameChat: m.discover, requireExactChat: m.exact }));
+vi.mock("../src/lib/game/chat-membership", () => ({ bindPairGameChat: async (_id: string, _players: string[], candidate: string | null) => candidate, findExistingGameChat: m.discover, requireExactChat: m.exact }));
 vi.mock("../src/lib/game/chat-bootstrap", () => ({ prepareGameChatBootstrap: m.bootstrap, reconcileFrozenGameChatBootstrapReceipt: m.recover }));
 vi.mock("../src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: m.proposal }));
 vi.mock("../src/lib/hosted-onboarding/hosted-member-identity-store", () => ({ readHostedMemberIdentity: m.identity }));
@@ -36,6 +36,7 @@ describe("durable game chat lifecycle", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     m.reserveMissed.mockResolvedValue(0);
+    m.missedBatch.mockResolvedValue([{ gameId: "game", memberId: "person-a", missedDates: ["2030-03-03"] }, { gameId: "second-game", memberId: "person-b", missedDates: ["2030-03-03"] }]);
     m.receipts.mockResolvedValue([receipt]); m.frozen.mockResolvedValue([]); m.recover.mockResolvedValue(true); m.receiptUpdate.mockResolvedValue({ count: 1 });
     m.game.mockResolvedValue(game); m.current.mockResolvedValue({ id: "game" }); m.bind.mockResolvedValue({ count: 1 });
     m.state.mockResolvedValue({ games: [{ id: "game", status: "live", lengthDays: 7, startsOn: null, terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: "Read a chapter" }, { seat: 1, text: "Read a chapter" }], schedule: { days: [0, 1, 2, 3, 4] }, stakes: [] }, players: players.map((memberId, seat) => ({ memberId, seat, firstName: seat ? "Sam" : "Alex", dayOne: "2030-03-04", timeZone: seat ? "Pacific/Auckland" : "America/Los_Angeles" })), pendingChange: null }] });
@@ -74,6 +75,20 @@ describe("durable game chat lifecycle", () => {
     expect(notification.instructions).toContain("murph.write_recap");
     expect(notification.instructions).toContain("The bounded room transcript.");
     expect(m.discover).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
+  });
+  it("batches daily misses across tasks and players into one shared turn", async () => {
+    const state = await m.state();
+    state.games[0].progress = { players: [{ memberId: "person-a", days: [{ date: "2030-03-03", status: "missed" }] }] };
+    state.games.push({ ...state.games[0], id: "second-game", terms: { ...state.games[0].terms, tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Walk" }] },
+      progress: { players: [{ memberId: "person-b", days: [{ date: "2030-03-03", status: "missed" }] }] } });
+    m.receipts.mockResolvedValue([{ ...receipt, template: "game_missed", sourceRef: "game:person-a:2030-03-03", idempotencyKey: "hash:game-missed:game:person-a:2030-03-03" }]);
+    expect(await drainGameChatLifecycle({ now })).toEqual({ attempted: 1, queued: 1, deferred: 0 });
+    expect(m.append).toHaveBeenCalledTimes(1);
+    const instructions = m.prepare.mock.calls[0][0].envelope.notification.instructions;
+    expect(instructions).toContain("one daily check-in");
+    expect(instructions).toContain('"task":"Walk"');
+    expect(instructions).toContain('"task":"Read a chapter"');
+    expect(instructions).toContain('"playerName":"Sam"');
   });
   it("queues one skippable missed-day turn in the bound room", async () => {
     m.receipts.mockResolvedValue([{ ...receipt, template: "game_missed", sourceRef: "game:person-a:2030-03-03", idempotencyKey: "hash:game-missed:game:person-a:2030-03-03" }]);

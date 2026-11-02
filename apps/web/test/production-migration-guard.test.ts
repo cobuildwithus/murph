@@ -678,6 +678,22 @@ describe("hosted web production migration guard", () => {
     }
   });
 
+  test("limits many-game compatibility to the two obsolete roster guards", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "game-many-migration-"));
+    const migrationId = "20261101230000_game_many_per_pair";
+    try {
+      const directory = path.join(root, migrationId);
+      await mkdir(directory);
+      const sql = await readFile(path.join(appRoot, "prisma/migrations", migrationId, "migration.sql"), "utf8");
+      await writeFile(path.join(directory, "migration.sql"), sql);
+      assert.deepEqual(await findHostedWebPrismaPredeployDestructiveMigrations(root), []);
+      await writeFile(path.join(directory, "migration.sql"), sql + '\nALTER TABLE "game" DROP COLUMN "terms";');
+      assert.equal((await findHostedWebPrismaPredeployDestructiveMigrations(root)).length, 1);
+      await writeFile(path.join(directory, "migration.sql"), sql + '\nDROP INDEX "unrelated_index";');
+      assert.equal((await findHostedWebPrismaPredeployDestructiveMigrations(root)).length, 1);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   test("limits negotiation compatibility to the exact reviewed game constraint expansion", async () => {
     const migrationsDir = await mkdtemp(path.join(tmpdir(), "hosted-web-prisma-migrations-"));
     const migrationId = "20261022071000_game_negotiation";
