@@ -64,9 +64,11 @@ function numberOrNull(value: unknown): number | null {
 }
 
 function mealName(attributes: Record<string, unknown>): string | null {
-  for (const value of [attributes.mealName, attributes.dishName, attributes.title, attributes.note]) {
+  for (const value of [attributes.title, attributes.mealName, attributes.dishName, attributes.note]) {
     if (typeof value !== "string") continue;
-    const text = value.trim().replace(/\s+/gu, " ");
+    const text = value.trim().replace(/\s+/gu, " ")
+      .replace(/^(?:(?:breakfast|lunch|dinner|snack)\s*:\s*|estimated\b\s*:?\s*|photo shows\b\s*:?\s*|retained image(?: reviewed)?\s*:\s*)+/iu, "")
+      .split(/;| - /u, 1)[0]!.trim();
     if (!text || text.toLowerCase() === "meal") continue;
     return text.length > 120 ? `${text.slice(0, 119)}…` : text;
   }

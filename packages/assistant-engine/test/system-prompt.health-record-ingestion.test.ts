@@ -26,6 +26,19 @@ function buildPrompt(): string {
 }
 
 describe('assistant system prompt health record ingestion invariant', () => {
+  it('separates dish names from notes and excludes non-food photos across loaded guidance', async () => {
+    const prompt = buildPrompt()
+    expect(prompt).toContain('2–5 words, at most 40 characters, sentence case')
+    expect(prompt).toContain('Keep descriptions, portions, places, brands, and uncertainty in note')
+    expect(prompt).toContain('non-food images are not meals')
+    const food = await readFile(path.join(resolveAssistantSkillsRoot(), 'food-journal', 'SKILL.md'), 'utf8')
+    const automatic = await readFile(path.join(resolveAssistantSkillsRoot(), 'automatic-meal-capture', 'SKILL.md'), 'utf8')
+    expect(food).toContain('--name "<short dish name>"')
+    expect(food).toContain('meal edit --name')
+    expect(automatic).toContain('An imported photo stub is not evidence of consumption')
+    expect(automatic).not.toContain('record only that the retained image was')
+  })
+
   it('requires uploaded medical records to be structured or durably preserved instead of becoming memory-only notes', () => {
     const prompt = buildPrompt()
 

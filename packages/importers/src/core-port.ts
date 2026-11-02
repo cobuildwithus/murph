@@ -15,6 +15,7 @@ export interface DocumentImportPayload {
 }
 
 export interface MealImportPayload {
+  name?: string;
   vaultRoot?: string;
   photoPath?: string;
   audioPath?: string;

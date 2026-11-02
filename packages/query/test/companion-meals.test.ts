@@ -65,3 +65,26 @@ it("projects only explicit upload links, preserving them through encrypted core 
   const decoded = assembleBrowserVaultCoreReplica(parseBrowserVaultCoreShard(JSON.parse(JSON.stringify(shards.core))));
   expect(decoded.meals?.days[0]?.meals.map(value => value.uploadId)).toEqual([uploaded.attributes.uploadId, null, null]);
 });
+
+it.each([
+  [{ title: "Salmon rice bowl", note: "Large serving from a cafe; portion uncertain" }, "Salmon rice bowl"],
+  [{ title: "Meal", note: "Lunch: Estimated lentil soup; two cups" }, "lentil soup"],
+  [{ note: "Photo shows baked tofu - portion uncertain" }, "baked tofu"],
+  [{ note: "Snack: Retained image reviewed: apple slices; small plate" }, "apple slices"],
+  [{ note: "breakfast: Photo shows porridge" }, "porridge"],
+  [{ note: "Dinner: Estimated; no useful identity" }, null],
+  [{ title: "Meal", note: "  " }, null],
+  [{ title: "Meal", mealName: "Estimated noodle soup - one bowl" }, "noodle soup"],
+  [{ title: "Meal", note: "x".repeat(130) }, `${"x".repeat(119)}…`],
+])("prefers canonical dish names and cleans legacy labels without mutating meals: %j", (attributes, expected) => {
+  const record = meal("meal_name", "2026-11-01T12:00:00Z", { calories: 620, proteinGrams: 28 });
+  Object.assign(record.attributes, attributes);
+  record.attributes.uploadId = "synthetic-capture";
+  const before = structuredClone(record);
+  const projection = buildCompanionMealsProjection(createVaultReadModel({
+    vaultRoot: "browser://fixture", metadata: { timezone: "UTC" }, entities: [record],
+  }));
+  expect(projection?.days[0]?.meals[0]).toMatchObject({ name: expected, calories: 620, proteinGrams: 28, uploadId: "synthetic-capture" });
+  expect(projection?.days[0]).toMatchObject({ calories: 620, proteinGrams: 28, mealCount: 1 });
+  expect(record).toEqual(before);
+});

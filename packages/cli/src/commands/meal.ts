@@ -54,6 +54,22 @@ import {
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 import { publicValidationIssue } from './public-validation-issue.js'
 
+const mealNameGuidance = 'Use a sentence-case dish name, 2–5 words and at most 40 characters. No meal-type prefix, place/brand (unless part of the dish), uncertainty, or photo-review wording. Put portions, places, descriptions, and uncertainty in note.'
+const mealNameSchema = z.string().trim().describe(mealNameGuidance)
+
+function validateMealName(name: string | undefined): string | undefined {
+  if (name === undefined) return undefined
+  if (!name || name.length > 40 || /^(?:(?:breakfast|lunch|dinner|snack)\s*:|estimated\b|photo shows\b|retained image\b|approximately\b|(?:about|roughly|likely|probably|possibly|maybe|uncertain|confidence)\b)/iu.test(name)) {
+    throw new VaultCliError('invalid_option', 'Meal name must name the dish in at most 40 characters.', {
+      hint: `${mealNameGuidance} Retry with a short name; no meal was written.`,
+      issues: [publicValidationIssue({ code: 'custom' }, ['name'])],
+      retryable: false,
+      stage: 'validation',
+    })
+  }
+  return name
+}
+
 const mealIngredientsSchema = z
   .array(z.string().trim().min(1).max(4000))
   .max(100)
@@ -81,6 +97,7 @@ const mealInputPayloadSchema = z
     photoPath: pathSchema.optional(),
     audio: pathSchema.optional(),
     audioPath: pathSchema.optional(),
+    name: mealNameSchema.optional(),
     note: z.string().trim().min(1).optional(),
     occurredAt: occurredAtOptionSchema.optional(),
     source: eventSourceSchema.optional(),
@@ -90,6 +107,7 @@ const mealInputPayloadSchema = z
   .strict()
 
 type StructuredMealPayload = {
+  name?: string
   photo?: string
   audio?: string
   note?: string
@@ -103,7 +121,8 @@ const mealInputPayloadShapeDescription = [
   'Structured payload object keys:',
   '`photo` or `photoPath` for an optional meal photo path;',
   '`audio` or `audioPath` for an optional audio note path;',
-  '`note`, `occurredAt`, and `source` for the saved event fields;',
+  '`name` for the short dish name; `note` for description, portions, places, and uncertainty;',
+  '`occurredAt` and `source` for the saved event fields;',
   '`ingredients` as a string array;',
   '`nutrition` as `{ totals?: { calories?, proteinGrams?, carbsGrams?, fatGrams?, fiberGrams?, waterGrams? }, micros?: { <supported bounded nutrient keys> }, provenance?: { source, confidence?, sourceDetail? } }`.',
 ].join(' ')
@@ -329,6 +348,7 @@ async function loadStructuredMealPayload(inputFile: string): Promise<StructuredM
   return {
     photo: parsed.data.photo ?? parsed.data.photoPath,
     audio: parsed.data.audio ?? parsed.data.audioPath,
+    name: parsed.data.name,
     note: parsed.data.note,
     occurredAt: parsed.data.occurredAt,
     source: parsed.data.source,
@@ -455,6 +475,7 @@ const mealNutrientTotalsResultSchema = z.object({
 })
 
 const mealAddTypedOptionShape = {
+  name: mealNameSchema.optional(),
   withDailyTotals: z.boolean().optional().describe(
     'After saving, return fresh totals and goal context for the saved meal local date. Replaces a separate meal totals --resolve-goals read; does not attach a card or approve numeric suitability. If the read fails the meal is still saved: retry only meal totals, never meal add.',
   ),
@@ -469,7 +490,7 @@ const mealAddTypedOptionShape = {
     .trim()
     .min(1)
     .optional()
-    .describe('Optional freeform meal description when no media is available.'),
+    .describe('Meal description and notes: portions, places, brands, and uncertainty. Keep the short dish name in name.'),
   occurredAt: occurredAtOptionSchema
     .optional()
     .describe('Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
@@ -527,11 +548,12 @@ async function runMealAdd(
   const payload = inputFile ? await loadStructuredMealPayload(inputFile) : undefined
   const vaultRoot = String(options.vault ?? '')
   const photoPath =
-    typeof options.photo === 'string' ? options.photo : payload?.photo
+    stringOption(options.photo) ?? payload?.photo
   const audioPath =
-    typeof options.audio === 'string' ? options.audio : payload?.audio
+    stringOption(options.audio) ?? payload?.audio
+  const name = validateMealName(stringOption(options.name) ?? payload?.name)
   const note =
-    typeof options.note === 'string' ? options.note : payload?.note
+    stringOption(options.note) ?? payload?.note
   const occurredAtInput =
     typeof options.occurredAt === 'string'
       ? options.occurredAt
@@ -569,9 +591,10 @@ async function runMealAdd(
   const importers = (await loadImportersRuntimeModule()).createImporters()
   const mealInput = {
     vaultRoot,
-    ...(photoPath ? { photoPath } : {}),
-    ...(audioPath ? { audioPath } : {}),
-    ...(note ? { note } : {}),
+    photoPath,
+    audioPath,
+    name,
+    note,
     source,
     ingredients,
     nutrition,
@@ -595,6 +618,7 @@ async function runMealAdd(
     photoPath: result.photo?.relativePath ?? null,
     audioPath: result.audio?.relativePath ?? null,
     manifestFile: result.manifestPath,
+    name: name ?? null,
     note: result.event.note ?? note ?? null,
     source: result.event.source ?? null,
     ingredients: result.event.ingredients ?? null,
@@ -671,7 +695,7 @@ function buildTotalsOnlyDailyNutritionCard(
 export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
   registerArtifactBackedEntityGroup(cli, {
     commandName: 'meal',
-    description: 'Meal capture commands routed through the core write API.',
+    description: 'Log consumed food or drink with a short dish name and separate descriptive note. Do not log a meal from a non-food photo or food/drink the member did not consume.',
     primaryAction: {
       name: 'add',
       description:
@@ -702,7 +726,7 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
         },
       ],
       hint:
-        'Use typed flags for ordinary meal logs; add --with-daily-totals when preparing a daily nutrition card to save and read fresh totals/goal context in one call. The save result is authoritative. Reuse dailyTotals.data when available; a non-null dailyTotals.totalsOnlyCard is the complete no-goals card for that day. If unavailable, retry only meal totals, never the save. Use meal import-json --input @meal.json or meal import-json --input - for a structured payload; explicit flags override payload fields.',
+        'Supply --name for the short dish name and --note for description, portions, places, and uncertainty. Do not log non-food photos or food/drink that was not consumed. Use typed flags for ordinary meal logs; add --with-daily-totals when preparing a daily nutrition card to save and read fresh totals/goal context in one call. The save result is authoritative. Reuse dailyTotals.data when available; a non-null dailyTotals.totalsOnlyCard is the complete no-goals card for that day. If unavailable, retry only meal totals, never the save. Use meal import-json --input @meal.json or meal import-json --input - for a structured payload; explicit flags override payload fields.',
       args: z.object({}),
       options: mealAddTypedOptionShape,
       output: mealAddWithDailyTotalsResultSchema,
@@ -893,6 +917,7 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
         description:
           'Edit one meal event from typed fields.',
         options: {
+          name: mealNameSchema.optional(),
           timeZone: timeZoneSchema
             .optional()
             .describe('Replace the explicit IANA time zone, such as America/New_York.'),
@@ -912,6 +937,7 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
         buildPatch(options) {
           const set: string[] = []
           const clear: string[] = []
+          appendTypedSet(set, 'title', validateMealName(stringOption(options.name)))
           appendTypedSet(set, 'ingredients', stringArrayOption(options.ingredient))
           appendTypedSet(set, 'nutrition.totals.calories', numberOption(options.nutritionCalories))
           appendTypedSet(set, 'nutrition.totals.proteinGrams', numberOption(options.nutritionProteinGrams))

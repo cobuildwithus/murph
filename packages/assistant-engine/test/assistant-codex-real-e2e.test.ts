@@ -1973,6 +1973,58 @@ describeRealCodex('real model canonical production journeys', () => {
       await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths])
     }
   }, 600_000)
+  it('real model meal dish names separate notes and exclude non-food observations', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-meal-names-e2e-'))
+    const vaultRoot = path.join(root, 'vault')
+    const binDirectory = path.join(root, 'bin')
+    const commandLogPath = path.join(root, 'commands.log')
+    let providerRequests = 0
+    try {
+      await initializeVault({ vaultRoot, timezone: 'UTC' })
+      await materializeFocusedActivityProjectionCli({ binDirectory, commandLogPath, vaultRoot })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildDirectConversationDeveloperInstructions(false, null, [], '2026-08-29T13:00:00.000Z'),
+        env: config.env, fixtureBinDirectory: binDirectory, groupConversation: false,
+        model: config.model, modelProvider: config.modelProvider,
+        onProviderRequestStarted: () => { providerRequests += 1 },
+        reasoningEffort: 'low', sandbox: 'workspace-write', vaultRoot, workingDirectory: root,
+        prompt: 'Please log these four meals I ate yesterday: breakfast was a bowl of cinnamon porridge at home; lunch was a roasted beet and chickpea salad from Harbor Cafe; snack was a peach yogurt smoothie, about one glass; dinner was baked cod with potatoes at a restaurant. Do not estimate nutrition or show numbers. Keep the portion and place details. Separately, an image I mentioned showed a ceramic vase on a table, not anything I ate or drank.',
+      })
+      expect(providerRequests).toBeGreaterThan(0)
+      const meals = (await readVaultRawTolerant(vaultRoot)).events.filter(event => event.kind === 'meal')
+      expect(meals).toHaveLength(4)
+      const names: string[] = []
+      for (const meal of meals) {
+        const data = meal.attributes
+        expect(typeof data.title).toBe('string')
+        const name = String(data.title)
+        expect(data.title).not.toBe('Meal')
+        expect(name.length).toBeLessThanOrEqual(40)
+        expect(name.trim().split(/\s+/u).length).toBeGreaterThanOrEqual(2)
+        expect(name.trim().split(/\s+/u).length).toBeLessThanOrEqual(5)
+        expect(data.title).not.toMatch(/^(?:estimated|photo shows|retained image|approximately|breakfast:|lunch:|dinner:|snack:)/iu)
+        expect(data.title).not.toMatch(/Harbor|Cafe|restaurant|vase/iu)
+        expect(data.note).toBeTruthy()
+        expect(data.nutrition).toBeUndefined()
+        names.push(name)
+      }
+      // A batch invocation may contain all four saves. Count canonical effects,
+      // not the number of shell commands chosen by the model.
+      const writes = await Promise.all((await listWriteOperationMetadataPaths(vaultRoot))
+        .map(async relative => JSON.parse(await readFile(path.join(vaultRoot, relative), 'utf8'))))
+      expect(writes.filter(write => write.operationType === 'meal_import')).toHaveLength(4)
+      expect(result.finalMessage).toMatch(/logged|saved|recorded|added/iu)
+      expect(result.finalMessage).not.toMatch(/calories|\bkcal\b|\bgrams\b|couldn['’]t|unable/iu)
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      process.stdout.write(`[meal-name-proof] ${JSON.stringify({ names, mealCount: 4, nonFoodMealCount: 0, reply: result.finalMessage })}\n`)
+    } finally {
+      await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths])
+    }
+  }, 600_000)
   it('real model canonical meal persists across assistant restart', async () => {
     const config = await resolveRealCodexE2eConfig({ productionTransport: true })
     try { await runCanonicalMealRestartJourney({ ...config, onProviderRequestStarted: recordCanonicalProviderRequest }) }

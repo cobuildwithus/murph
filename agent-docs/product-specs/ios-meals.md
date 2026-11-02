@@ -70,8 +70,20 @@ its totals and counts cover all canonical selected meals on that local day.
 Nutrients sum only known estimates; if no meal supplies a nutrient its total is
 null, including calories. A real zero stays zero. `calorieMealCount` distinguishes
 partial from complete calorie coverage. Values are approximate, not targets.
-`name` is a saved short label or shortened note (at most 120 characters); it is
-null when no useful name was recorded. It is never generated during a read.
+`name` prefers the canonical event title written by `meal add/import-json/edit
+--name`: a sentence-case dish name, normally 2–5 words and at most 40 characters.
+Description, portions, places, and uncertainty stay in `note`. The CLI rejects
+long names and leading meal-type, estimation, confidence, or photo-review phrases
+before mutation, with a short-name retry hint. This uses the existing title
+field, not a new canonical schema.
+
+For older meals, projection construction skips the generic `Meal` title, then
+uses legacy mealName/dishName/note fields. It strips leading meal-type prefixes,
+Estimated, Photo shows, and Retained image reviewed phrases, cuts at the first
+semicolon or spaced hyphen, and preserves the existing 120-character legacy
+cap. It returns null when no useful label remains. This deterministic fallback
+never changes the vault or nutrition and never invokes a model. Existing saved
+projections gain the cleanup at their next ordinary runtime refresh.
 `eatenAt` is an ISO instant and `id` is an opaque stable meal/event lookup ID.
 
 `nextCursor` is the last returned day when older days remain, otherwise null.

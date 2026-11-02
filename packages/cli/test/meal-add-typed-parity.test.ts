@@ -148,6 +148,7 @@ test(
     for (const field of [
       'photo',
       'audio',
+      'name',
       'note',
       'occurredAt',
       'source',
@@ -1107,5 +1108,57 @@ test.sequential('structured meal save retains incomplete daily coverage in its c
     assert.deepEqual(saved.dailyTotals.data.totals.fiberGrams, { total: null, mealCount: 0 })
     // Incomplete coverage needs recovery before any card, so none is offered.
     assert.equal(saved.dailyTotals.totalsOnlyCard, null)
+  } finally { await rm(parentRoot, { recursive: true, force: true }) }
+})
+
+
+test.sequential('meal names persist separately through add import and edit without changing totals', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-cli-meal-name-')
+  try {
+    await initializeVault({ vaultRoot })
+    const cli = createMealCli()
+    const payloadPath = path.join(parentRoot, 'meal.json')
+    await writeFile(payloadPath, JSON.stringify({ name: 'Lentil soup', note: 'Two cups from a cafe; estimated portion', nutrition: { totals: { calories: 620 } } }))
+    for (const args of [
+      ['add', '--name', 'Lentil soup', '--note', 'Two cups from a cafe; estimated portion', '--nutrition-calories', '620'],
+      ['import-json', '--input', `@${payloadPath}`],
+    ]) {
+      const saved = requireData((await runInProcessJsonCli<MealAddResult & { name: string }>(cli, ['meal', ...args, '--vault', vaultRoot])).envelope)
+      assert.equal(saved.name, 'Lentil soup')
+      assert.equal(saved.note, 'Two cups from a cafe; estimated portion')
+      const edited = await runInProcessJsonCli<ShowResult>(cli, ['meal', 'edit', saved.mealId, '--name', 'Red lentil soup', '--vault', vaultRoot])
+      assert.equal(edited.exitCode, null)
+      const shown = requireData((await runInProcessJsonCli<ShowResult>(cli, ['meal', 'show', saved.mealId, '--vault', vaultRoot])).envelope)
+      assert.equal(shown.entity.data.title, 'Red lentil soup')
+      assert.equal(shown.entity.data.note, saved.note)
+      assert.deepEqual(shown.entity.data.nutrition, saved.nutrition)
+    }
+  } finally { await rm(parentRoot, { recursive: true, force: true }) }
+})
+
+test.sequential('invalid meal names return actionable validation before add import or edit writes', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-cli-meal-name-invalid-')
+  try {
+    await initializeVault({ vaultRoot })
+    const cli = createMealCli()
+    const saved = await addMeal({ vaultRoot, name: 'Bean tacos', note: 'Two tacos', nutrition: { totals: { calories: 450 } } })
+    const before = await runRawInProcessCli(cli, ['meal', 'show', saved.mealId, '--vault', vaultRoot, '--format', 'json'])
+    const payloadPath = path.join(parentRoot, 'meal.json')
+    for (const name of ['x'.repeat(41), 'Estimated soup', 'Photo shows soup', 'Retained image reviewed: soup', 'Approximately soup', 'Lunch: soup', 'Breakfast: soup', 'Dinner: soup', 'Snack: soup', 'Probably soup']) {
+      await writeFile(payloadPath, JSON.stringify({ name, note: 'One bowl' }))
+      for (const args of [
+        ['add', '--name', name, '--note', 'One bowl'],
+        ['import-json', '--input', `@${payloadPath}`],
+        ['edit', saved.mealId, '--name', name],
+      ]) {
+        const result = await runInProcessJsonCli(cli, ['meal', ...args, '--vault', vaultRoot])
+        assert.equal(result.exitCode, 1)
+        assert.equal(result.envelope.ok, false)
+        if (!result.envelope.ok) assert.match(JSON.stringify(result.envelope.error), /(?:40 characters|name the dish)/u)
+      }
+    }
+    assert.equal(await runRawInProcessCli(cli, ['meal', 'show', saved.mealId, '--vault', vaultRoot, '--format', 'json']), before)
+    const list = requireData((await runInProcessJsonCli<MealListResult>(cli, ['meal', 'list', '--vault', vaultRoot])).envelope)
+    assert.equal(list.count, 1)
   } finally { await rm(parentRoot, { recursive: true, force: true }) }
 })

@@ -120,12 +120,18 @@ nutrition fields:
 
 ```sh
 vault-cli meal add --with-daily-totals --format json \
-  --note "<meal and portion>" --occurred-at "<ISO date/time>" \
+  --name "<short dish name>" --note "<meal and portion>" --occurred-at "<ISO date/time>" \
   --nutrition-calories <kcal> --nutrition-protein-grams <grams> \
   --nutrition-carbs-grams <grams> --nutrition-fat-grams <grams> \
   --nutrition-fiber-grams <grams> --nutrition-source <source> \
   --nutrition-confidence <confidence> --nutrition-source-detail "<evidence or URL>"
 ```
+Use `--name` for a sentence-case dish name: 2–5 words, at most 40 characters.
+Keep portions, uncertainty, brands, and places in `--note`; omit meal-type
+prefixes and photo-review language from the name. Use `meal edit --name` when
+enriching an existing meal. Never log a meal from a non-food image or food/drink
+that the member did not consume.
+
 Nutrition source is `user`, `label`, `database`, `inherited`, or `estimated`;
 confidence is `low`, `medium`, or `high`. Keep `--nutrition-source-detail` to
 at most 240 characters: the key sources, ids or URL, and decisive assumption.

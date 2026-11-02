@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { normalizeOptionalText } from "./domains/shared.ts";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
@@ -229,6 +230,7 @@ interface RecordInboxDocumentDefaultPromotionInput
 }
 
 interface AddMealInput {
+  name?: string;
   vaultRoot: string;
   mealId?: string;
   eventId?: string;
@@ -6376,6 +6378,7 @@ export async function addMeal({
   mealId: requestedMealId,
   eventId: requestedEventId,
   occurredAt = new Date(),
+  name,
   note,
   photoPath,
   audioPath,
@@ -6386,8 +6389,7 @@ export async function addMeal({
   externalRef,
 }: AddMealInput): Promise<AddMealResult> {
   const vault = await loadVault({ vaultRoot });
-  const normalizedNote =
-    typeof note === "string" && note.trim().length > 0 ? note.trim() : undefined;
+  const normalizedNote = normalizeOptionalText(note) ?? undefined;
   const normalizedIngredients = normalizeUniqueTextList(ingredients, "ingredients");
   const normalizedNutrition = normalizeMealNutrition(nutrition, "nutrition");
 
@@ -6450,7 +6452,7 @@ export async function addMeal({
     recordedAt: new Date(),
     timeZone: vault.metadata.timezone,
     source,
-    title: "Meal",
+    title: normalizeOptionalText(name) ?? "Meal",
     note: normalizedNote,
     tags,
     externalRef,
