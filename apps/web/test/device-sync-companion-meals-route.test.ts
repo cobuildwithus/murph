@@ -169,3 +169,12 @@ it("withholds health data if session or consent is revoked during decryption", a
   expect(response.status).toBe(403);
   expect(mocks.submit).not.toHaveBeenCalled();
 });
+
+
+it.each(["2f1c1fdc-c7b0-4d90-b902-8e6295959243", "a".repeat(64), null])("returns the saved upload ID in list and detail (%s)", async uploadId => {
+  const linkedMeal = { ...meal, uploadId };
+  mocks.decode.mockResolvedValue({ client: { replica: { generation: 17, generatedAt: savedAt, meals: { ...projection, days: [{ ...days[0], meals: [linkedMeal] }] } } } });
+  expect(await (await GET(request())).json()).toMatchObject({ days: [{ meals: [linkedMeal] }] });
+  expect(await (await detail(request(), context())).json()).toEqual({ timeZone: "Asia/Tokyo", savedAt, meal: linkedMeal });
+  expect((await DELETE(request("", { method: "DELETE" }), context())).status).toBe(202);
+});

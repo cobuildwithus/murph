@@ -15,9 +15,10 @@ it.each([false, true])("tombstones nutrition and safely handles redelivery (corr
     const removed = await addMeal({ vaultRoot, occurredAt: "2026-11-01T12:00:00Z", note: "Synthetic grain bowl", nutrition: { totals: { calories: 500, proteinGrams: 25 } },
       ...(corrected ? { source: "device", externalRef: { system: "synthetic-provider", resourceType: "meal", resourceId: "synthetic-meal", version: "2026-11-01T12:00:00Z" } } : {}),
     });
+    await upsertEvent({ vaultRoot, allowSpecializedKindRewrite: true, payload: { ...removed.event, uploadId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243" } });
     if (corrected) {
       await upsertEvent({ vaultRoot, allowSpecializedKindRewrite: true, payload: {
-        ...removed.event, occurredAt: "2026-11-01T12:30:00Z",
+        ...removed.event, uploadId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243", occurredAt: "2026-11-01T12:30:00Z",
         externalRef: { ...removed.event.externalRef, version: "2026-11-01T12:30:00Z" },
       } });
     }

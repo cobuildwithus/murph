@@ -1,5 +1,6 @@
 import {
   companionMealsProjectionSchema,
+  companionMealUploadIdSchema,
   type CompanionMeal,
   type CompanionMealDay,
   type CompanionMealsProjection,
@@ -31,7 +32,7 @@ export function buildCompanionMealsProjection(vault: VaultReadModel): CompanionM
       proteinGrams: numberOrNull(totals?.proteinGrams),
       carbsGrams: numberOrNull(totals?.carbsGrams),
       fatGrams: numberOrNull(totals?.fatGrams),
-      uploadId: null,
+      uploadId: companionMealUploadIdSchema.safeParse(attributes.uploadId).data ?? null,
     };
     const date = toLocalDayKey(eatenAt, timeZone);
     const day = days.get(date) ?? {

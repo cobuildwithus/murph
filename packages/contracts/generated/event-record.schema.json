@@ -2382,6 +2382,11 @@
           "type": "string",
           "pattern": "^meal_[0-9A-HJKMNP-TV-Z]{26}$"
         },
+        "uploadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
         "ingredients": {
           "maxItems": 100,
           "type": "array",

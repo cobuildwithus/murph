@@ -1,4 +1,5 @@
 import * as z from "./zod-runtime.ts";
+import { companionMealUploadIdSchema } from "./companion-meals.ts";
 import { sleepSessionTypeSchema, sleepSessionStateSchema } from "./sleep-session.ts";
 export { sleepSessionTypeSchema, sleepSessionStateSchema } from "./sleep-session.ts";
 import { clinicalFactSchema } from "./clinical-fact.ts";
@@ -1563,6 +1564,7 @@ export const eventRecordSchema = withContractMetadata(
     }),
     eventSchema("meal", {
       mealId: idSchema(ID_PREFIXES.meal),
+      uploadId: companionMealUploadIdSchema.optional(),
       ingredients: uniqueArray(boundedString(1, 4000), { maxItems: 100 }).optional(),
       nutrition: mealNutritionSchema.optional(),
     }),

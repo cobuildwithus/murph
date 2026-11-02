@@ -52,3 +52,16 @@ it("retains structured meals through full and core-only encrypted replica payloa
   const shards = await splitBrowserVaultReplica(replica);
   expect(assembleBrowserVaultCoreReplica(parseBrowserVaultCoreShard(JSON.parse(JSON.stringify(shards.core)))).meals).toEqual(replica.meals);
 });
+
+
+it("projects only explicit upload links, preserving them through encrypted core shards", async () => {
+  const uploaded = meal("meal_upload", "2026-11-01T12:00:00Z");
+  uploaded.attributes.uploadId = "2f1c1fdc-c7b0-4d90-b902-8e6295959243";
+  const legacy = meal("meal_legacy", "2026-11-01T11:00:00Z");
+  legacy.attributes.externalRef = { system: "meal-photo-capture", resourceId: "a".repeat(64) };
+  const vault = createVaultReadModel({ vaultRoot: "browser://fixture", metadata: { timezone: "UTC" }, entities: [uploaded, legacy, meal("meal_typed", "2026-11-01T10:00:00Z")] });
+  const replica = await createBrowserVaultReplica({ vault, metricPoints: [], generatedAt: "2026-11-01T13:00:00Z", sourceBundleHash: "a".repeat(64) });
+  const shards = await splitBrowserVaultReplica(replica);
+  const decoded = assembleBrowserVaultCoreReplica(parseBrowserVaultCoreShard(JSON.parse(JSON.stringify(shards.core))));
+  expect(decoded.meals?.days[0]?.meals.map(value => value.uploadId)).toEqual([uploaded.attributes.uploadId, null, null]);
+});
