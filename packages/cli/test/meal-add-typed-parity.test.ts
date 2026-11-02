@@ -222,7 +222,7 @@ test('meal remove-photo schema requires one automatic-capture meal id', async ()
 })
 
 test.sequential(
-  'meal remove-photo clears the automatic attachment while preserving structured nutrition',
+  'meal remove-photo completes review while preserving structured nutrition and media',
   async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'murph-cli-meal-remove-photo-',
@@ -270,7 +270,7 @@ test.sequential(
       assert.equal(result.exitCode, null)
       const shown = requireData(result.envelope)
       assert.equal(shown.entity.id, meal.mealId)
-      assert.deepEqual(shown.entity.data.attachments ?? [], [])
+      assert.equal((shown.entity.data.attachments as Array<{ role: string }>)[0]?.role, 'reviewed_photo')
       assert.deepEqual(shown.entity.data.ingredients, ['tofu', 'rice'])
       assert.deepEqual(
         (shown.entity.data.nutrition as { totals?: { calories?: number } })

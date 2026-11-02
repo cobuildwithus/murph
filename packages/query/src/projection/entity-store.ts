@@ -154,7 +154,7 @@ function queryStoredCanonicalEntities(
       throw new TypeError("Automatic meal closeout requires a valid occurrence timestamp.");
     }
     const occurrenceAt = new Date(occurrenceTime).toISOString();
-    const retryEvidence = "julianday(json_extract(entity_json, '$.attributes.recordedAt')) >= julianday(?)";
+    const retryEvidence = "julianday(COALESCE(json_extract(entity_json, '$.attributes.photoReviewedAt'), CASE WHEN json_extract(entity_json, '$.attributes.photoCapturedAt') IS NULL THEN json_extract(entity_json, '$.attributes.recordedAt') END)) >= julianday(?)";
     whereClauses.push(
       "family = 'event' AND kind = 'meal'",
       "json_extract(entity_json, '$.attributes.externalRef.system') = 'meal-photo-capture'",

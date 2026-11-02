@@ -236,12 +236,12 @@ On a scheduled run:
    --occurrence-at <scheduled-occurrence-instant> --to
    <occurrence-local-date> --limit 20 --format json`. It returns
    same-occurrence retry evidence first, then the oldest bounded batch of
-   automatic captures that still retain photos. Those photos are the queue,
+   automatic captures with attachments whose role is `photo` (pending review). Reviewed full photos and thumbnails remain available but are not pending work. Pending photos are the queue,
    with no separate cursor or state.
-2. Treat each retained photo as pending closeout work. Also include an
-   automatic capture with no photo when its latest `recordedAt` is at or after
-   this scheduled occurrence instant: that removal revision proves an earlier
-   attempt of the same occurrence already cleaned it. `closeout-work` includes
+2. Treat each `photo` attachment as pending closeout work. Also include the
+   same-occurrence review evidence returned by the queue: `photoReviewedAt`
+   proves an earlier attempt already reviewed it. Legacy removal revisions
+   remain supported. Thumbnail maintenance is not review evidence. `closeout-work` includes
    that evidence without carrying it into a later occurrence. Group captures
    by local capture date. A capture is eligible for member-visible presentation
    only when its local capture date equals the engine-supplied `Occurrence local
@@ -261,10 +261,12 @@ On a scheduled run:
    nutrition nor that observation is not ready for cleanup.
 5. Only after the read-back proves saved nutrition or the observation fallback,
    run `vault-cli meal remove-photo <meal-id>` and read the meal back again.
-   This automatic-capture-only command preserves the structured meal and
-   replaces retained image bytes with a privacy tombstone. Any removal failure
-   fails the run. On retry, combine photos that remain with same-occurrence
-   removal revisions so a provider or partial-cleanup failure loses no meal.
+   This compatibility-named command marks pending attachments `reviewed_photo`
+   and records `photoReviewedAt`; it preserves the structured meal and media.
+   Full photos expire 90 days after capture. A private thumbnail remains while
+   the meal exists. Verify no attachment with role `photo` remains. Any command
+   failure fails the run. On retry, combine pending photos with same-occurrence
+   review evidence so a provider or partial-closeout failure loses no meal.
 
 After all selected cleanup, exclude identified non-food or unconsumed-food
 records from presentation and questions. Stop before any presentation work when
@@ -415,3 +417,11 @@ scheduled-question exception; its answer uses the existing-meal recovery above.
   the same Murph account, network access, and Full Photos permission. Avoid
   repeated blind retries; if one fresh setup attempt still fails, state the
   unresolved step rather than claiming capture is on.
+
+## Reading an older meal photo
+
+Use the canonical `photo_thumbnail` attachment when the full photo has expired
+or is unavailable. It is a smaller JPEG of the same photo, not evidence of a new
+meal. Inspect it through the normal media tools and update the existing meal;
+do not recreate a meal or infer details the thumbnail cannot support. Removing
+a meal removes its thumbnail and any remaining canonical full photo.

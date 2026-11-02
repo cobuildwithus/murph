@@ -1,5 +1,6 @@
 import {
   companionMealsProjectionSchema,
+  mealPhotoThumbnailSchema,
   companionMealUploadIdSchema,
   type CompanionMeal,
   type CompanionMealDay,
@@ -24,7 +25,9 @@ export function buildCompanionMealsProjection(vault: VaultReadModel): CompanionM
     const attributes = record.attributes;
     const nutrition = asRecord(attributes.nutrition);
     const totals = asRecord(nutrition?.totals);
+    const thumbnail = mealPhotoThumbnailSchema.safeParse(attributes.photoThumbnail).data;
     const meal: CompanionMeal = {
+      ...(thumbnail ? { thumbnail } : {}),
       id: record.primaryLookupId,
       eatenAt,
       name: mealName(attributes),

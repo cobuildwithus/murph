@@ -128,6 +128,7 @@ function readCanonicalEventMediaReferencePaths(
         if (
           normalized.startsWith(`${VAULT_LAYOUT.rawInboxDirectory}/`)
           || normalized.startsWith(`${VAULT_LAYOUT.rawCapturesDirectory}/`)
+          || normalized.startsWith(`${VAULT_LAYOUT.rawMealsDirectory}/`)
         ) {
           paths.add(normalized);
         }
@@ -203,11 +204,12 @@ async function restoreHostedCanonicalWriteMediaReferences(input: {
         sha256: action.sha256,
       });
       changed = true;
-    } else {
+    } else if (action.kind !== "delete" && action.kind !== "delete_if_match" && !action.targetRelativePath.startsWith("raw/meals/")) {
+      // Keep deleted media receipts until final snapshot reconciliation. Removing
+      // the only catalogue pointer here would orphan the encrypted object; eager
+      // deletion during replay could destroy media reused by a later receipt.
       const existing = entries.get(action.targetRelativePath);
-      if (existing && (action.kind !== "delete_if_match" || (
-        existing.sha256 === action.expectedSha256 && existing.byteSize === action.expectedByteLength
-      ))) {
+      if (existing) {
         changed = entries.delete(action.targetRelativePath) || changed;
       }
     }

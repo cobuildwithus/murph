@@ -35,6 +35,7 @@ vi.mock("../src/hosted-runtime/pending-input-index.ts", () => ({
 const archiveClosedIntegrationIngestShards = vi.fn();
 const archiveClosedEventLedgerShards = vi.fn();
 const archiveClosedAuditShards = vi.fn();
+const runMealPhotoMaintenance = vi.fn();
 const runGeneratedImageCaptureRetention = vi.fn();
 vi.mock("@murphai/core", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@murphai/core")>()),
@@ -43,6 +44,7 @@ vi.mock("@murphai/core", async (importOriginal) => ({
     archiveClosedEventLedgerShards(input),
   archiveClosedIntegrationIngestShards: (input: unknown) =>
     archiveClosedIntegrationIngestShards(input),
+  runMealPhotoMaintenance: (input: unknown) => runMealPhotoMaintenance(input),
   runGeneratedImageCaptureRetention: (input: unknown) =>
     runGeneratedImageCaptureRetention(input),
 }));
@@ -94,6 +96,7 @@ async function waitForAtomicArchiveTempFile(
 }
 
 beforeEach(() => {
+  runMealPhotoMaintenance.mockReset().mockResolvedValue({ thumbnailCount: 0, retiredPhotoCount: 0, blockedMealCount: 0, hasMore: false, nextEligibleAt: null });
   compactWarmCodexThread.mockReset();
   runAssistantTranscriptContentRetention.mockReset();
   runAssistantTranscriptContentRetention.mockResolvedValue({

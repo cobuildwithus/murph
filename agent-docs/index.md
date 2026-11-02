@@ -1,5 +1,9 @@
+Private meal thumbnail delivery, capture-based retention and deletion are owned by
+[`ios-meals.md`](product-specs/ios-meals.md); implementation is tracked in
+[the thumbnail plan](exec-plans/active/2026-11-02-meal-photo-thumbnails.md).
+
 Historical exact meal-photo association is tracked in
-[the implementation plan](exec-plans/active/2026-11-02-meal-photos-exact.md);
+[the implementation plan](exec-plans/completed/2026-11-02-meal-photos-exact.md);
 `product-specs/ios-meals.md` owns the read-time recovery rule.
 
 Game history task/stake API fields and bounded hydration proof are tracked in

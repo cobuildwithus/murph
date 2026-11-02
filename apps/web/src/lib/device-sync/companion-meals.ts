@@ -1,8 +1,8 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import { companionMealIdSchema, type CompanionMealsProjection } from "@murphai/contracts";
-import { assessBrowserVaultReplicaFreshness } from "@murphai/hosted-execution";
+import { companionMealIdSchema, type CompanionMeal, type CompanionMealsProjection } from "@murphai/contracts";
+import { assessBrowserVaultReplicaFreshness, createHostedMediaReferenceId } from "@murphai/hosted-execution";
 import { parseHostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/parsers";
 import { generateHostedUserRecipientKeyPair } from "@murphai/runtime-state";
 import { assertHostedNativeMemberAuthCurrentTx } from "../better-auth/native-auth";
@@ -127,4 +127,26 @@ export async function queueCompanionMealRemoval(request: Request, id: string) {
     if (isHostedOnboardingError(error) && (error.httpStatus === 401 || error.httpStatus === 403)) throw error;
     throw mealApiError("MEAL_REMOVAL_UNAVAILABLE", 503, "Meal removal is temporarily unavailable.");
   }
+}
+
+/** Sign only meals selected for this response, then recheck live owner authority. */
+export async function presentCompanionMeals(state: Awaited<ReturnType<typeof readCompanionMeals>>, meals: CompanionMeal[]) {
+  const descriptors = new Map<string, { mediaId: string; sha256: string; byteSize: number }>();
+  for (const meal of meals) {
+    if (!meal.thumbnail) continue;
+    const mediaId = createHostedMediaReferenceId({ ...meal.thumbnail, mediaKind: "image" });
+    descriptors.set(mediaId, { mediaId, sha256: meal.thumbnail.sha256, byteSize: meal.thumbnail.byteSize });
+  }
+  const control = readHostedExecutionControlClientIfConfigured();
+  const deliveries = descriptors.size && control
+    ? await control.mealThumbnailDeliveries({ userId: state.auth.member.id, photos: [...descriptors.values()] }) : null;
+  const urls = new Map(deliveries?.map(delivery => [delivery.mediaId, delivery.url]) ?? []);
+  if (descriptors.size && control) {
+    await assertHostedNativeMemberAuthCurrentTx(state.auth, state.prisma);
+    await assertBrowserVaultMemberAuthority({ memberId: state.auth.member.id, prisma: state.prisma });
+  }
+  return meals.map(({ thumbnail, ...meal }) => {
+    const url = thumbnail ? urls.get(createHostedMediaReferenceId({ ...thumbnail, mediaKind: "image" })) : undefined;
+    return { ...meal, photo: url && thumbnail ? { url, width: thumbnail.width, height: thumbnail.height } : null };
+  });
 }

@@ -233,13 +233,13 @@ export const MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION = {
     'automatic-meal-capture',
   ],
   instructions: [
-    'At 9:00pm in the member\'s vault timezone, close out automatically captured meals and remove their retained photos after using them.',
+    'At 9:00pm in the member\'s vault timezone, close out automatically captured meals and mark their pending photos reviewed after using them.',
     '',
     'Read the automatic-meal-capture and food-journal skills before working. The automatic-meal-capture skill\'s "Run the automatic 9pm closeout" section is the single owner of the closeout workflow; follow it exactly.',
     '',
     'Use the engine-supplied `Occurrence local date` from the Scheduled occurrence context as the action and search-date anchor, even when the wall-clock `Today\'s date` differs. Use the occurrence instant for bounded same-occurrence retry evidence.',
     '',
-    'If the skill selects neither a retained photo nor a same-occurrence removal revision, return `{"kind":"skip","privateSummary":"No captured meals are awaiting closeout."}`. A removal failure or any selected photo remaining fails the run. After successful cleanup, follow the skill\'s presentation rules: historical-only work returns its required `skip`, and historical captures never contribute to a current-date response. For eligible current-date work, return the compact unresolved-capture question when required. If a response card is attached, return a `send_message` decision whose text contains no nutrition values because the runtime replaces it with deterministic card text. Otherwise return the ordinary compact closeout. Do not expose images, internal paths, or automation details.',
+    'If the skill selects neither a retained photo nor a same-occurrence removal revision, return `{"kind":"skip","privateSummary":"No captured meals are awaiting closeout."}`. A review-completion failure or any selected pending photo attachment remaining fails the run. Reviewed full photos and thumbnails follow the meal retention policy. After successful cleanup, follow the skill\'s presentation rules: historical-only work returns its required `skip`, and historical captures never contribute to a current-date response. For eligible current-date work, return the compact unresolved-capture question when required. If a response card is attached, return a `send_message` decision whose text contains no nutrition values because the runtime replaces it with deterministic card text. Otherwise return the ordinary compact closeout. Do not expose images, internal paths, or automation details.',
   ].join('\n'),
 } satisfies MurphManagedAutomationSeed
 

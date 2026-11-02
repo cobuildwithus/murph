@@ -11,13 +11,13 @@ import { NextRequestAdapter } from "next/dist/server/web/spec-extension/adapters
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 vi.mock("server-only", () => ({}));
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), current: vi.fn(), authority: vi.fn(), workspace: vi.fn(), control: vi.fn(), decode: vi.fn(), submit: vi.fn(), uploadLinks: vi.fn() }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), current: vi.fn(), authority: vi.fn(), workspace: vi.fn(), control: vi.fn(), decode: vi.fn(), submit: vi.fn(), uploadLinks: vi.fn(), thumbnails: vi.fn() }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({ $queryRaw: mocks.uploadLinks }) }));
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({ requireActiveHostedMemberAuthFromBearerToken: mocks.auth }));
 vi.mock("@/src/lib/better-auth/native-auth", () => ({ assertHostedNativeMemberAuthCurrentTx: mocks.current }));
 vi.mock("@/src/lib/browser-vault/authority", () => ({ assertBrowserVaultMemberAuthority: mocks.authority }));
 vi.mock("@/src/lib/hosted-workspace/store", () => ({ readHostedWorkspace: mocks.workspace }));
-vi.mock("@/src/lib/hosted-execution/control", () => ({ readHostedExecutionControlClientIfConfigured: () => ({ createBrowserVaultSession: mocks.control }) }));
+vi.mock("@/src/lib/hosted-execution/control", () => ({ readHostedExecutionControlClientIfConfigured: () => ({ createBrowserVaultSession: mocks.control, mealThumbnailDeliveries: mocks.thumbnails }) }));
 vi.mock("@/src/lib/member-actions/submit", () => ({ submitMemberAction: mocks.submit }));
 vi.mock("@/src/lib/browser-vault/loader", () => ({ parseBrowserVaultSessionResponse: (value: unknown) => value, decodeReadyBrowserVaultSession: mocks.decode }));
 import { GET } from "../app/api/device-sync/companion/meals/route";
@@ -49,8 +49,8 @@ it("pages whole days using vault timezone, saved timestamp, and native identity"
   const first = await GET(request("?limit=2"));
   expect(first.status).toBe(200);
   expect(first.headers.get("cache-control")).toContain("no-store");
-  expect(await first.json()).toEqual({ timeZone: "Asia/Tokyo", savedAt, days: days.slice(0, 2), nextCursor: "2026-10-31" });
-  expect(await (await GET(request("?limit=2&cursor=2026-10-31"))).json()).toEqual({ timeZone: "Asia/Tokyo", savedAt, days: days.slice(2), nextCursor: null });
+  expect(await first.json()).toEqual({ timeZone: "Asia/Tokyo", savedAt, days: publicDays(days.slice(0, 2)), nextCursor: "2026-10-31" });
+  expect(await (await GET(request("?limit=2&cursor=2026-10-31"))).json()).toEqual({ timeZone: "Asia/Tokyo", savedAt, days: publicDays(days.slice(2)), nextCursor: null });
   expect(mocks.control).toHaveBeenCalledWith(expect.objectContaining({ userId: "member_native", requestedShards: ["core"] }));
   expect(mocks.decode).toHaveBeenCalledWith(expect.objectContaining({ expectedMemberId: "member_native" }));
 });
@@ -66,7 +66,7 @@ it.each(["?limit=0", "?limit=32", "?limit=1.5", "?limit=1&limit=2", "?memberId=s
 });
 
 it("returns only the one member-owned meal without images or provenance", async () => {
-  expect(await (await detail(request(), context())).json()).toEqual({ timeZone: "Asia/Tokyo", savedAt, meal });
+  expect(await (await detail(request(), context())).json()).toEqual({ timeZone: "Asia/Tokyo", savedAt, meal: { ...meal, photo: null } });
 });
 
 it.each(["meal_othermember", "invalid"])("treats missing or foreign IDs alike: %s", async id => {
@@ -178,7 +178,7 @@ it("withholds health data if session or consent is revoked during decryption", a
 
 
 it.each(["2f1c1fdc-c7b0-4d90-b902-8e6295959243", "a".repeat(64), null])("returns the saved upload ID in list and detail (%s)", async uploadId => {
-  const linkedMeal = { ...meal, uploadId };
+  const linkedMeal = { ...meal, uploadId, photo: null };
   mocks.decode.mockResolvedValue({ client: { replica: { entities: [], generation: 17, generatedAt: savedAt, meals: { ...projection, days: [{ ...days[0], meals: [linkedMeal] }] } } } });
   expect(await (await GET(request())).json()).toMatchObject({ days: [{ meals: [linkedMeal] }] });
   expect(await (await detail(request(), context())).json()).toEqual({ timeZone: "Asia/Tokyo", savedAt, meal: linkedMeal });
@@ -222,8 +222,8 @@ it("recovers legacy exact automatic upload links in list and detail, then rechec
   } } }));
   mocks.uploadLinks.mockResolvedValue([{ captureId }]);
   const list = await (await GET(request())).json();
-  expect(list.days[0].meals[0]).toEqual({ ...meal, uploadId: captureId });
-  expect(await (await detail(request(), context())).json()).toEqual({ timeZone: projection.timeZone, savedAt, meal: { ...meal, uploadId: captureId } });
+  expect(list.days[0].meals[0]).toEqual({ ...meal, uploadId: captureId, photo: null });
+  expect(await (await detail(request(), context())).json()).toEqual({ timeZone: projection.timeZone, savedAt, meal: { ...meal, uploadId: captureId, photo: null } });
   expect(mocks.uploadLinks).toHaveBeenCalledTimes(2);
   expect(mocks.uploadLinks.mock.calls[0]![0].values).toEqual(["member_native", [captureId]]);
   expect(mocks.current.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.uploadLinks.mock.invocationCallOrder[0]!);
@@ -258,4 +258,28 @@ it("recovers a real legacy import from the frozen production core client without
     expect(await (await detail(request(), context(typed.mealId))).json()).toMatchObject({ meal: { uploadId: null } });
     expect(client.replica.meals!.days[0]!.meals[0]!.uploadId).toBeNull();
   } finally { await rm(vaultRoot, { recursive: true, force: true }); }
+});
+
+function publicDays(input: typeof days) { return input.map(day => ({ ...day, meals: day.meals.map(item => ({ ...item, photo: null })) })); }
+
+it("signs only the selected owner meals and never leaks storage metadata", async () => {
+  const thumbnail = { relativePath: "raw/meals/2026/11/meal_fixture/thumbnail.jpg", sha256: "b".repeat(64), byteSize: 100, width: 640, height: 480 };
+  const saved = structuredClone(projection);
+  Object.assign(saved.days[0]!.meals[0]!, { thumbnail });
+  Object.assign(saved.days[1]!.meals[0]!, { thumbnail: { ...thumbnail, sha256: "c".repeat(64) } });
+  mocks.decode.mockResolvedValue({ client: { replica: { generation: 17, generatedAt: savedAt, meals: saved, entities: [] } } });
+  mocks.thumbnails.mockImplementation(async ({ photos }) => photos.map((photo: { mediaId: string }) => ({ mediaId: photo.mediaId, url: "https://media.example.test/private-thumbnail?exp=123" })));
+  const response = await GET(request("?limit=1"));
+  const body = await response.json();
+  expect(response.status).toBe(200);
+  expect(body.days[0].meals[0].photo).toEqual({ url: "https://media.example.test/private-thumbnail?exp=123", width: 640, height: 480 });
+  expect(body.days[0].meals[0].thumbnail).toBeUndefined();
+  expect(JSON.stringify(body)).not.toContain("raw/meals");
+  expect(mocks.thumbnails).toHaveBeenCalledWith({ userId: "member_native", photos: [expect.objectContaining({ sha256: "b".repeat(64), byteSize: 100 })] });
+  expect(mocks.current).toHaveBeenCalledTimes(2);
+  mocks.thumbnails.mockImplementationOnce(async () => {
+    mocks.current.mockRejectedValueOnce(hostedOnboardingError({ code: "NATIVE_AUTH_INVALID", httpStatus: 401, message: "Session unavailable." }));
+    return [];
+  });
+  expect((await detail(request(), context())).status).toBe(401);
 });

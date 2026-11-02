@@ -17,6 +17,7 @@ import {
 } from "./route-handlers/telegram-send.ts";
 import { gameImageRoutes } from "./route-handlers/game-images.ts";
 import { gameMediaRoutes } from "./route-handlers/game-media.ts";
+import { mealThumbnailRoutes } from "./route-handlers/meal-thumbnail.ts";
 import { mealPhotoRoutes } from "./route-handlers/meal-photo-stage.ts";
 import {
   deviceWebhookEnqueueRoutes,
@@ -30,6 +31,7 @@ export const workerInternalRoutes = [
   ...runtimeResourcePurgeRoutes,
   ...telegramUsageLimitNoticeRoutes,
   ...mealPhotoRoutes,
+  ...mealThumbnailRoutes,
   ...gameMediaRoutes,
   ...gameImageRoutes,
   ...browserVaultRoutes,

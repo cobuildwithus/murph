@@ -63,6 +63,7 @@ describe("createCloudflareHostedControlClient", () => {
       "ensureRuntimeProcessing",
       "gameImageDelivery",
       "getRunnerStatus",
+      "mealThumbnailDeliveries",
       "purgeRuntimeResource",
       "putGameImage",
       "putGameMedia",

@@ -105,3 +105,14 @@ it("carries exact capture provenance in encrypted core entities for legacy link 
   });
   expect(decoded.meals?.days[0]?.meals[0]?.uploadId).toBeNull();
 });
+
+it("preserves private thumbnail metadata through the encrypted core projection", async () => {
+  const record = meal("meal_photo", "2026-11-01T12:00:00Z");
+  const thumbnail = { relativePath: "raw/meals/2026/11/meal_photo/thumbnail.jpg", sha256: "c".repeat(64), byteSize: 60000, width: 640, height: 480 };
+  record.attributes.photoThumbnail = thumbnail;
+  const vault = createVaultReadModel({ vaultRoot: "browser://fixture", metadata: { timezone: "UTC" }, entities: [record] });
+  const replica = await createBrowserVaultReplica({ vault, metricPoints: [], generatedAt: "2026-11-01T13:00:00Z", sourceBundleHash: "a".repeat(64) });
+  const shards = await splitBrowserVaultReplica(replica);
+  const decoded = assembleBrowserVaultCoreReplica(parseBrowserVaultCoreShard(JSON.parse(JSON.stringify(shards.core))));
+  expect(decoded.meals?.days[0]?.meals[0]?.thumbnail).toEqual(thumbnail);
+});

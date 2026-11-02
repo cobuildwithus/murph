@@ -1,3 +1,4 @@
+import { createHostedMediaReferenceId } from "@murphai/hosted-execution";
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -43,6 +44,7 @@ export const HOSTED_MEDIA_REFS_RELATIVE_PATH =
 export const HOSTED_MEDIA_REFS_SCHEMA = "murph.hosted-media-refs.v1";
 
 const RAW_INBOX_PREFIX = `${VAULT_LAYOUT.rawInboxDirectory}/`;
+const RAW_MEALS_PREFIX = `${VAULT_LAYOUT.rawMealsDirectory}/`;
 const RAW_CAPTURES_PREFIX = `${VAULT_LAYOUT.rawCapturesDirectory}/`;
 
 export interface HostedMediaReference {
@@ -388,7 +390,7 @@ function collectCaptureHostedMediaCandidates(
       continue;
     }
     for (const rawRef of collectEventRawReferencePaths(record)) {
-      const normalized = normalizeHostedMediaVaultPath(rawRef, RAW_CAPTURES_PREFIX);
+      const normalized = normalizeHostedMediaVaultPath(rawRef, record.kind === "meal" ? RAW_MEALS_PREFIX : RAW_CAPTURES_PREFIX);
       const mediaKind = normalized ? readHostedMediaKindFromPath(normalized) : null;
       if (!mediaKind || !normalized) {
         continue;
@@ -397,7 +399,9 @@ function collectCaptureHostedMediaCandidates(
         byteSize: null,
         expiresAt: isGeneratedImageCaptureEvent(record)
           ? new Date(Date.parse(record.recordedAt) + GENERATED_IMAGE_CAPTURE_RETENTION_WINDOW_MS).toISOString()
-          : null,
+          : record.kind === "meal" && record.photoCapturedAt && record.photoThumbnail && normalized !== record.photoThumbnail?.relativePath
+            ? new Date(Date.parse(record.photoCapturedAt) + INBOX_IMAGE_RETENTION_WINDOW_MS).toISOString()
+            : null,
         mediaKind,
         mimeType: readHostedMediaMimeTypeFromPath(normalized),
         recordedAt: normalizeHostedMediaRecordedAt(record.recordedAt),
@@ -558,24 +562,6 @@ async function prepareHostedMediaReferenceFromLocalFile(input: {
   return { entry, uploaded: true };
 }
 
-function createHostedMediaReferenceId(input: {
-  byteSize: number;
-  mediaKind: HostedRuntimeMediaKind;
-  relativePath: string;
-  sha256: string;
-}): string {
-  return createHash("sha256")
-    .update("murph.hosted-media-ref.v1")
-    .update("\0")
-    .update(input.mediaKind)
-    .update("\0")
-    .update(input.relativePath)
-    .update("\0")
-    .update(input.sha256)
-    .update("\0")
-    .update(String(input.byteSize))
-    .digest("hex");
-}
 
 async function localHostedMediaReferenceIsValid(input: {
   entry: HostedMediaReference;
@@ -840,6 +826,7 @@ function normalizeHostedMediaCataloguePath(value: unknown): string | null {
     if (
       normalized.startsWith(RAW_INBOX_PREFIX)
       || normalized.startsWith(RAW_CAPTURES_PREFIX)
+      || normalized.startsWith(RAW_MEALS_PREFIX)
     ) {
       return normalized;
     }

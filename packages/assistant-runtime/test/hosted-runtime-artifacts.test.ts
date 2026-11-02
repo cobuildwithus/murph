@@ -9,6 +9,9 @@ import path from "node:path";
 import { expect, test, vi } from "vitest";
 import {
   addCapture,
+  addMeal,
+  deleteEvent,
+  runMealPhotoMaintenance,
   addCaptureWithLookup,
   applyCanonicalWriteBatch,
   appendJsonlRecord,
@@ -928,4 +931,41 @@ test.each([
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("meal thumbnail and full-photo deletion survives canonical receipt replay and prunes encrypted objects", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "murph-meal-media-replay-"));
+  const vaultRoot = path.join(root, "live"), restoredRoot = path.join(root, "restored");
+  const store = createHostedRuntimeMediaStoreStub();
+  const persisted: HostedCanonicalWritePersistenceInput[] = [];
+  try {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    await initializeVault({ vaultRoot: restoredRoot, timezone: "UTC" });
+    const photoPath = path.join(root, "fixture.png");
+    await writeFile(photoPath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==", "base64"));
+    const captureTime = "2030-01-01T12:00:00.000Z";
+    await withHostedCanonicalWritePort({
+      async persistCanonicalWrite(persistence) { persisted.push(await externalizeHostedCanonicalWriteMediaPayloads({ persistence, mediaStore: store.mediaStore, vaultRoot })); },
+    }, async () => {
+      const meal = await addMeal({ vaultRoot, photoPath, photoCapturedAt: captureTime, occurredAt: captureTime });
+      expect(await runMealPhotoMaintenance({ vaultRoot, now: new Date(captureTime) })).toMatchObject({ thumbnailCount: 1, blockedMealCount: 0 });
+      const refs = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries;
+      expect(refs).toHaveLength(2);
+      expect(refs.filter(ref => ref.expiresAt === null)).toHaveLength(1);
+      expect(refs.find(ref => ref.expiresAt !== null)?.expiresAt).toBe("2030-04-01T12:00:00.000Z");
+      await deleteEvent({ vaultRoot, eventId: meal.event.id });
+    });
+    expect(store.storedBytesByMediaId.size).toBe(2);
+    for (const persistence of persisted) {
+      const input = { receipt: persistence.receipt, vaultRoot: restoredRoot,
+        readPayload: async (ref: { sha256: string }) => persistence.payloads.find(payload => payload.sha256 === ref.sha256)?.bytes ?? null };
+      await applyHostedCanonicalWriteReceiptWithMedia(input);
+      await applyHostedCanonicalWriteReceiptWithMedia(input);
+    }
+    // Replay does not erase the cleanup pointers or eagerly delete objects.
+    expect(store.storedBytesByMediaId.size).toBe(2);
+    const cleaned = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot: restoredRoot, mediaStore: store.mediaStore });
+    expect(cleaned.prunedMediaCount).toBe(2);
+    expect(store.storedBytesByMediaId.size).toBe(0);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

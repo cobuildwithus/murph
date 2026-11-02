@@ -62,6 +62,7 @@ import {
 } from '@murphai/contracts'
 import {
   addMeal,
+  runMealPhotoMaintenance,
   appendBloodTest,
   appendJsonlRecord,
   initializeVault,
@@ -34537,6 +34538,42 @@ async function materializeRestaurantMealVaultCli(input: {
 }
 
 describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
+  it('uses a retained meal thumbnail after full-photo expiry without relogging', { timeout: 1_800_000 }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-thumbnail-review-e2e-'))
+    const vaultRoot = path.join(root, 'vault'), binDirectory = path.join(root, 'bin')
+    const commandLog = path.join(root, 'commands.log'), skillsRoot = path.join(root, 'skills')
+    try {
+      await initializeVault({ vaultRoot, timezone: 'UTC' })
+      await Promise.all((['automatic-meal-capture', 'food-journal'] as const).map(slug => materializeAssistantSkill({ skillsRoot, slug })))
+      const captureTime = '2026-07-01T12:00:00.000Z'
+      const meal = await addMeal({ vaultRoot, occurredAt: captureTime, photoCapturedAt: captureTime,
+        photoPath: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../apps/web/public/meal-snap-2.jpg') })
+      expect(await runMealPhotoMaintenance({ vaultRoot, now: new Date('2026-11-02T12:00:00Z') })).toMatchObject({ thumbnailCount: 1, retiredPhotoCount: 1 })
+      await materializeAutomaticMealClarificationVaultCli({ binDirectory, commandLog, vaultRoot })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAutomaticMealClarificationDeveloperInstructions({ currentLocalDate: '2026-11-02', protectedContext: true, scheduled: false }),
+        env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot },
+        fixtureBinDirectory: binDirectory, groupConversation: false, model: config.model, modelProvider: config.modelProvider,
+        reasoningEffort: 'low', sandbox: 'workspace-write', vaultRoot, workingDirectory: vaultRoot,
+        prompt: `Please look at the saved picture for my July 1 meal (${meal.mealId}) and add a short description to that existing meal. Keep it qualitative, with no nutrition numbers. Use the saved thumbnail if the original has expired. Do not create another meal.`,
+      })
+      const commands = (await readFile(commandLog, 'utf8')).trim().split('\n')
+      expect(commands.some(command => command.startsWith(`meal show ${meal.mealId}`))).toBe(true)
+      expect(commands.filter(command => isMealEditMutationCommand(command))).toHaveLength(1)
+      expect(commands.some(command => /meal (?:add|delete|import-json|remove-photo)\b/u.test(command))).toBe(false)
+      expect(result.jsonEvents.some(event => readRecord(readRecord(readRecord(event)?.params)?.item)?.type === 'imageView')).toBe(true)
+      const state = await readAutomaticMealClarificationState({ vaultRoot, mealId: meal.mealId })
+      expect(state.savedNote).toBeTruthy()
+      expect(state.savedCalories).toBeNull()
+      expect(result.finalMessage).not.toMatch(/\b\d+\s*(?:calories|kcal|grams|g protein)|(?:created|logged|added) (?:a )?new meal/iu)
+      process.stdout.write(`[meal-thumbnail-review-proof] ${JSON.stringify({ reply: result.finalMessage, editedMeals: 1, duplicateMeals: 0 })}\n`)
+    } finally { await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths]) }
+  })
+
   it('corrects non-food stubs without blocking meal closeout or masking removal failures', { timeout: 1_800_000 }, async () => {
     const config = await resolveRealCodexE2eConfig()
     const root = await mkdtemp(path.join(tmpdir(), 'murph-nonfood-closeout-e2e-'))
@@ -38181,7 +38218,7 @@ async function readAutomaticMealClarificationState(input: {
   return {
     savedAttachmentCount: event
       ? Array.isArray(meal?.attachments)
-        ? meal.attachments.length
+        ? meal.attachments.filter(attachment => readRecord(attachment)?.role === 'photo').length
         : 0
       : null,
     savedCalories: typeof totals?.calories === 'number'

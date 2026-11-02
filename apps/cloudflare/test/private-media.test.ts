@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { createHostedMediaStore } from "../src/bundle-store.ts";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   isHostedRuntimePrivateImageDeliveryUrl,
@@ -8,6 +10,7 @@ import type {
   R2PutValueLike,
 } from "../src/crypto.ts";
 import {
+  createHostedMealThumbnailDelivery,
   HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN,
   HOSTED_PRIVATE_MEDIA_LIFETIME_SECONDS,
   matchHostedPrivateMediaCapabilityPath,
@@ -543,6 +546,7 @@ function createPrivateMediaBucket(input: {
             }
           : null;
       },
+      async delete(key: string) { values.delete(key); },
       async head(key: string) {
         const value = values.get(key);
         return value
@@ -597,3 +601,34 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
     bytes.byteOffset + bytes.byteLength,
   ) as ArrayBuffer;
 }
+
+it("serves an existing encrypted meal thumbnail only through its owner-bound five-minute capability", async () => {
+  const bucket = createPrivateMediaBucket();
+  const nowMs = Date.parse("2026-11-02T12:00:00Z");
+  const descriptor = { mediaId: "a".repeat(64), byteSize: JPEG_BYTES.byteLength,
+    sha256: createHash("sha256").update(JPEG_BYTES).digest("hex"), mediaKind: "image" as const };
+  const store = createHostedMediaStore({ bucket: bucket.api, key: new Uint8Array(32).fill(7), keyId: "fixture-key", userId: USER_ID });
+  await store.writeMedia({ ...descriptor, plaintext: JPEG_BYTES });
+  const delivery = await createHostedMealThumbnailDelivery({ ...descriptor, userId: USER_ID,
+    capabilitySecret: CAPABILITY_SECRET, deliveryOrigin: HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN, nowMs });
+  expect(bucket.put).toHaveBeenCalledOnce();
+  expect(delivery.url).not.toContain(USER_ID);
+  expect(delivery.url).not.toContain(descriptor.mediaId);
+  const url = new URL(delivery.url);
+  const capability = url.pathname.split("/").at(-2)!;
+  const expiresAtUnixSeconds = Number(url.searchParams.get("exp"));
+  expect(expiresAtUnixSeconds * 1000 - nowMs).toBe(300_000);
+  const readRuntimeMedia = vi.fn(async (input: { userId: string; mediaId: string; sha256: string; byteSize: number }) => {
+    expect(input.userId).toBe(USER_ID);
+    return store.readMedia({ ...input, mediaKind: "image" });
+  });
+  const read = { bucket: bucket.api, capability, capabilitySecret: CAPABILITY_SECRET,
+    expiresAtUnixSeconds, nowMs, readRuntimeMedia, runtimeMediaOnly: true };
+  expect(await readHostedPrivateMedia(read)).toEqual({ bytes: JPEG_BYTES, contentType: "image/jpeg" });
+  expect(await readHostedPrivateMedia({ ...read, nowMs: nowMs + 300_000 })).toBeNull();
+  expect(await readHostedPrivateMedia({ ...read, capabilitySecret: "another-private-media-capability-secret" })).toBeNull();
+  expect(await readHostedPrivateMedia({ ...read, expiresAtUnixSeconds: expiresAtUnixSeconds + 1 })).toBeNull();
+  expect(readRuntimeMedia).toHaveBeenCalledOnce();
+  await store.deleteMedia(descriptor.mediaId);
+  expect(await readHostedPrivateMedia(read)).toBeNull();
+});

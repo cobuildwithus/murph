@@ -9,6 +9,7 @@ import { HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV } from '@murphai/hosted-exe
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { executeCodexAppServerTurn, resolveMurphDynamicTools, stopWarmCodexAppServer } from '../src/assistant-codex.ts'
+import { MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION } from '../src/assistant/managed-automations.ts'
 import { MURPH_CODEX_BASE_INSTRUCTIONS } from '../src/assistant/codex-base-instructions.ts'
 import { buildAssistantSystemPromptLayers } from '../src/assistant/system-prompt.ts'
 import { writeHostedOpenAiMixedModeModelCatalogJson } from './support/codex-model-catalog.ts'
@@ -74,8 +75,8 @@ describe.skipIf(process.env.MURPH_MEASURE_USAGE_INPUT !== '1')('usage efficiency
     }).trim()
   })
 
-  it.each(['direct', 'group', 'groupAvailable', 'gameGroup'] as const)('complete first provider request (%s)', { timeout: 180_000 }, async (fixture) => {
-    const scope = fixture === 'direct' ? 'direct' : 'group'
+  it.each(['direct', 'group', 'groupAvailable', 'gameGroup', 'mealCloseout'] as const)('complete first provider request (%s)', { timeout: 180_000 }, async (fixture) => {
+    const scope = fixture === 'direct' || fixture === 'mealCloseout' ? 'direct' : 'group'
     const groupAvailable = fixture === 'groupAvailable'
     const baselineRoot = await materializeUsageInputBaseline(repository, base)
     temporaryPaths.push(baselineRoot)
@@ -84,6 +85,7 @@ describe.skipIf(process.env.MURPH_MEASURE_USAGE_INPUT !== '1')('usage efficiency
       const baseline: typeof import('../src/assistant/system-prompt.ts') = await import(pathToFileURL(`${baselineRoot}/src/assistant/system-prompt.ts`).href)
       const baselineCatalog: typeof import('../src/assistant-codex/dynamic-tool-catalog.ts') = await import(pathToFileURL(`${baselineRoot}/src/assistant-codex/dynamic-tool-catalog.ts`).href)
       const baselineInstructions: typeof import('../src/assistant/codex-base-instructions.ts') = await import(pathToFileURL(`${baselineRoot}/src/assistant/codex-base-instructions.ts`).href)
+      const baselineAutomation: typeof import('../src/assistant/managed-automations.ts') = await import(pathToFileURL(`${baselineRoot}/src/assistant/managed-automations.ts`).href)
       const availability: Parameters<typeof resolveMurphDynamicTools>[0] = {
         allowFinishWithoutReply: true, automationAvailable: true,
         personalizationAvailable: scope === 'direct', groupSharedReadAvailable: fixture === 'group',
@@ -109,7 +111,8 @@ describe.skipIf(process.env.MURPH_MEASURE_USAGE_INPUT !== '1')('usage efficiency
           cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' }, conversationScope: scope,
           currentLocalDate: '2030-01-10', currentInstant: '2030-01-10T16:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
-          ordinaryInboundTurn: true,
+          ordinaryInboundTurn: fixture !== 'mealCloseout',
+          ...(fixture === 'mealCloseout' ? { scheduledOccurrenceAt: '2030-01-10T21:00:00Z', turnTrigger: 'automation-cron' as const } : {}),
         })
         const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
           codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
@@ -122,7 +125,9 @@ describe.skipIf(process.env.MURPH_MEASURE_USAGE_INPUT !== '1')('usage efficiency
           fetchImpl: noExternalFetch, publicInternetFetch: noExternalFetch,
           baseInstructions: phase === 'base' ? baselineInstructions.MURPH_CODEX_BASE_INSTRUCTIONS : MURPH_CODEX_BASE_INSTRUCTIONS,
           developerInstructions: [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n'),
-          prompt: [layers.dynamicTurnContextPrompt, groupAvailable
+          prompt: [layers.dynamicTurnContextPrompt, fixture === 'mealCloseout'
+            ? (phase === 'base' ? baselineAutomation.MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION : MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION).instructions
+            : groupAvailable
             ? 'Summarize the shared sleep duration for January 10, 2030, with the shared timezone for each person. Keep it brief.'
             : 'Review the existing reminders and summarize which need attention.'].join('\n\n'),
           env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },

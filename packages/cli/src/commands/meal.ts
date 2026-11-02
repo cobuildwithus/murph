@@ -772,7 +772,7 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
         description:
           'List same-occurrence retries, then the oldest automatic-capture meals that still retain photos.',
         hint:
-          'Use this bounded oldest-first queue for automatic meal closeout; remove each returned photo with meal remove-photo after enrichment.',
+          'Use this bounded oldest-first queue for automatic meal closeout; mark each pending photo reviewed with meal remove-photo after enrichment.',
         options: {
           limit: commonListLimitOptionSchema,
           occurrenceAt: isoTimestampSchema
@@ -897,7 +897,7 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
           id: mealLookupSchema.describe('Automatic-capture meal id (`meal_*`).'),
         }),
         description:
-          'Remove retained image bytes from one automatic-capture meal while preserving the meal record and structured nutrition.',
+          'Complete photo review for one automatic-capture meal. Full photos follow 90-day retention; private thumbnails remain with the meal.',
         hint:
           'Use only after inspecting the automatic meal photo and saving any supported ingredients or nutrition. The operation is idempotent and rejects ordinary meal photos.',
         options: {},

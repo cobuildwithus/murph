@@ -38,6 +38,9 @@ test('closeout selection bounds materialized rows after filtering and preserves 
         meal('meal_old_removal', '2097-01-01T12:00:00.000Z', { ...automatic, recordedAt: '2099-07-24T00:59:59.999Z', attachments: [] }),
         meal('meal_wrong_source', '2097-01-01T12:00:00.000Z', { ...retained, externalRef: { system: 'other', resourceType: 'photo' } }),
         meal('meal_wrong_photo_role', '2097-01-01T12:00:00.000Z', { ...automatic, attachments: [{ kind: 'photo', role: 'receipt' }] }),
+        meal('meal_thumbnail_maintenance', '2097-01-01T12:00:00.000Z', { ...automatic,
+          photoCapturedAt: '2097-01-01T12:00:00.000Z', photoReviewedAt: '2099-07-24T00:59:59.999Z',
+          recordedAt: '2099-07-24T01:01:00.000Z', attachments: [{ kind: 'photo', role: 'photo_thumbnail' }] }),
         meal('meal_future', '2099-07-24T12:00:00.000Z', retained),
       ])
       database.exec('COMMIT')

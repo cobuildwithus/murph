@@ -35,6 +35,7 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
     method: "GET",
     suffix: "game-media/stat",
   },
+  mealThumbnailDelivery: { method: "POST", suffix: "meal-photos/thumbnails" },
   mealPhotoStage: {
     method: "POST",
     suffix: "meal-photos/stage",
@@ -158,4 +159,8 @@ function buildCloudflareHostedControlUserRoutePath(
   return `/internal/users/${encodeURIComponent(normalizedUserId)}/${
     CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS[routeName].suffix
   }`;
+}
+
+export function buildCloudflareHostedControlMealThumbnailDeliveryPath(userId: string): string {
+  return buildCloudflareHostedControlUserRoutePath("mealThumbnailDelivery", userId);
 }
