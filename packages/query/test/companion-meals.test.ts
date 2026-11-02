@@ -88,3 +88,20 @@ it.each([
   expect(projection?.days[0]).toMatchObject({ calories: 620, proteinGrams: 28, mealCount: 1 });
   expect(record).toEqual(before);
 });
+
+it("carries exact capture provenance in encrypted core entities for legacy link recovery", async () => {
+  const record = meal("meal_legacy", "2026-11-01T11:00:00Z");
+  Object.assign(record.attributes, {
+    source: "device",
+    externalRef: { system: "meal-photo-capture", resourceType: "photo", resourceId: "a".repeat(64) },
+    rawRefs: ["private/photo.jpg"],
+  });
+  const vault = createVaultReadModel({ vaultRoot: "browser://fixture", metadata: { timezone: "UTC" }, entities: [record] });
+  const replica = await createBrowserVaultReplica({ vault, metricPoints: [], generatedAt: "2026-11-01T13:00:00Z", sourceBundleHash: "a".repeat(64) });
+  const shards = await splitBrowserVaultReplica(replica);
+  const decoded = assembleBrowserVaultCoreReplica(parseBrowserVaultCoreShard(JSON.parse(JSON.stringify(shards.core))));
+  expect(decoded.entities[0]?.attributes).toEqual({
+    mealId: "meal_legacy", source: "device", externalRef: record.attributes.externalRef,
+  });
+  expect(decoded.meals?.days[0]?.meals[0]?.uploadId).toBeNull();
+});

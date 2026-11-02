@@ -505,6 +505,8 @@ function projectSafeEventAttributes(
   }
 
   switch (entity.kind) {
+    case "meal":
+      return projectSafeAttributeKeys(entity, ["mealId", "source", "externalRef"]);
     case "activity_session": {
       const attributes = projectSafeAttributeKeys(entity, ["source"]);
       const activityKind = resolveAdherenceObservationActivityKind({
