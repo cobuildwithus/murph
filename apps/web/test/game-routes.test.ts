@@ -489,6 +489,16 @@ describe("weekly game routes", () => {
       });
     });
 
+    it.each(["prize", "dare", null] as const)("returns history tasks and %s stake for the authenticated viewer", async (kind) => {
+      const history = historyFixture(1, 1);
+      history.people[0].games[0].stake = kind ? { kind, item: "Lunch" } : null;
+      mocks.readHistory.mockResolvedValue(history);
+      const response = await routes.history.GET(new Request(`${BASE}/history?memberId=outsider`));
+      expect(response.status).toBe(200);
+      expect(mocks.readHistory).toHaveBeenCalledWith(LEO);
+      expect(await response.json()).toEqual({ ok: true, ...history });
+    });
+
     it("signs history card previews with the avatar variant after media authorization, preserving cache identities", async () => {
       const history = historyFixture(1, 2);
       const previews = history.people[0].games[0].previews;
@@ -835,6 +845,7 @@ function historyFixture(people: number, games: number): GameHistoryView {
     memberId: `member_${person}`, firstName: "Player", record: { won: 0, lost: 0, tied: games },
     games: Array.from({ length: games }, (_, game) => ({
       id: `game_${person}_${game}`, startedOn: "2030-01-01", endsOn: "2030-01-07", lengthDays: 7,
+      tasks: { mine: "30 lunges", theirs: "15 min walking" }, stake: { kind: "prize", item: "Lunch" },
       schedule: { count: 5 }, score: { mine: 0, theirs: 0 }, result: "tied", perfect: false,
       previews: Array.from({ length: 6 }, (_, preview) => ({
         entryId: `entry_${person}_${game}_${preview}`, kind: "photo", text: null, mine: preview % 2 === 0,

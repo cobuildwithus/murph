@@ -91,6 +91,23 @@ today first, then your other live games, invites, and results.
 settled 1v1 games by unblocked opponent, orders people and their games by newest
 settlement, returns the viewer's record and score plus up to six authorized
 shot previews per game, and bounds both people and games per person.
+Each game also includes `tasks: { mine: string; theirs: string }`, oriented by
+player seat, and `stake: { kind: "prize" | "dare"; item: string } | null`.
+These use the final agreed terms and exactly the task and stake wording in
+`GameView.terms`; tasks lock at kickoff. Equal tasks remain two equal strings
+so native clients can title the card as one shared task. No stake is `null`.
+For legacy terms, the first stake is used: `winner_gets` maps to `prize` and
+`per_miss` maps to `dare`, without changing its wording or settlement.
+The additive fields reuse loaded terms and batch decryption, with no per-game
+query. Older clients may ignore them. Example game fields:
+
+```json
+{
+  "tasks": { "mine": "30 lunges", "theirs": "15 min walking" },
+  "stake": { "kind": "prize", "item": "Lunch" }
+}
+```
+
 The latest game's previews for each person may also include `delivery` with a
 five-minute signed URL for the small rendition and its ISO `expiresAt`. Keep
 `mediaUrls` as cache identity; if delivery is absent or expired, request the

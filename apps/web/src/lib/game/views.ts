@@ -199,6 +199,8 @@ export function buildGameHistoryView(input: GameViewInput): BuiltGameHistoryView
   const mine = playerView(input, viewer);
   const theirs = playerView(input, other);
   const outcome = outcomeFor(input.result, input.viewerId);
+  const terms = termsView(input.state, input.words);
+  const stake = terms.stakes[0];
   const visible = visibleEntryIds(input.state, input.viewerId, input.hiddenEntryIds);
   const seats = new Map(input.state.players.map((player) => [player.memberId, player.seat]));
   const previews = input.state.entries
@@ -218,7 +220,12 @@ export function buildGameHistoryView(input: GameViewInput): BuiltGameHistoryView
       perfect: outcome === "perfect",
       previews,
       result: outcome === "won" || outcome === "lost" ? outcome : "tied",
-      schedule: currentTerms(input.state.game.terms).schedule,
+      schedule: terms.schedule,
+      tasks: {
+        mine: terms.tasks.find((task) => task.seat === viewer.seat)?.text ?? "",
+        theirs: terms.tasks.find((task) => task.seat === other.seat)?.text ?? "",
+      },
+      stake: stake ? { kind: stake.kind === "dare" || stake.kind === "per_miss" ? "dare" : "prize", item: stake.item } : null,
       score: { mine: mine.score, theirs: theirs.score },
       startedOn: viewer.dayOne,
     },

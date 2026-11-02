@@ -1468,17 +1468,18 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
 
     const otherSide = await readHistory(ava);
     expect(otherSide.people).toHaveLength(1);
+    expect(otherSide.people[0].games[0].tasks).toEqual({ mine: "10 min abs", theirs: "100 pushups" });
     expect(otherSide.people[0]).toMatchObject({ memberId: viewer, record: { won: 1, lost: 2, tied: 1 } });
   });
 
-  it("keeps history JSON identical without opening unused terms, recaps or relationships", async () => {
+  it("opens history terms in the existing batch without opening recaps or relationships", async () => {
     const viewer = await member("ProjectionViewer", "UTC");
     const opponent = await member("ProjectionOpponent", "UTC");
     const seeded = await seedSettledGame({ challenger: viewer, opponent, settledAt: new Date(), mediaDays: 3 });
     const before = await readHistory(viewer);
     // These encrypted fields belong to the live/detail view, never history JSON.
     await getPrisma().game.update({ where: { id: seeded.gameId }, data: {
-      termsWordsEncrypted: "not-opened-by-history", recapEncrypted: "not-opened-by-history",
+      recapEncrypted: "not-opened-by-history",
     } });
     await getPrisma().gameContactLabel.create({ data: { ownerMemberId: viewer,
       subjectMemberId: opponent, relationshipEncrypted: "not-opened-by-history" } });
@@ -1486,7 +1487,13 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const open = vi.spyOn(crypto, "openGameTexts");
     expect(await readHistory(viewer)).toEqual(before);
     const fields = open.mock.calls.flatMap(([requests]) => requests).map(request => request.field);
-    for (const unused of ["terms_words", "recap", "relationship"]) expect(fields).not.toContain(unused);
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(fields.filter(field => field === "terms_words")).toHaveLength(1);
+    expect(before.people[0].games[0]).toMatchObject({
+      tasks: { mine: "100 pushups", theirs: "10 min abs" },
+      stake: { kind: "prize", item: "Breakfast in bed" },
+    });
+    for (const unused of ["recap", "relationship"]) expect(fields).not.toContain(unused);
   });
 
   it("signs only authorized history previews, excluding reported, withdrawn, blocked and non-player content", async () => {

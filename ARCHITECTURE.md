@@ -5589,8 +5589,10 @@ need no database reads; a mixed batch needs one, so the
 maximum is 50 authorization queries with one database connection at a time.
 The single-media route uses this same predicate. History hydration retains its
 eight set-based queries (including the database clock and player relation), at
-most four in flight, and decrypts names, labels and visible entry payloads;
-unused terms, recap stories and relationships are not opened. The history route
+most four in flight, and decrypts task/stake terms, names, labels and visible
+entry payloads in the existing batch; recap stories and relationships are not
+opened. History uses the same final terms projection as live game views,
+orienting tasks by viewer seat without any per-game query. The history route
 reuses the existing request-scoped root unwrap owner across native auth and
 hydration; exact roots are zeroized before signing. Session rows and revocation
 are still read on every request. Root-envelope metadata and provider unwraps
