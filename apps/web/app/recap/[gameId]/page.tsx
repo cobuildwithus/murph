@@ -31,7 +31,9 @@ export default async function GameRecapPage(props: { params: Promise<{ gameId: s
   const isAppleMobile = /iPhone|iPad|iPod/i.test(userAgent)
     || (/Macintosh/i.test(userAgent) && /Mobile\//i.test(userAgent));
   return (
-    <main className="min-h-dvh bg-background px-6 py-7 text-foreground sm:px-10 sm:py-9">
+    <main className={isAppleMobile
+      ? "min-h-dvh bg-background px-6 py-7 text-foreground sm:px-10 sm:py-9"
+      : "min-h-dvh bg-background text-foreground"}>
       <GameRecapView {...(isAppleMobile
         ? { appUrl: gameRecapAppUrl(gameId) }
         : { recapUrl: `https://www.withmurph.ai/recap/${gameId}` })} />
