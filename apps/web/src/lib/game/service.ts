@@ -2147,7 +2147,7 @@ async function buildViewInputs(
     requests.push({ ...target, value });
     return requests.length - 1;
   };
-  const wordsAt = games.map((game) => history ? null : ask(gameTarget(game.row, "terms_words"), game.row.termsWordsEncrypted));
+  const wordsAt = games.map((game) => ask(gameTarget(game.row, "terms_words"), game.row.termsWordsEncrypted));
   const recapAt = games.map((game, index) => !history && game.row.recapEncrypted && !recapSuppressed[index]
     ? ask(gameTarget(game.row, "recap"), game.row.recapEncrypted)
     : null);
@@ -2260,7 +2260,7 @@ async function buildViewInputs(
       state: states[index],
       tickets: tickets.filter((ticket) => ticket.gameId === game.row.id).map((ticket) => withoutHidden(toTicketRow(ticket), blocks)),
       viewerId,
-      words: wordsAt[index] === null ? { v: 1, versions: [] } : parseTermWords(plain[wordsAt[index]] ?? ""),
+      words: parseTermWords(plain[wordsAt[index]] ?? ""),
     };
   });
 }

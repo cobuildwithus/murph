@@ -422,6 +422,9 @@ export interface GameHistoryGameView {
   endsOn: string;
   lengthDays: number;
   schedule: GameTermsVersion["schedule"];
+  /** Final agreed task wording, oriented by player seat. */
+  tasks: { mine: string; theirs: string };
+  stake: { kind: "prize" | "dare"; item: string } | null;
   score: { mine: number; theirs: number };
   result: "won" | "lost" | "tied";
   perfect: boolean;
