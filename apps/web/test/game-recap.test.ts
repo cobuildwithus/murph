@@ -24,6 +24,37 @@ describe("game recap validation", () => {
     const result = [{ memberId: "a", name: "Ava", score }, { memberId: "l", name: "Leo", score: 3 }];
     expect(validateGameRecap({ recap, players, entries, result })).toEqual([]);
   });
+  it.each([
+    [4, 3, "Ava won 4-3. Leo brought a laundry basket to training."],
+    [3, 4, "Leo won 4 to 3. Ava kept the mat on payroll."],
+    [5, 5, "The week ended in a tie, 5–5. Leo trained beside the laundry."],
+    [5, 5, "Game over, tied 5–5. Leo called an 11:58 pm post pacing."],
+    [0, 0, "Game over, a 0:0 tie. Ava's mat had a quiet week."],
+  ])("accepts the canonical result %s to %s: %s", (a, b, chatLine) => {
+    const result = [{ memberId: "a", name: "Ava", score: a }, { memberId: "l", name: "Leo", score: b }];
+    expect(validateGameRecap({ recap: { pages: valid.pages, chatLine }, players, entries, result })).toEqual([]);
+  });
+  it.each(["Ava won 6-3.", "Game over, tied 4 to 4.", "Ava won 4—2.", "Final score 4:3. Actually, 7-6."])("rejects invented scores: %s", (chatLine) => {
+    const result = [{ memberId: "a", name: "Ava", score: 4 }, { memberId: "l", name: "Leo", score: 3 }];
+    expect(validateGameRecap({ recap: { pages: valid.pages, chatLine }, players, entries, result }))
+      .toContain("chatLine: score must match the settled result (3 to 4).");
+  });
+  it("rejects a non-tie score for a canonical tie", () => {
+    const result = [{ memberId: "a", name: "Ava", score: 5 }, { memberId: "l", name: "Leo", score: 5 }];
+    expect(validateGameRecap({ recap: { pages: valid.pages, chatLine: "Ava won 5-4. The mat earned tenure." }, players, entries, result }))
+      .toContain("chatLine: score must match the settled result (5 to 5).");
+  });
+  it("exempts only the opening result from earlier-line trigrams", () => {
+    const priorChatLines = ["The week ended in a tie, 5 to 5. The laundry basket supervised."];
+    const result = [{ memberId: "a", name: "Ava", score: 5 }, { memberId: "l", name: "Leo", score: 5 }];
+    const check = (chatLine: string) => validateGameRecap({ recap: { pages: valid.pages, chatLine }, players, entries, result, priorChatLines });
+    expect(check("The week ended in a tie, 5 to 5. Ava gave the mat tenure.")).toEqual([]);
+    expect(check("The week ended in a tie, 5 to 5. The laundry basket supervised."))
+      .toContain("chatLine: repeats \"laundry basket supervised\" from an earlier week's chat line in the lore; say it a new way.");
+    expect(check("The laundry basket supervised the week, 5 to 5.").some((error) => error.includes("repeats"))).toBe(true);
+    expect(check("The laundry basket supervised. The week ended 5 to 5.").some((error) => error.includes("repeats"))).toBe(true);
+    expect(check("The week ended in a tie. A different moment.").some((error) => error.includes("repeats"))).toBe(true);
+  });
   it("still validates an empty or overlong legacy scoreLine", () => {
     expect(validateGameRecap({ recap: { ...valid, scoreLine: "" }, players, entries }).some((error) => error.startsWith("scoreLine:"))).toBe(true);
     expect(validateGameRecap({ recap: { ...valid, scoreLine: "Ava " + "a".repeat(80) }, players, entries }).some((error) => error.startsWith("scoreLine:"))).toBe(true);
@@ -88,8 +119,8 @@ describe("game recap validation", () => {
       "page 3 block 1: both players read this; write about them by name, not you.",
       "chatLine: no exclamation marks.",
       "chatLine: no emoji.",
-      "chatLine: lead with the week's funniest moment, not with the recap being ready.",
-      "chatLine: that ending is a stock phrase; point them to the recap in your own words.",
+      "chatLine: lead with the finished game and its result, not with the recap being ready.",
+      "chatLine: skip stock recap phrases and invitations; the next line already supplies the link.",
     ]));
   });
 });

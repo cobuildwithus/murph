@@ -1624,3 +1624,7 @@ calibration proof are tracked in [the specialized alert fix](exec-plans/complete
 Operator recap regeneration and its execution-gated rollout are specified in [Weekly Game](product-specs/weekly-game.md).
 Implementation and focused proof are tracked in
 [the regeneration plan](exec-plans/completed/2026-11-01-recap-regenerate.md).
+
+Recap group messages announce the finished game and canonical result before a
+specific moment; the contract remains in `product-specs/weekly-game.md`. Proof:
+[recap chat result](exec-plans/completed/2026-11-01-recap-chat-line-result.md).
