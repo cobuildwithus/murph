@@ -399,7 +399,7 @@ active invocation lease to the Worker egress authorizer. UserRunner stores only
 the token hash on the active write fence. The Worker validates the token against
 that hash, injects the Worker-owned provider credential on success, and strips
 the provider-egress token before forwarding upstream.
-Native child-process provider egress for OpenAI, Exa, Mapbox,
+Native child-process provider egress for OpenAI, Mapbox,
 `murph_data_api`, and `workers_ai_transcribe` uses a signed Murph provider
 credential in the provider's native credential slot instead of the
 injected-credential sentinel. That credential identifies provider kind, hosted
@@ -1629,7 +1629,6 @@ The undeployed dual URL marker, model-authored destination dialect, and
 intermediate request-id alias are rejected rather than preserved. Remove the
 old action parsing and legacy request-id lookup eleven minutes after all old runners are
 recycled: the existing ten-minute request TTL plus a one-minute queue margin.
-
 
 For `consented_member` requests, on an allow the completion control path
 revalidates the group, personal

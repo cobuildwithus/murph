@@ -378,7 +378,6 @@ describe('executeReadOnlyAssistantAsk', () => {
 
   it('strips ambient hosted capabilities when no explicit child env is supplied', async () => {
     const workspaceRoot = await createTempRoot('murph-assistant-ask-ambient-')
-    vi.stubEnv('EXA_API_KEY', 'ambient-search-secret')
     askMocks.buildEvidence.mockResolvedValue('No committed evidence.')
     askMocks.executeTurn.mockResolvedValue({
       finalMessage: JSON.stringify({
@@ -394,7 +393,6 @@ describe('executeReadOnlyAssistantAsk', () => {
     })
 
     const childEnv = askMocks.executeTurn.mock.calls[0]?.[0].env
-    expect(childEnv.EXA_API_KEY).toBeUndefined()
   })
 
   it('rejects invalid structured output and invalid questions', async () => {
@@ -685,7 +683,6 @@ describe('executeConsentedReadOnlyAssistantAsk', () => {
       },
     ])
   })
-
 
   it('assembles a self-contained direct-recipient answer contract', async () => {
     const workspaceRoot = await createTempRoot('murph-consented-direct-ask-')

@@ -6,9 +6,7 @@ import { readConfiguredDeviceSyncProviderConfigs } from "./provider-configs.ts";
 import { createJunctionDeviceSyncProvider } from "../providers/junction.ts";
 
 import type {
-  ConfiguredDeviceSyncProviderConfigByKey,
   ConfiguredDeviceSyncProviderConfigs,
-  ConfiguredDeviceSyncProviderKey,
   DeviceSyncEnvSource,
 } from "./provider-types.ts";
 import type { DeviceSyncProvider, DeviceSyncRegistry } from "../types.ts";
@@ -30,19 +28,9 @@ export function createConfiguredDeviceSyncRegistry(
 export function createConfiguredDeviceSyncProvidersFromConfigs(
   configs: ConfiguredDeviceSyncProviderConfigs,
 ): DeviceSyncProvider[] {
-  const providers: DeviceSyncProvider[] = [];
-
-  for (const provider of configuredDeviceSyncProviderKeys) {
-    const config = configs[provider];
-
-    if (config === undefined) {
-      continue;
-    }
-
-    providers.push(createConfiguredDeviceSyncProviderFromConfig(provider, config as never));
-  }
-
-  return providers;
+  return configs.junction === undefined
+    ? []
+    : [createJunctionDeviceSyncProvider(configs.junction)];
 }
 
 export function createConfiguredDeviceSyncRegistryFromConfigs(
@@ -51,20 +39,6 @@ export function createConfiguredDeviceSyncRegistryFromConfigs(
   return createDeviceSyncRegistry(
     createConfiguredDeviceSyncProvidersFromConfigs(configs),
   );
-}
-
-function createConfiguredDeviceSyncProviderFromConfig<
-  TProvider extends ConfiguredDeviceSyncProviderKey,
->(
-  provider: TProvider,
-  config: ConfiguredDeviceSyncProviderConfigByKey[TProvider],
-): DeviceSyncProvider {
-  switch (provider) {
-    case "junction":
-      return createJunctionDeviceSyncProvider(
-        config as ConfiguredDeviceSyncProviderConfigByKey["junction"],
-      );
-  }
 }
 
 export { configuredDeviceSyncProviderKeys };

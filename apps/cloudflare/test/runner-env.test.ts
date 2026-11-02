@@ -97,7 +97,6 @@ describe("buildHostedRunnerContainerEnv", () => {
   it("forwards opt-in runner env profiles when configured", () => {
     expect(buildHostedRunnerContainerEnv({
       ...REQUIRED_OPENAI_PROVIDER_ENV,
-      EXA_API_KEY: "exa-token",
       HOSTED_EMAIL: {
         send: async (_message: unknown) => undefined,
       },
@@ -105,32 +104,17 @@ describe("buildHostedRunnerContainerEnv", () => {
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_EMAIL_SIGNING_SECRET: "signing-secret",
-      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram,mapbox,hosted-email,exa",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram,mapbox,hosted-email",
       MAPBOX_ACCESS_TOKEN: "mapbox-token",
       TELEGRAM_BOT_TOKEN: "telegram-token",
     })).toEqual({
       ...REQUIRED_OPENAI_PROVIDER_ENV,
-      EXA_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
       HOSTED_EMAIL_INGRESS_READY: "true",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_EMAIL_SEND_READY: "true",
       MAPBOX_ACCESS_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-      NODE_ENV: "production",
-    });
-  });
-
-  it("maps Worker-owned Exa credentials to a hosted runtime sentinel", () => {
-    expect(buildHostedRunnerContainerEnv({
-      ...REQUIRED_OPENAI_PROVIDER_ENV,
-      EXA_API_KEY: "exa-token",
-      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa",
-    })).toEqual({
-      ...REQUIRED_OPENAI_PROVIDER_ENV,
-      EXA_API_KEY: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-      HOSTED_EMAIL_INGRESS_READY: "false",
-      HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "production",
     });
   });
@@ -431,7 +415,6 @@ describe("buildHostedRunnerContainerEnv", () => {
       [HOSTED_RUNTIME_CODEX_APP_SERVER_PROXY_URL_ENV]: "tcp://evil.example.test:1234",
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       DEEPSEEK_API_KEY: "deepseek-user",
-      EXA_API_KEY: "exa-user",
       GEMINI_API_KEY: "gemini-user",
       HF_TOKEN: "hf-user",
       LINQ_API_TOKEN: "linq-user",
@@ -453,7 +436,6 @@ describe("buildHostedRunnerContainerEnv", () => {
   it("rejects intercept-injected provider credentials from runner secrets even when explicitly allowlisted", () => {
     expect(filterHostedRunnerSecrets(
       {
-        EXA_API_KEY: "exa-user",
         LINQ_API_TOKEN: "linq-user",
         MAPBOX_ACCESS_TOKEN: "mapbox-user",
         MURPH_DATA_API_KEY: "data-api-user",
@@ -469,7 +451,6 @@ describe("buildHostedRunnerContainerEnv", () => {
       },
       {
         HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: [
-          "EXA_API_KEY",
           "LINQ_API_TOKEN",
           "MAPBOX_ACCESS_TOKEN",
           "MURPH_DATA_API_KEY",
@@ -1135,7 +1116,7 @@ describe("hosted deploy automation device-sync surface", () => {
     });
 
     expect(deployEnv.workerVars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES).toBe(
-      "exa,hosted-email,linq,mapbox,telegram",
+      "hosted-email,linq,mapbox,telegram",
     );
     expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).toEqual(
       expect.arrayContaining([
@@ -1150,7 +1131,6 @@ describe("hosted deploy automation device-sync surface", () => {
     expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).toEqual(
       expect.arrayContaining([
         "LINQ_API_TOKEN",
-        "EXA_API_KEY",
         "GEMINI_API_KEY",
         "MAPBOX_ACCESS_TOKEN",
         "TELEGRAM_BOT_TOKEN",

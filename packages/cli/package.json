@@ -78,7 +78,6 @@
     "@murphai/vault-usecases": "workspace:*",
     "@scalar/openapi-types": "^0.8.0",
     "@toon-format/toon": "^2.1.0",
-    "exa-js": "2.17.0",
     "grammy": "1.42.0",
     "incur": "0.5.1",
     "mpg123-decoder": "1.0.3",

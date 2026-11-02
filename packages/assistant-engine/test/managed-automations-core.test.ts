@@ -26,7 +26,7 @@ import {
   MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
   MURPH_RETIRED_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
   MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
-  MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
+  MURPH_RETIRED_RESEARCH_SCOUT_AUTOMATION_ID,
   applyMurphManagedAutomations,
   ensureAutomaticMealCloseoutAutomation,
   type MurphManagedAutomationDiagnosticStage,
@@ -193,7 +193,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       })
 
       await expect(applyMurphManagedAutomations({ defaultRoute, now, vaultRoot })).resolves.toEqual({
-        created: 4,
+        created: 3,
         skipped: 0,
         updated: 1,
       })
@@ -209,7 +209,7 @@ describe('applyMurphManagedAutomations core integration', () => {
 
       await expect(applyMurphManagedAutomations({ defaultRoute, now, vaultRoot })).resolves.toEqual({
         created: 0,
-        skipped: 4,
+        skipped: 3,
         updated: 0,
       })
       await expect(showAutomation({
@@ -256,6 +256,93 @@ describe('applyMurphManagedAutomations core integration', () => {
     })).resolves.toBeNull()
     await expect(showAutomation({
       slug: 'personal-patterns-update',
+      vaultRoot,
+    })).resolves.toBeNull()
+  })
+
+  it.each(['active', 'paused'] as const)(
+    'archives a persisted %s research scout job without reseeding it', async (status) => {
+      const vaultRoot = await createVaultRoot()
+      const now = new Date('2026-10-19T17:10:00.000Z')
+      const legacySchedule = { kind: 'cron' as const, expression: '0 13 * * *', timeZone: 'America/New_York' }
+      await upsertAutomation({
+        automationId: MURPH_RETIRED_RESEARCH_SCOUT_AUTOMATION_ID,
+        continuityPolicy: 'fresh',
+        instructions: 'Retired synthetic weekly research check.',
+        now: new Date('2026-09-01T00:00:00.000Z'),
+        route: defaultRoute,
+        schedule: legacySchedule,
+        slug: 'weekly-health-research-scout',
+        status,
+        tags: ['assistant', 'scheduled', 'murph-managed', 'murph-managed:weekly-health-research-scout'],
+        title: 'Retired research check',
+        vaultRoot,
+      })
+
+      await expect(applyMurphManagedAutomations({ defaultRoute, now, vaultRoot })).resolves.toEqual({
+        created: 3,
+        skipped: 0,
+        updated: 1,
+      })
+      // Retirement archives in place; it never migrates the retired schedule.
+      await expect(showAutomation({
+        automationId: MURPH_RETIRED_RESEARCH_SCOUT_AUTOMATION_ID,
+        vaultRoot,
+      })).resolves.toMatchObject({
+        schedule: legacySchedule,
+        slug: 'weekly-health-research-scout',
+        status: 'archived',
+      })
+
+      await expect(applyMurphManagedAutomations({ defaultRoute, now, vaultRoot })).resolves.toEqual({
+        created: 0,
+        skipped: 3,
+        updated: 0,
+      })
+      await expect(showAutomation({
+        automationId: MURPH_RETIRED_RESEARCH_SCOUT_AUTOMATION_ID,
+        vaultRoot,
+      })).resolves.toMatchObject({ status: 'archived' })
+    },
+  )
+
+  it('preserves a member automation using the retired scout slug', async () => {
+    const vaultRoot = await createVaultRoot()
+    const memberJob = await upsertAutomation({
+      automationId: 'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3F8',
+      continuityPolicy: 'preserve',
+      instructions: 'Keep this member-authored reminder.',
+      now: new Date('2026-09-01T00:00:00.000Z'),
+      route: defaultRoute,
+      schedule: { kind: 'cron', expression: '0 9 * * 1' },
+      slug: 'weekly-health-research-scout',
+      status: 'active',
+      tags: ['user'],
+      title: 'My reminder',
+      vaultRoot,
+    })
+    await applyMurphManagedAutomations({ defaultRoute, now: new Date('2026-10-19T17:10:00.000Z'), vaultRoot })
+    await expect(showAutomation({ automationId: memberJob.record.automationId, vaultRoot }))
+      .resolves.toEqual(memberJob.record)
+  })
+
+  it('does not seed research scout into a fresh vault', async () => {
+    const vaultRoot = await createVaultRoot()
+    expect(MURPH_MANAGED_AUTOMATIONS.map((seed) => seed.automationId))
+      .not.toContain(MURPH_RETIRED_RESEARCH_SCOUT_AUTOMATION_ID)
+
+    await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-10-19T17:10:00.000Z'),
+      vaultRoot,
+    })
+
+    await expect(showAutomation({
+      automationId: MURPH_RETIRED_RESEARCH_SCOUT_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toBeNull()
+    await expect(showAutomation({
+      slug: 'weekly-health-research-scout',
       vaultRoot,
     })).resolves.toBeNull()
   })
@@ -534,7 +621,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })
 
-    expect(result.created).toBe(4)
+    expect(result.created).toBe(3)
     expect(result.experimentLifecycleFailure).toMatchObject({
       code: 'EXPERIMENT_STORAGE_INVALID',
     })
@@ -584,7 +671,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(result.experimentLifecycleFailure).toMatchObject({
       code: 'EXPERIMENT_STORAGE_INVALID',
     })
-    expect(result.created).toBe(4)
+    expect(result.created).toBe(3)
     expect(
       await showAutomation({ automationId: experimentAutomationId, vaultRoot }),
     ).toMatchObject({ status: 'active' })
@@ -603,7 +690,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })
     expect(result).toEqual({
-      created: 4,
+      created: 3,
       skipped: 0,
       updated: 0,
     })
@@ -611,8 +698,8 @@ describe('applyMurphManagedAutomations core integration', () => {
       { stage: 'experiment_lifecycle' },
       { stage: 'onboarding_goal_checkin' },
       { stage: 'seed_composition' },
-      ...Array.from({ length: 4 }, (_value, seedIndex) => ({
-        seedCount: 4,
+      ...Array.from({ length: 3 }, (_value, seedIndex) => ({
+        seedCount: 3,
         seedPosition: seedIndex + 1,
         stage: 'managed_seed' as const,
       })),
@@ -869,60 +956,6 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(improvementCoachRecord?.instructions).toContain(
       'If it could reasonably read as scolding, disappointment, surveillance, a grade, or "you need to do better," it does not clear the send bar.',
     )
-
-    const researchScoutRecord = await showAutomation({
-      automationId: MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
-      vaultRoot,
-    })
-
-    expect(researchScoutRecord).toMatchObject({
-      automationId: MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
-      route: defaultRoute,
-      slug: 'weekly-health-research-scout',
-      status: 'active',
-      title: 'Weekly health research scout',
-    })
-    expect(researchScoutRecord?.assistantTargetOverride).toEqual({
-      reasoningEffort: 'high',
-    })
-    expectCronSchedule(researchScoutRecord?.schedule)
-    expect(researchScoutRecord?.tags).toContain('murph-managed:weekly-health-research-scout')
-    expect(researchScoutRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
-    expect(researchScoutRecord?.instructions).toContain(
-      'Use the engine-supplied committed recent conversation as conservative interruption-cost evidence',
-    )
-    expect(researchScoutRecord?.instructions).toContain('On this scheduled weekly run')
-    expect(researchScoutRecord?.instructions).not.toContain('Wednesday at 7:30 PM local time')
-    expect(researchScoutRecord?.instructions).not.toContain('assistant onboarding')
-    expect(researchScoutRecord?.instructions).not.toContain('14 days')
-    expect(researchScoutRecord?.instructions).toContain('Use `vault-cli research scout-batch` once')
-    expect(researchScoutRecord?.instructions).not.toContain('Use `vault-cli research scout` once')
-    expect(researchScoutRecord?.instructions).toContain('Do not send raw lab values')
-    expect(researchScoutRecord?.instructions).not.toContain('lowercase non-identifying category tags')
-    expect(researchScoutRecord?.instructions).toContain('run `vault-cli research scout-batch-payload-schema --format json`')
-    expect(researchScoutRecord?.instructions).toContain('sole provider-value catalog')
-    expect(researchScoutRecord?.instructions).toContain('every provider value is an exact concept allowed for that field')
-    expect(researchScoutRecord?.instructions).toContain('If none exists, suppress the scheduled message without calling `vault-cli research scout-batch`')
-    expect(researchScoutRecord?.instructions).toContain('If no relevant topic can be represented exactly, suppress the scheduled message without calling `vault-cli research scout-batch`')
-    expect(researchScoutRecord?.instructions).toContain('or a generic `tags` field')
-    expect(researchScoutRecord?.instructions).not.toContain('Example body:')
-    expect(researchScoutRecord?.instructions).not.toContain('blue light glasses')
-    expect(researchScoutRecord?.instructions).not.toContain('late meals')
-    expect(researchScoutRecord?.instructions).toContain('device and measurement meta-commentary')
-    expect(researchScoutRecord?.instructions).toContain('wearable trend')
-    expect(researchScoutRecord?.instructions).toContain('ignore a metric their own data shows is noisy for them')
-    expect(researchScoutRecord?.instructions).not.toContain('wearable hrv reliability')
-    expect(researchScoutRecord?.instructions).not.toContain('wearable tracking')
-    expect(researchScoutRecord?.instructions).toContain('YYYY-MM-DD dates or full ISO timestamps are accepted')
-    expect(researchScoutRecord?.instructions).toContain('Suppress the scheduled message')
-    expect(researchScoutRecord?.instructions).toContain('The unit of value is the insight, not the paper')
-    expect(researchScoutRecord?.instructions).toContain('The scout-batch call is the retrieval budget')
-    expect(researchScoutRecord?.instructions).toContain('Recent conversation and automation/regimen changes are veto context')
-    expect(researchScoutRecord?.instructions).toContain('a worthwhile takeaway beyond repeated basics')
-    expect(researchScoutRecord?.instructions).toContain('still remember the point ten seconds after reading')
-    expect(researchScoutRecord?.instructions).toContain('Hard provenance gate: if the note could have been written without this run\'s retrieved sources')
-    expect(researchScoutRecord?.instructions).toContain('without a send quota or an expectation to skip most weeks')
-    expect(researchScoutRecord?.instructions).toContain('Do not reuse the provider candidate\'s `actionOrQuestion` as advice')
 
     await expect(showAutomation({
       automationId: MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
@@ -1312,7 +1345,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       },
       vaultRoot,
     })).resolves.toEqual({
-      created: 7,
+      created: 6,
       skipped: 0,
       updated: 0,
     })
@@ -1386,7 +1419,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       routeValidationProfile: 'hosted',
       vaultRoot,
     })).resolves.toEqual({
-      created: 6,
+      created: 5,
       skipped: 0,
       updated: 0,
     })
@@ -1446,7 +1479,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 3,
       skipped: 0,
       updated: 0,
     })
@@ -1483,7 +1516,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 0,
-      skipped: 4,
+      skipped: 3,
       updated: 0,
     })
 
@@ -1515,7 +1548,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 0,
-      skipped: 4,
+      skipped: 3,
       updated: 0,
     })
   })
@@ -1528,7 +1561,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 3,
       skipped: 0,
       updated: 0,
     })
@@ -1574,7 +1607,7 @@ describe('applyMurphManagedAutomations core integration', () => {
         now: new Date('2026-06-23T13:00:00.000Z'),
         vaultRoot,
       })).resolves.toEqual({
-        created: 4,
+        created: 3,
         skipped: 0,
         updated: 1,
       })
@@ -1636,7 +1669,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       },
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 3,
       skipped: 0,
       updated: 1,
     })
@@ -1704,7 +1737,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 3,
       skipped: 0,
       updated: 0,
     })
@@ -1857,7 +1890,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       },
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 3,
       skipped: 0,
       updated: 1,
     })
@@ -1924,7 +1957,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 3,
       skipped: 0,
       updated: 1,
     })
@@ -1974,7 +2007,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 3,
       skipped: 0,
       updated: 0,
     })
@@ -2028,7 +2061,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 3,
       skipped: 0,
       updated: 0,
     })
@@ -2073,7 +2106,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 4,
       skipped: 0,
       updated: 1,
     })
@@ -2149,7 +2182,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 3,
       skipped: 0,
       updated: 1,
     })
@@ -2271,7 +2304,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 3,
+      created: 2,
       skipped: 0,
       updated: 1,
     })
@@ -2324,7 +2357,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 3,
       skipped: 0,
       updated: 1,
     })
@@ -2377,7 +2410,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 3,
+      created: 2,
       skipped: 0,
       updated: 1,
     })
@@ -2455,7 +2488,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 3,
+      created: 2,
       skipped: 0,
       updated: 1,
     })
@@ -2563,7 +2596,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 0,
-      skipped: 4,
+      skipped: 3,
       updated: 0,
     })
 
@@ -2576,7 +2609,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })).resolves.toBeNull()
     await expect(showAutomation({
-      automationId: MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
+      automationId: MURPH_RETIRED_RESEARCH_SCOUT_AUTOMATION_ID,
       vaultRoot,
     })).resolves.toBeNull()
     await expect(showAutomation({

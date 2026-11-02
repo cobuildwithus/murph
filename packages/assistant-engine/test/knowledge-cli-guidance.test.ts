@@ -89,7 +89,6 @@ describe('knowledge CLI guidance matches the shipped CLI', () => {
       'improvement-opportunities',
       'journal-connected-context',
       'weekly-health-insights',
-      'weekly-health-research-scout',
     ])
     // Absence stays a quiet prior-state signal; it never authorizes a write or a guess.
     expect(MURPH_ONBOARDING_FIRST_PERSONAL_READ_INSTRUCTIONS).toContain(
@@ -101,7 +100,6 @@ describe('knowledge CLI guidance matches the shipped CLI', () => {
     expect(optionalReaders.map((automation) => automation.slug).sort()).toEqual([
       'monthly-improvement-coach',
       'weekly-health-insight',
-      'weekly-health-research-scout',
     ])
     for (const automation of optionalReaders) {
       expect(automation.instructions).toMatch(/read fails(?: instead)?, return skip/u)

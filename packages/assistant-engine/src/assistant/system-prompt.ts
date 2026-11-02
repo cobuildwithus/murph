@@ -25,7 +25,6 @@ import { isAssistantUserFacingChannel } from "./channel-presentation.js";
 import { buildAssistantPersonaPrompt } from "./persona-prompts.js";
 import {
   buildAssistantExecutionBehaviorText,
-  buildAssistantResearchScoutCapabilityText,
   type AssistantModelBehaviorProfile,
 } from "./model-behavior.js";
 import {
@@ -67,7 +66,6 @@ export interface AssistantSystemPromptInput {
   assistantKnowledgeToolsAvailable?: boolean;
   assistantPollsAvailable?: boolean;
   assistantProgressUpdatesAvailable?: boolean;
-  assistantResearchAvailable?: boolean;
   assistantToolNameAliases?: Readonly<Record<string, string>> | null;
   assistantPersona?: AssistantPersonaId | null;
   assistantPersonality?: AssistantPersonalityPreferences | null;
@@ -485,9 +483,6 @@ function buildAssistantStableExecutionGuidanceText(
   return joinPromptSections(
     groupEmail ? null : buildAssistantHealthCommonsGuidanceText(),
     input.hostedRuntime === true ? buildAssistantLateChildResultGuidanceText() : null,
-    input.assistantResearchAvailable === true && !groupEmail
-      ? buildAssistantResearchScoutCapabilityText()
-      : null,
     groupEmail
       ? "Group-email health guidance: apply the resident Understand before recommending rules. Snoring/gasping, unrefreshing sleep despite enough opportunity, unexplained awakenings, morning headaches, sleep attacks, or dangerous sleepiness require sleep-safety assessment; give immediate guidance before coaching when driving or work safety is affected. Filesystem skills, browser actions, and personal-state operations are unavailable here."
       : buildAssistantSkillRouteHintText(conversationScope),

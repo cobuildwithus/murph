@@ -1867,7 +1867,7 @@ Core execution tuning:
   that same start until this container-owned window expires.
 - `CF_ALLOWED_RUNNER_SECRET_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` in the rendered worker config
 - `HOSTED_EXECUTION_CONTAINER_ROLLOUT` selects native `gradual` (default), explicit `immediate`, or `worker-only`. Follow the Production rollout policy above for compatibility evidence and first-writer transitions.
-- `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `exa,hosted-email,linq,mapbox,telegram`. Hosted device-sync runtime config is resolved from worker env directly rather than a runtime-env profile.
+- `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `hosted-email,linq,mapbox,telegram`. Hosted device-sync runtime config is resolved from worker env directly rather than a runtime-env profile.
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `600000` and bounds
   conversation warmth from the latest accepted inbound user's original server
   receipt. `HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS` defaults to
@@ -2223,11 +2223,10 @@ When hosted email sender identity is configured, deploy automation renders one n
 
 Hosted assistant provider and channel secrets:
 
-- `EXA_API_KEY`, `MAPBOX_ACCESS_TOKEN`, and `TELEGRAM_BOT_TOKEN` when those
+- `MAPBOX_ACCESS_TOKEN`, and `TELEGRAM_BOT_TOKEN` when those
   hosted runtime integrations are enabled. `LINQ_API_TOKEN` is no longer
   optional because the independent database-health page owner uses it. These
-  are Worker-owned credentials, not raw child-container env. Exa egress is
-  limited to `POST /search`.
+  are Worker-owned credentials, not raw child-container env.
 
 Hosted usage-reporting secrets:
 
@@ -2254,7 +2253,6 @@ Opt-in execution integrations:
 
 - `HOSTED_EMAIL_SIGNING_SECRET`
 - `DEVICE_SYNC_SECRET`
-- `EXA_API_KEY`
 - `JUNCTION_API_KEY`
 - `JUNCTION_CLIENT_USER_ID_SECRET`
 - `JUNCTION_WEBHOOK_SECRET`

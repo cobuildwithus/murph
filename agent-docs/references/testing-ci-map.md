@@ -2053,3 +2053,5 @@ The opt-in scripted `memory profile complete provider input` capture measures
 complete private/group requests without a live provider.
 
 Device transport coverage is Junction-only. `packages/device-syncd/test/provider-api-error.test.ts` owns the shared diagnostic formatter; importer suites retain WHOOP/Oura/Strava source payloads and historical reads. Hosted runtime foreground ingestion uses a Junction source-authority fixture.
+
+Scout retirement is covered by `managed-automations-core.test.ts`, `managed-automations.test.ts`, `assistant-cron-runtime.test.ts` and `assistant-outbox-runtime.test.ts`. The focused live journey `preserves provider-labelled sleep reads after scout retirement` uses the production prompt and one real CLI read. Historical provider labels remain query inputs after direct transport removal.

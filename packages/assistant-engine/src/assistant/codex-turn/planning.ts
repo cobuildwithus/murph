@@ -1073,11 +1073,7 @@ export async function resolveAssistantRouteTurnPlan(
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
   })
-  const assistantResearchAvailable = normalizeNullableString(
-    input.sharedPlan.cliAccess.env.EXA_API_KEY,
-  ) !== null
-    && input.profile.promptProfile === 'conversation'
-    && (privateInteractiveAudience || authenticatedGroupChatRuntime)
+
   const userActionAcceptedInputIds = resolveAssistantUserActionAcceptedInputIds({
     acceptedInputItems: input.acceptedInputItems ?? [],
     turnTrigger: input.input.turnTrigger ?? null,
@@ -1110,7 +1106,6 @@ export async function resolveAssistantRouteTurnPlan(
   const bootstrapAssistantCliContract = scopeAssistantCliSurfaceContractForAssistant({
     contract: unscopedAssistantCliContract,
     hostedRuntime: input.executionContext?.hosted != null,
-    researchAvailable: assistantResearchAvailable,
   })
   if (privateInteractiveProviderTurn) {
     // A small vault can repair its navigation snapshot before provider start.
@@ -1234,7 +1229,6 @@ export async function resolveAssistantRouteTurnPlan(
         promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
       assistantPollsAvailable: pollsAvailable,
       assistantProgressUpdatesAvailable: input.progressDelivery != null,
-      assistantResearchAvailable,
       assistantToolNameAliases,
       assistantPersona: explicitAssistantPersona,
       assistantPersonality:

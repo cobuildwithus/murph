@@ -55,7 +55,6 @@ import {
   goalMetricTargetSchema,
   parseCalendarEventPayload,
   regimenFrontmatterSchema,
-  researchScoutBatchPayloadSchema,
   toLocalDayKey,
   addDaysToIsoDate,
   resolveFloatingIsoTimestampInTimeZone,
@@ -270,7 +269,6 @@ import {
   MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
-  MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
 import {
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
@@ -1672,6 +1670,8 @@ async function buildFocusedSleepPatternProjectionInstructions() {
   })
   expect(instructions).toContain(assistantCliContract)
   expect(assistantCliContract).toContain('sleep pattern')
+  expect(instructions).not.toContain('research scout')
+  expect(instructions).not.toContain('Configured Exa research:')
   return instructions
 }
 
@@ -1684,7 +1684,7 @@ function readFocusedSleepPatternProjectionCommand(command: string): string {
 }
 
 describeRealCodex('real Codex focused sleep-pattern projection e2e', () => {
-  it('answers duration and usable nights from one native sleep-pattern read without other reads or effects', async () => {
+  it('preserves provider-labelled sleep reads after scout retirement', async () => {
     const config = await resolveRealCodexE2eConfig()
     const root = await mkdtemp(path.join(tmpdir(), 'murph-sleep-pattern-projection-e2e-'))
     const vaultRoot = path.join(root, 'vault'); const binDirectory = path.join(root, 'bin')
@@ -2386,7 +2386,6 @@ const CHILD_MODEL_SELECTION_CONFIG_OVERRIDES = [
   'features.multi_agent_v2.expose_spawn_agent_model_overrides=true',
   'features.multi_agent_v2.max_concurrent_threads_per_session=4',
 ] as const
-
 
 const REAL_NUTRITION_CARD_CONVERSATION_INPUT = {
   groupConversation: false,
@@ -4798,102 +4797,6 @@ describe('real Codex live fixture contracts', () => {
     }
   })
 
-  describe('research scout diagnostics', () => {
-    it('distinguishes a silent finish from a turn with no observed tools', () => {
-      const empty = buildResearchScoutTurnDiagnostics({ jsonEvents: [], providerActionCount: 0, finalMessage: '' })
-      expect(empty.nativeCommandCount).toBe(0)
-      expect(empty.dynamicTools).toEqual([])
-      expect(empty.completedAgentMessageCount).toBe(0)
-      const result = buildResearchScoutTurnDiagnostics({
-        providerActionCount: 1, finalMessage: '', jsonEvents: [
-          { method: 'item/tool/call', params: { tool: 'finish_without_reply', arguments: {} } },
-          { method: 'item/completed', params: { item: {
-            type: 'dynamicToolCall', tool: 'finish_without_reply', arguments: {}, success: true,
-          } } },
-        ],
-      })
-      expect(result.providerActionCount).toBe(1)
-      expect(result.nativeCommandCount).toBe(0)
-      expect(result.dynamicToolAttemptCount).toBe(1)
-      expect(result.dynamicTools).toEqual([{ eventIndex: 1, tool: 'finish_without_reply', success: true }])
-      expect(result.finalMessageChars).toBe(0)
-    })
-
-    it('classifies surfaced native failures without treating missing exits as success', () => {
-      const cases = [
-        [127, 'zsh:1: command not found: vault-cli', 'fixture-cli-unavailable'],
-        [127, '/bin/bash: vault-cli: command not found', 'fixture-cli-unavailable'],
-        [1, "Error: Cannot find module '@murphai/contracts'", 'module-resolution'],
-        [1, 'Error [ERR_MODULE_NOT_FOUND]: private module details', 'module-resolution'],
-        [64, 'Unsupported synthetic command', 'unsupported-synthetic-command'],
-        [1, 'EXA_API_KEY is missing', 'environment-missing'],
-        [1, 'Missing environment variable: RESEARCH_FIXTURE_RESOLVER', 'environment-missing'],
-        [0, 'EXA_API_KEY is not missing', null],
-        [0, 'success', null],
-        [-1, '', null],
-        [null, '', null],
-      ] as const
-      for (const [exitCode, output, outputSignal] of cases) {
-        const result = buildResearchScoutTurnDiagnostics({
-          providerActionCount: 1, finalMessage: '', jsonEvents: [
-            { method: 'item/commandExecution/outputDelta', params: { itemId: 'cmd', delta: output } },
-            { method: 'item/completed', params: { item: {
-              id: 'cmd', type: 'commandExecution', command: 'vault-cli knowledge show-index',
-              exitCode, aggregatedOutput: '',
-            } } },
-          ],
-        })
-        expect(result.nativeCommands).toEqual([{
-          eventIndex: 1, exitCode, success: exitCode === null ? null : exitCode === 0, outputSignal,
-        }])
-        expect(result.nativeCommandFailures).toBe(exitCode !== null && exitCode !== 0 ? 1 : 0)
-        expect(result.nativeCommandUnknownOutcomes).toBe(exitCode === null ? 1 : 0)
-      }
-    })
-
-    it('counts native completions rather than expanded batch children', () => {
-      const result = buildResearchScoutTurnDiagnostics({
-        providerActionCount: 1, finalMessage: '', jsonEvents: [{
-          method: 'item/completed', params: { item: { type: 'command_execution', exit_code: 0 } },
-        }],
-      }, [0, 1].map(() => ({ command: 'vault-cli knowledge show-index',
-        eventIndex: 0, kind: 'command' as const, ok: true, output: '{}' })))
-      expect(result.nativeCommandCount).toBe(1)
-      expect(result.nativeCommands).toEqual([{ eventIndex: 0, exitCode: 0, success: true, outputSignal: null }])
-    })
-
-    it('bounds metadata, ignores reasoning, and never emits provider text or arguments', () => {
-      const privateText = '/private/fixture/path SECRET_ENV=secret-value raw-output'
-      const result = buildResearchScoutTurnDiagnostics({
-        providerActionCount: 21, finalMessage: privateText,
-        jsonEvents: [
-          { method: 'item/completed', params: { item: {
-            type: 'reasoning', get text() { throw new Error('Reasoning must not be read') },
-          } } },
-          { method: 'item/completed', params: { item: { type: 'agentMessage', text: privateText } } },
-          ...Array.from({ length: 10 }, () => ({ method: 'item/completed', params: { item: {
-            type: 'commandExecution', command: privateText, exitCode: 0, aggregatedOutput: privateText,
-          } } })),
-          ...Array.from({ length: 10 }, () => ({ method: 'item/completed', params: { item: {
-            type: 'dynamicToolCall', tool: privateText, arguments: { privateText }, success: false,
-            contentItems: [{ text: privateText }],
-          } } })),
-        ],
-      })
-      expect(result.nativeCommandCount).toBe(10)
-      expect(result.nativeCommands).toHaveLength(8)
-      expect(result.nativeCommandsOmitted).toBe(2)
-      expect(result.dynamicToolCount).toBe(10)
-      expect(result.dynamicTools).toHaveLength(8)
-      expect(result.dynamicToolsOmitted).toBe(2)
-      expect(result.dynamicTools.every((tool) => tool.tool === 'unrecognized' && !tool.success)).toBe(true)
-      expect(result.completedAgentMessageCount).toBe(1)
-      expect(result.completedAgentMessageChars).toBe(privateText.length)
-      expect(result.finalMessageChars).toBe(privateText.length)
-      expect(JSON.stringify(result)).not.toMatch(/private|SECRET_ENV|secret-value|raw-output|Reasoning/u)
-    })
-  })
-
   it('retains streamed policy before a yielded command completion without duplicating its tail', () => {
     const events = [
       { method: 'item/commandExecution/outputDelta', params: { itemId: 'read-policy', delta: 'Complete policy\n' } },
@@ -5747,68 +5650,6 @@ describeRealCodex('real Codex optional knowledge show e2e', () => {
 })
 
 describeRealCodex('real Codex optional knowledge ledger and wiki write e2e', () => {
-  it('reads an absent optional scheduled ledger once and stays quiet without writing', async () => {
-    const config = await resolveRealCodexE2eConfig()
-    const automation = MURPH_MANAGED_AUTOMATIONS.find(
-      (candidate) => candidate.automationId === MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
-    )
-    if (!automation) throw new Error('Expected the managed research scout automation.')
-    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-optional-ledger-e2e-'))
-    // Fixture scaffolding stays outside the vault so the snapshot covers all vault content.
-    const vaultRoot = path.join(workingDirectory, 'vault')
-    const binDirectory = path.join(workingDirectory, 'bin')
-    const commandLogPath = path.join(workingDirectory, 'commands.log')
-    try {
-      await initializeVault({ title: 'Synthetic optional ledger', timezone: 'UTC', vaultRoot })
-      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot })
-      const vaultBefore = await snapshotRealCodexCanonicalVault(vaultRoot)
-      const result = await executeRealCodexAppServerTurn({
-        allowFinishWithoutReply: true,
-        approvalPolicy: 'never',
-        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
-        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
-        codexHome: config.codexHome,
-        developerInstructions: buildWeeklyHealthInsightDeveloperInstructions(),
-        dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
-        // No research credential: the saved instructions require a quiet skip after the ledger read.
-        env: { ...config.env, EXA_API_KEY: undefined },
-        fixtureBinDirectory: binDirectory,
-        model: config.model,
-        modelProvider: config.modelProvider,
-        prompt: [
-          automation.instructions,
-          'Scheduled occurrence context: 2026-08-09. This is an isolated synthetic fixture.',
-        ].join('\n\n'),
-        reasoningEffort: 'high',
-        sandbox: 'workspace-write',
-        workingDirectory,
-      })
-      const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
-        .filter((command) => !isRecordedVaultHelpCommand(command))
-      const actions = readCapabilityRoutingActions(result.jsonEvents)
-      const knowledgeOutputs = actions.filter((action) => action.kind === 'command' && action.command.includes('knowledge'))
-        .map((action) => action.output)
-      const finishCalls = actions.filter((action) => action.kind === 'dynamic'
-        && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name)
-      process.stdout.write(`[optional-ledger-e2e] ${JSON.stringify({
-        finalMessage: result.finalMessage || '(silent)', finishCalls: finishCalls.length,
-      })}\n`)
-      const ledgerReads = commands.filter((command) => /^knowledge show weekly-health-research-scout(?:\s|$)/u.test(command))
-      expect(ledgerReads).toHaveLength(1)
-      expect(ledgerReads[0]).toContain('--if-exists')
-      expect(knowledgeOutputs.filter((output) => /knowledge_page_not_found|VALIDATION_ERROR/u.test(output))).toEqual([])
-      expect(commands.filter((command) => /^research scout-batch\b/u.test(command))).toEqual([])
-      // Absence authorizes nothing: every canonical and derived vault file is unchanged.
-      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(vaultBefore)
-      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
-      expect(result.responseMedia).toEqual([])
-      expect(result.finalMessage === '' && finishCalls.length === 1
-        || /"kind"\s*:\s*"skip"/u.test(result.finalMessage)).toBe(true)
-    } finally {
-      await removeRealCodexTemporaryPath(workingDirectory)
-      await removeRealCodexTemporaryPaths(config.temporaryPaths)
-    }
-  }, 600_000)
 
   it('saves an explicitly requested wiki page with exactly one valid upsert', async () => {
     const config = await resolveRealCodexE2eConfig()
@@ -19050,176 +18891,6 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
   }, 720_000)
 })
 
-describeRealCodex('real Codex research scout ongoing interest e2e', () => {
-  it('saves research with compressed ledger sources and suppresses repeated research', async () => {
-    const config = await resolveRealCodexE2eConfig()
-    const automation = MURPH_MANAGED_AUTOMATIONS.find(
-      (candidate) => candidate.automationId === MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
-    )
-    if (!automation) throw new Error('Expected the managed research scout automation.')
-    try {
-      for (const repeated of [false, true]) {
-        const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-research-interest-e2e-'))
-        try {
-          const binDirectory = path.join(workingDirectory, 'bin')
-          await mkdir(binDirectory)
-          await writeFile(path.join(binDirectory, 'calls.jsonl'), '')
-          await writeFile(path.join(binDirectory, 'retrievals.jsonl'), '')
-          const finding = 'A synthetic randomized human study found that resistance training with one arm also improved strength in the untrained arm. This suggests some strength adaptation transfers through the nervous system rather than being confined to the practiced muscles. It does not establish injury prevention or a need to change training.'
-          await initializeVault({ vaultRoot: workingDirectory, timezone: 'UTC' })
-          const sourcePath = 'ledger/events/2024/2024-01.jsonl'
-          const sourceAbsolutePath = path.join(workingDirectory, sourcePath)
-          await mkdir(path.dirname(sourceAbsolutePath), { recursive: true })
-          await writeFile(sourceAbsolutePath, '{"synthetic":true}\n')
-          await upsertKnowledgePage({
-            vault: workingDirectory,
-            slug: 'weekly-health-research-scout',
-            title: 'Weekly health research scout',
-            body: repeated ? finding : 'No previous research findings.',
-            sourcePaths: [sourcePath],
-          })
-          await writeFile(`${sourceAbsolutePath}.br`, brotliCompressSync('{"synthetic":true}\n'))
-          await rm(sourceAbsolutePath)
-          const originalPage = await getKnowledgePage({
-            vault: workingDirectory,
-            slug: 'weekly-health-research-scout',
-          })
-          const context = {
-            summary: 'The member has an ongoing interest in resistance training and how strength develops, stated three months ago and never withdrawn. There is no current experiment, symptom, recent change, open question, or decision. They enjoy explanations and do not want extra tasks. No recent unsolicited health note is waiting for a reply.',
-          }
-          const fixture = {
-            context,
-            schema: {
-              schemaVersion: 'murph.payload-schema.v1',
-              command: 'research scout-batch --input',
-              mediaType: 'application/json',
-              schemaName: 'ResearchScoutBatchPayload',
-              schema: researchScoutBatchPayloadSchema.toJSONSchema(),
-              examples: [{ lanes: [{ label: 'resistance training', profile: { behaviors: ['resistance training'] } }] }],
-            },
-            research: { lanes: [{ label: 'resistance training', response: { results: [{
-              title: 'Synthetic resistance training trial',
-              url: 'https://example.org/synthetic-resistance-trial',
-              publishedDate: '2026-07-01',
-              text: finding,
-            }] } }] },
-          }
-          await writeFile(path.join(binDirectory, 'fixture.json'), JSON.stringify(fixture))
-          await writeFile(path.join(binDirectory, 'vault-cli'), [
-            '#!/usr/bin/env node',
-            "const fs = require('node:fs');",
-            "const path = require('node:path');",
-            "const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixture.json'), 'utf8'));",
-            "const { createRequire } = require('node:module');",
-            "const { researchScoutBatchPayloadSchema } = createRequire(process.env.RESEARCH_FIXTURE_RESOLVER)('@murphai/contracts');",
-            'const args = process.argv.slice(2);',
-            "const option = (name) => args.find((arg) => arg.startsWith(name + '='))?.slice(name.length + 1) ?? args[args.indexOf(name) + 1];",
-            "fs.appendFileSync(path.join(__dirname, 'calls.jsonl'), JSON.stringify(args) + String.fromCharCode(10));",
-            "if (args.includes('--help')) console.log('research scout-batch --input @file.json --since YYYY-MM-DD --until YYYY-MM-DD --maxCandidatesPerLane 8; knowledge append-section <slug> <heading> --body <markdown>; knowledge show <slug>; knowledge show-index');",
-            "else if (args[0] === 'research' && args[1] === 'scout-batch-payload-schema') console.log(JSON.stringify(fixture.schema));",
-            "else if (args[0] === 'research' && args[1] === 'scout-batch') {",
-            "  const input = option('--input');",
-            "  const body = input === '-' ? fs.readFileSync(0, 'utf8') : input.startsWith('{') ? input : fs.readFileSync(input.replace(/^@/, ''), 'utf8');",
-            '  const parsed = researchScoutBatchPayloadSchema.safeParse(JSON.parse(body));',
-            '  if (!parsed.success) { console.error(JSON.stringify(parsed.error.issues)); process.exit(64); }',
-            "  fs.appendFileSync(path.join(__dirname, 'retrievals.jsonl'), JSON.stringify(parsed.data) + String.fromCharCode(10));",
-            "  fs.writeFileSync(path.join(__dirname, 'payload.json'), body);",
-            '  console.log(JSON.stringify(fixture.research));',
-            "} else if (args[0] === 'knowledge') {",
-            "  const { spawnSync } = require('node:child_process');",
-            "  const result = spawnSync(process.execPath, ['--import', process.env.RESEARCH_FIXTURE_LOADER, process.env.RESEARCH_FIXTURE_CLI, ...args, '--vault', path.dirname(__dirname)], { encoding: 'utf8', env: process.env });",
-            "  process.stdout.write(result.stdout ?? '');",
-            "  process.stderr.write(result.stderr ?? '');",
-            "  if (result.error || result.status !== 0) process.exit(result.status ?? 1);",
-            "  if (['append-section', 'upsert'].includes(args[1])) fs.appendFileSync(path.join(__dirname, 'writes.jsonl'), JSON.stringify({ slug: args[1] === 'upsert' ? option('--slug') : args[2] }) + String.fromCharCode(10));",
-            '}',
-            "else if (['goal', 'memory', 'list', 'search', 'experiment', 'regimen', 'wearables'].includes(args[0])) console.log(JSON.stringify(fixture.context));",
-            "else { console.error('Unsupported synthetic command'); process.exit(64); }",
-          ].join('\n'), { mode: 0o700 })
-          const result = await executeRealCodexAppServerTurn({
-            allowFinishWithoutReply: true,
-            approvalPolicy: 'never',
-            baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
-            codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
-            codexHome: config.codexHome,
-            configOverrides: ['shell_environment_policy.set.EXA_API_KEY="synthetic-fixture-only"'],
-            fixtureBinDirectory: binDirectory,
-            developerInstructions: buildWeeklyHealthInsightDeveloperInstructions(),
-            dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
-            env: {
-              ...config.env,
-              EXA_API_KEY: 'synthetic-fixture-only',
-              RESEARCH_FIXTURE_RESOLVER: fileURLToPath(new URL('../package.json', import.meta.url)),
-              RESEARCH_FIXTURE_LOADER: VAULT_E2E_TSX_LOADER,
-              RESEARCH_FIXTURE_CLI: VAULT_E2E_CLI_ENTRYPOINT,
-              TSX_TSCONFIG_PATH: path.resolve(path.dirname(VAULT_E2E_CLI_ENTRYPOINT), '../../../tsconfig.base.json'),
-            },
-            model: config.model,
-            modelProvider: config.modelProvider,
-            prompt: [
-              automation.instructions,
-              'Scheduled occurrence context: 2026-08-09. This is an isolated synthetic fixture; all source findings are test data, not real health claims. Use the local vault-cli for all reads, research, and knowledge writes; no external browsing is needed.',
-              `Canonical member context: ${JSON.stringify(context)}`,
-            ].join('\n\n'),
-            reasoningEffort: 'high',
-            sandbox: 'workspace-write',
-            workingDirectory,
-          })
-          const actions = readCapabilityRoutingActions(result.jsonEvents)
-          console.info('[research-scout turn]', JSON.stringify({
-            scenario: repeated ? 'repeated' : 'ongoing-interest',
-            ...buildResearchScoutTurnDiagnostics(result, actions),
-          }))
-          console.info(`[research-scout ${repeated ? 'repeated' : 'ongoing-interest'}] ${result.finalMessage || '(silent)'}`)
-          const calls = (await readFile(path.join(binDirectory, 'calls.jsonl'), 'utf8'))
-            .trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as string[])
-          const retrievals = (await readFile(path.join(binDirectory, 'retrievals.jsonl'), 'utf8'))
-            .trim().split('\n').filter(Boolean)
-          const writesPath = path.join(binDirectory, 'writes.jsonl')
-          const writes = existsSync(writesPath)
-            ? (await readFile(writesPath, 'utf8')).trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as { slug: string })
-            : []
-          console.info('[research-scout effects]', JSON.stringify({
-            cliCallCount: calls.length, retrievalCount: retrievals.length, writeCount: writes.length,
-            commandFamilies: calls.map((args: string[]) => args.slice(0, 2)),
-          }))
-          expect(retrievals, `Expected exactly one research retrieval; observed ${retrievals.length} retrievals.`).toHaveLength(1)
-          const payload = JSON.parse(await readFile(path.join(binDirectory, 'payload.json'), 'utf8'))
-          expect(researchScoutBatchPayloadSchema.safeParse(payload)).toMatchObject({ success: true })
-          const suppressed = result.finalMessage === '' || /"kind"\s*:\s*"skip"/u.test(result.finalMessage)
-          expect(writes).toHaveLength(repeated || suppressed ? 0 : 1)
-          const saved = await getKnowledgePage({ vault: workingDirectory, slug: 'weekly-health-research-scout' })
-          expect(saved.page.sourcePaths).toContain(sourcePath)
-          expect(existsSync(sourceAbsolutePath)).toBe(false)
-          if (!repeated && !suppressed) {
-            expect(writes[0]?.slug).toBe('weekly-health-research-scout')
-            expect(saved.page.body).toContain('https://example.org/synthetic-resistance-trial')
-            expect(saved.page.body).toContain('No previous research findings.')
-          } else {
-            expect(saved.page.markdown).toBe(originalPage.page.markdown)
-          }
-          const finishCalls = actions.filter((action) => action.kind === 'dynamic'
-            && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name)
-          if (repeated || suppressed) {
-            expect(result.finalMessage === '' && finishCalls.length === 1
-              || /"kind"\s*:\s*"skip"/u.test(result.finalMessage)).toBe(true)
-          } else {
-            expect(finishCalls).toHaveLength(0)
-            expect(result.finalMessage).toMatch(/strength|resistance training/iu)
-            expect(result.finalMessage).toMatch(/untrained|other (?:arm|side)|transfer|one arm[\s\S]*\bother\b/iu)
-            expect(result.finalMessage).not.toMatch(/you should|you need to|start doing|try adding|\?|https?:\/\//iu)
-            expect(result.finalMessage.split(/\s+/u).length).toBeLessThan(180)
-          }
-        } finally {
-          await removeRealCodexTemporaryPath(workingDirectory)
-        }
-      }
-    } finally {
-      await removeRealCodexTemporaryPaths(config.temporaryPaths)
-    }
-  }, 720_000)
-})
-
 describeRealCodex('real Codex private Journal capture recovery e2e', () => {
   it('vault pass recovery compacts a live conversation and preserves its task', async () => {
     const config = await resolveRealCodexE2eConfig()
@@ -20564,7 +20235,6 @@ describeRealCodex('real Codex wearable arrival and timezone recovery e2e', () =>
     720_000,
   )
 })
-
 
 describeRealCodex('real Codex member runtime troubleshooting e2e', () => {
   it('reads member runtime diagnostics without inventing a confidentiality refusal', async () => {
@@ -28457,7 +28127,6 @@ describeRealCodex('real Codex support escalation e2e', () => {
     720_000,
   )
 
-
 })
 
 describeRealCodex('real Codex appointment check-in recovery e2e', () => {
@@ -33901,7 +33570,6 @@ async function buildRegimenLabelDeveloperInstructions(vaultRoot: string) {
       workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
     })),
     hostedRuntime: true,
-    researchAvailable: false,
   })
   if (assistantCliContract === null) throw new Error('Expected the production CLI surface contract.')
   await refreshAssistantContextSnapshot({ vaultRoot })
@@ -36482,7 +36150,6 @@ describeRealCodex('real Codex private usage diagnostics e2e', () => {
     }
   }, 360_000)
 })
-
 
 describeRealCodex('real Codex weekly usage optimizer e2e', () => {
   it('downgrades suitable reminders, preserves explicit choices, and reports privately', async () => {
@@ -40572,7 +40239,6 @@ async function materializeRepeatedSetVaultCli(input: {
   await chmod(executablePath, 0o700)
 }
 
-
 function buildPhysicalNoteAddressResult(input: {
   recommended: boolean
 }) {
@@ -41410,7 +41076,6 @@ function commandIncludesTruthyWearableActivityWorkoutDetailOption(
   )
   return match !== null && match[1] !== 'false'
 }
-
 
 async function materializeExperimentSupportInventoryVaultCli(input: {
   binDirectory: string
@@ -42984,7 +42649,6 @@ interface DynamicToolAttempt {
   tool: string
 }
 
-
 function readDynamicToolAttempts(
   events: readonly unknown[],
 ): DynamicToolAttempt[] {
@@ -43118,66 +42782,6 @@ function readCapabilityRoutingActions(
     }
     return []
   })
-}
-
-function buildResearchScoutTurnDiagnostics(input: {
-  jsonEvents: readonly unknown[]
-  providerActionCount: number
-  finalMessage: string
-}, actions = readCapabilityRoutingActions(input.jsonEvents)) {
-  // Count native completions, not the batch children expanded by the routing helper.
-  const commands = input.jsonEvents.flatMap((event, eventIndex) => {
-    const record = readRecord(event)
-    if (readString(record?.method, record?.type) !== 'item/completed') return []
-    const item = readRecord(readRecord(record?.params)?.item)
-    if (item?.type !== 'commandExecution' && item?.type !== 'command_execution') return []
-    const rawExitCode = item.exitCode ?? item.exit_code
-    const exitCode = typeof rawExitCode === 'number' && Number.isInteger(rawExitCode)
-      ? rawExitCode : null
-    const output = actions.flatMap((action) => action.kind === 'command'
-      && action.eventIndex === eventIndex ? [action.output] : []).join('\n')
-    return [{
-      eventIndex,
-      exitCode,
-      success: exitCode !== null ? exitCode === 0
-        : item.status === 'failed' || item.status === 'declined' ? false : null,
-      outputSignal: classifyResearchScoutCommandOutput(output),
-    }]
-  })
-  const tools = actions.flatMap((action) => action.kind === 'dynamic' ? [{
-    eventIndex: action.eventIndex,
-    // This journey admits only this tool; never echo arbitrary provider strings.
-    tool: action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name ? action.tool : 'unrecognized',
-    success: action.success,
-  }] : [])
-  const messages = readCompletedAgentMessages(input.jsonEvents)
-  return {
-    eventCount: input.jsonEvents.length,
-    providerActionCount: input.providerActionCount,
-    nativeCommandCount: commands.length,
-    nativeCommandFailures: commands.filter((command) => command.success === false).length,
-    nativeCommandUnknownOutcomes: commands.filter((command) => command.success === null).length,
-    nativeCommands: commands.slice(0, 8),
-    nativeCommandsOmitted: Math.max(0, commands.length - 8),
-    dynamicToolAttemptCount: readDynamicToolAttempts(input.jsonEvents).length,
-    dynamicToolCount: tools.length,
-    dynamicTools: tools.slice(0, 8),
-    dynamicToolsOmitted: Math.max(0, tools.length - 8),
-    completedAgentMessageCount: messages.length,
-    completedAgentMessageChars: messages.reduce((sum, message) => sum + message.text.length, 0),
-    finalMessageChars: input.finalMessage.length,
-  }
-}
-
-function classifyResearchScoutCommandOutput(output: string): string | null {
-  // Signatures are diagnostic evidence, not inferred causes. Unmatched output stays unknown.
-  const signatures = [
-    ['fixture-cli-unavailable', /(?:command not found:[^\r\n]*\bvault-cli\b|\bvault-cli:\s*(?:command not found|not found|no such file or directory))/iu],
-    ['module-resolution', /\b(?:ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND|ERR_PACKAGE_PATH_NOT_EXPORTED|ERR_REQUIRE_ESM)\b|Cannot find (?:module|package)/iu],
-    ['unsupported-synthetic-command', /\bUnsupported synthetic command\b/u],
-    ['environment-missing', /\b(?:EXA_API_KEY|RESEARCH_FIXTURE_RESOLVER)(?:\s+is)?\s*:?\s*(?:missing|unset|not (?:set|available|defined))\b|\bMissing (?:environment variable[:\s]+)?(?:EXA_API_KEY|RESEARCH_FIXTURE_RESOLVER)\b/iu],
-  ] as const
-  return signatures.find(([, pattern]) => pattern.test(output))?.[0] ?? null
 }
 
 function readBatchCapabilityRoutingActions(input: {
@@ -44626,7 +44230,6 @@ describeRealCodex('real Codex poll freshness e2e', () => {
   }, 360_000)
 })
 
-
 describeRealCodex('real Codex proactive plan follow-through e2e', () => {
   it.each(['known-window', 'missing-window', 'declined-support'] as const)(
     'closes a repeated-action proposal with appropriate support: %s',
@@ -44722,7 +44325,6 @@ describeRealCodex('real Codex proactive plan follow-through e2e', () => {
     }, 720_000,
   )
 })
-
 
 describeRealCodex('wearable haptic reminder journey', () => {
   it('reports consented group app contact without diagnosing missing steps as closure', async () => {
@@ -45142,7 +44744,6 @@ describeRealCodex('scheduled phone-call reminder journey', () => {
   }, 720_000)
 })
 
-
 describeRealCodex('real Codex fresh multi-pass delegation e2e', () => {
   it('preserves one canonical identity write in a fresh child without duplicate root effects', async () => {
     const config = await resolveRealCodexE2eConfig()
@@ -45291,7 +44892,6 @@ describeRealCodex('real Codex fresh multi-pass delegation e2e', () => {
   }, 660_000)
 })
 
-
 describeRealCodex('bounded reaction routing journeys', () => {
   it('usage reaction router live handles ambiguity and measures priority Luna latency', async () => {
     const { classifyAssistantReaction } = await import('../src/assistant/reaction-routing.js')
@@ -45363,7 +44963,6 @@ describeRealCodex('bounded reaction routing journeys', () => {
     }
   }, 600_000)
 })
-
 
 describeRealCodex('production reaction routing turn journey', () => {
   it('usage reaction full turn live suppresses appreciation and escalates confusing and ambiguous reactions', async () => {
@@ -46781,7 +46380,6 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
     }
   }, 360_000)
 })
-
 
 describeRealCodex('Bluetooth wearable help', () => {
   it.each([

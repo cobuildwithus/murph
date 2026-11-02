@@ -1453,7 +1453,7 @@ describe("buildWranglerEnvFileText", () => {
         HOSTED_WEB_BASE_URL: "http://localhost:3000",
         LINQ_API_TOKEN: "linq-secret",
       }),
-    ).toContain('HOSTED_EXECUTION_RUNNER_ENV_PROFILES="device-sync,exa,hosted-email,linq,mapbox,telegram"');
+    ).toContain('HOSTED_EXECUTION_RUNNER_ENV_PROFILES="device-sync,hosted-email,linq,mapbox,telegram"');
     expect(
       buildWranglerEnvFileText({
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
@@ -1523,7 +1523,6 @@ describe("buildWranglerEnvFileText", () => {
   it("includes hosted provider optional env inspected by the Worker", () => {
     const text = buildWranglerEnvFileText({
       ELEVENLABS_API_KEY: "elevenlabs-secret",
-      EXA_API_KEY: "exa-secret",
       HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph",
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "CUSTOM_API_KEY",
       HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: "bundle-fingerprint",
@@ -1536,7 +1535,6 @@ describe("buildWranglerEnvFileText", () => {
     });
 
     expect(text).toContain('ELEVENLABS_API_KEY="elevenlabs-secret"');
-    expect(text).toContain('EXA_API_KEY="exa-secret"');
     expect(text).toContain('HOSTED_EMAIL_DEFAULT_SUBJECT="Murph"');
     expect(text).toContain('HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS="CUSTOM_API_KEY"');
     expect(text).toContain('HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT="bundle-fingerprint"');

@@ -1,4 +1,6 @@
-Npm publication is retired; the protected CI coverage matrix and hosted runtime artifact checks remain owned by `operations/verification-and-runtime.md` and `references/testing-ci-map.md`. The [deletion plan](exec-plans/active/2026-11-02-remove-device-npm-jobs.md) records the unchanged runner package closure.
+Research scout is retired through the existing managed-automation tombstone and archival path. Personal Patterns remains retired. `../packages/assistant-engine/README.md` owns reconciliation; the [deletion plan](exec-plans/completed/2026-11-02-remove-device-npm-jobs.md) records deployment skew and verification.
+
+Npm publication is retired; the protected CI coverage matrix and hosted runtime artifact checks remain owned by `operations/verification-and-runtime.md` and `references/testing-ci-map.md`. The [deletion plan](exec-plans/completed/2026-11-02-remove-device-npm-jobs.md) records the unchanged runner package closure.
 
 Private meal thumbnail delivery, capture-based retention and deletion are owned by
 [`ios-meals.md`](product-specs/ios-meals.md); implementation is tracked in
@@ -1561,7 +1563,6 @@ Security runtime and dependency patching is tracked in
 Requested game proposal inactivity handling and CI repair proof are recorded in
 [the delivery remediation](exec-plans/completed/2026-10-21-game-proposal-requested-delivery.md).
 
-
 Daily game post push limits, session-bound device enrollment and verification are
 recorded in [game post notifications](exec-plans/completed/2026-10-21-game-daily-notifications.md).
 
@@ -1679,4 +1680,4 @@ Legacy meal naming repair and shared write validation are tracked in
 
 Local product retirement: the CLI owns hosted onboarding; verification inventories exclude the retired setup and assistant wrapper packages. Inbox owners retain hosted normalization, storage, and repair without polling daemons. Release verification package discovery skips leftover `packages/*` folders that have no manifest.
 
-Local device daemon and fixture capture retirement is tracked in [the deletion plan](exec-plans/active/2026-11-02-remove-device-npm-jobs.md). Hosted CLI command signatures and source availability types remain.
+Local device daemon and fixture capture retirement is tracked in [the deletion plan](exec-plans/completed/2026-11-02-remove-device-npm-jobs.md). Hosted CLI command signatures and source availability types remain.

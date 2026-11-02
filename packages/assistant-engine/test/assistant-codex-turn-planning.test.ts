@@ -61,14 +61,12 @@ vi.mock('../src/assistant/cli-surface-bootstrap.js', () => ({
     planningMocks.readAssistantCliSurfaceBootstrapContext,
   scopeAssistantCliSurfaceContractForAssistant: (input: {
     contract: string | null
-    researchAvailable?: boolean
   }) => input.contract === null
     ? null
     : input.contract
         .split('\n')
         .filter((line) =>
           !/^- `assistant style (?:show|set|reset)`/u.test(line)
-          && (input.researchAvailable !== false || !/^- `research(?: |`)/u.test(line))
         )
         .join('\n'),
 }))
@@ -82,7 +80,6 @@ vi.mock('../src/assistant/codex-runtime.js', () => ({
 vi.mock('../src/assistant/service.js', () => ({
   sendAssistantMessage: planningMocks.sendAssistantMessage,
 }))
-
 
 vi.mock('../src/assistant/context-snapshot.js', () => ({
   readAssistantContextSnapshotPrompt:
@@ -536,185 +533,6 @@ describe('assistant Codex turn planning', () => {
     expect(planningMocks.refreshAssistantContextSnapshotBestEffort).not.toHaveBeenCalled()
     expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
     expect(groupPlan.systemPrompt).not.toContain('VALUE_FREE_DEGRADED_SNAPSHOT')
-  })
-
-  it('exposes grounded research guidance only when Exa is configured across conversation routes', async () => {
-    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue([
-      'Murph CLI Contract:',
-      '- `research scout`: Search current human research.',
-    ].join('\n'))
-    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
-    const preferenceContext = {
-      assistantPersona: null,
-      assistantPersonality: null,
-      assistantTone: null,
-      assistantVoice: null,
-    }
-    const profile = {
-      promptProfile: 'conversation' as const,
-      threadScope: 'session-thread' as const,
-      toolProfile: 'provider-turn' as const,
-    }
-    const promptTimeContext = {
-      currentLocalDate: '2026-08-06',
-      currentTimeZone: 'America/New_York',
-    }
-    const route = createRoute()
-    const resolvePlan = async (input: {
-      channel?: 'email' | 'telegram'
-      configured: boolean
-      group?: boolean
-      progressAvailable?: boolean
-      scheduled?: boolean
-    }) => {
-      const group = input.group ?? false
-      const channel = input.channel ?? 'telegram'
-      return await resolveAssistantRouteTurnPlan({
-        executionContext: group
-          ? {
-              hosted: {
-                dynamicContextPrompts: [],
-                memberId: 'member-research-fixture',
-                userEnvKeys: input.configured ? ['EXA_API_KEY'] : [],
-              },
-            }
-          : null,
-        input: {
-          ...createMessageInput(),
-          channel,
-          threadIsDirect: !group,
-          ...(input.scheduled
-            ? {
-                scheduledAutomationAuthority: {
-                  automationId: 'automation_research_fixture',
-                  occurrenceAt: '2026-08-06T13:00:00.000Z',
-                },
-                scheduledOccurrenceAt: '2026-08-06T13:00:00.000Z',
-                turnTrigger: 'automation-cron' as const,
-              }
-            : {}),
-        },
-        preferenceContext,
-        profile,
-        promptTimeContext,
-        progressDelivery: input.progressAvailable
-          ? {
-              send: async () => ({ kind: 'sent', source: 'model' }),
-            }
-          : null,
-        route,
-        session: createSession(),
-        sharedPlan: createSharedPlan({
-          cliAccess: {
-            env: { ...createSharedPlan().cliAccess.env, ...(input.configured ? { EXA_API_KEY: 'configured-sentinel' } : {}) },
-            rawCommand: 'vault-cli',
-          },
-        }, {
-          channel,
-          threadIsDirect: !group,
-          threadId: 'thread-test',
-        }),
-      })
-    }
-
-    for (const configuredPlan of await Promise.all([
-      resolvePlan({ configured: true }),
-      resolvePlan({ configured: true, group: true }),
-      resolvePlan({ configured: true, scheduled: true }),
-    ])) {
-      expect(configuredPlan.systemPrompt).toContain('Configured Exa research:')
-      expect(configuredPlan.developerInstructions).toContain('Configured Exa research:')
-      expect(configuredPlan.turnContextPrompt).not.toContain('Configured Exa research:')
-      expect(configuredPlan.systemPrompt).toContain(
-        '`resultIndex` maps to a result',
-      )
-      expect(configuredPlan.systemPrompt).toContain(
-        'no usable current source',
-      )
-      expect(configuredPlan.systemPrompt).toContain(
-        'Use `research scout-batch` for broad discovery or automation',
-      )
-      expect(configuredPlan.systemPrompt).toContain(
-        'never send a mode-less single-scout request',
-      )
-    }
-
-    for (const group of [false, true]) {
-      const configured = await resolvePlan({ configured: true, group })
-      const unavailable = await resolvePlan({ configured: false, group })
-      expect(configured.assistantContractFingerprint).toBe(unavailable.assistantContractFingerprint)
-    }
-
-    const directProgressPlan = await resolvePlan({
-      configured: true,
-      progressAvailable: true,
-    })
-    const groupProgressPlan = await resolvePlan({
-      configured: true,
-      group: true,
-      progressAvailable: true,
-    })
-    const emailWithoutProgressPlan = await resolvePlan({
-      channel: 'email',
-      configured: true,
-    })
-    const directProgressPrompt = directProgressPlan.systemPrompt
-    const groupProgressPrompt = groupProgressPlan.systemPrompt
-    if (!directProgressPrompt || !groupProgressPrompt) {
-      throw new Error('Expected progress-capable conversation prompts.')
-    }
-
-    expect(directProgressPlan.dynamicTools.map((tool) => tool.name)).toContain(
-      'send_progress_update',
-    )
-    expect(directProgressPrompt.match(
-      /Use `murph\.send_progress_update` for interim updates/gu,
-    )).toHaveLength(1)
-    expect(groupProgressPlan.dynamicTools.map((tool) => tool.name)).toContain(
-      'send_progress_update',
-    )
-    expect(groupProgressPrompt.match(
-      /use `murph\.send_progress_update` much more sparingly/gu,
-    )).toHaveLength(1)
-    for (const plan of [directProgressPlan, groupProgressPlan]) {
-      expect(plan.systemPrompt).not.toContain(
-        'Before a noticeable foreground pass',
-      )
-      expect(plan.systemPrompt).not.toContain(
-        'a research lookup alone does not justify a status message',
-      )
-      expect(plan.systemPrompt).not.toContain(
-        'call `send_progress_update` before bounded local media tools',
-      )
-    }
-
-    expect(emailWithoutProgressPlan.systemPrompt).toContain(
-      'Configured Exa research:',
-    )
-    expect(emailWithoutProgressPlan.systemPrompt).toContain(
-      'For voice memos and audio/video, use transcript fragments directly',
-    )
-    expect(emailWithoutProgressPlan.systemPrompt).toContain(
-      'Member-visible interim progress is unavailable on this route',
-    )
-    expect(emailWithoutProgressPlan.dynamicTools.map((tool) => tool.name))
-      .not.toContain('send_progress_update')
-    expect(emailWithoutProgressPlan.systemPrompt)
-      .not.toContain('send_progress_update')
-
-    for (const unavailablePlan of await Promise.all([
-      resolvePlan({ configured: false }),
-      resolvePlan({ configured: false, group: true }),
-      resolvePlan({ configured: false, scheduled: true }),
-    ])) {
-      expect(unavailablePlan.systemPrompt).not.toContain(
-        'Configured Exa research:',
-      )
-      expect(unavailablePlan.systemPrompt).not.toContain('`research scout`')
-    }
   })
 
   it('does not expose per-turn route env in Codex execution plans', async () => {
@@ -8242,7 +8060,6 @@ function createHostedToolContext(): AssistantHostedToolContext {
     vaultFileSendAvailable: false,
   }
 }
-
 
 function createTrustedGroupImageCompletionCandidate(input: {
   completionAssistantInputId: string

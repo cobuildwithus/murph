@@ -1271,3 +1271,5 @@ it is not permission to send unrelated messages, deploy, or change the webhook.
 - Before adding a runtime target, document entrypoints, environment assumptions, and operational guardrails here.
 
 Device provider retirement checks cover the Junction transport, shared ingress, importer source labels, hosted device tools, and foreground ingestion. Direct WHOOP/Oura/Strava transport suites are retired; do not remove source-labelled normalization or wearable-query coverage.
+
+The retired research scout has no CLI, Exa egress or live scheduled journey. Focused managed-automation, cron and outbox tests prove exact-ID archival and suppression; the real provider-labelled sleep read journey proves the surviving query contract. Run the CLI generators and full offline runner assembly after changing the private dependency closure.

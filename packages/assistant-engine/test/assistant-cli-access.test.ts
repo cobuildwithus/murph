@@ -97,7 +97,6 @@ describe("prepareAssistantDirectCliEnv", () => {
       DEVICE_SYNC_BASE_URL: "http://127.0.0.1:8788",
       DEVICE_SYNC_CONTROL_TOKEN: "device-token",
       ELEVENLABS_API_KEY: "elevenlabs-sentinel",
-      EXA_API_KEY: "exa-sentinel",
       LINQ_API_TOKEN: "linq-secret",
       MAPBOX_ACCESS_TOKEN: "mapbox-sentinel",
       MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
@@ -141,7 +140,6 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(env.CURL_CA_BUNDLE).toBe("/etc/cloudflare/certs/cloudflare-containers-ca.crt");
     expect(env.HTTP_PROXY).toBe("http://platform-proxy.example.test:8080");
     expect(env.HTTPS_PROXY).toBe("http://platform-proxy.example.test:8080");
-    expect(env.EXA_API_KEY).toBe("exa-sentinel");
     expect(env.MAPBOX_ACCESS_TOKEN).toBe("mapbox-sentinel");
     expect(env.NO_PROXY).toBe("localhost,127.0.0.1,host.docker.internal");
     expect(env.NODE_EXTRA_CA_CERTS).toBe("/etc/cloudflare/certs/cloudflare-containers-ca.crt");

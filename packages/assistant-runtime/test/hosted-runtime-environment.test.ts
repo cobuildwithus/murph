@@ -684,7 +684,6 @@ test("hosted runtime forwarded env profiles are runtime-owned and transport-mapp
     buildHostedRuntimeForwardedEnv({
       FFMPEG_COMMAND: "/stale/ffmpeg",
       ELEVENLABS_API_KEY: "elevenlabs-token",
-      EXA_API_KEY: "exa-token",
       GEMINI_API_KEY: "gemini-token",
       HOSTED_EMAIL: {
         send: async (_message: unknown) => undefined,
@@ -693,7 +692,7 @@ test("hosted runtime forwarded env profiles are runtime-owned and transport-mapp
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_EMAIL_SIGNING_SECRET: "signing-secret",
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,parsers,telegram",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email,linq,mapbox,parsers,telegram",
       LINQ_API_BASE_URL: "http://127.0.0.1:4011",
       LINQ_API_TOKEN: "linq-token",
       LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
@@ -716,7 +715,6 @@ test("hosted runtime forwarded env profiles are runtime-owned and transport-mapp
     }),
     {
       ELEVENLABS_API_KEY: "elevenlabs-token",
-      EXA_API_KEY: "exa-token",
       GEMINI_API_KEY: "gemini-token",
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_INGRESS_READY: "true",
@@ -741,7 +739,6 @@ test("hosted runtime forwarded env profiles are runtime-owned and transport-mapp
 });
 
 test("hosted runtime parsers profile is semantic and forwards no native paths", () => {
-  assert.deepEqual(HOSTED_RUNTIME_ENV_PROFILE_KEYS.exa, ["EXA_API_KEY"]);
   assert.deepEqual(HOSTED_RUNTIME_ENV_PROFILE_KEYS.parsers, []);
   assert.deepEqual(
     buildHostedRuntimeForwardedEnv({

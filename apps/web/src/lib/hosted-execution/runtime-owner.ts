@@ -433,7 +433,7 @@ export async function authorizeHostedRuntimeProvider(input: {
   const { cutover, owner } = await readRuntimeEffectOwner(input.prisma, input.userId);
   if (!owner?.attemptId || !owner.runnerContainerName || owner.workspaceVersion === null) return { cutover, owner: null };
   if (input.runnerContainerName !== null) {
-    if (owner.runnerContainerName !== input.runnerContainerName || !["exa", "mapbox", "murph_data_api", "openai", "workers_ai_transcribe"].includes(input.providerKind)) return { cutover, owner: null };
+    if (owner.runnerContainerName !== input.runnerContainerName || !["mapbox", "murph_data_api", "openai", "workers_ai_transcribe"].includes(input.providerKind)) return { cutover, owner: null };
   } else if (!input.providerEgressTokenHash || owner.providerEgressTokenHash !== input.providerEgressTokenHash) return { cutover, owner: null };
   return { cutover, owner };
 }

@@ -164,14 +164,6 @@ export const providerBoundaryRegistry = Object.freeze([
     sdkModules: ["@elevenlabs/elevenlabs-js"],
   },
   {
-    hosts: ["api.exa.ai"],
-    id: "exa",
-    identifiers: ["exa"],
-    label: "Exa",
-    rawHttpPolicy: "require-official-sdk",
-    sdkModules: ["exa-js"],
-  },
-  {
     hosts: ["api.lob.com"],
     id: "lob",
     identifiers: ["lob"],
@@ -434,15 +426,8 @@ export const approvedProviderRawHttpOwners = Object.freeze([
     requiredRuntimeModule: "resend",
   },
   {
-    ownerName: "request",
-    providerIds: ["exa"],
-    reason: "provider-sdk-override",
-    relativePath: "packages/cli/src/research-scout-client.ts",
-    requiredRuntimeModule: "exa-js",
-  },
-  {
     ownerName: "fetchAuthorizedProviderUpstream",
-    providerIds: ["elevenlabs", "exa", "gemini", "linq", "openai", "xai"],
+    providerIds: ["elevenlabs", "gemini", "linq", "openai", "xai"],
     reason: "existing-provider-boundary",
     relativePath: "apps/cloudflare/src/runner-egress-intercept.ts",
   },

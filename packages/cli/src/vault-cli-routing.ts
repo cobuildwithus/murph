@@ -35,7 +35,6 @@ const lazyRootCommands = [
   'protocol',
   'query',
   'regimen',
-  'research',
   'route',
   'search',
   'show',

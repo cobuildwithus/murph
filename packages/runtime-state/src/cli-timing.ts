@@ -50,7 +50,6 @@ export const CLI_TIMING_FAILURE_CODES = [
   "unknown", "invalid_option", "invalid_payload", "invalid_operation", "VALIDATION_ERROR", "VAULT_INVALID_INPUT",
   "exercise_not_found", "exercise_catalog_unavailable", "exercise_catalog_invalid",
   "memory_not_found", "memory_document_invalid",
-  "research_scout_invalid_batch_payload", "research_scout_invalid_window", "research_exa_token_missing",
   "not_found", "conflict", "permission_denied", "invalid_path", "storage_unavailable",
   "knowledge_page_not_found", "knowledge_page_conflict", "knowledge_duplicate_slug", "knowledge_page_invalid",
   "knowledge_source_unreadable", "knowledge_invalid_source_path", "knowledge_invalid_library_slug",
@@ -68,7 +67,7 @@ export interface CliFailureTiming {
   stage: typeof CLI_TIMING_FAILURE_STAGES[number];
   count: number;
   validation?: CliValidationDiagnostic;
-  rejection?: CliTimingRejection | CliTimingParseRejection | CliTimingFilterRejection;
+  rejection?: CliTimingParseRejection | CliTimingFilterRejection;
   sourceCause?: CliTimingSourceCause;
 }
 export function cliTimingFailureCode(value: unknown, command?: unknown): CliFailureTiming["code"] {
@@ -79,7 +78,6 @@ export function cliTimingFailureCode(value: unknown, command?: unknown): CliFail
 export function cliTimingFailureStage(value: unknown): CliFailureTiming["stage"] {
   return CLI_TIMING_FAILURE_STAGES.find((stage) => stage === value) ?? "unknown";
 }
-
 
 // Only these command schemas (or Incur's fixed invocation field "arguments")
 // own these exact names. No path parsing, coercion, array-index admission or
@@ -162,17 +160,7 @@ export function cliTimingValidationFailure(
   } catch { return {}; }
 }
 
-// First rejected invariant of `research scout-batch`'s existing schema, classified
-// by the CLI parser from fixed issue code/path shape. Never issue paths, indices,
-// keys, labels, values or messages; unclassified rejections are absent.
-export const CLI_TIMING_REJECTIONS = [
-  "envelope", "unexpected_root_field", "lane_count", "lane_label",
-  "profile_shape", "unexpected_lane_field", "public_concept",
-] as const;
-export type CliTimingRejection = typeof CLI_TIMING_REJECTIONS[number];
-
-// Argv rejection class set by the pinned Incur parser at the exact
-// unknown-flag/missing-value throw site; never derived from argv or text.
+// Argv rejection class set by the pinned Incur parser.
 export const CLI_TIMING_PARSE_REJECTIONS = ["unknown_flag", "missing_value"] as const;
 export type CliTimingParseRejection = typeof CLI_TIMING_PARSE_REJECTIONS[number];
 
@@ -182,7 +170,7 @@ export type CliTimingParseRejection = typeof CLI_TIMING_PARSE_REJECTIONS[number]
 export const CLI_TIMING_FILTER_REJECTIONS = ["comma_delimited", "unsupported_value"] as const;
 export type CliTimingFilterRejection = typeof CLI_TIMING_FILTER_REJECTIONS[number];
 const rejectionOwners = [
-  ["research scout-batch", "research_scout_invalid_batch_payload", CLI_TIMING_REJECTIONS],
+
   ["exercise list", "VALIDATION_ERROR", CLI_TIMING_PARSE_REJECTIONS],
   ["knowledge upsert", "VALIDATION_ERROR", CLI_TIMING_PARSE_REJECTIONS],
   ["knowledge show", "VALIDATION_ERROR", CLI_TIMING_PARSE_REJECTIONS],
@@ -202,7 +190,7 @@ export function cliTimingRejectionFailure(
 }
 
 // Existing typed causes hidden by the legacy "unknown" code. Only the reached
-// meal mutation and food/research response owners belong here, not all provider
+// meal mutation and food response owners belong here, not all provider
 // errors. Keep these optional so older readers preserve failures and timing.
 const sourceCauseOwners = [
   ["meal edit", ["contract_invalid", "invalid_timestamp", "vault_error"]],
@@ -212,10 +200,7 @@ const sourceCauseOwners = [
     "food_labels_api_service_unavailable", "food_labels_api_response_failed",
     "food_labels_api_response_body_timed_out", "food_labels_api_response_body_failed", "food_labels_api_invalid_response",
   ]],
-  ["research scout-batch", [
-    "research_exa_auth_failed", "research_exa_rate_limited", "research_exa_unavailable",
-    "research_exa_invalid_response", "research_exa_request_rejected", "research_exa_timeout",
-  ]],
+
 ] as const;
 // Exact core codes preserved by the reached usecase mappings. Unknown names
 // stay absent; this is not a catalog of every vault error.
@@ -270,7 +255,6 @@ function sameFailureVariant(left: CliFailureTiming, right: CliFailureTiming): bo
     left.validation?.missing === right.validation?.missing && left.rejection === right.rejection &&
     left.sourceCause?.code === right.sourceCause?.code && left.sourceCause?.vaultCode === right.sourceCause?.vaultCode;
 }
-
 
 // Registered paths from the source-owned CLI catalog (incur.generated.ts).
 // New names require consumer-first admission here; until then they become other.
