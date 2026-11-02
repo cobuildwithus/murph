@@ -81,6 +81,14 @@ Updated: 2026-11-02
 - Build, hosted-execution/runtime typechecks, Web/Cloudflare typechecks, the full hosted-execution suite, eight focused runtime files (527 passed, 6 credential-gated skips), and three focused Web files (186 passed) passed.
 - Docs drift initially rejected a 37-file change because the already-committed active plan was absent from the current diff. The checker is unchanged from `c04ccc04cc`; updating this plan supplies the required evidence without changing or bypassing the guard.
 
+## PR CI follow-up
+
+Full PR CI on `c66620edc9` found three gaps that the focused local lanes did not run:
+
+- Deleting `contracts-routes-opaque-ids.test.ts` also removed the edge-case tests for the retained reply-route inference, so gateway-core line coverage fell to 77.77%, under the 80% floor. Those edge cases (explicit routes, directness normalization, requested delivery kinds, participant and thread fallback, Linq and channel-less routing) are now in `packages/gateway-core/test/reply-routes.test.ts`. Coverage is back to 100% lines.
+- `scripts/workspace-boundaries/import-policy-rules.test.ts` still expected the removed `zod/v4` owner exception for gateway-core; that case is removed with the exception.
+- The route-plan digest snapshot in `test/assistant-codex-turn-planning.test.ts` changed for the direct and scheduled-email plans, which carry the corrected navigation sentence. It was regenerated with Vitest.
+
 ## Retained and skipped work
 
 - No requested deletion was skipped for an unexpected production consumer. The audit's required exceptions remain: hosted `local-service.ts`, runtime-write locking, reply-route enums/types, outbox summaries, config reads/hosted writes/default-vault resolution, self-target defaults, and header persistence/redaction.

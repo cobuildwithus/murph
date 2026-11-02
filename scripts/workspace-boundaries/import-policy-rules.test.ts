@@ -118,7 +118,6 @@ import /* keep */ {
 
   it.each([
     ["zod", "packages/contracts"],
-    ["zod/v4", "packages/gateway-core"],
   ])("allows the %s owner in %s", (specifier, sourceMember) => {
     const filePath = path.join(repoRoot, sourceMember, "src/example.ts");
     const failure = verifyWorkspaceImportPolicy({
