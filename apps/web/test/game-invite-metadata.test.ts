@@ -1,4 +1,4 @@
-import { createElement } from "react";
+import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -8,8 +8,20 @@ import type { GameInvitePreview } from "@/src/lib/game/contract";
 const mocks = vi.hoisted(() => ({ readInvitePreview: vi.fn() }));
 
 vi.mock("@/src/lib/game/service", () => ({ readInvitePreview: mocks.readInvitePreview }));
+vi.mock("@/app/_og/og-shared", () => ({
+  loadMurphHeroOgAssets: async () => ({ fonts: [] }),
+  OG_CONTENT_TYPE: "image/png", OG_SIZE: { width: 1200, height: 630 },
+}));
+vi.mock("next/og", () => ({
+  ImageResponse: class extends Response {
+    constructor(element: ReactNode, options: ResponseInit) {
+      super(renderToStaticMarkup(element), options);
+    }
+  },
+}));
 
-const { generateMetadata } = await import("@/app/g/[token]/page");
+const { default: GameInvitePage, generateMetadata } = await import("@/app/g/[token]/page");
+const { default: GameInviteOGImage } = await import("@/app/g/[token]/opengraph-image");
 
 const OPEN: GameInvitePreview = {
   expiresAt: "2026-10-26T15:00:00.000Z",
@@ -32,6 +44,41 @@ async function metadataFor(preview: GameInvitePreview | null, token = "tok_1") {
 
 describe("weekly game invite link preview", () => {
   beforeEach(() => mocks.readInvitePreview.mockReset());
+
+  it("reads a group token as multiplayer in metadata, page and the OG image route", async () => {
+    const group = {
+      ...OPEN, maxPlayers: 10, group: { id: "synthetic-group", word: "family" }, lengthDays: 14,
+      alreadyIn: { count: 2, firstNames: ["PRIVATE_NAME"], avatarUrl: "PRIVATE_AVATAR" },
+      yourTask: "PRIVATE_YOUR_TASK", pendingLabel: "PRIVATE_PENDING", relationship: "PRIVATE_RELATIONSHIP",
+      terms: { ...OPEN.terms, defaultTask: "A healthy meal", tasks: [{ seat: 0, text: "PRIVATE_OVERRIDE" }] },
+    } satisfies GameInvitePreview & { pendingLabel: string; relationship: string };
+    // Match service capability behavior: omitting true reproduces the original closed preview.
+    mocks.readInvitePreview.mockImplementation(async (_token, multiplayer) => multiplayer ? group : null);
+    const props = { params: Promise.resolve({ token: "group_token" }) };
+    const title = "Leo started a family challenge";
+    const metadata = await generateMetadata(props);
+    expect(metadata.title).toBe(title);
+    expect(metadata.openGraph).toMatchObject({
+      title,
+      description: "A healthy meal every weekday for two weeks. Winner gets Breakfast in bed.",
+      images: [expect.objectContaining({ alt: title, url: "/g/group_token/opengraph-image" })],
+    });
+    const page = renderToStaticMarkup(await GameInvitePage(props));
+    const image = await GameInviteOGImage(props);
+    const card = await image.text();
+    for (const html of [page, card]) {
+      expect(html).toContain(title);
+      expect(html).toContain("A healthy meal");
+      expect(html).toContain("Breakfast in bed");
+      expect(html).not.toMatch(/PRIVATE_|alreadyIn|pendingLabel|isn&#x27;t available|challenged you|—| - /u);
+    }
+    expect(page).toContain("Everyone");
+    expect(page).toContain("Days");
+    expect(page).not.toContain("Artifact");
+    expect(page).toContain('href="ai.withmurph.app://invite/group_token"');
+    expect(image.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.readInvitePreview.mock.calls).toEqual(Array.from({ length: 3 }, () => ["group_token", true]));
+  });
 
   it("previews an open invite as the challenge, with its own card", async () => {
     const metadata = await metadataFor(OPEN);

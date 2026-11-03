@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 type GameInvitePageProps = { params: Promise<{ token: string }> };
 
 // Metadata and the page share one read per request.
-const readPreview = cache(readInvitePreview);
+const readPreview = cache((token: string) => readInvitePreview(token, true));
 
 /**
  * The link preview Messages shows: an open invite's challenge, or just that a

@@ -13,7 +13,7 @@ export const contentType = OG_CONTENT_TYPE;
 export const dynamic = "force-dynamic";
 
 export default async function GameInviteOGImage(props: { params: Promise<{ token: string }> }) {
-  const preview = await readInvitePreview(await resolveDecodedRouteParam(props.params, "token"));
+  const preview = await readInvitePreview(await resolveDecodedRouteParam(props.params, "token"), true);
   const { fonts } = await loadMurphHeroOgAssets();
   return new ImageResponse(<GameInviteShareCard preview={preview} />, {
     ...OG_SIZE,

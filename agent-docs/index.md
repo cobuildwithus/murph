@@ -1,3 +1,7 @@
+Public group invite Web rendering and pair preservation are owned by
+[Weekly Game](product-specs/weekly-game.md); proof and the PR lane are tracked in
+[the invite preview plan](exec-plans/active/2026-11-03-group-invite-web.md).
+
 Group chat uses one keyed provider-roster authority for association, tools,
 lifecycle and egress, including unresolved invitees. Current ownership is in
 [Weekly Game](product-specs/weekly-game.md), [Security](SECURITY.md) and

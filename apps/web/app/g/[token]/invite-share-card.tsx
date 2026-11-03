@@ -1,6 +1,6 @@
 import type { GameInvitePreview } from "@/src/lib/game/contract";
 
-import { CLOSED_INVITE_TITLE, describeSchedule, describeStakeLabel, describeStartDate } from "./invite-copy";
+import { CLOSED_INVITE_TITLE, describeSchedule, describeStakeLabel, describeStartDate, inviteShareCopy } from "./invite-copy";
 
 export const GAME_INVITE_OG_ALT = "A Murph game challenge.";
 
@@ -25,7 +25,8 @@ const INVITEE_NAME = "You";
  * challenger's first name against "You", both tasks, the days, and the stake,
  * which the invite page already shows to anyone holding the link. The name the
  * challenger typed for the invitee is their private label, so it never
- * appears. A used, expired, or missing invite shows only that it isn't
+ * appears. Groups show the starter headline and shared task in the same ticket.
+ * A used, expired, or missing invite shows only that it isn't
  * available. Pure inline styles with no node
  * imports, so the opengraph-image route (satori) and the /design study render
  * the same card. Fraunces is upright SemiBold throughout; there's no logo.
@@ -76,13 +77,24 @@ function OpenTicket({ preview }: { preview: Extract<GameInvitePreview, { status:
         }}
       >
         <Label color={SIENNA} size={20} spacing={5.6}>CHALLENGE</Label>
-        <div style={{ alignItems: "flex-start", display: "flex", justifyContent: "space-between", width: "100%" }}>
-          <Player bar={SAGE} name={preview.inviterFirstName} size={nameSize} task={taskFor(tasks, 0)} />
-          <div style={{ color: FAINT, display: "flex", fontFamily: "Fraunces", fontSize: 30, fontWeight: 600, lineHeight: `${nameSize + 8}px` }}>
-            vs.
+        {preview.maxPlayers === 10 ? (
+          <div style={{ alignItems: "center", display: "flex", flexDirection: "column", gap: 16, textAlign: "center" }}>
+            <div style={{ color: INK, display: "flex", fontFamily: "Fraunces", fontSize: 44, fontWeight: 600, lineHeight: 1.15 }}>
+              {inviteShareCopy(preview).title}
+            </div>
+            <div style={{ color: MUTED, display: "flex", fontFamily: "DM Sans", fontSize: 24, lineHeight: 1.3 }}>
+              {preview.terms.defaultTask}
+            </div>
           </div>
-          <Player bar={SIENNA} name={INVITEE_NAME} size={nameSize} task={taskFor(tasks, 1)} />
-        </div>
+        ) : (
+          <div style={{ alignItems: "flex-start", display: "flex", justifyContent: "space-between", width: "100%" }}>
+            <Player bar={SAGE} name={preview.inviterFirstName} size={nameSize} task={taskFor(tasks, 0)} />
+            <div style={{ color: FAINT, display: "flex", fontFamily: "Fraunces", fontSize: 30, fontWeight: 600, lineHeight: `${nameSize + 8}px` }}>
+              vs.
+            </div>
+            <Player bar={SIENNA} name={INVITEE_NAME} size={nameSize} task={taskFor(tasks, 1)} />
+          </div>
+        )}
         <Label color={FAINT} size={18} spacing={3.6}>{when}</Label>
       </div>
       <Perforation />

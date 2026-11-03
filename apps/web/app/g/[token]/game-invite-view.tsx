@@ -5,7 +5,7 @@ import { buttonVariants } from "@/src/components/ui/button";
 import type { GameInvitePreview } from "@/src/lib/game/contract";
 
 import { CopyInviteLink } from "./copy-invite-link";
-import { CLOSED_INVITE_TITLE, describeSchedule, describeStakeLabel } from "./invite-copy";
+import { CLOSED_INVITE_TITLE, describeSchedule, describeStakeLabel, inviteShareCopy } from "./invite-copy";
 
 /** What a texted challenge link shows, from the invite preview. The page supplies `<main>` and the app link. */
 export function GameInviteView(props: { appUrl: string; preview: GameInvitePreview | null }) {
@@ -16,13 +16,19 @@ export function GameInviteView(props: { appUrl: string; preview: GameInvitePrevi
       {preview?.status === "open" ? (
         <section className="py-12 sm:py-16">
           <h1 className="text-balance font-serif text-4xl font-semibold leading-[1.05] tracking-[-0.03em] sm:text-5xl">
-            {preview.inviterFirstName} challenged you
+            {inviteShareCopy(preview).title}
           </h1>
           <dl className="mt-8 divide-y divide-border border-y border-border text-base">
-            {preview.terms.tasks.map((task) => (
-              <Row key={task.seat} label={task.seat === 0 ? preview.inviterFirstName : "You"} value={task.text} />
-            ))}
-            <Row label="Artifact" value={preview.terms.checkInKind === "any" ? "Choose each day" : preview.terms.checkInKind === "heart_rate" ? "Heart-rate graph · wearable required" : "Photo"} />
+            {preview.maxPlayers === 10 ? (
+              <Row label="Everyone" value={preview.terms.defaultTask ?? ""} />
+            ) : (
+              <>
+                {preview.terms.tasks.map((task) => (
+                  <Row key={task.seat} label={task.seat === 0 ? preview.inviterFirstName : "You"} value={task.text} />
+                ))}
+                <Row label="Artifact" value={preview.terms.checkInKind === "any" ? "Choose each day" : preview.terms.checkInKind === "heart_rate" ? "Heart-rate graph · wearable required" : "Photo"} />
+              </>
+            )}
             <Row label="Days" value={`${describeSchedule(preview.terms.schedule)} · ${preview.lengthDays ?? 7} days`} />
             {preview.terms.stakes.map((stake, index) => (
               <Row key={index} label={describeStakeLabel(stake)} value={stake.item} />
