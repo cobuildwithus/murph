@@ -60,8 +60,8 @@ export interface GameTermsInput {
   lengthDays?: number;
   /**
    * The challenger's picked Day 1 (YYYY-MM-DD, a calendar date): from tomorrow
-   * to 60 days out in their zone. Acceptance before 20:00 can start today;
-   * this date wins when later.
+   * to 60 days out in their zone. Going live before 15:00 for every player
+   * can start today; this date wins when later.
    */
   startsOn?: string;
 }

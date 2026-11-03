@@ -13,7 +13,7 @@ import {
 import type { Weekday } from "./contract";
 
 const DAY_START_HOUR = 3;
-export const GAME_SAME_DAY_CUTOFF_HOUR = 20;
+export const GAME_SAME_DAY_CUTOFF_HOUR = 15;
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 const MONDAY_FIRST: readonly Weekday[] = [6, 0, 1, 2, 3, 4, 5];
@@ -39,7 +39,12 @@ export function gameLocalDate(instant: Date, timeZone: string): string {
   return local.hour < DAY_START_HOUR ? addDays(local.dayKey, -1) : local.dayKey;
 }
 
-/** The accepter can start today only during the daytime part of their game day. */
+/**
+ * A player's earliest default Day 1 when a game goes live: today only from 3am
+ * to 3pm local, otherwise their next game date. After midnight but before 3am
+ * that is the calendar date that has just begun, so late-night starts open at
+ * 3am rather than handing anyone a short leftover day.
+ */
 export function acceptanceStartDate(instant: Date, timeZone: string): string {
   const { hour } = formatTimeZoneDateTimeParts(instant, timeZone);
   const today = gameLocalDate(instant, timeZone);

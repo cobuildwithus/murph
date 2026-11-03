@@ -333,8 +333,8 @@ describe("game chat tool authority", () => {
     expect(m.read).not.toHaveBeenCalled();
   });
   it("returns each refusal's plain rule with its code so Murph can explain it", async () => {
-    m.run.mockResolvedValue({ ok: false, error: { code: "INVALID_REQUEST", message: "Choose a start date from tomorrow to 60 days out, or use Start now." }, status: 400 });
-    expect((await handleGameChatTool(update)).result).toEqual({ status: "rejected", error: "INVALID_REQUEST: Choose a start date from tomorrow to 60 days out, or use Start now." });
+    m.run.mockResolvedValue({ ok: false, error: { code: "INVALID_REQUEST", message: "Choose a start date from today to 60 days out." }, status: 400 });
+    expect((await handleGameChatTool(update)).result).toEqual({ status: "rejected", error: "INVALID_REQUEST: Choose a start date from today to 60 days out." });
     m.run.mockResolvedValue({ ok: false, error: { code: "INVALID_REQUEST", message: "x".repeat(300) }, status: 400 });
     expect((await handleGameChatTool(update)).result.error).toHaveLength(128);
   });
