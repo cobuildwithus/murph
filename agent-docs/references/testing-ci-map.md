@@ -1454,12 +1454,18 @@ boundaries are owned by `agent-docs/operations/verification-and-runtime.md`.
   progress detector. It exercises the real paginated SQL together with exact
   personal and thread-container AI authority, including current-participant
   access and inactive, stale, removed, suspended, or consent-revoked
-  exclusions. It also proves usage-denial suppression and restart chronology
+  exclusions. It proves usage-denial suppression for imported default-owned
+  system heads, including member actions, while model-free heads remain alertable.
+  Import must cover aged high water; invalid evidence, failed usage reads, and
+  exhausted usage-read budgets retain alerts. It also proves restart chronology
   across staging, provider, delivery, and mailbox-consumption evidence, plus
   system heads aging from mailbox creation independently of imported frontiers,
   fresh suffixes, checkpoints, or workspace wakes. An imported sequence above
   durable high water remains unknown with no derived unhandled count; equality
-  retains full import coverage. Focused unit coverage also
+  retains full import coverage. Activation, device-sync, and meal-photo heads
+  share the bounded current-owner foreground-checkpoint exemption; its SQL and
+  classifier proofs reject expired, stale, incomplete, or mismatched evidence.
+  Focused unit coverage also
   proves aggregate device-head, import-coverage, imported-but-unhandled, and
   wake-owner diagnostics remain identifier-free. The assistant-runtime
   entrypoint suite proves the existing terminal invocation event carries the
