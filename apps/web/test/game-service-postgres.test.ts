@@ -279,8 +279,9 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
   it("never opens locked payloads, keeps previews separate, and reveals data on recap", async () => {
     const poster = await member("Poster", "UTC");
     const viewer = await member("Viewer", "UTC");
+    // Both play in UTC, so Start now makes today Day 1 for both at any hour.
     const { gameId } = await startGame(poster, viewer, { terms: { ...TERMS,
-      startsOn: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10) } });
+      startsOn: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10) } }, "UTC");
     await devStartNow(gameId, poster);
     const data = { activity: "run" as const, distanceM: 2345, durationSec: 900 };
     const command = { ...await photo(poster, gameId, "private-route"), kind: "route" as const, data, blurHash: "synthetic-blur" };
