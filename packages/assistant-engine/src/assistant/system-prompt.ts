@@ -485,7 +485,10 @@ function buildAssistantStableExecutionGuidanceText(
     input.hostedRuntime === true ? buildAssistantLateChildResultGuidanceText() : null,
     groupEmail
       ? "Group-email health guidance: apply the resident Understand before recommending rules. Snoring/gasping, unrefreshing sleep despite enough opportunity, unexplained awakenings, morning headaches, sleep attacks, or dangerous sleepiness require sleep-safety assessment; give immediate guidance before coaching when driving or work safety is affected. Filesystem skills, browser actions, and personal-state operations are unavailable here."
-      : buildAssistantSkillRouteHintText(conversationScope),
+      : buildAssistantSkillRouteHintText(
+          conversationScope,
+          input.assistantProgressUpdatesAvailable ?? true,
+        ),
     buildAssistantExecutionBehaviorText({
       profile: input.modelBehaviorProfile,
       browserActionsAvailable: !groupEmail,
@@ -1599,6 +1602,7 @@ function buildAssistantVaultFileSendGuidanceText(): string {
 
 function buildAssistantSkillRouteHintText(
   conversationScope: AssistantConversationScope,
+  progressUpdatesAvailable: boolean,
 ): string {
   const routeLines = [
     "Murph skill router:",
@@ -1606,7 +1610,11 @@ function buildAssistantSkillRouteHintText(
     "- Skills live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`. Read the primary owner for the user's visible outcome. If ambiguous, inspect at most two for discovery; then follow handoffs and load each safety/execution owner. Do not preload or use a discovery CLI.",
     '- Meal capture and saved-day reviews: run `cat "$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/SKILL.md"` first unless already loaded this turn. When a new meal needs label lookups, run them in that same tool step: `vault-cli food search-labels-batch` with one `--query` per food, `--generic` for ordinary ingredients in USDA order (`bananas raw`), a separate branded/menu batch, and one official web search for a named restaurant or packaged item. The loaded skill supplies the command contract: execute its typed CLI commands without preflight help/schema, repository searches, or CLI-source inspection.',
     "- Bluetooth wearable help, WHOOP not connecting to Murph, or missing live heart rate -> bluetooth-device-help before setup or data-sync guidance. Clarify Bluetooth versus saved-data sync when unclear; local Bluetooth has no device logs or remote diagnostic tool.",
-    "- Setup: explicit achievable-outcome help (`help me ...`/Goals CTA) -> goal-setup before domain/Commons knowledge; facts -> domain. For a new proposal, run `cat \"$MURPH_ASSISTANT_SKILLS_ROOT/goal-setup/SKILL.md\"` alone first; do not write yet. On acceptance, execute its persist section using the loaded instructions and completed research; do not restart setup. Also: murph-onboarding, hosted-low-usage, signup-link, experiment-onboarding, behavior-followthrough.",
+    "- Setup: explicit achievable-outcome help (`help me ...`/Goals CTA) -> goal-setup before domain/Commons knowledge; facts -> domain. For a new proposal, run `cat \"$MURPH_ASSISTANT_SKILLS_ROOT/goal-setup/SKILL.md\"` " +
+      (conversationScope === "direct" && progressUpdatesAvailable
+        ? "in the first tool round, alongside exactly one brief `murph.send_progress_update`; do not write yet. "
+        : "alone first; do not write yet. ") +
+      "On acceptance, execute its persist section using the loaded instructions and completed research; do not restart setup. Also: murph-onboarding, hosted-low-usage, signup-link, experiment-onboarding, behavior-followthrough.",
     "- Automatic meal capture: automatic-meal-capture for the iPhone app, Photos permission, background timing, Meals review, import verification, and photo-only meal enrichment.",
     "- Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.",
     "- Sleep safety outranks fatigue/clock routing: snoring/gasping, unrefreshing sleep with enough opportunity, unexplained awakenings, morning headache, sleep attacks, or dangerous daytime sleepiness -> sleep-improvement. If driving/work safety is affected, give immediate safety guidance before coaching.",

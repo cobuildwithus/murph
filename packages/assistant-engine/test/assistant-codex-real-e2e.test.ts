@@ -430,8 +430,28 @@ describeRealCodex('real natural goal canary journey', () => {
       }
       const timedMessage = async (stage: string) => {
         const before = await fixture.commandCount()
+        const progressUpdates: { elapsedMs: number; text: string }[] = []
         const startedAt = performance.now()
-        const result = await fixture.message(promptFor(stage))
+        const result = await fixture.message(promptFor(stage), {
+          deliverResponse: true,
+          deliveryDispatchMode: 'queue-only',
+          deliveryIdempotencyKey: `synthetic-goal-canary-${stage}`,
+          turnTrigger: 'automation-auto-reply',
+          executionContext: { hosted: {
+            memberId: 'synthetic-goal-canary-member', userEnvKeys: [],
+            progressDeliveryDependencies: {
+              async sendLinq(input) {
+                progressUpdates.push({ elapsedMs: Math.round(performance.now() - startedAt), text: input.message })
+                return {
+                  providerMessageId: `synthetic-progress-${stage}-${progressUpdates.length}`,
+                  providerThreadId: 'canonical-live-synthetic-thread',
+                  target: 'canonical-live-synthetic-thread', targetKind: 'thread',
+                }
+              },
+            },
+          } },
+        })
+        const elapsedMs = Math.round(performance.now() - startedAt)
         const invocations = (await readFile(path.join(fixture.root, 'commands.jsonl'), 'utf8'))
           .split('\n').filter(Boolean).slice(before).map((line) => {
             const args: unknown = JSON.parse(line)
@@ -442,12 +462,15 @@ describeRealCodex('real natural goal canary journey', () => {
           })
         const commands = expandRecordedVaultCommands(invocations)
         process.stdout.write(`[natural-goal-latency] ${JSON.stringify({
-          stage, elapsedMs: Math.round(performance.now() - startedAt), cliInvocations: invocations.length,
+          stage, elapsedMs, firstVisibleMs: progressUpdates[0]?.elapsedMs ?? elapsedMs,
+          progressUpdates: progressUpdates.length, progressMessages: progressUpdates,
+          cliInvocations: invocations.length,
           commands: commands.map((command) => command.split(' ').slice(0, command.startsWith('commons ') ? 3 : 2).join(' ')),
         })}\n`)
-        return { result, commands }
+        return { result, commands, progressUpdates }
       }
-      const { result: preview, commands: previewCommands } = await timedMessage('goal-proposal')
+      const { result: preview, commands: previewCommands, progressUpdates: previewProgress } = await timedMessage('goal-proposal')
+      expect(previewProgress).toHaveLength(1)
       expect(previewCommands.filter((command) => /^commons goal list(?: |$)/u.test(command) && !isRecordedVaultHelpCommand(command))).toHaveLength(1)
       expect(previewCommands.filter((command) => /^commons goal show(?: |$)/u.test(command) && !isRecordedVaultHelpCommand(command))).toEqual([])
       expect(preview.response).toMatch(/walk/iu)
@@ -456,7 +479,9 @@ describeRealCodex('real natural goal canary journey', () => {
       expect(await listGoals(fixture.vault)).toHaveLength(0)
       expect((await readVaultRawTolerant(fixture.vault)).regimens).toHaveLength(0)
 
-      const { result: accepted, commands } = await timedMessage('accept-goal')
+      const { result: accepted, commands, progressUpdates: acceptedProgress } = await timedMessage('accept-goal')
+      expect(acceptedProgress).toHaveLength(0)
+      expect(commands.filter((command) => /^regimen list(?: |$)/u.test(command))).toEqual([])
       expect(commands.filter((command) => /^commons goal (list|show)(?: |$)/u.test(command) && !isRecordedVaultHelpCommand(command))).toEqual([])
       expect(commands.filter((command) => /^goal save /u.test(command) && !isRecordedVaultHelpCommand(command))).toHaveLength(1)
       expect(commands.filter((command) => /^regimen save /u.test(command) && !isRecordedVaultHelpCommand(command))).toHaveLength(1)
