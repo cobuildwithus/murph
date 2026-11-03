@@ -1037,8 +1037,6 @@ export async function executeClaimedAssistantCronJob(
               deviceActivityAuthority,
               occurrenceAt,
             ),
-            recurringReminderConversation:
-              assistantCronUsesRecurringReminderConversation(input.job),
             scheduledAutomationScheduleKind:
               input.job.kind === 'canonical'
                 && input.job.source.kind === 'automation'
@@ -1928,7 +1926,7 @@ export function buildAssistantCronExecutionInstructions(
     job,
     independentAuthority !== null,
   )
-  const recurringReminderConversation =
+  const recurringReminderInstructions =
     buildAssistantCronRecurringReminderConversationInstructions(job)
   const memberWording = buildAssistantCronMemberWordingInstructions(job)
   const overlays = [
@@ -1939,7 +1937,7 @@ export function buildAssistantCronExecutionInstructions(
     retryEvidence,
     automationContext,
     independentAuthority,
-    recurringReminderConversation,
+    recurringReminderInstructions,
     supportScope,
     exerciseCue,
     memberWording,

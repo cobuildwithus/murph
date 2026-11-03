@@ -12,12 +12,9 @@ stale messages; an already empty series needs no effect.
 
 When creating automations, keep their instructions to the durable user request
 and request-specific context. The scheduled runtime owns generic recurring
-reminder cadence, including how it reacts to a prior delivered reminder and
-later conversation while the immediately prior confirmed output remains inside
-the existing evidence horizon. A longer cadence or unusual delay sends normally
-when that evidence has expired instead of guessing silence. Do not copy that
-execution policy into every automation. The linked habit regimen remains the
-source of truth for the repeated-action plan. Save its exact regimen reference in
+reminder execution. Do not copy that execution policy into every automation.
+The linked habit regimen remains the source of truth for the repeated-action
+plan. Save its exact regimen reference in
 `contextReferences`; reminders derive changing targets from that current owner
 and the occurrence local date rather than storing copied progression rules or
 rotation anchors. Keep reminder titles neutral when the target varies. Preserve
@@ -26,12 +23,12 @@ explicit date-scoped exceptions without inferring a permanent plan reset.
 Every automation owned by a non-experiment repeated-action plan, including a training plan, must set `supportSeriesId: "habit:<regimenId>"` and persist the exact accepted purpose as `supportKind: "reminder"`, `"check_in"`, or `"review"` when the automation is saved or patched, where `<regimenId>` is its canonical habit-regimen id. The active canonical automation is the exact persisted support-consent record for that purpose; pausing or archiving it withdraws scheduled delivery. Never pass a raw `system:support-series:*` tag; `tags` are only for ordinary descriptive values. Keep the support-series id stable, and do not key lifecycle cleanup only by a mutable slug, title, or reminder text.
 
 Support kind also bounds the user-facing message shape. `reminder` authorizes a
-cue or skip. Apart from the separately attached one-time check described below,
-its only question exception is runtime-owned cadence administration: after one delivered recurring cue whose confirmed output is
-still available receives no relevant reply, Murph may ask once whether to keep,
-change, or pause the interruption. It does not authorize a completion, repair,
-accountability, or reflection question. This cadence exception is limited to
-ordinary non-clinical reminders.
+cue or skip. Ordinary recurring reminders send every scheduled occurrence with
+their requested wording until the member pauses or changes them, subject to
+existing authoritative skip conditions. Silence never stops them or adds a
+question about continuing them. Apart from the separately attached one-time
+check described below, a reminder does not authorize a completion, repair,
+accountability, or reflection question.
 Medication, prescribed treatment, clinician-directed care, clinical monitoring,
 and safety-critical reminders continue the saved cue after silence; only the
 user's explicit change or pause or an existing authoritative skip condition may
@@ -65,8 +62,7 @@ and clear only that boundary after the user explicitly reopens the topic.
 
 Keep Murph-designed habit support finite and prefer bounded one-shot
 automations. When the user explicitly requests an ongoing recurring cue, it
-may omit `activeUntil`; for an ordinary non-clinical reminder, the runtime's
-quiet-after-silence behavior and the user's pause, change, and stop controls
+may omit `activeUntil`; the user's pause, change, and stop controls
 remain its off-ramp. Do not add a finite check-in or review lifecycle merely
 because the reminder recurs. Never use silence to stop clinical or
 safety-critical support.
@@ -113,11 +109,8 @@ Automation instructions should not include:
 - instructions to nag harder after non-response
 
 Prefer bounded support, and never increase frequency or add messages after
-non-response. An explicitly requested ongoing reminder may stay active. For
-normal daily and weekly reminders, the resident runtime asks once whether to
-keep, change, or pause after a delivered cue receives no relevant reply, then
-stays quiet if that question is also unanswered. A longer or unusually delayed
-cadence sends normally after its prior confirmed-output evidence expires.
+non-response. An explicitly requested ongoing reminder stays active until the
+member pauses or changes it; silence does not change its scheduled cues.
 
 ### Repair a mistimed interruption
 
@@ -151,17 +144,16 @@ support loop, not as a miss or a motivation problem.
 ## Opt-in accountability check-ins
 
 A reminder is a cue. An accountability check-in is a separate, later action
-whose job is to learn the outcome, not repeat the cue. The runtime-owned
-keep/change/pause cadence question does not ask about the outcome and does not
-turn a reminder into a check-in. Default to a simple reminder.
+whose job is to learn the outcome, not repeat the cue. Default to a simple
+reminder.
 
 The existing automation tool's `attach_follow_up` action is a narrow exception:
 Murph may attach one optional, expiring check to an original private reminder
 or an important unresolved question when it would help and no saved quiet,
 decline, or no-proactive-support preference forbids it. Choose a useful delay
 and self-contained instructions with explicit skip conditions. Do not attach
-to casual offers, every question, reminder-cadence questions, or an already
-ignored check-in. A reminder needing no context can remain a simple cue;
+to casual offers, every question, or an already ignored check-in.
+A reminder needing no context can remain a simple cue;
 contextual follow-ups use the host-selected contextual model. The host binds
 the attachment to actual delivery. The later turn reads current conversation
 and completion evidence, then sends once or stays silent; it cannot attach
@@ -227,13 +219,13 @@ message.
 
 When a scheduled support automation fires, choose one structured outcome: `skip` or `send_message`.
 If sending, stay within the engine-supplied persisted
-support kind: a `reminder` is a normal cue plus only the runtime-owned
-keep/change/pause cadence exception; a separately consented `check_in` may ask
+support kind: a `reminder` is a normal cue; a separately consented `check_in` may ask
 the authorized accountability or narrow repair question; and a `review` may
 ask the bounded review or next-decision question. Never widen the saved purpose
 at fire time.
 
-For an ordinary recurring reminder, use the resident cadence policy above.
+For an ordinary recurring reminder, send its scheduled cue unless the member
+pauses or changes it or an existing authoritative skip condition applies.
 The generic repair, skip, and miss rules below apply only to Murph-designed
 habit support or an explicitly consented `check_in` or `review`; do not persist
 or apply them to a standalone ordinary recurring reminder.

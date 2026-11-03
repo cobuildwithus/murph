@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-11-03",
+  "order": 100,
+  "item": {
+    "id": "reminders-send-every-time",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Your reminders arrive every time",
+    "summary": "Daily and weekly reminders now send every time they're scheduled, even when you don't reply.",
+    "details": "Murph no longer adds a question about keeping, changing, or pausing a reminder you haven't answered, and it no longer goes quiet after a few quiet days. A reminder stops or changes only when you ask. If you've already told Murph you did the thing, it still skips that one reminder.",
+    "relevanceTags": [
+      "reminders",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      4504
+    ]
+  }
+}

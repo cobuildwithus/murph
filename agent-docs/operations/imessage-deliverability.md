@@ -352,9 +352,9 @@ Preferred shape:
 - routine reminders and summaries carry their requested content; generic saved
   change/pause notes describe controls and do not become repeated footers.
   Explain those controls during setup when useful. Preserve explicit requested
-  copy, concrete stop conditions, bounded review decisions, and a cadence
-  question when the current engine policy requires one. A relevant reply to
-  the prior reminder rules out another silence-based cadence question.
+  copy, concrete stop conditions, and bounded review decisions. Silence after
+  a reminder is not feedback: it never adds a keep, change, or pause question
+  or quiets later occurrences.
 - full recognizable URLs only when links are necessary
 - calm, non-salesy language
 
