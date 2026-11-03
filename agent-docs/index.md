@@ -1021,7 +1021,7 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/compliance/health-data-tracking-and-ads-rule.md` | Hard rule and review checklist for analytics, telemetry, ad pixels, attribution, and marketing tools on health-data surfaces. | Health-data tracking policy | High | 2026-04-29 |
 | `agent-docs/product-specs/index.md` | Index for product-spec docs. | Product-spec inventory | High | 2026-07-16 |
 | `agent-docs/product-specs/sleep-summary-card.md` | Host-built private nightly summaries, envelope 8, static rollout and wake-date selection. | Sleep card product spec | High | 2026-11-03 |
-| `agent-docs/exec-plans/active/2026-11-03-sleep-summary-card.md` | Reviewed backend and Web sleep summary implementation plan. | Active execution plan | High | 2026-11-03 |
+| `agent-docs/exec-plans/completed/2026-11-03-sleep-summary-card.md` | Completed backend and Web sleep summary plan with ReviewGPT plan dispositions. | Completed execution plan | High | 2026-11-03 |
 | `agent-docs/product-specs/nutrition-totals-card.md` | Logged-so-far nutrition cards without mandatory targets; invitation evidence, recovery, and native skew. | Nutrition card product spec | High | 2026-09-11 |
 | `agent-docs/exec-plans/completed/2026-09-11-nutrition-totals-card.md` | Completed implementation, assistant proof and review for optional-goal daily cards. | Completed execution plan | High | 2026-09-11 |
 | `agent-docs/exec-plans/completed/2026-09-12-channel-welcome-reader-rollout.md` | Consumer-first release extraction for channel welcomes; production rollout remains with the deployment owners. | Historical implementation evidence | Low | 2026-09-12 |

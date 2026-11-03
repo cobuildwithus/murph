@@ -1,5 +1,9 @@
 # Plan: sleep summary response card (host-built, envelope 8)
 
+Status: completed
+Created: 2026-11-03
+Updated: 2026-11-03
+
 Date: 2026-11-03. Repos: `murph` (backend, Web image), `murph-ios` (native view).
 
 ## Member outcome
@@ -187,3 +191,18 @@ Response: `audit-packages/plan-sleep-summary-card.md`.
 - Reuse `executeResponseCardAttachmentDynamicTool`, `applyResponseCardPatch`,
   the serialization/attachment classifiers and the in-flight steering test:
   **accepted**.
+Status: completed
+Updated: 2026-11-03
+Completed: 2026-11-03
+
+## Completion
+
+- Backend PR cobuildwithus/murph#4518 and iOS PR cobuildwithus/murph-ios#325.
+- Four live real-Codex journeys passed (general question attaches the card,
+  specific, compound and missing-night questions stay text).
+- PR ReviewGPT round 1 on `bcbf8963d18384abdd3f5b7dab5fd308cd42022f`: PASS,
+  no findings.
+- Deviation from the plan: none in behavior. The static image, text recovery
+  and Telegram table label HRV without the method suffix, and the
+  no-stage block reads ASLEEP without repeating the total, matching the
+  approved native design.
