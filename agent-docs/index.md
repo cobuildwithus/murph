@@ -1,6 +1,8 @@
 Group app terms preserve valid unjoined invitation overrides through edits using
 the validator's shared seat eligibility; chat and public preview privacy stay
 unchanged. The projection contract is owned by [Weekly Game](product-specs/weekly-game.md).
+Group history uses the latest round's shared default task for every viewer,
+including players with a seat override; the same spec owns that contract.
 
 Public group invite Web rendering and pair preservation are owned by
 [Weekly Game](product-specs/weekly-game.md); proof and the PR lane are tracked in
