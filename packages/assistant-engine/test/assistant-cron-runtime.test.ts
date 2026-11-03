@@ -241,9 +241,6 @@ import {
   seedMurphOnboardingFollowupAutomation,
   seedMurphOnboardingEarlyStallAutomation,
 } from '../src/assistant/onboarding-followup-seed.ts'
-import {
-  ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
-} from '../src/assistant/shared.ts'
 import type { AssistantExecutionContext } from '../src/assistant/execution-context.ts'
 import type { AssistantNotificationInput } from '../src/assistant/notification-turn.ts'
 import type { AssistantChannelDependencies } from '../src/assistant/channels/types.ts'
@@ -4721,119 +4718,76 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
-  it('sends one recurring reminder cadence question and then skips after continued room silence', async () => {
+  it('delivers every ordinary daily reminder occurrence in the same conversation without replies', async () => {
     vi.useFakeTimers()
     const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-recurring-reminder-conversation-',
+      'assistant-cron-runtime-unanswered-daily-reminder-',
     )
-    const canonicalJob = await createCanonicalJob(
-      vaultRoot,
-      'room reset reminder',
-    )
+    const canonicalJob = await createCanonicalJob(vaultRoot, 'daily breathing reminder')
     const automation = findCanonicalAutomation(vaultRoot, canonicalJob.jobId)
     if (!automation) {
       throw new Error('Expected the recurring reminder automation to exist.')
     }
-    automation.instructions = 'Remind the room to do its short reset.'
-    automation.route.threadIsDirect = false
+    const reminderText = 'Take a quiet breath.'
+    automation.instructions = `Send this exact reminder every day: "${reminderText}"`
+    automation.supportKind = 'reminder'
 
-    const providerDecisions = [
-      {
-        kind: 'send_message' as const,
-        privateSummary: 'Sent the current room reminder.',
-        text: 'Quick room reset.',
-      },
-      {
-        kind: 'send_message' as const,
-        privateSummary: 'Sent the cue with one room cadence question.',
-        text: 'Quick room reset. Should I keep these, change them, or pause?',
-      },
-      {
-        kind: 'skip' as const,
-        privateSummary: 'The room cadence question remains unanswered.',
-      },
-    ]
+    const decision = {
+      kind: 'send_message' as const,
+      privateSummary: 'Sent the saved daily reminder.',
+      text: reminderText,
+    }
     let occurrenceIndex = 0
     cronMocks.sendAssistantMessageLocal.mockImplementation(async (input: {
       beforeCommit?: (context: {
-        decision: (typeof providerDecisions)[number]
-        deliveryOutcome: ReturnType<typeof buildSentReminderDeliveryOutcome> | null
-        response: string | null
+        decision: typeof decision
+        deliveryOutcome: ReturnType<typeof buildSentReminderDeliveryOutcome>
+        response: string
       }) => Promise<void> | void
       beforeDelivery?: (context: {
-        decision: (typeof providerDecisions)[number]
-        deliveryOutcome: ReturnType<typeof buildSentReminderDeliveryOutcome> | null
-        response: string | null
+        decision: typeof decision
+        deliveryOutcome: ReturnType<typeof buildSentReminderDeliveryOutcome>
+        response: string
       }) => Promise<void> | void
       instructions: string
       onProviderRequestStarted?: () => Promise<void> | void
     }) => {
       const notificationInput = await prepareAssistantCronNotificationInput(
         input as AssistantNotificationInput,
+        { sessionId: 'session-room-reminder' },
       )
       expect(notificationInput.instructions).toContain(
         'Recurring reminder conversation (engine-supplied',
       )
       expect(notificationInput.instructions).toContain(
-        'Any silence-based cadence policy appended below does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders.',
+        '- Otherwise send the current cue as scheduled with its requested wording. A lack of replies to earlier occurrences never justifies skipping this one or adding a question about keeping, changing, or pausing the reminder.',
       )
+      expect(notificationInput.instructions).toContain(
+        'Direct-message completion takes precedence: return `skip` for only this occurrence',
+      )
+      expect(notificationInput.instructions).not.toContain('keep, change, or pause')
+      expect(notificationInput.instructions).not.toContain('Confirmed-output reminder cadence policy')
+      expect(notificationInput.instructions).not.toContain('silence-based')
       expect(notificationInput.instructions).not.toContain('carry-forward grace')
       if (occurrenceIndex === 0) {
         expect(notificationInput.instructions).not.toContain(
           'Recent outputs from this automation',
         )
-        expect(notificationInput.instructions).not.toContain(
-          'keep, change, or pause these interruptions',
-        )
-        expect(notificationInput.instructions).toContain(
-          'Otherwise send the current concise cue normally.',
-        )
       } else {
         expect(notificationInput.instructions).toContain(
           'Recent outputs from this automation',
         )
-        expect(notificationInput.instructions).toContain('1. "Quick room reset.')
-        expect(notificationInput.instructions).toContain(
-          'If no relevant human reply followed and that output already asked whether to keep, change, or pause these interruptions, return `skip`.',
-        )
-        expect(notificationInput.instructions).toContain(
-          'If that output is unavailable under the existing evidence-retention horizon, send the current cue normally.',
-        )
-        expect(notificationInput.instructions).toContain(
-          'In a group, address the room collectively.',
-        )
-        expect(notificationInput.instructions).toContain(
-          ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
-        )
-        expect(notificationInput.instructions).toContain(
-          'inside this provider request\'s engine-supplied recent-conversation-history section',
-        )
-        expect(notificationInput.instructions).toContain(
-          'That marker expires after the provider request that supplied it',
-        )
+        expect(notificationInput.instructions).toContain(`1. "${reminderText}"`)
       }
       await input.onProviderRequestStarted?.()
-
-      const decision = providerDecisions[occurrenceIndex]
-      if (!decision) {
-        throw new Error('Unexpected extra reminder occurrence.')
-      }
       occurrenceIndex += 1
-      if (decision.kind === 'skip') {
-        return {
-          decision,
-          response: null,
-          session: { sessionId: 'session-room-reminder' },
-        }
-      }
-
-      const deliveryOutcome = buildSentReminderDeliveryOutcome(
-        `outbox_room_reminder_${occurrenceIndex}`,
-      )
       const context = {
         decision,
-        deliveryOutcome,
-        response: decision.text,
+        deliveryOutcome: buildSentReminderDeliveryOutcome(
+          `outbox_daily_reminder_${occurrenceIndex}`,
+          reminderText,
+        ),
+        response: reminderText,
       }
       await input.beforeDelivery?.(context)
       await input.beforeCommit?.(context)
@@ -4861,6 +4815,7 @@ describe('assistant cron runtime orchestration', () => {
     }
 
     expect(occurrenceIndex).toBe(3)
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(3)
     const scheduledNextOccurrence = (await listAssistantCronJobs(vaultRoot))
       .find((job) => job.jobId === canonicalJob.jobId)
       ?.state.nextRunAt
@@ -4868,16 +4823,18 @@ describe('assistant cron runtime orchestration', () => {
     expect(Date.parse(scheduledNextOccurrence ?? '')).toBeGreaterThan(
       Date.parse(occurrenceTimes.at(-1) ?? ''),
     )
-    await expect(listAssistantCronRuns({
+    const { runs } = await listAssistantCronRuns({
       job: canonicalJob.jobId,
       vault: vaultRoot,
-    })).resolves.toMatchObject({
-      runs: [
-        { outcome: 'no_op', response: 'The room cadence question remains unanswered.' },
-        { outcome: 'delivered', response: providerDecisions[1].text },
-        { outcome: 'delivered', response: providerDecisions[0].text },
-      ],
     })
+    expect(runs).toHaveLength(3)
+    for (const run of runs) {
+      expect(run).toMatchObject({
+        outcome: 'delivered',
+        response: reminderText,
+        sessionId: 'session-room-reminder',
+      })
+    }
   })
 
   it('keeps a safety-critical recurring reminder sending after unanswered occurrences', async () => {
@@ -4921,10 +4878,10 @@ describe('assistant cron runtime orchestration', () => {
         input as AssistantNotificationInput,
       )
       expect(notificationInput.instructions).toContain(
-        'Any silence-based cadence policy appended below does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders.',
+        'Otherwise send the current cue as scheduled with its requested wording.',
       )
       expect(notificationInput.instructions).toContain(
-        'Send those cues normally unless the direct-conversation completion rule above applies, the member explicitly changes or pauses them, or another authoritative skip condition applies.',
+        'Direct-message completion takes precedence: return `skip` for only this occurrence',
       )
       if (occurrenceIndex > 0) {
         expect(notificationInput.instructions).toContain(

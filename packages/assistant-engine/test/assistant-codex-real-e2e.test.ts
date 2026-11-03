@@ -10759,7 +10759,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         job: projectCanonicalAssistantCronJob({ source, runtimeState }), kind: 'canonical', runtimeState, source,
       }, { automationId: null, contextReferences: [] })
       const prepared = await prepareAssistantCronNotificationInput({
-        instructions, recurringReminderConversation: true,
+        instructions,
         outboxAutomationAuthority: { automationId: saved.record.automationId, expectedUpdatedAt: saved.record.updatedAt },
         scheduledAutomationScheduleKind: source.schedule.kind,
         scheduledInvocationAuthority: { automationId: saved.record.automationId, occurrenceAt: '2026-09-23T18:00:00.000Z' },
@@ -10883,7 +10883,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             automationId: createdAutomation.record.automationId,
             expectedUpdatedAt: createdAutomation.record.updatedAt,
           },
-          recurringReminderConversation: true,
           scheduledAutomationScheduleKind: source.schedule.kind,
           scheduledInvocationAuthority: {
             automationId: createdAutomation.record.automationId,
@@ -21130,7 +21129,6 @@ describeRealCodex('real Codex canonical plan reminder targets e2e', () => {
         const prepared = await prepareAssistantCronNotificationInput({
           instructions, vault: workingDirectory, workingDirectory,
           outboxAutomationAuthority: { automationId: source.automationId, expectedUpdatedAt: source.updatedAt },
-          recurringReminderConversation: true,
           scheduledAutomationScheduleKind: source.schedule.kind,
           scheduledInvocationAuthority: { automationId: source.automationId, occurrenceAt },
           turnTrigger: 'automation-cron',
@@ -21664,7 +21662,6 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
           automationId: createdAutomation.record.automationId,
           expectedUpdatedAt: createdAutomation.record.updatedAt,
         },
-        recurringReminderConversation: true,
         scheduledAutomationScheduleKind: source.schedule.kind,
         scheduledInvocationAuthority: {
           automationId: createdAutomation.record.automationId,
@@ -21679,7 +21676,7 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
         { sessionId: 'session-synthetic-first-reminder' },
       )
       expect(preparedInput.instructions).toContain(
-        'Otherwise send the current concise cue normally.',
+        'Otherwise send the current cue as scheduled with its requested wording.',
       )
       expect(preparedInput.instructions).not.toContain(
         'Recent outputs from this automation',
@@ -21729,50 +21726,114 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
     }
   }, 360_000)
 
+  it('sends ordinary recurring reminders after unanswered occurrences with the exact saved cue', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-unanswered-recurring-reminder-e2e-'),
+    )
+    const cue = 'Take a quiet breath.'
+    const sessionId = 'session-synthetic-unanswered-reminder'
+    const occurrenceAt = '2026-08-05T13:00:00.000Z'
+
+    try {
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
+      const saved = await upsertAutomation({
+        continuityPolicy: 'preserve',
+        instructions: `Send this exact reminder every morning: "${cue}"`,
+        now: new Date('2026-08-02T12:00:00.000Z'),
+        route: {
+          channel: 'linq', deliveryTarget: 'synthetic-unanswered-reminder',
+          identityId: null, participantId: null,
+          threadId: 'synthetic-unanswered-reminder', threadIsDirect: true,
+        },
+        schedule: { kind: 'dailyLocal', localTime: '09:00' },
+        slug: 'synthetic-unanswered-reminder',
+        status: 'active', supportKind: 'reminder', tags: [],
+        title: 'Synthetic breathing reminder', vaultRoot: workingDirectory,
+      })
+      const source = findCanonicalAssistantCronRecordInList(
+        await listCanonicalAssistantCronRecords(workingDirectory), saved.record.automationId,
+      )
+      if (!source || source.kind !== 'automation') {
+        throw new Error('Expected the canonical reminder automation source.')
+      }
+      const jobId = resolveCanonicalAssistantCronJobId(source)
+      const runtimeState = createAssistantCronCanonicalRuntimeRecord({ jobId, now: occurrenceAt })
+      const instructions = buildAssistantCronExecutionInstructions({
+        job: projectCanonicalAssistantCronJob({ source, runtimeState }),
+        kind: 'canonical', runtimeState, source,
+      }, { automationId: null, contextReferences: [] }, occurrenceAt)
+      const priorOutputs = [
+        { at: '2026-08-03T13:00:00.000Z', text: cue },
+        { at: '2026-08-04T13:00:00.000Z', text: `${cue} Should I keep these, change them, or pause?` },
+      ]
+      const paths = resolveAssistantStatePaths(workingDirectory)
+      for (const [index, output] of priorOutputs.entries()) {
+        await appendAssistantCronRun(paths, {
+          schema: 'murph.assistant-cron-run.v1',
+          runId: `cronrun_unanswered_${index}`, jobId,
+          trigger: 'scheduled', outcome: 'delivered', reason: 'sent', status: 'succeeded',
+          startedAt: output.at, finishedAt: output.at, scheduledOccurrenceAt: output.at,
+          sessionId, response: output.text, responseLength: output.text.length, error: null,
+        })
+      }
+      const prepared = await prepareAssistantCronNotificationInput({
+        instructions,
+        outboxAutomationAuthority: {
+          automationId: source.automationId, expectedUpdatedAt: source.updatedAt,
+        },
+        scheduledAutomationScheduleKind: source.schedule.kind,
+        scheduledInvocationAuthority: { automationId: source.automationId, occurrenceAt },
+        turnTrigger: 'automation-cron', vault: workingDirectory, workingDirectory,
+      }, { sessionId })
+      for (const output of priorOutputs) {
+        expect(prepared.instructions).toContain(JSON.stringify(output.text))
+      }
+      expect(prepared.instructions).toContain(
+        'Otherwise send the current cue as scheduled with its requested wording.',
+      )
+      expect(prepared.instructions).not.toContain('Confirmed-output reminder cadence policy')
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildScheduledAutomationDeveloperInstructions('direct'),
+        dynamicTools: [], env: config.env, model: config.model, modelProvider: config.modelProvider,
+        prompt: [
+          prepared.instructions,
+          'Recent conversation history for context only; do not answer these prior messages:',
+          ...priorOutputs.map((output) => `Assistant (${output.at}): ${output.text}`),
+          'No member message followed either delivered output.',
+        ].join('\n\n'),
+        reasoningEffort: 'medium', sandbox: 'read-only', workingDirectory,
+      })
+      const decision = parseAssistantNotificationDecision(result.finalMessage)
+      process.stdout.write(`${JSON.stringify({ scenario: 'unanswered recurring reminder', decision })}\n`)
+      expect(decision.kind).toBe('send_message')
+      if (decision.kind !== 'send_message') {
+        throw new Error('Expected the scheduled reminder to send its saved cue.')
+      }
+      expect(decision.text).toBe(cue)
+      expect(decision.text).not.toMatch(/keep|change|pause|\?/iu)
+      expect(result.followUpRequest).toBeNull()
+      expect(readCapabilityRoutingActions(result.jsonEvents).filter(
+        (action) => action.kind === 'dynamic',
+      )).toHaveLength(0)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
   it.each([
     {
       context: [
-        'The immediately prior cue, "Quick room reset.", was provider-accepted and sent.',
-        'No human message followed it.',
-      ].join('\n'),
-      expectedKind: 'send_message',
-      expectedText: /keep|change|pause/iu,
-      savedInstructions: 'Remind the room to do its short reset.',
-      scenario: 'asks one cadence question after an unanswered cue',
-      scope: 'group' as const,
-    },
-    {
-      context: [
-        'The immediately prior reminder, "Quick room reset. Should I keep these, change them, or pause?", was provider-accepted and sent.',
-        'No human message followed it.',
-      ].join('\n'),
-      expectedKind: 'skip',
-      expectedText: null,
-      savedInstructions: 'Remind the room to do its short reset.',
-      scenario: 'skips after the unanswered cadence question',
-      scope: 'group' as const,
-    },
-    {
-      context: [
-        'The prior cadence question was provider-accepted and sent.',
+        'The prior reminder was provider-accepted and sent.',
         'A human then replied about this reminder: "Keep it, but make the next cue say quick stretch instead."',
       ].join('\n'),
       expectedKind: 'send_message',
       expectedText: /quick stretch/iu,
       savedInstructions: 'Remind the room to do its short reset.',
       scenario: 'uses a relevant reply when resuming the cue',
-      scope: 'group' as const,
-    },
-    {
-      context: [
-        'The prior cadence question was provider-accepted and sent.',
-        'The only later human message was unrelated room chatter about tonight\'s dinner.',
-        'No one replied about the reminder or asked Murph to resume or change it.',
-      ].join('\n'),
-      expectedKind: 'skip',
-      expectedText: null,
-      savedInstructions: 'Remind the room to do its short reset.',
-      scenario: 'does not treat unrelated group chatter as re-engagement',
       scope: 'group' as const,
     },
     {
@@ -22056,7 +22117,7 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
     }
   }, 360_000)
 
-  it('expires a cold-history marker before later native-resume decisions', async () => {
+  it('sends recurring cues through cold history and later native resumes', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(
       path.join(tmpdir(), 'murph-recurring-reminder-resume-e2e-'),
@@ -22107,7 +22168,7 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
         expect(coldDecision.text).not.toMatch(/keep|change|pause/iu)
       }
 
-      const warmQuestion = await executeRealCodexAppServerTurn({
+      const warmReminder = await executeRealCodexAppServerTurn({
         ...commonInput,
         prompt: [
           savedInstructions,
@@ -22118,29 +22179,37 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
         ].join('\n\n'),
         resumeSessionId: cold.sessionId,
       })
-      const questionDecision = parseAssistantNotificationDecision(
-        warmQuestion.finalMessage,
+      const warmDecision = parseAssistantNotificationDecision(
+        warmReminder.finalMessage,
       )
-      expect(questionDecision.kind).toBe('send_message')
-      if (questionDecision.kind !== 'send_message') {
-        throw new Error('Expected the resumed occurrence to ask about cadence.')
+      expect(warmDecision.kind).toBe('send_message')
+      if (warmDecision.kind !== 'send_message') {
+        throw new Error('Expected the resumed occurrence to send its cue.')
       }
-      expect(questionDecision.text).toMatch(/keep|change|pause/iu)
+      expect(hasRoomResetCueMeaning(warmDecision.text)).toBe(true)
+      expect(warmDecision.text).not.toMatch(/keep|change|pause/iu)
 
-      const warmSkip = await executeRealCodexAppServerTurn({
+      const laterReminder = await executeRealCodexAppServerTurn({
         ...commonInput,
         prompt: [
           savedInstructions,
           ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS,
           'Current trusted delivery and conversation evidence:',
-          `The immediately prior reminder, ${JSON.stringify(questionDecision.text)}, was provider-accepted and sent.`,
+          `The immediately prior reminder, ${JSON.stringify(warmDecision.text)}, was provider-accepted and sent.`,
           'No human message followed it.',
         ].join('\n\n'),
-        resumeSessionId: warmQuestion.sessionId,
+        resumeSessionId: warmReminder.sessionId,
       })
-      expect(
-        parseAssistantNotificationDecision(warmSkip.finalMessage).kind,
-      ).toBe('skip')
+      const laterDecision = parseAssistantNotificationDecision(laterReminder.finalMessage)
+      expect(laterDecision.kind).toBe('send_message')
+      if (laterDecision.kind === 'send_message') {
+        expect(hasRoomResetCueMeaning(laterDecision.text)).toBe(true)
+        expect(laterDecision.text).not.toMatch(/keep|change|pause/iu)
+      }
+      process.stdout.write(`${JSON.stringify({
+        scenario: 'recurring reminder cold and resumed history',
+        replies: [coldDecision, warmDecision, laterDecision],
+      })}\n`)
     } finally {
       await removeRealCodexTemporaryPaths([
         workingDirectory,
