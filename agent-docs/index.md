@@ -1,3 +1,8 @@
+Dark group HTTP capability, privacy projections and two-slot daily pushes are
+owned by [Weekly Game](product-specs/weekly-game.md) and `../ARCHITECTURE.md`;
+[PR 4 proof](exec-plans/completed/2026-11-03-group-games-pr4.md) records contract,
+compatibility and maximum-cardinality measurements.
+
 Dark group lifecycle, audience identity and settlement are owned by
 [Weekly Game](product-specs/weekly-game.md) and `../ARCHITECTURE.md` § Weekly Game;
 [PR 3 execution plan](exec-plans/completed/2026-11-02-group-games-lifecycle-pr3.md).

@@ -248,8 +248,8 @@ describe.skipIf(!runPostgresProof)("weekly game when a player deletes their acco
     const afterFirst = await db.game.findUniqueOrThrow({ where: { id: gameId }, include: { players: true, invitees: true } });
     expect(afterFirst).toMatchObject({ createdBy: null, wordsOwnerMemberId: second, status });
     expect(afterFirst.players.find(player => player.seat === 0)).toMatchObject({ memberId: null, leftAt: expect.any(Date) });
-    expect((await readGame(gameId, second))!.players.find(player => player.seat === 0)!.firstName).toBe("Coach");
-    expect((await readGame(gameId, third))!.players.find(player => player.seat === 0)!.firstName).toBe("Sibling");
+    expect((await readGame(gameId, second, true))!.players.find(player => player.seat === 0)!.firstName).toBe("Coach");
+    expect((await readGame(gameId, third, true))!.players.find(player => player.seat === 0)!.firstName).toBe("Sibling");
     expect(afterFirst.invitees.every(invitee => invitee.pendingLabel === null)).toBe(true);
     expect(await deleteAccount(second)).toEqual({ calledOff: status === "live" ? 1 : 0, deleted: 0, kept: 1 });
     const afterSecond = await db.game.findUniqueOrThrow({ where: { id: gameId }, include: { players: true, tickets: true } });
@@ -257,7 +257,7 @@ describe.skipIf(!runPostgresProof)("weekly game when a player deletes their acco
     expect(afterSecond.players).toHaveLength(3);
     expect(afterSecond.players.filter(player => player.memberId === null)).toHaveLength(2);
     expect(JSON.stringify(afterSecond.players.map(player => player.departedLabel))).not.toContain(second);
-    const view = (await readGame(gameId, third))!;
+    const view = (await readGame(gameId, third, true))!;
     expect(view.players.filter(player => player.left).map(player => player.firstName)).toEqual(["Sibling", "Neighbor"]);
     expect(view.terms.tasks.map(task => task.text)).toEqual(["100 pushups", "10 min abs"]);
     await expect(openGameTexts([{ table: "game", field: "terms_words", rowId: gameId, memberId: third, value: afterSecond.termsWordsEncrypted }]))

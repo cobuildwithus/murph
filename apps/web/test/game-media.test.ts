@@ -121,7 +121,7 @@ describe("game media when deployed (private Cloudflare Images)", () => {
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(response.headers.get("referrer-policy")).toBe("no-referrer");
     expect(await response.json()).toEqual(delivery);
-    expect(mocks.authorize).toHaveBeenLastCalledWith("hbm_ava", key);
+    expect(mocks.authorize).toHaveBeenLastCalledWith("hbm_ava", key, false);
   });
 
   it("checks missing pointers for legacy bytes without falling through to the byte proxy", async () => {

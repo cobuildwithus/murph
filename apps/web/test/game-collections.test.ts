@@ -146,3 +146,41 @@ describe("canonical game state and viewer visibility", () => {
     expect(visibleEntryIds(state, "outsider")).toEqual(new Set());
   });
 });
+
+describe("reduced multiplayer projection", () => {
+  it("adds participation and progress without treating pending invitations as players", () => {
+    const state = stateFor(2); state.game.status = "invited"; state.players = state.players.slice(0, 1);
+    const input = { ...viewInput(state), invitee: { memberId: null, name: "Invitee", photoKey: null, relationship: null } };
+    const legacy = buildGameView(input); const capable = buildGameView({ ...input, multiplayer: true });
+    expect(legacy.players).toHaveLength(2); expect(legacy.players[1]).not.toHaveProperty("participation");
+    expect(capable.players).toHaveLength(1); expect(capable.players[0].participation?.state).toBe("joined");
+    expect(legacy).not.toHaveProperty("maxPlayers"); expect(legacy.days[0]).not.toHaveProperty("progress");
+  });
+  it("keeps blocked and reported posts in aggregate progress, without their content or latest-poster identity", () => {
+    const state = stateFor(4); state.entries = state.players.map(({ memberId }, index) => post(memberId, 0, 1, { receivedAt: new Date(NOW.getTime() + index), incomplete: true }));
+    const input = { ...viewInput(state), multiplayer: true, hiddenMemberIds: new Set(["player-1"]), hiddenEntryIds: new Set([state.entries[2].id]) };
+    const view = buildGameView(input);
+    expect(view.days[0].progress).toEqual({ latestPosterSeats: [3, 0] });
+    expect(view.days[0].others.slice(0, 2)).toEqual([1, 2].map(seat => ({ seat, status: "posted", hidden: true, entry: null })));
+    expect(view.players.every(player => player.score === 0)).toBe(true);
+  });
+  it("keeps frozen winners and ranks after account deletion and provides masked ticket parties", () => {
+    const state = stateFor(4); state.game.status = "settled"; state.entries = [post("player-0"), post("player-1"), post("player-2", 0, 1, { incomplete: true })];
+    const result = decideSettle(state).result; state.players = state.players.filter(player => player.seat !== 0);
+    const input = { ...viewInput(state), multiplayer: true, viewerId: "player-1", result, audienceKey: "audience", departed: [{ seat: 0, name: "Former player" }], hiddenMemberIds: new Set(["player-2"]) };
+    input.tickets = [{ id: "ticket", gameId: state.game.id, stakeKey: "prize", owedBySeats: [2, 3], owedToSeats: [0, 1], players: [{ seat: 0, memberId: null }, ...state.players], status: "open", createdAt: NOW, redeemedAt: null }];
+    const view = buildGameView(input);
+    expect(view.result?.winnerSeats).toEqual([0, 1]); expect(view.result?.standings?.map(row => row.rank)).toEqual([1, 1, 3, 3]);
+    expect(view.tickets[0]).toMatchObject({ canRedeem: true, owedByMemberId: "", owedToMemberId: "", parties: { owedBy: [{ seat: 2, memberId: null, firstName: "", avatarUrl: null }, { seat: 3, memberId: "player-3" }] } });
+    const history = buildGameHistoryView(input)!;
+    expect(history).toHaveProperty("group"); expect(history.game).toMatchObject({ winnerSeats: [0, 1], players: expect.arrayContaining([expect.objectContaining({ seat: 0, participation: { state: "deleted", joinedOn: null, eligibleFromDay: null, canWin: true } })]) });
+  });
+  it("measures the unbounded Home payload at the admitted calendar and collection cardinality", () => {
+    const state = stateFor(10, 365); state.entries = state.players.flatMap(({ memberId }) => Array.from({ length: 365 }, (_, day) => post(memberId, day)));
+    const input = { ...viewInput(state), multiplayer: true };
+    const detail = buildGameView(input);
+    const bytes = Buffer.byteLength(JSON.stringify({ games: Array(50).fill(detail) }));
+    console.info("group-full-home-baseline", JSON.stringify({ games: 50, players: 10, days: 365, bytes }));
+    expect(bytes).toBeGreaterThan(4_500_000);
+  });
+});

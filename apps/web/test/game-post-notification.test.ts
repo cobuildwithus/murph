@@ -1,154 +1,124 @@
-import type { GamePlayer } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { sha256Hex } from "@/src/lib/primitives";
+import type { RuleEntry, RuleState } from "@/src/lib/game/rules";
 
-const m = vi.hoisted(() => ({
-  route: vi.fn(), claim: vi.fn(), update: vi.fn(), send: vi.fn(), forget: vi.fn(),
-}));
-vi.mock("@/src/lib/apple-push/send", async (original) => ({
-  ...await original<typeof import("@/src/lib/apple-push/send")>(), sendApplePush: m.send,
-}));
-vi.mock("@/src/lib/companion/push-route", async (original) => ({
-  ...await original<typeof import("@/src/lib/companion/push-route")>(), forgetCompanionPushRoute: m.forget,
-}));
-vi.mock("@/src/lib/prisma", () => ({
-  getPrisma: () => ({ companionPushRoute: { findFirst: m.route }, gameEvent: { updateMany: m.update } }),
-}));
-
+const m = vi.hoisted(() => ({ routes: vi.fn(), route: vi.fn(), claims: vi.fn(), previous: vi.fn(), blocks: vi.fn(), game: vi.fn(), report: vi.fn(), update: vi.fn(), send: vi.fn(), forget: vi.fn() }));
+vi.mock("@/src/lib/apple-push/send", async original => ({ ...await original<typeof import("@/src/lib/apple-push/send")>(), sendApplePush: m.send }));
+vi.mock("@/src/lib/companion/push-route", async original => ({ ...await original<typeof import("@/src/lib/companion/push-route")>(), forgetCompanionPushRoute: m.forget }));
+vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({ companionPushRoute: { findFirst: m.route }, gameEvent: { updateMany: m.update }, game: { findUnique: m.game }, gameBlock: { findMany: m.blocks }, gameReport: { findFirst: m.report } }) }));
 import { claimGamePostNotification, deliverGamePostNotification } from "@/src/lib/game/post-notification";
-import type { RuleEntry } from "@/src/lib/game/rules";
 
 const target = { token: "ab".repeat(32), environment: "development", topic: "ai.withmurph.app.dev" };
-const route = { ...target, gameSessionId: "session-one" };
 const clock = new Date("2026-10-21T12:00:00Z");
-const players: GamePlayer[] = ["poster", "recipient"].map((memberId, seat) => ({
-  gameId: "game-a", memberId, seat, timeZone: "America/New_York", dayOne: clock, leftAt: null, departedLabel: null, joinedAt: clock,
-}));
-// Only the transaction methods used by this owner; the PostgreSQL suite proves
-// real lock, unique-key and commit behavior through runGameCommand.
-const tx = { companionPushRoute: { findFirst: m.route }, gameEvent: { createMany: m.claim } };
-const claim = (overrides: Partial<Parameters<typeof claimGamePostNotification>[1]> = {}) =>
-  claimGamePostNotification(tx, { gameId: "game-a", actor: "poster", players, clock, entries: [], dayIndex: 0, ...overrides });
+const post = (memberId: string, extra: Partial<RuleEntry> = {}): RuleEntry => ({ id: `post-${memberId}`, memberId, dayIndex: 0, attempt: 1, kind: "photo", receivedAt: clock, withdrawnAt: null, mediaKeys: [], blurHash: null, ...extra });
+function state(count = 2): RuleState {
+  return { game: { id: "game-a", seats: count === 2 ? 2 : 10, createdBy: "p0", status: "live", lengthDays: 7, startsOn: null, inviteExpiresAt: null,
+    terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { count: 7 }, stakes: [] }] } },
+    players: Array.from({ length: count }, (_, seat) => ({ memberId: `p${seat}`, seat, timeZone: "America/New_York", dayOne: "2026-10-21", joinedAt: clock })), entries: [post("p0")] };
+}
+function stored(s: RuleState) {
+  return { id: s.game.id, status: s.game.status, maxPlayers: s.game.seats, createdBy: s.game.createdBy, lengthDays: s.game.lengthDays, startsOn: null, inviteExpiresAt: null, devClockOffsetMs: 0n,
+    terms: s.game.terms, invitees: s.game.invitees, entries: s.entries, players: s.players.map(player => ({ ...player, entries: s.entries.filter(entry => entry.memberId === player.memberId), dayOne: player.dayOne ? new Date(`${player.dayOne}T00:00:00Z`) : null })) };
+}
+const tx = { companionPushRoute: { findMany: m.routes }, gameEvent: { findMany: m.previous, createMany: m.claims }, gameBlock: { findMany: m.blocks } };
+async function claim(s = state(), at = clock, actor = "p0") {
+  m.game.mockResolvedValue(stored(s));
+  m.routes.mockResolvedValue(s.players.filter(player => player.memberId !== actor).map(player => ({ userId: player.memberId, ...target, gameSessionId: "session-one" })));
+  return claimGamePostNotification(tx, { state: s, clock: at, actor, entryId: `post-${actor}`, dayIndex: 0 });
+}
 
-describe("game daily post notifications", () => {
-  afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
+describe("one daily game notifier", () => {
   beforeEach(() => {
-    vi.resetAllMocks();
-    vi.useFakeTimers();
-    vi.setSystemTime(clock);
-    vi.stubEnv("MURPH_GAME_ENABLED", "true");
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
-    m.route.mockResolvedValue(route);
-    m.claim.mockResolvedValue({ count: 1 });
-    m.send.mockResolvedValue("sent");
-    m.update.mockResolvedValue({ count: 1 });
+    vi.resetAllMocks(); vi.useFakeTimers(); vi.setSystemTime(clock);
+    vi.stubEnv("MURPH_GAME_ENABLED", "true"); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
+    m.previous.mockResolvedValue([]); m.blocks.mockResolvedValue([]); m.report.mockResolvedValue(null);
+    m.claims.mockImplementation(async ({ data }) => ({ count: data.length }));
+    m.route.mockResolvedValue({ userId: "p1" }); m.send.mockResolvedValue("sent"); m.update.mockResolvedValue({ count: 1 });
   });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 
-  it("claims only the other player's allowed address and sends a content-free game destination", async () => {
-    const notification = await claim();
-    expect(m.route).toHaveBeenCalledExactlyOnceWith({
-      where: { userId: "recipient", alertsAllowed: true, gameSessionId: { not: null }, member: { suspendedAt: null } },
-      select: { environment: true, token: true, topic: true, gameSessionId: true },
-    });
-    await deliverGamePostNotification(notification);
-    expect(m.send).toHaveBeenCalledExactlyOnceWith({
-      collapseId: expect.stringMatching(/^[a-f0-9]{64}$/u),
-      data: { gameId: "game-a", notification: "game_post" },
-      expiresAt: new Date("2026-10-22T07:00:00Z"),
-      message: { kind: "alert", title: "New game check-in", body: expect.any(String) }, target,
-    });
-    expect(m.update).toHaveBeenCalledWith(expect.objectContaining({
-      data: { payload: { v: 1, recipientMemberId: "recipient", day: "2026-10-21", outcome: "sent" } },
-    }));
+  it("claims coinciding slots once and preserves pair copy", async () => {
+    const notifications = await claim();
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0].claims.map(claim => claim.slot)).toEqual(["first", "completion"]);
+    await deliverGamePostNotification(notifications[0]);
+    expect(m.send).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ data: { gameId: "game-a", notification: "game_post" },
+      message: { kind: "alert", title: "New game check-in", body: "Someone posted. Share yours to see it." } }));
   });
-
-  it("keeps one stable daily identity across posts, with independent games, recipients and 3am boundaries", async () => {
-    const first = await claim({ clock: new Date("2026-10-21T06:59:59Z") });
-    const sameDay = await claim({ clock: new Date("2026-10-21T01:00:00Z") });
-    const nextDay = await claim({ clock: new Date("2026-10-21T07:00:00Z") });
-    const otherGame = await claim({ gameId: "game-b", clock: new Date("2026-10-21T06:59:59Z") });
-    const otherPlayer = await claim({ actor: "recipient", clock: new Date("2026-10-21T06:59:59Z") });
-    expect(first?.commandKey).toBe(sameDay?.commandKey);
-    expect(new Set([first?.commandKey, nextDay?.commandKey, otherGame?.commandKey, otherPlayer?.commandKey]).size).toBe(4);
-    m.claim.mockResolvedValue({ count: 0 });
-    await deliverGamePostNotification(await claim());
-    expect(m.send).not.toHaveBeenCalled();
+  it.each([null, clock])("keeps the pair's permanent unlock copy after withdrawal %s", async withdrawnAt => {
+    const s = state(); s.entries.push(post("p1", { withdrawnAt }));
+    const [notification] = await claim(s); await deliverGamePostNotification(notification);
+    expect(m.send.mock.calls[0][0].message.body).toBe("There's a new post in your game. Take a look.");
   });
-
-  it.each([
-    { kind: "photo", attempt: 1, dayIndex: 0, memberId: "recipient", withdrawnAt: null, unlocked: true },
-    { kind: "heart_rate", attempt: 1, dayIndex: 0, memberId: "recipient", withdrawnAt: null, unlocked: true },
-    { kind: "photo", attempt: 1, dayIndex: 0, memberId: "recipient", withdrawnAt: clock, unlocked: true },
-    { kind: "excuse", attempt: 0, dayIndex: 0, memberId: "recipient", withdrawnAt: null, unlocked: false },
-    { kind: "photo", attempt: 1, dayIndex: 1, memberId: "recipient", withdrawnAt: null, unlocked: false },
-    { kind: "photo", attempt: 1, dayIndex: 0, memberId: "poster", withdrawnAt: null, unlocked: false },
-  ] satisfies (Omit<RuleEntry, "id" | "mediaKeys" | "receivedAt" | "blurHash"> & { unlocked: boolean })[])(
-    "matches the post-to-unlock state for the new entry's day: %j", async ({ unlocked, ...entry }) => {
-      const notification = await claim({ entries: [{ ...entry, id: "entry-one", mediaKeys: [], receivedAt: clock, blurHash: null }] });
-      await deliverGamePostNotification(notification);
-      expect(m.send).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-        message: {
-          kind: "alert", title: "New game check-in",
-          body: unlocked ? "There's a new post in your game. Take a look." : "Someone posted. Share yours to see it.",
-        },
-      }));
-    },
-  );
-
-  it("uses the recipient's frozen zone through daylight saving time", async () => {
-    const notification = await claim({ clock: new Date("2026-11-01T07:30:00Z") });
-    expect(notification?.day).toBe("2026-10-31");
-    expect(notification?.request.expiresAt).toEqual(new Date("2026-11-01T08:00:00Z"));
+  it("claims first then completion and includes incomplete artifacts", async () => {
+    const s = state(3); const first = (await claim(s)).find(n => n.memberId === "p2")!;
+    expect(first.claims.map(claim => claim.slot)).toEqual(["first"]);
+    m.previous.mockResolvedValue(first.claims);
+    s.entries.push(post("p1", { incomplete: true }));
+    const final = (await claim(s, clock, "p1")).find(n => n.memberId === "p2")!;
+    expect(final.claims.map(claim => claim.slot)).toEqual(["completion"]);
+    await deliverGamePostNotification(final);
+    expect(m.send.mock.calls[0][0].message.body).toBe("Everyone's in but you.");
   });
-
-  it.each([null, target, { ...route, token: "invalid" }])("does not claim an unavailable, unenrolled or invalid push address", async (route) => {
-    m.route.mockResolvedValue(route);
-    expect(await claim()).toBeNull();
-    expect(m.claim).not.toHaveBeenCalled();
+  it("sends Everyone's in to a recipient who posted and combines both slots", async () => {
+    const s = state(3); s.entries.push(post("p1"), post("p2"));
+    const n = (await claim(s)).find(n => n.memberId === "p2")!;
+    expect(n.claims).toHaveLength(2); await deliverGamePostNotification(n);
+    expect(m.send.mock.calls[0][0].message.body).toBe("Everyone's in.");
   });
-
-  it("honors the feature gate and bounds the current 1v1 audience", async () => {
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "third");
-    expect(await claim()).toBeNull();
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
-    expect(await claim({ players: [...players, { ...players[0]!, memberId: "third" }] })).toBeNull();
-    expect(m.route).not.toHaveBeenCalled();
+  it("treats a legacy receipt as both slots consumed and handles competing claims", async () => {
+    const key = `game-post:${sha256Hex(JSON.stringify(["game-a", "p1", "2026-10-21"]))}`;
+    m.previous.mockResolvedValue([{ commandKey: key }]); expect(await claim()).toEqual([]);
+    m.previous.mockResolvedValue([]); m.claims.mockResolvedValue({ count: 0 }); expect(await claim()).toEqual([]);
   });
-
-  it.each(["poster", "recipient"])("notifies in a game that is on, whichever player is listed (%s)", async (listed) => {
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", listed);
-    expect(await claim()).toMatchObject({ memberId: "recipient" });
+  it("keys real local 03:00 days independently of entry days and handles DST", async () => {
+    const first = (await claim(state(), new Date("2026-10-21T06:59:59Z")))[0];
+    const same = (await claim(state(), new Date("2026-10-21T01:00:00Z")))[0];
+    const next = (await claim(state(), new Date("2026-10-21T07:00:00Z")))[0];
+    expect(first.day).toBe("2026-10-20"); expect(first.claims).toEqual(same.claims); expect(next.claims).not.toEqual(first.claims);
+    const dst = (await claim(state(), new Date("2026-11-01T07:30:00Z")))[0];
+    expect(dst.day).toBe("2026-10-31"); expect(dst.request.expiresAt).toEqual(new Date("2026-11-01T08:00:00Z"));
   });
-
-  it("revalidates route permission before sending and expires undelivered alerts", async () => {
-    const notification = await claim();
-    m.route.mockResolvedValue(null);
-    await deliverGamePostNotification(notification);
-    expect(m.send).not.toHaveBeenCalled();
-    expect(m.route).toHaveBeenLastCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        gameSessionId: "session-one",
-        member: { suspendedAt: null, authRecords: { some: { model: "session", id: "session-one", expiresAt: { gt: clock } } } },
-      }),
-    }));
-    expect(m.update.mock.calls[0]?.[0].data.payload.outcome).toBe("superseded");
-    m.route.mockResolvedValue(target);
-    vi.setSystemTime(new Date("2026-10-22T07:00:00Z"));
-    await deliverGamePostNotification(notification);
-    expect(m.send).not.toHaveBeenCalled();
+  it.each(["retake", "excuse", "withdrawn"])("does not claim for %s", async reason => {
+    const s = state(); s.entries[0] = post("p0", reason === "retake" ? { attempt: 2 } : reason === "excuse" ? { kind: "excuse", attempt: 0 } : { withdrawnAt: clock });
+    expect(await claim(s)).toEqual([]); expect(m.claims).not.toHaveBeenCalled();
   });
-
-  it("never releases an uncertain claim or fails a saved post when delivery or receipt storage fails", async () => {
-    const notification = await claim();
-    m.send.mockRejectedValue(new Error("synthetic uncertain delivery"));
-    m.update.mockRejectedValue(new Error("synthetic database failure"));
-    await expect(deliverGamePostNotification(notification)).resolves.toBeUndefined();
-    expect(m.claim).toHaveBeenCalledTimes(1);
-    expect(m.send).toHaveBeenCalledTimes(1);
+  it("excludes left and future-eligible peers and never names blocked activity", async () => {
+    const s = state(4); s.players[2].leftAt = clock; s.players[3].joinedAt = new Date("2026-10-22T12:00:00Z");
+    expect(await claim(s)).toHaveLength(1);
+    m.blocks.mockResolvedValue([{ blockerMemberId: "p1", blockedMemberId: "p0" }]); expect(await claim(s)).toEqual([]);
+    const group = state(3); group.entries.push(post("p2"));
+    m.blocks.mockResolvedValue([{ blockerMemberId: "p1", blockedMemberId: "p2" }]);
+    expect((await claim(group)).find(n => n.memberId === "p1")!.claims.map(c => c.slot)).toEqual(["first"]);
   });
-
-  it("removes only the exact rejected device token", async () => {
-    m.send.mockResolvedValue("unregistered");
-    await deliverGamePostNotification(await claim());
-    expect(m.forget).toHaveBeenCalledExactlyOnceWith("recipient", target.token);
+  it.each(["withdrawn", "left", "blocked", "reported", "settled", "route", "expired", "milestone"])("suppresses stale %s without releasing claims", async reason => {
+    const s = state(3); s.entries.push(post("p2")); const n = (await claim(s)).find(n => n.memberId === "p1")!;
+    if (reason === "withdrawn") s.entries[0].withdrawnAt = clock;
+    if (reason === "left") s.players[1].leftAt = clock;
+    if (reason === "blocked") m.blocks.mockResolvedValue([{ blockerMemberId: "p1", blockedMemberId: "p2" }]);
+    if (reason === "reported") m.report.mockResolvedValue({ id: "report" });
+    if (reason === "settled") s.game.status = "settled";
+    if (reason === "route") m.route.mockResolvedValue(null);
+    if (reason === "expired") vi.setSystemTime(n.request.expiresAt);
+    if (reason === "milestone") s.entries.push(post("p1"));
+    m.game.mockResolvedValue(stored(s)); await deliverGamePostNotification(n);
+    expect(m.send).not.toHaveBeenCalled(); expect(m.update.mock.calls[0][0].data.payload.outcome).toBe("superseded");
+  });
+  it("revalidates session and exact token, preserves uncertain claims, and forgets only rejected tokens", async () => {
+    const [n] = await claim(); m.send.mockRejectedValueOnce(new Error("uncertain")); await deliverGamePostNotification(n);
+    expect(m.route.mock.calls[0][0].where).toMatchObject({ gameSessionId: "session-one", ...target, member: { authRecords: { some: { id: "session-one" } } } });
+    expect(m.update.mock.calls[0][0].data.payload.outcome).toBe("failed");
+    m.send.mockResolvedValue("unregistered"); await deliverGamePostNotification(n); expect(m.forget).toHaveBeenCalledExactlyOnceWith("p1", target.token);
+  });
+  it("honors rollout and invalid or unenrolled routes", async () => {
+    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "unrelated"); expect(await claim()).toEqual([]);
+    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "p1"); expect(await claim()).toHaveLength(1);
+    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "p2");
+    const invited = state(); invited.game.invitees = [{ memberId: "p2", seat: 2 }];
+    const [notification] = await claim(invited); await deliverGamePostNotification(notification);
+    expect(m.send).toHaveBeenCalledOnce();
+    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "p1");
+    m.routes.mockResolvedValue([{ userId: "p1", ...target, gameSessionId: null }]);
+    expect(await claimGamePostNotification(tx, { state: state(), clock, actor: "p0", entryId: "post-p0", dayIndex: 0 })).toEqual([]);
   });
 });

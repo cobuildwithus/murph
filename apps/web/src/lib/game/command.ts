@@ -7,7 +7,8 @@ import {
   GAME_REPORT_REASONS,
   GAME_STAKE_KINDS,
   GAME_WEEKDAYS,
-  type GameCommand as WireGameCommand,
+  type GameCommand,
+  type GameInviteTargetInput,
   type GameChange,
   type GameInviteeLabel,
   type GameSchedule,
@@ -19,21 +20,9 @@ import { parseGameEntryData } from "./entry-data";
 import { isRecord } from "../primitives";
 import { GAME_MIN_LENGTH_DAYS, GAME_MAX_LENGTH_DAYS, reject, validNewStakes, type GameTerms } from "./rules";
 
-/** Internal admission surface. HTTP contracts are widened by the capability rollout. */
 export type { GameTerms } from "./rules";
-export interface GameInviteTarget {
-  seat: number;
-  recipient: { kind: "phone" | "email"; value: string };
-  firstName?: string;
-  label?: GameInviteeLabel;
-}
-export type GameCommand = Exclude<WireGameCommand, { type: "createGame" | "report" }>
-  | (Omit<Extract<WireGameCommand, { type: "createGame" }>, "terms" | "inviteeFirstName"> & {
-    terms: GameTerms; inviteeFirstName?: string; maxPlayers?: 2 | 10; groupWord?: string; invitees?: GameInviteTarget[];
-  })
-  | (Extract<WireGameCommand, { type: "report" }> & { reportedMemberId?: string })
-  | { type: "leave"; gameId: string }
-  | { type: "editTerms"; gameId: string; expectedTermsVersion: number; terms: GameTerms };
+export type { GameCommand } from "./contract";
+export type GameInviteTarget = GameInviteTargetInput;
 
 /**
  * The one validator for game commands, shared by the app's routes and
@@ -209,7 +198,7 @@ function inviteTargets(value: unknown): GameInviteTarget[] {
     return {
       seat: integer(target.seat, "invitees[].seat", 1, 9),
       recipient: { kind: oneOf(recipient.kind, "recipient.kind", ["phone", "email"] as const), value: string(recipient.value, "recipient.value", 320) },
-      ...optional(target.firstName, value => ({ firstName: words(value, "firstName") })),
+      firstName: words(target.firstName, "firstName"),
       ...optional(target.label, value => ({ label: inviteeLabel(record(value, "label")) })),
     };
   });

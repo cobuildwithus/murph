@@ -5514,6 +5514,20 @@ policy (2 or 10). `MURPH_GAME_GROUPS_ENABLED` in `access.ts` gates group creatio
 and joining only: off unless `true` in production, on by default elsewhere.
 Persisted groups remain readable, settle and support deletion with admission off.
 
+`http/capability.ts` reads `X-Murph-Game-Multiplayer: 1`; the command boundary,
+reads, public invite preview and media reads pass it to the existing service.
+Group collection predicates precede query limits; direct targets fail with the
+existing not-found shape for legacy clients. One `views.ts` serializer uses the
+capability flag for participation, frozen standings, ticket parties and group
+history, preserving legacy pair JSON and pending invitees. Home group days and
+entry decryption cover today's card only; full detail retains all days. The
+common capable JSON response streams byte-identical JSON in bounded chunks to
+accommodate the existing maximum history cardinality. This is transport only,
+with no new pagination or storage. Home/history signatures run at most six at
+a time; a post response authorizes and signs at most nine newly unlocked peer
+photos, bounded by the ten-player roster. See the weekly game spec for exact fields,
+leave/terms routes, authenticated preview additions and `canStartGroups`.
+
 `audience.ts` owns exact addressed-set identity alongside the existing lore
 fingerprint. Preparation normalizes one to nine transient recipient handles plus
 the starter's verified handle, resolves members and rejects duplicate handles or
@@ -5801,23 +5815,24 @@ suspends the reported member (`suspended_at`), and marks the report reviewed.
 
 ### Weekly game post notifications
 
-The posting transaction claims one `game_event` receipt of type
-`post_notification`, using the existing unique `command_key` over game,
-recipient and recipient-local 3am day. First photo/heart-rate attempts qualify;
-retakes and excuses do not. The current 1v1 roster admits one recipient. A
-successful post adds at most one narrow route read and one claim insert under
-its existing game lock, with no external work. After commit and once the
-post's response is on its way (Next.js `after`), one route read
-revalidates permission, token, suspension and the live unexpired registering
-session, then at most one 2.5-second APNs
-attempt and one receipt update record sent, failed, unregistered or superseded.
-An unregistered token adds one exact-token deletion. Peak added database and
-provider concurrency is one. A crash or ambiguous provider result leaves the
-claim consumed; this optional best-effort alert is never replayed.
-Copy derives from `hasUnlockedDay` over the entries already loaded under the
-game lock for the new post's day index. A recipient who posted still receives
-the alert, with an invitation to look; a locked recipient is prompted to share.
-This reuses permanent post-to-unlock authority without another query or state.
+The posting transaction includes the candidate in the canonical entry snapshot
+and claims `post_notification` events under the existing game lock. Unique
+`command_key` values hash game, recipient and their real local 03:00 day, with
+`:first` and `:completion` suffixes. An old unsuffixed daily claim consumes both.
+Routes, symmetric blocks and prior receipts are batched, then each recipient's
+applicable claims are inserted together. Both milestones firing together yield
+one delivery. Pair milestones always coincide and retain generic copy.
+Incomplete live artifacts count; retakes, corrections and excuses do not.
+
+Next.js `after` sends only after commit. Before the one best-effort APNs attempt,
+it rechecks the exact route/session, permission, suspension, game switch, active
+participation, real day, candidate, reporter mask, block mask and milestone.
+Group completion is suppressed if any eligible peer is blocked. A stale send,
+crash or uncertain provider result never releases its claims. Recipients are
+processed sequentially; provider work stays outside transactions. No names or
+content enter pushes. Pair copy continues to derive from permanent
+`hasUnlockedDay`; group completion derives from live submitted artifacts.
+The missed-day query and pure producer both exclude groups.
 
 `POST /api/game/v1/push-route` uses game bearer admission, allowing free players
 to register the existing `companion_push_route` address and explicit alert

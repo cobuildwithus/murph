@@ -40,8 +40,11 @@ The internal command and rules path supports `maxPlayers: 10`, behind
 `MURPH_GAME_GROUPS_ENABLED`. It is off in production unless explicitly `true`;
 unset means on outside production. This admission switch does not disable
 existing group reads, settlement or account deletion. The released pair protocol
-is unchanged. Group HTTP capabilities, response fields, notifications and chat
-are subsequent rollout work.
+is unchanged. Upgraded HTTP clients send `X-Murph-Game-Multiplayer: 1`.
+Without it, groups are excluded before Home, wallet and history limits, and
+individual group reads, mutations and invite previews return not found.
+The capability changes rendering, never legal, profile or member authorization.
+Exact-group chat, composer handoff, group recaps and hosted tools remain deferred.
 
 A group addresses one to nine recipients and admits its starter immediately.
 A second acceptance activates it; until then it waits without expiry. Addressed
@@ -64,6 +67,39 @@ grace. Any surviving participant eligible at settlement can mark the shared
 prize done while a recipient and debtor survive. Same again copies the original
 addressed audience and terms, including task-seat remapping, and is available
 only to someone who both played and belongs to that audience.
+
+### Multiplayer app contract
+
+`contract.ts` supplies participation and eligibility, at most two latest poster
+seats, size, immutable group identity, original invited count, permissions,
+frozen winners and standings, ticket parties and redemption permission. Capable
+rosters contain admitted players and retained departures; legacy pair rosters
+keep the pending invitee placeholder. Group ticket scalar member fields are
+empty strings; clients render `parties`. Player reports name `reportedMemberId`;
+post reports derive their author and terms reports target the starter.
+
+`POST /api/game/v1/games/:id/leave` and
+`PUT /api/game/v1/games/:id/terms` with `{expectedTermsVersion, terms}` use the
+existing locked commands. Group creation accepts transient addressed recipients,
+`groupWord`, `defaultTask` and sparse invitation-seat overrides. Groups never
+negotiate or use Start now. Creating with a chat container still rejects.
+
+Open capable previews include `maxPlayers`, `group`, nullable `expiresAt` and
+`dayOne`. Authenticated addressed invitees also receive `yourTask`.
+`alreadyIn` is authenticated-only: joined nonstarter count, at most two own
+profile names and the first named player's signed own photo. Block and report
+masks apply before signing; private contact labels never enter this preview.
+Home computes `canStartGroups` per request from the admission switch and member
+allowlist. Both server create and join retain the admission gate.
+
+Group history keeps each round's roster, frozen standings and previews, plus
+viewer-specific `task` and `prize` at group level. Existing bounds remain fifty
+identities with fifty rounds each. Home keeps fifty games and two hundred wallet
+tickets; group cards contain only the current live day, while detail keeps all
+days. This reduces the measured ten-player, 365-day Home from over 80 MB to
+under 1.1 MB. Capable JSON responses stream unchanged JSON bytes because full
+history at those bounds exceeds the hosting platform's buffered response limit.
+There is no day pagination or new persisted projection.
 
 ## Product
 
@@ -203,19 +239,19 @@ this default without deleting other people's private contact choices.
   Relative dates use the acting message’s occurrence time in that player’s
   game timezone, including its 3am boundary; delayed processing cannot shift
   the chosen day. Missing or ambiguous occurrence timestamps need clarification.
-- **Post notifications.** With iPhone notification permission, another player's
-  first non-excuse check-in can send one push per recipient per game
-  per recipient-local game day (3am to 3am in the zone frozen at go-live).
-  Retakes, withdrawals and excuses do not send alerts. Offline-grace posts use
-  the recipient's day at receipt for the cap. Notifications reveal only that a
-  check-in was posted; names, tasks, words and images remain out of the payload.
-  Players who already posted still receive the alert. Its body invites them to
-  look when they have unlocked the new entry's day, or to share their own post
-  when that day remains locked. Copy uses the same permanent unlock rule as
-  the game reader, including after a withdrawal; an excuse does not unlock.
-  Tapping opens the game with its normal post-to-unlock rules. Delivery is best
-  effort: retries and uncertain provider failures never trigger another attempt
-  for the same game day. Players may decline or revoke iOS alert permission.
+- **Post notifications.** One notifier owns two recipient-local daily slots:
+  the first eligible peer artifact, then completion ("Everyone's in but you."
+  or "Everyone's in."). Incomplete artifacts count as submitted; excuses do
+  not. The posting actor is excluded. Simultaneous milestones consume both
+  claims and send one message. Pairs always coincide and retain their existing
+  generic copy and permanent-unlock wording. Claims use `GameEvent.commandKey`
+  over game, recipient and the real 03:00-to-03:00 day in their frozen zone;
+  legacy daily receipts consume both slots. Candidate posts participate in the
+  calculation. Retakes, retries, corrections and excuses create no new slots.
+  Sending happens after commit, with route/session, active participation, block,
+  report, real-day and milestone rechecks. Stale or uncertain sends keep claims
+  consumed. A blocked peer suppresses completion wording. No content or names
+  enter pushes. Pair missed-day chat stays; groups have no missed-day producer.
 - **Excuses.** An excuse explains a missed day in a few words: the phone
   transcribes the voice note on-device and sends only the transcript (1-500
   characters); no audio is uploaded or stored, and it's never replayed. It

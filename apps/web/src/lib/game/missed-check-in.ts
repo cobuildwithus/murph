@@ -53,7 +53,7 @@ export function missedCheckInDueAt(firstMissedDate: string, timeZone: string): D
 
 /** Canonical misses exclude incomplete artifacts and any-days capacity. */
 export function gameMissedCheckInRuns(state: RuleState, now: Date) {
-  if (state.game.status !== "live" || !("days" in currentTerms(state.game.terms).schedule)) return [];
+  if (state.game.seats !== 2 || state.game.status !== "live" || !("days" in currentTerms(state.game.terms).schedule)) return [];
   return state.players.flatMap((player) => {
     if (!player.dayOne) return [];
     const days: MissedCheckInDay[] = Array.from({ length: state.game.lengthDays }, (_, dayIndex) => {

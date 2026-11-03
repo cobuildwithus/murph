@@ -39,6 +39,7 @@ export type GameCheckInKind = (typeof GAME_CHECK_IN_KINDS)[number];
 
 /** One version of what everyone agreed to, applying from `fromDay`. */
 export interface GameTermsVersion {
+  defaultTask?: string;
   checkInKind?: GameCheckInKind;
   n: number;
   fromDay: number;
@@ -49,9 +50,10 @@ export interface GameTermsVersion {
 
 /** What a new game starts with (version 1, from day 0). */
 export interface GameTermsInput {
+  defaultTask?: string;
   /** New games use any; retained photo/heart_rate terms keep their requirement. */
   checkInKind?: GameCheckInKind;
-  /** Seat 0 is the creator, seat 1 the other player, including chat-created games. */
+  /** Pair tasks address seats 0 and 1; with defaultTask, tasks are sparse seat overrides. */
   tasks: GameTask[];
   schedule: GameSchedule;
   stakes: GameStake[];
@@ -126,12 +128,27 @@ export interface GameProfileView {
 /** POST /games. Chat setup translates member-keyed tasks into this same command,
  * seating both verified players in negotiating rather than an unclaimed invite. */
 export interface CreateGameBody {
+  maxPlayers?: 2 | 10;
+  groupWord?: string;
+  invitees?: GameInviteTargetInput[];
   gameId: string;
   terms: GameTermsInput;
   /** The first name the challenger typed for the invitee. */
-  inviteeFirstName: string;
+  inviteeFirstName?: string;
   inviteeLabel?: GameInviteeLabel;
   previousGameId?: string;
+}
+
+export interface GameInviteTargetInput {
+  seat: number;
+  recipient: { kind: "phone" | "email"; value: string };
+  firstName: string;
+  label?: GameInviteeLabel;
+}
+
+export interface EditGameTermsBody {
+  expectedTermsVersion: number;
+  terms: GameTermsInput;
 }
 
 /** POST /invites/:token/accept */
@@ -185,6 +202,7 @@ export type GameReportAbout = (typeof GAME_REPORT_ABOUT)[number];
  * step. Retrying with the same `reportId` is safe.
  */
 export interface ReportGameBody {
+  reportedMemberId?: string;
   reportId: string;
   reason: GameReportReason;
   about?: GameReportAbout;
@@ -244,6 +262,8 @@ export interface GameChangeControls {
 export type GameDayOutcome = { date: string; status: "marked_incomplete" | "restored" | "already_incomplete" | "already_complete" | "no_artifact" };
 
 export type GameCommand =
+  | { type: "leave"; gameId: string }
+  | ({ type: "editTerms"; gameId: string } & EditGameTermsBody)
   | { type: "setDayCompletion"; gameId: string; date: string; incomplete: boolean }
   /** DELETE /games/:id cancels an unstarted invite. */
   | { type: "cancelInvite"; gameId: string }
@@ -264,7 +284,23 @@ export type GameCommand =
 
 export type GameStatus = "invited" | "negotiating" | "live" | "settled" | "void";
 
+export interface GameGroupView { id: string; word: string }
+export interface GameParticipationView {
+  state: "joined" | "left" | "deleted";
+  joinedOn: string | null;
+  eligibleFromDay: number | null;
+  canWin: boolean;
+}
+export interface GameStandingView { seat: number; score: number; rank: number | null }
+export interface GamePermissions {
+  canJoin: boolean;
+  canLeave: boolean;
+  canCancel: boolean;
+  canEditTerms: boolean;
+}
+
 export interface GamePlayerView {
+  participation?: GameParticipationView;
   memberId: string | null;
   seat: number;
   /** The viewer's private label name if set, else the player's own first name. */
@@ -314,6 +350,7 @@ export interface GameEntryView {
 }
 
 export interface GameDayView {
+  progress?: { latestPosterSeats: number[] };
   index: number;
   /** The viewer's local date for this day (YYYY-MM-DD). */
   localDate: string;
@@ -336,6 +373,9 @@ export interface GameDayView {
 }
 
 export interface GameTicketView {
+  parties?: { owedBy: GameTicketPartyView[]; owedTo: GameTicketPartyView[] };
+  canRedeem?: boolean;
+  group?: GameGroupView;
   id: string;
   kind?: GameStakeKind;
   what: string;
@@ -356,10 +396,21 @@ export interface GameTicketView {
   redeemedAt: string | null;
 }
 
+export interface GameTicketPartyView {
+  seat: number;
+  memberId: string | null;
+  firstName: string;
+  avatarUrl: string | null;
+}
+
 /** Addressed app rematches also use the existing join/negotiate commands from chat.
  * Shared native shape for app and chat creation: negotiating + no pendingChange
  * waits for seat 1 to Shake on it; seat 0 has already agreed. */
 export interface GameView {
+  maxPlayers?: 2 | 10;
+  group?: GameGroupView;
+  invitedCount?: number;
+  permissions?: GamePermissions;
   changeControls: GameChangeControls;
   pendingChange: GamePendingChange | null;
   id: string;
@@ -397,12 +448,13 @@ export interface GameView {
    */
   inviteToken: string | null;
   inviteExpiresAt: string | null;
-  result: { scores: { seat: number; score: number }[]; outcome: "won" | "lost" | "tie" | "perfect" } | null;
+  result: { scores: { seat: number; score: number }[]; outcome: "won" | "lost" | "tie" | "perfect"; winnerSeats?: number[]; standings?: GameStandingView[] } | null;
   recap: { superlatives?: Array<{ memberId: string; title: string; line: string }>; pages: Array<{ background: "night" | "paper" | "sage" | "sienna" | "slate"; blocks: Array<Record<string, unknown>> }>; scoreLine?: string; chatLine: string } | null;
   tickets: GameTicketView[];
 }
 
 export interface GameHomeView {
+  canStartGroups?: boolean;
   me: { memberId: string; firstName: string | null; timeZone: string | null; avatarUrl: string | null; usualKind?: GameEntryKind | null };
   /** Invite-only: whether this member may start a fresh game. Anyone may rematch. Older apps ignore it. */
   canStartGames: boolean;
@@ -416,7 +468,31 @@ export interface GameHomeView {
 }
 
 export interface GameHistoryView {
+  groups?: GameHistoryGroupView[];
   people: GameHistoryPersonView[];
+}
+
+export interface GameHistoryGroupGameView {
+  id: string;
+  round: number;
+  startedOn: string;
+  endsOn: string;
+  lengthDays: number;
+  schedule: GameSchedule;
+  players: GamePlayerView[];
+  result: "won" | "lost" | "tied";
+  winnerSeats: number[];
+  standings: GameStandingView[];
+  previews: Array<GameEntryView & { seat: number }>;
+}
+
+export interface GameHistoryGroupView {
+  id: string;
+  word: string;
+  task: string;
+  prize: string | null;
+  record: { won: number; lost: number; tied: number };
+  games: GameHistoryGroupGameView[];
 }
 
 export interface GameHistoryPersonView {
@@ -457,6 +533,11 @@ export interface GameBlockedPerson {
 export type GameInvitePreview =
   | {
       status: "open";
+      maxPlayers?: 2 | 10;
+      group?: GameGroupView;
+      yourTask?: string;
+      alreadyIn?: { count: number; firstNames: string[]; avatarUrl: string | null };
+      dayOne?: string | null;
       supportsNegotiation?: boolean;
       lengthDays?: number;
       inviterFirstName: string;
@@ -470,7 +551,7 @@ export type GameInvitePreview =
       terms: GameTermsVersion;
       /** The picked Day 1, if the challenger chose one. */
       startsOn: string | null;
-      expiresAt: string;
+      expiresAt: string | null;
     }
   | { status: "used" }
   | { status: "expired"; reason?: "cancelled"; inviterFirstName?: string };

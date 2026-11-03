@@ -342,7 +342,7 @@ export function firstScheduledDate(date: string, schedule: GameSchedule): string
 
 // ------------------------------------------------------------------- terms
 
-export type GameTerms = GameTermsInput & { defaultTask?: string };
+export type GameTerms = GameTermsInput;
 
 export interface NewTerms {
   terms: StoredTerms;
@@ -677,6 +677,7 @@ export function decideWithdraw(
  * the player behind starts tomorrow. Only before anyone has started.
  */
 export function decideStartNow(state: RuleState, now: Date): Schedule {
+  if (state.game.seats !== 2) reject("INVALID_REQUEST", "The starter can edit group terms before Day 1.");
   if (state.game.status !== "live") reject("GAME_NOT_LIVE", "Both players have to shake on it first.");
   if (state.players.some((player) => (dayIndexAt(player, now) ?? -1) >= 0)) {
     reject("INVALID_REQUEST", "This game already started.");
