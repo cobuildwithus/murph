@@ -6,7 +6,6 @@ import {
   HOSTED_ASSISTANT_ASTRA_MODEL,
   HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
   HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
-  HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_DEFAULT_MODEL,
 } from "@murphai/hosted-execution/assistant-model";
 import { act, createElement, type ReactNode } from "react";
@@ -194,7 +193,7 @@ test.each([
   });
   const view = await renderClient(
     createElement(HostedAssistantModelSettings, {
-      availableModels: [HOSTED_ASSISTANT_GPT_6_LUNA_MODEL, HOSTED_ASSISTANT_DEFAULT_MODEL, HOSTED_ASSISTANT_SOL_MODEL, ...(model === HOSTED_ASSISTANT_ASTRA_MODEL ? [model] : [])],
+      availableModels: [HOSTED_ASSISTANT_GPT_6_LUNA_MODEL, HOSTED_ASSISTANT_DEFAULT_MODEL, HOSTED_ASSISTANT_GPT_61_SOL_MODEL, ...(model === HOSTED_ASSISTANT_ASTRA_MODEL ? [model] : [])],
       canUpgradeToEdge: false,
       configurationAvailable: true,
       initialDormantSolPreference: false,

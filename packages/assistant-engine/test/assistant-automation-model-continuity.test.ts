@@ -91,7 +91,7 @@ describe('automation model continuity', () => {
       scheduledOccurrenceAt: '2026-09-23T15:00:00.000Z',
       turnTrigger: 'automation-cron',
     })
-    expect(envelope.assistantTargetOverride).toEqual(preference)
+    expect(envelope.assistantTargetOverride).toEqual({ model: storedModel === 'gpt-5.6-sol' ? 'gpt-6.1-sol' : storedModel })
     for (const modelProvider of ['openai', 'hosted-openai', 'hosted-chatgpt-openai', 'openai-local-test']) {
       const session = createGroupSession(requireTarget('gpt-6-sol', 'xhigh', modelProvider), null)
       for (const serviceTier of ['flex', null] as const) {
@@ -145,7 +145,7 @@ describe('automation model continuity', () => {
   ] as const)(
     'applies the canonical %s reasoning default to model-only stored overrides',
     (model, expectedModel, reasoningEffort) => {
-      const selectedTarget = requireTarget('gpt-5.6-sol', 'xhigh')
+      const selectedTarget = requireTarget('gpt-6.1-sol', 'xhigh')
       const session = createGroupSession(selectedTarget, null)
 
       const route = resolveAssistantTurnRoute(
@@ -162,7 +162,7 @@ describe('automation model continuity', () => {
   )
 
   it('returns a Luna reminder reply to Sol on the same compatible provider thread', async () => {
-    const solTarget = requireTarget('gpt-5.6-sol', 'low')
+    const solTarget = requireTarget('gpt-6.1-sol', 'low')
     const providerThreadId = 'provider-managed-thread'
     const session = createGroupSession(
       solTarget,
@@ -204,7 +204,7 @@ describe('automation model continuity', () => {
     )
     expect(saved.target).toEqual(solTarget)
     expect(saved.providerOptions).toMatchObject({
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6.1-sol',
       reasoningEffort: 'low',
     })
     expect(saved.resumeState?.threadId).toBe(providerThreadId)
@@ -220,7 +220,7 @@ describe('automation model continuity', () => {
     )
 
     expect(replyRoute.providerOptions).toMatchObject({
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6.1-sol',
       reasoningEffort: 'low',
     })
     expect(
@@ -232,7 +232,7 @@ describe('automation model continuity', () => {
   })
 
   it('clears the old selected-model thread after an isolated lower-tier turn', async () => {
-    const solTarget = requireTarget('gpt-5.6-sol', 'low')
+    const solTarget = requireTarget('gpt-6.1-sol', 'low')
     const session = createGroupSession(
       solTarget,
       createResumeState(solTarget, 'provider-sol-thread'),

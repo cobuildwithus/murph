@@ -58,7 +58,7 @@ beforeEach(() => {
 
 describe('skipped automation continuity', () => {
   it('preserves the attended thread when a turn-scoped automation commits no history', async () => {
-    const solTarget = requireTarget('gpt-5.6-sol', 'low')
+    const solTarget = requireTarget('gpt-6.1-sol', 'low')
     const attendedThreadId = 'provider-attended-sol-thread'
     const session = createGroupSession(
       solTarget,

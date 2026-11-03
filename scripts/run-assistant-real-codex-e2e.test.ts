@@ -35,13 +35,13 @@ describe('assistant real Codex local runner', () => {
       '--auth',
       'provider',
       '--model',
-      'gpt-5.6-sol',
+      'gpt-6.1-sol',
     ])).toEqual({
       authMode: 'provider',
       codexHome: null,
       codexCommand: null,
       help: false,
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6.1-sol',
       testPattern: 'member preference',
     })
   })

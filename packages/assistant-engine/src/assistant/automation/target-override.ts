@@ -1,5 +1,6 @@
 import {
   automationAssistantTargetOverrideSchema,
+  normalizeStoredAssistantModel,
   type AutomationAssistantTargetOverride,
 } from '@murphai/contracts'
 import {
@@ -9,7 +10,6 @@ import {
   HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
   HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
   HOSTED_ASSISTANT_LUNA_MODEL,
-  HOSTED_ASSISTANT_SOL_MODEL,
   isHostedAssistantProductModel,
   type HostedAssistantProductModel,
   type HostedAssistantReasoningEffort,
@@ -34,7 +34,6 @@ import { normalizeNullableString } from '../shared.js'
 // Keep stored pins intact so their original preference remains inspectable.
 const AUTOMATION_OPENAI_MODEL_REPLACEMENTS = new Map<string, HostedAssistantProductModel>([
   [HOSTED_ASSISTANT_LUNA_MODEL, HOSTED_ASSISTANT_GPT_6_LUNA_MODEL],
-  [HOSTED_ASSISTANT_SOL_MODEL, HOSTED_ASSISTANT_GPT_61_SOL_MODEL],
   ['gpt-5.6-terra', HOSTED_ASSISTANT_GPT_61_SOL_MODEL],
   [HOSTED_ASSISTANT_GPT_6_SOL_MODEL, HOSTED_ASSISTANT_GPT_61_SOL_MODEL],
 ])
@@ -47,7 +46,6 @@ const AUTOMATION_OPENAI_MODEL_PROVIDERS = new Set<string>([
 
 const AUTOMATION_DEFAULT_REASONING_BY_HOSTED_PRODUCT_MODEL = {
   [HOSTED_ASSISTANT_LUNA_MODEL]: 'high',
-  [HOSTED_ASSISTANT_SOL_MODEL]: 'low',
   [HOSTED_ASSISTANT_ASTRA_MODEL]: 'low',
   [HOSTED_ASSISTANT_TERRA_MODEL]: 'low',
   [HOSTED_ASSISTANT_GPT_6_SOL_MODEL]: 'low',
@@ -65,7 +63,7 @@ export function compactAutomationAssistantTargetOverride(
     return null
   }
 
-  const model = normalizeNullableString(input.model)
+  const model = normalizeStoredAssistantModel(normalizeNullableString(input.model))
   const modelProvider = normalizeNullableString(input.modelProvider)
   const reasoningEffort = normalizeNullableString(input.reasoningEffort)
   const target = {

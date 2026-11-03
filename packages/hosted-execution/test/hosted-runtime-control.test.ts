@@ -18,7 +18,7 @@ import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
   HOSTED_ASSISTANT_REASONING_EFFORT_OVERRIDES,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
-  HOSTED_ASSISTANT_SOL_MODEL,
+  HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
   HOSTED_ASSISTANT_DEFAULT_MODEL,
   isHostedAssistantProductModel,
   isHostedAssistantReasoningEffort,
@@ -385,7 +385,7 @@ describe("hosted runtime control contracts", () => {
     expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-6.1-sol")).toBe("gpt-6.1-sol");
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-6.1-sol-2026-07-08")).toBe("gpt-6.1-sol");
     expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-6.1-sol-2026-07-08")).toBe("gpt-6.1-sol");
-    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.6-sol")).toBe("gpt-5.6-sol");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.6-sol")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-6.1-sol-2026-07-08")).toBe("gpt-6.1-sol");
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.6-luna-2026-07-08")).toBe("gpt-5.6-luna");
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.5")).toBeNull();
@@ -404,7 +404,6 @@ describe("hosted runtime control contracts", () => {
       "gpt-6-sol",
       "gpt-6-luna",
       HOSTED_ASSISTANT_LUNA_MODEL,
-      HOSTED_ASSISTANT_SOL_MODEL,
       "gpt-6-astra",
     ]);
     expect(HOSTED_ASSISTANT_MODEL_OVERRIDES).toEqual([
@@ -413,20 +412,19 @@ describe("hosted runtime control contracts", () => {
       "gpt-6-sol",
       "gpt-6-luna",
       HOSTED_ASSISTANT_LUNA_MODEL,
-      HOSTED_ASSISTANT_SOL_MODEL,
       "gpt-6-astra",
     ]);
     expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_LUNA_MODEL)).toBe(true);
     expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_DEFAULT_MODEL)).toBe(true);
-    expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_SOL_MODEL)).toBe(true);
+    expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_GPT_61_SOL_MODEL)).toBe(true);
     expect(isHostedAssistantProductModel("gpt-5.5")).toBe(false);
     expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_LUNA_MODEL))
       .toBe(HOSTED_ASSISTANT_LUNA_MODEL);
-    expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_SOL_MODEL))
-      .toBe(HOSTED_ASSISTANT_SOL_MODEL);
+    expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_GPT_61_SOL_MODEL))
+      .toBe(HOSTED_ASSISTANT_GPT_61_SOL_MODEL);
     expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_DEFAULT_MODEL))
       .toBe(HOSTED_ASSISTANT_DEFAULT_MODEL);
-    expect(parseHostedAssistantModelOverride(" gpt-5.6-sol ")).toBeNull();
+    expect(parseHostedAssistantModelOverride(" gpt-6.1-sol ")).toBeNull();
   });
 
   it("parses the common hosted reasoning efforts and nullable low default", () => {
@@ -684,7 +682,7 @@ describe("hosted runtime control contracts", () => {
       serviceTier: "flex",
     })).toBe("openai-flex");
     expect(resolveHostedAiUsageTokenPricingBasis({
-      model: "gpt-5.6-sol",
+      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       serviceTier: "flex",
     })).toBe("openai-flex");
@@ -2509,13 +2507,13 @@ describe("hosted runtime control contracts", () => {
     expect(parseHostedWorkspaceReadResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
       hostedAssistantSubagentModelOverridesAllowed: true,
-      hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
+      hostedAssistantModelOverride: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
       hostedAssistantReasoningEffortOverride: "high",
       workspace: null,
     })).toEqual({
       fetchedAt: "2026-04-26T00:00:02.000Z",
       hostedAssistantSubagentModelOverridesAllowed: true,
-      hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
+      hostedAssistantModelOverride: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
       hostedAssistantReasoningEffortOverride: "high",
       workspace: null,
     });
@@ -2554,7 +2552,7 @@ describe("hosted runtime control contracts", () => {
     for (const invalidOverride of [
       null,
       "gpt-5.5",
-      " gpt-5.6-sol ",
+      " gpt-6.1-sol ",
       56,
     ]) {
       expect(parseHostedWorkspaceReadResponse({

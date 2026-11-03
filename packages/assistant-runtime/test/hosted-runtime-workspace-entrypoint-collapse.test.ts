@@ -233,11 +233,11 @@ describe("hosted workspace runtime entrypoint", () => {
         action: "update",
         result: {
           appliesAt: "next_turn",
-          availableModels: ["gpt-6-sol", "gpt-5.6-sol"],
+          availableModels: ["gpt-6-sol", "gpt-6.1-sol"],
           availableReasoningEfforts: ["low", "high"],
           configurationAvailable: true,
           dormantSolPreference: false,
-          model: "gpt-5.6-sol",
+          model: "gpt-6.1-sol",
           reasoningEffort: "high",
           requiredPlan: null,
           solAvailable: true,
@@ -263,7 +263,7 @@ describe("hosted workspace runtime entrypoint", () => {
         action: "update",
         result: {
           appliesAt: "next_turn",
-          availableModels: ["gpt-6-sol", "gpt-5.6-sol"],
+          availableModels: ["gpt-6-sol", "gpt-6.1-sol"],
           availableReasoningEfforts: ["low", "high"],
           configurationAvailable: true,
           dormantSolPreference: false,
@@ -278,11 +278,11 @@ describe("hosted workspace runtime entrypoint", () => {
         action: "update",
         result: {
           appliesAt: "next_turn",
-          availableModels: ["gpt-6-sol", "gpt-5.6-sol"],
+          availableModels: ["gpt-6-sol", "gpt-6.1-sol"],
           availableReasoningEfforts: ["low", "high"],
           configurationAvailable: true,
           dormantSolPreference: false,
-          model: "gpt-5.6-sol",
+          model: "gpt-6.1-sol",
           reasoningEffort: "high",
           requiredPlan: null,
           solAvailable: true,
@@ -293,11 +293,11 @@ describe("hosted workspace runtime entrypoint", () => {
         action: "update",
         result: {
           appliesAt: "next_turn",
-          availableModels: ["gpt-6-sol", "gpt-5.6-sol"],
+          availableModels: ["gpt-6-sol", "gpt-6.1-sol"],
           availableReasoningEfforts: ["low", "high"],
           configurationAvailable: true,
           dormantSolPreference: false,
-          model: "gpt-5.6-sol",
+          model: "gpt-6.1-sol",
           reasoningEffort: "high",
           requiredPlan: null,
           solAvailable: true,
@@ -356,7 +356,7 @@ describe("hosted workspace runtime entrypoint", () => {
                     return {
                       action: "read",
                       result: {
-                        availableModels: ["gpt-6-sol", "gpt-5.6-sol"],
+                        availableModels: ["gpt-6-sol", "gpt-6.1-sol"],
                         availableReasoningEfforts: ["low", "high"],
                         configurationAvailable: true,
                         dormantSolPreference: false,
@@ -402,7 +402,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 await configurationTool.request({
                   action: "update",
                   assistantInputId: `ain_${"1".repeat(32)}`,
-                  model: "gpt-5.6-sol",
+                  model: "gpt-6.1-sol",
                   reasoningEffort: "high",
                 });
                 assert.deepEqual(
@@ -436,14 +436,14 @@ describe("hosted workspace runtime entrypoint", () => {
                 await configurationTool.request({
                   action: "update",
                   assistantInputId: `ain_${"4".repeat(32)}`,
-                  model: "gpt-5.6-sol",
+                  model: "gpt-6.1-sol",
                   reasoningEffort: "high",
                 });
               } else if (assistantPhaseCalls === 5) {
                 await configurationTool.request({
                   action: "update",
                   assistantInputId: `ain_${"5".repeat(32)}`,
-                  model: "gpt-5.6-sol",
+                  model: "gpt-6.1-sol",
                   reasoningEffort: "high",
                 });
               }
@@ -495,15 +495,15 @@ describe("hosted workspace runtime entrypoint", () => {
         },
         {
           forwardedEffort: "high",
-          forwardedModel: "gpt-5.6-sol",
+          forwardedModel: "gpt-6.1-sol",
           runtimeEffort: "high",
-          runtimeModel: "gpt-5.6-sol",
+          runtimeModel: "gpt-6.1-sol",
         },
         {
           forwardedEffort: "high",
-          forwardedModel: "gpt-5.6-sol",
+          forwardedModel: "gpt-6.1-sol",
           runtimeEffort: "high",
-          runtimeModel: "gpt-5.6-sol",
+          runtimeModel: "gpt-6.1-sol",
         },
         {
           forwardedEffort: "low",
@@ -513,9 +513,9 @@ describe("hosted workspace runtime entrypoint", () => {
         },
         {
           forwardedEffort: "high",
-          forwardedModel: "gpt-5.6-sol",
+          forwardedModel: "gpt-6.1-sol",
           runtimeEffort: "high",
-          runtimeModel: "gpt-5.6-sol",
+          runtimeModel: "gpt-6.1-sol",
         },
       ]);
       assert.deepEqual(configurationRequests.map((request) => request.action), [
@@ -538,7 +538,7 @@ describe("hosted workspace runtime entrypoint", () => {
       // attribution comes from the model actually bound to the warm thread.
       expect(mocks.runHostedIdleCheckpointMaintenance).toHaveBeenCalledWith(
         expect.objectContaining({
-          model: "gpt-5.6-sol",
+          model: "gpt-6.1-sol",
         }),
       );
     } finally {

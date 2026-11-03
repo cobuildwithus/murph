@@ -10,7 +10,6 @@ import {
   HOSTED_ASSISTANT_DEFAULT_REASONING_EFFORT,
   HOSTED_ASSISTANT_PRODUCT_MODELS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
-  HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_GPT_6_SOL_MODEL,
   HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
   isHostedAssistantReasoningEffort,
@@ -426,7 +425,6 @@ function isHostedPersonalAssistantConfigurationAvailable(
 }
 
 function isSolModel(model: HostedAssistantProductModel | null | undefined): boolean {
-  return model === HOSTED_ASSISTANT_SOL_MODEL
-    || model === HOSTED_ASSISTANT_GPT_6_SOL_MODEL
+  return model === HOSTED_ASSISTANT_GPT_6_SOL_MODEL
     || model === HOSTED_ASSISTANT_GPT_61_SOL_MODEL;
 }

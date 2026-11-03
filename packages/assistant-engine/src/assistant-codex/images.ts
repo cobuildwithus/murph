@@ -35,7 +35,6 @@ const CODEX_ORIGINAL_IMAGE_DETAIL_MODELS = new Set<string>([
   'gpt-6.1-sol',
   'gpt-6-sol',
   'gpt-6-luna',
-  'gpt-5.6-sol',
   'gpt-6-astra',
 ])
 const CODEX_ORIGINAL_IMAGE_DETAIL_PROVIDER_IDS = new Set<string>([

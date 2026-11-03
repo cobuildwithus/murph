@@ -1,6 +1,7 @@
 import * as z from '@murphai/contracts/zod-runtime'
 import {
   assistantReasoningEffortValues as contractAssistantReasoningEffortValues,
+  normalizeStoredAssistantModel,
   automationContextReferencesSchema,
   automationFollowUpRequestSchema,
   automationRouteSchema,
@@ -554,7 +555,7 @@ function normalizeAssistantPersistedConversation(
         oss: false,
         profile: null,
       }
-    : target
+    : { ...target, model: normalizeStoredAssistantModel(target.model) }
   const codexResume = resetProvider
     ? null
     : normalizeCodexResumeState(

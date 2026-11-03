@@ -1313,3 +1313,25 @@ describe("markdown document primitives", () => {
     expect(readRecord.tags).toEqual(["nightly", "assistant"]);
   });
 });
+
+
+it("reads retired stored Sol overrides as 6.1 Sol but rejects explicit writes", async () => {
+  const vaultRoot = await makeVaultRoot();
+  const created = await upsertAutomation({ vaultRoot, ...createAutomationPayload({
+    assistantTargetOverride: { model: "gpt-6.1-sol", reasoningEffort: "xhigh" },
+  }) });
+  const file = path.join(vaultRoot, created.record.relativePath);
+  await fs.writeFile(file, (await fs.readFile(file, "utf8")).replace("gpt-6.1-sol", "gpt-5.6-sol"));
+  const read = await readAutomation({ vaultRoot, automationId: created.record.automationId });
+  expect(read.assistantTargetOverride).toEqual({ model: "gpt-6.1-sol", reasoningEffort: "xhigh" });
+  expect(await fs.readFile(file, "utf8")).toContain("gpt-5.6-sol");
+  const edited = await patchAutomation({ vaultRoot, lookup: created.record.automationId, title: "Renamed reminder" });
+  expect(edited.record.assistantTargetOverride).toEqual(read.assistantTargetOverride);
+  expect(await fs.readFile(file, "utf8")).not.toContain("gpt-5.6-sol");
+  await expect(patchAutomation({ vaultRoot, lookup: created.record.automationId,
+    assistantTargetOverride: { model: "gpt-5.6-sol" },
+  })).rejects.toThrow("retired");
+  await expect(upsertAutomation({ vaultRoot, ...createAutomationPayload({
+    assistantTargetOverride: { model: "gpt-5.6-sol" },
+  }) })).rejects.toThrow("retired");
+});

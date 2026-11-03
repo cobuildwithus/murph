@@ -1784,3 +1784,7 @@ Game storage parent-review corrections and PR completion are tracked in
 Exact audience game chat, explicit composer handoff, consumer-first runner
 compatibility and shared recap privacy are tracked in
 [the PR 5 plan](exec-plans/completed/2026-11-03-group-games-pr5.md).
+
+Retired Sol selection, persisted-reader compatibility and historical usage pricing
+are tracked in [the removal plan](exec-plans/active/2026-11-03-remove-gpt-56-sol.md).
+`../ARCHITECTURE.md` owns current model selection and the Web usage owner retains ledger pricing.

@@ -2460,10 +2460,10 @@ describe("hosted runtime internal web routes", () => {
       version: "4",
     }));
     mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce({
-      availableModels: ["gpt-5.6-sol"],
-      hostedAssistantModelOverride: "gpt-5.6-sol",
+      availableModels: ["gpt-6.1-sol"],
+      hostedAssistantModelOverride: "gpt-6.1-sol",
       hostedAssistantReasoningEffortOverride: "high",
-      model: "gpt-5.6-sol",
+      model: "gpt-6.1-sol",
       reasoningEffort: "high",
       solAvailable: true,
     });
@@ -2499,7 +2499,7 @@ describe("hosted runtime internal web routes", () => {
     expect(parseHostedWorkspaceReadResponse(await readResponse.json()))
       .toMatchObject({
         hostedAssistantSubagentModelOverridesAllowed: true,
-        hostedAssistantModelOverride: "gpt-5.6-sol",
+        hostedAssistantModelOverride: "gpt-6.1-sol",
         hostedAssistantReasoningEffortOverride: "high",
         workspace: {
           nextDefaultProcessingWakeAt: "2026-04-26T00:08:00.000Z",

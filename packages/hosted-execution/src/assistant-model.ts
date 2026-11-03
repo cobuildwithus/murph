@@ -15,7 +15,6 @@ import {
 } from "./parsers/assertions.ts";
 
 export const HOSTED_ASSISTANT_LUNA_MODEL = "gpt-5.6-luna" as const;
-export const HOSTED_ASSISTANT_SOL_MODEL = "gpt-5.6-sol" as const;
 export const HOSTED_ASSISTANT_GPT_6_SOL_MODEL = "gpt-6-sol" as const;
 export const HOSTED_ASSISTANT_GPT_6_LUNA_MODEL = "gpt-6-luna" as const;
 export const HOSTED_ASSISTANT_GPT_61_SOL_MODEL = "gpt-6.1-sol" as const;
@@ -30,7 +29,6 @@ export const HOSTED_ASSISTANT_PRODUCT_MODELS = [
   HOSTED_ASSISTANT_GPT_6_SOL_MODEL,
   HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
   HOSTED_ASSISTANT_LUNA_MODEL,
-  HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_ASTRA_MODEL,
 ] as const;
 
@@ -309,7 +307,7 @@ function parseHostedRuntimeAssistantConfigurationSnapshot(
   const availableModels = requireArray(
     record.availableModels,
     "Hosted runtime assistant configuration availableModels",
-  ).map((model) =>
+  ).filter((model) => model !== "gpt-5.6-sol").map((model) =>
     parseHostedRuntimeAssistantProductModel(
       model,
       "Hosted runtime assistant configuration available model",
@@ -338,7 +336,7 @@ function parseHostedRuntimeAssistantConfigurationSnapshot(
       "Hosted runtime assistant configuration dormantSolPreference",
     ),
     model: parseHostedRuntimeAssistantProductModel(
-      record.model,
+      record.model === "gpt-5.6-sol" ? HOSTED_ASSISTANT_GPT_61_SOL_MODEL : record.model,
       "Hosted runtime assistant configuration model",
     ),
     reasoningEffort: parseHostedRuntimeAssistantReasoningEffort(

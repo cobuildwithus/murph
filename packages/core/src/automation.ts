@@ -1,3 +1,4 @@
+import { normalizeStoredAssistantModel } from "@murphai/contracts";
 import { isDeepStrictEqual } from "node:util";
 
 import {
@@ -573,6 +574,7 @@ function resolveAutomationPatchSchedule(input: {
 
 function normalizeAutomationAssistantTargetOverride(
   value: unknown,
+  stored = false,
 ): AutomationAssistantTargetOverride | null {
   if (value === undefined || value === null) {
     return null;
@@ -592,8 +594,11 @@ function normalizeAutomationAssistantTargetOverride(
   const reasoningEffort = normalizeAutomationAssistantTargetOverrideReasoningEffort(
     object.reasoningEffort,
   );
+  if (!stored && model === "gpt-5.6-sol") {
+    throw new TypeError("assistantTargetOverride.model is retired; use gpt-6.1-sol.");
+  }
   const target: AutomationAssistantTargetOverride = {
-    ...(model ? { model } : {}),
+    ...(model ? { model: normalizeStoredAssistantModel(model) ?? model } : {}),
     ...(modelProvider ? { modelProvider } : {}),
     ...(reasoningEffort ? { reasoningEffort } : {}),
   };
@@ -871,6 +876,7 @@ function parseAutomationRecord(
     route: normalizeAutomationRoute(attributes.route),
     assistantTargetOverride: normalizeAutomationAssistantTargetOverride(
       attributes.assistantTargetOverride,
+      true,
     ),
     supportKind: normalizeAutomationSupportKind(attributes.supportKind),
     plannedOccurrenceOffsetMs: normalizeAutomationPlannedOccurrenceOffsetMs(

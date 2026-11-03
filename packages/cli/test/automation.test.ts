@@ -462,7 +462,7 @@ const automationPublicPathCases = [
     invalidValue: () => ({ reasoningEffort: "not-an-effort" }),
     saveOptions: [
       "--trigger-kind", "cron", "--trigger-cron", "0 9 * * 1",
-      "--assistant-target-override-model", "gpt-5.6-sol",
+      "--assistant-target-override-model", "gpt-6.1-sol",
     ],
     expectedPaths: ["assistantTargetOverride.reasoningEffort"],
   },
@@ -473,7 +473,7 @@ const automationPublicPathCases = [
     overrideIssuePath: ["privateTargetField"],
     saveOptions: [
       "--trigger-kind", "cron", "--trigger-cron", "0 9 * * 1",
-      "--assistant-target-override-model", "gpt-5.6-sol",
+      "--assistant-target-override-model", "gpt-6.1-sol",
     ],
     expectedPaths: [],
   },

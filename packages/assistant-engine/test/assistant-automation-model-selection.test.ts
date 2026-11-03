@@ -52,7 +52,6 @@ describe('hosted automation model selection', () => {
     'gpt-6-sol',
     'gpt-6-luna',
     'gpt-5.6-luna',
-    'gpt-5.6-sol',
   ] as const)(
     'persists the declarative %s preference without freezing derived reasoning',
     (model) => {
@@ -189,4 +188,12 @@ describe('hosted automation model selection', () => {
       kind: 'invalid-automation-arguments',
     })
   })
+})
+
+
+it('rejects retired Sol in new automation saves and patches', () => {
+  expect(readSaveRequest({ model: 'gpt-5.6-sol' })).toMatchObject({ kind: 'invalid-automation-arguments' })
+  expect(readPatchRequest({ model: 'gpt-5.6-sol' })).toMatchObject({ kind: 'invalid-automation-arguments' })
+  expect(MURPH_AUTOMATION_TOOL.description).not.toContain('gpt-5.6-sol')
+  expect(JSON.stringify(MURPH_AUTOMATION_TOOL.inputSchema)).not.toContain('gpt-5.6-sol')
 })

@@ -1,3 +1,4 @@
+import { normalizeStoredAssistantModel } from '@murphai/contracts'
 import path from 'node:path'
 import * as z from '@murphai/contracts/zod-runtime'
 import {
@@ -17,6 +18,7 @@ import {
 } from './assistant/provider-config.js'
 import {
   parseHostedAssistantConfig,
+  prepareHostedAssistantConfigForWrite,
   type HostedAssistantConfig,
 } from './hosted-assistant-config.js'
 import {
@@ -294,6 +296,8 @@ function buildOperatorConfig(
   },
   existing: OperatorConfig | null,
 ): OperatorConfig {
+  if (patch.assistant?.backend) normalizeAssistantBackendTargetForPersistence(patch.assistant.backend)
+  if (patch.hostedAssistant) prepareHostedAssistantConfigForWrite(patch.hostedAssistant)
   return normalizeParsedOperatorConfig(
     operatorConfigSchema.parse({
       schema: OPERATOR_CONFIG_SCHEMA,
@@ -469,7 +473,11 @@ function normalizeAssistantOperatorDefaults(
 
   const currentParsed = assistantOperatorDefaultsSchema.safeParse(defaults)
   if (currentParsed.success) {
-    return compactAssistantOperatorDefaults(currentParsed.data)
+    return compactAssistantOperatorDefaults({ ...currentParsed.data,
+      backend: currentParsed.data.backend ? { ...currentParsed.data.backend,
+        model: normalizeStoredAssistantModel(currentParsed.data.backend.model),
+      } : null,
+    })
   }
 
   if (typeof defaults !== 'object' || defaults === null) {

@@ -3087,7 +3087,7 @@ describeRealCodex('real Codex GPT-6 configuration e2e', () => {
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-astra-selection-'))
     const updates: unknown[] = []
     const snapshot: import('@murphai/hosted-execution/runtime-control').HostedRuntimeAssistantConfigurationSnapshot = {
-      availableModels: ['gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-6-astra'],
+      availableModels: ['gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-luna', 'gpt-6.1-sol', 'gpt-6-astra'],
       availableReasoningEfforts: ['low', 'medium', 'high', 'xhigh'] as const,
       configurationAvailable: true,
       dormantSolPreference: false,
@@ -3215,7 +3215,7 @@ describeRealCodex('real Codex GPT-6 configuration e2e', () => {
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-openai-selection-'))
     const updates: unknown[] = []
     const snapshot: import('@murphai/hosted-execution/runtime-control').HostedRuntimeAssistantConfigurationSnapshot = {
-      availableModels: ['gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-6-astra'],
+      availableModels: ['gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-luna', 'gpt-6.1-sol', 'gpt-6-astra'],
       availableReasoningEfforts: ['low', 'medium', 'high', 'xhigh'] as const,
       configurationAvailable: true,
       dormantSolPreference: false,
@@ -10729,6 +10729,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   it.each([
     ['gpt-5.6-luna', 'gpt-6-luna'],
     ['gpt-6-sol', 'gpt-6.1-sol'],
+    ['gpt-5.6-sol', 'gpt-6.1-sol'],
   ])('runs a saved %s reminder on the current OpenAI model without rewriting it', async (savedModel, expectedModel) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-automation-model-upgrade-e2e-'))
@@ -10738,7 +10739,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
       await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
       const saved = await upsertAutomation({
-        assistantTargetOverride: { model: savedModel },
+        assistantTargetOverride: { model: savedModel === 'gpt-5.6-sol' ? expectedModel : savedModel },
         continuityPolicy: 'fresh',
         instructions: 'Send this self-contained reminder now: put the recycling bin outside. No lookups or other actions are needed.',
         now: new Date('2026-09-23T12:00:00.000Z'),
@@ -10746,6 +10747,11 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         schedule: { kind: 'dailyLocal', localTime: '18:00' },
         slug: 'synthetic-model-upgrade-reminder', status: 'active', title: 'Recycling reminder', vaultRoot: workingDirectory,
       })
+      if (savedModel === 'gpt-5.6-sol') {
+        const storedFile = path.join(workingDirectory, saved.record.relativePath)
+        await writeFile(storedFile, (await readFile(storedFile, 'utf8')).replace(expectedModel, savedModel), 'utf8')
+      }
+      const storedBeforeTurn = await showAutomation({ automationId: saved.record.automationId, vaultRoot: workingDirectory })
       // Prove the real canonical CLI is available before spending a live turn.
       const readback = await execFileAsync(path.join(binDirectory, 'vault-cli'), [
         'automation', 'show', saved.record.automationId, '--format', 'json',
@@ -10765,7 +10771,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         scheduledInvocationAuthority: { automationId: saved.record.automationId, occurrenceAt: '2026-09-23T18:00:00.000Z' },
         turnTrigger: 'automation-cron', vault: workingDirectory, workingDirectory,
       }, { sessionId: 'synthetic-model-upgrade-session' })
-      const target = resolveAutomationAssistantTargetOverrideForTarget(saved.record.assistantTargetOverride, createAssistantModelTarget({
+      const target = resolveAutomationAssistantTargetOverrideForTarget(source.assistantTargetOverride, createAssistantModelTarget({
         model: config.model, modelProvider: config.modelProvider ?? 'openai', provider: 'codex-cli', reasoningEffort: 'low',
       }))
       expect(target).toMatchObject({ model: expectedModel, reasoningEffort: 'low' })
@@ -10794,7 +10800,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       const actions = readCapabilityRoutingActions(result.jsonEvents)
       expect(actions).toHaveLength(commands.length)
       for (const action of actions) expect(action).toMatchObject({ kind: 'command', ok: true })
-      expect(await showAutomation({ automationId: saved.record.automationId, vaultRoot: workingDirectory })).toEqual(saved.record)
+      expect(await showAutomation({ automationId: saved.record.automationId, vaultRoot: workingDirectory })).toEqual(storedBeforeTurn)
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }
