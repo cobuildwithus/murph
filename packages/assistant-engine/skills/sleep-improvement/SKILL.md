@@ -26,6 +26,13 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
 - At altitude, use this skill for the sleep phenotype and the initial safety gate. If symptoms or remoteness make altitude illness possible, stop ordinary sleep coaching and route to the user's existing altitude safety plan, qualified expedition or remote-medicine support, or local emergency or clinical care.
 - Route suspected sleep apnea, restless legs, narcolepsy, parasomnia, mania, severe depression, dangerous sleepiness, pregnancy/postpartum disruption, persistent or impairing insomnia, pain, reflux, nocturia, or medication-driven insomnia to clinician support. For persistent or impairing insomnia, name CBT-I as the evidence-based treatment lane: suggest evaluation for clinician-delivered CBT-I, or an evidence-based digital CBT-I program when appropriate and access is limited. Do not present generic sleep hygiene, supplements, or a Murph habit experiment as a substitute.
 
+## Nightly Summary Presentation
+
+- For a general nightly summary such as "how did I sleep", "how was my sleep last night", or "sleep recap", use `murph.attach_sleep_card` with the local wake date when available. The host reads and builds the card. After a successful sleep card, end with no final text and no media.
+- A specific metric question such as "what was my deep sleep", "when did I fall asleep", or "what's my HRV" gets a plain text answer with the verified number and no card.
+- Compound questions and advice requests stay complete ordinary text. A card must satisfy the whole request.
+- On `no_sleep_for_date`, answer truthfully in text. Missing wearable evidence does not mean the member did not sleep.
+
 ## Data First
 
 - Look at recent sleep duration, sleep opportunity, bedtime/wake-time regularity, sleep latency if available, awakenings, naps, HR/RHR overnight, HRV, illness tags, workouts, alcohol/caffeine logs, and recent schedule changes.

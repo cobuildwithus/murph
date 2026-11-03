@@ -141,6 +141,7 @@ import { PublicComparisonTableStudy } from "./public-comparison-table-study";
 import type { HostedGrowthDashboard } from "@/src/lib/hosted-ops/growth-metrics";
 import { ImessageChallengeStandingsCardStudy } from "./imessage-challenge-standings-card-study";
 import { ImessageNutritionCardStudy } from "./imessage-nutrition-card-study";
+import { ImessageSleepCardStudy } from "./imessage-sleep-card-study";
 import { ImessageCompactTableCardStudy } from "./imessage-compact-table-card-study";
 import { MurphCardHandoffStudy } from "./murph-card-handoff-study";
 import { ApprovalPasskeyStudy } from "./approval-passkey-study";
@@ -929,6 +930,10 @@ export function ComponentsContent() {
         </Section>
 
         <Separator />
+
+        <Section id="imessage-sleep-card" title="iMessage sleep summary">
+          <ImessageSleepCardStudy />
+        </Section>
 
         <Section
           id="imessage-nutrition-card"

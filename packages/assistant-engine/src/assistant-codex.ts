@@ -6364,6 +6364,7 @@ const serializedDynamicToolKinds: ReadonlySet<MurphDynamicToolRequest['kind']> =
   'generate-song',
   'attach-group-challenge-response-card',
   'attach-response-card',
+  'attach-sleep-card',
   'response-card-envelope-too-large',
   'attach-response-media',
   'send-vault-file',
@@ -6389,6 +6390,7 @@ function isResponseAttachmentDynamicToolRequest(
 ): boolean {
   return request.kind === 'attach-group-challenge-response-card' ||
     request.kind === 'attach-response-card' ||
+    request.kind === 'attach-sleep-card' ||
     request.kind === 'response-card-envelope-too-large' ||
     request.kind === 'attach-response-media' ||
     request.kind === 'generate-image' ||

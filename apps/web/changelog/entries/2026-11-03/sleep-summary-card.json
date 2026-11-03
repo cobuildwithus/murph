@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-11-03",
+  "order": 100,
+  "item": {
+    "id": "sleep-summary-card",
+    "kind": "feature",
+    "priority": 4,
+    "title": "Your night, in one sleep card",
+    "summary": "Ask how you slept in a private chat to see your wearable sleep summary in one card.",
+    "details": "The card shows the sleep values available for that night and leaves missing values out. Questions about a specific metric still get a direct text answer.",
+    "relevanceTags": ["sleep", "wearables", "messaging"],
+    "sourcePullRequests": [],
+    "tryIt": {
+      "label": "Review last night's sleep",
+      "prompt": "How did I sleep last night?"
+    }
+  }
+}

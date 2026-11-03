@@ -18,6 +18,7 @@ import {
 } from "./assistant-codex-runtime.harness.ts";
 
 import path from 'node:path'
+import * as sleepCardBuilder from '../src/assistant-codex/dynamic-tools/sleep-summary-card.js'
 import {
   renderAssistantResponseCardText,
   renderAssistantWorkoutResponseCardText,
@@ -70,6 +71,7 @@ describe('steered final segments', () => {
         expectedText: string
         id: number
         kind: 'attach-response-card'
+        tool?: 'attach_sleep_card'
       }
     | {
         expectedSuccess?: boolean
@@ -276,10 +278,10 @@ describe('steered final segments', () => {
                 method: 'item/tool/call',
                 params: {
                   namespace: 'murph',
-                  tool: 'attach_response_card',
-                  arguments: {
-                    card: step.card,
-                  },
+                  tool: step.tool ?? 'attach_response_card',
+                  arguments: step.tool === 'attach_sleep_card'
+                    ? { date: '2026-11-03' }
+                    : { card: step.card },
                   turnId: 'turn-steered-finals',
                 },
               }))
@@ -1306,9 +1308,22 @@ describe('steered final segments', () => {
       card: OVERSIZED_TRACKED_WORKOUT_RESPONSE_CARD,
       label: 'oversized card text recovery',
     },
-  ] satisfies Array<{ card: AssistantResponseCard; label: string }>)(
+    {
+      card: DAILY_NUTRITION_RESPONSE_CARD,
+      label: 'host-built sleep card',
+      tool: 'attach_sleep_card',
+    },
+  ] satisfies Array<{ card: AssistantResponseCard; label: string; tool?: 'attach_sleep_card' }>)(
     'rejects an in-flight response card after accepted input advances ($label)',
-    async ({ card }) => {
+    async ({ card, ...variant }) => {
+      if ('tool' in variant) {
+        vi.spyOn(sleepCardBuilder, 'resolveTrustedSleepSummaryCard').mockResolvedValue({
+          kind: 'sleep_summary', version: 1, localDate: '2026-11-03',
+          bedtime: null, wakeTime: null, totalSleepMinutes: 436, score: null,
+          stages: null, awakeMinutes: null, efficiencyPercent: null,
+          hrv: null, restingHeartRate: null, wakeUps: null,
+        })
+      }
       const executionStarted = createDeferred<void>()
       const releaseExecution = createDeferred<void>()
       const result = await runScriptedSteeredFinalSegmentsTurn([
@@ -1324,6 +1339,7 @@ describe('steered final segments', () => {
           expectedText: 'response card unavailable for this final response',
           id: 861,
           kind: 'attach-response-card',
+          ...('tool' in variant ? { tool: variant.tool } : {}),
         },
         completedItemEvent({
           id: 'user-after-in-flight-card',
