@@ -595,10 +595,12 @@ case remains open. Quiet rooms retain the existing game-notice exemption and
 repeated dispatch claims the same delivery only once.
 
 Instructions contain shared profile names, the target day's task, day number,
-server receipt time, deadline and the accused's time zone. They contain no media
-URLs or keys, private contact labels, or capture-to-post gap. The notice is brief
-and deadpan, uses names rather than pronouns, asks one short question, and names
-the option to mark the day as not counting. The situation can be funny; the
+and the server receipt time and proof deadline as weekday and clock time in the
+accused's time zone (the zone itself is not named). They contain no media URLs
+or keys, private contact labels, or capture-to-post gap. The notice is two or
+three short lines, deadpan, uses names rather than pronouns, asks one short
+question, and says the post stands unless the accused marks the day as not
+counting. The situation can be funny; the
 person is never the joke. No shame, insults, laughing emoji, em dashes, invented
 evidence, verdicts, feature advertising or reminders.
 

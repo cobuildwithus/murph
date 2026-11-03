@@ -290,7 +290,11 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const currentCase = await readGameChallengeCase(db, gameId, target.entryId, new Date());
     const instructions = await readGameChallengeInstructions(currentCase!);
     const facts = JSON.parse(instructions!.split("\n").at(-1)!);
-    expect(facts).toMatchObject({ challengerName: "Maya", accusedName: "Sam", task: "10 min abs", timeZone: "America/New_York" });
+    // Times are weekday and clock time in the accused's zone, which is never named.
+    const inZone = (date: Date) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", hour: "numeric", minute: "2-digit" }).format(date);
+    const targetEntry = currentCase!.state.entries.find(entry => entry.id === target.entryId)!;
+    expect(facts).toEqual({ challengerName: "Maya", accusedName: "Sam", dayNumber: targetEntry.dayIndex + 1, task: "10 min abs",
+      postedAt: inZone(targetEntry.receivedAt), proofDueBy: inZone(currentCase!.challenge.deadlineAt) });
     expect(instructions).not.toMatch(/Friend|https?:|mediaKey|captureAge/u);
     expect((await readGame(gameId, a))?.canChallenge).toBe(false);
     expect(await errorCode(b, command)).toBe("INVALID_REQUEST");
