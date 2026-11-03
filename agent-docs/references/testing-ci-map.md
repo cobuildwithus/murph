@@ -809,6 +809,32 @@ only after a canonical condition read. The focused real-Codex companion repeats
 the member journey with synthetic health data and requires one condition read,
 one successful direct automation call, and one exact record reference.
 
+### Sleep summary response cards
+
+Focused contract proof is `packages/contracts/test/sleep-summary-card.test.ts`.
+Query wake-date, eligibility, recovery and SDNN coverage lives in
+`packages/query/test/wearables-sleep-card.test.ts`; synthetic provider mapping,
+tool admission and sleep skill routing live in
+`packages/assistant-engine/test/sleep-summary-card.test.ts`.
+Operator text, transcript, Telegram, exact Swift HTTPS fixtures and sleep-only
+static delivery are pinned in
+`packages/operator-config/test/sleep-summary-card.test.ts`.
+`apps/web/test/imessage-sleep-summary-card-image.test.tsx` renders real PNGs and
+proves strict pre-font rejection; `og-assets:runtime-check` probes envelope 8.
+The production-renderer study is `/design?tab=components#imessage-sleep-card`.
+
+Run the four real-Codex journeys independently with
+`pnpm test:assistant:live -- --test "<exact name>"`:
+
+- `sleep card: general sleep question attaches the host-built card`
+- `sleep card: specific deep sleep question answers in text`
+- `sleep card: compound sleep and training question stays text`
+- `sleep card: missing night answers truthfully without a card`
+
+These use synthetic canonical vaults and production prompt/tool contracts.
+Inspect actual reply prose and attachment counts; routine CI keeps live calls
+opt-in. iOS decoder/layout proof and actual handset delivery remain separate.
+
 ### Codex tool input contracts and CLI upgrades
 
 Automation cron authoring is covered by

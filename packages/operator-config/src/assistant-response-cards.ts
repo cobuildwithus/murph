@@ -7,6 +7,12 @@ import {
   IMESSAGE_APP_CARD_IMAGE_PATH_PREFIX,
   IMESSAGE_APP_CARD_IMAGE_PATH_SUFFIX,
   MURPH_PRODUCT_ORIGIN,
+  buildSleepSummaryAppCardEnvelopeV8,
+  formatSleepCardDate,
+  formatSleepCardClock,
+  formatSleepCardDuration,
+  sleepSummaryCardValueRows,
+  type SleepSummaryResponseCardV1,
   assistantResponseCardV1Bounds,
   assistantResponseCardSchema,
   assistantResponseCardMatchesConversationAudience,
@@ -242,6 +248,8 @@ export function renderAssistantResponseCardText(
       return renderExerciseRoutineResponseCardTextV1(parsed)
     case 'telegram_rich_content':
       return renderTelegramRichContentResponseCardTextV1(parsed)
+    case 'sleep_summary':
+      return renderSleepSummaryResponseCardText(parsed)
     case 'challenge_standings':
       return renderChallengeStandingsResponseCardText(parsed)
   }
@@ -286,6 +294,8 @@ export function renderAssistantResponseCardTranscriptText(
       return renderExerciseRoutineResponseCardTextV1(parsed)
     case 'telegram_rich_content':
       return renderTelegramRichContentResponseCardTextV1(parsed)
+    case 'sleep_summary':
+      return renderSleepSummaryResponseCardText(parsed)
     case 'challenge_standings':
       return renderChallengeStandingsResponseCardText(parsed)
   }
@@ -314,6 +324,8 @@ export function buildTelegramRichMessage(
       return { html: renderTelegramExerciseRoutineCardHtml(parsed) }
     case 'telegram_rich_content':
       return { html: parsed.html, skip_entity_detection: true }
+    case 'sleep_summary':
+      return { html: `<h2>Sleep</h2><p>${formatSleepCardDate(parsed.localDate)}</p><img src="${buildLinqIMessageAppCardImageUrl(parsed)}" alt="Sleep summary" /><table>${sleepSummaryCardValueRows(parsed).map(([label, value]) => `<tr><th>${escapeTelegramRichHtml(label)}</th><td>${escapeTelegramRichHtml(value)}</td></tr>`).join('')}</table>` }
     case 'challenge_standings':
       return { html: renderTelegramChallengeStandingsCardHtml(parsed) }
   }
@@ -327,7 +339,8 @@ export function buildLinqIMessageAppFallbackText(
   | 'Your Murph guide.'
   | 'Your daily nutrition.'
   | 'Your Murph summary.'
-  | 'Your workout.' {
+  | 'Your workout.'
+  | 'Your sleep summary.' {
   const parsed = assistantResponseCardSchema.parse(card)
   switch (parsed.kind) {
     case 'daily_nutrition':
@@ -341,6 +354,8 @@ export function buildLinqIMessageAppFallbackText(
           return 'Your workout.'
       }
     }
+    case 'sleep_summary':
+      return 'Your sleep summary.'
     case 'challenge_standings':
       return 'Challenge standings.'
     case 'exercise_routine':
@@ -387,6 +402,8 @@ export function buildLinqIMessageAppLayout(
     }
   }
 
+  if (parsed.kind === 'sleep_summary') return { caption: formatSleepCardDate(parsed.localDate), image_url: buildLinqIMessageAppCardImageUrl(parsed) }
+
   const mealLabel = parsed.mealCount === 1 ? 'meal' : 'meals'
   const partialLabel = renderPartialNutritionLabel(parsed)
   const introduction = readDailyNutritionIntroduction(parsed, companionMessage)
@@ -414,7 +431,9 @@ export function buildLinqIMessageAppCardImageUrl(
       'Telegram rich content cards do not have a native iMessage image URL.',
     )
   }
-  const encoded = parsed.kind === 'daily_nutrition'
+  const encoded = parsed.kind === 'sleep_summary'
+    ? encodeAppCardEnvelopePayload(buildSleepSummaryAppCardEnvelopeV8(parsed))
+    : parsed.kind === 'daily_nutrition'
     ? encodeDailyNutritionAppCardPayload(parsed)
     : parsed.kind === 'compact_table'
       ? encodeCompactTableAppCardPayload(parsed, false)
@@ -438,6 +457,8 @@ export function buildLinqIMessageAppCardUrl(
 ): string {
   const parsed = assistantResponseCardSchema.parse(card)
   switch (parsed.kind) {
+    case 'sleep_summary':
+      return encodeAppCardEnvelopeUrl(encodeAppCardEnvelopePayload(buildSleepSummaryAppCardEnvelopeV8(parsed)))
     case 'daily_nutrition':
       return encodeDailyNutritionAppCardUrl(parsed)
     case 'compact_table':
@@ -596,6 +617,7 @@ function encodeAppCardEnvelopePayload(
     | AppCardEnvelopeV2
     | AppCardEnvelopeV3
     | AppCardEnvelopeV5
+    | ReturnType<typeof buildSleepSummaryAppCardEnvelopeV8>
     | ReturnType<typeof buildWorkoutSessionAppCardEnvelopeV4>
     | ReturnType<typeof buildWorkoutSessionAppCardEnvelopeV6>,
 ): string {
@@ -1549,4 +1571,23 @@ function createAssistantResponseCardJsonSchema() {
       'Author daily_nutrition V2, generic compact_table V1, or compact_table workout V1.',
     anyOf: [nutrition, compactTableGeneric, compactTableWorkout],
   } as const
+}
+
+function renderSleepSummaryResponseCardText(card: SleepSummaryResponseCardV1): string {
+  const window = card.bedtime !== null && card.wakeTime !== null
+    ? `, ${formatSleepCardClock(card.bedtime)} to ${formatSleepCardClock(card.wakeTime)}` : ''
+  const lines = [`Sleep, ${formatSleepCardDate(card.localDate).replace(',', '')}`, `${formatSleepCardDuration(card.totalSleepMinutes)} asleep${window}`]
+  if (card.score !== null) lines.push(`Score ${card.score}`)
+  const stages: string[] = []
+  if (card.stages !== null) stages.push(`Deep ${formatSleepCardDuration(card.stages.deepMinutes)}`, `REM ${formatSleepCardDuration(card.stages.remMinutes)}`, `light ${formatSleepCardDuration(card.stages.lightMinutes)}`)
+  if (card.awakeMinutes !== null) stages.push(`awake ${formatSleepCardDuration(card.awakeMinutes)}`)
+  if (stages.length) lines.push(stages.join(', '))
+  if (card.stages !== null) lines.push(`Restorative (deep + REM) ${formatSleepCardDuration(card.stages.deepMinutes + card.stages.remMinutes)}`)
+  const details: string[] = []
+  if (card.wakeUps !== null) details.push(`${card.wakeUps} wake-ups`)
+  if (card.efficiencyPercent !== null) details.push(`${card.efficiencyPercent}% asleep`)
+  if (card.hrv !== null) details.push(`HRV ${card.hrv.milliseconds} ms`)
+  if (card.restingHeartRate !== null) details.push(`resting HR ${card.restingHeartRate} bpm`)
+  if (details.length) lines.push(details.join(', '))
+  return lines.join('\n')
 }

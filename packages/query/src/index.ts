@@ -672,3 +672,9 @@ export async function readExperimentQuerySource(vaultRoot: string) {
   const mod = await import("./experiment-query-source.ts");
   return mod.readExperimentQuerySource(vaultRoot);
 }
+
+export type { WearableSleepCardNight } from "./wearables/sleep-card.ts";
+export async function resolveWearableSleepCardNight(vaultRoot: string, input: { wakeDate: string }) {
+  const mod = await import("./wearables/sleep-card.ts");
+  return mod.resolveWearableSleepCardNight(vaultRoot, input);
+}

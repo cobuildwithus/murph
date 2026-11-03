@@ -69,6 +69,9 @@ import type {
   AssistantProviderMessageEffect,
 } from './assistant-cli-contracts.js'
 
+// Native envelope-8 delivery requires a separate owner-approved compatibility rollout.
+export const LINQ_SLEEP_SUMMARY_CARD_INTERACTIVE = false
+
 const DEFAULT_LINQ_API_BASE_URL = 'https://api.linqapp.com/api/partner/v3'
 const LINQ_HTTP_TIMEOUT_MS = 30_000
 const LINQ_IMESSAGE_CAPABILITY_TIMEOUT_MS = 2_500
@@ -740,7 +743,7 @@ export async function sendLinqIMessageAppCard(
           bundle_id: 'ai.withmurph.app.messages',
           app_store_id: 6786145859,
         },
-        interactive: true,
+        interactive: input.card.kind === 'sleep_summary' ? LINQ_SLEEP_SUMMARY_CARD_INTERACTIVE : true,
         url: buildLinqIMessageAppCardUrl(input.card),
         fallback_text: buildLinqIMessageAppFallbackText(input.card),
         layout: buildLinqIMessageAppLayout(input.card, input.companionMessage),
