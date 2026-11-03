@@ -1,3 +1,7 @@
+Hosted retention invocation coalescing and unchanged expiry deadlines are owned
+by `../packages/assistant-runtime/README.md`; regression and deployment proof are
+tracked in [the retention wake plan](exec-plans/completed/2026-11-03-retention-wake-loop.md).
+
 Canonical cron wake parity with claim selection is owned by
 `../packages/assistant-engine/README.md`; regression proof is tracked in
 [the wake plan](exec-plans/completed/2026-11-02-cron-missed-wakes.md).

@@ -2293,6 +2293,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           importItem: importMailboxItem,
           limitPerLane: mailboxBudget.fetchLimitPerLane,
           materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
+          onCanonicalWriteReceiptLogUpdated: (entryCount) => {
+            pendingCanonicalReceiptCount = entryCount;
+          },
           platform: {
             ...guardedRuntime.platform,
             mailboxPort: runnerMailboxPort,
@@ -2308,7 +2311,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         },
         checkpointRequestBuilder,
         expectedUserId: input.request.userId,
-        generatedImageRetentionMaxCaptures: Math.max(
+        generatedImageRetentionMaxCaptures: () => Math.max(
           0,
           HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_YIELD_THRESHOLD
             - pendingCanonicalReceiptCount,
@@ -7884,9 +7887,9 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
   canonicalWriteRunnerInput: HostedWorkspaceRunnerInput;
   checkpointRequestBuilder: ReturnType<typeof createHostedWorkspaceSnapshotCheckpointRequestBuilder>;
   expectedUserId: string;
-  generatedImageRetentionMaxCaptures: number;
+  generatedImageRetentionMaxCaptures: () => number;
   input: HostedAssistantWorkspaceRuntimeJobInput;
-  issueExportPort?: HostedRuntimePlatform["issueExportPort"] | null;
+  issueExportPort: HostedRuntimePlatform["issueExportPort"] | null;
   materializeWorkspaceArtifacts: HostedWorkspaceArtifactMaterializer;
   runtimeAbortSignal: AbortSignal;
   shutdownSignal: AbortSignal | null;
@@ -7903,77 +7906,98 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
   }
 
   let workspace = input.workspace;
-
-  const idleMaintenance = input.shutdownSignal?.aborted === true
-    ? buildHostedShutdownIdleMaintenanceOutcome()
-    : await runHostedPendingInputProtectedIdleMaintenance({
-        credentialSource: "platform",
-        generatedImageRetentionMaxCaptures:
-          input.generatedImageRetentionMaxCaptures,
-        materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
-        memberId: input.input.request.userId,
-        model: null,
-        pendingWork: false,
-        processingMode: "inbox_media_retention",
-        persistGeneratedImageRetention: async (write) => {
-          const persisted = await runHostedWorkspaceCanonicalWriteAtBoundary({
-            previousRedactedStatus: workspace.redactedStatus ?? null,
-            runnerInput: {
-              ...input.canonicalWriteRunnerInput,
-              workspace,
-            },
-            write,
-          });
-          if (persisted.canonicalWritePersisted && persisted.workspace) {
-            workspace = persisted.workspace;
-          }
-          return persisted.result;
-        },
-        providerName: null,
-        recordUsage: null,
-        reportRetentionIssue: async (issue) => {
-          await writeHostedRuntimeLogBestEffort({
-            entry: {
-              ...buildHostedRuntimeLogContextFields(input.canonicalWriteRunnerInput.runtimeLogContext),
-              component: "runtime",
-              eventCode: "runtime.retention_issue",
-              // Buffer diagnostic delivery so an arriving foreground wake can preempt.
-              level: "info",
-              phase: "checkpoint",
-              redactedJson: { ...issue },
-            },
-            platform: input.canonicalWriteRunnerInput.platform,
-          });
-        },
-        resolveAssistantSessionId: null,
-        shutdownSignal: input.shutdownSignal,
-        vaultRoot: input.vaultRoot,
-        wakeSignal: input.wakeSignal,
-      });
-  const pendingWakeNotification = consumePendingRuntimeWakeUnlessShuttingDown({
-    runtimeWakeSignal: input.wakeSignal,
-    shutdownSignal: input.shutdownSignal,
-  });
-  if (pendingWakeNotification) {
-    throw new HostedRuntimeCheckpointInterruptedByWakeError({
-      notification: pendingWakeNotification,
+  // Reuse one restore/checkpoint for due slices and nearby exact expiries.
+  // Neither content deadlines nor the independent default wake may be delayed.
+  const deadlineMs = Math.min(
+    Date.now() + resolveHostedRuntimeIdleCheckpointDelayMs(input.input.request.runnerIdleTtlMs),
+    workspace.nextWakeAt ? Date.parse(workspace.nextWakeAt) : Infinity,
+  );
+  let retentionFailed = false;
+  let idleMaintenance: HostedIdleMaintenanceOutcome;
+  let waited: HostedRuntimeDirtyWaitResult;
+  do {
+    input.assertRuntimeNotAborted();
+    idleMaintenance = input.shutdownSignal?.aborted === true
+      ? buildHostedShutdownIdleMaintenanceOutcome()
+      : await runHostedPendingInputProtectedIdleMaintenance({
+          credentialSource: "platform",
+          generatedImageRetentionMaxCaptures:
+            input.generatedImageRetentionMaxCaptures(),
+          materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+          memberId: input.input.request.userId,
+          model: null,
+          pendingWork: false,
+          processingMode: "inbox_media_retention",
+          persistGeneratedImageRetention: async (write) => {
+            const persisted = await runHostedWorkspaceCanonicalWriteAtBoundary({
+              previousRedactedStatus: workspace.redactedStatus ?? null,
+              runnerInput: {
+                ...input.canonicalWriteRunnerInput,
+                workspace,
+              },
+              write,
+            });
+            if (persisted.canonicalWritePersisted && persisted.workspace) {
+              workspace = persisted.workspace;
+            }
+            return persisted.result;
+          },
+          providerName: null,
+          recordUsage: null,
+          reportRetentionIssue: async (issue) => {
+            retentionFailed ||= issue.outcome === "failed";
+            await writeHostedRuntimeLogBestEffort({
+              entry: {
+                ...buildHostedRuntimeLogContextFields(input.canonicalWriteRunnerInput.runtimeLogContext),
+                component: "runtime",
+                eventCode: "runtime.retention_issue",
+                // Buffer diagnostic delivery so an arriving foreground wake can preempt.
+                level: "info",
+                phase: "checkpoint",
+                redactedJson: { ...issue },
+              },
+              platform: input.canonicalWriteRunnerInput.platform,
+            });
+          },
+          resolveAssistantSessionId: null,
+          shutdownSignal: input.shutdownSignal,
+          vaultRoot: input.vaultRoot,
+          wakeSignal: input.wakeSignal,
+        });
+    const pendingWakeNotification = consumePendingRuntimeWakeUnlessShuttingDown({
+      runtimeWakeSignal: input.wakeSignal,
+      shutdownSignal: input.shutdownSignal,
     });
-  }
+    if (pendingWakeNotification) {
+      throw new HostedRuntimeCheckpointInterruptedByWakeError({
+        notification: pendingWakeNotification,
+      });
+    }
+    const nextWakeMs = idleMaintenance.nextWakeAt ? Date.parse(idleMaintenance.nextWakeAt) : Infinity;
+    if (retentionFailed || nextWakeMs >= deadlineMs || input.generatedImageRetentionMaxCaptures() === 0) break;
+    waited = await waitForHostedRuntimeDirtyWindow({
+      idleCheckpointStartByMs: deadlineMs,
+      projectedWakeAtMs: nextWakeMs,
+      runtimeAbortSignal: input.runtimeAbortSignal,
+      runtimeWakeSignal: input.wakeSignal,
+      shutdownSignal: input.shutdownSignal,
+    });
+    if (waited.kind === "external_wake") {
+      throw new HostedRuntimeCheckpointInterruptedByWakeError({ notification: waited.notification });
+    }
+  } while (waited.kind === "projected_wake");
   const checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
     assertRuntimeNotAborted: input.assertRuntimeNotAborted,
     checkpointRequestBuilder: input.checkpointRequestBuilder,
     expectedUserId: input.expectedUserId,
-    inboxMediaRetentionWakeAt: selectHostedRetentionOnlyCheckpointWake({
+    ...selectHostedIdleCheckpointWake({
       idleMaintenance,
       previousInboxMediaRetentionWakeAt:
         workspace.inboxMediaRetentionWakeAt ?? null,
+      projectedWakeAt: workspace.nextWakeAt ?? null,
+      projectedWakeReason: workspace.nextWakeReason ?? null,
     }),
-    issueExportPort: input.issueExportPort ?? null,
-    nextWakeAt: workspace.nextWakeAt ?? null,
-    nextWakeReason: workspace.nextWakeReason ?? null,
-    onCanonicalWriteReceiptLogCleared: () => {
-      input.canonicalWriteRunnerInput.onCanonicalWriteReceiptLogUpdated?.(0);
-    },
+    issueExportPort: input.issueExportPort,
     redactedStatus: workspace.redactedStatus ?? null,
     runtimeAbortSignal: input.runtimeAbortSignal,
     vaultRoot: input.vaultRoot,
@@ -7986,11 +8010,8 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
     },
     checkpoint.workspace,
   );
-  const immediateRecheckCandidate =
-    idleMaintenance.nextWakeReason === "inbox_media_retention"
-    && idleMaintenance.nextWakeAt !== null;
   const immediateRecheckRequested =
-    immediateRecheckCandidate
+    idleMaintenance.nextWakeReason === "inbox_media_retention"
     && !isHostedRuntimeFutureMailboxContinuation({
       nextWakeAt: nextWake.nextWakeAt,
       nextWakeReason: nextWake.nextWakeReason,
@@ -9498,26 +9519,6 @@ function selectHostedIdleCheckpointWake(input: {
     nextWakeAt: input.projectedWakeAt,
     nextWakeReason: input.projectedWakeReason,
   };
-}
-
-function selectHostedRetentionOnlyCheckpointWake(input: {
-  idleMaintenance: HostedIdleMaintenanceOutcome;
-  previousInboxMediaRetentionWakeAt: string | null;
-}): string | null {
-  if (input.idleMaintenance.nextWakeAt) {
-    return input.idleMaintenance.nextWakeAt;
-  }
-
-  const preservePreviousRetentionWake =
-    "reason" in input.idleMaintenance
-    && (
-      input.idleMaintenance.reason === "pending_work"
-      || input.idleMaintenance.reason === "shutdown"
-    );
-
-  return preservePreviousRetentionWake
-    ? input.previousInboxMediaRetentionWakeAt
-    : null;
 }
 
 function readHostedWorkspaceDurableCheckpointEffectResult(
