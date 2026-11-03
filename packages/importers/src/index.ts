@@ -49,7 +49,6 @@ export {
   type SampleImportSkipReasonCount,
 } from "./core-port.ts";
 export {
-  createDeviceProviderSnapshotImportSession,
   createImporters,
 } from "./create-importers.ts";
 export { importDocument, prepareDocumentImport } from "./document-importer.ts";

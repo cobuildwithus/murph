@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gamePairLoreFingerprint } from "../src/lib/game/pair-fingerprint";
+import { gamePairLoreFingerprint } from "../src/lib/game/audience";
 
 describe("game lore pair fingerprint", () => {
   it("uses one opaque order-independent namespace per exact pair", () => {

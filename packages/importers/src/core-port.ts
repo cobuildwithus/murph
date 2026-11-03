@@ -1,6 +1,5 @@
 import type { DeviceDataOrigin as ContractDeviceDataOrigin, EventSource, MealNutrition } from "@murphai/contracts";
 import type {
-  DeviceBatchImportSession,
   DeviceBatchImportTiming,
 } from "@murphai/core";
 
@@ -156,7 +155,6 @@ export interface DeviceBatchImportPayload {
 export interface DeviceBatchImportExecutionOptions {
   signal?: AbortSignal | null;
   onTiming?: (timing: DeviceBatchImportTiming) => void;
-  session?: DeviceBatchImportSession;
 }
 
 export interface CanonicalWritePort {

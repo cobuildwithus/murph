@@ -21,6 +21,7 @@ import type {
 } from "./contract";
 import {
   currentTerms,
+  eligibleFromDay,
   dayIndexAt,
   entriesForDay,
   indexGameEntries,
@@ -120,7 +121,8 @@ const NO_HIDDEN: ReadonlySet<string> = new Set();
 /** Every entry this viewer may see, less the ones they reported. Callers decrypt only these. */
 export function visibleEntryIds(state: RuleState, viewerId: string, hidden: ReadonlySet<string> = NO_HIDDEN, hiddenMembers: ReadonlySet<string> = NO_HIDDEN, entries = indexGameEntries(state.entries)): Set<string> {
   const visible = new Set<string>();
-  if (!playerFor(state, viewerId)) return visible;
+  const viewer = playerFor(state, viewerId);
+  if (!viewer || viewer.leftAt) return visible;
   for (const entry of state.entries) {
     if (entry.memberId === viewerId) {
       if (entry.withdrawnAt === null) visible.add(entry.id);
@@ -155,7 +157,9 @@ export function termsView(state: RuleState, words: TermWords): GameTermsVersion 
     n: version.n,
     schedule: version.schedule,
     stakes: version.stakes.map((stake) => ({ item: stakeItem(words, stake.key), key: stake.key, kind: stake.kind })),
-    tasks: versionWords.tasks.map((task) => ({ seat: task.seat, text: task.text })),
+    tasks: state.game.seats === 10 && versionWords.defaultTask !== undefined ? state.players.map(player => ({ seat: player.seat,
+      text: versionWords.tasks.find(task => task.seat === player.seat)?.text ?? versionWords.defaultTask ?? "" }))
+      : versionWords.tasks.map((task) => ({ seat: task.seat, text: task.text })),
   };
 }
 
@@ -202,7 +206,7 @@ export interface BuiltGameHistoryView {
 
 /** The bounded history projection, built from the same viewer-scoped inputs as a recap. */
 export function buildGameHistoryView(input: GameViewInput): BuiltGameHistoryView | null {
-  if (input.state.game.status !== "settled" || !input.result) return null;
+  if (input.state.game.seats !== 2 || input.state.game.status !== "settled" || !input.result) return null;
   const viewer = playerFor(input.state, input.viewerId);
   const other = input.state.players.find((player) => player.memberId !== input.viewerId);
   // The released history contract groups games by one opponent.
@@ -255,11 +259,11 @@ export function buildGameView(input: GameViewInput): GameView {
   const { game } = state;
   const entries = indexGameEntries(state.entries);
   const players = [...state.players].sort((a, b) => a.seat - b.seat);
-  const playerViews = players.map((player) => input.hiddenMemberIds?.has(player.memberId)
+  const playerViews = players.map((player) => game.seats === 2 && input.hiddenMemberIds?.has(player.memberId)
     ? departedView(input, { seat: player.seat, name: input.names.get(player.memberId) ?? "" })
     : playerView(input, player, entries));
   for (const departed of input.departed ?? []) playerViews.push(departedView(input, departed));
-  if (input.invitee && playerViews.length < game.seats) playerViews.push(inviteeView(input, input.invitee, firstOpenSeat(playerViews), viewerId));
+  if (game.seats === 2 && input.invitee && playerViews.length < game.seats) playerViews.push(inviteeView(input, input.invitee, firstOpenSeat(playerViews), viewerId));
   playerViews.sort((a, b) => a.seat - b.seat);
   return {
     changeControls: gameChangeControls(state, input.now, input.pendingChange ?? null),
@@ -295,24 +299,31 @@ function resultView(result: StoredResult | null, viewerId: string): GameView["re
 
 function playerView(input: GameViewInput, player: RulePlayer, entries: GameEntryIndex): GamePlayerView {
   const { game } = input.state;
-  const today = game.status === "live" ? dayIndexAt(player, input.now) : null;
+  const now = player.leftAt ?? input.now;
+  const today = game.status === "live" ? dayIndexAt(player, now) : null;
   const started = today !== null && today >= 0;
   const resultScore = input.result?.scores.find((score) => score.memberId === player.memberId)?.score;
-  const profileKey = input.profileAvatarKeys?.get(player.memberId) ?? null;
-  const avatarKey = input.avatarKeys.get(player.memberId) ?? profileKey;
   const isMe = player.memberId === input.viewerId;
   return {
-    avatarUrl: avatarKey ? gameMediaUrl(avatarKey) : null,
-    profileAvatarUrl: profileKey ? gameMediaUrl(profileKey) : null,
-    dayIndex: started && today < game.lengthDays ? today : null,
+    ...playerAvatars(input, player.memberId),
+    ...(player.leftAt ? { left: true as const } : {}),
+    dayIndex: !player.leftAt && started && today < game.lengthDays ? today : null,
     firstName: input.names.get(player.memberId) ?? "",
     isMe,
     memberId: player.memberId,
     relationship: isMe ? null : input.relationships.get(player.memberId) ?? null,
     score: resultScore ?? (started ? scorePlayer(input.state, player, today, entries).score : 0),
     seat: player.seat,
-    streak: playerStreak(input.state, player, input.now),
+    streak: playerStreak(input.state, player, now),
   };
+}
+
+/** Resolve private/canonical photos only after the symmetric member mask. */
+function playerAvatars(input: GameViewInput, memberId: string): Pick<GamePlayerView, "avatarUrl" | "profileAvatarUrl"> {
+  if (input.hiddenMemberIds?.has(memberId)) return { avatarUrl: null, profileAvatarUrl: null };
+  const profileKey = input.profileAvatarKeys?.get(memberId) ?? null;
+  const avatarKey = input.avatarKeys.get(memberId) ?? profileKey;
+  return { avatarUrl: avatarKey ? gameMediaUrl(avatarKey) : null, profileAvatarUrl: profileKey ? gameMediaUrl(profileKey) : null };
 }
 
 /** A player who deleted their account: only their seat, final score and the viewer's name for them remain. */
@@ -353,9 +364,9 @@ function inviteeView(input: GameViewInput, invitee: NonNullable<GameViewInput["i
 function dayViews(input: GameViewInput, players: readonly RulePlayer[], entries: GameEntryIndex): GameDayView[] {
   const { state, viewerId } = input;
   const viewer = playerFor(state, viewerId);
-  if (!viewer?.dayOne) return [];
+  if (!viewer?.dayOne || viewer.leftAt) return [];
   const visible = visibleEntryIds(state, viewerId, input.hiddenEntryIds, input.hiddenMemberIds, entries);
-  const others = players.filter((player) => player.memberId !== viewerId && !input.hiddenMemberIds?.has(player.memberId));
+  const others = players.filter((player) => player.memberId !== viewerId && (state.game.seats === 10 || !input.hiddenMemberIds?.has(player.memberId)));
   return Array.from({ length: state.game.lengthDays }, (_, index) => {
     const mine = liveEntry(entries, viewerId, index) ?? entriesForDay(entries, viewerId, index).find((entry) => entry.attempt === 0 && entry.withdrawnAt === null);
     return {
@@ -371,6 +382,9 @@ function dayViews(input: GameViewInput, players: readonly RulePlayer[], entries:
 /** Another player's day as this viewer may see it: locked until the viewer posts that day. */
 function otherDayView(input: GameViewInput, visible: ReadonlySet<string>, other: RulePlayer, index: number, entries: GameEntryIndex): GameDayView["others"][number] {
   const posted = liveEntry(entries, other.memberId, index);
+  if (input.hiddenMemberIds?.has(other.memberId)) return {
+    entry: null, seat: other.seat, ...(posted ? { hidden: true, status: "posted" as const } : { status: unpostedStatus(input, other, index) }),
+  };
   // Reported: still their post for the day, with nothing of it to show.
   if (posted && input.hiddenEntryIds?.has(posted.id)) return { entry: null, hidden: true, seat: other.seat, status: "posted" };
   if (posted) {
@@ -391,6 +405,7 @@ function otherDayView(input: GameViewInput, visible: ReadonlySet<string>, other:
 
 function unpostedStatus(input: GameViewInput, other: RulePlayer, index: number): GameDayOtherStatus {
   const { game } = input.state;
+  if (index < eligibleFromDay(input.state, other) || other.leftAt) return "none";
   if (!isScheduledDay(input.state, index)) return "off";
   // A blank day isn't a miss in a pick-any-days game; only the shortfall is.
   if ("count" in currentTerms(game.terms).schedule) return "none";

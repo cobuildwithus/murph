@@ -64,6 +64,12 @@ export function isGameEnabled(env: GameEnv = process.env): boolean {
   return flag === "true" || (flag !== "false" && env.NODE_ENV !== "production");
 }
 
+/** Admission only: persisted groups remain readable and settle while this is off. */
+export function areGameGroupsEnabled(env: GameEnv = process.env): boolean {
+  const flag = env.MURPH_GAME_GROUPS_ENABLED;
+  return flag === "true" || (flag !== "false" && env.NODE_ENV !== "production");
+}
+
 /**
  * Time travel exists only outside real production, whatever the flags say.
  * On Vercel the deployment kind decides (previews run with NODE_ENV=production);

@@ -2,9 +2,15 @@ Hosted retention invocation coalescing and unchanged expiry deadlines are owned
 by `../packages/assistant-runtime/README.md`; regression and deployment proof are
 tracked in [the retention wake plan](exec-plans/completed/2026-11-03-retention-wake-loop.md).
 
+Dark group lifecycle, audience identity and settlement are owned by
+[Weekly Game](product-specs/weekly-game.md) and `../ARCHITECTURE.md` § Weekly Game;
+[PR 3 execution plan](exec-plans/completed/2026-11-02-group-games-lifecycle-pr3.md).
+
 Canonical cron wake parity with claim selection is owned by
 `../packages/assistant-engine/README.md`; regression proof is tracked in
 [the wake plan](exec-plans/completed/2026-11-02-cron-missed-wakes.md).
+
+Core-owned device identity cache local implementation and verification: [execution record](exec-plans/completed/2026-11-02-identity-warm-cache-local.md).
 
 Pair-preserving game collection preparation and visibility proof are recorded in
 [the PR 1 plan](exec-plans/completed/2026-11-02-game-roster-pr1.md).

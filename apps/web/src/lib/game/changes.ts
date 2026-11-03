@@ -13,7 +13,7 @@ export function firstUnstartedGameDay(state: RuleState, now: Date): number {
 export function gameChangeControls(state: RuleState, now: Date, pending: GamePendingChange | null): GameChangeControls {
   const day = firstUnstartedGameDay(state, now);
   // Negotiation is still a two-person agreement policy.
-  const live = ["live", "negotiating"].includes(state.game.status) && isPairRoster(state.players);
+  const live = state.game.seats === 2 && ["live", "negotiating"].includes(state.game.status) && isPairRoster(state.players);
   // Once either player's last day is over, the game is done for changes.
   const editable = live && !pending && !isGameDue(state, now) && day <= state.game.lengthDays;
   const enabled = editable && day < GAME_MAX_LENGTH_DAYS;

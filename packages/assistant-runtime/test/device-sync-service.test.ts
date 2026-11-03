@@ -120,19 +120,19 @@ test.each([
 test("hosted runtime device-sync preserves bounded import execution options", async () => {
   const importDeviceProviderSnapshot = vi.fn(async () => ({ ok: true }));
   const importer = captureHostedDeviceSyncImporter({ importDeviceProviderSnapshot });
-  const importSession = { kind: "device_batch_import_session" as const };
+  const signal = new AbortController().signal;
 
   await importer.importDeviceProviderSnapshot({
     provider: "demo",
     snapshot: {},
     vaultRoot: "/tmp/vault-root",
-  }, { importSession });
+  }, { signal });
 
   expect(importDeviceProviderSnapshot).toHaveBeenCalledWith({
     provider: "demo",
     snapshot: {},
     vaultRoot: "/tmp/vault-root",
-  }, { importSession });
+  }, { signal });
 });
 
 function captureHostedDeviceSyncImporter(

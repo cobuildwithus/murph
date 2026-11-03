@@ -7316,9 +7316,9 @@ test("device sync scopes provider execution to each drain and standalone worker 
   }
 });
 
-test("device sync drain shares one bounded import session and reports cumulative progress", async () => {
+test("device sync drain reports cumulative import progress", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-import-session");
-  const importSessions: unknown[] = [];
+  let imports = 0;
   const progress: number[] = [];
   const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
@@ -7328,8 +7328,8 @@ test("device sync drain shares one bounded import session and reports cumulative
       stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
     },
     importer: {
-      async importDeviceProviderSnapshot(_input, options) {
-        importSessions.push(options?.importSession);
+      async importDeviceProviderSnapshot() {
+        imports += 1;
         return { events: [] };
       },
     },
@@ -7372,9 +7372,7 @@ test("device sync drain shares one bounded import session and reports cumulative
     assert.equal(await service.drainWorker(2, account.id, {
       onProcessedJobRows: (count) => progress.push(count),
     }), 2);
-    assert.equal(importSessions.length, 2);
-    assert.ok(importSessions[0]);
-    assert.equal(importSessions[1], importSessions[0]);
+    assert.equal(imports, 2);
     assert.deepEqual(progress, [1, 2]);
   } finally {
     close();

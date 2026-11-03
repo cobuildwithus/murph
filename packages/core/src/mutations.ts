@@ -380,14 +380,9 @@ export interface DeviceBatchImportTiming {
   totalElapsedMs: number;
 }
 
-export interface DeviceBatchImportSession {
-  readonly kind: "device_batch_import_session";
-}
-
 export interface ImportDeviceBatchExecutionOptions {
   signal?: AbortSignal | null;
   onTiming?: (timing: DeviceBatchImportTiming) => void;
-  session?: DeviceBatchImportSession;
 }
 
 interface ImportDeviceBatchResultBase {
@@ -2275,13 +2270,16 @@ function orderEventImportDecisionsBySourceVersion(
 }
 
 interface EventExternalRefIndex {
+  entriesById: Map<string, EventExternalRefIndexState>;
+  matchesByRefKey: Map<string, IndexedEventExternalRefMatch[]>;
+  shardRowCounts: Map<string, number>;
   aliasRepairContaminatedEventIds: Set<string>;
   aliasRepairContaminatedRefKeys: Set<string>;
   aliasRepairHistoryById: Map<string, EventSpineEntry<EventRecord>[]>;
   liveOwnerIdsByRefKey: Map<string, ReadonlySet<string>>;
   junctionSparseDayHistoryById: Map<string, {
-    latest: { dayKey: string; revision: number };
-    previous?: { dayKey: string; revision: number };
+    latest: EventLedgerPosition & { dayKey: string; revision: number };
+    previous?: EventLedgerPosition & { dayKey: string; revision: number };
   }>;
   deviceOwnerRevisionsByRefKeyAndFingerprint: Map<
     string,
@@ -2304,10 +2302,214 @@ interface IndexedEventExternalRefMatch {
   record: EventRecord;
 }
 
+interface EventLedgerPosition {
+  relativePath: string;
+  rowNumber: number;
+}
+
+function compareEventLedgerPositions(left: EventLedgerPosition, right: EventLedgerPosition): number {
+  return left.relativePath.localeCompare(right.relativePath) || left.rowNumber - right.rowNumber;
+}
+
 interface EventExternalRefIndexState {
+  firstPosition: EventLedgerPosition;
+  indexedRefKey?: string;
   latestDeviceExternalRefEntryByRefKey: Map<string, EventSpineEntry<EventRecord>>;
   latestExternalRefEntry: EventSpineEntry<EventRecord> | null;
   latestEntry: EventSpineEntry<EventRecord>;
+}
+
+function createEventExternalRefIndex(): EventExternalRefIndex {
+  return {
+    entriesById: new Map(),
+    matchesByRefKey: new Map(),
+    shardRowCounts: new Map(),
+    aliasRepairContaminatedEventIds: new Set(),
+    aliasRepairContaminatedRefKeys: new Set(),
+    aliasRepairHistoryById: new Map(),
+    deviceOwnerRevisionsByRefKeyAndFingerprint: new Map(),
+    junctionNoIdProfilePredecessorsByScope: new Map(),
+    junctionSparseDayHistoryById: new Map(),
+    latestByRefKey: new Map(),
+    latestById: new Map(),
+    liveOwnerIdsByRefKey: new Map(),
+    maxRevisionById: new Map(),
+    revisionsById: new Map(),
+  };
+}
+
+function reduceJunctionSparseDayHistory(
+  index: EventExternalRefIndex,
+  record: EventRecord,
+  position: EventLedgerPosition,
+): void {
+  const { junctionSparseDayHistoryById } = index;
+  const revision = eventSpineRevision(record);
+  if (
+    record.externalRef
+    && isJunctionSparseIntervalExternalRef(record.externalRef)
+  ) {
+    const candidate = { ...position, dayKey: record.dayKey, revision };
+    const history = junctionSparseDayHistoryById.get(record.id);
+    if (!history || revision > history.latest.revision) {
+      junctionSparseDayHistoryById.set(record.id, {
+        latest: candidate,
+        ...(history ? { previous: history.latest } : {}),
+      });
+    } else if (
+      revision === history.latest.revision
+      && compareEventLedgerPositions(candidate, history.latest) < 0
+    ) {
+      history.latest = candidate;
+    } else if (
+      revision < history.latest.revision
+      && (!history.previous || revision > history.previous.revision
+        || (revision === history.previous.revision && compareEventLedgerPositions(candidate, history.previous) < 0))
+    ) {
+      junctionSparseDayHistoryById.set(record.id, {
+        latest: history.latest,
+        previous: candidate,
+      });
+    }
+  }
+}
+
+function reduceEventExternalRefRow(
+  index: EventExternalRefIndex,
+  relativePath: string,
+  raw: unknown,
+): string | undefined {
+  const rowNumber = (index.shardRowCounts.get(relativePath) ?? 0) + 1;
+  const position = { relativePath, rowNumber };
+  index.shardRowCounts.set(relativePath, rowNumber);
+  const {
+    aliasRepairContaminatedEventIds, aliasRepairContaminatedRefKeys,
+    maxRevisionById, revisionsById, deviceOwnerRevisionsByRefKeyAndFingerprint, entriesById,
+  } = index;
+  const parsed = safeParseContract(eventRecordSchema, raw);
+
+  if (!parsed.success) {
+    if (isLooseRecordValue(raw)) {
+      if (typeof raw.id === "string" && raw.id.length > 0) {
+        aliasRepairContaminatedEventIds.add(raw.id);
+      }
+      const rejectedRefKey = readRejectedEventExternalRefKey(raw.externalRef);
+      if (rejectedRefKey) {
+        aliasRepairContaminatedRefKeys.add(rejectedRefKey);
+      }
+    }
+    return;
+  }
+  const entry = { relativePath, record: parsed.data };
+  maxRevisionById.set(
+    entry.record.id,
+    Math.max(maxRevisionById.get(entry.record.id) ?? 0, eventSpineRevision(entry.record)),
+  );
+  const revisions = revisionsById.get(entry.record.id) ?? new Set<number>();
+  const revision = eventSpineRevision(entry.record);
+  revisions.add(revision);
+  revisionsById.set(entry.record.id, revisions);
+  reduceJunctionSparseDayHistory(index, entry.record, position);
+
+  const state = entriesById.get(entry.record.id);
+  const latestDeviceExternalRefEntryByRefKey =
+    state?.latestDeviceExternalRefEntryByRefKey ?? new Map<string, EventSpineEntry<EventRecord>>();
+
+  if (entry.record.source === "device" && entry.record.externalRef) {
+    const refKey = eventExternalRefKey(entry.record.externalRef);
+    const ownersByFingerprint = deviceOwnerRevisionsByRefKeyAndFingerprint.get(refKey)
+      ?? new Map<string, Map<string, Set<number>>>();
+    const fingerprint = deviceEventContentFingerprint(entry.record);
+    const revisionsByOwnerId = ownersByFingerprint.get(fingerprint)
+      ?? new Map<string, Set<number>>();
+    const ownerRevisions = revisionsByOwnerId.get(entry.record.id) ?? new Set<number>();
+    ownerRevisions.add(eventSpineRevision(entry.record));
+    revisionsByOwnerId.set(entry.record.id, ownerRevisions);
+    ownersByFingerprint.set(fingerprint, revisionsByOwnerId);
+    deviceOwnerRevisionsByRefKeyAndFingerprint.set(refKey, ownersByFingerprint);
+    const latestDeviceExternalRefEntry = latestDeviceExternalRefEntryByRefKey.get(refKey);
+    if (!latestDeviceExternalRefEntry || compareEventSpineEntries(latestDeviceExternalRefEntry, entry) < 0) {
+      latestDeviceExternalRefEntryByRefKey.set(refKey, entry);
+    }
+  }
+
+  const latestExternalRefEntry = entry.record.externalRef &&
+      (!state?.latestExternalRefEntry || compareEventSpineEntries(state.latestExternalRefEntry, entry) < 0)
+    ? entry
+    : state?.latestExternalRefEntry ?? null;
+
+  entriesById.set(entry.record.id, {
+    firstPosition: !state || compareEventLedgerPositions(position, state.firstPosition) < 0
+      ? position : state.firstPosition,
+    indexedRefKey: state?.indexedRefKey,
+    latestDeviceExternalRefEntryByRefKey,
+    latestEntry: !state || compareEventSpineEntries(state.latestEntry, entry) < 0
+      ? entry
+      : state.latestEntry,
+    latestExternalRefEntry,
+  });
+  return entry.record.id;
+}
+
+async function refreshEventExternalRefMatches(
+  index: EventExternalRefIndex,
+  changedIds: Iterable<string>,
+  signal?: AbortSignal | null,
+): Promise<void> {
+  const changedRefs = new Set<string>();
+  let count = 0;
+  for (const id of changedIds) {
+    if (signal && ++count % 256 === 0) await yieldToEventLoop();
+    signal?.throwIfAborted();
+    const state = index.entriesById.get(id)!;
+    if (state.indexedRefKey) {
+      const group = index.matchesByRefKey.get(state.indexedRefKey) ?? [];
+      index.matchesByRefKey.set(state.indexedRefKey, group.filter((match) => match.record.id !== id));
+      changedRefs.add(state.indexedRefKey);
+    }
+    const latestForId = state.latestEntry;
+    index.latestById.set(id, latestForId.record);
+    const externalRefEntry = latestForId.record.externalRef ? latestForId : state.latestExternalRefEntry;
+    state.indexedRefKey = undefined;
+    if (!externalRefEntry?.record.externalRef) continue;
+    const refKey = eventExternalRefKey(externalRefEntry.record.externalRef);
+    const indexedEntry = state.latestDeviceExternalRefEntryByRefKey.get(refKey) ?? externalRefEntry;
+    const group = index.matchesByRefKey.get(refKey) ?? [];
+    group.push({
+      indexedExternalRef: indexedEntry.record.externalRef ?? externalRefEntry.record.externalRef,
+      indexedRecord: indexedEntry.record,
+      relativePath: latestForId.relativePath,
+      record: latestForId.record,
+    });
+    index.matchesByRefKey.set(refKey, group);
+    state.indexedRefKey = refKey;
+    changedRefs.add(refKey);
+  }
+  for (const refKey of changedRefs) {
+    if (signal && ++count % 256 === 0) await yieldToEventLoop();
+    signal?.throwIfAborted();
+    const old = index.latestByRefKey.get(refKey);
+    if (old) updateJunctionNoIdProfilePredecessor(index, old, false);
+    // Ties retain the first owner in ledger order, even after an earlier-month append.
+    const group = (index.matchesByRefKey.get(refKey) ?? []).sort((a, b) =>
+      compareEventLedgerPositions(
+        index.entriesById.get(a.record.id)!.firstPosition,
+        index.entriesById.get(b.record.id)!.firstPosition,
+      ));
+    const liveIds = new Set(group
+      .filter((match) => !isDeletedEventSpineRecord(match.record))
+      .map((match) => match.record.id));
+    index.liveOwnerIdsByRefKey.delete(refKey);
+    if (liveIds.size) index.liveOwnerIdsByRefKey.set(refKey, liveIds);
+    const latest = selectLatestIndexedEventExternalRefMatch(group);
+    index.latestByRefKey.delete(refKey);
+    if (latest) {
+      index.latestByRefKey.set(refKey, latest);
+      updateJunctionNoIdProfilePredecessor(index, latest, true);
+    } else {
+      index.matchesByRefKey.delete(refKey);
+    }
+  }
 }
 
 async function indexLatestEventsByExternalRef(
@@ -2315,183 +2517,16 @@ async function indexLatestEventsByExternalRef(
   relativePaths: readonly string[],
   signal?: AbortSignal | null,
 ): Promise<EventExternalRefIndex> {
-  const aliasRepairContaminatedEventIds = new Set<string>();
-  const aliasRepairContaminatedRefKeys = new Set<string>();
-  const deviceOwnerRevisionsByRefKeyAndFingerprint = new Map<
-    string,
-    Map<string, Map<string, Set<number>>>
-  >();
-  const junctionSparseDayHistoryById: EventExternalRefIndex["junctionSparseDayHistoryById"] =
-    new Map();
-  const liveOwnerIdsByRefKey = new Map<string, Set<string>>();
-  const latestByRefKey = new Map<string, IndexedEventExternalRefMatch>();
-  const latestById = new Map<string, EventRecord>();
-  const maxRevisionById = new Map<string, number>();
-  const revisionsById = new Map<string, Set<number>>();
-  const entriesById = new Map<string, EventExternalRefIndexState>();
-
+  const index = createEventExternalRefIndex();
   for (const relativePath of relativePaths) {
     signal?.throwIfAborted();
     await visitEventLedgerShardRecordsInterruptible({
-      vaultRoot,
-      relativePath,
-      signal,
-      visit(raw) {
-        signal?.throwIfAborted();
-        const parsed = safeParseContract(eventRecordSchema, raw);
-
-        if (!parsed.success) {
-          if (isLooseRecordValue(raw)) {
-            if (typeof raw.id === "string" && raw.id.length > 0) {
-              aliasRepairContaminatedEventIds.add(raw.id);
-            }
-            const rejectedRefKey = readRejectedEventExternalRefKey(raw.externalRef);
-            if (rejectedRefKey) {
-              aliasRepairContaminatedRefKeys.add(rejectedRefKey);
-            }
-          }
-          return;
-        }
-        const entry = { relativePath, record: parsed.data };
-        maxRevisionById.set(
-          entry.record.id,
-          Math.max(maxRevisionById.get(entry.record.id) ?? 0, eventSpineRevision(entry.record)),
-        );
-        const revisions = revisionsById.get(entry.record.id) ?? new Set<number>();
-        const revision = eventSpineRevision(entry.record);
-        revisions.add(revision);
-        revisionsById.set(entry.record.id, revisions);
-        if (
-          entry.record.externalRef
-          && isJunctionSparseIntervalExternalRef(entry.record.externalRef)
-        ) {
-          const candidate = { dayKey: entry.record.dayKey, revision };
-          const history = junctionSparseDayHistoryById.get(entry.record.id);
-          if (!history || revision > history.latest.revision) {
-            junctionSparseDayHistoryById.set(entry.record.id, {
-              latest: candidate,
-              ...(history ? { previous: history.latest } : {}),
-            });
-          } else if (
-            revision < history.latest.revision
-            && (!history.previous || revision > history.previous.revision)
-          ) {
-            junctionSparseDayHistoryById.set(entry.record.id, {
-              latest: history.latest,
-              previous: candidate,
-            });
-          }
-        }
-
-        const state = entriesById.get(entry.record.id);
-        const latestDeviceExternalRefEntryByRefKey =
-          state?.latestDeviceExternalRefEntryByRefKey ?? new Map<string, EventSpineEntry<EventRecord>>();
-
-        if (entry.record.source === "device" && entry.record.externalRef) {
-          const refKey = eventExternalRefKey(entry.record.externalRef);
-          const ownersByFingerprint = deviceOwnerRevisionsByRefKeyAndFingerprint.get(refKey)
-            ?? new Map<string, Map<string, Set<number>>>();
-          const fingerprint = deviceEventContentFingerprint(entry.record);
-          const revisionsByOwnerId = ownersByFingerprint.get(fingerprint)
-            ?? new Map<string, Set<number>>();
-          const ownerRevisions = revisionsByOwnerId.get(entry.record.id) ?? new Set<number>();
-          ownerRevisions.add(eventSpineRevision(entry.record));
-          revisionsByOwnerId.set(entry.record.id, ownerRevisions);
-          ownersByFingerprint.set(fingerprint, revisionsByOwnerId);
-          deviceOwnerRevisionsByRefKeyAndFingerprint.set(refKey, ownersByFingerprint);
-          const latestDeviceExternalRefEntry = latestDeviceExternalRefEntryByRefKey.get(refKey);
-          if (!latestDeviceExternalRefEntry || compareEventSpineEntries(latestDeviceExternalRefEntry, entry) < 0) {
-            latestDeviceExternalRefEntryByRefKey.set(refKey, entry);
-          }
-        }
-
-        const latestExternalRefEntry = entry.record.externalRef &&
-            (!state?.latestExternalRefEntry || compareEventSpineEntries(state.latestExternalRefEntry, entry) < 0)
-          ? entry
-          : state?.latestExternalRefEntry ?? null;
-
-        entriesById.set(entry.record.id, {
-          latestDeviceExternalRefEntryByRefKey,
-          latestEntry: !state || compareEventSpineEntries(state.latestEntry, entry) < 0
-            ? entry
-            : state.latestEntry,
-          latestExternalRefEntry,
-        });
-      },
+      vaultRoot, relativePath, signal,
+      visit(raw) { reduceEventExternalRefRow(index, relativePath, raw); },
     });
   }
-
-  const groupedByRefKey = new Map<string, IndexedEventExternalRefMatch[]>();
-
-  let indexedCount = 0;
-  for (const state of entriesById.values()) {
-    if (signal && ++indexedCount % 256 === 0) {
-      await yieldToEventLoop();
-    }
-    signal?.throwIfAborted();
-    // Collapse each event id globally before indexing external refs. An event
-    // whose latest revision moved to a corrected ref must not remain
-    // discoverable through an older historical ref.
-    const latestForId = state.latestEntry;
-    latestById.set(latestForId.record.id, latestForId.record);
-    const externalRefEntry = latestForId.record.externalRef
-      ? latestForId
-      : state.latestExternalRefEntry;
-
-    if (!externalRefEntry?.record.externalRef) {
-      continue;
-    }
-
-    const refKey = eventExternalRefKey(externalRefEntry.record.externalRef);
-    const indexedExternalRefEntry =
-      state.latestDeviceExternalRefEntryByRefKey.get(refKey) ?? externalRefEntry;
-    const refGroup = groupedByRefKey.get(refKey) ?? [];
-    const indexedMatch = {
-      indexedExternalRef: indexedExternalRefEntry.record.externalRef ?? externalRefEntry.record.externalRef,
-      indexedRecord: indexedExternalRefEntry.record,
-      relativePath: latestForId.relativePath,
-      record: latestForId.record,
-    };
-    refGroup.push(indexedMatch);
-    groupedByRefKey.set(refKey, refGroup);
-    if (!isDeletedEventSpineRecord(latestForId.record)) {
-      const liveOwnerIds = liveOwnerIdsByRefKey.get(refKey) ?? new Set<string>();
-      liveOwnerIds.add(latestForId.record.id);
-      liveOwnerIdsByRefKey.set(refKey, liveOwnerIds);
-    }
-  }
-
-  let groupedCount = 0;
-  for (const [refKey, group] of groupedByRefKey) {
-    if (signal && ++groupedCount % 256 === 0) {
-      await yieldToEventLoop();
-    }
-    signal?.throwIfAborted();
-    // Preserve the prior duplicate-ref behavior: if multiple live ids still
-    // claim one external ref, reconcile against the latest comparable spine.
-    const latest = selectLatestIndexedEventExternalRefMatch(group);
-
-    if (latest) {
-      latestByRefKey.set(refKey, latest);
-    }
-  }
-
-  const junctionNoIdProfilePredecessorsByScope =
-    await indexJunctionNoIdProfilePredecessors(latestByRefKey.values(), signal);
-
-  return {
-    aliasRepairContaminatedEventIds,
-    aliasRepairContaminatedRefKeys,
-    aliasRepairHistoryById: new Map(),
-    deviceOwnerRevisionsByRefKeyAndFingerprint,
-    junctionNoIdProfilePredecessorsByScope,
-    junctionSparseDayHistoryById,
-    latestByRefKey,
-    latestById,
-    liveOwnerIdsByRefKey,
-    maxRevisionById,
-    revisionsById,
-  };
+  await refreshEventExternalRefMatches(index, index.entriesById.keys(), signal);
+  return index;
 }
 
 async function loadBoundedAliasRepairHistories(
@@ -2662,34 +2697,19 @@ function isJunctionNoIdProfilePredecessor(
   return junctionNoIdProfileProviderBaselineRevision(match) !== null;
 }
 
-async function indexJunctionNoIdProfilePredecessors(
-  matches: Iterable<IndexedEventExternalRefMatch>,
-  signal?: AbortSignal | null,
-): Promise<Map<string, IndexedEventExternalRefMatch[]>> {
-  const byScope = new Map<string, IndexedEventExternalRefMatch[]>();
-  let matchCount = 0;
-  for (const match of matches) {
-    if (signal && ++matchCount % 256 === 0) {
-      await yieldToEventLoop();
-    }
-    signal?.throwIfAborted();
-    if (!isJunctionNoIdProfilePredecessor(match)) {
-      continue;
-    }
-
-    const scopeKey = junctionNoIdProfileScopeKey(
-      match.indexedExternalRef,
-      match.indexedRecord.dataOrigin,
-    );
-    if (!scopeKey) {
-      continue;
-    }
-
-    const scopedMatches = byScope.get(scopeKey) ?? [];
-    scopedMatches.push(match);
-    byScope.set(scopeKey, scopedMatches);
-  }
-  return byScope;
+function updateJunctionNoIdProfilePredecessor(
+  index: EventExternalRefIndex,
+  match: IndexedEventExternalRefMatch,
+  add: boolean,
+): void {
+  if (!isJunctionNoIdProfilePredecessor(match)) return;
+  const scope = junctionNoIdProfileScopeKey(match.indexedExternalRef, match.indexedRecord.dataOrigin);
+  if (!scope) return;
+  const matches = (index.junctionNoIdProfilePredecessorsByScope.get(scope) ?? []).filter((entry) => entry !== match);
+  if (add) matches.push(match);
+  matches.sort((a, b) => eventExternalRefKey(a.indexedExternalRef).localeCompare(eventExternalRefKey(b.indexedExternalRef)));
+  if (matches.length) index.junctionNoIdProfilePredecessorsByScope.set(scope, matches);
+  else index.junctionNoIdProfilePredecessorsByScope.delete(scope);
 }
 
 function isIncomingJunctionNoIdProfile(record: EventRecord): boolean {
@@ -3213,164 +3233,30 @@ interface DeviceEventIdentityContext {
   legacyReservations: ReadonlyMap<string, LegacyExternalRefReservation>;
 }
 
-interface DeviceEventIdentityDependency {
-  authoritativeEventSets: readonly NormalizedDeviceAuthoritativeEventSet[];
-  eventIds: ReadonlySet<string>;
-  externalRefs: readonly ExternalRef[];
-  junctionNoIdProfileScopes: ReadonlySet<string>;
-}
-
-interface DeviceBatchImportSessionVaultState {
-  dependencyChanges: DeviceEventIdentityDependency[];
-  eventIdentityContext: DeviceEventIdentityContext;
+// One resident vault is normal. Bound retained history, including revisions and
+// rejected rows; oversized ledgers still use the complete builder per import.
+const deviceEventIdentityCache = new Map<string, {
+  index: EventExternalRefIndex;
   eventLedgerFingerprint: string;
-}
+  pendingPayloads: [string, string][];
+}>();
+const MAX_WARM_IDENTITY_ROWS = 100_000;
 
-const deviceBatchImportSessionState = new WeakMap<
-  DeviceBatchImportSession,
-  Map<string, DeviceBatchImportSessionVaultState>
->();
-
-export function createDeviceBatchImportSession(): DeviceBatchImportSession {
-  const session = Object.freeze({
-    kind: "device_batch_import_session" as const,
-  });
-  deviceBatchImportSessionState.set(session, new Map());
-  return session;
-}
-
-function buildDeviceEventIdentityDependency(
-  plan: DeviceBatchPlan,
-  additionalEventIds: readonly string[] = [],
-): DeviceEventIdentityDependency {
-  const externalRefs = plan.preparedEvents.flatMap((entry) => [
-    ...(entry.record.externalRef ? [entry.record.externalRef] : []),
-    ...entry.legacyExternalRefs,
-  ]);
-  return {
-    authoritativeEventSets: plan.authoritativeEventSets,
-    eventIds: new Set([
-      ...plan.preparedEvents.map((entry) => entry.record.id),
-      ...additionalEventIds,
-    ]),
-    externalRefs,
-    junctionNoIdProfileScopes: new Set(
-      plan.preparedEvents.flatMap((entry) => {
-        const externalRef = entry.record.externalRef;
-        const scope = externalRef
-          ? junctionNoIdProfileScopeKey(externalRef, entry.record.dataOrigin)
-          : null;
-        return scope ? [scope] : [];
-      }),
-    ),
-  };
-}
-
-function eventRefBelongsToAuthoritativeSet(
-  externalRef: ExternalRef,
-  set: NormalizedDeviceAuthoritativeEventSet,
-): boolean {
-  if (
-    externalRef.system !== set.system
-    || externalRef.resourceType !== set.resourceType
-    || externalRef.resourceId !== set.resourceId
-    || externalRef.facet === undefined
-  ) {
-    return false;
-  }
-  return set.facetPrefixes.some((prefix) =>
-    externalRef.facet === prefix || externalRef.facet?.startsWith(`${prefix}-`)
-  );
-}
-
-function authoritativeEventSetsOverlap(
-  left: NormalizedDeviceAuthoritativeEventSet,
-  right: NormalizedDeviceAuthoritativeEventSet,
-): boolean {
-  if (
-    left.system !== right.system
-    || left.resourceType !== right.resourceType
-    || left.resourceId !== right.resourceId
-  ) {
-    return false;
-  }
-  return left.facetPrefixes.some((leftPrefix) =>
-    right.facetPrefixes.some((rightPrefix) =>
-      leftPrefix === rightPrefix
-      || leftPrefix.startsWith(`${rightPrefix}-`)
-      || rightPrefix.startsWith(`${leftPrefix}-`)
-    )
-  );
-}
-
-function deviceEventIdentityDependenciesOverlap(
-  left: DeviceEventIdentityDependency,
-  right: DeviceEventIdentityDependency,
-): boolean {
-  if ([...left.eventIds].some((eventId) => right.eventIds.has(eventId))) {
-    return true;
-  }
-
-  const rightRefKeys = new Set(right.externalRefs.map(eventExternalRefKey));
-  if (left.externalRefs.some((externalRef) => rightRefKeys.has(eventExternalRefKey(externalRef)))) {
-    return true;
-  }
-
-  if (
-    [...left.junctionNoIdProfileScopes].some((scope) =>
-      right.junctionNoIdProfileScopes.has(scope)
-    )
-  ) {
-    return true;
-  }
-
-  if (left.externalRefs.some((externalRef) =>
-    right.authoritativeEventSets.some((set) =>
-      eventRefBelongsToAuthoritativeSet(externalRef, set)
-    )
-  )) {
-    return true;
-  }
-  if (right.externalRefs.some((externalRef) =>
-    left.authoritativeEventSets.some((set) =>
-      eventRefBelongsToAuthoritativeSet(externalRef, set)
-    )
-  )) {
-    return true;
-  }
-  return left.authoritativeEventSets.some((leftSet) =>
-    right.authoritativeEventSets.some((rightSet) =>
-      authoritativeEventSetsOverlap(leftSet, rightSet)
-    )
-  );
-}
-
-function readDeviceBatchImportSessionVaultState(
-  session: DeviceBatchImportSession | undefined,
+function retainDeviceEventIdentityIndex(
   vaultRoot: string,
-): DeviceBatchImportSessionVaultState | undefined {
-  return session ? deviceBatchImportSessionState.get(session)?.get(vaultRoot) : undefined;
-}
-
-function replaceDeviceBatchImportSessionVaultState(
-  session: DeviceBatchImportSession | undefined,
-  vaultRoot: string,
-  state: DeviceBatchImportSessionVaultState,
+  index: EventExternalRefIndex,
+  fingerprint?: string,
+  pendingPayloads: [string, string][] = [],
 ): void {
-  if (!session) {
-    return;
+  deviceEventIdentityCache.clear();
+  if (fingerprint && [...index.shardRowCounts.values()].reduce((sum, count) => sum + count, 0) <= MAX_WARM_IDENTITY_ROWS) {
+    // Alias histories belong to one repair request, not the reusable ledger index.
+    deviceEventIdentityCache.set(vaultRoot, {
+      index: { ...index, aliasRepairHistoryById: new Map() },
+      eventLedgerFingerprint: fingerprint,
+      pendingPayloads,
+    });
   }
-  deviceBatchImportSessionState.get(session)?.set(vaultRoot, state);
-}
-
-function clearDeviceBatchImportSessionVaultState(
-  session: DeviceBatchImportSession | undefined,
-  vaultRoot: string,
-): void {
-  if (!session) {
-    return;
-  }
-  deviceBatchImportSessionState.get(session)?.delete(vaultRoot);
 }
 
 function emitDeviceBatchImportTiming(
@@ -3386,6 +3272,7 @@ function emitDeviceBatchImportTiming(
 }
 
 async function buildDeviceEventLedgerFingerprint(vaultRoot: string): Promise<string> {
+  const root = await stat(vaultRoot);
   const shardSources = await listEventLedgerShardSources(vaultRoot);
   const metadata = await Promise.all(shardSources.map(async (source) => {
     const shard = await stat(resolveVaultPath(vaultRoot, source.sourcePath).absolutePath);
@@ -3399,7 +3286,7 @@ async function buildDeviceEventLedgerFingerprint(vaultRoot: string): Promise<str
       shard.ctimeMs,
     ].join("\0");
   }));
-  return createHash("sha256").update(metadata.join("\n")).digest("hex");
+  return createHash("sha256").update([root.dev, root.ino, root.birthtimeMs, ...metadata].join("\n")).digest("hex");
 }
 
 async function tryBuildDeviceEventLedgerFingerprint(
@@ -3579,31 +3466,18 @@ async function buildDeviceEventIdentityContext(
   entries: readonly PreparedDeviceEventEntry[],
   authoritativeEventSets: readonly NormalizedDeviceAuthoritativeEventSet[] = [],
   signal?: AbortSignal | null,
+  cachedIndex?: EventExternalRefIndex,
 ): Promise<DeviceEventIdentityContext> {
   signal?.throwIfAborted();
   if (entries.length === 0 && authoritativeEventSets.length === 0) {
     return {
-      index: {
-        aliasRepairContaminatedEventIds: new Set(),
-        aliasRepairContaminatedRefKeys: new Set(),
-        aliasRepairHistoryById: new Map(),
-        deviceOwnerRevisionsByRefKeyAndFingerprint: new Map(),
-        junctionNoIdProfilePredecessorsByScope: new Map(),
-        junctionSparseDayHistoryById: new Map(),
-        latestByRefKey: new Map(),
-        latestById: new Map(),
-        liveOwnerIdsByRefKey: new Map(),
-        maxRevisionById: new Map(),
-        revisionsById: new Map(),
-      },
+      index: createEventExternalRefIndex(),
       legacyReservations: new Map(),
     };
   }
-  const { relativePaths: shardPaths } = await listEventLedgerShardPathsInterruptible({
-    vaultRoot,
-    signal,
-  });
-  const index = await indexLatestEventsByExternalRef(vaultRoot, shardPaths, signal);
+  const shardPaths = cachedIndex ? []
+    : (await listEventLedgerShardPathsInterruptible({ vaultRoot, signal })).relativePaths;
+  const index = cachedIndex ?? await indexLatestEventsByExternalRef(vaultRoot, shardPaths, signal);
   const context: DeviceEventIdentityContext = { index, legacyReservations: new Map() };
   // A legitimate primary spine may advance before the duplicate is repaired.
   // Load only structural candidates first so reservations can use the bounded
@@ -3622,14 +3496,19 @@ async function buildDeviceEventIdentityContext(
     aliasRepairOwnerIds.add(ownerSplit.legacyOwner.record.id);
   }
   if (aliasRepairOwnerIds.size > 0) {
-    index.aliasRepairHistoryById = await loadBoundedAliasRepairHistories(
-      vaultRoot,
-      shardPaths,
-      aliasRepairOwnerIds,
-      signal,
-    );
+    context.index = {
+      ...index,
+      aliasRepairHistoryById: await loadBoundedAliasRepairHistories(
+        vaultRoot,
+        cachedIndex
+          ? (await listEventLedgerShardPathsInterruptible({ vaultRoot, signal })).relativePaths
+          : shardPaths,
+        aliasRepairOwnerIds,
+        signal,
+      ),
+    };
   }
-  context.legacyReservations = buildLegacyExternalRefReservations(entries, index);
+  context.legacyReservations = buildLegacyExternalRefReservations(entries, context.index);
   return context;
 }
 
@@ -3638,6 +3517,7 @@ function cloneDeviceEventIdentityContext(
 ): DeviceEventIdentityContext {
   return {
     index: {
+      ...context.index,
       aliasRepairContaminatedEventIds: new Set(
         context.index.aliasRepairContaminatedEventIds,
       ),
@@ -3667,19 +3547,7 @@ function cloneDeviceEventIdentityContext(
 function buildEmptyDeviceEventIdentityContext(
   entries: readonly PreparedDeviceEventEntry[],
 ): DeviceEventIdentityContext {
-  const index: EventExternalRefIndex = {
-    aliasRepairContaminatedEventIds: new Set(),
-    aliasRepairContaminatedRefKeys: new Set(),
-    aliasRepairHistoryById: new Map(),
-    deviceOwnerRevisionsByRefKeyAndFingerprint: new Map(),
-    junctionNoIdProfilePredecessorsByScope: new Map(),
-    junctionSparseDayHistoryById: new Map(),
-    latestByRefKey: new Map(),
-    latestById: new Map(),
-    liveOwnerIdsByRefKey: new Map(),
-    maxRevisionById: new Map(),
-    revisionsById: new Map(),
-  };
+  const index = createEventExternalRefIndex();
   return {
     index,
     legacyReservations: buildLegacyExternalRefReservations(entries, index),
@@ -7275,9 +7143,11 @@ export async function importDeviceBatch(
   };
   try {
     options.signal?.throwIfAborted();
-    return await importDeviceBatchWithExecutionOptions(input, options, timing);
+    const result = await importDeviceBatchWithExecutionOptions(input, options, timing);
+    // Replay results can borrow resident records. Never expose mutable cache state.
+    return { ...result, events: structuredClone(result.events) };
   } catch (error) {
-    clearDeviceBatchImportSessionVaultState(options.session, input.vaultRoot);
+    deviceEventIdentityCache.delete(input.vaultRoot);
     throw error;
   } finally {
     timing.totalElapsedMs = Math.max(0, performance.now() - startedAt);
@@ -7324,47 +7194,44 @@ timing: DeviceBatchImportTiming,
   });
   const requiresEventIdentityContext = deviceBatchPlan.preparedEvents.length > 0
     || deviceBatchPlan.authoritativeEventSets.length > 0;
-  const eventIdentityDependency = buildDeviceEventIdentityDependency(deviceBatchPlan);
   const indexStartedAt = performance.now();
-  const sessionVaultState = requiresEventIdentityContext
-    ? readDeviceBatchImportSessionVaultState(options.session, vaultRoot)
-    : undefined;
-  const cachedEventIdentityContext = sessionVaultState
-    && sessionVaultState.eventLedgerFingerprint
-      === await tryBuildDeviceEventLedgerFingerprint(vaultRoot)
-    && sessionVaultState.dependencyChanges.every((dependencyChange) =>
-      !deviceEventIdentityDependenciesOverlap(eventIdentityDependency, dependencyChange)
-    )
-    && !deviceBatchPlan.preparedEvents.some((entry) =>
-      resolveStructuralJunctionDailyAggregateAliasOwnerSplit(
-        entry,
-        sessionVaultState.eventIdentityContext.index,
-      ) !== null
-    )
-    ? sessionVaultState.eventIdentityContext
-    : undefined;
-  const initialEventIdentityContext = cachedEventIdentityContext
-    ?? await buildDeviceEventIdentityContext(
-      vaultRoot,
-      deviceBatchPlan.preparedEvents,
-      deviceBatchPlan.authoritativeEventSets,
-      options.signal,
-    );
-  timing.eventIdentityIndexCacheHit = cachedEventIdentityContext !== undefined;
+  const cached = requiresEventIdentityContext ? deviceEventIdentityCache.get(vaultRoot) : undefined;
+  const fingerprint = requiresEventIdentityContext
+    ? await tryBuildDeviceEventLedgerFingerprint(vaultRoot) : undefined;
+  let cachedIndex: EventExternalRefIndex | undefined;
+  if (cached && fingerprint && cached.eventLedgerFingerprint === fingerprint) {
+    try {
+      const { index } = cached;
+      const changedIds = new Set<string>();
+      for (const [relativePath, payload] of cached.pendingPayloads) {
+        for (const line of payload.trimEnd().split("\n")) {
+          const id = reduceEventExternalRefRow(index, relativePath, JSON.parse(line));
+          if (id) changedIds.add(id);
+        }
+      }
+      await refreshEventExternalRefMatches(index, changedIds, options.signal);
+      index.aliasRepairHistoryById = new Map();
+      cached.pendingPayloads = [];
+      if ([...index.shardRowCounts.values()].reduce((sum, count) => sum + count, 0) <= MAX_WARM_IDENTITY_ROWS) {
+        cachedIndex = index;
+      }
+    } catch {
+      cachedIndex = undefined;
+    }
+  }
+  if (cached && !cachedIndex) deviceEventIdentityCache.delete(vaultRoot);
+  const initialEventIdentityContext = await buildDeviceEventIdentityContext(
+    vaultRoot,
+    deviceBatchPlan.preparedEvents,
+    deviceBatchPlan.authoritativeEventSets,
+    options.signal,
+    cachedIndex,
+  );
+  timing.eventIdentityIndexCacheHit = cachedIndex !== undefined;
   options.signal?.throwIfAborted();
   timing.eventIdentityIndexElapsedMs = Math.max(0, performance.now() - indexStartedAt);
-  if (options.session && requiresEventIdentityContext && !timing.eventIdentityIndexCacheHit) {
-    const eventLedgerFingerprint = await tryBuildDeviceEventLedgerFingerprint(vaultRoot);
-    if (eventLedgerFingerprint) {
-      replaceDeviceBatchImportSessionVaultState(options.session, vaultRoot, {
-        dependencyChanges: [],
-        // The baseline is read-only; reconciliation clones at its mutation boundary.
-        eventIdentityContext: initialEventIdentityContext,
-        eventLedgerFingerprint,
-      });
-    } else {
-      clearDeviceBatchImportSessionVaultState(options.session, vaultRoot);
-    }
+  if (requiresEventIdentityContext) {
+    retainDeviceEventIdentityIndex(vaultRoot, initialEventIdentityContext.index, fingerprint);
   }
   deviceBatchPlan.preparedEvents = resolveJunctionFloatingFallbackEntries(
     deviceBatchPlan.preparedEvents,
@@ -8282,28 +8149,17 @@ timing: DeviceBatchImportTiming,
     0,
     performance.now() - canonicalWriteStartedAt,
   );
-  if (eventAppendPlan.appendedRecordIds.length > 0) {
-    const currentSessionState = readDeviceBatchImportSessionVaultState(
-      options.session,
-      vaultRoot,
-    );
-    if (currentSessionState) {
-      const eventLedgerFingerprint = await tryBuildDeviceEventLedgerFingerprint(vaultRoot);
-      if (eventLedgerFingerprint) {
-        replaceDeviceBatchImportSessionVaultState(options.session, vaultRoot, {
-          ...currentSessionState,
-          dependencyChanges: [
-            ...currentSessionState.dependencyChanges,
-            buildDeviceEventIdentityDependency(
-              deviceBatchPlan,
-              eventReconciliation.records.map((record) => record.id),
-            ),
-          ],
-          eventLedgerFingerprint,
-        });
-      } else {
-        clearDeviceBatchImportSessionVaultState(options.session, vaultRoot);
-      }
+  const publishedCache = deviceEventIdentityCache.get(vaultRoot);
+  if (publishedCache && eventAppendPlan.appendedRecordIds.length > 0) {
+    // Only the append payloads represent rows actually published. Reconciliation
+    // also returns unchanged owners and must never be used to advance this cache.
+    deviceEventIdentityCache.delete(vaultRoot);
+    try {
+      retainDeviceEventIdentityIndex(vaultRoot, publishedCache.index,
+        await tryBuildDeviceEventLedgerFingerprint(vaultRoot),
+        [...publishedCache.pendingPayloads, ...eventAppendPlan.payloads]);
+    } catch {
+      // Cache failure cannot turn successful publication into an apparent failure.
     }
   }
   return result;

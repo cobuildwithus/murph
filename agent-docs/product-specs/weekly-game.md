@@ -34,6 +34,37 @@ shows Murph's Terms step, records the grant, and sends the write again. Clients
 that predate the code see an ordinary refusal, so turn it on only once a build
 that handles it is out. Game moves made in Murph's chat don't pass this door.
 
+## Group lifecycle staging
+
+The internal command and rules path supports `maxPlayers: 10`, behind
+`MURPH_GAME_GROUPS_ENABLED`. It is off in production unless explicitly `true`;
+unset means on outside production. This admission switch does not disable
+existing group reads, settlement or account deletion. The released pair protocol
+is unchanged. Group HTTP capabilities, response fields, notifications and chat
+are subsequent rollout work.
+
+A group addresses one to nine recipients and admits its starter immediately.
+A second acceptance activates it; until then it waits without expiry. Addressed
+invitees keep their seats. Bearer joiners use separate seats, and ten total
+admissions includes departures. There is no rejoin. Late joiners share the
+existing calendar and can score only from their local joining day, capped by
+the common schedule. The starter can edit or cancel before Day 1 begins for
+any activated participant; stale joins must read the new terms before accepting.
+
+A pre-settlement leave is silent, preserves evidence and excludes the player
+from prizes, debts and new content. Leaving a waiting invitation voids it, as
+does an active game falling below two remaining players. Group blocks mask content symmetrically without changing scores or
+ending the game. Explicit player reports identify their subject; posts remain
+counted when their reporter hides them.
+
+Exactly one winner's prize is shared by a proper subset tied for the highest
+numeric score. An all-way tie has no ticket. Eligibility and scores freeze at
+settlement, after the last remaining competitor's local final day and applicable
+grace. Any surviving participant eligible at settlement can mark the shared
+prize done while a recipient and debtor survive. Same again copies the original
+addressed audience and terms, including task-seat remapping, and is available
+only to someone who both played and belongs to that audience.
+
 ## Product
 
 A weekly game is a run of days between close people. Each player picks a habit

@@ -7,18 +7,33 @@ import {
   GAME_REPORT_REASONS,
   GAME_STAKE_KINDS,
   GAME_WEEKDAYS,
-  type GameCommand,
+  type GameCommand as WireGameCommand,
   type GameChange,
   type GameInviteeLabel,
   type GameSchedule,
   type GameStake,
   type GameTask,
-  type GameTermsInput,
 } from "./contract";
 import { isGameMediaKey } from "./media";
 import { parseGameEntryData } from "./entry-data";
 import { isRecord } from "../primitives";
-import { GAME_MIN_LENGTH_DAYS, GAME_MAX_LENGTH_DAYS, reject, validNewStakes } from "./rules";
+import { GAME_MIN_LENGTH_DAYS, GAME_MAX_LENGTH_DAYS, reject, validNewStakes, type GameTerms } from "./rules";
+
+/** Internal admission surface. HTTP contracts are widened by the capability rollout. */
+export type { GameTerms } from "./rules";
+export interface GameInviteTarget {
+  seat: number;
+  recipient: { kind: "phone" | "email"; value: string };
+  firstName?: string;
+  label?: GameInviteeLabel;
+}
+export type GameCommand = Exclude<WireGameCommand, { type: "createGame" | "report" }>
+  | (Omit<Extract<WireGameCommand, { type: "createGame" }>, "terms" | "inviteeFirstName"> & {
+    terms: GameTerms; inviteeFirstName?: string; maxPlayers?: 2 | 10; groupWord?: string; invitees?: GameInviteTarget[];
+  })
+  | (Extract<WireGameCommand, { type: "report" }> & { reportedMemberId?: string })
+  | { type: "leave"; gameId: string }
+  | { type: "editTerms"; gameId: string; expectedTermsVersion: number; terms: GameTerms };
 
 /**
  * The one validator for game commands, shared by the app's routes and
@@ -29,9 +44,12 @@ import { GAME_MIN_LENGTH_DAYS, GAME_MAX_LENGTH_DAYS, reject, validNewStakes } fr
 export function parseGameCommand(value: unknown): GameCommand {
   const input = record(value, "command");
   switch (input.type) {
+    case "leave":
+      return { type: "leave", gameId: clientId(input.gameId, "gameId") };
+    case "editTerms":
+      return { type: "editTerms", gameId: clientId(input.gameId, "gameId"), expectedTermsVersion: integer(input.expectedTermsVersion, "expectedTermsVersion", 1), terms: terms(record(input.terms, "terms")) };
     case "setDayCompletion":
-      if (typeof input.date !== "string" || !isStrictIsoDate(input.date) || typeof input.incomplete !== "boolean" || "memberId" in input || "entryId" in input) reject("INVALID_REQUEST", "Choose your own game day by date.");
-      return { type: "setDayCompletion", gameId: clientId(input.gameId, "gameId"), date: input.date, incomplete: input.incomplete };
+      return dayCompletion(input);
     case "cancelInvite":
       return { type: "cancelInvite", gameId: clientId(input.gameId, "gameId") };
     case "proposeChange":
@@ -50,14 +68,7 @@ export function parseGameCommand(value: unknown): GameCommand {
     case "setProfile":
       return profile(input);
     case "createGame":
-      return {
-        gameId: clientId(input.gameId, "gameId"),
-        inviteeFirstName: words(input.inviteeFirstName, "inviteeFirstName"),
-        terms: terms(record(input.terms, "terms")),
-        type: "createGame",
-        ...optional(input.inviteeLabel, (label) => ({ inviteeLabel: inviteeLabel(record(label, "inviteeLabel")) })),
-        ...optional(input.previousGameId, (id) => ({ previousGameId: clientId(id, "previousGameId") })),
-      };
+      return create(input);
     case "negotiate":
       return {
         type: "negotiate", token: opaque(input.token, "token"),
@@ -89,11 +100,29 @@ export function parseGameCommand(value: unknown): GameCommand {
   }
 }
 
+function dayCompletion(input: Record<string, unknown>): Extract<GameCommand, { type: "setDayCompletion" }> {
+  if (typeof input.date !== "string" || !isStrictIsoDate(input.date) || typeof input.incomplete !== "boolean" || "memberId" in input || "entryId" in input) reject("INVALID_REQUEST", "Choose your own game day by date.");
+  return { type: "setDayCompletion", gameId: clientId(input.gameId, "gameId"), date: input.date, incomplete: input.incomplete };
+}
+
+function create(input: Record<string, unknown>): Extract<GameCommand, { type: "createGame" }> {
+  return {
+    gameId: clientId(input.gameId, "gameId"),
+    ...(input.maxPlayers === 10 ? {} : { inviteeFirstName: words(input.inviteeFirstName, "inviteeFirstName") }),
+    terms: terms(record(input.terms, "terms")),
+    type: "createGame",
+    ...optional(input.maxPlayers, value => ({ maxPlayers: oneOf(value, "maxPlayers", [2, 10] as const) })),
+    ...optional(input.groupWord, value => ({ groupWord: words(value, "groupWord") })),
+    ...optional(input.invitees, value => ({ invitees: inviteTargets(value) })),
+    ...optional(input.inviteeLabel, (label) => ({ inviteeLabel: inviteeLabel(record(label, "inviteeLabel")) })),
+    ...optional(input.previousGameId, (id) => ({ previousGameId: clientId(id, "previousGameId") })),
+  };
+}
+
 const WORDS_MAX = 200;
 const POST_TEXT_MAX = 2000;
 const MEDIA_KEYS_MAX = 4;
 const CAPTURE_AGE_MAX_MS = 7 * 24 * 60 * 60 * 1000;
-const LIST_MAX = 8;
 const CLIENT_ID = /^[A-Za-z0-9_-]{8,64}$/u;
 const INVISIBLE = /[\p{Cc}\p{Cf}]/gu;
 const ZWJ = "\u200D";
@@ -158,18 +187,34 @@ function inviteeLabel(input: Record<string, unknown>): GameInviteeLabel {
   };
 }
 
-function terms(input: Record<string, unknown>): GameTermsInput {
+function terms(input: Record<string, unknown>): GameTerms {
   return {
+    ...optional(input.defaultTask, value => ({ defaultTask: words(value, "terms.defaultTask") })),
     checkInKind: input.checkInKind === undefined ? "any" : oneOf(input.checkInKind, "terms.checkInKind", GAME_CHECK_IN_KINDS),
     schedule: schedule(record(input.schedule, "terms.schedule")),
     stakes: newStakes(input.stakes),
-    tasks: list(input.tasks, "terms.tasks", LIST_MAX).map((value): GameTask => {
+    tasks: list(input.tasks, "terms.tasks", 10).map((value): GameTask => {
       const task = record(value, "terms.tasks[]");
       return { seat: integer(task.seat, "terms.tasks[].seat", 0), text: words(task.text, "terms.tasks[].text") };
     }),
     ...optional(input.lengthDays, (value) => ({ lengthDays: integer(value, "terms.lengthDays", GAME_MIN_LENGTH_DAYS, GAME_MAX_LENGTH_DAYS) })),
     ...optional(input.startsOn, (value) => ({ startsOn: calendarDate(value, "terms.startsOn") })),
   };
+}
+
+function inviteTargets(value: unknown): GameInviteTarget[] {
+  const targets = list(value, "invitees", 9).map(value => {
+    const target = record(value, "invitees[]");
+    const recipient = record(target.recipient, "recipient");
+    return {
+      seat: integer(target.seat, "invitees[].seat", 1, 9),
+      recipient: { kind: oneOf(recipient.kind, "recipient.kind", ["phone", "email"] as const), value: string(recipient.value, "recipient.value", 320) },
+      ...optional(target.firstName, value => ({ firstName: words(value, "firstName") })),
+      ...optional(target.label, value => ({ label: inviteeLabel(record(value, "label")) })),
+    };
+  });
+  if (!targets.length || new Set(targets.map(target => target.seat)).size !== targets.length) reject("INVALID_REQUEST", "Choose one to nine distinct invitation seats.");
+  return targets;
 }
 
 function newStakes(value: unknown): GameStake[] {
@@ -259,6 +304,7 @@ function report(input: Record<string, unknown>): GameCommand {
     type: "report", reportId: clientId(input.reportId, "reportId"),
     reason: oneOf(input.reason, "reason", GAME_REPORT_REASONS),
     ...reportTarget(input),
+    ...optional(input.reportedMemberId, value => ({ reportedMemberId: opaque(value, "reportedMemberId") })),
     ...(note ? { note } : {}),
     ...optional(input.block, (block) => ({ block: flag(block, "block") })),
   };
