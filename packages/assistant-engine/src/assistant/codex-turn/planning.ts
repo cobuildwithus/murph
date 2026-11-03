@@ -543,8 +543,8 @@ function gamePhotoContextPrompts(input: AssistantRouteTurnPlanInput, acceptedInp
   return input.input.channel === 'linq' && areConversationGamesAvailable(input, acceptedInputIds, scope) ? [GAME_PHOTO_CHAT_GUIDANCE] : []
 }
 
-function areConversationPollsAvailable(input: AssistantRouteTurnPlanInput, acceptedInputIds: readonly string[], channel: string | null): boolean {
-  return acceptedInputIds.length > 0 && (channel === 'linq' || channel === 'telegram') && input.hostedToolContext?.pollTool != null
+function areConversationPollsAvailable(input: AssistantRouteTurnPlanInput, acceptedInputIds: readonly string[], channel: string | null, scheduledInvocationScope: ReturnType<typeof resolveAssistantHostedScheduledInvocationScope>): boolean {
+  return (acceptedInputIds.length > 0 || scheduledInvocationScope !== null) && (channel === 'linq' || channel === 'telegram') && input.hostedToolContext?.pollTool != null
 }
 
 function resolvePrivateMemberToolAvailability({
@@ -1176,7 +1176,7 @@ export async function resolveAssistantRouteTurnPlan(
       session: input.session,
       sharedPlan: input.sharedPlan,
     })
-  const pollsAvailable = areConversationPollsAvailable(input, userActionAcceptedInputIds, currentAudienceDeliveryFields.channel)
+  const pollsAvailable = areConversationPollsAvailable(input, userActionAcceptedInputIds, currentAudienceDeliveryFields.channel, scheduledInvocationScope)
   const modelBehaviorProfile = resolveAssistantModelBehaviorProfile(
     input.route.providerOptions,
   )

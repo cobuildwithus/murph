@@ -180,6 +180,10 @@ export interface AssistantHostedToolContext {
   claimIMessageContactAssistantInputId?(): string | null
   currentScheduledAutomationAuthority?(): HostedRuntimeGroupEmailScheduledAuthority | null
   currentInvocationScope?(): AssistantHostedInvocationScope | null
+  currentConversationPollRoute?(): {
+    channel: 'linq' | 'telegram'
+    target: string
+  } | null
   closeGroupEmailCapability?(): void
   recordGroupEmailSendResult?(
     result: Extract<
@@ -597,6 +601,14 @@ export function createAssistantHostedToolContext(input: {
       return deliveryContext.messageInput.scheduledAutomationAuthority ?? null
     },
     currentInvocationScope: readCurrentInvocationScope,
+    currentConversationPollRoute: () => {
+      const { messageInput } = readDeliveryContext()
+      const channel = messageInput.channel
+      const target = messageInput.bindingDeliveryTarget ?? messageInput.deliveryTarget
+      return (channel === 'linq' || channel === 'telegram') && target
+        ? { channel, target }
+        : null
+    },
     closeGroupEmailCapability: groupEmailOutboxTool?.closeCapability,
     recordGroupEmailSendResult: input.recordGroupEmailSendResult,
     currentScheduledPhoneCallScope: readCurrentScheduledPhoneCallScope,

@@ -8,6 +8,7 @@ import { requireHostedRuntimeActiveAccessForUpdateTx } from "../hosted-mailbox/r
 import { assertHostedLinqRecentInboundEngagementForRuntime, resolveHostedLinqEgressPolicyForRuntime } from "../hosted-onboarding/linq-egress-engagement";
 import { readHostedMemberRoutingState } from "../hosted-onboarding/hosted-member-routing-store";
 import { assertHostedThreadRouteEgressAuthority } from "../hosted-routing/thread-route-store";
+import { assertHostedAssistantNotificationRouteAuthority } from "../hosted-routing/assistant-notification-destination";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { getPrisma } from "../prisma";
 
@@ -23,6 +24,9 @@ export async function authorizePollConversation(input: {
     await requireHostedRuntimeCallbackTx(tx, input.memberId, input.runtimeIdentity);
     await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
   });
+  if ("origin" in input.request) {
+    return authorizeScheduledPollConversation({ memberId: input.memberId, request: input.request, prisma });
+  }
   const wake = await readHostedMailboxConversationWakeByAssistantInputId({
     assistantInputId: input.request.assistantInputId, memberId: input.memberId, prisma,
   });
@@ -57,4 +61,34 @@ export async function authorizePollConversation(input: {
     return { channel: "telegram", target: message.threadId };
   }
   throw hostedOnboardingError({ code: "HOSTED_POLL_UNSUPPORTED", message: "Native polls require current iMessage or Telegram conversation input.", httpStatus: 400, retryable: false });
+}
+
+async function authorizeScheduledPollConversation(input: {
+  memberId: string;
+  request: Extract<ConversationPollRequest, { origin: unknown }>;
+  prisma: ReturnType<typeof getPrisma>;
+}): Promise<PollRoute> {
+  const { prisma } = input;
+  const { route, request } = input.request;
+  if (route.channel === "linq") {
+    const assertion = await assertHostedLinqRecentInboundEngagementForRuntime({
+      authorityCheckOnly: true, memberId: input.memberId, prisma, target: route.target,
+    });
+    if (assertion.resolvedRoute.target !== route.target) throw new TypeError("Poll conversation changed.");
+    const { policy, service } = await resolveHostedLinqEgressPolicyForRuntime({
+      prisma, target: route.target, fromPhoneNumber: assertion.resolvedRoute.fromPhoneNumber,
+      linePhoneNumberLookupKey: assertion.linePhoneNumberLookupKey, targetKind: "thread",
+    });
+    if (service?.trim().toLowerCase() !== "imessage") {
+      throw hostedOnboardingError({ code: "HOSTED_POLL_UNSUPPORTED_SERVICE", message: "Native polls require a confirmed iMessage conversation.", httpStatus: 400, retryable: false });
+    }
+    if ((request.action === "create" || request.action === "vote") && policy.kind === "block") {
+      throw new TypeError("Poll delivery is blocked for this conversation.");
+    }
+  } else {
+    await assertHostedAssistantNotificationRouteAuthority({
+      authority: { channel: "telegram", containerMemberId: input.memberId, threadId: route.target }, prisma,
+    });
+  }
+  return route;
 }

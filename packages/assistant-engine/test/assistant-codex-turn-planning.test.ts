@@ -185,6 +185,8 @@ import {
   ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
 } from '../src/assistant/shared.js'
 import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
+import { createAssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
+import { executeConversationPollTool } from '../src/assistant-codex/dynamic-tools/conversation-polls.js'
 import {
   assistantChannelDeliverySchema,
   type AssistantSession,
@@ -8027,6 +8029,64 @@ describe('assistant Codex turn planning', () => {
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
+  })
+})
+
+describe('scheduled poll advertisement', () => {
+  it('prefers accepted input and otherwise binds the current authorized delivery target', async () => {
+    const occurrenceAt = '2026-11-02T14:00:00.000Z'
+    const inputId = 'ain_' + 'a'.repeat(32)
+    let acceptedInputIds = [inputId]
+    const request = vi.fn(async () => ({ status: 'listed' as const, polls: [] }))
+    const messageInput: AssistantMessageInput = { ...createMessageInput(), turnTrigger: 'automation-cron', scheduledOccurrenceAt: occurrenceAt,
+      scheduledInvocationAuthority: { automationId: 'automation_poll', occurrenceAt },
+      bindingDeliveryTarget: 'authorized-binding', deliveryTarget: 'authorized-fallback', threadId: 'saved-old-thread',
+    }
+    const context = createAssistantHostedToolContext({
+      executionContext: { memberId: 'member_synthetic', userEnvKeys: [], pollTool: { request }, currentAssistantInputId: () => inputId },
+      getUserActionAcceptedInputIds: () => acceptedInputIds, getConversationScope: () => 'direct',
+      messageInput, session: createSession(),
+    })
+    await executeConversationPollTool({ context, request: { action: 'list' } })
+    expect(request).toHaveBeenLastCalledWith({ assistantInputId: inputId, request: { action: 'list' } })
+    acceptedInputIds = []
+    await executeConversationPollTool({ context, request: { action: 'list' } })
+    expect(request).toHaveBeenLastCalledWith({ origin: { kind: 'automation_occurrence', automationId: 'automation_poll', occurrenceAt }, route: { channel: 'telegram', target: 'authorized-binding' }, request: { action: 'list' } })
+    delete messageInput.bindingDeliveryTarget
+    expect(context.currentConversationPollRoute?.()).toEqual({ channel: 'telegram', target: 'authorized-fallback' })
+    messageInput.bindingDeliveryTarget = ''
+    // An explicitly empty binding cannot fall back to a stale saved thread.
+    expect(context.currentConversationPollRoute?.()).toBeNull()
+  })
+  it.each([
+    { channel: 'linq', direct: true, authority: true, port: true, available: true },
+    { channel: 'linq', direct: false, authority: true, port: true, available: true },
+    { channel: 'telegram', direct: true, authority: true, port: true, available: true },
+    { channel: 'telegram', direct: false, authority: true, port: true, available: true },
+    { channel: 'email', direct: true, authority: true, port: true, available: false },
+    { channel: 'telegram', direct: true, authority: false, port: true, available: false },
+    { channel: 'telegram', direct: true, authority: true, port: false, available: false },
+  ])('advertises polls only with channel, port and verified occurrence: %j', async ({ channel, direct, authority, port, available }) => {
+    const occurrenceAt = '2026-11-02T14:00:00.000Z'
+    const plan = await resolveAssistantRouteTurnPlan({
+      executionContext: { hosted: { memberId: 'member_synthetic', userEnvKeys: [] } },
+      hostedToolContext: {
+        computerToolsAvailable: false, vaultFileSendAvailable: false,
+        pollTool: port ? { request: vi.fn() } : null,
+        currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+        sendVaultFile: vi.fn(),
+      },
+      input: { ...createMessageInput(), channel, threadIsDirect: direct,
+        turnTrigger: 'automation-cron', scheduledOccurrenceAt: occurrenceAt,
+        scheduledInvocationAuthority: authority ? { automationId: 'automation_poll', occurrenceAt } : null,
+      },
+      profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
+      promptTimeContext: { currentLocalDate: '2026-11-02', currentTimeZone: 'UTC' },
+      route: createRoute(), session: createSession(),
+      sharedPlan: createSharedPlan({}, { channel, threadIsDirect: direct, threadId: 'thread-test' }),
+      acceptedInputItems: [],
+    })
+    expect(plan.dynamicTools.some((tool) => tool.name === 'poll')).toBe(available)
   })
 })
 

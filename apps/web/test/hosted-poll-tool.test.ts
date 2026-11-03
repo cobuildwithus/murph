@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 import type { HostedConversationPoll } from "@prisma/client";
 const m = vi.hoisted(() => ({
   rows: new Map<string, HostedConversationPoll>(),
@@ -32,6 +33,12 @@ const assistantInputId = "ain_" + "a".repeat(32);
 const create: ConversationPollAction = { action: "create", question: "Which day?", options: ["Saturday", "Sunday"] };
 function call(request: ConversationPollAction, inputId = assistantInputId) {
   return handleHostedConversationPollTool({ memberId: "member_synthetic", runtimeIdentity: null, request: { assistantInputId: inputId, request } });
+}
+function scheduledCall(request: ConversationPollAction, occurrenceAt = "2026-11-02T14:00:00.000Z", automationId = "automation_poll") {
+  return handleHostedConversationPollTool({ memberId: "member_synthetic", runtimeIdentity: null, request: {
+    origin: { kind: "automation_occurrence", automationId, occurrenceAt },
+    route: { channel: m.route.channel === "linq" ? "linq" : "telegram", target: m.route.target }, request,
+  } });
 }
 function created(pollRef: string, channel = "telegram") {
   return { messageId: "17", providerPollId: "provider-poll", snapshot: { pollRef, channel, question: "Which day?", options: [{ text: "Saturday", votes: 0 }, { text: "Sunday", votes: 0 }], totalVoters: 0, anonymous: channel === "telegram", multipleAnswers: channel === "linq", closed: false, observedAt: new Date().toISOString(), freshness: "creation" } };
@@ -71,6 +78,41 @@ describe("hosted poll effects", () => {
     const read = await call({ action: "read", pollRef: first.polls[0]!.pollRef });
     expect(read.polls[0]).toMatchObject(first.polls[0]!);
     expect(read.polls[0]?.voterSource).toBe("anonymous"); expect(m.telegram).toHaveBeenCalledTimes(1);
+  });
+  it("preserves the accepted-input poll identity", async () => {
+    const result = await call(create);
+    expect(result.polls[0]?.pollRef).toBe("poll_" + createHash("sha256").update(JSON.stringify(["member_synthetic", assistantInputId])).digest("hex").slice(0, 32));
+  });
+  it.each(["linq", "telegram"])("replays the scheduled %s receipt without a second dispatch", async (channel) => {
+    m.route.channel = channel;
+    const first = await scheduledCall(create);
+    expect(first.status).toBe("sent");
+    expect(first.polls[0]?.pollRef).toBe("poll_" + createHash("sha256").update(JSON.stringify(["member_synthetic", "automation_occurrence", "automation_poll", "2026-11-02T14:00:00.000Z"])).digest("hex").slice(0, 32));
+    expect(await scheduledCall(create)).toEqual(first);
+    await expect(scheduledCall({ ...create, question: "Changed" })).rejects.toThrow("different poll");
+    expect(m.linq).toHaveBeenCalledTimes(channel === "linq" ? 1 : 0);
+    expect(m.question).toHaveBeenCalledTimes(channel === "linq" ? 1 : 0);
+    expect(m.telegram).toHaveBeenCalledTimes(channel === "telegram" ? 1 : 0);
+  });
+  it("gives different occurrences and automations distinct creation identities", async () => {
+    const responses = [await scheduledCall(create), await scheduledCall(create, "2026-11-09T14:00:00.000Z"), await scheduledCall(create, undefined, "automation_other")];
+    expect(new Set(responses.map((r) => r.polls[0]?.pollRef)).size).toBe(3);
+    expect(m.telegram).toHaveBeenCalledTimes(3);
+  });
+  it.each(["provider", "persistence"])("retains the scheduled claim after interrupted %s", async (failure) => {
+    if (failure === "provider") m.telegram.mockRejectedValueOnce(new Error("Lost acknowledgement"));
+    else m.update.mockRejectedValueOnce(new Error("Lost persistence acknowledgement"));
+    expect(await scheduledCall(create)).toEqual({ status: "unknown", polls: [] });
+    expect(await scheduledCall(create)).toEqual({ status: "unknown", polls: [] });
+    expect(m.telegram).toHaveBeenCalledTimes(1);
+  });
+  it("dispatches once across concurrent scheduled creates and reauthorizes replay", async () => {
+    const responses = await Promise.all([scheduledCall(create), scheduledCall(create)]);
+    expect(responses.some((r) => r.status === "sent")).toBe(true);
+    expect(m.telegram).toHaveBeenCalledTimes(1);
+    m.authorize.mockRejectedValueOnce(new Error("Revoked"));
+    await expect(scheduledCall(create)).rejects.toThrow("Revoked");
+    expect(m.telegram).toHaveBeenCalledTimes(1);
   });
   it("passes named Telegram mode through the creation receipt and provider", async () => {
     await call({ ...create, anonymous: false });
