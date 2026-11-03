@@ -242,10 +242,27 @@ return. Foreground work still proceeds; unfinished asks and clinical extraction
 retain their durable successors instead of repeatedly reclaiming canceled work.
 
 Finite `inbox_media_retention` checkpoints run the existing transient-content
-cleanup owners and publish their next deadlines. They do not scan or compress
-unrelated canonical event, audit, or integration history; ordinary idle checkpoints
-remain responsible for those archives. This separation does not change content
-eligibility, protected pending work, or the maximum retention deadline.
+cleanup owners and publish their next deadlines. Due transaction slices and
+nearby expiries share one invocation and snapshot, using the existing wakeable
+wait within a fixed runner idle duration (normally ten minutes). Expiries are
+serviced at their exact deadlines, never rounded later; unexpired media stays
+intact. The invocation returns sooner when there is no nearby expiry, an
+independent default wake is earlier, cleanup fails, or canonical receipt capacity
+requires a checkpoint. Foreground wakes preempt the wait, shutdown checkpoints
+its remaining deadline, and failures retain their retry. Transaction batch sizes
+remain local atomic-write limits rather than mandatory invocation boundaries.
+These checkpoints do not scan or compress unrelated canonical event, audit, or
+integration history; ordinary idle checkpoints remain responsible for those
+archives. Content eligibility, protected pending work, and retention windows
+are unchanged. The separate mode and wake column remain the inactive-member
+cleanup authority and keep retention independent of assistant admission.
+
+This scheduling change is runner-image-only: Web and Worker protocol fields,
+persisted deadlines, snapshot formats, and receipt limits are unchanged. Roll
+out the image through the normal Worker/container release and let older warm
+runners drain. Old and new Web/Worker versions accept both runner behaviors;
+old runners remain correct but perform more invocations. No migration, rearm,
+Web-first release, or new rollback floor is required.
 
 Post-device-sync dense raw retention receives up to forty-five seconds within
 the remaining overall device-pass budget. Time spent fetching or importing does

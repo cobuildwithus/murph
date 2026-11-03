@@ -1,3 +1,7 @@
+Hosted retention invocation coalescing and unchanged expiry deadlines are owned
+by `../packages/assistant-runtime/README.md`; regression and deployment proof are
+tracked in [the retention wake plan](exec-plans/completed/2026-11-03-retention-wake-loop.md).
+
 Dark group lifecycle, audience identity and settlement are owned by
 [Weekly Game](product-specs/weekly-game.md) and `../ARCHITECTURE.md` § Weekly Game;
 [PR 3 execution plan](exec-plans/completed/2026-11-02-group-games-lifecycle-pr3.md).
