@@ -1,3 +1,4 @@
+import { associateGameChatInviteTx, type prepareGameChatInvite } from "../game/chat-membership";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import {
   type HostedExecutionLinqConversationMessage,
@@ -1316,6 +1317,7 @@ function hasSameHostedLinqMessageEdit(
 }
 
 type HostedOnboardingLinqWebhookPlannerInput = {
+  preparedGameInvite?: Awaited<ReturnType<typeof prepareGameChatInvite>>;
   affirmativeReaction?: boolean;
   event: HostedLinqWebhookEvent;
   firstContactAdmissionDecision?: HostedLinqFirstContactAdmissionDecision | null;
@@ -1405,6 +1407,7 @@ export async function planHostedOnboardingLinqWebhook(
       throw input.directMailboxPreparationFailure;
     }
     return planHostedLinqExistingThreadRouteWebhook({
+      preparedGameInvite: input.preparedGameInvite,
       ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
       accountLookupKey,
       accountLookupKeys: threadRouteAccountLookupKeys,
@@ -1418,6 +1421,7 @@ export async function planHostedOnboardingLinqWebhook(
 
   if (isHostedLinqGroupChat(messageEvent)) {
     return planHostedLinqGroupChatWebhook({
+      preparedGameInvite: input.preparedGameInvite,
       ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
       context,
       event: input.event,
@@ -3252,6 +3256,7 @@ async function resolveIncomingHostedLinqHomeLineRouteBindingTx(input: {
  * authority.
  */
 async function planHostedLinqExistingThreadRouteWebhook(input: {
+  preparedGameInvite?: Awaited<ReturnType<typeof prepareGameChatInvite>>;
   accountLookupKey: string | null;
   accountLookupKeys: readonly string[];
   affirmativeReaction?: boolean;
@@ -3321,6 +3326,7 @@ async function planHostedLinqExistingThreadRouteWebhook(input: {
   }
 
   return planHostedLinqExplicitThreadRouteWebhook({
+      preparedGameInvite: input.preparedGameInvite,
     ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
     accountLookupKey: routeAccountLookupKey,
     context: input.context,
@@ -3333,6 +3339,7 @@ async function planHostedLinqExistingThreadRouteWebhook(input: {
 }
 
 async function planHostedLinqExplicitThreadRouteWebhook(input: {
+  preparedGameInvite?: Awaited<ReturnType<typeof prepareGameChatInvite>>;
   accountLookupKey?: string | null;
   affirmativeReaction?: boolean;
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
@@ -3384,7 +3391,12 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
       participantMemberId: verifiedInboundParticipant.memberId,
       prisma: input.prisma,
     });
+    await associateGameChatInviteTx({ prepared: input.preparedGameInvite, isFromMe: summary.isFromMe,
+      containerMemberId: input.route.containerMemberId, senderMemberId: verifiedInboundParticipant.memberId,
+      threadId: summary.chatId, tx: input.prisma });
   }
+
+
 
   let containerAccessActive = (await readHostedRuntimeAiAccessDecision({
     memberId: input.route.containerMemberId,
@@ -3747,6 +3759,7 @@ type HostedLinqNewGroupAdmissionIgnoreReason =
  * Existing routes are handled before this admission path.
  */
 async function planHostedLinqGroupChatWebhook(input: {
+  preparedGameInvite?: Awaited<ReturnType<typeof prepareGameChatInvite>>;
   affirmativeReaction?: boolean;
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   event: HostedLinqWebhookEvent;
@@ -4174,6 +4187,7 @@ async function planHostedLinqGroupChatWebhook(input: {
 
   const plan = routeEnsured
     ? await planHostedLinqExplicitThreadRouteWebhook({
+      preparedGameInvite: input.preparedGameInvite,
         ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
         accountLookupKey,
         context: input.context,
@@ -4186,6 +4200,7 @@ async function planHostedLinqGroupChatWebhook(input: {
         sourceMailboxConsumedAt: demotedMailboxConsumedAt,
       })
     : await planHostedLinqExistingThreadRouteWebhook({
+      preparedGameInvite: input.preparedGameInvite,
         ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
         accountLookupKey,
         accountLookupKeys: input.threadRouteAccountLookupKeys,

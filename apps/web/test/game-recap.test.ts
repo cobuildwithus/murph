@@ -154,3 +154,25 @@ describe("optional recap superlatives", () => {
     expect(validateGameRecap({ recap: parse(superlatives), players, entries })).toEqual([]);
   });
 });
+
+it("requires one kind superlative per eligible group member and rejects hidden quotes and media", () => {
+  const result = Array.from({ length: 10 }, (_, i) => ({ memberId: `person_${i}`, name: `Player ${i + 1}`, score: i }));
+  const recap: HostedGameRecap = { pages: [
+    { background: "paper", blocks: [{ kind: "headline", text: "A week outside" }] },
+    { background: "sage", blocks: [{ kind: "headline", text: "New paths together" }] },
+    { background: "night", blocks: [{ kind: "headline", text: "The next walk awaits" }] },
+  ], chatLine: "The walking challenge ended. Ten different routes made a shared week.",
+    superlatives: result.map((p, i) => ({ memberId: p.memberId, title: `Choose route ${i + 1}`, line: `${p.name} brought a walking task to the week.` })) };
+  const input = { recap, group: true, players: result.map(p => p.name), result, entries: [] };
+  expect(validateGameRecap(input)).toEqual([]);
+  expect(validateGameRecap({ ...input, recap: { ...recap, superlatives: recap.superlatives!.slice(1) } })).toContainEqual(expect.stringContaining("exactly one"));
+  expect(validateGameRecap({ ...input, recap: { ...recap, chatLine: "Player 1 didn’t post." } })).toContainEqual(expect.stringContaining("shame"));
+  for (const chatLine of ["Player 1 never missed a day.", "Nobody missed. A week of new routes."]) {
+    expect(validateGameRecap({ ...input, recap: { ...recap, chatLine } })).not.toContainEqual(expect.stringContaining("shame"));
+  }
+  const hidden = { entryId: "hidden", kind: "words", playerName: "Player 1", text: "A hidden sentence", visibleToBoth: false };
+  const pages = [...recap.pages, { background: "paper" as const, blocks: [{ kind: "quote" as const, quote: { who: "Player 1", text: hidden.text } }, { kind: "photo" as const, entryIds: [hidden.entryId] }] }];
+  const errors = validateGameRecap({ ...input, entries: [hidden], recap: { ...recap, pages } });
+  expect(errors).toContainEqual(expect.stringContaining("quote isn't"));
+  expect(errors).toContainEqual(expect.stringContaining("isn't in this game"));
+});

@@ -1,3 +1,4 @@
+import { prepareGameChatInvite } from "../game/chat-membership";
 import { queueHostedLinqHomeContactCardAfterDelivery } from "./linq-contact-card-delivery";
 import { handleHostedLinqPollWebhook } from "../hosted-polls/linq-webhook";
 import type {
@@ -576,6 +577,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                     }
                   : {}),
                 instantStartAllowed,
+                preparedGameInvite: preparation.preparedGameInvite,
                 pendingGroupParticipantMemberIds:
                   planningResolution.pendingGroupParticipantMemberIds ?? null,
                 pendingGroupRosterUnavailable:
@@ -662,6 +664,11 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 ? planningResolution.threadRoute
                 : undefined,
             });
+            if (planningEvent.event_type === "message.received") {
+              const gameContext = resolveHostedOnboardingLinqMessageContext(planningEvent);
+              if (!gameContext.summary.isFromMe && gameContext.messageEvent.data.chat?.is_group) preparation.preparedGameInvite =
+                await prepareGameChatInvite(gameContext.summary.text ?? "", gameContext.summary.chatId);
+            }
             if (preparation.preparedDirectMailboxPayloadRoot) {
               reusableDirectCryptoDomainRoots = {
                 memberId:
@@ -2337,6 +2344,7 @@ type HostedDirectTelegramRoutingCryptoPreparation =
   | HostedDirectTelegramMemberRoutingCryptoPreparation;
 
 interface HostedThreadRoutingCryptoPreparation {
+  preparedGameInvite?: Awaited<ReturnType<typeof prepareGameChatInvite>>;
   directMailboxPreparationFailure?: unknown;
   pendingGroupSetupPreparationFailure?: unknown;
   preparedDirectTelegramRouting?: HostedDirectTelegramRoutingCryptoPreparation;

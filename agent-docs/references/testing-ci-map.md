@@ -2063,3 +2063,33 @@ complete private/group requests without a live provider.
 Device transport coverage is Junction-only. `packages/device-syncd/test/provider-api-error.test.ts` owns the shared diagnostic formatter; importer suites retain WHOOP/Oura/Strava source payloads and historical reads. Hosted runtime foreground ingestion uses a Junction source-authority fixture.
 
 Scout retirement is covered by `managed-automations-core.test.ts`, `managed-automations.test.ts`, `assistant-cron-runtime.test.ts` and `assistant-outbox-runtime.test.ts`. The focused live journey `preserves provider-labelled sleep reads after scout retirement` uses the production prompt and one real CLI read. Historical provider labels remain query inputs after direct transport removal.
+
+## Exact audience game chat proof
+
+PR 5 extends `game-groups-postgres.test.ts` with existing-room discovery, multiple
+games, explicit composer replay, inbound association under readable key rotation,
+no retarget/bootstrap, legal/profile refusal, duplicate names and shared recap
+report/block suppression. Use the isolated migrated `murph_test_*` database lane
+above and remove it afterward. Keep pair access/setup/service/progress/bootstrap
+recovery suites green. Membership tests cover 2/3/10-person exact, extra, missing,
+ambiguous and incomplete provider handles. Engagement-route tests prove stale
+roster, departure and block rejection at final egress.
+
+Run hosted-execution game-tools-compatibility/game-chat-notifications tests,
+assistant-engine assistant-game-tools/game-chat-bootstrap tests, Cloudflare
+group-tool-port tests, and the focused live journey named in the engine README.
+Run Linq thread-route/webhook/graph-boundary suites when inbound preparation or
+association changes. The frozen old consumer compatibility test uses the PR 4
+base contract and proves both deploy-skew directions; run it locally with
+`MURPH_VERIFY_GAME_GROUP_SKEW=1` (shallow routine CI skips historical objects). Runner changes require
+production bundle assembly (local absolute caps) and exact-base Linux CI growth
+proof before merge. Local-only parent review cannot supply exact-head CI evidence.
+
+PR 5 parent-review regressions run the real Linq webhook and engagement route for
+unresolved composer audiences, best-effort association, current keyed rosters,
+rotation, outside seats and restrictions. `game-groups-postgres.test.ts` covers
+late verified-address acceptance and seated-only shared projections. The opt-in
+`MURPH_MEASURE_GAME_INPUT=1` assistant `assistant-game-input-measurement.test.ts`
+captures complete first provider input for identical direct/group fixtures against
+`MURPH_GAME_INPUT_BASE`; it reports exact bytes and explicitly records an
+unavailable target tokenizer instead of estimating tokens.

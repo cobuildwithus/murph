@@ -317,6 +317,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
 >;
 
 type HostedRuntimeGroupToolHandlerInput = {
+  gameMultiplayer?: boolean;
   runtimeIdentity?: HostedRuntimeIdentity | null;
   includeMembershipAvailability?: boolean;
   includeParticipantRosters?: boolean;
@@ -456,7 +457,7 @@ export async function handleHostedRuntimeConversationTool(
     return handleGameChatBootstrapControl({ memberId: input.memberId, runtimeIdentity: input.runtimeIdentity ?? null, request: input.request });
   }
   if (input.request.action === "read_game" || input.request.action === "update_game" || input.request.action === "game_photo" || input.request.action === "write_recap") {
-    return handleGameChatTool({ memberId: input.memberId, runtimeIdentity: input.runtimeIdentity ?? null, request: input.request });
+    return handleGameChatTool({ multiplayer: input.gameMultiplayer, memberId: input.memberId, runtimeIdentity: input.runtimeIdentity ?? null, request: input.request });
   }
   return handleHostedRuntimeGroupTool({ ...input, request: input.request });
 }

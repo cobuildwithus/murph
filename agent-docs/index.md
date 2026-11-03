@@ -1,3 +1,11 @@
+Group chat uses one keyed provider-roster authority for association, tools,
+lifecycle and egress, including unresolved invitees. Current ownership is in
+[Weekly Game](product-specs/weekly-game.md), [Security](SECURITY.md) and
+`../ARCHITECTURE.md` § Exact audience group chat. The
+[PR 5 review plan](exec-plans/completed/2026-11-03-group-games-pr5-review.md) tracks
+parent corrections and the publication lane; [testing](references/testing-ci-map.md)
+includes real webhook/egress regressions and complete provider-input measurement.
+
 The PR 4 parent-review correction preserves full own-day Home film strips and
 bounds group history independently. Current owners are [Weekly Game](product-specs/weekly-game.md)
 and `../ARCHITECTURE.md`; [publication plan](exec-plans/completed/2026-11-03-group-games-pr4-review.md).
@@ -1772,3 +1780,7 @@ Current owners: `../ARCHITECTURE.md` § Weekly Game and `../apps/web/README.md`
 
 Game storage parent-review corrections and PR completion are tracked in
 [the follow-up plan](exec-plans/active/2026-11-02-group-games-storage-pr-review.md).
+
+Exact audience game chat, explicit composer handoff, consumer-first runner
+compatibility and shared recap privacy are tracked in
+[the PR 5 plan](exec-plans/completed/2026-11-03-group-games-pr5.md).

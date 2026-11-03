@@ -1,5 +1,5 @@
 import type { HostedGameChatState } from "@murphai/hosted-execution/runtime-control";
-import { indexGameEntries, attemptsUsed, currentTerms, dayIndexAt, isScheduledDay, liveEntry, completedEntry, scorePlayer, type RuleState } from "./rules";
+import { eligibleFromDay, indexGameEntries, attemptsUsed, currentTerms, dayIndexAt, isScheduledDay, liveEntry, completedEntry, scorePlayer, type RuleState } from "./rules";
 import { addDays, dayStartInstant, GAME_GRACE_MS } from "./time";
 
 const CHAT_DAY_WINDOW = 14;
@@ -14,15 +14,15 @@ export function gameChatProgress(state: RuleState, now: Date): Progress {
     const current = state.game.status === "live" && today !== null && today >= 0 && today < state.game.lengthDays ? today : null;
     const schedule = currentTerms(state.game.terms).schedule;
     const endDay = Math.min(state.game.lengthDays, Math.max(CHAT_DAY_WINDOW, (today ?? -1) + 1));
-    const firstDay = Math.max(0, endDay - CHAT_DAY_WINDOW);
-    const days: Progress["players"][number]["days"] = player.dayOne ? Array.from({ length: endDay - firstDay }, (_, offset) => {
+    const firstDay = Math.max(eligibleFromDay(state, player), endDay - CHAT_DAY_WINDOW);
+    const days: Progress["players"][number]["days"] = player.dayOne ? Array.from({ length: Math.max(0, endDay - firstDay) }, (_, offset) => {
       const dayIndex = firstDay + offset;
       const date = addDays(player.dayOne!, dayIndex);
-      const posted = completedEntry(entries, player.memberId, dayIndex);
+      const posted = state.game.seats === 10 ? liveEntry(entries, player.memberId, dayIndex) : completedEntry(entries, player.memberId, dayIndex);
       const closed = state.game.status === "settled" || now.getTime() >= dayStartInstant(addDays(date, 1), player.timeZone).getTime() + GAME_GRACE_MS;
       const status = posted ? "posted" : !isScheduledDay(state, dayIndex) ? "off"
         : today === null || dayIndex > today ? "upcoming"
-        : "count" in schedule ? "not_posted" : closed ? "missed" : "due";
+        : "count" in schedule || state.game.seats === 10 ? "not_posted" : closed ? "missed" : "due";
       return { dayIndex, date, status };
     }) : [];
     return { memberId: player.memberId, currentDayIndex: current,

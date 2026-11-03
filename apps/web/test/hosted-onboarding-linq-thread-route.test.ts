@@ -5674,6 +5674,59 @@ describe("Linq group chat auto-provision", () => {
     mockAllowedThreadUsage();
   }
 
+  it.each(["mismatch", "nonmember", "timeout", "association-failure", "replay", "apex", "extra-token"])("ingests an ordinary composer invite through the webhook: %s", async scenario => {
+    const prisma = createStatefulThreadRoutePrisma();
+    mockSuccessfulGroupProvision({ prisma, senderCore });
+    mockSenderLookup(senderCore);
+    vi.mocked(prismaModule.getPrisma).mockReturnValue(prisma as never);
+    const token = "synthetic_game_invite_token_123";
+    const handles = ["+15551112222", "relative@example.test", "unjoined@example.test"];
+    const { gameAudienceKeys } = await import("../src/lib/game/audience");
+    const audienceKey = gameAudienceKeys(handles.map(value => ({ kind: value.includes("@") ? "email" : "phone", value }))).current;
+    const game = { id: "composer-game", maxPlayers: 10, createdBy: senderCore.id, status: "invited", chatContainerMemberId: null as string | null,
+      audienceKey, inviteTokenHash: (await import("../src/lib/primitives")).sha256Hex(token),
+      players: [{ memberId: senderCore.id, seat: 0, leftAt: null }] };
+    prisma.game.findFirst.mockResolvedValue(game);
+    const gameUpdate = vi.fn(async ({ data }: { data: { chatContainerMemberId: string } }) => Object.assign(game, data));
+    const gameFind = vi.fn(async () => { if (scenario === "association-failure") throw new Error("synthetic statement failure"); return game; });
+    Object.assign(prisma.game, { findUnique: gameFind, update: gameUpdate });
+    Object.assign(prisma, { gameBlock: { findFirst: vi.fn().mockResolvedValue(null) } });
+    Object.assign(prisma.hostedMember, { findFirst: vi.fn().mockResolvedValue(null) });
+    const key = createHostedPhoneLookupKey(handles[0]);
+    prisma.hostedMemberIdentity.findMany.mockImplementation(async ({ select }: { select: { phoneLookupKey?: boolean } }) => select.phoneLookupKey
+      ? [{ memberId: senderCore.id, phoneLookupKey: key }] : [{ memberId: senderCore.id, member: { suspendedAt: null } }]);
+    prisma.hostedMemberEmailAuthorization.findMany.mockResolvedValue([]);
+    vi.mocked(linqClient.getHostedLinqChatSummary).mockImplementation(async ({ timeoutMs }) => {
+      if (scenario === "timeout" && timeoutMs === 3_000) throw new Error("Linq timeout with private provider context");
+      const roster = scenario === "mismatch" ? [...handles, "extra@example.test"] : handles;
+      return { isGroup: true, handlesComplete: true, handles: [{ handle: "+15550000000", isMe: true, status: "active" }, ...roster.map(handle => ({ handle, isMe: false, status: "active" }))] };
+    });
+    vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://www.example.test");
+    const link = `https://${scenario === "apex" ? "" : "www."}example.test/g/${token}`;
+    const text = scenario === "extra-token" ? `${link} https://example.test/g/second_synthetic_invite_token` : `Family challenge ${link}`;
+    vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest).mockReturnValue(buildLinqMessageReceivedEvent({ text }) as never);
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const response = await handleHostedOnboardingLinqWebhook({ rawBody: "{}", signature: null, timestamp: null });
+      expect(response).toMatchObject({ ok: true, ignored: false, reason: "wake-appended-thread-route" });
+      expect(mailboxStore.appendHostedMailboxEnvelopeWithSourceMessageTx).toHaveBeenCalled();
+      if (["nonmember", "replay", "apex"].includes(scenario)) {
+        expect(game.chatContainerMemberId).toBeTruthy();
+        expect(gameUpdate).toHaveBeenCalledOnce();
+        expect(game.players).toHaveLength(1);
+        if (scenario === "replay") {
+          await handleHostedOnboardingLinqWebhook({ rawBody: "{}", signature: null, timestamp: null });
+          expect(new Set(gameUpdate.mock.calls.map(([call]) => call.data.chatContainerMemberId)).size).toBe(1);
+        }
+      } else expect(gameUpdate).not.toHaveBeenCalled();
+      const inviteWarnings = warning.mock.calls.filter(([event]) => String(event).includes("game.chat.invite-association"));
+      if (["mismatch", "timeout", "association-failure"].includes(scenario)) expect(inviteWarnings.length).toBeGreaterThan(0);
+      expect(JSON.stringify(inviteWarnings)).not.toContain("@example.test");
+      expect(JSON.stringify(inviteWarnings)).not.toContain("private provider context");
+      if (scenario === "association-failure") expect(prisma.$executeRaw.mock.calls.some(([query]) => String(query).includes("ROLLBACK TO SAVEPOINT"))).toBe(true);
+    } finally { warning.mockRestore(); }
+  });
+
   it("offers setup without logging an unknown group sender email", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const prisma = createStatefulThreadRoutePrisma();

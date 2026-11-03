@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { executeMurphDynamicToolRequest, resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tools.js'
-import { GAME_SETUP_CHAT_GUIDANCE, MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL, GAME_SELECTION_GUIDANCE } from '../src/assistant-codex/dynamic-tools/games.js'
+import { GAME_GROUP_CHAT_GUIDANCE, GAME_SETUP_CHAT_GUIDANCE, MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL, GAME_SELECTION_GUIDANCE } from '../src/assistant-codex/dynamic-tools/games.js'
 import { resolveAssistantGameHostDynamicTools } from '../src/assistant/codex-turn/planning.js'
 import { MURPH_FINISH_WITHOUT_REPLY_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.js'
 import { createAssistantHostedToolContext, type AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
@@ -28,6 +28,23 @@ async function execute(args: unknown, ctx = context()) {
   return executeMurphDynamicToolRequest({ request, hostedToolContext: ctx, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
 }
 describe('game dynamic tools', () => {
+  it('uses group-only guidance for two-person group games and accepts starter edit_terms', async () => {
+    const response = { action: 'read_game', result: { status: 'ok', state: { games: [
+      { id: 'game_group_one', maxPlayers: 10, status: 'invited' }, { id: 'game_group_two', maxPlayers: 10, status: 'invited' },
+    ] } } }
+    const requestPort = vi.fn().mockResolvedValue(response)
+    const result = await executeMurphDynamicToolRequest({ request: parse('read_game', { messageRef: inputId })!, hostedToolContext: { ...context(), groupTool: { request: requestPort } }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    const text = result.rpcResult.contentItems[0]?.text
+    expect(text).toContain(GAME_GROUP_CHAT_GUIDANCE)
+    expect(text).toContain(GAME_SELECTION_GUIDANCE)
+    expect(text).not.toContain(GAME_SETUP_CHAT_GUIDANCE)
+    const tasks = Array.from({ length: 10 }, (_, index) => ({ memberId: `player_${index}`, text: 'Walk' }))
+    expect(parse('update_game', { messageRef: inputId, operation: 'edit_terms', gameId: 'game_group_one', expectedTermsVersion: 1,
+      terms: { defaultTask: 'Walk', tasks, schedule: { count: 5 }, stakes: [{ kind: 'prize', item: 'Choose lunch' }] } })).toMatchObject({ kind: 'game' })
+    expect(GAME_GROUP_CHAT_GUIDANCE).toContain('Only the starter')
+    expect(GAME_GROUP_CHAT_GUIDANCE).toContain('Never nudge')
+  })
+
   it('reads a scheduled group occurrence without a message selector or write guidance', async () => {
     const scheduledOrigin = { kind: 'automation_occurrence' as const, automationId: 'automation_game_read', occurrenceAt: '2030-04-01T20:00:00Z' }
     const response = { action: 'read_game' as const, result: { status: 'ok' as const, state: { games: [{ status: 'live' }, { status: 'live' }] } } }
@@ -345,5 +362,12 @@ it('exposes optional member-addressed superlatives with shared grounding', () =>
   const recap = { pages: [], chatLine: 'Game over, tied 5 to 5.', superlatives }
   expect(parse('write_recap', recap)).toMatchObject({ kind: 'game', request: { recap } })
   expect(MURPH_WRITE_RECAP_TOOL.inputSchema.properties).toHaveProperty('superlatives')
-  for (const phrase of ['both player memberIds', 'text both players can see', '2–6 words', 'differ between players', 'bodies or weight']) expect(MURPH_WRITE_RECAP_TOOL.description).toContain(phrase)
+  for (const phrase of ['eligible player memberIds', 'text all players can see', '2–6 words', 'differ between players', 'bodies or weight']) expect(MURPH_WRITE_RECAP_TOOL.description).toContain(phrase)
+})
+
+it('offers one seated task for a group starter edit', () => {
+  expect(parse('update_game', { messageRef: inputId, operation: 'edit_terms', gameId: 'game_group_one', expectedTermsVersion: 1,
+    terms: { defaultTask: 'Walk', tasks: [{ memberId: 'player_0', text: 'Walk' }], schedule: { count: 5 }, stakes: [{ kind: 'prize', item: 'Choose lunch' }] } })).toMatchObject({ kind: 'game' })
+  expect(GAME_GROUP_CHAT_GUIDANCE).toContain('pendingInviteeCount')
+  expect(GAME_GROUP_CHAT_GUIDANCE).toContain('server preserves private unjoined overrides')
 })
