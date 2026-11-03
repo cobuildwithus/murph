@@ -107,6 +107,14 @@ spine used by local automation:
 source adapter -> AssistantInputEvent -> AssistantInputSource -> scanner/active turn -> accepted-input journal -> Codex
 ```
 
+System-mailbox connection failures retain a finite Codex error subtype and an
+optional integer HTTP status in the existing `mailbox.system_processed` warning.
+The preparation result carries these fields transiently; they are never persisted
+in mailbox state and do not affect acknowledgement, retry timing, or admission.
+Only the four connection-loss variants known to the engine are retained; missing
+or unsupported subtypes become `unknown`. The existing runtime-log reader accepts
+these additive metadata fields, so old and new producers can coexist.
+
 Conversation import and handling progress remain distinct. The imported
 watermark records local staging; terminal inputs stay in the hosted pending
 index until an accepted idle checkpoint stamps their exact Web-owned mailbox

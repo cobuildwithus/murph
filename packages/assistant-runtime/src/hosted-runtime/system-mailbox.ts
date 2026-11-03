@@ -109,11 +109,22 @@ export type {
   HostedSystemMailboxState,
 } from "./system-mailbox-state.ts";
 
+type HostedSystemMailboxCodexConnectionFailure = {
+  codexErrorInfo:
+    | "httpConnectionFailed"
+    | "responseStreamConnectionFailed"
+    | "responseStreamDisconnected"
+    | "responseTooManyFailedAttempts"
+    | "unknown";
+  codexErrorHttpStatusCode?: number;
+};
+
 export type HostedSystemMailboxCheckpointPreparation =
   | {
       assistantNotificationValidationFailureReason?:
         HostedAssistantNotificationValidationFailureReason;
       attemptCount: number;
+      codexConnectionFailure?: HostedSystemMailboxCodexConnectionFailure;
       errorCode: string | null;
       errorMessage: string | null;
       itemId: string;
@@ -685,6 +696,10 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         ? { assistantNotificationValidationFailureReason }
         : {}),
       attemptCount: prepared.attemptCount,
+      codexConnectionFailure: readHostedSystemMailboxCodexConnectionFailure(
+        error,
+        normalized.code,
+      ),
       errorCode: normalized.code,
       errorMessage: normalized.message,
       itemId: prepared.itemId,
@@ -1885,6 +1900,49 @@ function hostedSystemMailboxRecordRetryDelay(
     return HOSTED_VAULT_SHARE_PROJECTION_DEFERRED_RETRY_MS;
   }
   return HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS;
+}
+
+function readHostedSystemMailboxCodexConnectionFailure(
+  error: unknown,
+  normalizedCode: string,
+): HostedSystemMailboxCodexConnectionFailure | undefined {
+  const readOwnDataProperty = (value: unknown, key: string): unknown => {
+    if (typeof value !== "object" || value === null) {
+      return undefined;
+    }
+    try {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      return descriptor && Object.hasOwn(descriptor, "value")
+        ? descriptor.value
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  if (
+    normalizedCode !== "ASSISTANT_CODEX_CONNECTION_LOST"
+    || readOwnDataProperty(error, "code") !== "ASSISTANT_CODEX_CONNECTION_LOST"
+  ) {
+    return undefined;
+  }
+  const context = readOwnDataProperty(error, "context");
+  const kind = readOwnDataProperty(context, "codexErrorInfo");
+  const status = readOwnDataProperty(context, "codexErrorHttpStatusCode");
+  return {
+    codexErrorInfo:
+      kind === "httpConnectionFailed"
+      || kind === "responseStreamConnectionFailed"
+      || kind === "responseStreamDisconnected"
+      || kind === "responseTooManyFailedAttempts"
+        ? kind
+        : "unknown",
+    ...(typeof status === "number"
+      && Number.isInteger(status)
+      && status >= 100
+      && status <= 599
+      ? { codexErrorHttpStatusCode: status }
+      : {}),
+  };
 }
 
 function normalizeHostedSystemMailboxError(error: unknown): {

@@ -5704,6 +5704,7 @@ async function runSystemMailboxMaintenancePhase(
         assistantNotificationValidationFailureReason:
           systemMailboxPreparation.assistantNotificationValidationFailureReason ?? null,
         attemptCount: systemMailboxPreparation.attemptCount,
+        codexConnectionFailure: systemMailboxPreparation.codexConnectionFailure,
         errorCode: systemMailboxPreparation.errorCode,
         errorMessage: systemMailboxPreparation.errorMessage,
         legacyUsageReferralAuthorityClassification:
@@ -7747,6 +7748,10 @@ async function writeHostedSystemMailboxRuntimeLog(input: {
     HostedAssistantNotificationValidationFailureReason | null;
   assistantAskCompletionFirstAttemptDelayed?: boolean;
   attemptCount: number | null;
+  codexConnectionFailure?: Extract<
+    HostedSystemMailboxPreparation,
+    { status: "retryable_failed" }
+  >["codexConnectionFailure"];
   errorCode?: string | null;
   errorMessage?: string | null;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
@@ -7792,6 +7797,7 @@ async function writeHostedSystemMailboxRuntimeLog(input: {
           : {}),
         assistantAskCompletionFirstAttemptDelayed:
           input.assistantAskCompletionFirstAttemptDelayed ?? false,
+        ...(input.codexConnectionFailure ?? {}),
         errorCode: input.errorCode ? errorCode : null,
         legacyUsageReferralAuthorityClassification:
           input.legacyUsageReferralAuthorityClassification,
