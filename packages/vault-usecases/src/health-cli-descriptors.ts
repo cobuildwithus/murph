@@ -377,14 +377,6 @@ export type HealthCommandDescriptorEntry = HealthEntityDescriptor & {
   query: HealthQueryDescriptor;
 };
 
-export const healthEntityDescriptorByKind = new Map<HealthEntityKind, HealthEntityDescriptor>(
-  healthEntityDescriptors.map((descriptor) => [descriptor.kind, descriptor]),
-);
-
-export const healthEntityDescriptorByNoun = new Map<string, HealthEntityDescriptor>(
-  healthEntityDescriptors.map((descriptor) => [descriptor.noun, descriptor]),
-);
-
 export const healthEntityDescriptorByCommandName = new Map<string, HealthEntityDescriptor>(
   healthEntityDescriptors.flatMap((descriptor) =>
     descriptor.command ? [[descriptor.command.commandName, descriptor] as const] : [],
@@ -409,25 +401,11 @@ export function hasHealthCommandDescriptor(
   return Boolean(descriptor.command && descriptor.core && descriptor.query);
 }
 
-export function healthCoreHasInputCapability(
-  descriptor: Pick<HealthCoreDescriptorEntry, "core">,
-  capability: HealthUpsertInputCapability,
-) {
-  return descriptor.core.inputCapabilities.includes(capability);
-}
-
 export function healthCoreHasResultCapability(
   descriptor: Pick<HealthCoreDescriptorEntry, "core">,
   capability: HealthUpsertResultCapability,
 ) {
   return descriptor.core.resultCapabilities.includes(capability);
-}
-
-export function healthQueryHasListFilterCapability(
-  descriptor: Pick<HealthQueryDescriptorEntry, "query">,
-  capability: HealthListFilterCapability,
-) {
-  return descriptor.query.genericListFilterCapabilities.includes(capability);
 }
 
 const queryHealthDescriptors = healthEntityDescriptors.filter(hasHealthQueryDescriptor);

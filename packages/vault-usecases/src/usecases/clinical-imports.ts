@@ -737,22 +737,6 @@ function noteTextFromClinicalNote(payload: ClinicalNoteSavePayload | ClinicalNot
   return `Structured clinical note with ${sectionCount} section${sectionCount === 1 ? '' : 's'}.`
 }
 
-export async function saveClinicalNotePayload(input: {
-  vault: string
-  payload: ClinicalNoteSavePayload
-}): Promise<ClinicalImportResult> {
-  const runtime = await loadClinicalRuntime()
-  try {
-    const result = await runtime.upsertEvent({
-      vaultRoot: input.vault,
-      payload: buildClinicalNoteEventPayload(input.payload),
-    })
-    return toEventResult(input.vault, result)
-  } catch (error) {
-    toClinicalImportError(error)
-  }
-}
-
 export async function importClinicalNoteRecord(input: ClinicalImportInput): Promise<ClinicalImportResult> {
   const payload = await loadPayload(input.inputFile, clinicalNoteImportPayloadSchema, 'clinical-note')
   return importSingleClinicalEventPayload({

@@ -507,15 +507,6 @@ export function recordPath(record: JsonObject) {
   return typeof relativePath === "string" ? relativePath : undefined
 }
 
-export function buildScaffoldPayload(noun: string) {
-  const definition = healthEntityDefinitions.find((entry) => entry.noun === noun)
-  if (!definition?.scaffoldTemplate) {
-    throw new VaultCliError("invalid_payload", `No scaffold template is defined for ${noun}.`)
-  }
-
-  return definition.scaffoldTemplate
-}
-
 export function buildEntityLinks(record: {
   data: Record<string, unknown>
   relatedIds?: string[]
@@ -969,8 +960,4 @@ function isMissingFileError(error: unknown): boolean {
     "code" in error &&
     (error as { code?: unknown }).code === "ENOENT"
   )
-}
-
-export function toJournalLookupId(date: string) {
-  return `journal:${date}`
 }

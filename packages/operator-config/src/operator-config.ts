@@ -39,7 +39,6 @@ import {
 import { VaultCliError } from './vault-cli-errors.js'
 export {
   ROOT_OPTIONS_WITH_VALUES,
-  resolveEffectiveTopLevelToken,
 } from './command-helpers.js'
 export {
   expandConfiguredVaultPath,

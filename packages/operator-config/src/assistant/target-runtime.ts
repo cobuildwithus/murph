@@ -66,13 +66,6 @@ export const OPENAI_CODEX_MODEL_PROVIDER_CONFIG = {
   wireApi: 'responses',
 } as const satisfies AssistantCodexModelProviderConfig
 
-export const ASSISTANT_CODEX_MODEL_PROVIDER_CONFIGS = [
-  OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
-] as const satisfies readonly AssistantCodexModelProviderConfig[]
-
-export const ASSISTANT_CODEX_MODEL_PROVIDER_IDS =
-  ASSISTANT_CODEX_MODEL_PROVIDER_CONFIGS.map((config) => config.id)
-
 export class UnsupportedAssistantRuntimeTargetError extends Error {
   readonly code = 'ASSISTANT_RUNTIME_TARGET_UNSUPPORTED'
 

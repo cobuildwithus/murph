@@ -960,20 +960,8 @@ export type CaptureResultItem = z.infer<typeof captureResultItemSchema>
 export type CaptureAddResult = z.infer<typeof captureAddResultSchema>
 export type WorkoutAddResult = z.infer<typeof workoutAddResultSchema>
 export type WorkoutFormatSaveResult = z.infer<typeof workoutFormatSaveResultSchema>
-export type WorkoutImportInspectResult = z.infer<typeof workoutImportInspectResultSchema>
-export type WorkoutImportCsvResult = z.infer<typeof workoutImportCsvResultSchema>
-export type InterventionAddResult = z.infer<typeof interventionAddResultSchema>
 export type SamplesImportCsvResult = z.infer<
   typeof samplesImportCsvResultSchema
->
-export type SampleWindowSummaryResult = z.infer<
-  typeof sampleWindowSummarySchema
->
-export type SamplesSummarizeResult = z.infer<
-  typeof samplesSummarizeResultSchema
->
-export type SamplesCsvProfileResult = z.infer<
-  typeof samplesCsvProfileResultSchema
 >
 export type ExperimentCreateResult = z.infer<
   typeof experimentCreateResultSchema
@@ -989,7 +977,5 @@ export interface ListEntity extends Omit<ReadEntity, 'markdown' | 'data'> {
 export type ListItem = ListEntity
 export type ShowResult = z.infer<typeof showResultSchema>
 export type ListFilters = z.infer<typeof listFilterSchema>
-export type WorkoutFormatListResult = z.infer<typeof workoutFormatListResultSchema>
 export type ListResult = z.infer<typeof listResultSchema>
-export type DeleteResult = z.infer<typeof deleteResultSchema>
 export type ExportPackResult = z.infer<typeof exportPackResultSchema>

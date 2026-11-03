@@ -51,15 +51,6 @@ export function createUnwiredMethod<
   }
 }
 
-export function createUnwiredHealthMethodSet<TMethods extends string>(
-  names: readonly TMethods[],
-  group: "core" | "query",
-) {
-  return Object.fromEntries(
-    names.map((name) => [name, createUnwiredMethod(`${group}.${name}`)]),
-  ) as Record<TMethods, () => Promise<never>>
-}
-
 function isPlainObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }

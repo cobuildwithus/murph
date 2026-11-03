@@ -4,10 +4,10 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { foodLabelResponse } from './fixtures/food-label-response.ts'
 
 import {
-  foodLabelSearchItemSchema,
   searchFoodLabels,
   searchFoodLabelsBatch,
 } from '../src/food-labels.js'
+import { hostedDataApiLabelSearchItemSchema } from '../src/hosted-data-api-labels.js'
 
 const hostedRuntimeEnv = {
   MURPH_DATA_API_KEY: 'signed-murph-data-api-credential',
@@ -224,9 +224,9 @@ const yogurtContaminantSummary = {
   ],
 }
 
-describe('foodLabelSearchItemSchema', () => {
+describe('hostedDataApiLabelSearchItemSchema', () => {
   it('accepts regulatory presence findings without lab-measurement metadata', () => {
-    const parsed = foodLabelSearchItemSchema.parse({
+    const parsed = hostedDataApiLabelSearchItemSchema.parse({
       id: 'fdc:2259794',
       dataOrigin: 'usda_branded',
       dataOriginId: '2259794',
@@ -291,7 +291,7 @@ describe('foodLabelSearchItemSchema', () => {
   })
 
   it('keeps legacy contaminant payloads valid when additive test metadata is absent', () => {
-    const parsed = foodLabelSearchItemSchema.parse({
+    const parsed = hostedDataApiLabelSearchItemSchema.parse({
       id: 'fdc:2259794',
       dataOrigin: 'usda_branded',
       dataOriginId: '2259794',

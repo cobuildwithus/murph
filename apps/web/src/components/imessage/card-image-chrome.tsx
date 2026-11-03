@@ -7,7 +7,6 @@ export const IMESSAGE_CARD_COLOR = {
   systemAccent: "#007AFF",
 } as const;
 
-export const IMESSAGE_CARD_SCALE = 3.75;
 export const IMESSAGE_CARD_HORIZONTAL_PADDING = 45;
 export const IMESSAGE_CARD_VERTICAL_PADDING = 38;
 

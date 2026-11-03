@@ -20,9 +20,6 @@ vi.mock('../src/vault-cli.js', () => ({
 
 vi.mock('@murphai/operator-config/operator-config', () => ({
   expandConfiguredVaultPath: vi.fn((vault: string) => vault),
-  resolveEffectiveTopLevelToken: vi.fn(
-    (argv: readonly string[]) => argv.find((token) => !token.startsWith('-')) ?? null,
-  ),
   resolveDefaultVault,
   resolveOperatorHomeDirectory,
 }))

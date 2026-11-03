@@ -39,7 +39,6 @@ const LAB_RESULT_DEFINITIONS_BY_KEY = new Map(
   LAB_RESULT_METRICS.map((definition) => [definition.key, definition]),
 );
 const LAB_RESULT_DEFINITIONS_BY_ALIAS = new Map<string, MetricDefinition>();
-const LAB_RESULT_PRIMARY_METRIC_BY_BIOMARKER = new Map<string, MetricDefinition>();
 
 for (const definition of METRIC_DEFINITIONS) {
   for (const alias of [definition.key, ...definition.aliases]) {
@@ -60,12 +59,6 @@ for (const definition of METRIC_DEFINITIONS) {
 for (const definition of LAB_RESULT_METRICS) {
   for (const alias of [definition.key, ...definition.aliases]) {
     LAB_RESULT_DEFINITIONS_BY_ALIAS.set(normalizeMetricKey(alias), definition);
-  }
-  if (definition.biomarkerKey) {
-    LAB_RESULT_PRIMARY_METRIC_BY_BIOMARKER.set(definition.biomarkerKey, definition);
-  }
-  for (const biomarkerAlias of definition.biomarkerAliases ?? []) {
-    LAB_RESULT_PRIMARY_METRIC_BY_BIOMARKER.set(biomarkerAlias, definition);
   }
 }
 
@@ -118,12 +111,6 @@ export function resolveLabResultMetricDefinition(value: string): MetricDefinitio
   return LAB_RESULT_DEFINITIONS_BY_KEY.get(key)
     ?? LAB_RESULT_DEFINITIONS_BY_ALIAS.get(key)
     ?? null;
-}
-
-export function resolveLabResultMetricDefinitionForBiomarker(
-  biomarkerKey: string,
-): MetricDefinition | null {
-  return LAB_RESULT_PRIMARY_METRIC_BY_BIOMARKER.get(biomarkerKey) ?? null;
 }
 
 export function resolveMetricInputKey(value: string): string {

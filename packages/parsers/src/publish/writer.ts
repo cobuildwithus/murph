@@ -132,14 +132,6 @@ export async function readParserResult(input: {
   return output;
 }
 
-export async function writeParserResultFileAtomic(input: ParserResultFileInput): Promise<void> {
-  await writeEncodedParserResultFileAtomic({
-    vaultRoot: input.vaultRoot,
-    resultPath: input.resultPath,
-    encodedOutput: encodeParserOutput(input.output),
-  });
-}
-
 async function writeEncodedParserResultFileAtomic(
   input: EncodedParserResultFileInput,
 ): Promise<void> {

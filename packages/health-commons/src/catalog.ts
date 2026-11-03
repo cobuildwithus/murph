@@ -8,7 +8,6 @@ import {
   type HealthCommonsArtifactManifest,
   type HealthCommonsCatalog,
   type HealthCommonsCatalogEntity,
-  type HealthCommonsChangeRecord,
   type HealthCommonsEvidenceAppraisal,
   type HealthCommonsPageFrontmatter,
   type HealthCommonsRedirect,
@@ -1258,12 +1257,4 @@ export function collectArtifactPointers(manifests: readonly HealthCommonsArtifac
       manifestKey: manifest.manifestKey,
     })),
   );
-}
-
-export function sortChangesById(changes: readonly HealthCommonsChangeRecord[]): HealthCommonsChangeRecord[] {
-  return [...changes].sort((left, right) => left.changeId.localeCompare(right.changeId));
-}
-
-export function sortRedirects(redirects: readonly HealthCommonsRedirect[]): HealthCommonsRedirect[] {
-  return [...redirects].sort((left, right) => left.from.localeCompare(right.from));
 }

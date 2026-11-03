@@ -74,14 +74,6 @@ export async function prepareApprovalPasskeyWrite(input: {
   };
 }
 
-export function preserveApprovalPasskeyState(state: ApprovalPasskeyState): PreparedApprovalPasskeyWrite {
-  return {
-    expectedEncrypted: state.encrypted,
-    memberId: state.memberId,
-    nextEncrypted: state.encrypted,
-  };
-}
-
 // Call within the same transaction as the one-use challenge and approved
 // mutation. Holding the member lock also serializes enrollment and deletion.
 export async function commitApprovalPasskeyWriteTx(input: {

@@ -43,10 +43,6 @@ export function getGeneratedHealthCommonsWebRouteIndex(
   return cachedGeneratedWebRouteIndex;
 }
 
-export function normalizeHealthCommonsWebRouteId(value: string): string {
-  return safeDecodeURIComponent(value).trim().replace(/^\/+|\/+$/gu, "").toLowerCase();
-}
-
 function assertGeneratedWebRouteIndex(
   value: unknown,
 ): asserts value is HealthCommonsWebRouteIndex {
@@ -100,14 +96,6 @@ function parseJsonObject(raw: string): unknown {
     throw new Error("Health Commons generated artifact must be a JSON object.");
   }
   return parsed;
-}
-
-function safeDecodeURIComponent(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

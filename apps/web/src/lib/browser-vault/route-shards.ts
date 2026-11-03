@@ -29,13 +29,6 @@ export function planBrowserVaultRouteShards(
   return CORE_SHARDS;
 }
 
-export function browserVaultShardSetContains(
-  available: readonly BrowserVaultReplicaShard[],
-  required: readonly BrowserVaultReplicaShard[],
-): boolean {
-  return required.every((shard) => available.includes(shard));
-}
-
 export function normalizeBrowserVaultMetricBucketDemand(
   bucketIds: readonly BrowserVaultMetricBucketId[],
 ): BrowserVaultMetricBucketId[] {

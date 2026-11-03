@@ -21,7 +21,6 @@ import {
   httpBaseUrlSchema,
   normalizeHttpBaseUrlOption,
   requestIdFromOptions,
-  resolveEffectiveTopLevelToken,
   resolveVaultCliCommandPath,
   withBaseOptions,
 } from '../src/command-helpers.ts'
@@ -72,7 +71,7 @@ async function withTemporaryProcessEnv(
   }
 }
 
-test('command helpers normalize top-level tokens and request ids', () => {
+test('command helpers normalize command paths and request ids', () => {
   assert.deepEqual(emptyArgsSchema.parse({}), {})
   assert.deepEqual(
     withBaseOptions({
@@ -86,37 +85,6 @@ test('command helpers normalize top-level tokens and request ids', () => {
       vault: '/vault',
     },
   )
-  assert.equal(
-    resolveEffectiveTopLevelToken([
-      '--format',
-      'json',
-      '--token-limit',
-      '10',
-      'assistant',
-      'status',
-    ]),
-    'assistant',
-  )
-  assert.equal(
-    resolveEffectiveTopLevelToken([
-      '--format=json',
-      '--token-limit=10',
-      'assistant',
-      'status',
-    ]),
-    'assistant',
-  )
-  assert.equal(
-    resolveEffectiveTopLevelToken([
-      '--filter-output=result',
-      '--token-offset=5',
-      'assistant',
-      'status',
-    ]),
-    'assistant',
-  )
-  assert.equal(resolveEffectiveTopLevelToken(['', '--token-offset', '5']), null)
-  assert.equal(resolveEffectiveTopLevelToken(['--format', 'json', '--', 'show']), 'show')
   assert.deepEqual(
     resolveVaultCliCommandPath([
       '--format',

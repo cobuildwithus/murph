@@ -17,68 +17,6 @@ import type {
   HostedPhoneCountryOption,
 } from "./hosted-phone-auth-types";
 
-export function HostedInviteMaskedPhoneStep({
-  disabled,
-  pendingAction,
-  phoneHint,
-  onSendCode,
-  onUseDifferentNumber,
-}: {
-  disabled: boolean;
-  pendingAction: HostedPhoneAuthPendingAction;
-  phoneHint: string;
-  onSendCode: () => void;
-  onUseDifferentNumber: () => void;
-}) {
-  return (
-    <div className="flex flex-col gap-4">
-      <HostedInviteMaskedPhoneSummary phoneHint={phoneHint} />
-      <Button
-        aria-busy={pendingAction === "send-code"}
-        type="button"
-        disabled={disabled}
-        size="xl"
-        className="w-full"
-        onClick={onSendCode}
-      >
-        {pendingAction === "send-code" ? (
-          <>
-            <Spinner aria-hidden="true" />
-            Sending code...
-          </>
-        ) : "Send verification code"}
-      </Button>
-      <HostedUseDifferentNumberButton
-        disabled={disabled}
-        pendingAction={pendingAction}
-        size="sm"
-        onClick={onUseDifferentNumber}
-      />
-    </div>
-  );
-}
-
-
-function HostedInviteMaskedPhoneSummary({
-  phoneHint,
-}: {
-  phoneHint: string;
-}) {
-  return (
-    <div className="space-y-2">
-      <p className="text-sm font-medium leading-none text-foreground">
-        Phone number
-      </p>
-      <div className="rounded-xl border border-border bg-muted px-4 py-3">
-        <p className="text-lg font-semibold text-foreground">{phoneHint}</p>
-      </div>
-      <p className="text-sm text-muted-foreground">
-        We will text a verification code to this number.
-      </p>
-    </div>
-  );
-}
-
 export function HostedPhoneEntryStep({
   phoneFieldLabel,
   phoneFieldDescription,

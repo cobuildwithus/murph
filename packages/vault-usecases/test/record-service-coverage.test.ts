@@ -49,7 +49,6 @@ import {
   asListEnvelope,
   assertNoReservedPayloadKeys,
   buildEntityLinks,
-  buildScaffoldPayload,
   describeLookupConstraint,
   inferEntityKind,
   isQueryableRecordId,
@@ -62,7 +61,6 @@ import {
   requirePayloadObjectField,
   toGenericListItem,
   toGenericShowEntity,
-  toJournalLookupId,
 } from "../src/usecases/shared.ts";
 import {
   compactObject,
@@ -384,8 +382,6 @@ describe("shared and vault helper functions", () => {
     assert.equal(isVaultQueryableRecordId("goal_sleep"), true);
     assert.equal(describeLookupConstraint("goal_sleep"), null);
     assert.equal(describeLookupConstraint("journal:2026-04-08"), null);
-    assert.equal(toJournalLookupId("2026-04-08"), "journal:2026-04-08");
-
     assert.deepEqual(asEntityEnvelope("./vault", toGenericShowEntity(sampleQueryRecord()), "missing"), {
       vault: "./vault",
       entity: toGenericShowEntity(sampleQueryRecord()),
@@ -402,10 +398,6 @@ describe("shared and vault helper functions", () => {
     assert.equal(recordPath({ document: { relativePath: "raw/documents/doc.pdf" } }), "raw/documents/doc.pdf");
     assert.equal(recordPath({}), undefined);
 
-    const scaffold = buildScaffoldPayload("goal");
-    assert.equal(typeof scaffold, "object");
-    assert.ok(scaffold && typeof scaffold === "object");
-    assert.throws(() => buildScaffoldPayload("does-not-exist"), VaultCliError);
     assert.deepEqual(assertNoReservedPayloadKeys({ title: "ok" }), undefined);
     assert.throws(() => assertNoReservedPayloadKeys({ vault: "x" }), VaultCliError);
     assert.deepEqual(optionalStringArray([" alpha ", "beta"], "field"), ["alpha", "beta"]);
