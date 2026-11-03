@@ -1,22 +1,3 @@
-import type { DeviceSyncLogger } from "./types.ts";
-
-export function createConsoleDeviceSyncLogger(consoleLike: Console = console): DeviceSyncLogger {
-  return {
-    debug(message, context) {
-      consoleLike.debug?.(message, context ?? {});
-    },
-    info(message, context) {
-      consoleLike.info?.(message, context ?? {});
-    },
-    warn(message, context) {
-      consoleLike.warn?.(message, context ?? {});
-    },
-    error(message, context) {
-      consoleLike.error?.(message, context ?? {});
-    },
-  };
-}
-
 export {
   deviceSyncProviderRuntimeSecretEnvKeys,
   deviceSyncProviderRuntimeVariableEnvKeys,

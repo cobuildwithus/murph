@@ -115,14 +115,6 @@ export function computeRetryDelayMs(attempts: number): number {
   return sequence[retryIndex] ?? sequence[sequence.length - 1]!;
 }
 
-export function coerceRecord(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-
-  return value as Record<string, unknown>;
-}
-
 export function normalizePublicBaseUrl(value: string): string {
   const url = new URL(value);
   url.pathname = `${url.pathname.replace(/\/+$/u, "")}/`;

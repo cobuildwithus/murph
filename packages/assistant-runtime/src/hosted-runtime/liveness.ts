@@ -1,4 +1,3 @@
-export const RUNTIME_LIVENESS_DEFAULT_INTERVAL_MS = 5_000;
 export const RUNTIME_LIVENESS_TOUCH_TIMEOUT_MAX_MS = 2_000;
 
 export type RuntimeLivenessRejectionReason =

@@ -6,7 +6,6 @@ import {
   DeviceSyncError,
   buildPublicDeviceSyncErrorPayload,
   deviceSyncError,
-  formatDeviceSyncStartupError,
   isDeviceSyncError,
 } from "../src/errors.ts";
 
@@ -46,29 +45,6 @@ test("device sync errors preserve defaults, explicit fields, and causes", () => 
   assert.equal(fallback.details, undefined);
 });
 
-test("startup error formatting distinguishes device-sync, generic, and scalar failures", () => {
-  assert.equal(
-    formatDeviceSyncStartupError(
-      new DeviceSyncError({
-        code: "CONTROL_PLANE_AUTH_REQUIRED",
-        message: "Missing bearer token.",
-      }),
-    ),
-    "DeviceSyncError CONTROL_PLANE_AUTH_REQUIRED: Missing bearer token.",
-  );
-  assert.equal(
-    formatDeviceSyncStartupError(
-      new TypeError("boom", {
-        cause: Object.assign(new Error("connect failed with access_token=value"), {
-          code: "ECONNRESET",
-        }),
-      }),
-    ),
-    "TypeError UNEXPECTED_ERROR: boom | cause: Error ECONNRESET: connect failed with access_token=[redacted]",
-  );
-  assert.equal(formatDeviceSyncStartupError(42), "NON_ERROR_THROW: 42");
-});
-
 test("device sync public error payload keeps only sanitized provider status details", () => {
   const sensitiveBodySnippet =
     "account_id=acct_fake_sensitive_123 access_token=tok_fake_sensitive_456 scope=heartrate";
@@ -102,27 +78,6 @@ test("device sync public error payload keeps only sanitized provider status deta
       },
     },
   });
-});
-
-test("device sync startup error formatting omits sensitive provider response details", () => {
-  const formatted = formatDeviceSyncStartupError(
-    new DeviceSyncError({
-      code: "JUNCTION_API_REQUEST_FAILED",
-      message: "Junction API request failed for /v2/summary/activity.",
-      retryable: true,
-      httpStatus: 502,
-      details: {
-        accountId: "acct_fake_sensitive_123",
-        bodySnippet: "access_token=tok_fake_sensitive_456",
-        status: 502,
-      },
-    }),
-  );
-
-  assert.equal(formatted, "DeviceSyncError JUNCTION_API_REQUEST_FAILED: Junction API request failed for /v2/summary/activity.");
-  assert.doesNotMatch(formatted, /acct_fake_sensitive_123/u);
-  assert.doesNotMatch(formatted, /tok_fake_sensitive_456/u);
-  assert.doesNotMatch(formatted, /bodySnippet/u);
 });
 
 test("buildPublicDeviceSyncErrorPayload exposes only safe numeric status details", () => {

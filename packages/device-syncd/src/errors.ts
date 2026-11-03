@@ -36,21 +36,6 @@ export function isDeviceSyncError(error: unknown): error is DeviceSyncError {
   return error instanceof DeviceSyncError;
 }
 
-export function formatDeviceSyncStartupError(error: unknown): string {
-  if (isDeviceSyncError(error)) {
-    const message = sanitizeHostedRuntimeErrorText(error.message) ?? "[redacted]";
-    return `${error.name} ${error.code}: ${message}`;
-  }
-
-  if (error instanceof Error) {
-    const message = sanitizeHostedRuntimeErrorText(error.message) ?? "[redacted]";
-    const cause = summarizeStartupErrorCause(error);
-    return `${error.name} UNEXPECTED_ERROR: ${cause ? `${message} | cause: ${cause}` : message}`;
-  }
-
-  return `NON_ERROR_THROW: ${sanitizeHostedRuntimeErrorText(String(error)) ?? "[redacted]"}`;
-}
-
 export function buildPublicDeviceSyncErrorPayload(error: DeviceSyncError): {
   error: {
     code: string;
@@ -92,31 +77,4 @@ function readDeviceSyncErrorStatusDetail(
         : Number.NaN;
 
   return Number.isInteger(status) && status >= 100 && status <= 599 ? status : null;
-}
-
-function summarizeStartupErrorCause(error: Error): string | null {
-  const cause = error.cause;
-
-  if (!(cause instanceof Error)) {
-    return null;
-  }
-
-  const message = sanitizeHostedRuntimeErrorText(cause.message);
-  if (!message) {
-    return null;
-  }
-
-  const code = readErrorCode(cause);
-  return code ? `${cause.name} ${code}: ${message}` : `${cause.name}: ${message}`;
-}
-
-function readErrorCode(error: Error): string | null {
-  if (!("code" in error)) {
-    return null;
-  }
-
-  const value = error.code;
-  return typeof value === "string" && value.length > 0
-    ? sanitizeHostedRuntimeErrorText(value)?.replace(/\s+/gu, "_") ?? null
-    : null;
 }

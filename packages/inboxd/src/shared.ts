@@ -187,10 +187,6 @@ export function buildSnippet(...sources: Array<string | null | undefined>): stri
   return "";
 }
 
-export async function ensureParentDirectory(filePath: string): Promise<void> {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-}
-
 function sha256Hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }

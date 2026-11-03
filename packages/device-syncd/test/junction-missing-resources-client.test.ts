@@ -5,7 +5,6 @@ import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junct
 
 import {
   JunctionClient,
-  resolveJunctionTimeseriesApiResource,
 } from "../src/providers/junction-client.ts";
 import { createJsonResponse, readUrl } from "./helpers.ts";
 
@@ -25,26 +24,6 @@ const WINDOW = {
 };
 
 test("Junction timeseries API mapping changes only public fat and legacy weight names", async () => {
-  assert.equal(resolveJunctionTimeseriesApiResource("fat"), "body_fat");
-  assert.equal(resolveJunctionTimeseriesApiResource("weight"), "body_weight");
-  assert.equal(resolveJunctionTimeseriesApiResource("body_mass_index"), "body_mass_index");
-  for (const resource of [
-    "calories_basal",
-    "daylight_exposure",
-    "fall",
-    "floors_climbed",
-    "handwashing",
-    "stand_duration",
-    "stand_hour",
-    "uv_exposure",
-    "wheelchair_push",
-    "workout_distance",
-    "workout_duration",
-    "workout_swimming_stroke",
-  ]) {
-    assert.equal(resolveJunctionTimeseriesApiResource(resource), resource);
-  }
-
   const paths: string[] = [];
   const client = createClient(async (input) => {
     paths.push(new URL(readUrl(input)).pathname);

@@ -740,12 +740,6 @@ export function findHostedExecutionDeviceSyncRuntimeApplyEntry(
   return response.updates.find((entry) => entry.connectionId === connectionId) ?? null;
 }
 
-export function didHostedExecutionDeviceSyncRuntimeApplyConnectionWrite(
-  entry: Pick<HostedExecutionDeviceSyncRuntimeApplyEntry, "writeUpdate"> | null,
-): boolean {
-  return entry?.writeUpdate === "applied";
-}
-
 export interface HostedExecutionDeviceSyncJobHint {
   availableAt?: string;
   dedupeKey?: string | null;

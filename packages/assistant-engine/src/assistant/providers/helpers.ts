@@ -71,26 +71,6 @@ function requireAssistantProviderUserPrompt(
   )
 }
 
-function hasAssistantProviderUsableNativeResume(
-  input: AssistantProviderTurnExecutionInput,
-): boolean {
-  return normalizeNullableString(input.resume?.codexThreadId) !== null
-}
-
-export type AssistantProviderHistoryMode =
-  | 'none'
-  | 'structured-messages'
-
-export function resolveAssistantProviderHistoryMode(
-  input: AssistantProviderTurnExecutionInput,
-): AssistantProviderHistoryMode {
-  if (hasAssistantProviderUsableNativeResume(input)) {
-    return 'none'
-  }
-
-  return 'structured-messages'
-}
-
 function resolveAssistantProviderContextSections(
   input: AssistantProviderTurnExecutionInput,
 ): string[] {

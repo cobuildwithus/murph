@@ -44,22 +44,6 @@ export {
   resolveRouteParams,
 } from "../http";
 
-export function callbackHtml(title: string, body: string, status = 200): NextResponse {
-  return new NextResponse(
-    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${escapeHtml(
-      title,
-    )}</title></head><body><main><h1>${escapeHtml(title)}</h1><p>${escapeHtml(
-      body,
-    )}</p></main></body></html>`,
-    {
-      headers: mergeJsonHeaders(HOSTED_DEVICE_SYNC_DEFAULT_HEADERS, {
-        "content-type": "text/html; charset=utf-8",
-      }),
-      status,
-    },
-  );
-}
-
 export function redirectTo(url: string): NextResponse {
   return NextResponse.redirect(url, {
     headers: mergeJsonHeaders(HOSTED_DEVICE_SYNC_DEFAULT_HEADERS),
@@ -92,15 +76,6 @@ export function errorToCallbackRedirect(input: {
     errorCode: input.error.code,
   });
   return location ? redirectTo(location) : null;
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
 }
 
 function matchDeviceSyncError(error: unknown): JsonErrorMapping | null {

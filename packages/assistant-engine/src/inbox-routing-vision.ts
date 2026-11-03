@@ -102,12 +102,6 @@ export function getRoutingImageEligibility(
   }
 }
 
-export function shouldBypassParserWaitForRouting(
-  attachment: InboxAttachment,
-): boolean {
-  return getRoutingImageEligibility(attachment).eligible
-}
-
 function hasStoredPath(value: string | null | undefined): value is string {
   return typeof value === 'string' && value.trim().length > 0
 }

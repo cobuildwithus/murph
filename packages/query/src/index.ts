@@ -421,7 +421,6 @@ export {
   normalizeKnowledgeSlug,
   normalizeKnowledgeTag,
   orderedUniqueStrings,
-  sameKnowledgeStringSet,
   summarizeKnowledgeBody,
 } from "./knowledge-model.ts";
 export {

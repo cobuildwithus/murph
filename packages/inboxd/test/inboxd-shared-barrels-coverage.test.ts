@@ -33,7 +33,6 @@ import {
   buildSnippet,
   createDeterministicInboxCaptureId,
   createInboxCaptureIdentityKey,
-  ensureParentDirectory,
   generatePrefixedId,
   normalizeRelativePath,
   normalizeStoredAttachments,
@@ -252,7 +251,7 @@ test("shared helper wrappers translate cross-package path errors into TypeErrors
   );
 });
 
-test("filesystem helpers create parent directories, hash content, and walk named files with skips", async () => {
+test("filesystem helpers hash content and walk named files with skips", async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "inboxd-shared-coverage-"));
 
   try {
@@ -263,7 +262,7 @@ test("filesystem helpers create parent directories, hash content, and walk named
     const hashedFile = path.join(tempRoot, "hash.txt");
 
     await mkdir(skippedDirectory, { recursive: true });
-    await ensureParentDirectory(targetFile);
+    await mkdir(nestedDirectory, { recursive: true });
     await writeFile(targetFile, "alpha");
     await writeFile(skippedFile, "hidden");
     await writeFile(hashedFile, "murph");

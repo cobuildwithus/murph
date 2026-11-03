@@ -40,28 +40,6 @@ export function resolveWearableProviderPriority(
   });
 }
 
-export function isPreferredWearableProvider(
-  metric: WearableMetricKey,
-  provider: string,
-  providers: readonly string[],
-  options: {
-    metricFamily?: WearableMetricPolicyFamily;
-  } = {},
-): boolean {
-  const normalizedProvider = normalizeLowercaseString(provider);
-
-  if (!normalizedProvider) {
-    return false;
-  }
-
-  const bestProvider = [...providers]
-    .map((value) => normalizeLowercaseString(value))
-    .filter((value): value is string => Boolean(value))
-    .sort((left, right) => compareWearableProviders(metric, left, right, options))[0];
-
-  return bestProvider === normalizedProvider;
-}
-
 export function compareWearableProviders(
   metric: WearableMetricKey,
   left: string,

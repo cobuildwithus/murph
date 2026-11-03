@@ -1,18 +1,10 @@
 import assert from "node:assert/strict";
-import { Console } from "node:console";
-import { createHmac } from "node:crypto";
-import { Writable } from "node:stream";
 import { test } from "vitest";
-
-import {
-  JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
-} from "@murphai/importers/device-providers/junction-resources";
 
 import {
   cloneConfiguredDeviceSyncRuntimeConfig,
   cloneSerializableConfiguredDeviceSyncProviderConfigs,
   configuredDeviceSyncProviderKeys,
-  createConsoleDeviceSyncLogger,
   createConfiguredDeviceSyncRegistry,
   deviceSyncProviderRuntimeSecretEnvKeys,
   deviceSyncProviderRuntimeVariableEnvKeys,
@@ -277,32 +269,6 @@ test("parseConfiguredDeviceSyncRuntimeConfig rejects Junction timeseries resourc
       ),
     /runtime\.deviceSync\.providerConfigs\.junction\.timeseriesResources is code-owned/u,
   );
-});
-
-test("createConsoleDeviceSyncLogger forwards messages and defaults missing context to an empty object", () => {
-  const writes: string[] = [];
-  const sink = new Writable({
-    write(chunk, _encoding, callback) {
-      writes.push(String(chunk));
-      callback();
-    },
-  });
-  const logger = createConsoleDeviceSyncLogger(new Console({ stdout: sink, stderr: sink }));
-  const debug = requireValue(logger.debug);
-  const info = requireValue(logger.info);
-  const warn = requireValue(logger.warn);
-  const error = requireValue(logger.error);
-
-  debug("debug message");
-  info("info message", { connected: true });
-  warn("warn message");
-  error("error message", { retryable: false });
-
-  const output = writes.join("");
-  assert.match(output, /debug message \{\}/u);
-  assert.match(output, /info message \{ connected: true \}/u);
-  assert.match(output, /warn message \{\}/u);
-  assert.match(output, /error message \{ retryable: false \}/u);
 });
 
 test("only Junction is configured and runtime serialization preserves its secret boundary", () => {
