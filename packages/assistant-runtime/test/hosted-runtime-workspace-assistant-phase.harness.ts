@@ -13,6 +13,7 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
+  buildHostedExecutionMealPhotoCapturedWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionPendingEffectsReconcileRequestedWake,
   buildHostedExecutionRuntimeControlWake,
@@ -2025,6 +2026,33 @@ function createPendingEffectsReconcileSystemMailboxItem() {
   };
 }
 
+/** A photo the member explicitly sent from the app, re-queued for its estimation reply. */
+function createManualMealPhotoNotificationSystemMailboxItem(
+  input: { origin?: "automatic" | "manual" } = {},
+) {
+  const captureId = "c".repeat(64);
+  const eventId = `meal-photo:${input.origin ?? "manual"}:${captureId}`;
+  return {
+    ...createSystemMailboxItem(),
+    attemptCount: 0,
+    itemId: "system_mailbox_item_manual_meal_photo",
+    mailboxDedupeKey: eventId,
+    occurredAt: "2026-04-27T00:02:00.000Z",
+    routeAction: "dispatch-assistant-notification" as const,
+    wake: buildHostedExecutionMealPhotoCapturedWake({
+      byteLength: 4,
+      captureId,
+      capturedAt: "2026-04-27T00:02:00.000Z",
+      directRoute: { channel: "linq", threadId: "linq_private_thread" },
+      eventId,
+      mealPhotoKey: "d".repeat(40),
+      memberId: "member_synthetic_phase",
+      occurredAt: "2026-04-27T00:02:00.000Z",
+      sha256: "e".repeat(64),
+    }),
+  };
+}
+
 function createAssistantAskCompletionSystemMailboxItem() {
   return {
     ...createSystemMailboxItem(),
@@ -2084,6 +2112,7 @@ export {
   createFailedDeliveryOutcome,
   createGroupRoomModelInitializationSystemMailboxItem,
   createMaintenanceSystemMailboxItem,
+  createManualMealPhotoNotificationSystemMailboxItem,
   createMemberActionSystemMailboxItem,
   createMemberActivationSignupWelcomeSystemMailboxItem,
   createMemberPreferencesSystemMailboxItem,

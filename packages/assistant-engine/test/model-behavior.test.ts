@@ -1299,7 +1299,12 @@ describe('assistant system prompt cache stability', () => {
     // Dish-name and consumed-food guidance adds 478 characters. Complete
     // provider input grows 487 UTF-8 bytes for direct turns and zero for groups;
     // focused live naming and non-food closeout journeys cover the behavior.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(79_430)
+    // The private unresolved meal-photo arrival rule adds 307 characters so an
+    // ordinary reply asks for a photo's missing contents or amount instead of
+    // reporting it logged as unknown. Direct input grows 307 UTF-8 bytes and
+    // groups are unchanged; focused Terra arrival-check journeys moved from 0/3
+    // to 5/5. Retain the prior 128-character margin.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(79_737)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -1606,7 +1611,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toMatchInlineSnapshot(`"68a1d5108af16ff8649843be4ab7aa231321228a52be79e80f0f3010cfea7c67"`)
-    expect(promptA.cacheMetadata.stableRouteCapabilityPromptHash).toMatchInlineSnapshot(`"368551959d87cc9f86eead9a4951d5ad63905f5309e114dc3c555a385eec284d"`)
+    expect(promptA.cacheMetadata.stableRouteCapabilityPromptHash).toMatchInlineSnapshot(`"c636dea248569b4b041de827f6954d50768ed7b895fa9b8d7e5273b9c37d065f"`)
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
     )
@@ -1816,6 +1821,20 @@ describe('assistant Murph onboarding guidance', () => {
 })
 
 describe('assistant conversation scope', () => {
+  it('asks about an unresolved meal photo when a private member checks it arrived', () => {
+    const rule = 'If it is still unclear what the meal was or how much was eaten, confirm it arrived and ask one short question for the missing contents or amount'
+    const directPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+    const groupPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      assistantHostedGroupToolSurface: 'families',
+      channel: 'linq',
+      conversationScope: 'group',
+      hostedRuntime: true,
+    }))
+
+    expect(directPrompt).toContain(rule)
+    expect(groupPrompt).not.toContain(rule)
+  })
+
   it('discovers explicit current-sender personal Murph consultation without broadening group authority', () => {
     const groupPrompt = buildAssistantSystemPrompt(
       createCommonCodexPromptInput({

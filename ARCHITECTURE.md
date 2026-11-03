@@ -2562,7 +2562,10 @@ After canonical import, an unconsumed manual capture (the server-owned
 through the existing model-capable notification lane. The runtime constructs
 an isolated, tool-enabled private turn to inspect and enrich the saved meal,
 or ask for essential missing identity or amount. It retains the original meal
-and a stable delivery identity across retries. Automatic captures remain
+and a stable delivery identity across retries. The member is waiting for that
+reply, so the foreground-causal selector owns its exact queued intent: chat input
+arriving mid-estimation cannot strand it behind the background yield, and the
+chat waits for the next pass. Automatic captures remain
 import-only until a meal-related turn or closeout. Ordinary private meal
 logging also recovers incomplete meals for the selected date before attempting
 a complete daily card, while preserving nonnumeric tracking preferences.
