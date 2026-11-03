@@ -10,7 +10,7 @@ import { appendPreparedHostedMailboxEnvelopeTx, prepareHostedMailboxEnvelopeAppe
 import { assertHostedAssistantNotificationRouteAuthority, bindHostedAssistantNotificationDestination, resolveHostedAssistantNotificationDestination } from "../hosted-routing/assistant-notification-destination";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
-import { gameChatPlayerIds, hasGameChatBlock, readGameChatAudience, bindPairGameChat, findExistingGameChat, requireExactChat } from "./chat-membership";
+import { readGroupGameChatAuthority, type GameChatAudience, bindPairGameChat, findExistingGameChat, requireExactChat } from "./chat-membership";
 import { prepareGameChatBootstrap, reconcileFrozenGameChatBootstrapReceipt } from "./chat-bootstrap";
 import { gameChatLifecycleEventId, gameMissedDayEventId, markGameChatGenerationQueuedTx, type GameChatLifecycleKind } from "./chat-lifecycle-receipt";
 import { isGameOn } from "./access";
@@ -167,10 +167,10 @@ function lifecycleStatuses(kind: GameChatLifecycleKind): string[] {
   return kind === "rematch" ? ["invited"] : kind === "recap" ? ["settled"] : kind === "missed" ? ["live"] : kind === "change_expired" ? ["live", "negotiating", "settled", "void"] : kind === "cancelled" ? ["void"] : kind === "started" ? ["live"] : ["live", "negotiating"];
 }
 
-type GameChatLifecycleRecord = Game & { players: Array<{ memberId: string | null }>; invitees: Array<{ memberId: string | null }> };
+type GameChatLifecycleRecord = Game & { players: Array<{ memberId: string | null; seat: number; leftAt: Date | null }>; invitees: Array<{ memberId: string | null }> };
 
 function lifecyclePlayerMemberIds(game: GameChatLifecycleRecord | null, kind: GameChatLifecycleKind): string[] {
-  if (game?.maxPlayers === 10) return gameChatPlayerIds(game);
+  if (game?.maxPlayers === 10) return game.players.flatMap(player => player.memberId && !player.leftAt ? [player.memberId] : []);
   if (kind !== "rematch") return game?.players.flatMap(player => player.memberId ? [player.memberId] : []) ?? [];
   if (!game?.createdBy || !game.invitees[0]?.memberId || game.players.length !== 1 || game.players[0]?.memberId !== game.createdBy) return [];
   return [game.createdBy, game.invitees[0]?.memberId];
@@ -185,13 +185,13 @@ function isCurrentGameChatLifecycle(
 ): game is GameChatLifecycleRecord {
   return Boolean(game && statuses.includes(game.status)
     && (kind !== "rematch" || !isGameInviteExpired(game, now))
-    && isGameMemberSet(players) && (game.maxPlayers !== 10 || !["missed", "change_cancelled", "change_expired"].includes(kind)));
+    && (game.maxPlayers === 10 ? players.length > 0 : isGameMemberSet(players)) && (game.maxPlayers !== 10 || !["missed", "change_cancelled", "change_expired"].includes(kind)));
 }
 
 export async function deliverGameChatLifecycle(gameId: string, kind: GameChatLifecycleKind, proposalId?: string, now = new Date(), regenerationId?: string): Promise<boolean> {
   const prisma = getPrisma();
   const eventId = gameChatLifecycleEventId(gameId, kind, proposalId, regenerationId);
-  const game = await prisma.game.findUnique({ where: { id: gameId }, include: { invitees: true, players: { select: { memberId: true, leftAt: true }, take: 11 } } });
+  const game = await prisma.game.findUnique({ where: { id: gameId }, include: { invitees: true, players: { select: { memberId: true, leftAt: true, seat: true }, take: 11 } } });
   const statuses = lifecycleStatuses(kind);
   const boundOnly = game?.maxPlayers === 10 || ["rematch", "cancelled", "change_expired", "recap"].includes(kind);
   const players = lifecyclePlayerMemberIds(game, kind);
@@ -199,7 +199,7 @@ export async function deliverGameChatLifecycle(gameId: string, kind: GameChatLif
     await prisma.hostedLinqDelivery.updateMany({ where: { source: "game_lifecycle", idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(eventId), template: `game_${kind}`, status: "awaiting_generation" }, data: { status: "skipped", skippedAt: now, skipReason: "game_lifecycle_superseded", retryAfterAt: null } });
     return false;
   }
-  if (!isGameOn(game) || (game.maxPlayers === 10 && await hasGameChatBlock(prisma, players))) return false;
+  if (!isGameOn(game)) return false;
   // Cancellation needs no private words or shared projection (void games are
   // absent there), and must never discover or create a new chat.
   if (boundOnly && !game.chatContainerMemberId) return false;
@@ -210,7 +210,7 @@ export async function deliverGameChatLifecycle(gameId: string, kind: GameChatLif
 
 async function deliverGameMissedDayLifecycle(gameId: string, memberId: string, firstMissedDate: string): Promise<boolean> {
   const prisma = getPrisma();
-  const game = await prisma.game.findUnique({ where: { id: gameId }, include: { invitees: true, players: { select: { memberId: true, leftAt: true }, take: 11 } } });
+  const game = await prisma.game.findUnique({ where: { id: gameId }, include: { invitees: true, players: { select: { memberId: true, leftAt: true, seat: true }, take: 11 } } });
   const players = game?.players.flatMap(player => player.memberId ? [player.memberId] : []) ?? [];
   const statuses = lifecycleStatuses("missed");
   if (!game || game.maxPlayers === 10 || !game.chatContainerMemberId || !statuses.includes(game.status) || !isPairRoster(players) || !players.includes(memberId)) return false;
@@ -257,11 +257,11 @@ async function deliverCurrentGameChatLifecycle(input: {
   const { boundOnly, eventId, game, gameId, instructions, kind, players, prisma } = input;
   if (game.maxPlayers === 10) {
     if (!game.chatContainerMemberId) return false;
-    const audience = await readGameChatAudience(game.chatContainerMemberId);
-    if (!game.audienceKey || !audience.keys.candidates.includes(game.audienceKey)) return false;
+    const audience = await readGroupGameChatAuthority(game, game.chatContainerMemberId);
+    if (!audience) return false;
     const destination = await resolveHostedAssistantNotificationDestination({ memberId: game.chatContainerMemberId, prisma });
     if (!destination || destination.conversationShape !== "thread-container" || destination.route.channel !== "linq") return false;
-    return enqueueGameLifecycle({ containerMemberId: game.chatContainerMemberId, gameId, kind, eventId, instructions, destination, players });
+    return enqueueGameLifecycle({ audience, containerMemberId: game.chatContainerMemberId, gameId, kind, eventId, instructions, destination, players });
   }
   const identities = await Promise.all(players.map((memberId) => readHostedMemberIdentity({ memberId, prisma })));
   const phones = identities.flatMap((identity) => identity?.phoneNumberVerifiedAt && identity.phoneNumber ? [identity.phoneNumber] : []);
@@ -315,6 +315,7 @@ async function lifecycleInstructions(game: Pick<Game, "id" | "chatContainerMembe
 }
 
 async function enqueueGameLifecycle(input: {
+  audience?: GameChatAudience;
   containerMemberId: string; gameId: string; kind: GameChatLifecycleKind; eventId: string; instructions: string;
   players: readonly string[];
   destination: NonNullable<Awaited<ReturnType<typeof resolveHostedAssistantNotificationDestination>>>;
@@ -343,8 +344,9 @@ async function enqueueGameLifecycle(input: {
   const appended = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     if (bound.externalThreadRouteAuthority) await assertHostedAssistantNotificationRouteAuthority({ authority: bound.externalThreadRouteAuthority, prisma: tx });
     const current = await tx.game.findFirst({ where: { id: input.gameId, status: { in: lifecycleStatuses(input.kind) }, chatContainerMemberId: input.containerMemberId },
-      select: { id: true, inviteExpiresAt: true, status: true } });
+      include: { players: { take: 11 } } });
     if (!current || (input.kind === "rematch" && isGameInviteExpired(current, new Date()))) return null;
+    if (input.audience && !await readGroupGameChatAuthority(current, input.containerMemberId, input.audience, tx)) return null;
     const result = await appendPreparedHostedMailboxEnvelopeTx({ prepared, tx });
     await markGameChatGenerationQueuedTx(input.eventId, tx, input.containerMemberId);
     return result;

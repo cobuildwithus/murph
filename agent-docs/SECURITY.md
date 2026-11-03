@@ -1839,16 +1839,26 @@ existing accounting and provider access checks.
 
 ## Weekly game chat authority
 
-Group rooms require complete provider handles matching the original keyed
-addressed audience (2–10 people), plus local membership and current route
-ownership. Composer association accepts only a canonical invite URL from ordinary
-verified inbound admission and revalidates verified contact ownership in the
-transaction. It does not join invitees or accept bearer-only room members.
+Group room authority belongs to `readGroupGameChatAuthority`: complete provider
+handles with exactly one active Murph handle must match the original keyed
+addressed audience (2–10 people), using rotation read candidates and current
+Linq routing. Seated players must occupy addressed seats 0–9; departures and
+outside bearer seats suppress shared projections. Resolve verified accounts
+where they exist and check restrictions over their union with seated players.
+Unresolved handles are valid audience evidence and do not acquire account rights.
+
+Composer association is best-effort and accepts exactly one configured-origin
+invite token from a verified starter or seated sender. It binds only; ordinary
+join claims the seat after matching memberId or verified contact read keys and
+checking legal/profile prerequisites. A savepoint protects ordinary ingestion
+from association statement failures. Diagnostics contain fixed reason codes only.
 Groups have no automatic bootstrap producer and cannot silently change rooms.
-Before generated shared material and lifecycle egress, check departures, outsiders,
-blocks and revoked consent; final egress also compares the provider thread target.
-Any group report withholds the shared recap, including media and quotes. Private
-labels and prior private/lore context never enter group recap instructions.
+Only seated players have names, status and content in shared projections;
+unjoined invitees appear only as counts. Private pending labels stay with the
+starter. Final lifecycle egress repeats the authority check and verifies the
+provider target. Lifecycle notices and recap links contain text only. Any group
+report withholds the shared recap, including media and quotes; private lore never
+enters group recap instructions.
 
 
 Game proposals are structural metadata under the canonical game lock. The

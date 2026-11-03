@@ -166,7 +166,10 @@ it("requires one kind superlative per eligible group member and rejects hidden q
   const input = { recap, group: true, players: result.map(p => p.name), result, entries: [] };
   expect(validateGameRecap(input)).toEqual([]);
   expect(validateGameRecap({ ...input, recap: { ...recap, superlatives: recap.superlatives!.slice(1) } })).toContainEqual(expect.stringContaining("exactly one"));
-  expect(validateGameRecap({ ...input, recap: { ...recap, chatLine: "Player 1 missed every day." } })).toContainEqual(expect.stringContaining("shame"));
+  expect(validateGameRecap({ ...input, recap: { ...recap, chatLine: "Player 1 didn’t post." } })).toContainEqual(expect.stringContaining("shame"));
+  for (const chatLine of ["Player 1 never missed a day.", "Nobody missed. A week of new routes."]) {
+    expect(validateGameRecap({ ...input, recap: { ...recap, chatLine } })).not.toContainEqual(expect.stringContaining("shame"));
+  }
   const hidden = { entryId: "hidden", kind: "words", playerName: "Player 1", text: "A hidden sentence", visibleToBoth: false };
   const pages = [...recap.pages, { background: "paper" as const, blocks: [{ kind: "quote" as const, quote: { who: "Player 1", text: hidden.text } }, { kind: "photo" as const, entryIds: [hidden.entryId] }] }];
   const errors = validateGameRecap({ ...input, entries: [hidden], recap: { ...recap, pages } });

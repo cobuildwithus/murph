@@ -85,6 +85,9 @@ export const POST = withJsonError(async (request: Request) => {
 
   const gameChatPlayers = await readGameProposalDeliveryPlayers(idempotencyKey, userId, expectedResolvedRoute?.target ?? target);
 
+  const gameAuthority = gameChatPlayers && "memberIds" in gameChatPlayers
+    ? { playerMemberIds: gameChatPlayers.memberIds, audience: gameChatPlayers } : { playerMemberIds: gameChatPlayers };
+
   const assertion = await prisma.$transaction(async (tx) => {
     const chatLockTarget = targetKind === "participant"
       ? null
@@ -127,7 +130,7 @@ export const POST = withJsonError(async (request: Request) => {
     const requestedGameProposal = await assertGameProposalDeliveryCurrentTx({
       deliveryIdempotencyKey: idempotencyKey,
       containerMemberId: userId,
-      playerMemberIds: gameChatPlayers,
+      ...gameAuthority,
       tx,
     });
 

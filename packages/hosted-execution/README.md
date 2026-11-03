@@ -139,7 +139,8 @@ metadata. They have no executable wake, callback, or callback validator.
 ## Group game deploy compatibility
 
 The game consumer accepts 2–10 players, optional `maxPlayers: 10`, group ticket
-seat sets and `edit_terms`. New runners request these through signed
+seat sets, anonymous `pendingInviteeCount` and `edit_terms`. Shared player lists
+contain seated people only; unresolved invitees do not prevent exact-room tools. New runners request these through signed
 `gameMultiplayer=1` on the existing groups/tool URL, leaving request JSON unchanged.
 Web hides groups from unmarked readers before collection limits and rejects their
 group writes; existing strict pair readers keep working. Old Web ignores the

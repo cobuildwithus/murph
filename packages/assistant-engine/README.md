@@ -653,7 +653,8 @@ Group game tools consume the capable hosted-execution contract and choose group
 instructions from immutable `maxPlayers: 10`, including a two-person turnout.
 Only the starter edits terms before Day 1; group instructions prohibit change
 requests, Start now, person-to-person nudges and missed-person shaming. Stable
-numbered first names disambiguate people. Shared recaps require one kind
+numbered first names disambiguate seated people. Unjoined addressees appear
+only as a count; tools preserve their private task overrides during starter edits. Shared recaps require one kind
 superlative per eligible person and exclude private lore. The focused real-Codex
 journey `group game addressed acceptance with duplicate first names` exercises
 production prompt builders, read_game and canonical approve arguments.

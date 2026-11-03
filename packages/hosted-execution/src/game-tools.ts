@@ -25,7 +25,7 @@ export const hostedGameCreateTermsSchema = z.object({
 }).strict();
 export const hostedGameUpdateSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("create"), gameId, terms: hostedGameCreateTermsSchema, previousGameId: gameId.optional(), groupWord: z.string().trim().min(1).max(40).optional() }).strict(),
-  z.object({ operation: z.literal("edit_terms"), gameId, expectedTermsVersion: z.number().int().min(1), terms: hostedGameCreateTermsSchema.extend({ defaultTask: z.string().min(1).max(200) }) }).strict(),
+  z.object({ operation: z.literal("edit_terms"), gameId, expectedTermsVersion: z.number().int().min(1), terms: hostedGameCreateTermsSchema.extend({ defaultTask: z.string().min(1).max(200), tasks: z.array(hostedGameCreateTermsSchema.shape.tasks.element).min(1).max(10) }) }).strict(),
   z.object({ operation: z.enum(["mark_incomplete", "restore_day"]), gameId, date }).strict(),
   z.object({ operation: z.literal("propose"), gameId, proposalId: gameId, expectedTermsVersion: z.number().int().min(1), change: hostedGameChangeSchema }).strict(),
   z.object({ operation: z.literal("approve"), gameId, proposalId: gameId.optional(), expectedTermsVersion: z.number().int().min(1).optional() }).strict().refine(value => (value.proposalId !== undefined) !== (value.expectedTermsVersion !== undefined), "Approval needs proposalId or expectedTermsVersion."),
@@ -106,10 +106,10 @@ const result = z.object({
   tickets: z.array(z.object({ owedByMemberId: z.string().max(128), owedToMemberId: z.string().max(128), owedBySeats: z.array(z.number().int()).max(10).optional(), owedToSeats: z.array(z.number().int()).max(10).optional(), what: z.string().max(500), status: z.enum(["open", "redeemed", "expired"]), count: z.number().int().min(1) }).strict()).max(48),
 }).strict();
 export const hostedGameChatStateSchema = z.object({
-  players: z.array(z.object({ memberId: ref, firstName: z.string().max(200).nullable(), timeZone: z.string().max(100).nullable(), isSender: z.boolean() }).strict()).min(2).max(10).optional(),
+  players: z.array(z.object({ memberId: ref, firstName: z.string().max(200).nullable(), timeZone: z.string().max(100).nullable(), isSender: z.boolean() }).strict()).min(1).max(10).optional(),
   games: z.array(z.object({
   maxPlayers: z.literal(10).optional(),
-  invitees: z.array(z.object({ memberId: ref, seat: z.number().int(), firstName: z.string().max(200) }).strict()).max(9).optional(),
+  pendingInviteeCount: z.number().int().min(0).max(9).optional(),
   id: ref, status: z.enum(["invited", "negotiating", "live", "settled", "void"]), terms,
   startsOn: date.nullable(), lengthDays: z.number().int().min(1).max(365),
   players: z.array(z.object({ memberId: ref, seat: z.number().int(), firstName: z.string().max(200), dayOne: date.nullable(), timeZone: z.string().max(100) }).strict()).max(10),

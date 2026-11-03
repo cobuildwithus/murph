@@ -364,3 +364,10 @@ it('exposes optional member-addressed superlatives with shared grounding', () =>
   expect(MURPH_WRITE_RECAP_TOOL.inputSchema.properties).toHaveProperty('superlatives')
   for (const phrase of ['eligible player memberIds', 'text all players can see', '2–6 words', 'differ between players', 'bodies or weight']) expect(MURPH_WRITE_RECAP_TOOL.description).toContain(phrase)
 })
+
+it('offers one seated task for a group starter edit', () => {
+  expect(parse('update_game', { messageRef: inputId, operation: 'edit_terms', gameId: 'game_group_one', expectedTermsVersion: 1,
+    terms: { defaultTask: 'Walk', tasks: [{ memberId: 'player_0', text: 'Walk' }], schedule: { count: 5 }, stakes: [{ kind: 'prize', item: 'Choose lunch' }] } })).toMatchObject({ kind: 'game' })
+  expect(GAME_GROUP_CHAT_GUIDANCE).toContain('pendingInviteeCount')
+  expect(GAME_GROUP_CHAT_GUIDANCE).toContain('server preserves private unjoined overrides')
+})

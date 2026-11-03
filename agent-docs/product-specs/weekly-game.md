@@ -49,7 +49,10 @@ Exact-group chat, composer handoff, group recaps and hosted tools are implemente
 behind the same dark admission switch. See `ARCHITECTURE.md` § Exact audience
 group chat for the preparation/binding/egress boundary. The create response
 returns `composer: { murphPhoneNumber }` only when preparation selects that path;
-the app supplies the selected people and invite link to Messages.
+the app supplies the selected people and invite link to Messages. The verified
+starter’s invite message binds by exact keyed provider handles even before
+relatives join Murph. Binding never claims seats. Unjoined people appear only as
+a count in chat; they do not block text kickoff or recap.
 
 Runner compatibility is consumer-first: deploy Web, then the Cloudflare runner.
 The new runner opts in with signed `gameMultiplayer=1`; old runners remain

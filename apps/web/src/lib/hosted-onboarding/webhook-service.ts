@@ -666,7 +666,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
             });
             if (planningEvent.event_type === "message.received") {
               const gameContext = resolveHostedOnboardingLinqMessageContext(planningEvent);
-              if (gameContext.messageEvent.data.chat?.is_group) preparation.preparedGameInvite =
+              if (!gameContext.summary.isFromMe && gameContext.messageEvent.data.chat?.is_group) preparation.preparedGameInvite =
                 await prepareGameChatInvite(gameContext.summary.text ?? "", gameContext.summary.chatId);
             }
             if (preparation.preparedDirectMailboxPayloadRoot) {

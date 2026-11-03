@@ -46963,8 +46963,8 @@ describeRealCodex('real Codex exact group games', () => {
               accepted = true
             }
             return hostedGameToolResponseSchema.parse({ action: request.action, result: { status: 'ok', state: {
-              players, games: [{ id: 'game_group_fixture', maxPlayers: 10, invitees: players.slice(1).map((player, index) => ({ memberId: player.memberId, firstName: player.firstName, seat: index + 1 })), status: accepted ? 'live' : 'invited', lengthDays: 7, startsOn: null,
-                terms: { n: 1, fromDay: 0, tasks: players.map((_, seat) => ({ seat, text: 'Walk outside' })), defaultTask: 'Walk outside', schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: 'prize', item: 'Choose lunch' }] },
+              players: players.slice(0, accepted ? 2 : 1), games: [{ id: 'game_group_fixture', maxPlayers: 10, pendingInviteeCount: accepted ? 1 : 2, status: accepted ? 'live' : 'invited', lengthDays: 7, startsOn: null,
+                terms: { n: 1, fromDay: 0, tasks: players.slice(0, accepted ? 2 : 1).map((_, seat) => ({ seat, text: 'Walk outside' })), defaultTask: 'Walk outside', schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: 'prize', item: 'Choose lunch' }] },
                 players: players.slice(0, accepted ? 2 : 1).map((player, seat) => ({ memberId: player.memberId, firstName: player.firstName, timeZone: player.timeZone, seat, dayOne: accepted ? '2030-03-06' : null })),
                 pendingChange: null, changeControls: { canStartNow: false, canEdit: false, canEditSchedule: false, canEditStartDate: false, canEditTasks: false, canEditStakes: false, editableFromDay: null },
               }],

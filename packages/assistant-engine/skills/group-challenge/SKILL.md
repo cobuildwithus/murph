@@ -11,7 +11,8 @@ setup and acceptance in the exact audience chat with Murph. Read the game
 using the current accepted message reference when an app invite link arrives.
 For groups, only the starter edits terms before Day 1; there are no change
 requests or Start now. Each invitee accepts for themselves. Use returned
-disambiguated names. Never nudge one person through another, shame missing
+disambiguated names for seated players. Unjoined people appear only as a count;
+never name or infer their status. Never nudge one person through another, shame missing
 posts, or include hidden material in a recap. Include one kind superlative for
 each eligible person. Unaddressed bearer invitations stay app-only. This is separate from the managed group-challenge feature below.
 

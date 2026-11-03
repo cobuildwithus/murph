@@ -4,7 +4,7 @@ import { getPrisma } from "@/src/lib/prisma";
 import { upsertHostedMemberEmailAuthorization } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import { upsertHostedMemberIdentity } from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
 import { buildHostedMemberPhoneIdentityFields } from "@/src/lib/hosted-onboarding/member-identity-fields";
-import { createHostedEmailLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
+import { createHostedEmailLookupKey, createHostedExternalThreadIdentityLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { areGameGroupsEnabled } from "@/src/lib/game/access";
 import { gameAudienceKeys } from "@/src/lib/game/audience";
 import { runGameCommand, readGame, readHome, readGameChatState, runGameChatUpdate, readGameRecapMaterial, authorizeMediaRead } from "@/src/lib/game/service";
@@ -829,7 +829,7 @@ async function exactRoom(people: Person[]) {
   await db.hostedMember.create({ data: { id: room } });
   await db.hostedThreadContainer.create({ data: { memberId: room, ownerMemberId: people[0].id,
     participants: { create: people.map(person => ({ participantMemberId: person.id, handleLookupKey: createHostedEmailLookupKey(person.email)!, firstSeenAt: new Date(), lastSeenAt: new Date() })) } } });
-  await db.hostedThreadRoute.create({ data: { channel: "linq", containerMemberId: room, threadLookupKey: `thread_${room}`, threadIdentityLookupKey: `thread_${room}` } });
+  await db.hostedThreadRoute.create({ data: { channel: "linq", containerMemberId: room, threadLookupKey: `thread_${room}`, threadIdentityLookupKey: createHostedExternalThreadIdentityLookupKey({ channel: "linq", threadId: room })! } });
   chatProof.rooms.set(room, people.map(person => person.email));
   return room;
 }
@@ -845,8 +845,9 @@ describe.skipIf(!enabled)("exact group chat and composer persistence", () => {
     const state = await readGameChatState(room, people.map(p => p.id), people[0].id);
     const { hostedGameChatStateSchema } = await import("@murphai/hosted-execution/runtime-control");
     expect(hostedGameChatStateSchema.parse(state)).toEqual(state);
-    expect(state.games[0].terms.tasks).toHaveLength(3);
-    expect(state.games[0].invitees).toHaveLength(2);
+    expect(state.games[0].terms.tasks).toHaveLength(1);
+    expect(state.games[0].pendingInviteeCount).toBe(2);
+    expect(JSON.stringify(state)).not.toContain("Teammate");
     expect(state.games[0].terms.defaultTask).toBe("Take a walk");
     expect(state.games.map(g => g.id).sort()).toEqual([first.id, second.id].sort());
     expect((await readGameChatState(room, people.map(p => p.id), people[0].id, false)).games).toEqual([]);
@@ -875,16 +876,20 @@ describe.skipIf(!enabled)("exact group chat and composer persistence", () => {
     const room = await exactRoom(people);
     const game = { id: randomUUID() };
     expect(await runGameChatUpdate({ actorMemberId: people[0].id, multiplayer: true, chatContainerMemberId: room, chatPlayerMemberIds: people.map(p => p.id), now: createdAt,
-      update: { operation: "create", gameId: game.id, terms: { lengthDays: 3, tasks: people.map(p => ({ memberId: p.id, text: "Take a walk" })), schedule: { count: 3 }, stakes: [{ kind: "prize", item: "Choose lunch" }] } } })).toMatchObject({ ok: true });
+      update: { operation: "create", gameId: game.id, terms: { lengthDays: 3, tasks: people.map((p, index) => ({ memberId: p.id, text: index === 2 ? "Private stretch" : "Take a walk" })), schedule: { count: 3 }, stakes: [{ kind: "prize", item: "Choose lunch" }] } } })).toMatchObject({ ok: true });
     expect((await gameRow(game.id)).players).toHaveLength(1);
     const input = { actorMemberId: people[1].id, multiplayer: true, chatContainerMemberId: room, chatPlayerMemberIds: people.map(p => p.id), now: createdAt,
       update: { operation: "edit_terms" as const, gameId: game.id, expectedTermsVersion: 1,
-        terms: { defaultTask: "Take a walk", tasks: people.map((p, index) => ({ memberId: p.id, text: index === 2 ? "Stretch" : "Take a walk" })), schedule: { count: 2 }, stakes: [{ kind: "prize" as const, item: "Choose lunch" }] } } };
+        terms: { defaultTask: "Run", tasks: [{ memberId: people[0].id, text: "Run" }], schedule: { count: 2 }, stakes: [{ kind: "prize" as const, item: "Choose lunch" }] } } };
     expect(await runGameChatUpdate(input)).toMatchObject({ ok: false });
-    expect(await runGameChatUpdate({ ...input, actorMemberId: people[0].id })).toMatchObject({ ok: true });
+    expect(await runGameChatUpdate({ ...input, actorMemberId: people[0].id })).toEqual({ ok: true, game: null });
     const shared = await readGameChatState(room, people.map(p => p.id));
+    expect(JSON.stringify(shared)).not.toContain("Private stretch");
+    const saved = await gameRow(game.id);
+    const [storedWords] = await openGameTexts([{ table: "game", field: "terms_words", rowId: saved.id, memberId: saved.wordsOwnerMemberId!, value: saved.termsWordsEncrypted }]);
+    expect(storedWords).toContain("Private stretch");
     expect(shared.games[0].lengthDays).toBe(3);
-    expect(shared.games[0].terms).toMatchObject({ n: 2, defaultTask: "Take a walk", tasks: [{ seat: 0, text: "Take a walk" }, { seat: 1, text: "Take a walk" }, { seat: 2, text: "Stretch" }] });
+    expect(shared.games[0].terms).toMatchObject({ n: 2, defaultTask: "Run", tasks: [{ seat: 0, text: "Run" }] });
   });
 
   it("keeps a two-person group rematch on group policy in chat", async () => {
@@ -920,6 +925,40 @@ describe.skipIf(!enabled)("exact group chat and composer persistence", () => {
     expect(await readGameRecapMaterial(game.id, room, members)).toBeNull();
   });
 
+  it("binds unresolved addressees without claiming, accepts a later verified address, and keeps an unjoined relative", async () => {
+    const starter = await person();
+    const relatives = [{ id: "not-an-account", email: `${randomUUID()}@example.test` }, { id: "also-not-an-account", email: `${randomUUID()}@example.test` }];
+    const game = await create(starter, relatives);
+    const room = await exactRoom([starter]);
+    chatProof.rooms.set(room, [starter.email, ...relatives.map(p => p.email)]);
+    vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://www.example.test");
+    const { prepareGameChatInvite, associateGameChatInviteTx } = await import("@/src/lib/game/chat-membership");
+    const prepared = await prepareGameChatInvite(`Join https://example.test/g/${game.token}`, room);
+    expect(prepared?.memberIds).toEqual([starter.id]);
+    await db.$transaction(tx => associateGameChatInviteTx({ prepared, containerMemberId: room, senderMemberId: starter.id, threadId: room, tx }));
+    expect((await gameRow(game.id)).chatContainerMemberId).toBe(room);
+    expect((await gameRow(game.id)).invitees.every(invitee => invitee.memberId === null)).toBe(true);
+    const repeatedAudience = await create(starter, relatives);
+    expect((await gameRow(repeatedAudience.id)).chatContainerMemberId).toBe(room);
+    const state = await readGameChatState(room, [starter.id], starter.id);
+    expect(state.games[0]).toMatchObject({ pendingInviteeCount: 2, players: [{ memberId: starter.id }] });
+    expect(state.games[0].terms.tasks).toHaveLength(1);
+    expect(JSON.stringify(state)).not.toContain("Teammate");
+    const { readGameChatFundingRooms } = await import("@/src/lib/game/chat-access");
+    expect((await readGameChatFundingRooms({ memberIds: [room], now: new Date(), prisma: db })).get(room)).toBe(room);
+    const relative = await person();
+    await db.$transaction(tx => upsertHostedMemberEmailAuthorization({ memberId: relative.id, prisma: tx, verifiedEmail: { address: relatives[0].email, verifiedAt: createdAt } }));
+    const approve = { actorMemberId: relative.id, multiplayer: true, chatContainerMemberId: room, chatPlayerMemberIds: [starter.id, relative.id], now: createdAt,
+      update: { operation: "approve" as const, gameId: game.id, expectedTermsVersion: 1 } };
+    expect(await runGameChatUpdate(approve)).toMatchObject({ ok: true });
+    expect((await gameRow(game.id)).invitees[0].memberId).toBe(relative.id);
+    const outsider = await person();
+    expect(await runGameChatUpdate({ ...approve, actorMemberId: outsider.id })).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
+    await settle(game.id, starter.id);
+    expect((await readGameRecapMaterial(game.id, room, [starter.id, relative.id]))?.validation.result).toHaveLength(2);
+    expect((await gameRow(game.id)).invitees[1].memberId).toBeNull();
+  });
+
   it("returns an explicit composer on replay, binds the accepted invite once, and never retargets", async () => {
     const people = await Promise.all([person(), person(), person()]);
     const command: Extract<GameCommand, { type: "createGame" }> = { type: "createGame", gameId: randomUUID(), maxPlayers: 10, groupWord: "Crew", terms,
@@ -934,6 +973,7 @@ describe.skipIf(!enabled)("exact group chat and composer persistence", () => {
     vi.stubEnv("HOSTED_CONTACT_PRIVACY_KEYS", `v1:${Buffer.alloc(32, 7).toString("base64url")},v2:${Buffer.alloc(32, 8).toString("base64url")}`);
     vi.stubEnv("HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION", "v2");
     const { prepareGameChatInvite, associateGameChatInviteTx } = await import("@/src/lib/game/chat-membership");
+    vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://www.withmurph.ai");
     const prepared = await prepareGameChatInvite(`https://www.withmurph.ai/g/${first!.inviteToken}`, room);
     expect(prepared).not.toBeNull();
     await db.$transaction(tx => associateGameChatInviteTx({ prepared, containerMemberId: room, senderMemberId: people[0].id, threadId: room, tx }));

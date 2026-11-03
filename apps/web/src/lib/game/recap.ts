@@ -160,7 +160,7 @@ export function validateGameRecap(input: { recap: HostedGameRecap; players: read
     const expected = input.result?.map(player => player.memberId) ?? [];
     if (!input.recap.superlatives || !withValidGameSuperlatives(input.recap, expected).superlatives) errors.push("superlatives: include exactly one kind superlative per eligible player.");
     const copy = JSON.stringify(input.recap);
-    if (/\b(missed|missing|slacker|lazy|failed|failure|no.show|didn.t post|did not post|behind everyone)\b/iu.test(copy)) errors.push("Group recaps must not shame or single out missing people.");
+    if (/\b(slacker|lazy|no.show|didn.t post|did not post|behind everyone)\b/iu.test(copy)) errors.push("Group recaps must not shame or single out missing people.");
     if (input.recap.scoreLine) errors.push("scoreLine: omit for groups; the result card owns standings and prize parties.");
   }
   if (pages.length < 3 || pages.length > 7) errors.push(`pages: ${pages.length}; write 3 to 7.`);

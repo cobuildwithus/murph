@@ -29,7 +29,7 @@ export async function readGameChatFundingRooms(input: {
         WHERE container_member_id = room.id AND removed_at IS NULL
         ORDER BY participant_member_id LIMIT 11
       ) roster
-      HAVING count(*) BETWEEN 2 AND 10 AND bool_and(last_seen_at >= ${cutoff})
+      HAVING count(*) BETWEEN 1 AND 10 AND bool_and(last_seen_at >= ${cutoff})
     ) pair ON TRUE
     JOIN LATERAL (
       SELECT COALESCE(
@@ -37,11 +37,8 @@ export async function readGameChatFundingRooms(input: {
           AND game.chat_container_member_id = room.id
           AND (game.status IN ('invited', 'live') OR (game.status = 'settled' AND game.settled_at > ${settledCutoff} AND game.settled_at <= ${input.now}))
           AND game.created_by = ANY(pair.player_ids)
-              AND (SELECT count(*) FROM game_invitee invited WHERE invited.game_id = game.id) = cardinality(pair.player_ids) - 1
-              AND NOT EXISTS (SELECT 1 FROM game_invitee invited WHERE invited.game_id = game.id
-                AND (invited.member_id IS NULL OR NOT (invited.member_id = ANY(pair.player_ids))))
               AND NOT EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = game.id
-                AND (p.left_at IS NOT NULL OR p.member_id IS NULL OR NOT (p.member_id = ANY(pair.player_ids))))
+                AND (p.left_at IS NOT NULL OR p.member_id IS NULL OR p.seat NOT BETWEEN 0 AND 9))
           ORDER BY game.created_at DESC, game.id LIMIT 1),
         -- An addressed rematch temporarily funds only its inherited primary
         -- room while the one bound-room notice is still waiting.
@@ -132,11 +129,8 @@ export async function readGameChatFundingRooms(input: {
           (game.status = 'settled' AND game.settled_at > ${settledCutoff} AND game.settled_at <= ${input.now}) OR
           (game.status = 'void' AND game.chat_container_member_id = room.id))
         AND ((game.max_players = 10 AND game.created_by = ANY(pair.player_ids)
-              AND (SELECT count(*) FROM game_invitee invited WHERE invited.game_id = game.id) = cardinality(pair.player_ids) - 1
-              AND NOT EXISTS (SELECT 1 FROM game_invitee invited WHERE invited.game_id = game.id
-                AND (invited.member_id IS NULL OR NOT (invited.member_id = ANY(pair.player_ids))))
               AND NOT EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = game.id
-                AND (p.left_at IS NOT NULL OR p.member_id IS NULL OR NOT (p.member_id = ANY(pair.player_ids))))) OR (game.max_players = 2 AND cardinality(pair.player_ids) = 2 AND ((game.status = 'invited'
+                AND (p.left_at IS NOT NULL OR p.member_id IS NULL OR p.seat NOT BETWEEN 0 AND 9))) OR (game.max_players = 2 AND cardinality(pair.player_ids) = 2 AND ((game.status = 'invited'
               AND game.created_by = ANY(pair.player_ids)
               AND EXISTS (SELECT 1 FROM game_invitee invited WHERE invited.game_id = game.id AND invited.member_id = ANY(pair.player_ids) AND invited.member_id <> game.created_by))
           OR (game.status <> 'invited'

@@ -293,7 +293,8 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(stored.blurHash).toBe("synthetic-blur");
     const locked = await readGame(gameId, viewer);
     expect(locked?.days[0].others[0]).toEqual({ seat: 0, status: "locked", entry: null,
-      postedAt: stored.receivedAt.toISOString(), blurHash: "synthetic-blur" });
+      postedAt: stored.receivedAt.toISOString(), blurHash: "synthetic-blur",
+      preview: { kind: "route", mediaUrl: `/api/game/v1/media/${encodeURIComponent(command.mediaKeys[0])}` } });
     expect(await authorizeMediaRead(viewer, command.mediaKeys[0])).toBe(false);
     expect(JSON.stringify(await readHome(viewer))).not.toMatch(/distanceM|private-route/);
     const chat = await readGameChatState("synthetic-room", [poster, viewer]);

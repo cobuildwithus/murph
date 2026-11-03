@@ -5869,22 +5869,34 @@ returns an explicit response-only `composer: { murphPhoneNumber }`. Composer
 retries repeat the handoff without starting discovery or bootstrap. Group games
 never produce automatic bootstrap work. Pair bootstrap and #4458 rematches remain.
 
-Ordinary Linq inbound preparation recognizes a single canonical invite URL and
-proves complete provider handles against rotating keyed audience candidates.
-Verified inbound admission associates that proof before room access is evaluated;
-it rechecks sender, local membership, verified contact ownership, blocks and
-consent under the game lock. Replays retain the first room. Association does not
-join anyone. Group approval uses ordinary join with current terms, GameProfile
-and current-room authority; bearer invitations remain app-only.
+Ordinary Linq inbound preparation recognizes exactly one invite token from the
+configured public origin (including its www/apex alias). Preparation and binding
+are best-effort: fixed reason codes contain no contact data, and a savepoint
+isolates association failures from ordinary message ingestion. A verified starter
+or seated sender can bind an unbound game or replay the same room. Association
+never claims invitees; later link messages naturally retry it.
 
-Shared reads, recap material and final lifecycle egress fail closed for changed
-rosters, departures, outsiders, blocks or revoked consent. Egress verifies the
-provider roster and exact delivery target again; a stored binding is insufficient.
+`readGroupGameChatAuthority` is the sole group room check for association,
+shared reads, commands, lifecycle enqueue and final egress. It requires a current
+Linq route, a complete provider roster with exactly one active Murph handle,
+rotating keyed equality with the original addressed audience, and only addressed
+seats (0–9). Resolved verified room members plus seated players are checked for
+blocks, suspension and revoked consent. Unresolved handles are allowed; account
+membership is not audience evidence. A stored binding never permits retargeting.
+Runtime funding derives bounded database eligibility; it never grants projection
+or delivery authority.
+
+Approval matches an addressed invitee by memberId or verified contact read keys
+and calls ordinary join, including legal and profile prerequisites. Unaddressed
+bearer acceptance remains app-only, and an outside seated joiner suppresses chat.
+Shared names, task overrides and statuses describe seated players only; unjoined
+addressees appear as a pending count. Private labels never leave the starter.
 Group recaps exclude private labels and lore and are withheld if any report makes
 shared content unsafe. Duplicate first names receive stable numbered labels.
-Every eligible person gets one kind superlative; missed-person shaming and group
-scoreLine copy are rejected. The existing recap-message link renderer is already
-independent of roster size.
+Every eligible person gets one kind superlative. The hard shame validator rejects
+clearly negative labels while allowing praise such as “never missed a day”; the
+prompt prohibits singling out missing people. Lifecycle messages and recap links
+are text-only, so unjoined relatives cannot receive player media attachments.
 
 New runners opt into group responses through the signed `gameMultiplayer=1`
 query parameter on the existing tool route. Unmarked runners retain pair-only

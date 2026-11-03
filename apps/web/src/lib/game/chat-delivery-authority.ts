@@ -6,14 +6,15 @@ import { Prisma } from "@prisma/client";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { isGameChangeExpired, parsePendingGameChange } from "./changes";
 import { isGameInviteExpired, parseStoredTerms } from "./rules";
-import { gameChatPlayerIds, hasGameChatRestriction, sameGamePlayers } from "./chat-membership";
+import { readGroupGameChatAuthority, type GameChatAudience, sameGamePlayers } from "./chat-membership";
 
 /** Returns true only for the current proposal and proven audience; stale outbox work cannot announce a replaced edit. */
 export async function assertGameProposalDeliveryCurrentTx(input: {
   deliveryIdempotencyKey: string | null;
   containerMemberId: string;
   playerMemberIds?: readonly string[];
-  tx: { game: Pick<Prisma.TransactionClient["game"], "findFirst">; gameBlock?: Prisma.TransactionClient["gameBlock"]; hostedMember?: Prisma.TransactionClient["hostedMember"]; gameReport?: Prisma.TransactionClient["gameReport"] };
+  audience?: GameChatAudience;
+  tx: Prisma.TransactionClient;
   now?: Date;
 }): Promise<boolean> {
   const key = input.deliveryIdempotencyKey ?? "";
@@ -135,8 +136,7 @@ function stale(): never {
   throw hostedOnboardingError({ code: "GAME_CHANGE_SUPERSEDED", httpStatus: 409, message: "This proposed game change is no longer current.", retryable: false });
 }
 
-async function deliveryAudienceCurrent(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], game: Parameters<typeof gameChatPlayerIds>[0], players: readonly string[]): Promise<boolean> {
+async function deliveryAudienceCurrent(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], game: Parameters<typeof readGroupGameChatAuthority>[0], players: readonly string[]): Promise<boolean> {
   if (game.maxPlayers !== 10) return sameGamePlayers(game.players.map(player => player.memberId), players);
-  if (!sameGamePlayers(gameChatPlayerIds(game), players) || !input.tx.gameBlock || !input.tx.hostedMember || !input.tx.gameReport) return false;
-  return !await hasGameChatRestriction({ gameBlock: input.tx.gameBlock, hostedMember: input.tx.hostedMember }, players);
+  return Boolean(input.audience && await readGroupGameChatAuthority(game, input.containerMemberId, input.audience, input.tx));
 }

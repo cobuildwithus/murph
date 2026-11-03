@@ -2084,3 +2084,12 @@ base contract and proves both deploy-skew directions; run it locally with
 `MURPH_VERIFY_GAME_GROUP_SKEW=1` (shallow routine CI skips historical objects). Runner changes require
 production bundle assembly (local absolute caps) and exact-base Linux CI growth
 proof before merge. Local-only parent review cannot supply exact-head CI evidence.
+
+PR 5 parent-review regressions run the real Linq webhook and engagement route for
+unresolved composer audiences, best-effort association, current keyed rosters,
+rotation, outside seats and restrictions. `game-groups-postgres.test.ts` covers
+late verified-address acceptance and seated-only shared projections. The opt-in
+`MURPH_MEASURE_GAME_INPUT=1` assistant `assistant-game-input-measurement.test.ts`
+captures complete first provider input for identical direct/group fixtures against
+`MURPH_GAME_INPUT_BASE`; it reports exact bytes and explicitly records an
+unavailable target tokenizer instead of estimating tokens.
