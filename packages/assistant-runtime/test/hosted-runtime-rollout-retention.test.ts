@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { initializeVault } from "@murphai/core";
 import {
   getAssistantSession,
+  lookupAssistantSession,
   resolveAssistantSession,
   saveAssistantSession,
 } from "@murphai/assistant-engine/assistant-store";
@@ -63,6 +64,29 @@ it("retires idle resumes before snapshot and converges after a lost checkpoint o
     const sessionPath = path.join(".runtime/operations/assistant/sessions", `${session.sessionId}.json`);
     sessions.push({ ...item, session, sessionPath, rollout, rolloutBytes, sessionBytes: await readFile(path.join(vaultRoot, sessionPath)) });
   }
+  // A newer session owns routing while its idle predecessor still claims the
+  // same alias and conversation key in its persisted session record.
+  const predecessor = sessions[1]!;
+  const successor = sessions[3]!;
+  successor.session = await saveAssistantSession(vaultRoot, {
+    ...successor.session,
+    alias: predecessor.session.alias,
+    binding: predecessor.session.binding,
+  });
+  successor.sessionBytes = await readFile(path.join(vaultRoot, successor.sessionPath));
+  expect(successor.session.sessionId).not.toBe(predecessor.session.sessionId);
+  const assertSuccessorRouting = async (vault: string, home: string) => {
+    for (const locator of [
+      { alias: predecessor.session.alias },
+      { channel: "linq", identityId: "synthetic-member", threadId: "synthetic-chat", threadIsDirect: true },
+    ]) {
+      const resolved = await lookupAssistantSession({ ...locator, vault });
+      expect(resolved.session.sessionId).toBe(successor.session.sessionId);
+    }
+    expect(await readFile(path.join(vault, successor.sessionPath))).toEqual(successor.sessionBytes);
+    expect(await readFile(path.join(home, successor.rollout))).toEqual(successor.rolloutBytes);
+  };
+  await assertSuccessorRouting(vaultRoot, operatorHomeRoot);
   const oldSnapshot = await snapshotHostedExecutionContext({ vaultRoot, operatorHomeRoot });
   expect(oldSnapshot.codexHomeSnapshotDiagnostics?.codexResumeThreadCount).toBe(5);
 
@@ -72,9 +96,12 @@ it("retires idle resumes before snapshot and converges after a lost checkpoint o
     resolveAssistantSessionId: null, shutdownSignal: null, wakeSignal: null,
   });
   await maintain(vaultRoot);
+  await assertSuccessorRouting(vaultRoot, operatorHomeRoot);
+  expect(await getAssistantSession(vaultRoot, predecessor.session.sessionId)).toMatchObject({ codexResume: null, resumeState: null });
   // Local retirement survived, but the checkpoint did not: rerunning is safe.
   const retiredBytes = await Promise.all(sessions.map((item) => readFile(path.join(vaultRoot, item.sessionPath))));
   await maintain(vaultRoot);
+  await assertSuccessorRouting(vaultRoot, operatorHomeRoot);
   expect(await Promise.all(sessions.map((item) => readFile(path.join(vaultRoot, item.sessionPath))))).toEqual(retiredBytes);
 
   const archive = await collectHostedWorkspaceSnapshotArchivePlan({ durableRoot, vaultRoot, operatorHomeRoot });
@@ -83,6 +110,7 @@ it("retires idle resumes before snapshot and converges after a lost checkpoint o
     .map((entry) => entry.relativePath).sort()).toEqual(sessions.filter((item) => !item.retire).map((item) => item.rollout).sort());
   const snapshot = await snapshotHostedExecutionContext({ vaultRoot, operatorHomeRoot });
   const restored = await restoreHostedExecutionContext({ bundle: snapshot.bundle, workspaceRoot: path.join(durableRoot, "new-restore") });
+  await assertSuccessorRouting(restored.vaultRoot, restored.operatorHomeRoot);
   for (const item of sessions) {
     const current = await getAssistantSession(restored.vaultRoot, item.session.sessionId);
     if (item.retire) {
@@ -97,11 +125,14 @@ it("retires idle resumes before snapshot and converges after a lost checkpoint o
   }
   // A crash losing the local workspace restores the old complete checkpoint.
   const oldRestore = await restoreHostedExecutionContext({ bundle: oldSnapshot.bundle, workspaceRoot: path.join(durableRoot, "old-restore") });
+  await assertSuccessorRouting(oldRestore.vaultRoot, oldRestore.operatorHomeRoot);
   for (const item of sessions) {
     expect((await getAssistantSession(oldRestore.vaultRoot, item.session.sessionId)).codexResume).toEqual(item.session.codexResume);
     expect(await readFile(path.join(oldRestore.operatorHomeRoot, item.rollout))).toEqual(item.rolloutBytes);
   }
   await maintain(oldRestore.vaultRoot);
+  await assertSuccessorRouting(oldRestore.vaultRoot, oldRestore.operatorHomeRoot);
+  expect(await getAssistantSession(oldRestore.vaultRoot, predecessor.session.sessionId)).toMatchObject({ codexResume: null, resumeState: null });
   const converged = await snapshotHostedExecutionContext(oldRestore);
   expect(converged.codexHomeSnapshotDiagnostics?.codexResumeThreadCount).toBe(2);
 });

@@ -113,7 +113,7 @@ export async function runAssistantCodexResumeRetention(input: {
         input.signal?.throwIfAborted()
         // Clear the in-memory compatibility alias too, so serialization cannot
         // recover an intentionally retired reference through its null fallback.
-        await saveAssistantSessionAtPaths(paths, { ...session, codexResume: null, resumeState: null })
+        await writeAssistantSession(paths, { ...session, codexResume: null, resumeState: null })
       }
     }, input.signal),
   })
