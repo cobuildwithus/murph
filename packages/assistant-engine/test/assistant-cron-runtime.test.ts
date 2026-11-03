@@ -5326,6 +5326,31 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
+  it.each([
+    ['member', addOvernightMemoryConsolidationAutomation, '2026-04-09T03:00:00.000Z'],
+    ['group', addGroupRoomModelConsolidationAutomation, '2026-04-09T04:00:00.000Z'],
+  ] as const)('preserves a future maintenance wake during foreground yield (%s)', async (_scope, seed, occurrenceAt) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-09T02:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-future-maintenance-yield-')
+    seed(vaultRoot)
+    const options = {
+      executionContext: { hosted: { memberId: 'member-synthetic', userEnvKeys: [] } },
+      shouldYieldBackgroundMaintenance: () => true,
+    }
+    await expect(getAssistantCronStatus(vaultRoot, options)).resolves.toMatchObject({
+      dueJobs: 0, runningJobs: 0, nextRunAt: occurrenceAt,
+    })
+    vi.setSystemTime(new Date(occurrenceAt))
+    await expect(getAssistantCronStatus(vaultRoot, options)).resolves.toMatchObject({
+      dueJobs: 0, nextRunAt: new Date(Date.parse(occurrenceAt) + 30_000).toISOString(),
+    })
+    await expect(getAssistantCronStatus(vaultRoot, {
+      ...options, shouldYieldBackgroundMaintenance: () => false,
+    })).resolves.toMatchObject({ dueJobs: 1, nextRunAt: occurrenceAt })
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+  })
+
   it('preserves shown memory and releases its retry when foreground work arrives before forget', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-09T03:10:00.000Z'))
@@ -12502,18 +12527,18 @@ describe('assistant cron runtime orchestration', () => {
   it.each([
     MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
     MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
-  ])('omits onboarding-blocked research wakes and restores %s after completion', async (automationId) => {
+  ])('preserves research occurrence wakes for %s throughout onboarding', async (automationId) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T09:20:00.000Z'))
     const { vaultRoot } = await createRuntimeContext('assistant-cron-onboarding-wake-')
     addManagedResearchAutomation({ automationId, tag: 'murph-managed:weekly-health-insight', vaultRoot })
 
     await expect(getAssistantCronStatus(vaultRoot)).resolves.toMatchObject({
-      dueJobs: 0, enabledJobs: 1, nextRunAt: null, totalJobs: 1,
+      dueJobs: 0, enabledJobs: 1, nextRunAt: '2026-04-08T10:00:00.000Z', totalJobs: 1,
     })
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
     await expect(getAssistantCronStatus(vaultRoot)).resolves.toMatchObject({
-      dueJobs: 0, nextRunAt: null,
+      dueJobs: 1, nextRunAt: '2026-04-08T10:00:00.000Z',
     })
     await completeAssistantOnboarding({ reason: 'user_answered', vault: vaultRoot })
     await expect(getAssistantCronStatus(vaultRoot)).resolves.toMatchObject({
@@ -12544,7 +12569,7 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
-  it('keeps unrelated schedules visible when research wakes are onboarding-blocked', async () => {
+  it('selects the earliest research occurrence ahead of unrelated schedules during onboarding', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T09:20:00.000Z'))
     const { vaultRoot } = await createRuntimeContext('assistant-cron-onboarding-independent-')
@@ -12558,7 +12583,7 @@ describe('assistant cron runtime orchestration', () => {
     })
     getVaultAutomationStore(vaultRoot)[1]!.schedule = { kind: 'dailyLocal', localTime: '11:00' }
     await expect(getAssistantCronStatus(vaultRoot)).resolves.toMatchObject({
-      dueJobs: 0, enabledJobs: 2, totalJobs: 2, nextRunAt: '2026-04-08T11:00:00.000Z',
+      dueJobs: 0, enabledJobs: 2, totalJobs: 2, nextRunAt: '2026-04-08T10:00:00.000Z',
     })
   })
 

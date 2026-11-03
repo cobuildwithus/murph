@@ -44,6 +44,13 @@ induce failures. An empty window is not evidence that the path works.
 
 ## Cron delivery reconciliation telemetry
 
+Cron wake selection uses the same canonical schedule and runtime projection as
+claim selection. Onboarding gates research notifications when an occurrence
+executes; it does not remove that occurrence's wake. A gated occurrence records
+its skip at the scheduled time instead of waiting for an unrelated wake to expire.
+Foreground yield defers due background maintenance with the existing short retry
+and preserves future maintenance occurrence times.
+
 `cron.job.completed` describes execution; `runOutcome=delivery_pending` means
 the outbox still owns delivery. It is not a delivery failure. When
 `cron/delivery-reconciliation.ts` successfully persists clearing a job's pending
