@@ -575,6 +575,7 @@ export type GameErrorCode =
   | "GAME_NOT_LIVE"
   | "DAY_CLOSED"
   | "RETAKE_USED"
+  | "CHALLENGE_USED"
   | "MEDIA_MISSING"
   | "TICKET_NOT_HELD"
   | "TICKET_EXPIRED"

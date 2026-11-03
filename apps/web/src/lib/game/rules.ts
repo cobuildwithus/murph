@@ -86,6 +86,7 @@ export interface RuleEntry {
 }
 
 export interface RuleGame {
+  chatContainerMemberId?: string | null;
   id: string;
   status: GameStatus;
   /** Null once the creator deleted their account. */
@@ -161,6 +162,7 @@ export const GAME_ERROR_STATUS: Record<GameErrorCode, number> = {
   CHANGE_PENDING: 409,
   CHANGE_EXPIRED: 409,
   CHAT_UNAVAILABLE: 503,
+  CHALLENGE_USED: 409,
   CONTENT_NOT_ALLOWED: 422,
   DAY_CLOSED: 409,
   GAME_DISABLED: 404,
@@ -195,6 +197,59 @@ export class GameRuleError extends Error {
 
 export function reject(code: GameErrorCode, message: string): never {
   throw new GameRuleError(code, message);
+}
+
+/** Accepted event identity and the latest accused/day concession evidence. */
+export interface RuleChallenge {
+  id: bigint;
+  actor: string;
+  entryId: string;
+  deadlineAt: Date;
+  concessionEventId: bigint | null;
+}
+
+export type GameChallengeStatus = "void" | "conceded" | "open" | "stood";
+
+export function gameChallengeKey(gameId: string, entryId: string): string {
+  return `game-challenge:${gameId}:${entryId}`;
+}
+
+/** The stored maximum window; canonical game end may close the case earlier. */
+export function gameChallengeDeadline(createdAt: Date): Date {
+  return new Date(createdAt.getTime() + 12 * 60 * 60 * 1000);
+}
+
+/** Restoring score never erases a concession or spends the returned budget. */
+export function gameChallengeStatus(state: RuleState, challenge: RuleChallenge, now: Date): GameChallengeStatus {
+  if (challenge.concessionEventId !== null && challenge.concessionEventId > challenge.id) return "conceded";
+  const entry = state.entries.find(entry => entry.id === challenge.entryId);
+  if (!entry || entry.withdrawnAt !== null || liveEntry(state.entries, entry.memberId, entry.dayIndex)?.id !== entry.id) return "void";
+  return state.game.status !== "live" || isGameDue(state, now) || now >= challenge.deadlineAt ? "stood" : "open";
+}
+
+export function canChallengeGame(state: RuleState, challenges: readonly RuleChallenge[], memberId: string, now: Date): boolean {
+  const players = remainingPlayers(state);
+  return state.game.seats === 2 && state.game.status === "live" && Boolean(state.game.chatContainerMemberId)
+    && isPairRoster(players) && players.some(player => player.memberId === memberId) && !isGameDue(state, now)
+    && !challenges.some(challenge => challenge.actor === memberId && ["open", "stood"].includes(gameChallengeStatus(state, challenge, now)));
+}
+
+/** Visibility is supplied by the single viewer projection, visibleEntryIds. */
+export function decideChallenge(state: RuleState, challenges: readonly RuleChallenge[], input: {
+  memberId: string; entryId: string; visibleEntryIds: ReadonlySet<string>; now: Date; createdAt: Date;
+}): { commandKey: string; payload: { v: 1; entryId: string; deadlineAt: string } } {
+  requireLivePlayer(state, input.memberId);
+  if (state.game.seats !== 2 || !isPairRoster(remainingPlayers(state))) reject("INVALID_REQUEST", "Prove it is available in two-player games.");
+  if (isGameDue(state, input.now)) reject("GAME_NOT_LIVE", "This game has ended.");
+  if (!state.game.chatContainerMemberId) reject("CHAT_UNAVAILABLE", "This game needs its shared chat first.");
+  const entry = state.entries.find(entry => entry.id === input.entryId);
+  if (!entry || entry.memberId === input.memberId || entry.kind !== "photo" || entry.attempt <= 0
+    || entry.withdrawnAt !== null || entry.incomplete || entry.dayIndex < 0 || entry.dayIndex >= state.game.lengthDays
+    || !state.players.some(player => player.memberId === entry.memberId && !player.leftAt)
+    || !input.visibleEntryIds.has(entry.id)) reject("INVALID_REQUEST", "Choose an opponent's visible photo post that counts.");
+  if (!canChallengeGame(state, challenges, input.memberId, input.now)) reject("CHALLENGE_USED", "You've used your Prove it for this game.");
+  return { commandKey: gameChallengeKey(state.game.id, entry.id),
+    payload: { v: 1, entryId: entry.id, deadlineAt: gameChallengeDeadline(input.createdAt).toISOString() } };
 }
 
 export function currentTerms(terms: StoredTerms): StoredTermsVersion {
