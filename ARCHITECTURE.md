@@ -5822,9 +5822,12 @@ if the game ends before its notice drains, under existing post-game funding limi
 room; delete clears the binding. It is not a read or mutation permission. App `POST /api/game/v1/games/:id/changes`
 records the proposing player and expected terms version. Signed group dynamic
 `read_game` / `update_game` actions share the existing group-tool transport.
-The Web bridge resolves the actor from an accepted group mailbox message, then
-revalidates runtime identity, exact route and game participation inside the game
-mutation transaction. The model interprets agreement; it cannot choose an actor.
+For accepted-input actions, the Web bridge resolves the actor from an accepted
+group mailbox message, then revalidates runtime identity, exact route and game
+participation inside the game mutation transaction. Verified scheduled
+invocations may read the exact two-player group's shared game state without an
+actor; writes still require accepted-message authority. The model interprets
+agreement; it cannot choose an actor.
 Approvals and declines are unavailable through public app routes. A proposer
 can cancel through `DELETE /api/game/v1/games/:id/changes/:proposalId`.
 

@@ -291,7 +291,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
       const developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
       const tools = resolveMurphDynamicTools(scope === 'local' ? {} : {
         allowFinishWithoutReply: true, automationAvailable: true, imageGenerationAvailable: true,
-        progressUpdatesAvailable: true, progressUpdateMode: scope === 'group' ? 'group' : 'direct', gamesAvailable: true,
+        progressUpdatesAvailable: true, progressUpdateMode: scope === 'group' ? 'group' : 'direct', gameReadAvailable: true, gamesAvailable: true,
         groupSharedReadAvailable: scope === 'group', groupRoomModelAvailable: scope === 'group',
         personalizationAvailable: scope === 'direct', responseCardsAvailable: scope === 'direct',
       })
@@ -1383,7 +1383,7 @@ describe('game tools initial input measurement', () => {
           allowFinishWithoutReply: true, automationAvailable: true, personalizationAvailable: scope === 'direct',
           groupAvailable: scope === 'group', groupSharedReadAvailable: scope === 'group', responseCardsAvailable: scope === 'direct',
           imageGenerationAvailable: false, progressUpdatesAvailable: false,
-          gamesAvailable: phase === 'head' && scope === 'group',
+          gameReadAvailable: phase === 'head' && scope === 'group', gamesAvailable: phase === 'head' && scope === 'group',
         })
         await stopWarmCodexAppServer()
         stub.markRequestBaseline()
@@ -1441,7 +1441,7 @@ describe('game progress and photo initial input measurement', () => {
           allowFinishWithoutReply: true, automationAvailable: true, personalizationAvailable: scope === 'direct',
           groupAvailable: scope === 'group', groupSharedReadAvailable: scope === 'group', responseCardsAvailable: scope === 'direct',
           imageGenerationAvailable: false, progressUpdatesAvailable: false,
-          gamesAvailable: scope === 'group', gamePhotosAvailable: phase === 'head' && scope === 'group',
+          gameReadAvailable: scope === 'group', gamesAvailable: scope === 'group', gamePhotosAvailable: phase === 'head' && scope === 'group',
         })
         const tools = availableTools.map((tool) => {
           if (phase === 'head') return tool
@@ -1512,7 +1512,7 @@ describe('game host initial input measurement', () => {
           allowFinishWithoutReply: true, automationAvailable: true, personalizationAvailable: scope === 'direct',
           groupAvailable: scope === 'group', groupSharedReadAvailable: scope === 'group', responseCardsAvailable: scope === 'direct',
           imageGenerationAvailable: false, progressUpdatesAvailable: false,
-          gamesAvailable: scope === 'group', gamePhotosAvailable: scope === 'group',
+          gameReadAvailable: scope === 'group', gamesAvailable: scope === 'group', gamePhotosAvailable: scope === 'group',
           gameLoreAvailable: liveGameLoreAvailable,
         })
         const tools = phase === 'head' ? availableTools : availableTools.map((tool) =>
@@ -1576,7 +1576,7 @@ describe('game incomplete initial input measurement', () => {
           allowFinishWithoutReply: true, automationAvailable: true, personalizationAvailable: scope === 'direct',
           groupAvailable: scope === 'group', groupSharedReadAvailable: scope === 'group', responseCardsAvailable: scope === 'direct',
           imageGenerationAvailable: false, progressUpdatesAvailable: false,
-          gamesAvailable: scope === 'group', gamePhotosAvailable: scope === 'group',
+          gameReadAvailable: scope === 'group', gamesAvailable: scope === 'group', gamePhotosAvailable: scope === 'group',
         })
         const tools = availableTools.map((tool) => {
           if (phase === 'head') return tool

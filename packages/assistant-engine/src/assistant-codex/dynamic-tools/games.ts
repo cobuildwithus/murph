@@ -213,5 +213,24 @@ export async function executeGameTool(input: { request: GameDynamicRequest; cont
   const recapResult = await executeTrustedGameRecapTool(input)
   if (recapResult) return recapResult
   if (input.request.action === 'write_recap') return toolTextResult(false, 'write_recap is available only in the bound game recap turn.', 'authority_rejected')
+  if (input.request.action === 'read_game') {
+    const scheduledRead = await executeScheduledGameRead(input.context)
+    if (scheduledRead) return scheduledRead
+  }
   return executeOrdinaryGameTool({ ...input, request: input.request })
+}
+
+/** A verified scheduled occurrence reads the bound room's shared game state; it never acts for a player. */
+async function executeScheduledGameRead(context: AssistantHostedToolContext | null) {
+  const tool = context?.groupTool
+  if (!tool || context?.currentUserActionScope?.()?.acceptedInputIds.length) return null
+  const invocation = context?.currentInvocationScope?.()
+  if (invocation?.origin.kind !== 'automation_occurrence' || invocation.conversationScope !== 'group') return null
+  const { automationId, occurrenceAt } = invocation.origin
+  try {
+    const result = await tool.request({ action: 'read_game', origin: { kind: 'automation_occurrence', automationId, occurrenceAt }, includePlayers: true })
+    return toolTextResult(true, JSON.stringify(result))
+  } catch (error) {
+    return toolTextResult(false, 'The game state could not be read.', 'handler_exception', error)
+  }
 }

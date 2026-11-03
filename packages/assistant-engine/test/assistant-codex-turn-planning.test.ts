@@ -4895,6 +4895,57 @@ describe('assistant Codex turn planning', () => {
   })
 
   it.each([
+    ['authorized scheduled', false, true, ['read_game']],
+    ['scheduled without authority', false, false, []],
+    ['accepted-input', true, false, ['read_game', 'update_game', 'game_photo']],
+  ] as const)('plans game tools for an %s group turn', async (_label, accepted, scheduledAuthority, expectedTools) => {
+    const occurrenceAt = '2026-08-05T18:00:00.000Z'
+    const plan = await resolveAssistantRouteTurnPlan({
+      acceptedInputItems: accepted
+        ? [{ id: `ain_${'e'.repeat(32)}`, source: 'assistant-input' }]
+        : [],
+      executionContext: {
+        hosted: { memberId: 'synthetic-game-member', userEnvKeys: [] },
+      },
+      hostedToolContext: {
+        ...createHostedToolContext(),
+        groupTool: { request: vi.fn() },
+      },
+      input: {
+        ...createMessageInput(),
+        channel: 'linq',
+        scheduledInvocationAuthority: scheduledAuthority
+          ? { automationId: 'automation-scheduled-game-read', occurrenceAt }
+          : null,
+        scheduledOccurrenceAt: accepted ? null : occurrenceAt,
+        threadIsDirect: false,
+        turnTrigger: accepted ? 'automation-auto-reply' : 'automation-cron',
+      },
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-08-05',
+        currentTimeZone: 'America/New_York',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan({}, {
+        channel: 'linq',
+        threadIsDirect: false,
+        threadId: 'synthetic-game-thread',
+      }),
+    })
+
+    const gameTools = plan.dynamicTools
+      .map((tool) => tool.name)
+      .filter((name) => ['read_game', 'update_game', 'game_photo', 'game_lore', 'write_recap'].includes(name))
+    expect(gameTools).toEqual(expectedTools)
+  })
+
+  it.each([
     ['linq', false, true, false, true],
     ['telegram', false, true, false, false],
     ['email', false, true, false, false],
@@ -4997,7 +5048,7 @@ describe('assistant Codex turn planning', () => {
           ...createHostedToolContext(),
           clinicalRecordsConnectLinkTool: { createConnectLink: vi.fn() },
           personalizationTool: { request: vi.fn() },
-          phoneCalls: { start: vi.fn() },
+          phoneCalls: { start: vi.fn(), status: vi.fn(), stop: vi.fn() },
           physicalNotes: { send: vi.fn() },
           privateImageUrlPublisher: { publishPrivateImageUrl: vi.fn() },
         },
@@ -5024,7 +5075,7 @@ describe('assistant Codex turn planning', () => {
         route: createRoute(),
         session: createSession(),
         sharedPlan: createSharedPlan({}, {
-          channel: 'linq',
+          channel,
           threadIsDirect,
           threadId: threadIsDirect
             ? 'linq-direct-thread'
@@ -5034,6 +5085,9 @@ describe('assistant Codex turn planning', () => {
 
       const toolNames = plan.dynamicTools.map((tool) => tool.name)
       expect(toolNames.includes('create_phone_call')).toBe(expectedAvailable)
+      expect(toolNames.includes('get_phone_call_status')).toBe(expectedAvailable)
+      expect(toolNames).not.toContain('stop_phone_call')
+      expect(toolNames.includes('create_calendar_link')).toBe(channel === 'linq' && threadIsDirect)
       expect(toolNames).not.toContain('submit_product_feedback')
       expect(toolNames).not.toContain('send_progress_update')
       expect(plan.systemPrompt).not.toContain('murph.send_progress_update')

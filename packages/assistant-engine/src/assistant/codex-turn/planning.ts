@@ -465,6 +465,16 @@ interface AssistantRouteTurnPlanInput {
   messageTargetAuthorizerAvailable?: boolean | null
 }
 
+/** Reads accept a current player message or the verified scheduled occurrence for this room; writes need a player. */
+function isConversationGameReadAvailable(
+  input: AssistantRouteTurnPlanInput,
+  acceptedInputIds: readonly string[],
+  scope: string,
+  scheduledInvocationScope: ReturnType<typeof resolveAssistantHostedScheduledInvocationScope>,
+): boolean {
+  return input.hostedToolContext?.groupTool != null && scope === 'group' && (acceptedInputIds.length > 0 || scheduledInvocationScope !== null)
+}
+
 function areConversationGamesAvailable(input: AssistantRouteTurnPlanInput, acceptedInputIds: readonly string[], scope: string): boolean {
   return input.hostedToolContext?.groupTool != null && scope === 'group' && acceptedInputIds.length > 0
 }
@@ -646,6 +656,27 @@ function hasPrivateLinqUserInput(
     && delivery.threadIsDirect === true && acceptedInputIds.length > 0
 }
 
+/** Status is a read bound server-side to the call owner, so a verified scheduled call scope suffices. */
+function isPhoneCallStatusAvailable(
+  input: AssistantRouteTurnPlanInput,
+  interactivePhoneCallAction: boolean,
+  scheduledPhoneCallScope: ReturnType<typeof resolveAssistantHostedScheduledPhoneCallScope>,
+): boolean {
+  return (interactivePhoneCallAction || scheduledPhoneCallScope !== null)
+    && typeof input.hostedToolContext?.phoneCalls?.status === 'function'
+}
+
+/** Murph-owned direct Linq output: a current message or a verified scheduled occurrence. */
+function hasPrivateLinqInvocation(
+  privateInteractiveProviderTurn: boolean,
+  delivery: ReturnType<typeof resolveAssistantCurrentAudienceDeliveryFields>,
+  acceptedInputIds: readonly string[],
+  scheduledInvocationScope: ReturnType<typeof resolveAssistantHostedScheduledInvocationScope>,
+): boolean {
+  return privateInteractiveProviderTurn && delivery.channel === 'linq' && delivery.threadIsDirect === true
+    && (acceptedInputIds.length > 0 || scheduledInvocationScope !== null)
+}
+
 function resolveCommunicationToolAvailability({
   input,
   privateInteractiveAudience,
@@ -654,6 +685,7 @@ function resolveCommunicationToolAvailability({
   authenticatedGroupProviderTurn,
   userActionAcceptedInputIds,
   scheduledPhoneCallScope,
+  scheduledInvocationScope,
   currentAudienceDeliveryFields,
   interactivePhoneCallAudience,
 }: {
@@ -664,6 +696,7 @@ function resolveCommunicationToolAvailability({
   authenticatedGroupProviderTurn: boolean
   userActionAcceptedInputIds: readonly string[]
   scheduledPhoneCallScope: ReturnType<typeof resolveAssistantHostedScheduledPhoneCallScope>
+  scheduledInvocationScope: ReturnType<typeof resolveAssistantHostedScheduledInvocationScope>
   currentAudienceDeliveryFields: ReturnType<typeof resolveAssistantCurrentAudienceDeliveryFields>
   interactivePhoneCallAudience: boolean
 }) {
@@ -696,13 +729,13 @@ function resolveCommunicationToolAvailability({
         scheduledPhoneCallScope !== null ||
         interactivePhoneCallAction
       ),
-    phoneCallStatusAvailable:
-      interactivePhoneCallAction &&
-      typeof input.hostedToolContext?.phoneCalls?.status === 'function',
+    phoneCallStatusAvailable: isPhoneCallStatusAvailable(input, interactivePhoneCallAction, scheduledPhoneCallScope),
     phoneCallStopAvailable:
       interactivePhoneCallAction &&
       typeof input.hostedToolContext?.phoneCalls?.stop === 'function',
-    calendarLinkAvailable: privateLinqInput,
+    calendarLinkAvailable: hasPrivateLinqInvocation(
+      privateInteractiveProviderTurn, currentAudienceDeliveryFields, userActionAcceptedInputIds, scheduledInvocationScope,
+    ),
     conversationAttachmentsAvailable:
       conversationMediaTurn &&
       input.hostedToolContext?.currentConversationAttachmentAuthorities !== undefined,
@@ -1321,6 +1354,7 @@ export async function resolveAssistantRouteTurnPlan(
     scheduledAutomationId: input.input.scheduledInvocationAuthority?.automationId,
   })
   const availableDynamicTools = specializedDynamicTools ?? resolveMurphDynamicTools({
+        gameReadAvailable: isConversationGameReadAvailable(input, userActionAcceptedInputIds, conversationScope, scheduledInvocationScope),
         gamesAvailable: areConversationGamesAvailable(input, userActionAcceptedInputIds, conversationScope),
         gameLoreAvailable: gameLoreGuidance !== null,
         gamePhotosAvailable: gamePhotoContextPrompts(input, userActionAcceptedInputIds, conversationScope).length > 0,
@@ -1367,6 +1401,7 @@ export async function resolveAssistantRouteTurnPlan(
           authenticatedGroupProviderTurn,
           userActionAcceptedInputIds,
           scheduledPhoneCallScope,
+          scheduledInvocationScope,
           currentAudienceDeliveryFields,
           interactivePhoneCallAudience,
         }),
