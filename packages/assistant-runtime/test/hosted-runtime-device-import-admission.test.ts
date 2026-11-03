@@ -8,7 +8,7 @@ import {
   removeTempRoot, withRealTimeout, waitUntil,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, vi } from "vitest";
@@ -160,6 +160,8 @@ test.each([
           });
           seedPath = path.join(vaultRoot, seed.eventShardPaths[0]!);
           seedBytes = await readFile(seedPath);
+          // This journey interrupts a cold identity scan; seeding now warms the cache.
+          await utimes(seedPath, new Date(0), new Date(0));
           await enqueueHostedSystemMailboxItem({
             item: createResolvedDeviceSyncSystemMailboxItem(item), vaultRoot,
             wake: {

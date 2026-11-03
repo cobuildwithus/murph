@@ -16,8 +16,6 @@ export {
 } from "./errors.ts";
 export { deterministicContractId } from "./ids.ts";
 export {
-  createDeviceBatchImportSession,
-  type DeviceBatchImportSession,
   type DeviceBatchImportTiming,
   type ImportDeviceBatchExecutionOptions,
   type ImportDeviceBatchInput,

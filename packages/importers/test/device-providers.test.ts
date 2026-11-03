@@ -14,7 +14,6 @@ import {
 
 import {
   createDeviceProviderRegistry,
-  createDeviceProviderSnapshotImportSession,
   createImporters,
   importDeviceProviderSnapshot,
   prepareDeviceProviderSnapshotImport,
@@ -3251,8 +3250,6 @@ test("createImporters preserves committed snapshot progress after the signal abo
 
 test("importDeviceProviderSnapshot delegates normalized device batches to core", async () => {
   const calls: DeviceBatchImportPayload[] = [];
-  const importSession = createDeviceProviderSnapshotImportSession();
-  const observedSessions: unknown[] = [];
   const controller = new AbortController();
   const observedSignals: unknown[] = [];
 
@@ -3287,7 +3284,6 @@ test("importDeviceProviderSnapshot delegates normalized device batches to core",
         options?: DeviceBatchImportExecutionOptions,
       ) {
         calls.push(payload);
-        observedSessions.push(options?.session);
         observedSignals.push(options?.signal);
         options?.onTiming?.({
           canonicalWriteElapsedMs: 12,
@@ -3301,13 +3297,11 @@ test("importDeviceProviderSnapshot delegates normalized device batches to core",
         };
       },
     },
-    importSession,
     signal: controller.signal,
   });
 
   assert.equal(result.ok, true);
   assert.equal(result.provider, "whoop");
-  assert.deepEqual(observedSessions, [importSession]);
   assert.deepEqual(observedSignals, [controller.signal]);
   assert.deepEqual(result.deviceProviderSnapshotImportTiming, {
     canonicalCoreElapsedMs: 56,

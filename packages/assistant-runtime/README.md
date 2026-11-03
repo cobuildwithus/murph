@@ -44,7 +44,7 @@ Current responsibilities:
   Manual refreshes, dirty webhooks, new jobs, and mismatched connection epochs
   retain ordinary admission. Import rollback restores the prior frontier.
 - drain each hosted device-sync pass through one bounded worker call so
-  canonical imports can safely reuse a pass-local event identity index, while
+  canonical imports can safely reuse core’s process-local event identity index, while
   cumulative progress remains observable and the service-owned foreground
   yield check still runs between jobs
 - run inbox media retention during existing idle checkpoint maintenance so raw inbox image/audio bytes expire at their ordinary deadline, while unprotected hosted video bytes expire immediately and stay outside every new snapshot without a separate scheduler

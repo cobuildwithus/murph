@@ -16,6 +16,22 @@ when delivery history inspection is unchanged. Expanding a bounded
 inspection to full history still rebuilds the plan before publication, preserving
 exact-delivery replay and evidence-repair checks.
 
+Core retains one event-identity index across drains in the same process, under
+the existing canonical write lock. Vault identity and shard metadata fence reuse;
+committed append payloads advance the same row reducer used by a cold build.
+Unobserved writes, replacement, import failure, reducer failure, or more than
+100,000 ledger rows evict the cache. Alias repair histories remain request-local,
+and returned event records cannot mutate resident state. There is no persisted
+index or caller session token.
+
+For full-index equivalence proof, run the device import and preparation suites
+with `MURPH_IDENTITY_ASSERT=1`. The test-only transform compares each successful
+import's retained index with a complete rebuild. The session suite's opt-in
+`MURPH_IDENTITY_BENCH=1` case measures two imports over 70,000 valid synthetic rows;
+`MURPH_IDENTITY_BASELINE=<commit>` runs that measurement against an earlier core
+mutation implementation without changing the working tree. Run scan-count and
+timing cases without the equivalence assertion, which intentionally rescans.
+
 See [the Docker CPU benchmark](bench/README.md) for synthetic import profiling
 and one-/two-vCPU comparisons without production credentials.
 

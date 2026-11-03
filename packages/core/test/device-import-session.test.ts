@@ -3,11 +3,14 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { test } from "vitest";
+import { test, vi } from "vitest";
+import { eventRecordSchema, safeParseContract } from "@murphai/contracts";
+
+import * as eventLedger from "../src/event-ledger-storage.ts";
 
 import {
-  createDeviceBatchImportSession,
   importDeviceBatch,
+  deterministicContractId,
   initializeVault,
   readEvent,
   readIntegrationIngestById,
@@ -46,7 +49,73 @@ async function withTempVault(
   }
 }
 
-test("reuses a large event identity index only for non-overlapping imports", async () => {
+test("separate drains reuse identity rows without visiting unrelated history", async () => {
+  await withTempVault(async (vaultRoot) => {
+    const seed = await importDeviceBatch({
+      vaultRoot, provider: "synthetic", importedAt: "2026-01-01T00:00:00.000Z",
+      events: [buildObservation("history", "2020-01-01T00:00:00.000Z", 1)],
+    });
+    const shardPath = seed.eventShardPaths[0]!;
+    const row = seed.events[0]!;
+    await fs.writeFile(path.join(vaultRoot, shardPath), Array.from({ length: 1_000 }, (_, i) =>
+      JSON.stringify({ ...row, id: deterministicContractId("evt", `history-${i}`), externalRef: { ...row.externalRef, resourceId: `history-${i}` } }),
+    ).join("\n") + "\n");
+    let visited = 0;
+    const realVisit = eventLedger.visitEventLedgerShardRecordsInterruptible;
+    const spy = vi.spyOn(eventLedger, "visitEventLedgerShardRecordsInterruptible")
+      .mockImplementation((input) => realVisit({ ...input, visit(record, line) {
+        if (input.relativePath === shardPath) visited += 1;
+        return input.visit(record, line);
+      } }));
+    try {
+      for (const day of [2, 3]) {
+        const at = `2026-01-0${day}T00:00:00.000Z`;
+        await importDeviceBatch({ vaultRoot, provider: "synthetic", importedAt: at,
+          events: [buildObservation(`drain-${day}`, at, day)],
+        });
+        if (day === 2) {
+          assert.equal(visited, 1_000);
+          visited = 0;
+        } else {
+          assert.equal(visited, 0, "the second drain must not scan unrelated identity rows");
+        }
+      }
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+test.skipIf(process.env.MURPH_IDENTITY_BENCH !== "1")("measures two drains over 70k identity rows", async () => {
+  await withTempVault(async (vaultRoot) => {
+    const seed = await importDeviceBatch({ vaultRoot, provider: "synthetic",
+      importedAt: "2026-01-01T00:00:00.000Z",
+      events: [buildObservation("seed", "2020-01-01T00:00:00.000Z", 1)],
+    });
+    const row = seed.events[0]!;
+    for (let month = 0; month < 55; month++) {
+      const at = new Date(Date.UTC(2020, month, 1)).toISOString();
+      const shardPath = path.join(path.dirname(seed.eventShardPaths[0]!), `${at.slice(0, 7)}.jsonl`);
+      await fs.mkdir(path.dirname(path.join(vaultRoot, shardPath)), { recursive: true });
+      const rows = Array.from({ length: month === 54 ? 1_312 : 1_272 }, (_, i) => ({
+        ...row, id: deterministicContractId("evt", `bench-${month}-${i}`), occurredAt: at, dayKey: at.slice(0, 10),
+        externalRef: { ...row.externalRef, resourceId: `bench-${month}-${i}` },
+      }));
+      assert.ok(safeParseContract(eventRecordSchema, rows[0]).success);
+      await fs.writeFile(path.join(vaultRoot, shardPath), rows.map((record) => JSON.stringify(record)).join("\n") + "\n");
+    }
+    const timings: DeviceBatchImportTiming[] = [];
+    for (const day of [2, 3]) {
+      const at = `2026-01-0${day}T00:00:00.000Z`;
+      await importDeviceBatch({ vaultRoot, provider: "synthetic", importedAt: at,
+        events: [buildObservation(`drain-${day}`, at, day)],
+      }, { onTiming: (timing) => timings.push(timing) });
+    }
+    process.stdout.write(JSON.stringify({ rows: 70_000, shards: 55, identityMs: timings.map((t) => t.eventIdentityIndexElapsedMs), hits: timings.map((t) => t.eventIdentityIndexCacheHit) }) + "\n");
+  });
+});
+
+test("reuses a large event identity index across overlapping imports", async () => {
   await withTempVault(async (vaultRoot) => {
     const start = Date.parse("2020-01-01T00:00:00.000Z");
     await importDeviceBatch({
@@ -60,7 +129,6 @@ test("reuses a large event identity index only for non-overlapping imports", asy
       }),
     });
 
-    const session = createDeviceBatchImportSession();
     const timings: DeviceBatchImportTiming[] = [];
     const firstAt = "2026-01-02T00:00:00.000Z";
     const first = await importDeviceBatch({
@@ -70,7 +138,6 @@ test("reuses a large event identity index only for non-overlapping imports", asy
       importedAt: firstAt,
       events: [buildObservation("incremental-a", firstAt, 1)],
     }, {
-      session,
       onTiming: (timing) => timings.push(timing),
     });
     const secondAt = "2026-01-03T00:00:00.000Z";
@@ -81,11 +148,10 @@ test("reuses a large event identity index only for non-overlapping imports", asy
       importedAt: secondAt,
       events: [buildObservation("incremental-b", secondAt, 2)],
     }, {
-      session,
       onTiming: (timing) => timings.push(timing),
     });
 
-    assert.equal(timings[0]?.eventIdentityIndexCacheHit, false);
+    assert.equal(timings[0]?.eventIdentityIndexCacheHit, true);
     assert.equal(timings[1]?.eventIdentityIndexCacheHit, true);
     assert.equal(first.events.length, 1);
     assert.equal(second.events.length, 1);
@@ -98,11 +164,10 @@ test("reuses a large event identity index only for non-overlapping imports", asy
       importedAt: correctionAt,
       events: [buildObservation("incremental-a", correctionAt, 3)],
     }, {
-      session,
       onTiming: (timing) => timings.push(timing),
     });
 
-    assert.equal(timings[2]?.eventIdentityIndexCacheHit, false);
+    assert.equal(timings[2]?.eventIdentityIndexCacheHit, true);
     assert.equal(correction.events[0]?.id, first.events[0]?.id);
     assert.equal(correction.events[0]?.lifecycle?.revision, 2);
 
@@ -122,10 +187,9 @@ test("reuses a large event identity index only for non-overlapping imports", asy
       importedAt: afterExternalAt,
       events: [buildObservation("after-outside-session", afterExternalAt, 5)],
     }, {
-      session,
       onTiming: (timing) => timings.push(timing),
     });
-    assert.equal(timings[3]?.eventIdentityIndexCacheHit, false);
+    assert.equal(timings[3]?.eventIdentityIndexCacheHit, true);
   });
 }, 30_000);
 
@@ -138,7 +202,7 @@ test("does not seed an empty event identity cache from a sample-only import", as
       importedAt: persistedAt,
       events: [buildObservation("existing", persistedAt, 1)],
     });
-    const session = createDeviceBatchImportSession();
+    await fs.utimes(path.join(vaultRoot, persisted.eventShardPaths[0]!), new Date(0), new Date(0));
     await importDeviceBatch({
       vaultRoot,
       provider: "synthetic",
@@ -152,7 +216,7 @@ test("does not seed an empty event identity cache from a sample-only import", as
           value: 60,
         },
       }],
-    }, { session });
+    });
 
     let replayTiming: DeviceBatchImportTiming | undefined;
     const replay = await importDeviceBatch({
@@ -161,7 +225,6 @@ test("does not seed an empty event identity cache from a sample-only import", as
       importedAt: "2026-01-04T00:00:00.000Z",
       events: [buildObservation("existing", "2026-01-04T00:00:00.000Z", 2)],
     }, {
-      session,
       onTiming: (timing) => {
         replayTiming = timing;
       },
@@ -180,9 +243,8 @@ test("keeps the cached baseline isolated from reconciliation and discards it aft
       vaultRoot, provider: "synthetic", importedAt: originalAt,
       events: [buildObservation("existing", originalAt, 1)],
     });
-    const session = createDeviceBatchImportSession();
     const timings: DeviceBatchImportTiming[] = [];
-    const options = { session, onTiming: (timing: DeviceBatchImportTiming) => timings.push(timing) };
+    const options = { onTiming: (timing: DeviceBatchImportTiming) => timings.push(timing) };
     const secondAt = "2026-01-02T00:00:00.000Z";
     await importDeviceBatch({
       vaultRoot, provider: "synthetic", importedAt: secondAt,
@@ -198,7 +260,7 @@ test("keeps the cached baseline isolated from reconciliation and discards it aft
       vaultRoot, provider: "synthetic", importedAt: fourthAt,
       events: [buildObservation("another-disjoint", fourthAt, 4)],
     }, options);
-    assert.deepEqual(timings.map((timing) => timing.eventIdentityIndexCacheHit), [false, true, true]);
+    assert.deepEqual(timings.map((timing) => timing.eventIdentityIndexCacheHit), [true, true, true]);
     assert.equal(correction.events[0]?.id, original.events[0]?.id);
     assert.equal(correction.events[0]?.lifecycle?.revision, 2);
     assert.equal(disjoint.events[0]?.lifecycle?.revision ?? 1, 1);
@@ -262,7 +324,6 @@ test("preserves raw evidence identity across reordered frozen nested values", as
       ["nested", Object.freeze({ a: 1, z: 2 })],
       ["timestamp", importedAt],
     ]));
-    const session = createDeviceBatchImportSession();
     const makeInput = (content: Record<string, unknown>) => ({
       vaultRoot,
       provider: "synthetic",
@@ -270,9 +331,9 @@ test("preserves raw evidence identity across reordered frozen nested values", as
       events: [buildObservation("frozen-content", importedAt, 1)],
       evidenceParts: [{ role: "snapshot", fileName: "snapshot.json", content }],
     });
-    const original = await importDeviceBatch(makeInput(firstContent), { session });
+    const original = await importDeviceBatch(makeInput(firstContent));
     assert.ok(original.applied);
-    const replay = await importDeviceBatch(makeInput(replayContent), { session });
+    const replay = await importDeviceBatch(makeInput(replayContent));
     assert.equal(replay.applied, false);
     assert.deepEqual(replay.events.map((event) => event.id), original.events.map((event) => event.id));
     const stored = await readIntegrationIngestById(vaultRoot, original.ingestId);
