@@ -26,7 +26,11 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, vi } from "vitest";
-import { initializeVault, patchAutomation, upsertAutomation } from "@murphai/core";
+import { importDeviceBatch, inspectCanonicalWriteLock, withCanonicalWriteLock, initializeVault, patchAutomation, upsertAutomation } from "@murphai/core";
+import { eventRecordSchema } from "@murphai/contracts";
+import { prepareSyntheticFinalization } from "./device-import-finalization.fixture.ts";
+import { createDefaultImporterPort } from "@murphai/device-syncd/service";
+import * as deviceService from "../src/device-sync-service.ts";
 import { listCanonicalEntities } from "@murphai/query";
 import { createAssistantOutboxIntent, listAssistantOutboxIntents, type RunAssistantAutomationPassInput } from "@murphai/assistant-engine";
 import { writeAssistantAutoReplyReplyTerminalEvidence } from "@murphai/assistant-engine/assistant-automation";
@@ -38,7 +42,8 @@ import * as maintenanceCancellation from "../src/hosted-runtime/background-maint
 import { HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS } from "../src/hosted-runtime/device-sync-maintenance-limits.ts";
 import { readHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
 
-test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "acknowledgment", "empty-wake"] as const)("preserves foreground delivery with a %s concurrent device import", async (scenario) => {
+test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "acknowledgment", "empty-wake", "finalization", "long-finalization"] as const)("preserves foreground delivery with a %s concurrent device import", async (scenario) => {
+  const finalization = scenario === "finalization" || scenario === "long-finalization";
   const completesBeforeReply = scenario === "completed" || scenario === "acknowledgment" || scenario === "empty-wake";
   const cold = scenario === "cold" || scenario === "reminder";
   const persistent = scenario === "persistent" || cold;
@@ -46,6 +51,8 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
   const reminderAt = new Date(Date.parse(TEST_NOW) + 1_000).toISOString();
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-concurrent-device-import-"));
   const controller = new AbortController();
+  const replyDispatched = createDeferred<void>();
+  let idleClock: ReturnType<typeof setInterval> | undefined;
   let runtimeCompletion: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
   const events: string[] = [];
   const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -60,6 +67,43 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
   let replySent = false;
   let idleSnapshotCount = 0;
   let modelFinishedAt = 0;
+  let finalizationElapsedMs = 0;
+  const indexing = createDeferred<void>();
+  let identityRows = 0;
+  let rowsAtProviderResult = 0;
+  let importAttempts = 0;
+  let preparationAborts = 0;
+  let snapshot: unknown;
+  const realCreateService = deviceService.createHostedRuntimeDeviceSyncService;
+  const createSpy = vi.spyOn(deviceService, "createHostedRuntimeDeviceSyncService").mockImplementation(input => {
+    if (!finalization) return realCreateService(input);
+    const importer = createDefaultImporterPort();
+    return realCreateService({ ...input, importer: {
+      ...importer,
+      async importDeviceProviderSnapshot(request, options) {
+        importAttempts += 1;
+        if (importAttempts === 1) snapshot = request.snapshot;
+        else assert.equal(request.snapshot, snapshot, "Retry must retain the fetched snapshot");
+        try { return await importer.importDeviceProviderSnapshot(request, options); }
+        catch (error) {
+          assert.equal(options?.signal?.aborted, true);
+          assert.equal((await inspectCanonicalWriteLock(vaultRoot)).state, "unlocked");
+          preparationAborts += 1;
+          throw error;
+        }
+      },
+    } });
+  });
+  const parse = eventRecordSchema.safeParse.bind(eventRecordSchema);
+  const parseSpy = vi.spyOn(eventRecordSchema, "safeParse").mockImplementation((...args) => {
+    const record = args[0];
+    if (finalization && record && typeof record === "object" && "title" in record
+      && record.title === "Synthetic identity history" && importAttempts > 0) {
+      identityRows += 1;
+      if (identityRows === 256) indexing.resolve();
+    }
+    return parse(...args);
+  });
   const connectionId = "synthetic-concurrent-connection";
   const deviceItem = createMailboxItem({
     id: "mailbox_item_concurrent_device",
@@ -80,7 +124,12 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
   vi.stubGlobal("fetch", vi.fn(async (request: string | URL | Request, init?: RequestInit) => {
     const pathname = new URL(request instanceof Request ? request.url : String(request)).pathname;
     if (pathname.includes("/messages")) {
+      if (finalization) {
+        finalizationElapsedMs = performance.now() - modelFinishedAt;
+        process.stdout.write(`synthetic finalization ${scenario}: ${Math.round(finalizationElapsedMs)} ms; identity rows during tail: ${identityRows - rowsAtProviderResult}\n`);
+      }
       events.push("reply.sent");
+      replyDispatched.resolve();
       assert.ok(performance.now() - modelFinishedAt < 2_000, events.join(","));
       if (completesBeforeReply || persistent) {
         if (replySent) {
@@ -130,6 +179,10 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
       if (!currentInputId || handledInputIds.has(currentInputId)) return { currentTurnDeliveryIntentIds: [], nextWakeAt: null, progressed: false };
       if (scheduledOccurrence) assert.ok(Date.now() >= Date.parse(reminderAt));
       handledInputIds.add(currentInputId);
+      const finalize = finalization ? await prepareSyntheticFinalization(vaultRoot, TEST_NOW) : null;
+      const release = finalization ? await input.beforeProviderAcceptedInputs?.({
+        acceptedInputs: [{ id: currentInputId, source: "assistant-input" }], turnId: "synthetic-finalization",
+      }) : null;
       events.push("model.started");
       await input.onProviderRequestStarted?.({
         assistantInputIds: scheduledOccurrence ? [] : [currentInputId], providerRequestOrdinal: 0,
@@ -139,7 +192,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
         items.push(deviceItem);
         runtimeWakeSignal.notify();
         await withRealTimeout(
-          completesBeforeReply ? imported.promise : providerStarted.promise,
+          finalization ? indexing.promise : completesBeforeReply ? imported.promise : providerStarted.promise,
           10_000, () => JSON.stringify({events}),
         );
       }
@@ -164,6 +217,17 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
           ));
         }
       }
+      if (finalization) {
+        assert.ok(identityRows >= 256 && identityRows < 32_000, "Provider must return during real indexing");
+        if (scenario === "long-finalization") vi.setSystemTime(Date.now() + 31_000);
+        rowsAtProviderResult = identityRows;
+        modelFinishedAt = performance.now();
+        await release?.();
+        await finalize?.();
+        await withCanonicalWriteLock(vaultRoot, async () => {
+          events.push("foreground.lock.acquired");
+        });
+      }
       const intent = await createAssistantOutboxIntent({
         channel: "linq", createdAt: TEST_NOW,
         dedupeToken: `synthetic-concurrent-reply:${currentInputId}`,
@@ -183,7 +247,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
         terminalKind: "reply_intent_committed", vault: vaultRoot,
       });
       events.push("model.finished");
-      modelFinishedAt = performance.now();
+      if (!finalization) modelFinishedAt = performance.now();
       return { currentTurnDeliveryIntentIds: [intent.intentId], nextWakeAt: null, progressed: true };
     });
     const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
@@ -257,7 +321,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
     runtimeCompletion = runHostedWorkspaceRuntimeJobInProcess(
       createWorkspaceRuntimeJobInput({
         request: {
-          attemptId: "attempt_synthetic_concurrent_import", runnerIdleTtlMs: 1,
+          attemptId: "attempt_synthetic_concurrent_import", runnerIdleTtlMs: finalization ? 60_000 : 1,
           ...(cold ? { processingMode: "system_mailbox" as const } : {}),
         },
         forwardedEnv: { LINQ_API_TOKEN: "synthetic-linq-token" },
@@ -281,7 +345,21 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
         },
         async importItem(item) {
           if (item.item.lane === "conversation") {
-            if (!inputId && !cold) await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+            if (!inputId && !cold) {
+              await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+              if (finalization) {
+                for (let batch = 0; batch < 4; batch += 1) {
+                  await importDeviceBatch({ vaultRoot, provider: "synthetic",
+                    events: Array.from({ length: 8_000 }, (_, i) => ({
+                      kind: "observation" as const, occurredAt: "2026-01-01T00:00:00.000Z",
+                      recordedAt: TEST_NOW, title: "Synthetic identity history",
+                      externalRef: { system: "synthetic", resourceType: "metric", resourceId: `history-${batch}-${i}` },
+                      fields: { metric: "synthetic", unit: "count", value: 1 },
+                    })),
+                  });
+                }
+              }
+            }
             inputId = await stagePendingLinqAssistantInputForMailboxItem({ item: item.item, vaultRoot });
             return { assistantInputId: inputId, status: "imported" };
           }
@@ -363,6 +441,23 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
       assert.equal(events.filter((event) => event === "device.receipt.uploaded").length, 1);
       releaseSnapshot.resolve();
     }
+    if (finalization) {
+      // Keep this invocation alive through the retry. A 1-ms idle fixture can
+      // legitimately shut down between dispatch and resumed preparation.
+      await withRealTimeout(replyDispatched.promise, 10_000, () => events.join(","));
+      assert.ok(finalizationElapsedMs <= 400, `Provider return to dispatch took ${Math.round(finalizationElapsedMs)} ms`);
+      assert.equal(preparationAborts, 1);
+      assert.ok(events.includes("foreground.lock.acquired"));
+      await vi.waitFor(async () => {
+        const item = (await readHostedSystemMailboxState(vaultRoot)).pending.find(item => item.itemId === deviceItem.id);
+        assert.equal(item?.status, "recording");
+      }, { timeout: 10_000, interval: 25 });
+      // Advance the fake idle clock only after the retained import is durable.
+      idleClock = setInterval(() => {
+        vi.setSystemTime(Date.now() + 1_000);
+        runtimeWakeSignal.notify();
+      }, 10);
+    }
     await withRealTimeout(runtimeCompletion, 20_000, () => events.join(","));
     assert.ok(replySent, JSON.stringify({ events, intents: await listAssistantOutboxIntents(vaultRoot) }));
     if (completesBeforeReply || persistent) {
@@ -406,17 +501,33 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
             normalizerVersion: "junction-normalizer.v1", observedAtRaw: "2026-04-26T00:00:00.000Z", timestampSemantics: "utc" },
         }]);
       }
+    } else if (finalization) {
+      assert.equal(events.filter(event => event === "reply.sent").length, 1);
+      assert.equal(importAttempts, 2);
+      assert.equal(preparationAborts, 1);
+      assert.equal(events.filter(event => event.includes("/summary/sleep/")).length, 1);
+      assert.equal(events.slice(events.indexOf("model.started")).filter(event => event === "device.receipt.uploaded").length, 1);
+      assert.equal(dirtyAcks.length, 1);
+      assert.equal(dirtyAcks[0]?.processedRevision, "7");
+      assert.deepEqual(dirtyAcks[0]?.processedDirtyPayloadIds, ["synthetic-concurrent-payload"]);
+      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending.map(({ itemId, status }) => ({ itemId, status })), []);
+      assert.ok(events.indexOf("reply.sent") < events.lastIndexOf("device.receipt.uploaded"));
+      const rows = await listCanonicalEntities(vaultRoot, { family: "event" });
+      assert.equal(rows.filter(row => row.kind === "sleep_session").length, 1);
     } else if (scenario === "stalled") {
       assert.ok(events.includes("provider.aborted"), events.join(","));
       assert.ok(!events.includes("device.receipt.uploaded")
         || events.indexOf("reply.sent") < events.indexOf("device.receipt.uploaded"), events.join(","));
     }
   } finally {
+    if (idleClock) clearInterval(idleClock);
     releaseDownload.resolve();
     releaseSnapshot.resolve();
     controller.abort();
     await runtimeCompletion?.catch(() => undefined);
     if (originalAutomation) mocks.runAssistantAutomationPass.mockImplementation(originalAutomation);
+    parseSpy.mockRestore();
+    createSpy.mockRestore();
     vi.unstubAllGlobals();
     vi.useRealTimers();
     await removeTempRoot(vaultRoot);

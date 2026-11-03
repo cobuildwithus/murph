@@ -15977,3 +15977,74 @@ test("cold history unavailability retains accepted resource work beyond its retr
     assert.ok(fixture.service.listJobFailureDiagnostics().every((entry) => entry.retryable && entry.jobDisposition === "queued"));
   } finally { fixture.close(); await rm(vaultRoot, { recursive: true, force: true }); }
 });
+
+
+test.each([false, true])("retained snapshot gets an uninterrupted retry after 30 seconds of foreground traffic (already preparing: %s)", async (alreadyPreparing) => {
+  const vaultRoot = await makeTempDirectory("murph-import-fairness-");
+  let foreground = !alreadyPreparing;
+  let imports = 0;
+  let executions = 0;
+  let observed!: () => void;
+  const firstDeferral = new Promise<void>(resolve => { observed = resolve; });
+  const snapshot = { synthetic: true };
+  let now = Date.now();
+  const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+  const { service, store, close } = createServiceFixture({
+    secret: "synthetic-secret",
+    config: { vaultRoot, publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      shouldYieldImportPreparation: () => {
+        if (foreground) observed();
+        return foreground;
+      },
+    },
+    providers: [createFakeProvider({ async executeJob(context) {
+      executions += 1;
+      await context.importSnapshot(snapshot);
+      return {};
+    } })],
+    importer: { async importDeviceProviderSnapshot(input, options) {
+      imports += 1;
+      assert.equal(input.snapshot, snapshot);
+      const signal = options?.signal;
+      assert.ok(signal);
+      if (alreadyPreparing && imports === 1) {
+        foreground = true;
+        await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
+        throw signal.reason;
+      }
+      // Continued foreground traffic cannot abort the fairness attempt.
+      await new Promise(resolve => setTimeout(resolve, 220));
+      assert.equal(signal.aborted, false);
+      return { applied: true, events: [] };
+    } },
+  });
+  let running: ReturnType<typeof service.runWorkerOnce> | undefined;
+  try {
+    const begin = await service.startConnection({ provider: "demo" });
+    await service.handleOAuthCallback({ provider: "demo", state: begin.state, code: "synthetic" });
+    running = service.runWorkerOnce();
+    await firstDeferral;
+    for (let turn = 0; turn < 3; turn += 1) {
+      now += 9_000;
+      await new Promise(resolve => setTimeout(resolve, 120));
+      assert.equal(imports, alreadyPreparing ? 1 : 0);
+    }
+    now += 3_001;
+    const result = await Promise.race([
+      running,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Foreground traffic starved the retained snapshot beyond 30 seconds")), 1_000)),
+    ]);
+    assert.ok(result);
+    assert.equal(store.getJobById(result.id)?.status, "succeeded");
+    assert.equal(imports, alreadyPreparing ? 2 : 1);
+    assert.equal(executions, 1);
+    assert.equal(service.listJobTimingDiagnostics()[0]?.snapshotImportCount, 1);
+  } finally {
+    foreground = false;
+    await running;
+    clock.mockRestore();
+    close();
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
