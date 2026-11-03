@@ -78,35 +78,37 @@ for (const afterCommit of [false, true]) {
   }));
 }
 
-test("reducer failure evicts without failing a committed import", async () => withVault(async (root) => {
-  await importDeviceBatch(input(root, 1));
-  const realWrite = publication.runCanonicalWrite;
-  let committed = false;
-  const writeSpy = vi.spyOn(publication, "runCanonicalWrite").mockImplementation(async (request) => {
-    const result = await realWrite(request);
-    committed = true;
-    return result;
-  });
+test("pending reducer failure evicts and rebuilds without failing the next import", async () => withVault(async (root) => {
+  const seed = await importDeviceBatch(input(root, 1));
+  let failed = false;
   const realParse = contracts.safeParseContract;
   const parseSpy = vi.spyOn(contracts, "safeParseContract").mockImplementation((schema, value) => {
-    if (committed) throw new Error("Synthetic reducer failure");
+    if (!failed && schema === contracts.eventRecordSchema && typeof value === "object"
+      && value !== null && "id" in value && value.id === seed.events[0]!.id) {
+      failed = true;
+      throw new Error("Synthetic reducer failure");
+    }
     return realParse(schema, value);
   });
+  let hit: boolean | undefined;
   try {
-    assert.equal((await importDeviceBatch(input(root, 2))).applied, true);
+    const next = await importDeviceBatch(input(root, 2), {
+      onTiming: (timing) => { hit = timing.eventIdentityIndexCacheHit; },
+    });
+    assert.equal(next.applied, true);
+    assert.equal(failed, true);
+    assert.equal(hit, false);
   } finally {
-    writeSpy.mockRestore();
     parseSpy.mockRestore();
   }
-  let hit: boolean | undefined;
   await importDeviceBatch(input(root, 3), { onTiming: (timing) => { hit = timing.eventIdentityIndexCacheHit; } });
-  assert.equal(hit, false);
+  assert.equal(hit, true);
 }));
 
 test("capacity counts revisions, and a different resident vault evicts the prior vault", async () => withVault(async (root) => {
   const seed = await importDeviceBatch(input(root, 1));
   const shard = path.join(root, seed.eventShardPaths[0]!);
-  await fs.writeFile(shard, (JSON.stringify(seed.events[0]) + "\n").repeat(100_001));
+  await fs.writeFile(shard, (JSON.stringify(seed.events[0]) + "\n").repeat(100_000));
   const hits: boolean[] = [];
   const options = { onTiming: (timing: DeviceBatchImportTiming) => hits.push(timing.eventIdentityIndexCacheHit) };
   await importDeviceBatch(input(root, 2), options);

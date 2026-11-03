@@ -5,8 +5,10 @@ import path from "node:path";
 
 import { test, vi } from "vitest";
 import { eventRecordSchema, safeParseContract } from "@murphai/contracts";
+import * as contracts from "@murphai/contracts";
 
 import * as eventLedger from "../src/event-ledger-storage.ts";
+import * as publication from "../src/operations/write-batch.ts";
 
 import {
   importDeviceBatch,
@@ -48,6 +50,69 @@ async function withTempVault(
     await fs.rm(vaultRoot, { recursive: true, force: true });
   }
 }
+
+test("a writing import defers identity reduction of its committed rows until reuse", async () => {
+  await withTempVault(async (vaultRoot) => {
+    let committed = false;
+    let reducedAfterCommit = 0;
+    const realWrite = publication.runCanonicalWrite;
+    const writeSpy = vi.spyOn(publication, "runCanonicalWrite").mockImplementation(async (request) => {
+      const result = await realWrite(request);
+      committed = true;
+      return result;
+    });
+    const realParse = contracts.safeParseContract;
+    const parseSpy = vi.spyOn(contracts, "safeParseContract").mockImplementation((schema, value) => {
+      if (committed && schema === eventRecordSchema) reducedAfterCommit += 1;
+      return realParse(schema, value);
+    });
+    try {
+      const result = await importDeviceBatch({
+        vaultRoot, provider: "synthetic", importedAt: "2026-02-01T00:00:00.000Z",
+        events: [
+          buildObservation("first", "2026-01-01T00:00:00.000Z", 1),
+          buildObservation("second", "2026-02-01T00:00:00.000Z", 2),
+        ],
+      });
+      assert.equal(result.applied, true);
+      assert.equal(result.events.length, 2);
+      assert.equal(reducedAfterCommit, 0, "unused appended rows must not be reduced after publication");
+    } finally {
+      writeSpy.mockRestore();
+      parseSpy.mockRestore();
+    }
+  });
+});
+
+test("deferred committed rows give the next warm import the same owners as a fresh build", async () => {
+  await withTempVault(async (vaultRoot) => withTempVault(async (coldRoot) => {
+    const seed = await importDeviceBatch({
+      vaultRoot, provider: "synthetic", importedAt: "2026-02-01T00:00:00.000Z",
+      events: [
+        buildObservation("first", "2026-01-01T00:00:00.000Z", 1),
+        buildObservation("second", "2026-02-01T00:00:00.000Z", 2),
+      ],
+    });
+    await fs.cp(vaultRoot, coldRoot, { recursive: true });
+    const correction = {
+      provider: "synthetic", importedAt: "2026-03-01T00:00:00.000Z",
+      events: [
+        buildObservation("first", "2026-03-01T00:00:00.000Z", 3),
+        buildObservation("second", "2026-03-01T00:00:00.000Z", 4),
+      ],
+    };
+    const hits: boolean[] = [];
+    const options = { onTiming: (timing: DeviceBatchImportTiming) => hits.push(timing.eventIdentityIndexCacheHit) };
+    const warm = await importDeviceBatch({ ...correction, vaultRoot }, options);
+    const cold = await importDeviceBatch({ ...correction, vaultRoot: coldRoot }, options);
+    assert.deepEqual(hits, [true, false]);
+    assert.equal(warm.applied, true);
+    assert.equal(cold.applied, true);
+    assert.deepEqual(warm.events, cold.events);
+    assert.deepEqual(warm.events.map((event) => event.id), seed.events.map((event) => event.id));
+    assert.ok(warm.events.every((event) => event.lifecycle?.revision === 2));
+  }));
+});
 
 test("separate drains reuse identity rows without visiting unrelated history", async () => {
   await withTempVault(async (vaultRoot) => {

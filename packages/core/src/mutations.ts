@@ -3238,6 +3238,7 @@ interface DeviceEventIdentityContext {
 const deviceEventIdentityCache = new Map<string, {
   index: EventExternalRefIndex;
   eventLedgerFingerprint: string;
+  pendingPayloads: [string, string][];
 }>();
 const MAX_WARM_IDENTITY_ROWS = 100_000;
 
@@ -3245,6 +3246,7 @@ function retainDeviceEventIdentityIndex(
   vaultRoot: string,
   index: EventExternalRefIndex,
   fingerprint?: string,
+  pendingPayloads: [string, string][] = [],
 ): void {
   deviceEventIdentityCache.clear();
   if (fingerprint && [...index.shardRowCounts.values()].reduce((sum, count) => sum + count, 0) <= MAX_WARM_IDENTITY_ROWS) {
@@ -3252,6 +3254,7 @@ function retainDeviceEventIdentityIndex(
     deviceEventIdentityCache.set(vaultRoot, {
       index: { ...index, aliasRepairHistoryById: new Map() },
       eventLedgerFingerprint: fingerprint,
+      pendingPayloads,
     });
   }
 }
@@ -7195,8 +7198,27 @@ timing: DeviceBatchImportTiming,
   const cached = requiresEventIdentityContext ? deviceEventIdentityCache.get(vaultRoot) : undefined;
   const fingerprint = requiresEventIdentityContext
     ? await tryBuildDeviceEventLedgerFingerprint(vaultRoot) : undefined;
-  const cachedIndex = cached && fingerprint && cached.eventLedgerFingerprint === fingerprint
-    ? cached.index : undefined;
+  let cachedIndex: EventExternalRefIndex | undefined;
+  if (cached && fingerprint && cached.eventLedgerFingerprint === fingerprint) {
+    try {
+      const { index } = cached;
+      const changedIds = new Set<string>();
+      for (const [relativePath, payload] of cached.pendingPayloads) {
+        for (const line of payload.trimEnd().split("\n")) {
+          const id = reduceEventExternalRefRow(index, relativePath, JSON.parse(line));
+          if (id) changedIds.add(id);
+        }
+      }
+      await refreshEventExternalRefMatches(index, changedIds, options.signal);
+      index.aliasRepairHistoryById = new Map();
+      cached.pendingPayloads = [];
+      if ([...index.shardRowCounts.values()].reduce((sum, count) => sum + count, 0) <= MAX_WARM_IDENTITY_ROWS) {
+        cachedIndex = index;
+      }
+    } catch {
+      cachedIndex = undefined;
+    }
+  }
   if (cached && !cachedIndex) deviceEventIdentityCache.delete(vaultRoot);
   const initialEventIdentityContext = await buildDeviceEventIdentityContext(
     vaultRoot,
@@ -8127,22 +8149,15 @@ timing: DeviceBatchImportTiming,
     0,
     performance.now() - canonicalWriteStartedAt,
   );
-  const publishedIndex = deviceEventIdentityCache.get(vaultRoot)?.index;
-  if (publishedIndex && eventAppendPlan.appendedRecordIds.length > 0) {
+  const publishedCache = deviceEventIdentityCache.get(vaultRoot);
+  if (publishedCache && eventAppendPlan.appendedRecordIds.length > 0) {
     // Only the append payloads represent rows actually published. Reconciliation
     // also returns unchanged owners and must never be used to advance this cache.
     deviceEventIdentityCache.delete(vaultRoot);
     try {
-      const changedIds = new Set<string>();
-      for (const [relativePath, payload] of eventAppendPlan.payloads) {
-        for (const line of payload.trimEnd().split("\n")) {
-          const id = reduceEventExternalRefRow(publishedIndex, relativePath, JSON.parse(line));
-          if (id) changedIds.add(id);
-        }
-      }
-      await refreshEventExternalRefMatches(publishedIndex, changedIds);
-      publishedIndex.aliasRepairHistoryById = new Map();
-      retainDeviceEventIdentityIndex(vaultRoot, publishedIndex, await tryBuildDeviceEventLedgerFingerprint(vaultRoot));
+      retainDeviceEventIdentityIndex(vaultRoot, publishedCache.index,
+        await tryBuildDeviceEventLedgerFingerprint(vaultRoot),
+        [...publishedCache.pendingPayloads, ...eventAppendPlan.payloads]);
     } catch {
       // Cache failure cannot turn successful publication into an apparent failure.
     }
