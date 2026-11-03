@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { GameSchedule } from "@/src/lib/game/contract";
 import { decideJoin, type RuleEntry, type RuleState, type TermWords } from "@/src/lib/game/rules";
 import { addDays, dayStartInstant } from "@/src/lib/game/time";
-import { buildGameView, gameMediaUrl, ticketView, visibleEntryIds, type GameViewInput } from "@/src/lib/game/views";
+import { buildGameView, gameMediaUrl, termsView, ticketView, visibleEntryIds, type GameViewInput } from "@/src/lib/game/views";
 
 const LEO = "hbm_leo";
 const AVA = "hbm_ava";
@@ -93,6 +93,12 @@ function noonOnDay(state: RuleState, memberId: string, dayIndex: number, hour = 
 }
 
 describe("weekly game views: tickets", () => {
+  it.each([false, true])("preserves pair terms JSON bytes with multiplayer=%s", multiplayer => {
+    expect(JSON.stringify(termsView(liveState({ count: 7 }), WORDS, multiplayer))).toBe(
+      '{"checkInKind":"photo","fromDay":0,"n":1,"schedule":{"count":7},"stakes":[{"item":"Breakfast in bed","key":"gsk_breakfast","kind":"winner_gets"}],"tasks":[{"seat":0,"text":"100 pushups"},{"seat":1,"text":"10 min abs"}]}',
+    );
+  });
+
   it("projects a pending day as accepted now for both time zones without changing stored metadata", () => {
     const state = liveState();
     const pending = { id:"proposal", proposedByMemberId:LEO, expectedTermsVersion:1, change:{kind:"edit" as const,lengthDays:14},

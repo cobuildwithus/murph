@@ -1,3 +1,7 @@
+Group app terms preserve valid unjoined invitation overrides through edits using
+the validator's shared seat eligibility; chat and public preview privacy stay
+unchanged. The projection contract is owned by [Weekly Game](product-specs/weekly-game.md).
+
 Public group invite Web rendering and pair preservation are owned by
 [Weekly Game](product-specs/weekly-game.md); proof and the PR lane are tracked in
 [the invite preview plan](exec-plans/completed/2026-11-03-group-invite-web.md).

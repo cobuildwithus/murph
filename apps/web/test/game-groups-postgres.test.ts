@@ -139,6 +139,47 @@ describe("group admission switch and audience keys", () => {
 });
 
 describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
+  it("round-trips an unjoined invitee's task through a prize edit and allows its removal", async () => {
+    const [starter, joined, invited] = await Promise.all([person(), person(), person()]);
+    const ownTask = { seat: 2, text: "Read a chapter" };
+    const game = await create(starter, [joined, invited], { terms: { ...terms, tasks: [ownTask] } });
+    const { readInvitePreview } = await import("@/src/lib/game/service");
+    expect(await readInvitePreview(game.token, true)).toMatchObject({ terms: { tasks: [] } });
+    expect(await readInvitePreview(game.token, true, invited.id)).toMatchObject({ yourTask: ownTask.text });
+    await ok(joined.id, join(game.token));
+    const before = await readGame(game.id, starter.id, true);
+    expect(before?.terms.tasks).toEqual([
+      { seat: 0, text: terms.defaultTask }, { seat: 1, text: terms.defaultTask }, ownTask,
+    ]);
+    expect((await readGame(game.id, joined.id, true))?.terms).toEqual(before!.terms);
+    // The editor sends every non-default task, including seats outside its roster.
+    const tasks = before!.terms.tasks.filter(task => task.text !== before!.terms.defaultTask);
+    await ok(starter.id, { type: "editTerms", gameId: game.id, expectedTermsVersion: before!.terms.n,
+      terms: { ...terms, tasks, stakes: [{ kind: "prize", item: "Pick the next movie" }] } });
+    expect(await readInvitePreview(game.token, true, invited.id)).toMatchObject({ terms: { n: 2 }, yourTask: ownTask.text });
+    await ok(starter.id, { type: "editTerms", gameId: game.id, expectedTermsVersion: 2,
+      terms: { ...terms, tasks: tasks.filter(task => task.seat !== ownTask.seat) } });
+    expect(await readInvitePreview(game.token, true, invited.id)).toMatchObject({ terms: { n: 3 }, yourTask: terms.defaultTask });
+  });
+
+  it("excludes a removed invitation's stored override from an editable round-trip", async () => {
+    const [starter, joined, invited, removed] = await Promise.all([person(), person(), person(), person()]);
+    const ownTask = { seat: 2, text: "Read a chapter" };
+    const game = await create(starter, [joined, invited, removed], {
+      terms: { ...terms, tasks: [ownTask, { seat: 3, text: "Practice piano" }] },
+    });
+    await ok(joined.id, join(game.token));
+    await db.gameInvitee.delete({ where: { gameId_seat: { gameId: game.id, seat: 3 } } });
+    const before = await readGame(game.id, starter.id, true);
+    expect(before?.terms.tasks).toEqual([
+      { seat: 0, text: terms.defaultTask }, { seat: 1, text: terms.defaultTask }, ownTask,
+    ]);
+    const tasks = before!.terms.tasks.filter(task => task.text !== before!.terms.defaultTask);
+    const edited = await ok(starter.id, { type: "editTerms", gameId: game.id, expectedTermsVersion: before!.terms.n,
+      terms: { ...terms, tasks, stakes: [{ kind: "prize", item: "Pick the next movie" }] } });
+    expect(edited?.terms.tasks).toEqual(before!.terms.tasks);
+  });
+
   it("keeps one starter indefinitely invited and activates only on the second acceptance", async () => {
     const a = await person(), b = await person();
     const game = await create(a, [b]);

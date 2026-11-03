@@ -97,6 +97,16 @@ existing locked commands. Group creation accepts transient addressed recipients,
 `groupWord`, `defaultTask` and sparse invitation-seat overrides. Groups never
 negotiate or use Start now. Creating with a chat container still rejects.
 
+Group app terms keep the effective task for every admitted seat and append stored
+overrides for unjoined seats accepted by the edit validator. Both derive override
+eligibility from `groupTaskOverrideSeats`: current invitation seats, plus seat 0
+when a rematch retained a starter override. Removed invitation seats are omitted.
+All players receive the same seat-number/task-text projection; these are shared
+game terms, with no invitation identity or private pending label. Editors return
+every override they retain; omitting an override still removes it. Chat continues
+to expose only admitted players' tasks, and link previews expose the default task
+plus authenticated `yourTask`, never the sparse override list.
+
 Open capable previews include `maxPlayers`, `group`, nullable `expiresAt` and
 `dayOne`. Authenticated addressed invitees also receive `yourTask`.
 `alreadyIn` is authenticated-only: joined nonstarter count, at most two own
