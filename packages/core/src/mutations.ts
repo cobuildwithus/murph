@@ -385,6 +385,8 @@ export interface DeviceBatchImportSession {
 }
 
 export interface ImportDeviceBatchExecutionOptions {
+  /** Synchronous cooperative cancellation check; preparation only. */
+  checkPreparation?: () => void;
   signal?: AbortSignal | null;
   onTiming?: (timing: DeviceBatchImportTiming) => void;
   session?: DeviceBatchImportSession;
@@ -2314,7 +2316,12 @@ async function indexLatestEventsByExternalRef(
   vaultRoot: string,
   relativePaths: readonly string[],
   signal?: AbortSignal | null,
+  checkImportPreparation?: () => void,
 ): Promise<EventExternalRefIndex> {
+  const checkPreparation = () => {
+    checkImportPreparation?.();
+    signal?.throwIfAborted();
+  };
   const aliasRepairContaminatedEventIds = new Set<string>();
   const aliasRepairContaminatedRefKeys = new Set<string>();
   const deviceOwnerRevisionsByRefKeyAndFingerprint = new Map<
@@ -2331,11 +2338,12 @@ async function indexLatestEventsByExternalRef(
   const entriesById = new Map<string, EventExternalRefIndexState>();
 
   for (const relativePath of relativePaths) {
-    signal?.throwIfAborted();
+    checkPreparation();
     await visitEventLedgerShardRecordsInterruptible({
       vaultRoot,
       relativePath,
       signal,
+      shouldContinue: checkImportPreparation ? () => { checkPreparation(); return true; } : undefined,
       visit(raw) {
         signal?.throwIfAborted();
         const parsed = safeParseContract(eventRecordSchema, raw);
@@ -2428,7 +2436,7 @@ async function indexLatestEventsByExternalRef(
     if (signal && ++indexedCount % 256 === 0) {
       await yieldToEventLoop();
     }
-    signal?.throwIfAborted();
+    checkPreparation();
     // Collapse each event id globally before indexing external refs. An event
     // whose latest revision moved to a corrected ref must not remain
     // discoverable through an older historical ref.
@@ -2466,7 +2474,7 @@ async function indexLatestEventsByExternalRef(
     if (signal && ++groupedCount % 256 === 0) {
       await yieldToEventLoop();
     }
-    signal?.throwIfAborted();
+    checkPreparation();
     // Preserve the prior duplicate-ref behavior: if multiple live ids still
     // claim one external ref, reconcile against the latest comparable spine.
     const latest = selectLatestIndexedEventExternalRefMatch(group);
@@ -3579,6 +3587,7 @@ async function buildDeviceEventIdentityContext(
   entries: readonly PreparedDeviceEventEntry[],
   authoritativeEventSets: readonly NormalizedDeviceAuthoritativeEventSet[] = [],
   signal?: AbortSignal | null,
+  checkPreparation?: () => void,
 ): Promise<DeviceEventIdentityContext> {
   signal?.throwIfAborted();
   if (entries.length === 0 && authoritativeEventSets.length === 0) {
@@ -3603,7 +3612,7 @@ async function buildDeviceEventIdentityContext(
     vaultRoot,
     signal,
   });
-  const index = await indexLatestEventsByExternalRef(vaultRoot, shardPaths, signal);
+  const index = await indexLatestEventsByExternalRef(vaultRoot, shardPaths, signal, checkPreparation);
   const context: DeviceEventIdentityContext = { index, legacyReservations: new Map() };
   // A legitimate primary spine may advance before the duplicate is repaired.
   // Load only structural candidates first so reservations can use the bounded
@@ -7261,6 +7270,11 @@ function buildStoredDeviceDeliveryNoopResult(input: {
   };
 }
 
+function checkDeviceImportPreparation(options: ImportDeviceBatchExecutionOptions): void {
+  options.checkPreparation?.();
+  options.signal?.throwIfAborted();
+}
+
 export async function importDeviceBatch(
   input: ImportDeviceBatchInput,
   options: ImportDeviceBatchExecutionOptions = {},
@@ -7274,7 +7288,7 @@ export async function importDeviceBatch(
     totalElapsedMs: 0,
   };
   try {
-    options.signal?.throwIfAborted();
+    checkDeviceImportPreparation(options);
     return await importDeviceBatchWithExecutionOptions(input, options, timing);
   } catch (error) {
     clearDeviceBatchImportSessionVaultState(options.session, input.vaultRoot);
@@ -7316,7 +7330,7 @@ timing: DeviceBatchImportTiming,
     ingestReceipt,
     provenance,
   });
-  options.signal?.throwIfAborted();
+  checkDeviceImportPreparation(options);
   const sampleRecords = deviceBatchPlan.preparedSamples.map((entry) => entry.record);
   const sampleAppendPlan = await buildJsonlAppendPlan(vaultRoot, deviceBatchPlan.preparedSamples, {
     dedupeWithinPlan: true,
@@ -7349,9 +7363,10 @@ timing: DeviceBatchImportTiming,
       deviceBatchPlan.preparedEvents,
       deviceBatchPlan.authoritativeEventSets,
       options.signal,
+      options.checkPreparation,
     );
   timing.eventIdentityIndexCacheHit = cachedEventIdentityContext !== undefined;
-  options.signal?.throwIfAborted();
+  checkDeviceImportPreparation(options);
   timing.eventIdentityIndexElapsedMs = Math.max(0, performance.now() - indexStartedAt);
   if (options.session && requiresEventIdentityContext && !timing.eventIdentityIndexCacheHit) {
     const eventLedgerFingerprint = await tryBuildDeviceEventLedgerFingerprint(vaultRoot);
@@ -8240,8 +8255,8 @@ timing: DeviceBatchImportTiming,
   // Publication must finish atomically once started; only preparation yields.
   if (options.signal) {
     await yieldToEventLoop();
-    options.signal.throwIfAborted();
   }
+  checkDeviceImportPreparation(options);
   const canonicalWriteStartedAt = performance.now();
   const result: ImportDeviceBatchResult = await runCanonicalWrite({
     vaultRoot,

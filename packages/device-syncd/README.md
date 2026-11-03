@@ -314,10 +314,18 @@ The job's abort signal also reaches snapshot normalization and canonical import
 preparation. Hosted conversation admission additionally supplies an import-only
 predicate: preparation waits or aborts before publication, then retries the same
 snapshot in place without re-downloading or releasing the job. Hosted admission
-fails open after 30 seconds per new conversation row. Large identity
-scans yield to the event loop at bounded row intervals so foreground polling
-can interrupt them. Cancellation before
-publication releases the canonical lock and discards the session cache.
+re-arms its 30-second window at provider return, protecting transcript/session
+finalization and reply dispatch even after a long provider phase. The existing
+accepted-input release callback owns re-arming; provider start and phase cleanup
+close the window. Identity visitation and reduction synchronously check the same
+service predicate, with the existing 100-ms polling fallback elsewhere.
+
+Fairness is per retained snapshot: 30 seconds after its first deferral, preparation
+runs through even if newer foreground windows remain open. New messages and
+preparation retries cannot renew this deadline. Ordinary job cancellation still
+applies; this bounds foreground deferral, not total import execution time.
+Large identity scans yield to the event loop at bounded row intervals.
+Cancellation before publication releases the canonical lock and discards the session cache.
 Ordinary job-level cancellation still requeues work without consuming retry
 budget. Once canonical publication starts it finishes atomically and reports committed progress, even
 if the signal aborts during the write. This does not make synchronous

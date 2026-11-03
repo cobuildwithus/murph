@@ -1,6 +1,6 @@
 # Device import identity lookup without repeated history rebuilds
 
-Status: active — implementation plan only; no implementation authorized by this task.
+Status: active — step 1 locally verified, PR pending; steps 2 and 3 are separate follow-ups.
 Created: 2026-11-02
 Source baseline: `7ebfff430b8bb5b74153c72a7848e13edec19c37`
 
@@ -11,19 +11,23 @@ decisions identical while removing repeated whole-ledger parsing, validation and
 fingerprinting from ordinary imports. Foreground reply completion must remain
 responsive during both warm imports and initial index construction.
 
-Recommend **option C: one core-owned, rebuildable identity lookup projection**,
-updated from committed import writes and fenced against other ledger mutations.
-Use existing runtime-state SQLite primitives, not query.sqlite or a new dependency.
-Query only incoming identity dependencies and their complete historical owners.
-Use option A's raw-field filtering for bounded recovery/alias-history reads and
-option D's existing preparation abort/retry mechanism for foreground protection.
-Do not introduce another queue, service, canonical generation file or scheduler.
+Implement three separately reviewable changes in this order:
 
-A raw filter alone is smaller, but still parses every historical JSON row on every
-cache miss; it cannot pass the unrelated-record-visitation regression below.
-Calendar shard restriction is incorrect without an identity-to-shard lookup.
-A serialized copy of the entire in-memory index also retains O(history) decode
-cost; indexed lookup, rather than simply persistence, is the necessary property.
+1. **Foreground protection through finalization and dispatch (in progress).**
+   Re-arm the existing admission predicate at provider return, use the existing
+   preparation abort/retained-snapshot retry path, and bound per-snapshot deferral.
+2. **Core-owned warm in-memory identity cache across drains.** Replace the
+   session/dependency-change plumbing. Maintain the cache from actual committed
+   append-plan rows using one shared reducer; retain the full builder for cold
+   construction and conservative invalidation.
+3. **A2 two-pass locator/closure for the first import of an invocation.** Discover
+   complete relevant history before semantic reduction, preserving contamination
+   and physical ordering. Measure parsing, validation, hashing and copies separately.
+
+**C is deferred.** The SQLite projection is excluded from hosted snapshots;
+invocations restore fresh workspaces, so it would not avoid first-import rebuilds.
+Warm reuse can be fixed in memory without a persisted schema or recovery protocol.
+Do not add a scheduler, queue, feature flag or configuration knob.
 
 The main risk is an incomplete or stale dependency closure silently authorizing
 dedupe, revision repair or alias consolidation. The ledger remains authoritative;
@@ -31,6 +35,16 @@ missing, stale, incompatible or corrupt derived state must rebuild, never mean
 "no owner." Do not weaken existing refusal paths to obtain a performance result.
 
 ## Evidence and current ownership
+
+- Supplied three-day production aggregate: identity rebuilds taking at least
+  two seconds cost **2.02 hours on the first import of an invocation** and
+  **2.48 hours on later imports**. Fresh restored workspaces explain the cold
+  component; drain-session misses explain repeated warm work. These are supplied
+  aggregate facts, not new queries or a promised production speedup.
+- E7's supplied local profile of a 69,584-row ledger: decompression **4%**,
+  JSON parsing **11%**, schema validation **34%**, fingerprinting **26%**,
+  bookkeeping **25%**. A2 addresses first-import validation/hashing; warm cache
+  ownership addresses later imports. Step 1 protects reply latency only.
 
 - The supplied E5 investigation attributes the dominant import cost and competing
   foreground persistence delay to event identity indexing. Its synthetic overlap
@@ -180,74 +194,20 @@ archive decoding and adds little code, but fails correctness. Restricting reads
 using a verified identity locator is safe; that is a consequence of C, not a
 calendar-window shortcut. Cold receipt behavior otherwise remains unchanged.
 
-### C. Persist a derived identity lookup, updated on write
+### C. Persist a derived identity lookup — deferred
 
-Use a single proposed `.runtime/projections/device-event-identity.sqlite`, owned
-by core, with `PRAGMA user_version` and a semantic reducer/fingerprint version.
-Use existing runtime-state SQLite APIs. Keep canonical truth in the event ledger.
-Do not make device import depend on query.sqlite freshness, projection rebuilds
-or query's core dependency. A monolithic JSON map loses on whole-file decode and
-rewrite cost even when logically "cached."
+A core-owned `.runtime/projections/device-event-identity.sqlite` could use the
+existing runtime-state SQLite primitives, but this rebuildable subtree is already
+excluded from hosted snapshots. It cannot remove first-import construction in a
+fresh restored invocation. The smaller warm-cache change is preferred first.
 
-The projection needs indexed per-shard contributions and ID/ref/scope locators:
-latest overall/external/device-baseline entries with physical ordering; revision
-membership; historical fingerprint/owner/revision membership; sparse-day history;
-invalid-row contamination; and bounded alias-history locators. Preserve duplicate
-revision multiplicity for alias refusal. Keep full historical bodies in the
-ledger, except the current/baseline rows required by reconciliation. Load alias
-rows only for proven candidates, with the existing revision cap plus an overflow
-sentinel; compressed reads may still decode the candidate shard. Index queries
-must serve closure lookups without loading all summaries into JavaScript.
-
-Under the existing canonical lock, compare the complete shard inventory and the
-local stat tuple already used at `mutations.ts:3388`. Generation/version and
-completed-inventory metadata must agree before serving decisions. Include new,
-deleted, replaced, truncated and re-archived shards. Record content fingerprints
-when building changed contributions; do not hash every unchanged shard per import.
-Filesystem metadata is a local invalidation fence, not portable content proof.
-
-For successful imports, update contributions from **actual committed append
-entries**, including repairs, tombstones and member overlays; publish their new
-fence in one short SQLite transaction after ledger publication. Canonical failure
-or index-update failure invalidates reuse. A post-commit cache failure does not
-fail the successful canonical result. Other canonical writers and old binaries
-may omit this fast update: the next stat/inventory comparison rebuilds changed
-shard contributions and recomputes all affected owner/ref aggregates, including
-removing obsolete maxima, contamination and revisions. Never merely append to a
-stale summary or stamp the whole inventory fresh after an unproved write.
-
-Build replacement contributions off the active generation, check source stability
-and commit only complete generations. A crash before/after either publication,
-receipt rollback, archive replacement or corruption causes reconciliation from
-ledger bytes on the next access. Aborted incomplete work cannot authorize absence.
-Malformed JSON/archive errors must retain today's failure behavior; a corrupt
-unrelated shard cannot disappear because no incoming key selected it.
-
-Initially classify this as machine-local, disposable projection state, explicitly
-exclude DB/WAL/SHM from portable snapshots and reset it on workspace replacement.
-Register its lifecycle with runtime-state; do not assume the special query paths
-at `packages/runtime-state/src/hosted-bundles.ts:55` cover a new file. A cold restore
-therefore pays one rebuild, then imports across drains reuse it. This consciously
-does not promise zero cold-start history cost. Old runner + new snapshot sees
-unchanged canonical shapes; new runner + old snapshot rebuilds. An old writer
-against a warm workspace invalidates the new cache through shard metadata.
-Keep the existing cold-ingest reader floor; this adds no canonical rollback floor.
-
-Cost: initial O(history), steady O(shard metadata + touched identity closure +
-new committed rows), and recovery O(changed shard rows + affected summaries).
-Alias repair can decode its bounded set of candidate archives. Storage grows
-with identities/revisions/fingerprints, not with new files per event. Measure and
-set a byte budget before shipping; over-budget caches are disposable and fall
-back to canonical work with foreground preemption, never truncate identity proof.
-No history TTL may remove facts still needed for replay. Local private-data and
-account-deletion rules apply; no cache records or identifiers enter telemetry.
-
-Net complexity is higher than A but addresses the actual repeated-scan cost.
-Reuse one reducer/comparator rather than implementing a second reconciliation
-policy. Replace the drain-local WeakMap/dependency-change cache once equivalence
-is established, including obsolete session plumbing in core/importers/device-syncd;
-do not retain two competing caches. Retain a full-ledger builder for recovery
-and unrestricted callers, not a second business-rules implementation.
+If measurements later justify C, preserve the correctness obligations above:
+complete inventory/stat fences, physical ordering and duplicate revisions,
+rejected-row contamination, complete owner closure, actual committed append-row
+reduction, atomic complete generations, and conservative invalidation after
+unknown writers, failed updates, deletion/replacement, corruption or restore.
+Canonical publication success must survive a failed cache update. The ledger
+remains authoritative; missing derived state never means absent history.
 
 ### D. Cooperatively pause/resume import work during foreground turns
 
@@ -272,46 +232,63 @@ if existing hooks suffice; reject a second foreground scheduler.
 
 ## Ordered implementation and proof plan
 
-1. Establish deterministic synthetic fixtures and counters against this exact
-   baseline before changing production code. Use 1k, 10k and 100k unrelated event
-   rows, both within the same month and across many months, while holding incoming
-   events and relevant owner history constant. Exercise no session, new drain,
-   overlapping import, exact replay, authoritative-empty input and cold restore.
-   Count rows visited, JSON parsed, contract validated, fingerprinted, archive
-   bytes decoded, shard stats, lookup rows returned and rebuild/cache hits.
-   Today ordinary cache misses scale with all historical records; that is the
-   failing regression. Keep diagnostics numeric and synthetic.
-2. Compare every relevant index field and resulting import decisions against the
-   existing builder, including reversed row/month order, same-revision duplicates,
-   missing shards, ref removal/movement, conflicting historical owners, rejected
-   rows, legacy reservations, source-instance profiles and omitted facets. Preserve
-   output evidence/receipt mappings and atomic refusal, not just final row counts.
-3. Implement the core-owned projection and lifecycle exclusion, then incremental
-   updates and changed-shard recovery. Preserve unrestricted event-import callers.
-   Require warm fixed-input tests to visit/validate/fingerprint **zero unrelated
-   event records**, including after a preceding import changes the current month.
-   Shard-stat work may grow with month count; expose that separately. Recovery and
-   alias archive decode costs are explicit exceptions, never hidden cache hits.
-4. Inject crashes before/after ledger publication, during index publication and
-   after receipt rollback; delete/corrupt the projection, change schema versions,
-   restore an older snapshot and run an old writer followed by a new reader.
-   Compare all outcomes to a fresh full rebuild. Prove no private projection file
-   enters snapshots, exports or logs, and deletion removes the local file.
-5. Reproduce E5's real importer plus finalizer overlap using synthetic history and
-   real persistence. Include cold construction and changed compressed shards.
-   Start foreground work while indexing is actually active, not after completion.
-   Assert preparation releases the canonical lock on preemption; foreground tools
-   can write; resume/revalidation converges without duplicate publication. Use a
-   deterministic maximum-work-between-yields assertion plus container-equivalent
-   timings. Proposed timing gate: p95 added direct-reply finalization latency at
-   most 100 ms across the history sweep, with hardware/baseline recorded. This is
-   an acceptance target, not a result already obtained. Exclude intentional group
-   draft grace and provider/network latency from the persistence-tail comparison.
-   If it fails, refine existing D hooks before claiming completion.
-6. Update core/device-sync owner docs, architecture and runtime-state lifecycle
-   registration with the implemented contract; retire redundant session state.
-   Perform focused tests/typechecks and required exact-head CI/review for the
-   eventual implementation PR. This planning task creates no PR or deployment.
+### Step 1: foreground protection (in progress)
+
+Outcome: keep reply finalization and dispatch responsive during identity rebuilds.
+Reaches: ordinary and over-30-second provider turns, repeated conversation input,
+pre-publication retries, and already-started atomic publication.
+Proof: first add a regression on `9361875e83` with 8,000 synthetic historical rows.
+Return the provider result while the real importer is indexing; run actual
+transcript, turn-event and session persistence and dispatch through the hosted
+outbox. Require zero identity rows between return and dispatch, record wall time,
+prove canonical-lock release, retained-snapshot retry, one publication, correct
+acknowledgment, and an empty queue. Exercise sustained foreground traffic and
+preserve publication-after-abort behavior.
+
+Reuse the accepted-input release callback, which runs at provider return before
+finalization, to re-arm the existing 30-second runtime window. Keep provider-start
+and phase cleanup closure. Forward the service's existing preparation predicate
+as a synchronous execution check at identity-row/reduction boundaries; retain the
+100-ms polling fallback for other preparation. No polling delay can permit new
+identity rows after a protected provider result.
+
+Fairness belongs to the existing retained-snapshot retry loop: at most 30 seconds
+from its first deferral, then allow that snapshot's preparation through despite
+new foreground windows. The deadline survives retries and is not renewed by new
+conversation sequences. Ordinary job cancellation still applies. Publication is
+never interrupted once started. This bounds admission delay, not total import
+execution or synchronous archive-decode latency.
+
+Run the brief's named runtime/core/finalizer suites, affected service/importer
+proof, touched-package typechecks, and `pnpm complexity:diff --base origin/main`.
+Review locally and commit via `scripts/committer`; no push, PR or deployment.
+The overall plan stays active for steps 2 and 3.
+
+### Step 2: core-owned warm memory cache
+
+Retain the existing complete builder and per-ID reduction state. Update from
+accepted append-plan rows after successful canonical publication through one
+shared reducer. Remove drain/session tokens and changed-dependency bookkeeping.
+Bound retention; conservatively evict on unknown writers, unexplained shard
+changes, workspace replacement, failed updates or capacity limits.
+
+Prove fresh-rebuild equivalence across drains, overlapping corrections, replay,
+authoritative-empty imports, overlays, alias/historical repairs, equal revisions,
+appends to earlier months, and invalidation/restart. Count identity work separately
+from append-plan target-shard parsing and full-map context copies. A warm identity
+hit must avoid unrelated identity validation/fingerprinting; do not claim that it
+eliminates unrelated raw-ID reads by append preparation.
+
+### Step 3: A2 cold locator/closure
+
+Sweep 1k/10k/100k unrelated history with fixed relevant owners. Discover raw IDs,
+references, Junction scopes, authoritative facets and contamination conservatively;
+close over full owner histories before reducing in original traversal order.
+Compare every relevant index field, public result, refusal code, receipt/evidence
+mapping and atomicity against the full builder. Preserve malformed unrelated
+JSON/archive failures and rejected reference recovery. Explicitly measure retained
+bodies/buffers versus second-pass reads, archive decode, parsing, validation,
+fingerprinting, reduction, copies and append planning.
 
 ### Existing suites that must remain green
 
@@ -336,15 +313,15 @@ if existing hooks suffice; reject a second foreground scheduler.
   `hosted-runtime-cold-ingest-system-mailbox.test.ts` under
   `packages/assistant-runtime/test/`, plus
   `packages/assistant-engine/test/turn-finalizer-persistence-timing.test.ts`.
-  Add runtime-state lifecycle/snapshot proof for the proposed projection.
+  No projection lifecycle change is part of step 1.
 
 Run named suites using `pnpm --filter @murphai/<package> exec vitest run --config
 vitest.config.ts --no-coverage <test paths>` and typecheck each changed package
 with `pnpm --filter @murphai/<package> typecheck`. Prepare compiled runtime-worker
 dependencies as documented in `packages/assistant-runtime/README.md` before its
 integration suites. Consult the current testing map for implementation CI and
-the assistant verification skill if foreground behavior changes. No runtime test
-or typecheck result is claimed by this plan-only task.
+the assistant verification skill for model-dependent behavior. Step 1 changes
+only deterministic scheduling, with unchanged prompts, tools and reply content.
 
 ### Post-deploy acceptance, for a separately authorized implementation
 
@@ -364,11 +341,40 @@ overlap tails and unchanged correctness/error outcomes; no numerical production
 speedup is promised before measurement. Check after warm-runner convergence and
 again after cold restores. Recovery regressions block rollout even if speed wins.
 
-## Planning-task completion
+## Local implementation progress
 
-Only this plan is to be written and locally committed, as explicitly requested.
-It stays active for future implementation; do not archive it or modify the docs
-index in this one-file task. No source/config changes, push, PR or deployment.
-Review citations, privacy and whitespace, then run applicable documentation
-checks. The skill-referenced coordination ledger is absent in this checkout;
-no implementation coordination or source-edit workaround is being attempted.
+Step 1 regression-first evidence: both ordinary and 31-second provider-result
+cases fail on `9361875e83`, advancing from 256 to 8,000 identity rows during the
+reply tail. Both sustained-deferral service cases also fail past 30 seconds.
+No cache ownership or cold-locator implementation is included in this step.
+
+Step 1 local evidence:
+- Runtime admission, concurrent import and single-snapshot suites: 49 passed.
+- Core preparation, preemption and session suites: 11 passed, including
+  non-interruptible publication after cancellation.
+- Finalizer persistence timing: 2 passed; device-sync service: 202 passed.
+- Importer validation and device-provider suite: 81 passed. Total: 345 tests.
+- Core, importers, device-syncd, assistant-engine and assistant-runtime typechecks
+  pass. `pnpm complexity:diff --base origin/main` passes; source complexity debt
+  decreases by two, with no increase in runtime or service debt.
+- Five consecutive final overlap runs (ten cases) record 25–58 ms from provider
+  return to dispatch, with zero identity rows for both ordinary and 31-second
+  provider phases. Synthetic local measurements are not production percentiles.
+  The fixture keeps its invocation alive until the retried import reaches recording,
+  then advances its fake idle clock; the original 1-ms fixture could shut down
+  during the retry. Exact publication, acknowledgment and empty-queue assertions
+  remain unchanged.
+- Both cases abort preparation, observe an unlocked canonical lock, persist real
+  transcripts/turn events/sessions, dispatch once, retry the identical snapshot,
+  publish once, acknowledge revision 7 and its exact payload, and drain the queue.
+- Sustained real conversation sequences in default and system-mailbox modes keep
+  runtime admission open while the retained import completes after its service
+  fairness deadline. Separate service cases cover initially gated and interrupted
+  snapshots and keep the fairness retry un-aborted during continued foreground work.
+- Product UX: Ready for the tested deterministic timing/recovery paths. No model,
+  prompt, tools or reply-content changes; no stochastic journey is needed here.
+- Parent review covers the complete diff, publication boundary, deadline lifetime,
+  optional-hook compatibility and privacy. No new Frog-worthy friction arose.
+- Local-only candidate per brief: no push, PR, CI, external final review or deploy.
+  The same implementation PR must add its member-facing changelog entry when
+  prepared for shipping. This plan remains active for the sequenced work.

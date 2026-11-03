@@ -135,6 +135,7 @@ export function resolveDeviceSyncStoreNextWakeAt(input: {
 const DEVICE_SYNC_VALIDATION_ISSUE_LIMIT = 10;
 const DEVICE_SYNC_VALIDATION_CAUSE_DEPTH_LIMIT = 4;
 const DEVICE_SYNC_JOB_YIELD_POLL_MS = 100;
+const DEVICE_SYNC_IMPORT_PREPARATION_MAX_DEFER_MS = 30_000;
 // Never retain fewer diagnostics than one hosted pass can produce, and never
 // regress below the established 100-attempt observability window.
 export const DEVICE_SYNC_JOB_FAILURE_DIAGNOSTIC_LIMIT = Math.max(
@@ -1287,17 +1288,33 @@ class DeviceSyncServiceController {
         },
         importSnapshot: async (snapshot: unknown, options) => {
           const importWithAdmissionDeferral = async () => {
+            // One deadline per fetched snapshot, including retries. Once spent,
+            // preparation runs through despite new foreground windows; ordinary
+            // job cancellation and non-interruptible publication are unchanged.
+            let firstDeferredAt: number | null = null;
+            const shouldDeferPreparation = () => {
+              if (!this.shouldYieldImportPreparation?.()) return false;
+              firstDeferredAt ??= Date.now();
+              return Date.now() - firstDeferredAt < DEVICE_SYNC_IMPORT_PREPARATION_MAX_DEFER_MS;
+            };
             for (;;) {
               ensureExecutionActive();
-              while (this.shouldYieldImportPreparation?.()) {
+              while (shouldDeferPreparation()) {
                 await new Promise((resolve) => setTimeout(resolve, DEVICE_SYNC_JOB_YIELD_POLL_MS));
                 ensureExecutionActive();
               }
               const importDeferral = new AbortController();
               const importSignal = AbortSignal.any([jobAbortController.signal, importDeferral.signal]);
+              const deferPreparation = () => importDeferral.abort(
+                new Error("Device import preparation deferred for foreground work."),
+              );
+              const checkPreparation = () => {
+                if (shouldDeferPreparation()) deferPreparation();
+                importSignal.throwIfAborted();
+              };
               const stopImportYieldPolling = startDeviceSyncJobYieldPolling({
-                abort: () => importDeferral.abort(new Error("Device import preparation deferred for conversation admission.")),
-                shouldYield: this.shouldYieldImportPreparation,
+                abort: deferPreparation,
+                shouldYield: shouldDeferPreparation,
                 signal: importSignal,
               });
               const importStartedAt = currentNow();
@@ -1305,7 +1322,7 @@ class DeviceSyncServiceController {
               try {
                 const importResult = await this.importer.importDeviceProviderSnapshot(
                   { provider: provider.provider, snapshot, vaultRoot: this.vaultRoot, ...options },
-                  { importSession: input.importSession, signal: importSignal },
+                  { checkPreparation, importSession: input.importSession, signal: importSignal },
                 );
                 const applied = toPlainRecord(importResult)?.applied;
                 importOutcome = applied === true ? "applied" : applied === false ? "noop" : "unknown";

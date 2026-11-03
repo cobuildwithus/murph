@@ -154,6 +154,8 @@ export interface DeviceBatchImportPayload {
 }
 
 export interface DeviceBatchImportExecutionOptions {
+  /** Synchronous cooperative cancellation check; preparation only. */
+  checkPreparation?: () => void;
   signal?: AbortSignal | null;
   onTiming?: (timing: DeviceBatchImportTiming) => void;
   session?: DeviceBatchImportSession;
