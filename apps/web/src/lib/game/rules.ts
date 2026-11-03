@@ -391,6 +391,14 @@ export function decideNewTerms(input: GameTerms, options: { newKey: () => string
   };
 }
 
+/** The override seats accepted by group edits and retained in app terms. */
+export function groupTaskOverrideSeats(game: RuleGame, tasks: readonly { seat: number }[]): number[] {
+  const seats = (game.invitees ?? []).flatMap(invitee => invitee.seat === undefined ? [] : [invitee.seat]);
+  // Same again can move an original invitation override to its new starter.
+  if (tasks.some(task => task.seat === 0)) seats.push(0);
+  return seats;
+}
+
 export function validNewStakes(stakes: readonly { kind: GameStakeKind }[]): void {
   if (stakes.length !== 1 || !["prize", "dare"].includes(stakes[0].kind)) {
     reject("INVALID_REQUEST", "Choose one prize or dare.");
