@@ -1,6 +1,6 @@
 # Preview group game invite links
 
-Status: active
+Status: completed
 Created: 2026-11-03
 Updated: 2026-11-03
 
@@ -39,7 +39,9 @@ Updated: 2026-11-03
 2. Done: add group copy/rendering and explicit capable server reads.
 3. Done: prove open group, pair and closed journeys, including metadata/image routing.
 4. Done: inspect phone/desktop rendering and complete local checks and parent review.
-5. Commit, push, open draft, mark Ready; run ReviewGPT alongside CI. Do not merge.
+5. Done: candidate committed/pushed; PR #4502 opened draft and marked Ready.
+   ReviewGPT passed alongside CI. Final plan closeout gets fresh exact-head CI;
+   the PR remains the live completion owner. Do not merge or deploy.
 
 ## Decisions
 
@@ -62,8 +64,18 @@ Updated: 2026-11-03
 - Product UX: Ready. Open group, pair and closed/cancelled paths match the plan;
   public group rendering ignores private/seat-specific fields and keeps app links.
 - Parent candidate review passed: small renderer-only correction, no new state,
-  public API changes, providers or foreground reply work. ReviewGPT and CI pending.
+  public API changes, providers or foreground reply work.
 - Design proof is local with inspected synthetic captures. No hosted preview
   deployment is permitted by the task; the PR will disclose that limitation.
 - Browser setup regenerated unrelated stale legal PDFs. Restored those generated
   files and recorded the reproducible issue with Frog; no legal changes included.
+- ReviewGPT round 1: PASS on `1a1b9e38bfd973904259a3e88bdb21d838cd46e8`,
+  vonneumann, GPT-6 Pro selected and sent model verified. Full sensitive snapshot,
+  exact metadata/turn/attachment checks and completion marker validated; about
+  252 seconds from send to capture. Zero findings, zero accepted or rejected,
+  no remediation and no tooling retries. The proportional source review traced
+  preview capability, public privacy, pair compatibility and recovery paths.
+- Parent final review passed; only plan closure and its index link follow the
+  reviewed source. This explanatory documentation change is review-exempt under
+  the loop's later-round rule. Required CI on the final head is tracked in PR #4502.
+Completed: 2026-11-03
