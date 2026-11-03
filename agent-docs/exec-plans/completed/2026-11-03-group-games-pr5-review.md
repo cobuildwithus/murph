@@ -1,6 +1,6 @@
 # Group games PR 5 parent review and PR lane
 
-Status: active
+Status: completed
 Created: 2026-11-03
 Updated: 2026-11-03
 
@@ -40,7 +40,7 @@ Address the parent review of 08b190c2bc, then complete the ready PR, final Revie
 
 ## Verification
 
-Local candidate verification complete; external PR gates remain pending.
+Local verification and final ReviewGPT are complete. Required CI on the final documentation-closure head remains the publication gate.
 
 - Web game, webhook/inbound and egress selection: 32 suites, 909 passing tests; 16 PostgreSQL suites skipped in this non-database lane. Final affected rerun: 391 passing tests.
 - All 17 PostgreSQL game suites: 250 tests. An existing locked-preview expectation failed once; the unchanged base already emits that gated reference. The corrected test retains encrypted-payload and media denial checks. The two affected full suites then passed 105 tests, and the final composer selection passed 6 tests.
@@ -87,3 +87,11 @@ Focused follow-through proof passed: all 43 group PostgreSQL tests and 113 chat-
 - Result: FINDINGS. Both accepted. Scheduled reads were already corrected during the wait as documented above. Pair room reuse could select a group with the same two seated players, persist its larger room onto a pair, then permanently fail exact delivery. Restrict the reusable source query to maxPlayers 2 and retain an exact-two precondition. A composed PostgreSQL pair kickoff/replay test verifies its exact candidate wins while the partially joined group keeps its original room.
 - Retrospective: Both rounds exposed places where pair identity and group audience had diverged. The correction keeps complete provider proofs through every capable projection, leaves pair-only discovery/reuse explicitly pair-only, and retains the one group authority. Remaining capable roster readers were inspected; recap sealing now reuses the same complete-audience comparison. No alternate state owner, queue, bootstrap path or compatibility layer was added. Continue to round 3 on the corrected candidate.
 - Final remediation proof: 941 Web tests and all 253 PostgreSQL game tests passed. The final two PostgreSQL fixtures passed again after adding explicit identity defaults and the addressed-unjoined scheduled-group control. Web typecheck, lint, complexity and docs passed. Isolated database removed again. Round-2 CI has no failures; round 3 and final-head CI remain gates.
+
+## Final review and closure
+
+- Round 3: PASS on 70c5ccef83be83854c468360ddb19abb0778dd5d. Same vonneumann conversation, GPT-6 Pro sent model verified, full sensitive snapshot with 51 changed-file hashes and ancestry confirmed, exact-turn completed response and `REVIEW_COMPLETE` captured. Send 09:03:49 UTC; still pending 09:10:57 UTC, exceeding seven minutes and the 80-second gate. The UI does not expose a separate reasoning-duration label; the waited-capture timing is the attested minimum.
+- All four accepted findings from rounds 1–2 are resolved. Parent final review confirms the two identity models are explicit: keyed complete provider audience for groups; pair-only source selection and exact-pair validation for legacy games. Prepared proofs remain transient and provider work remains outside database locks. The added pre-seal recap correction is also reviewed.
+- The final commit archives this plan and updates its index link only. It changes no production behavior, runtime configuration, schema or contract, so the completion loop's explanatory-doc exemption preserves the round-3 result. Required CI must pass on that final authored head before handoff; its exact result belongs in the PR body and final report.
+- Current main refreshed by explicit refspec and remote SHA comparison; merge-tree proof passed. All isolated task databases were removed. Worktree retained for the open PR. No merge, deploy, schema change or production group-admission activation.
+Completed: 2026-11-03
