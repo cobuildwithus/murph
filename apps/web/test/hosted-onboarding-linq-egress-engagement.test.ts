@@ -2024,7 +2024,7 @@ describe("hosted Linq egress authority", () => {
           // No newest-game lookup: an already-live rematch cannot revoke this recap.
           expect(prisma.game.findFirst).toHaveBeenCalledTimes(1);
           expect(prisma.game.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
-            id: "game", chatContainerMemberId: "member-1", status: "settled", departedPlayer: expect.anything(),
+            id: "game", chatContainerMemberId: "member-1", status: "settled", players: { none: { leftAt: { not: null } } },
           }) }));
         }
         if (scenario === "regenerated-recap") {

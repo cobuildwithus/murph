@@ -114,7 +114,7 @@ describe.skipIf(!enabled)("canonical game storage migration PostgreSQL proof", (
       await expect(client.query("UPDATE game_player SET time_zone = NULL WHERE game_id = 'live' AND seat = 1")).rejects.toMatchObject({ code: "23514" });
       await expect(client.query("UPDATE game_invitee SET seat = 10 WHERE game_id = 'live'")).rejects.toMatchObject({ code: "23514" });
       await expect(client.query("UPDATE game_player SET seat = 19 WHERE game_id = 'live' AND seat = 1")).rejects.toMatchObject({ code: "23514" });
-      await expect(client.query("DELETE FROM game_profile WHERE member_id = $1", [members[0]])).rejects.toMatchObject({ code: "23001" });
+      await expect(client.query("DELETE FROM game_profile WHERE member_id = $1", [members[0]])).rejects.toMatchObject({ constraint: "game_words_owner_member_id_fkey" });
       await client.query("DELETE FROM game_entry WHERE game_id = 'live' AND member_id = $1", [members[1]]);
       await client.query("UPDATE game_player SET member_id = NULL, left_at = now() WHERE game_id = 'live' AND seat = 1");
       await expect(client.query("INSERT INTO game_entry(id,game_id,member_id,day_index,attempt,kind,received_at) VALUES ('orphan','live',$1,3,1,'photo',now())", [members[1]])).rejects.toMatchObject({ code: "23503" });

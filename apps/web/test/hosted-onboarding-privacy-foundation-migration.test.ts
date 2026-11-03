@@ -92,6 +92,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "conversationPolls HostedConversationPoll[]",
     "emailPublicBootstrapAttempts HostedEmailPublicBootstrapAttempt[]",
     "gameProfile GameProfile?",
+    'gameInvitations GameInvitee[] @relation("GameInviteeMember")',
     'chatHostedGames Game[] @relation("GameChatContainer")',
     'groupCurrentSenderClarificationsAsRuntime HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationRuntime")',
     'groupCurrentSenderClarificationsAsTarget HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationTarget")',
@@ -1249,6 +1250,7 @@ describe("hosted Prisma baseline migration", () => {
       "20261031230000_hosted_phone_call_linq_result_notification_channel",
       "20261101230000_game_many_per_pair",
       "20261102120000_hosted_cold_ingest_media",
+      "20261102230000_game_seat_storage",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(

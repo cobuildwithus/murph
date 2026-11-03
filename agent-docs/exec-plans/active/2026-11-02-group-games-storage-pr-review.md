@@ -13,7 +13,7 @@ ReviewGPT plus required CI without merge or deploy.
 - [x] Add composed invited-deletion proof; update current architecture owner.
 - [x] Rebase on current origin/main and verify affected integrations.
 - [x] Run focused PostgreSQL suites, typecheck, lint, complexity and docs checks.
-- [ ] Push draft, complete PR evidence, mark Ready and start ReviewGPT on vonneumann concurrently with CI.
+- [x] Push draft, complete PR evidence, mark Ready and start ReviewGPT on vonneumann concurrently with CI.
 - [ ] Resolve findings, validate reasoning duration and exact-head CI, close plan.
 
 ## Boundaries
@@ -45,4 +45,28 @@ completed execution plans remain historical and immutable.
 - `pnpm docs:drift` and `pnpm docs:gardening`: pass, zero documentation issues.
 - Parent review confirms invitation labels have one meaning and the new test
   exercises preparation, locked application, persisted erasure and pair views.
-- PR review and required CI remain pending.
+- PR #4486 opened with the full template and approved downtime/access/rollback
+  contract. First-reviewed head: `724b8e3701a15d2b06aa4ea3e5e8aab537dc8bc0`.
+- ReviewGPT round 1: PASS, no findings, on pinned `vonneumann` / GPT-6 Pro.
+  Exact accepted turn, one ready ZIP attachment and sent-message model were
+  verified by the canonical waited owner. Capture elapsed 245.7 seconds
+  (03:57:15.291–04:01:21.037 UTC), above the runbook's 80-second minimum.
+  The response names the exact head, full-snapshot metadata and all 58 file
+  hashes, then describes migration, deletion, privacy, admission, ticket,
+  funding and chat path inspection. It explicitly does not claim test execution.
+  The first/current/context heads are identical, prior head absent, sensitivity
+  sensitive, full scope/snapshot and initial remediation deltas empty. The
+  canonical packager and reviewer validated these inputs; its automatic cleanup
+  removed the JSON/ZIP before local readback. The metadata retention friction
+  is recorded in the task's Frog entry. Exact response identity and export remain
+  in ignored audit artifacts; no repeat audit is warranted.
+- Initial CI found four test-only gaps: PostgreSQL 17 vs 18 RESTRICT SQLSTATE,
+  privacy schema/migration inventories, recap query shape and retained-game
+  fixture teardown. Correct the assertions/teardown at their existing owners.
+  Production source and SQL remain identical to the reviewed head.
+- Remediation proof: all four affected suites pass (176 tests), including real
+  PostgreSQL migration and composed account deletion; typecheck and lint pass.
+  The isolated database was removed again. Docs checks pass.
+- Final required CI remains pending on the corrected head. The runbook exempts
+  isolated proof and explanatory documentation changes from a new substantive
+  round; retain the immutable first-reviewed baseline.
