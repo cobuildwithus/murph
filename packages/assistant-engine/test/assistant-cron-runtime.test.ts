@@ -612,6 +612,81 @@ afterEach(async () => {
 })
 
 describe('assistant cron runtime orchestration', () => {
+  it.each(['queue-only', 'direct', 'expired'] as const)(
+    'finishes a persisted retired-model one-shot through %s and runs the next job', async (mode) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-04-08T10:00:05.000Z'))
+      const core = await vi.importActual<typeof import('@murphai/core')>('@murphai/core')
+      const query = await vi.importActual<typeof import('@murphai/query')>('@murphai/query')
+      cronMocks.upsertAutomation.mockImplementation(core.upsertAutomation)
+      cronMocks.archiveAutomationIfActiveUntilElapsed.mockImplementation(core.archiveAutomationIfActiveUntilElapsed)
+      cronMocks.listCanonicalAutomations.mockImplementation(query.listAutomations)
+      cronMocks.showCanonicalAutomation.mockImplementation(query.showAutomation)
+      cronMocks.readAutomationByRelativePath.mockImplementation(query.readAutomationByRelativePath)
+      const { vaultRoot } = await createRuntimeContext('assistant-cron-retired-model-')
+      await core.initializeVault({ vaultRoot, timezone: 'UTC' })
+      const first = await core.upsertAutomation({
+        vaultRoot, now: new Date('2026-04-08T08:00:00.000Z'),
+        slug: 'legacy-one-shot', title: 'Legacy one-shot', status: 'active', continuityPolicy: 'preserve',
+        schedule: { kind: 'at', at: '2026-04-08T10:00:00.000Z' },
+        route: { channel: 'linq', deliveryTarget: 'thread-1', threadId: 'thread-1', identityId: null, participantId: null },
+        instructions: 'Send the synthetic reminder.',
+        assistantTargetOverride: { model: 'gpt-6.1-sol', reasoningEffort: 'high' },
+      })
+      const file = path.join(vaultRoot, first.record.relativePath)
+      await writeFile(file, (await readFile(file, 'utf8')).replace('gpt-6.1-sol', 'gpt-5.6-sol'))
+      const nextAt = mode === 'expired' ? '2026-04-08T11:05:00.000Z' : '2026-04-08T10:05:00.000Z'
+      const second = await core.upsertAutomation({
+        vaultRoot, now: new Date('2026-04-08T08:00:00.000Z'),
+        slug: 'next-one-shot', title: 'Next one-shot', status: 'active', continuityPolicy: 'preserve',
+        schedule: { kind: 'at', at: nextAt },
+        route: first.record.route, instructions: 'Send the next synthetic reminder.',
+      })
+      const intentId = 'outbox_retired_model_reminder'
+      if (mode === 'queue-only') {
+        await saveAssistantOutboxIntent(vaultRoot, buildTestLinqOutboxIntent({
+          createdAt: '2026-04-08T10:00:05.000Z', intentId,
+        }))
+        cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+          decision: { kind: 'send_message', privateSummary: 'Synthetic reminder.', text: 'Synthetic reminder.' },
+          deliveryOutcome: { kind: 'queued', error: null, intentId, session: { sessionId: 'session-default' } },
+          response: 'Synthetic reminder.', session: { sessionId: 'session-default' },
+        })
+      }
+      if (mode === 'expired') vi.setSystemTime(new Date('2026-04-08T11:01:00.000Z'))
+      await processDueAssistantCronJobsLocal({
+        vault: vaultRoot, limit: 1, ...(mode === 'queue-only' ? { deliveryDispatchMode: 'queue-only' as const } : {}),
+      })
+      if (mode !== 'expired') {
+        expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(expect.objectContaining({
+          assistantTargetOverride: expect.objectContaining({ model: 'gpt-6.1-sol', reasoningEffort: 'high' }),
+        }))
+      }
+      if (mode === 'queue-only') {
+        const pending = await readAssistantCronCanonicalRuntimeStore(resolveAssistantStatePaths(vaultRoot))
+        expect(pending.jobs.find(job => job.jobId === first.record.automationId)?.state.pendingDeliveryIntentId).toBe(intentId)
+        await markAssistantOutboxIntentSentById({
+          vault: vaultRoot, intentId, delivery: { channel: 'linq', idempotencyKey: null,
+            messageLength: 19, providerMessageId: 'synthetic-message', providerThreadId: 'thread-1',
+            sentAt: '2026-04-08T10:00:06.000Z', target: 'thread-1', targetKind: 'thread' },
+        })
+      }
+      vi.setSystemTime(new Date(nextAt))
+      await expect(processDueAssistantCronJobsLocal({ vault: vaultRoot, limit: 1 })).resolves.toMatchObject({
+        failed: 0, processed: 1, succeeded: 1,
+      })
+      for (const record of [first.record, second.record]) {
+        expect(await query.showAutomation(vaultRoot, record.automationId)).toMatchObject({ status: 'archived' })
+      }
+      expect(await readFile(file, 'utf8')).not.toContain('gpt-5.6-sol')
+      const final = await readAssistantCronCanonicalRuntimeStore(resolveAssistantStatePaths(vaultRoot))
+      expect(final.jobs.find(job => job.jobId === first.record.automationId)?.state.pendingDeliveryIntentId).toBeUndefined()
+      await expect(core.upsertAutomation({ ...first.record, vaultRoot,
+        assistantTargetOverride: { model: 'gpt-5.6-sol' },
+      })).rejects.toThrow('retired')
+    },
+  )
+
   it('preserves explicit private iMessage delivery routes when creating cron jobs', async () => {
     const { vaultRoot } = await createRuntimeContext('assistant-cron-linq-route-')
 

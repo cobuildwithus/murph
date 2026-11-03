@@ -3206,7 +3206,7 @@ text(result.output);
     } })
   })
 
-  it.each(['gpt-5.5', 'gpt-6-astra'])('rejects an unavailable child model %s before a provider request', {
+  it.each(['gpt-5.5', 'gpt-5.6-sol', 'gpt-6-astra'])('rejects an unavailable child model %s before a provider request', {
     timeout: TURN_TIMEOUT_MS,
   }, async (model) => {
     const scenario = await prepareScriptedTurnScenario({

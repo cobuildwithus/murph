@@ -101,3 +101,21 @@ it does not count as a substantive review. Shared package exclusions now remove
 image extensions across nested paths. Both lean/full archive tests pass with
 zero image entries. Restart round one on the updated pushed head and inspect
 the exact replacement archive before staging.
+
+## Review round one disposition
+
+Valid GPT-6 Pro review on lane vonneumann at bf44674a07528c3aac2c513fae701976f82ff955
+completed after more than six minutes with one High ORIGINAL_PR finding.
+Accepted: query-owned automation reads retained the retired pin, so automatic
+one-shot archive writes hit strict rejection and queued reconciliation blocked
+later jobs. All three queue-only/direct/expired composed regressions reproduced
+the failure against the reviewed source.
+
+Correction reuses the same stored-model helper in the existing query parser
+(two added source lines, one replaced line); no new abstraction or state.
+The regressions now pass using real canonical files, query reads, core writes
+and scheduler/outbox reconciliation; the following due job runs, pending
+references clear, explicit reasoning survives and new retired writes reject.
+Native child admission also rejects the retired model before another request.
+Query owner tests, workspace typechecks and complexity guard pass. No findings
+were rejected; no retrospective is required. Round two and final CI pending.
