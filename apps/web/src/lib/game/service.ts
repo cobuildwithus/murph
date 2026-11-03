@@ -2057,7 +2057,9 @@ export async function readGameChallengeInstructions(current: NonNullable<Awaited
   const accusedName = profiles.find(profile => profile.memberId === accused.memberId)?.firstName;
   if (!challengerName || !accusedName) return null;
   const version = termsForDay(current.state.game.terms, entry.dayIndex);
-  const words = parseTermWords(plain ?? "").versions.find(words => words.n === version.n);
+  // Structural-only revisions (Start now, duration, schedule, date) add no
+  // words; like termsView, inherit the newest words at or before this day's version.
+  const words = [...parseTermWords(plain ?? "").versions].reverse().find(words => words.n <= version.n);
   const task = words?.tasks.find(task => task.seat === accused.seat)?.text;
   if (!task) return null;
   return buildGameChallengeInstructions({ challengerName, accusedName, task, dayNumber: entry.dayIndex + 1,

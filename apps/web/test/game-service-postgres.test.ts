@@ -257,6 +257,31 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await rm(mediaDir, { force: true, recursive: true });
   });
 
+  it("names the inherited task in a Prove it case after a structural-only change", async () => {
+    const a = await member("Maya", "America/New_York"), b = await member("Sam", "America/New_York");
+    const db = getPrisma();
+    const { gameId } = await startGame(a, b);
+    const room = `game_room_${randomUUID()}`;
+    memberIds.push(room);
+    await db.hostedMember.create({ data: { id: room, billingStatus: "active" } });
+    // A duration-only revision advances the structural terms version but adds no task words.
+    const proposalId = randomUUID();
+    await ok(a, { type: "proposeChange", gameId, proposalId, expectedTermsVersion: 1, change: { kind: "edit", lengthDays: 10 } });
+    expect(await runGameCommand({ actorMemberId: b, command: { type: "respondChange", gameId, proposalId, decision: "approve" },
+      chatContainerMemberId: room, chatPlayerMemberIds: [a, b], beforeMutationTx: async () => {} })).toMatchObject({ ok: true });
+    await db.game.update({ where: { id: gameId }, data: { chatContainerMemberId: room } });
+    await devStartNow(gameId, a);
+    expect((await readGame(gameId, a))!.terms.n).toBeGreaterThan(1);
+    const target = await photo(b, gameId, "inherited-task-target");
+    await ok(b, target);
+    await ok(a, await photo(a, gameId, "inherited-task-unlock"));
+    await ok(a, { type: "challenge", gameId, entryId: target.entryId });
+    const currentCase = await readGameChallengeCase(db, gameId, target.entryId, new Date());
+    expect(currentCase?.status).toBe("open");
+    const instructions = await readGameChallengeInstructions(currentCase!);
+    expect(JSON.parse(instructions!.split("\n").at(-1)!)).toMatchObject({ challengerName: "Maya", accusedName: "Sam", task: "10 min abs" });
+  });
+
   it("accepts Prove it atomically, collapses concurrent retries, and returns budget permanently after concession", async () => {
     const a = await member("Maya", "America/New_York"), b = await member("Sam", "America/New_York");
     const db = getPrisma();
