@@ -1234,7 +1234,7 @@ describe('monorepo verification and review tooling audit', () => {
       'review_gpt_reject_repository_policy_overrides "$@"',
     )
     expect(reviewGptPrHeadPreflight).toContain(
-      '--minimum-marked-response-time 180s \\\n    "$@"',
+      '--minimum-marked-response-time 80s \\\n    "$@"',
     )
     expect(reviewGptPrHeadPreflight).not.toContain(
       'export ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS=',
@@ -1981,7 +1981,7 @@ describe('monorepo verification and review tooling audit', () => {
         'Idle draft cleanup: close hidden, inactive unsent drafts after 1800000ms',
       )
       expect(defaultResult.stdout).toContain(
-        'Minimum marked response time: 180000ms',
+        'Minimum marked response time: 80000ms',
       )
 
       writeHarnessFile(
@@ -1995,7 +1995,7 @@ describe('monorepo verification and review tooling audit', () => {
         'Response capture: enabled (7654321ms timeout)',
       )
       expect(localResult.stdout).toContain(
-        'Minimum marked response time: 180000ms',
+        'Minimum marked response time: 80000ms',
       )
 
       writeHarnessFile(
@@ -2011,7 +2011,7 @@ describe('monorepo verification and review tooling audit', () => {
       const callbackResult = runRepositoryDry()
       expect(callbackResult.status, callbackResult.stderr).toBe(0)
       expect(callbackResult.stdout).toContain(
-        'Minimum marked response time: 180000ms',
+        'Minimum marked response time: 80000ms',
       )
 
       const weakConfigPath = path.join(harnessRoot, 'weak-review-gpt.sh')
