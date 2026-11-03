@@ -44062,6 +44062,67 @@ describeRealCodex('real Codex native conversation polls e2e', () => {
   }, 720_000)
 })
 
+describeRealCodex('real Codex scheduled native poll e2e', () => {
+  it('scheduled native poll creates once and skips duplicate text', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-scheduled-poll-e2e-'))
+    const { MURPH_POLL_TOOL } = await import('../src/assistant-codex/dynamic-tools/conversation-polls.js')
+    const { resolveAssistantHostedScheduledInvocationScope } = await import('../src/assistant/hosted-tool-context.js')
+    const occurrenceAt = '2026-11-02T14:00:00.000Z'
+    const origin = { kind: 'automation_occurrence' as const, automationId: 'automation_weekly_poll', occurrenceAt }
+    const route = { channel: 'telegram' as const, target: '-100:topic:12' }
+    const calls: Array<import('@murphai/hosted-execution/conversation-polls').ConversationPollRequest> = []
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: false,
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantPollsAvailable: true,
+          channel: route.channel, cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
+          currentLocalDate: '2026-11-02', currentInstant: occurrenceAt, currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+          scheduledOccurrenceAt: occurrenceAt, turnTrigger: 'automation-cron',
+        }),
+        dynamicTools: [MURPH_POLL_TOOL], env: config.env,
+        hostedToolContext: {
+          computerToolsAvailable: false, vaultFileSendAvailable: false,
+          pollTool: { request: async (request) => {
+            calls.push(request)
+            return { status: 'sent', polls: [{
+              pollRef: 'poll_' + 'a'.repeat(32), channel: route.channel, question: 'Which day for our walk?',
+              options: [{ text: 'Saturday', votes: 0 }, { text: 'Sunday', votes: 0 }], totalVoters: 0,
+              anonymous: true, multipleAnswers: false, closed: false, observedAt: occurrenceAt, freshness: 'creation',
+            }] }
+          } },
+          currentInvocationScope: () => resolveAssistantHostedScheduledInvocationScope({
+            conversationScope: 'group', originSessionId: 'synthetic-scheduled-poll',
+            messageInput: { scheduledInvocationAuthority: origin, scheduledOccurrenceAt: occurrenceAt, turnTrigger: 'automation-cron' },
+          }),
+          currentConversationPollRoute: () => route,
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('No file send authorized.') },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'Saved weekly automation: Create a native poll in this conversation: Which day for our walk? Options: Saturday and Sunday. The poll itself fulfills this reminder; after it is sent, no additional message is needed.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const decision = parseAssistantNotificationDecision(result.finalMessage)
+      process.stdout.write(JSON.stringify({ scenario: 'scheduled native poll', decision, actions: calls.map((call) => call.request.action) }) + '\n')
+      expect(calls).toHaveLength(1)
+      expect(calls[0]).toMatchObject({ origin, route, request: { action: 'create', question: 'Which day for our walk?', options: ['Saturday', 'Sunday'] } })
+      expect(calls[0]).not.toHaveProperty('assistantInputId')
+      expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'dynamic').map((action) => action.tool)).toEqual(['poll'])
+      expect(decision.kind).toBe('skip')
+      expect(result.responseMedia).toEqual([])
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 720_000)
+})
+
 describeRealCodex('real Codex poll self vote e2e', () => {
   it.each(['tie', 'remove', 'telegram', 'settled', 'uncertain'] as const)('poll self vote %s', async (scenario) => {
     const config = await resolveRealCodexE2eConfig()

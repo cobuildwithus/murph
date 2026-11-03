@@ -81,8 +81,11 @@ async function createPoll(input: { memberId: string; runtimeIdentity: HostedRunt
   if (action.action !== "create") throw new TypeError("Expected poll creation.");
   if (route.channel === "linq" && action.anonymous === true) throw new TypeError("iMessage polls cannot be anonymous.");
   const prisma = getPrisma();
-  // One logical creation per accepted input, including retries with reworded arguments.
-  const id = "poll_" + createHash("sha256").update(JSON.stringify([input.memberId, input.request.assistantInputId])).digest("hex").slice(0, 32);
+  // One logical creation per accepted input or scheduled occurrence, including retries.
+  const identity = "assistantInputId" in input.request
+    ? [input.memberId, input.request.assistantInputId]
+    : [input.memberId, "automation_occurrence", input.request.origin.automationId, input.request.origin.occurrenceAt];
+  const id = "poll_" + createHash("sha256").update(JSON.stringify(identity)).digest("hex").slice(0, 32);
   const definition = { schema: "murph.conversation-poll.v1" as const, target: route.target, question: action.question, options: action.options, anonymous: route.channel === "telegram" ? action.anonymous ?? true : false };
   const encrypted = await encryptPoll({ id, memberId: input.memberId }, "definition", definition);
   const conversationKey = createHostedExternalThreadIdentityLookupKey({ channel: route.channel, threadId: route.target });

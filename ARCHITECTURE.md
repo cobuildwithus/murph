@@ -5326,6 +5326,19 @@ when the automation id and occurrence timestamp exactly match
 variants: a real accepted assistant input or an exact automation occurrence. An
 occurrence is authority in its own right and is never represented as a message.
 
+Native polls on Linq and Telegram accept either the existing accepted-input
+envelope or a strict automation-occurrence envelope with a host-bound channel
+and target. The target comes from cron's authorized delivery input, including
+direct Linq route replacement. Web rechecks runtime ownership, active access,
+and exact current route authority. Scheduled Linq polls require observed
+iMessage service from the existing chat-health projection; create and vote
+also apply the existing egress policy. Scheduled Telegram polls reuse the
+notification-route authority owner. Create replay uses one receipt per member
+and automation occurrence; accepted-input receipt identities stay unchanged.
+Deploy Web's accepting consumer before the runtime producer. Poll-only scheduled
+turns can finish with structured skip and consume the occurrence without another
+text delivery.
+
 Response cards, private Clinical Records connect links, route-eligible
 style/personalization, and synchronous image generation may use that exact
 occurrence authority. Synchronous image generation is exposed only when the

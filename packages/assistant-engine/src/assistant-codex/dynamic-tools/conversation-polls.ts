@@ -39,16 +39,26 @@ export async function executeConversationPollTool(input: {
 }) {
   const tool = input.context?.pollTool
   const scope = input.context?.currentInvocationScope?.()
-  if (!tool || scope?.origin.kind !== 'accepted_input') {
-    return toolTextResult(false, 'Poll actions require current conversation input.', 'authority_rejected')
+  const route = scope?.origin.kind === 'automation_occurrence'
+    ? input.context?.currentConversationPollRoute?.()
+    : null
+  if (!tool || !scope || (scope.origin.kind === 'automation_occurrence' && !route)) {
+    return toolTextResult(false, 'Poll actions require current conversation input or an authorized scheduled occurrence.', 'authority_rejected')
   }
   try {
-    const result = await tool.request({
+    const result = await tool.request(scope.origin.kind === 'accepted_input' ? {
       assistantInputId: scope.origin.assistantInputId,
+      request: input.request,
+    } : {
+      origin: scope.origin,
+      route: route!,
       request: input.request,
     })
     return toolTextResult(true, JSON.stringify(result))
   } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'HOSTED_POLL_UNSUPPORTED_SERVICE') {
+      return toolTextResult(false, 'Native polls require a confirmed iMessage conversation. This conversation’s service is unknown or unsupported; no poll action was sent.', 'authority_rejected', error)
+    }
     return toolTextResult(false, input.request.action === 'vote'
       ? 'The vote could not be confirmed and may have applied. Read the poll to inspect; do not automatically resubmit or claim success.'
       : 'Poll action could not be confirmed. Do not invent results or claim it succeeded; an interrupted create may have sent, so do not recreate automatically.', 'handler_exception', error)

@@ -18,10 +18,24 @@ export const conversationPollActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("vote"), pollRef, optionIndex: z.number().int().min(0).max(99), operation: z.enum(["add", "remove"]) }).strict(),
 ]);
 export type ConversationPollAction = z.infer<typeof conversationPollActionSchema>;
-export const conversationPollRequestSchema = z.object({
-  assistantInputId: z.string().regex(/^ain_[a-f0-9]{32}$/u),
-  request: conversationPollActionSchema,
-}).strict();
+export const conversationPollRequestSchema = z.union([
+  z.object({
+    assistantInputId: z.string().regex(/^ain_[a-f0-9]{32}$/u),
+    request: conversationPollActionSchema,
+  }).strict(),
+  z.object({
+    origin: z.object({
+      kind: z.literal("automation_occurrence"),
+      automationId: z.string().trim().min(1).max(256),
+      occurrenceAt: z.isoDateTime({ offset: true }),
+    }).strict(),
+    route: z.object({
+      channel: z.enum(["linq", "telegram"]),
+      target: z.string().min(1).max(256),
+    }).strict(),
+    request: conversationPollActionSchema,
+  }).strict(),
+]);
 export type ConversationPollRequest = z.infer<typeof conversationPollRequestSchema>;
 
 export const conversationPollVoterSchema = z.object({

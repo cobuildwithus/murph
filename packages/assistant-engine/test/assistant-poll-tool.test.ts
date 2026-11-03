@@ -57,6 +57,9 @@ describe('native poll dynamic tool', () => {
     { action: 'create', question: 'Day?', options: ['A'] },
     { action: 'create', question: 'Day?', options: ['A', 'B'], chatId: 'other' },
     { action: 'read', pollRef: 'invented' },
+    { action: 'list', origin: { kind: 'automation_occurrence', automationId: 'automation_poll', occurrenceAt: '2026-11-02T14:00:00.000Z' } },
+    { action: 'list', route: { channel: 'telegram', target: 'other-chat' } },
+    { action: 'list', assistantInputId: inputId },
     { action: 'vote', pollRef, optionIndex: -1, operation: 'add' },
     { action: 'vote', pollRef, optionIndex: 100, operation: 'add' },
     { action: 'vote', pollRef, optionIndex: 0.5, operation: 'add' },
@@ -105,12 +108,38 @@ describe('native poll dynamic tool', () => {
     expect(result.rpcResult.success).toBe(true)
     expect(result.rpcResult.contentItems[0]?.text).toContain('provider_update')
   })
-  it('denies scheduled or detached requests without accepted input authority', async () => {
+  it('denies detached requests without invocation authority', async () => {
     port.mockClear()
     const request = parse({ action: 'list' })
     if (!request) throw new Error('Expected poll request')
     const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: { ...context(), currentInvocationScope: () => null }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     expect(result.rpcResult.success).toBe(false)
     expect(port).not.toHaveBeenCalled()
+  })
+  it.each(['linq', 'telegram'] as const)('sends host-bound scheduled %s requests and requires a route', async (channel) => {
+    port.mockClear()
+    const origin = { kind: 'automation_occurrence' as const, automationId: 'automation_poll', occurrenceAt: '2026-11-02T14:00:00.000Z' }
+    const route = { channel, target: 'synthetic-chat' }
+    const request = parse({ action: 'create', question: 'Day?', options: ['Saturday', 'Sunday'] })!
+    const hostedToolContext: AssistantHostedToolContext = { ...context(),
+      currentInvocationScope: () => ({ origin, conversationScope: 'group' }),
+      currentConversationPollRoute: () => route,
+    }
+    const execute = () => executeMurphDynamicToolRequest({ request, hostedToolContext, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    expect((await execute()).rpcResult.success).toBe(true)
+    expect(port).toHaveBeenCalledExactlyOnceWith({ origin, route, request: { action: 'create', question: 'Day?', options: ['Saturday', 'Sunday'] } })
+    port.mockClear()
+    hostedToolContext.currentConversationPollRoute = () => null
+    expect((await execute()).rpcResult.success).toBe(false)
+    expect(port).not.toHaveBeenCalled()
+  })
+  it.each(['HOSTED_POLL_UNSUPPORTED_SERVICE', 'PROVIDER_FAILURE'])("maps only the pre-dispatch service error: %s", async (code) => {
+    port.mockRejectedValueOnce(Object.assign(new Error('Untrusted upstream text'), { code }))
+    const request = parse({ action: 'create', question: 'Day?', options: ['Saturday', 'Sunday'] })!
+    const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: context(), env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    expect(result.rpcResult.success).toBe(false)
+    const text = result.rpcResult.contentItems[0]?.text
+    expect(text).toContain(code === 'HOSTED_POLL_UNSUPPORTED_SERVICE' ? 'no poll action was sent' : 'an interrupted create may have sent')
+    expect(text).not.toContain('Untrusted upstream text')
   })
 })
