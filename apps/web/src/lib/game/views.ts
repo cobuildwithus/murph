@@ -374,7 +374,15 @@ function otherDayView(input: GameViewInput, visible: ReadonlySet<string>, other:
   // Reported: still their post for the day, with nothing of it to show.
   if (posted && input.hiddenEntryIds?.has(posted.id)) return { entry: null, hidden: true, seat: other.seat, status: "posted" };
   if (posted) {
-    if (!visible.has(posted.id)) return { entry: null, seat: other.seat, status: "locked", postedAt: posted.receivedAt.toISOString(), blurHash: posted.blurHash };
+    if (!visible.has(posted.id)) {
+      const locked = { entry: null, seat: other.seat, status: "locked" as const, postedAt: posted.receivedAt.toISOString(), blurHash: posted.blurHash };
+      // Today's picture, named but not served: the app can fetch it ahead with
+      // a signed delivery Home adds, so it develops the moment yours is in.
+      const viewer = playerFor(input.state, input.viewerId);
+      const today = viewer && input.state.game.status === "live" ? dayIndexAt(viewer, input.now) : null;
+      const key = posted.mediaKeys[0];
+      return today === index && key ? { ...locked, preview: { kind: posted.kind, mediaUrl: gameMediaUrl(key) } } : locked;
+    }
     // Its blur stays once it's open, for the app to show while the picture loads.
     return { entry: entryView(posted, input), seat: other.seat, status: "posted", ...(posted.blurHash ? { blurHash: posted.blurHash } : {}) };
   }

@@ -21,6 +21,10 @@ heart-rate samples and route coordinates. The separate optional blur string is
 public to the other game participant only alongside a posted, locked day's
 receipt timestamp. It grants no media authorization and never accompanies
 private payload data while locked. Neither summary nor blur reaches chat or push.
+On the viewer's today only, a locked picture's stable link and a short-lived
+signed delivery reach the other player's app (`authorizeLockedPreviewReads`:
+the media rules minus post-to-unlock), which keeps it hidden until its own post
+is in; the media route itself stays post-to-unlock.
 
 ## Non-Negotiable Rules
 

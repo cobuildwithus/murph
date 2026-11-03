@@ -324,6 +324,13 @@ export interface GameDayView {
   others: { seat: number; status: GameDayOtherStatus; entry: GameEntryView | null;
     /** `postedAt` only while it's still locked to this viewer; `blurHash` while it's locked and after, for while it loads. */
     postedAt?: string; blurHash?: string | null;
+    /**
+     * Locked, on the viewer's today, with a picture: what it will be once the
+     * viewer posts. `mediaUrl` stays locked (it answers MEDIA_MISSING until
+     * then); Home adds a short-lived signed `delivery` so the app can keep the
+     * picture ready, hidden, and develop it the moment the viewer's post is in.
+     */
+    preview?: { kind: GameEntryKind; mediaUrl: string; delivery?: { url: string; expiresAt: string } };
     /** The viewer reported this post: it's posted and counts, but never shown to them. */
     hidden?: true }[];
 }

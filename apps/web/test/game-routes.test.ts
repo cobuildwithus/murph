@@ -14,6 +14,7 @@ import { buildCurrentHostedConsentDocumentVersions } from "../src/lib/legal/cons
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
+  authorizeLockedPreviewReads: vi.fn(),
   authorizeMediaRead: vi.fn(),
   authorizeMediaReads: vi.fn(),
   devAdvanceDays: vi.fn(),
@@ -32,6 +33,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/src/lib/game/service", () => ({
+  authorizeLockedPreviewReads: mocks.authorizeLockedPreviewReads,
   authorizeMediaRead: mocks.authorizeMediaRead,
   authorizeMediaReads: mocks.authorizeMediaReads,
   devAdvanceDays: mocks.devAdvanceDays,
@@ -490,10 +492,12 @@ describe("weekly game routes", () => {
       const beforeText = await before.text();
       const beforeBody = JSON.parse(beforeText);
 
-      expect(beforeBody.game.days[0].others).toEqual([{ entry: null, seat: 0, status: "locked", postedAt: "2030-03-05T12:00:00.000Z", blurHash: null }]);
-      for (const secret of ["entry_leo", leoKey, encodeURIComponent(leoKey)]) {
-        expect(beforeText).not.toContain(secret);
-      }
+      // Only today's picture is named, as a preview the media route still
+      // keeps locked; the entry itself (its id, words and numbers) stays out.
+      expect(beforeBody.game.days[0].others).toEqual([{ entry: null, seat: 0, status: "locked", postedAt: "2030-03-05T12:00:00.000Z", blurHash: null,
+        preview: { kind: "photo", mediaUrl: `/api/game/v1/media/${encodeURIComponent(leoKey)}` } }]);
+      expect(beforeText).not.toContain("entry_leo");
+      expect(beforeText.split(encodeURIComponent(leoKey)).length - 1).toBe(1);
 
       mocks.readGame.mockResolvedValueOnce(viewFor(AVA, [leoPhoto, avaPhoto]));
       const after = await (await routes.game.GET(new Request(`${BASE}/games/${GAME_ID}`), params({ id: GAME_ID }))).json();
@@ -630,6 +634,42 @@ describe("weekly game routes", () => {
       mocks.control.gameImageDelivery.mockRejectedValueOnce(new Error("synthetic signing outage"));
       expect((await post("?delivery=signed")).game).toEqual(posted);
       expect(mocks.control.gameImageDelivery).toHaveBeenCalledTimes(2);
+    });
+
+    it("signs today's locked pictures into Home only when the app asks, through the locked-preview check", async () => {
+      const leoKey = `game/${LEO}/${"c".repeat(64)}.jpg`;
+      const leoPhoto = entry({ id: "entry_leo", kind: "photo", mediaKeys: [leoKey], memberId: LEO });
+      const game = viewFor(AVA, [leoPhoto]);
+      const home = { games: [game], me: { memberId: AVA }, wallet: { held: [], owed: [], redeemed: [] } };
+      const delivery = { url: "https://imagedelivery.net/account/image/gamephoto?exp=9999999999&sig=synthetic", expiresAt: "2030-01-01T00:00:00.000Z" };
+      signedInAs = AVA;
+      vi.stubEnv("VERCEL_ENV", "production");
+      mocks.control = { gameImageDelivery: vi.fn(async () => delivery) };
+      mocks.readHome.mockResolvedValue(home);
+      mocks.authorizeLockedPreviewReads.mockImplementation(async (_member: string, keys: string[]) => new Set(keys));
+      const read = async (query: string) => (await routes.home.GET(new Request(`${BASE}/home${query}`))).json();
+
+      // Released apps don't ask, and their Home waits on no signing.
+      expect((await read("")).games).toEqual([game]);
+      expect(mocks.control.gameImageDelivery).not.toHaveBeenCalled();
+
+      const signed = (await read("?delivery=signed")).games[0] as GameView;
+      expect(signed.days[0].others[0].preview).toEqual({ ...game.days[0].others[0].preview, delivery });
+      expect(signed.days[0].others[0].entry).toBeNull();
+      expect(mocks.authorizeLockedPreviewReads).toHaveBeenCalledExactlyOnceWith(AVA, [leoKey]);
+      expect(mocks.authorizeMediaRead).not.toHaveBeenCalled();
+      expect(mocks.control.gameImageDelivery).toHaveBeenCalledExactlyOnceWith({
+        mediaId: leoKey.slice(leoKey.lastIndexOf("/") + 1), userId: LEO, variant: "photo",
+      });
+
+      // Not authorized, unsignable, or a failed check: the preview stays
+      // unsigned and the app waits for its post's answer, as before.
+      mocks.authorizeLockedPreviewReads.mockResolvedValueOnce(new Set());
+      expect((await read("?delivery=signed")).games).toEqual([game]);
+      mocks.authorizeLockedPreviewReads.mockRejectedValueOnce(new Error("synthetic database failure"));
+      expect((await read("?delivery=signed")).games).toEqual([game]);
+      mocks.control.gameImageDelivery.mockRejectedValueOnce(new Error("synthetic signing outage"));
+      expect((await read("?delivery=signed")).games).toEqual([game]);
     });
 
     it("never shows another player's excuse, even after the viewer posts", async () => {

@@ -191,8 +191,16 @@ this default without deleting other people's private contact choices.
   applies to the player's most recent past scheduled day with no photo and no
   excuse yet, never today. It neither scores nor unlocks.
 - **Post to unlock.** A posted partner day exposes only its posting time and
-  optional device-rendered blur preview until you post that day. No media,
-  words or summary data is exposed while locked. The blur stays with the
+  optional device-rendered blur preview until you post that day. No words,
+  summary data or entry id is exposed while locked. On the viewer's today
+  only, a locked day with a picture also names it (`preview`: its kind and
+  stable media link, which still answers `MEDIA_MISSING` until you post), and
+  `GET /home?delivery=signed` signs that picture in, so the app can keep it
+  ready, hidden, and develop it the instant your own post is in. That makes
+  the lock app-enforced for today's picture only: the owner chose an instant
+  reveal over a server-only lock (Nov 2026). The signing check keeps every
+  other media rule (players only, no block either way, not reported, not
+  withdrawn, live game). The blur stays with the
   unlocked post, for the app to show while its picture loads. Unlocking is
   permanent after a non-excuse attempt, including withdrawal. Recap reveals
   every live artifact to the game's players. Excuses remain private to their
@@ -368,7 +376,7 @@ this default without deleting other people's private contact choices.
   ticket already redeemed returns the current game and changes nothing.
 - **Photos.** Kept with no expiry in private Cloudflare Images. The provider
   can read/resize them; Web applies the unlock/profile rules before granting a
-  five-minute signed URL. At most 4 MiB per upload. Existing game images need
+  five-minute signed URL (today's locked picture: the locked-preview rule above). At most 4 MiB per upload. Existing game images need
   no migration. Downloaded app-private caches remain available offline.
 - **Account deletion.** A member who deletes their account leaves every game
   they're in. An open invite, negotiation or live game is called off: it

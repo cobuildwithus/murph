@@ -54,6 +54,7 @@ import {
   devSettleNow,
   devStartNow,
   mediaKeyPrefixFor,
+  authorizeLockedPreviewReads,
   authorizeMediaRead,
   authorizeMediaReads,
   readGame,
@@ -493,6 +494,9 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(await getPrisma().gameEntry.count({ where: { gameId, memberId: ava } })).toBe(1);
     expect(await authorizeMediaRead(leo, key)).toBe(false);
     expect(await authorizeMediaRead(stranger, key)).toBe(false);
+    // Fetching ahead: the other player may before posting; a stranger never.
+    expect(await authorizeLockedPreviewReads(leo, [key])).toEqual(new Set([key]));
+    expect(await authorizeLockedPreviewReads(stranger, [key])).toEqual(new Set());
     expect(await errorCode(leo, await photo(leo, gameId, "synthetic-photo"))).toBe("INVALID_REQUEST");
     await ok(leo, { ...await photo(leo, gameId, "synthetic-own-graph"), kind: "heart_rate" });
     expect(await authorizeMediaRead(leo, key)).toBe(true);
@@ -500,6 +504,14 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await ok(ava, { ...await photo(ava, gameId, "synthetic-retake"), kind: "heart_rate" });
     expect(await errorCode(ava, { ...graph, entryId: randomUUID() })).toBe("RETAKE_USED");
     expect(await authorizeMediaRead(leo, key)).toBe(false);
+    // A retaken picture is withdrawn, so it isn't fetched ahead either; and a
+    // block ends the game, so nothing of it is.
+    expect(await authorizeLockedPreviewReads(leo, [key])).toEqual(new Set());
+    const retake = (await getPrisma().gameEntry.findFirstOrThrow({
+      where: { gameId, memberId: ava, withdrawnAt: null, attempt: { gt: 0 } } })).mediaKeys[0];
+    expect(await authorizeLockedPreviewReads(leo, [retake])).toEqual(new Set([retake]));
+    await ok(leo, { memberId: ava, type: "block" });
+    expect(await authorizeLockedPreviewReads(leo, [retake])).toEqual(new Set());
   });
 
   it("syncs canonical profile photos, preserves private overrides and scopes media to game participants", async () => {
@@ -610,8 +622,12 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await ok(ava, avaPost);
     const avaKey = avaPost.type === "post" ? avaPost.mediaKeys[0] : "";
     let leoView = await readGame(gameId, leo);
-    expect(leoView!.days[0].others[0]).toEqual({ blurHash: null, entry: null, postedAt: expect.any(String), seat: 1, status: "locked" });
+    expect(leoView!.days[0].others[0]).toEqual({ blurHash: null, entry: null, postedAt: expect.any(String), seat: 1, status: "locked",
+      preview: { kind: "photo", mediaUrl: `/api/game/v1/media/${encodeURIComponent(avaKey)}` } });
     expect(await authorizeMediaRead(leo, avaKey)).toBe(false);
+    // Fetching ahead is for players of the game only, and never for a profile stranger.
+    expect(await authorizeLockedPreviewReads(leo, [avaKey])).toEqual(new Set([avaKey]));
+    expect(await authorizeLockedPreviewReads(kat, [avaKey])).toEqual(new Set());
     expect(await authorizeMediaRead(kat, avaKey)).toBe(false);
     // Nobody can post someone else's upload, or one that was never stored.
     expect(await errorCode(leo, { entryId: randomUUID(), gameId, kind: "photo", mediaKeys: [avaKey], type: "post" })).toBe("MEDIA_MISSING");
