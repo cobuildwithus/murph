@@ -6,6 +6,7 @@ import {
 import type { HostedMemberChannelBarrierTiming } from "./delivery-latency-trace.ts";
 import type { WearableHapticAction } from "@murphai/hosted-execution/wearable-haptics";
 import { HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS } from "./workspace-system-work.ts";
+import { isHostedManualMealPhotoWake } from "./meal-photo-import.ts";
 import { createHash } from "node:crypto";
 
 import {
@@ -3971,13 +3972,21 @@ function isForegroundCausalSystemMailboxPreparation(
     return true;
   }
 
-  return "item" in preparation
-    && (
-      preparation.status === "processed"
-      || preparation.status === "recording"
-    )
-    && preparation.item.routeAction === "continue-assistant-ask"
-    && preparation.item.wake.kind === "assistant.ask.completed";
+  if (
+    !("item" in preparation)
+    || (preparation.status !== "processed" && preparation.status !== "recording")
+  ) {
+    return false;
+  }
+  const { routeAction, wake } = preparation.item;
+  if (routeAction === "continue-assistant-ask") {
+    return wake.kind === "assistant.ask.completed";
+  }
+  // The member sent this photo from the app and is waiting for Murph's answer,
+  // so a chat message arriving mid-estimation must not strand that reply.
+  return routeAction === "dispatch-assistant-notification"
+    && wake.kind === "meal-photo.captured"
+    && isHostedManualMealPhotoWake(wake);
 }
 
 function isPhoneCallResultSystemMailboxPreparation(

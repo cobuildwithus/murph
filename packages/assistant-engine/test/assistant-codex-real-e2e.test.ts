@@ -35858,6 +35858,105 @@ describeRealCodex('real Codex interactive nutrition-card meal recovery e2e', () 
     }
   })
 
+  it('asks what is in an opaque blended drink sent from the app, then completes that meal', { timeout: 900_000 }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const fixture = await createOpaqueDrinkPhotoFixture()
+    try {
+      const { capture, commandLog, shared, vaultRoot } = fixture
+      const first = await executeRealCodexAppServerTurn({
+        ...shared(config),
+        developerInstructions: buildAutomaticMealClarificationDeveloperInstructions({
+          currentLocalDate: '2026-08-21', manualSubmission: true, protectedContext: false, scheduled: false,
+        }),
+        prompt: buildManualMealEstimationInstructions({ mealId: capture.mealId, capturedAt: '2026-08-21T14:35:00.000Z' }),
+      })
+      // Resolve the member-visible text the way the notification runtime does:
+      // an attached card replaces the provider's text, which would drop a question.
+      const decision = resolveAssistantNotificationDecision({
+        providerAuthoredResponse: first.providerAuthoredFinalMessage ?? first.finalMessage,
+        runtimeReplacesFinalPresentation: first.responseCard !== null
+          && first.providerAuthoredFinalMessage !== first.finalMessage,
+        runtimeResponse: first.finalMessage,
+      })
+      const question = decision.kind === 'send_message' ? decision.text : ''
+      const firstCommands = expandRecordedVaultCommands((await readFile(commandLog, 'utf8')).trim().split('\n').filter(Boolean))
+      const afterSubmission = await readAutomaticMealClarificationState({ mealId: capture.mealId, vaultRoot })
+      process.stdout.write(`[opaque-drink-manual-photo-e2e] ${JSON.stringify({
+        turn: 'submission', reply: question, cardAttached: first.responseCard !== null,
+        savedCalories: afterSubmission.savedCalories, savedNote: afterSubmission.savedNote, commands: firstCommands,
+      })}\n`)
+      expect(decision.kind).toBe('send_message')
+      expect(first.responseCard).toBeNull()
+      expect(question).toMatch(/\?/u)
+      expect(question).toMatch(/\b(?:what(?:'s| is| was| went)?|which|ingredients?|made (?:with|of)|in (?:it|the|that))\b/iu)
+      expect(question).not.toMatch(/vault-cli|meal_[A-Za-z0-9]|closeout|projection|database/iu)
+      expect(firstCommands).toContain(`meal show ${capture.mealId}`)
+      expect(firstCommands.filter(command => /^(?:meal add|meal import-json)\b/u.test(command) && !isRecordedVaultHelpCommand(command))).toEqual([])
+      const beforeAnswer = firstCommands.length
+      const second = await executeRealCodexAppServerTurn({
+        ...shared(config),
+        developerInstructions: buildAutomaticMealClarificationDeveloperInstructions({
+          currentLocalDate: '2026-08-21', protectedContext: false, scheduled: false,
+        }),
+        prompt: [
+          `Earlier today you replied to my app drink photo: ${question}`,
+          'Strawberry banana protein smoothie, about 16 oz. My blender app says the whole thing is 340 calories, 30 g protein, 48 g carbs, 4 g fat, and 6 g fiber.',
+        ].join('\n'),
+      })
+      const commands = expandRecordedVaultCommands((await readFile(commandLog, 'utf8')).trim().split('\n').filter(Boolean))
+      const edits = commands.slice(beforeAnswer).filter(isMealEditMutationCommand)
+      const vault = await readVaultRawTolerant(vaultRoot)
+      const meals = vault.events.filter(event => event.kind === 'meal')
+      const saved = [...meals].reverse().find(event => event.entityId === capture.mealId)
+      process.stdout.write(`[opaque-drink-manual-photo-e2e] ${JSON.stringify({ turn: 'answer', reply: second.finalMessage, name: saved?.title, edits })}\n`)
+      expect(commands.filter(command => /^(?:meal add|meal import-json)\b/u.test(command) && !isRecordedVaultHelpCommand(command))).toEqual([])
+      expect(edits.length).toBeGreaterThanOrEqual(1)
+      expect(edits.every(command => command.startsWith(`meal edit ${capture.mealId} `))).toBe(true)
+      expect(new Set(meals.map(event => event.entityId))).toEqual(new Set([capture.mealId]))
+      expect(saved?.title).toMatch(/smoothie/iu)
+      expect(saved?.attributes.nutrition).toMatchObject({ totals: {
+        calories: 340, proteinGrams: 30, carbsGrams: 48, fatGrams: 4, fiberGrams: 6,
+      } })
+      expect(second.finalMessage).not.toMatch(/\?|vault-cli|meal_[A-Za-z0-9]|database|projection/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([fixture.root, ...config.temporaryPaths])
+    }
+  })
+
+  it('asks what is in an unresolved app drink photo when the member checks it arrived', { timeout: 900_000 }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    // The member asks "just now", so anchor the saved photo to the real clock.
+    const capturedAt = new Date(Date.now() - 4 * 60_000)
+    const fixture = await createOpaqueDrinkPhotoFixture({
+      name: 'Red smoothie',
+      note: 'Red blended drink in a jar; ingredients and amount uncertain.',
+      occurredAt: capturedAt.toISOString(),
+    })
+    try {
+      const { capture, commandLog, shared, vaultRoot } = fixture
+      const result = await executeRealCodexAppServerTurn({
+        ...shared(config),
+        developerInstructions: buildAutomaticMealClarificationDeveloperInstructions({
+          currentLocalDate: new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(capturedAt),
+          protectedContext: false, scheduled: false,
+        }),
+        prompt: 'Did you get the drink photo I just sent from the app?',
+      })
+      const commands = expandRecordedVaultCommands((await readFile(commandLog, 'utf8')).trim().split('\n').filter(Boolean))
+      const vault = await readVaultRawTolerant(vaultRoot)
+      const meals = vault.events.filter(event => event.kind === 'meal')
+      process.stdout.write(`[opaque-drink-arrival-check-e2e] ${JSON.stringify({ reply: result.finalMessage, commands })}\n`)
+      expect(commands.some(command => /^(?:meal (?:list|show)|list --kind meal)\b/u.test(command))).toBe(true)
+      expect(commands.filter(command => /^(?:meal add|meal import-json)\b/u.test(command) && !isRecordedVaultHelpCommand(command))).toEqual([])
+      expect(new Set(meals.map(event => event.entityId))).toEqual(new Set([capture.mealId]))
+      expect(result.finalMessage).toMatch(/\?/u)
+      expect(result.finalMessage).toMatch(/\b(?:what(?:'s| is| was| went)?|which|ingredients?|made (?:with|of)|in (?:it|the|that))\b/iu)
+      expect(result.finalMessage).not.toMatch(/vault-cli|meal_[A-Za-z0-9]|closeout|projection|database/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([fixture.root, ...config.temporaryPaths])
+    }
+  })
+
   it.each([
     { name: 'asks about an incomplete earlier meal during ordinary meal logging', manualSubmission: false, supportedEvidence: false, protectedContext: false },
     { name: 'estimates an incomplete earlier meal during ordinary meal logging', manualSubmission: false, supportedEvidence: true, protectedContext: false },
@@ -37951,6 +38050,72 @@ async function runRealAutomaticMealClarificationScenario(input: {
   } finally {
     await removeRealCodexTemporaryPath(workingRoot)
   }
+}
+
+const OPAQUE_DRINK_PHOTO_FIXTURE = fileURLToPath(
+  new URL('./fixtures/meal-photos/red-blended-drink-jar.jpg', import.meta.url),
+)
+
+/**
+ * A decodable synthetic app photo whose contents cannot be seen: a red blended
+ * drink in a jar. Accepted daily targets keep the card path available, as for
+ * a member who already tracks nutrition.
+ */
+async function createOpaqueDrinkPhotoFixture(saved: { name?: string; note?: string; occurredAt?: string } = {}) {
+  const root = await mkdtemp(path.join(tmpdir(), 'murph-opaque-drink-photo-'))
+  const vaultRoot = path.join(root, 'vault')
+  const skillsRoot = path.join(root, 'skills')
+  const binDirectory = path.join(root, 'bin')
+  const commandLog = path.join(root, 'commands.log')
+  const photoPath = path.join(root, 'app-photo.jpg')
+  await initializeVault({ timezone: 'America/New_York', vaultRoot })
+  await Promise.all([
+    ...(['food-journal', 'automatic-meal-capture', 'nutrition-strategy'] as const)
+      .map(slug => materializeAssistantSkill({ skillsRoot, slug })),
+    writeFile(commandLog, '', 'utf8'),
+    cp(OPAQUE_DRINK_PHOTO_FIXTURE, photoPath),
+  ])
+  const capture = await addMeal({
+    externalRef: { resourceId: 'synthetic-opaque-drink-photo', resourceType: 'photo', system: 'meal-photo-capture', version: '9'.repeat(64) },
+    uploadId: 'synthetic-opaque-drink-upload',
+    occurredAt: saved.occurredAt ?? '2026-08-21T14:35:00.000Z',
+    photoPath, source: 'device', vaultRoot,
+    ...(saved.name ? { name: saved.name } : {}),
+    ...(saved.note ? { note: saved.note } : {}),
+  })
+  const pointTarget = (targetId: string, metricKey: string, unit: string, value: number) =>
+    goalMetricTargetSchema.parse({
+      comparator: 'between', evaluation: { kind: 'selected-value' }, highValue: value,
+      kind: 'metric', metricKey, targetId, unit, value,
+    })
+  await upsertGoal({
+    domains: ['nutrition'],
+    metricTargets: [
+      pointTarget('synthetic-calories', 'dietary-calories', 'kcal', 2_100),
+      pointTarget('synthetic-protein', 'protein-grams', 'g', 135),
+      pointTarget('synthetic-carbs', 'carbs-grams', 'g', 250),
+      pointTarget('synthetic-fat', 'fat-grams', 'g', 70),
+      pointTarget('synthetic-fiber', 'fiber-grams', 'g', 30),
+    ],
+    status: 'active', title: 'Daily nutrition targets', vaultRoot, window: { startAt: '2026-08-01' },
+  })
+  await materializeAutomaticMealClarificationVaultCli({ binDirectory, commandLog, vaultRoot })
+  const shared = (config: RealCodexE2eConfig) => ({
+    approvalPolicy: 'never' as const,
+    baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+    codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+    codexHome: config.codexHome,
+    dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+    env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+      PATH: `${binDirectory}${path.delimiter}${config.env.PATH ?? ''}` },
+    groupConversation: false,
+    model: config.model, modelProvider: config.modelProvider,
+    // Hosted app-photo and ordinary reply turns run at low effort.
+    reasoningEffort: 'low' as const,
+    sandbox: 'workspace-write' as const,
+    workingDirectory: vaultRoot,
+  })
+  return { capture, commandLog, root, shared, vaultRoot }
 }
 
 function buildAutomaticMealClarificationDeveloperInstructions(input: {

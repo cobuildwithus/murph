@@ -1599,7 +1599,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toMatchInlineSnapshot(`"76af77f6c1d1efb2f1a0b4e344ed0d8408ca87a4dc236a01c0ebd9b8621feb30"`)
-    expect(promptA.cacheMetadata.stableRouteCapabilityPromptHash).toMatchInlineSnapshot(`"603a79aedef59d76214dadbe206613be14157622a5fa9a01fe0bb7ae9e8b64af"`)
+    expect(promptA.cacheMetadata.stableRouteCapabilityPromptHash).toMatchInlineSnapshot(`"f1c1eeb7daa631b10f3da573106ccea2368e1be2ae7db98518904fcaa74c67c5"`)
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
     )
@@ -1809,6 +1809,20 @@ describe('assistant Murph onboarding guidance', () => {
 })
 
 describe('assistant conversation scope', () => {
+  it('asks about an unresolved meal photo when a private member checks it arrived', () => {
+    const rule = 'If it is still unclear what the meal was or how much was eaten, confirm it arrived and ask one short question for the missing contents or amount'
+    const directPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+    const groupPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      assistantHostedGroupToolSurface: 'families',
+      channel: 'linq',
+      conversationScope: 'group',
+      hostedRuntime: true,
+    }))
+
+    expect(directPrompt).toContain(rule)
+    expect(groupPrompt).not.toContain(rule)
+  })
+
   it('discovers explicit current-sender personal Murph consultation without broadening group authority', () => {
     const groupPrompt = buildAssistantSystemPrompt(
       createCommonCodexPromptInput({
