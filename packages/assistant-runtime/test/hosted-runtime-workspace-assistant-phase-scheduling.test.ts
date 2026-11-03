@@ -1449,7 +1449,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("checkpoints due message-volume receipt recovery without a system mailbox item", async () => {
     mocks.queueHostedAssistantPendingMessageVolumeReceiptsForVault.mockResolvedValueOnce(1);
-    mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValueOnce(
+    mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValue(
       "2026-04-27T00:01:00.000Z",
     );
 
@@ -2087,7 +2087,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       secret: "synthetic-device-sync-secret",
     } as const;
 
-    mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValueOnce(outboxWakeAt);
+    mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValue(outboxWakeAt);
     mocks.resolveHostedDeviceSyncNextWakeAt.mockReturnValueOnce(deviceSyncContinuationAt);
 
     const firstPass = await runHostedWorkspaceAssistantPhase(createPhaseInput({
@@ -2103,7 +2103,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
 
-    mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValueOnce(null);
+    mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValue(null);
     mocks.resolveHostedDeviceSyncNextWakeAt.mockReturnValueOnce(deviceSyncContinuationAt);
 
     const restartedAtOutboxWake = await runHostedWorkspaceAssistantPhase(createPhaseInput({
