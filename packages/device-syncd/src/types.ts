@@ -1346,7 +1346,6 @@ export interface DeviceSyncImporterPort {
     snapshot: unknown;
     vaultRoot?: string;
   }, options?: {
-    importSession?: DeviceBatchImportExecutionOptions["session"];
     signal?: AbortSignal | null;
   }): Promise<unknown>;
   resolveDeviceProviderSnapshotDefaultTimeZone?(input: {

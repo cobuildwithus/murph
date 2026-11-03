@@ -27,7 +27,6 @@ import type { CompleteDeviceProviderSourceDay } from "./types.ts";
 export interface DeviceProviderImporterExecutionOptions {
   corePort?: unknown;
   defaultTimeZone?: string;
-  importSession?: DeviceBatchImportExecutionOptions["session"];
   signal?: AbortSignal | null;
   providerRegistry?: DeviceProviderRegistry;
 }
@@ -358,7 +357,6 @@ export async function importDeviceProviderSnapshot<TResult = unknown>(
   {
     corePort,
     defaultTimeZone,
-    importSession,
     signal,
     providerRegistry,
   }: DeviceProviderImporterExecutionOptions = {},
@@ -380,7 +378,6 @@ export async function importDeviceProviderSnapshot<TResult = unknown>(
   } = {};
   const result = await writer.importDeviceBatch(payload, {
     signal,
-    ...(importSession ? { session: importSession } : {}),
     onTiming: (timing) => {
       coreTimingRef.value = timing;
     },

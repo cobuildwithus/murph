@@ -302,13 +302,13 @@ their existing import path; complete-source-day timeseries imports and their
 authoritative corrections are unchanged. Source checks, continuation checkpoints,
 content proof, and reconciliation cadence keep their existing owners.
 
-One worker drain reuses a single in-memory canonical import session. Core may
-reuse its event-identity index only when the event-ledger metadata fingerprint
-is unchanged and every event id, external reference, Junction profile scope,
-and authoritative facet scope changed earlier in the drain is disjoint from
-the next import. Overlap, an external ledger write, or an import failure forces
-a full rescan. The session is neither persisted nor shared across drains, and
-the worker still checks the foreground-yield fence before each job.
+Core retains one bounded event-identity index in process memory across worker
+drains. Under the canonical write lock, it checks the vault and shard metadata
+fingerprint before reuse and advances the index from committed append rows using
+the cold builder's reducer. Unknown writes, shard or vault replacement, import
+failure, and histories above 100,000 rows discard the cache. Nothing is persisted;
+a fresh process rebuilds from the ledger. The worker still checks the foreground
+yield fence before each job.
 
 The job's abort signal also reaches snapshot normalization and canonical import
 preparation. Hosted conversation admission additionally supplies an import-only
@@ -325,7 +325,7 @@ runs through even if newer foreground windows remain open. New messages and
 preparation retries cannot renew this deadline. Ordinary job cancellation still
 applies; this bounds foreground deferral, not total import execution time.
 Large identity scans yield to the event loop at bounded row intervals.
-Cancellation before publication releases the canonical lock and discards the session cache.
+Cancellation before publication releases the canonical lock and discards the identity cache.
 Ordinary job-level cancellation still requeues work without consuming retry
 budget. Once canonical publication starts it finishes atomically and reports committed progress, even
 if the signal aborts during the write. This does not make synchronous

@@ -1,6 +1,5 @@
 import { resolveJunctionTimeseriesResourcePolicy } from "@murphai/contracts";
 import {
-  createDeviceProviderSnapshotImportSession,
   createImporters,
   isActiveCanonicalWriteLockError,
   JunctionSparseCalendarRepairNormalizationError,
@@ -863,7 +862,6 @@ class DeviceSyncServiceController {
   async runWorkerOnce(accountId?: string): Promise<DeviceSyncJobRecord | null> {
     const result = await this.runWorkerPassOnce({
       accountId,
-      importSession: createDeviceProviderSnapshotImportSession(),
       providerExecutors: new Map(),
       maxJobRows: Number.POSITIVE_INFINITY,
     });
@@ -872,7 +870,6 @@ class DeviceSyncServiceController {
 
   private async runWorkerPassOnce(input: {
     accountId?: string;
-    importSession: ReturnType<typeof createDeviceProviderSnapshotImportSession>;
     providerExecutors: Map<string, DeviceJobExecutor>;
     maxJobRows: number;
   }): Promise<{
@@ -1315,7 +1312,7 @@ class DeviceSyncServiceController {
               try {
                 const importResult = await this.importer.importDeviceProviderSnapshot(
                   { provider: provider.provider, snapshot, vaultRoot: this.vaultRoot, ...options },
-                  { importSession: input.importSession, signal: importSignal },
+                  { signal: importSignal },
                 );
                 const applied = toPlainRecord(importResult)?.applied;
                 importOutcome = applied === true ? "applied" : applied === false ? "noop" : "unknown";
@@ -1746,13 +1743,11 @@ class DeviceSyncServiceController {
   ): Promise<number> {
     const maxJobRows = normalizeProviderJobBatchLimit(limit, this.workerBatchSize);
     let processedJobRows = 0;
-    const importSession = createDeviceProviderSnapshotImportSession();
     const providerExecutors = new Map<string, DeviceJobExecutor>();
 
     while (processedJobRows < maxJobRows) {
       const result = await this.runWorkerPassOnce({
         accountId,
-        importSession,
         providerExecutors,
         maxJobRows: maxJobRows - processedJobRows,
       });
