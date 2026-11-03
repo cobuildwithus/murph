@@ -1,6 +1,6 @@
 Dark group lifecycle, audience identity and settlement are owned by
 [Weekly Game](product-specs/weekly-game.md) and `../ARCHITECTURE.md` § Weekly Game;
-[PR 3 execution plan](exec-plans/active/2026-11-02-group-games-lifecycle-pr3.md).
+[PR 3 execution plan](exec-plans/completed/2026-11-02-group-games-lifecycle-pr3.md).
 
 Pair-preserving game collection preparation and visibility proof are recorded in
 [the PR 1 plan](exec-plans/completed/2026-11-02-game-roster-pr1.md).

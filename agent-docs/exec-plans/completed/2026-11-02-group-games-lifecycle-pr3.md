@@ -1,6 +1,6 @@
 # Group games lifecycle and settlement
 
-Status: active
+Status: completed
 Created: 2026-11-02
 Updated: 2026-11-02
 
@@ -51,3 +51,12 @@ One original-PR finding was accepted: a pre-Day-1 leaver retained the old calend
 CI also exposed the suite's redundant task-specific database-name guard. Remove it and rely on the canonical PostgreSQL runner's existing loopback test-database validation, matching the other game suites. This is test setup only; local verification still uses an owned isolated database. Existing Frog entries cover differing database guards and round-metadata cleanup.
 
 After correction, the five focused suites pass 194 tests. Lint, complexity and documentation checks pass. The one-line production correction reduces filtering without adding a new owner; round 2 will re-send the full sensitive snapshot.
+
+## Final review and closeout
+
+Round 2 passed on `26be78188e` with zero remaining qualifying findings. It re-sent the full sensitive snapshot on vonneumann using verified GPT-6 Pro. The packaged metadata confirms the original first-reviewed head, previous head, current head and current context anchor. The exact response hash matches its turn receipt and completion marker. Send-to-capture elapsed time was approximately 188 seconds; both substantive rounds exceed the 80-second minimum. One original finding was received and accepted in round 1, fixed and resolved in round 2; none were rejected and no tooling retry was needed.
+
+The parent verified that the correction uses the existing scheduler and persistence owner, preserves joinedAt/leftAt, and restores one calendar without weakening access or prize eligibility. Focused proof is 5 suites / 194 passing tests; PostgreSQL runner proof is 6 passing tests. Web typecheck, lint, complexity and both docs checks pass. The isolated database was removed after remediation proof. No new Frog entry was needed; existing entries cover the encountered tooling friction.
+
+This final commit archives the plan and updates its index link only. It changes no executable behavior and needs no additional substantive review under the review loop's documentation exemption. Required CI must still pass on the resulting final head; the PR evidence and handoff record that exact-head result and current-base mergeability. The task ends with an open Ready PR, without merging or deploying.
+Completed: 2026-11-02
