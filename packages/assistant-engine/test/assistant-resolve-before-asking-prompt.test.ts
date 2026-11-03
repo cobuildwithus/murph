@@ -28,7 +28,11 @@ describe('assistant resolve-before-asking guidance', () => {
     const direct = buildPrompt('direct')
     expect(direct).toContain("Match replies, including voice memo text, to the user's conversational language")
     expect(direct).toContain('An explicit language request wins; otherwise honor an explicit saved language preference')
-    expect(direct).toContain('proactively remember a clearly established conversational language')
+    expect(direct).toContain('proactively remember a clearly established non-English conversational language')
+    expect(direct).toContain('English needs no new observed-language note')
+    expect(direct).toContain('When an existing observed note changes language, update it even for a switch to English')
+    expect(direct).not.toContain('proactively remember a clearly established conversational language as the default')
+    expect(direct).toContain('Preserve explicit saved preferences')
     expect(direct).toContain('through canonical `vault-cli memory` in this turn, even if replying in text')
     expect(direct).toContain('update the existing language note rather than duplicating it, and skip unchanged writes')
     expect(direct).toContain('A quotation, translation exercise, isolated foreign word, or one-off language request is not a new default')
@@ -36,7 +40,7 @@ describe('assistant resolve-before-asking guidance', () => {
     expect(direct).toContain('One substantive user message in that language is sufficient; do not wait for a request to remember it')
     expect(direct).toContain('A language change never changes the saved voice or makes voice output welcome by itself')
     for (const scope of ['group', 'unverified-external'] as const) {
-      expect(buildPrompt(scope)).not.toContain('proactively remember a clearly established conversational language')
+      expect(buildPrompt(scope)).not.toContain('proactively remember a clearly established non-English conversational language')
     }
   })
 

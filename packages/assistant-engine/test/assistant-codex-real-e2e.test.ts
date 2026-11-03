@@ -11882,6 +11882,8 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           workingDirectory,
         }
         const scenarios = [
+          { slug: 'english-text', prompt: 'Hi! How is your evening going?', language: /evening|here|help/iu },
+          { slug: 'english-reuse', prompt: '👍 🎙️', language: /night|sleep|rest/iu },
           { slug: 'text-learn', prompt: 'Cześć! Co porabiasz tego wieczoru?', language: /[ąćęłńóśźż]|dobr|cześć|wiecz/iu },
           { slug: 'learn', prompt: 'Wyślij mi krótką wiadomość głosową na dobranoc. Tylko nagranie.', language: /dobranoc|śpij|snu|odpoczn/iu },
           { slug: 'reuse', prompt: '👍 🎙️', language: /dobranoc|śpij|snu|odpoczn/iu },
@@ -11900,7 +11902,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             ...common,
             developerInstructions: buildDirectConversationDeveloperInstructions(false, [
               snapshot,
-              ...(scenario.slug === 'reuse' ? ['Recent conversation: Murph offered a short goodnight voice memo.'] : []),
+              ...(['reuse', 'english-reuse'].includes(scenario.slug) ? ['Recent conversation: Murph offered a short goodnight voice memo.'] : []),
             ].filter(Boolean).join('\n\n')),
             prompt: scenario.prompt,
           })
@@ -11908,6 +11910,16 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           previousSessionId = result.sessionId
           const actions = readCapabilityRoutingActions(result.jsonEvents)
           const calls = actions.filter((action) => action.kind === 'dynamic')
+          if (scenario.slug === 'english-text') {
+            expect(calls).toEqual([])
+            expect(result.responseMedia).toEqual([])
+            expect(result.finalMessage).toMatch(scenario.language)
+            expect(result.runtimeIssueInputs).toEqual([])
+            expect((await readMemoryDocument(workingDirectory)).records).toEqual([])
+            expect(actions.filter((action) => action.kind === 'command' && /memory (?:upsert|update|forget)/u.test(action.command))).toEqual([])
+            process.stdout.write(`[voice-language-memory-e2e] ${JSON.stringify({ scenario: scenario.slug, reply: result.finalMessage, memoryCount: 0 })}\n`)
+            continue
+          }
           if (scenario.slug === 'text-learn') {
             expect(calls).toEqual([])
             expect(result.responseMedia).toEqual([])
@@ -11933,6 +11945,11 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           expect(result.runtimeIssueInputs).toEqual([])
           const memory = await readMemoryDocument(workingDirectory)
           process.stdout.write(`[voice-language-memory-e2e] ${JSON.stringify({ scenario: scenario.slug, spoken: call.argumentsValue.text, reply: result.finalMessage, memoryCount: memory.records.length, commandCount: actions.filter((action) => action.kind === 'command').length })}\n`)
+          if (scenario.slug === 'english-reuse') {
+            expect(memory.records).toEqual([])
+            expect(actions.filter((action) => action.kind === 'command' && /memory (?:upsert|update|forget)/u.test(action.command))).toEqual([])
+            continue
+          }
           expect(memory.records).toHaveLength(1)
           const note = memory.records[0]!
           if (scenario.slug === 'learn') {
@@ -11953,7 +11970,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             }
           }
         }
-        expect(generations).toHaveLength(scenarios.length - 1)
+        expect(generations).toHaveLength(scenarios.length - 2)
       } finally {
         await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
       }
