@@ -1,6 +1,5 @@
 import {
   installSqliteExperimentalWarningFilterWithOptions,
-  isSqliteExperimentalWarning,
 } from "@murphai/runtime-state/node/sqlite-warning-filter";
 
 type ProcessEmitWarningRestArgs = Parameters<typeof process.emitWarning> extends [
@@ -56,19 +55,6 @@ export function installHostedWebWarningFilters(): void {
     matchMode: "includes",
   });
   installHostedWebNoiseWarningFilter();
-}
-
-export function isHostedWebNoiseWarning(
-  warning: string | Error,
-  args: readonly unknown[],
-): boolean {
-  return (
-    isSqliteExperimentalWarning(warning, args, {
-      matchMode: "includes",
-    }) ||
-    isPgConcurrentQueryDeprecationWarning(warning, args) ||
-    isWebCryptoExperimentalWarning(warning, args)
-  );
 }
 
 export function isPgConcurrentQueryDeprecationWarning(

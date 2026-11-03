@@ -28,10 +28,6 @@ export function buildContactSupportMailto({
   return `mailto:${MURPH_SUPPORT_EMAIL}${suffix ? `?${suffix}` : ""}`;
 }
 
-export function shouldShowContactSupportAction(message: string | null | undefined) {
-  return /\bcontact support\b/i.test(message ?? "");
-}
-
 export function ContactSupportAction({
   body,
   children = "Email support",

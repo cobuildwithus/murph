@@ -4,7 +4,6 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { healthEntityDefinitions } from "@murphai/contracts";
 import { projectVaultCliError } from "@murphai/operator-config/vault-cli-error-projection";
 import { formatStructuredErrorMessage } from "@murphai/operator-config/text/shared";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
@@ -15,7 +14,6 @@ import {
   asListEnvelope,
   assertNoReservedPayloadKeys,
   buildEntityLinks,
-  buildScaffoldPayload,
   describeLookupConstraint,
   inferEntityKind,
   isQueryableRecordId,
@@ -27,7 +25,6 @@ import {
   toGenericListItem,
   toGenericShowEntity,
   matchesGenericKindFilter,
-  toJournalLookupId,
 } from "../src/usecases/shared.ts";
 import {
   compactObject,
@@ -184,10 +181,6 @@ describe("helper barrel exports", () => {
       "bank/goals/goal-b.md",
     );
     expect(recordPath({})).toBeUndefined();
-
-    expect(buildScaffoldPayload("goal")).toEqual(
-      healthEntityDefinitions.find((entry) => entry.noun === "goal")?.scaffoldTemplate,
-    );
 
     expect(
       buildEntityLinks({
@@ -758,7 +751,6 @@ describe("helper barrel exports", () => {
     expect(matchesGenericKindFilter(goalRecord, "goal")).toBe(true);
     expect(matchesGenericKindFilter(bloodTest, "blood_test")).toBe(true);
     expect(matchesGenericKindFilter(audit, "audit")).toBe(true);
-    expect(toJournalLookupId("2026-04-08")).toBe("journal:2026-04-08");
   });
 
   it("covers the remaining helper edge branches with direct behavior assertions", async () => {
@@ -773,10 +765,6 @@ describe("helper barrel exports", () => {
     expect(() => requirePayloadObjectField({}, "payload")).toThrow(
       'Payload file must include a plain-object "payload" field.',
     );
-    expect(() => buildScaffoldPayload("missing")).toThrow(
-      "No scaffold template is defined for missing.",
-    );
-
     expect(
       buildEntityLinks({
         relatedIds: ["   "],

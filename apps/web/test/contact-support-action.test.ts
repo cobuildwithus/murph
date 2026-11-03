@@ -8,7 +8,6 @@ import {
   buildContactSupportMailto,
   ContactSupportAction,
   MURPH_SUPPORT_EMAIL,
-  shouldShowContactSupportAction,
 } from "@/src/components/support/contact-support-action";
 
 describe("contact support action", () => {
@@ -21,12 +20,6 @@ describe("contact support action", () => {
     expect(href).toBe(
       `mailto:${MURPH_SUPPORT_EMAIL}?subject=Murph+support+%26+billing&body=Hi+Murph+support%2C%0A%0APlease+help+%26+advise.`,
     );
-  });
-
-  it("shows the support action only when the copy explicitly asks the user to contact support", () => {
-    expect(shouldShowContactSupportAction("Please Contact Support right away.")).toBe(true);
-    expect(shouldShowContactSupportAction("Please contact us instead.")).toBe(false);
-    expect(shouldShowContactSupportAction(null)).toBe(false);
   });
 
   it("renders the default support email action label and href", () => {

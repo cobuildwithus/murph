@@ -12,19 +12,6 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { formatHostedDeviceSyncProviderLabel } from "@/src/lib/device-sync/provider-label";
 
 const mocks = vi.hoisted(() => ({
-  ConnectedAccountCard: vi.fn(({ action, label, value }: {
-    action?: React.ReactNode;
-    label: string;
-    value: string;
-  }) =>
-    createElement(
-      "section",
-      {
-        "data-card-label": label,
-        "data-card-value": value,
-      },
-      action,
-    )),
   HostedSettingsSessionState: vi.fn(() =>
     createElement("div", {
       "data-hosted-settings-session-state": "true",
@@ -100,10 +87,6 @@ vi.mock("@/src/lib/browser-vault/export", () => ({
   loadBrowserVaultExport: mocks.loadBrowserVaultExport,
   normalizeBrowserVaultExportError: (error: unknown) =>
     error instanceof Error ? error.message : "Your dashboard data is not available right now.",
-}));
-
-vi.mock("../src/components/settings/connected-account-card", () => ({
-  ConnectedAccountCard: mocks.ConnectedAccountCard,
 }));
 
 vi.mock("../src/components/settings/hosted-settings-session-state", () => ({

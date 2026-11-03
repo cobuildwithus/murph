@@ -15,7 +15,7 @@ import { test } from "vitest";
 import {
   findHealthDescriptorForLookup,
   getHealthRegistryCommandMetadata,
-  healthEntityDescriptorByKind,
+  healthEntityDescriptors,
   inferHealthEntityKind,
 } from "@murphai/vault-usecases";
 import {
@@ -25,7 +25,7 @@ import {
 
 test("CLI health descriptors reuse shared taxonomy lookup metadata and scaffold templates", () => {
   for (const definition of healthEntityDefinitions) {
-    const descriptor = healthEntityDescriptorByKind.get(definition.kind);
+    const descriptor = healthEntityDescriptors.find((entry) => entry.kind === definition.kind);
 
     assert.ok(descriptor, `missing CLI descriptor for ${definition.kind}`);
     assert.deepEqual(descriptor?.listKinds, definition.listKinds);
@@ -49,9 +49,9 @@ test("generic CLI lookup inference stays anchored to shared aliases and prefixes
 });
 
 test("health scaffold descriptors include canonical nested goal, regimen, and genetics examples", () => {
-  const goalPayload = healthEntityDescriptorByKind.get("goal")?.core?.payloadTemplate;
-  const regimenPayload = healthEntityDescriptorByKind.get("regimen")?.core?.payloadTemplate;
-  const geneticsPayload = healthEntityDescriptorByKind.get("genetics")?.core?.payloadTemplate;
+  const goalPayload = healthEntityDescriptors.find((entry) => entry.kind === "goal")?.core?.payloadTemplate;
+  const regimenPayload = healthEntityDescriptors.find((entry) => entry.kind === "regimen")?.core?.payloadTemplate;
+  const geneticsPayload = healthEntityDescriptors.find((entry) => entry.kind === "genetics")?.core?.payloadTemplate;
 
   assert.ok(goalPayload);
   assert.ok(regimenPayload);
@@ -78,14 +78,14 @@ test("health scaffold descriptors include canonical nested goal, regimen, and ge
 });
 
 test("assessment list capabilities only advertise supported date-range filtering", () => {
-  const descriptor = healthEntityDescriptorByKind.get("assessment");
+  const descriptor = healthEntityDescriptors.find((entry) => entry.kind === "assessment");
 
   assert.ok(descriptor?.query);
   assert.deepEqual(descriptor?.query?.genericListFilterCapabilities, ["date-range"]);
 });
 
 test("regimen CLI descriptor reuses CLI-owned registry command and runtime metadata", () => {
-  const descriptor = healthEntityDescriptorByKind.get("regimen");
+  const descriptor = healthEntityDescriptors.find((entry) => entry.kind === "regimen");
   const command = getHealthRegistryCommandMetadata("regimen");
 
   assert.ok(descriptor?.command);

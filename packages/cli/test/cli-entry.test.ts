@@ -98,9 +98,6 @@ function mockCliActionModules(input: {
     ...input.codexLifecycleModule,
   }));
   vi.doMock("@murphai/operator-config/operator-config", () => ({
-    resolveEffectiveTopLevelToken: vi.fn(
-      (argv: readonly string[]) => argv.find((token) => !token.startsWith("-")) ?? null,
-    ),
     ...input.operatorConfigModule,
   }));
 }
@@ -544,9 +541,6 @@ test("runMurphCliAction injects the resolved default vault for non-setup invocat
     },
     operatorConfigModule: {
       expandConfiguredVaultPath: vi.fn(),
-      resolveEffectiveTopLevelToken: vi.fn(
-        (argv: readonly string[]) => argv.find((token) => !token.startsWith("-")) ?? null,
-      ),
       resolveDefaultVault,
       resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
     },
@@ -644,7 +638,6 @@ test("runMurphCliAction allows vault-cli init to target an explicit vault", asyn
     operatorConfigModule: {
       expandConfiguredVaultPath: vi.fn(),
       resolveDefaultVault,
-      resolveEffectiveTopLevelToken: vi.fn(() => "init"),
       resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
     },
   });

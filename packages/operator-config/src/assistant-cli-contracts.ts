@@ -11,7 +11,6 @@ import {
   automationTimeScheduleKindValues,
   automationTimeScheduleSchema,
   type AutomationRoute,
-  type AutomationTimeScheduleKind,
 } from '@murphai/contracts'
 import { normalizeAssistantOpaqueId } from '@murphai/runtime-state/assistant-ids'
 import type {
@@ -1496,17 +1495,11 @@ export type AssistantBindingDelivery = z.infer<
 export type AssistantDeliverySource = z.infer<
   typeof assistantDeliverySourceSchema
 >
-export type AssistantExternalThreadRouteAuthority = z.infer<
-  typeof assistantExternalThreadRouteAuthoritySchema
->
 export type AssistantSessionBinding = z.infer<
   typeof assistantSessionBindingSchema
 >
 export type AssistantVoiceMemoGeneration = z.infer<
   typeof assistantVoiceMemoGenerationSchema
->
-export type AssistantVoiceMemoTransport = z.infer<
-  typeof assistantVoiceMemoTransportSchema
 >
 export type AssistantResponseMedia = z.infer<
   typeof assistantResponseMediaSchema
@@ -1555,21 +1548,12 @@ export type AssistantProviderMessageEffect = z.infer<
 export type AssistantDeliveryError = z.infer<
   typeof assistantDeliveryErrorSchema
 >
-export type AssistantTurnReceiptContext = z.infer<
-  typeof assistantTurnReceiptContextSchema
->
-export type AssistantTurnReceiptEvent = z.infer<
-  typeof assistantTurnReceiptEventSchema
->
 export type AssistantTurnTimelineEvent = z.infer<
   typeof assistantTurnTimelineEventSchema
 >
 export type AssistantTurnReceipt = z.infer<typeof assistantTurnReceiptSchema>
 
 export type AssistantOutboxIntent = z.infer<typeof assistantOutboxIntentSchema>
-export type AssistantOutboxAutomationAuthority = z.infer<
-  typeof assistantOutboxAutomationAuthoritySchema
->
 export type AssistantDiagnosticEvent = z.infer<
   typeof assistantDiagnosticEventSchema
 >
@@ -1586,12 +1570,6 @@ export type AssistantRuntimeEventKind =
 export type AssistantRuntimeEvent = z.infer<
   typeof assistantRuntimeEventSchema
 >
-export type AssistantRuntimeCacheBudget = z.infer<
-  typeof assistantRuntimeCacheBudgetSchema
->
-export type AssistantRuntimeMaintenanceSnapshot = z.infer<
-  typeof assistantRuntimeMaintenanceSnapshotSchema
->
 export type AssistantRuntimeBudgetSnapshot = z.infer<
   typeof assistantRuntimeBudgetSnapshotSchema
 >
@@ -1606,9 +1584,6 @@ export type AssistantAskResult = AssistantAskResultRecord
 export type AssistantDeliverResult = z.infer<
   typeof assistantDeliverResultSchema
 >
-export type AssistantSessionSummary = z.infer<
-  typeof assistantSessionSummarySchema
->
 export type AssistantCronSchedule = z.infer<typeof assistantCronScheduleSchema>
 export type AssistantCronScheduleInput = z.infer<typeof assistantCronScheduleInputSchema>
 export type AssistantCronTarget = Omit<
@@ -1621,8 +1596,6 @@ export type AssistantCronTarget = Omit<
   sessionId: string | null
   threadId: string | null
 }
-export type AssistantCronJobState = z.infer<typeof assistantCronJobStateSchema>
-export type AssistantCronScheduledLog = z.infer<typeof assistantCronScheduledLogSchema>
 export type AssistantCronJob = z.infer<typeof assistantCronJobSchema>
 export type AssistantCronRunRecord = z.infer<
   typeof assistantCronRunRecordSchema
@@ -1631,49 +1604,14 @@ export type AssistantCronPresetVariable = z.infer<
   typeof assistantCronPresetVariableSchema
 >
 export type AssistantCronPreset = z.infer<typeof assistantCronPresetSchema>
-export type AssistantCronStatusResult = z.infer<
-  typeof assistantCronStatusResultSchema
->
-export type AssistantCronListResult = z.infer<
-  typeof assistantCronListResultSchema
->
-export type AssistantCronShowResult = z.infer<
-  typeof assistantCronShowResultSchema
->
-export type AssistantCronAddResult = z.infer<typeof assistantCronAddResultSchema>
-export type AssistantCronRemoveResult = z.infer<
-  typeof assistantCronRemoveResultSchema
->
-export type AssistantCronRunResult = z.infer<typeof assistantCronRunResultSchema>
-export type AssistantCronRunsResult = z.infer<
-  typeof assistantCronRunsResultSchema
->
 export type AssistantCronTargetSnapshot = z.infer<
   typeof assistantCronTargetSnapshotSchema
->
-export type AssistantCronTargetShowResult = z.infer<
-  typeof assistantCronTargetShowResultSchema
->
-export type AssistantCronTargetSetResult = z.infer<
-  typeof assistantCronTargetSetResultSchema
->
-export type AssistantCronPresetListResult = z.infer<
-  typeof assistantCronPresetListResultSchema
->
-export type AssistantCronPresetShowResult = z.infer<
-  typeof assistantCronPresetShowResultSchema
->
-export type AssistantCronPresetInstallResult = z.infer<
-  typeof assistantCronPresetInstallResultSchema
 >
 export type AssistantSelfDeliveryTarget = z.infer<typeof assistantSelfDeliveryTargetSchema>
 export type AssistantOnboardingCompletionReason =
   (typeof assistantOnboardingCompletionReasonValues)[number]
 export type AssistantOnboardingState = z.infer<
   typeof assistantOnboardingStateSchema
->
-export type AssistantOnboardingResult = z.infer<
-  typeof assistantOnboardingResultSchema
 >
 export type AssistantOnboardingResumeContextResult = z.infer<
   typeof assistantOnboardingResumeContextResultSchema
@@ -1683,10 +1621,6 @@ export type AssistantStatusOutboxSummary = z.infer<
   typeof assistantStatusOutboxSummarySchema
 >
 
-export type AssistantDoctorCheck = z.infer<typeof assistantDoctorCheckSchema>
-export type AssistantDoctorResult = z.infer<
-  typeof assistantDoctorResultSchema
->
 export type AssistantSessionSecrets = z.infer<typeof assistantSessionSecretsSchema>
 export type AssistantInputCursor = z.infer<typeof assistantInputCursorSchema>
 export type AssistantAutomationState = z.infer<
@@ -1708,34 +1642,16 @@ export type AssistantTranscriptEntryKind =
   (typeof assistantTranscriptEntryKindValues)[number]
 export type AssistantTurnTrigger =
   (typeof assistantTurnTriggerValues)[number]
-export type AssistantTurnActionClass =
-  (typeof assistantTurnActionClassValues)[number]
-export type AssistantTurnState = (typeof assistantTurnStateValues)[number]
-export type AssistantTurnEventKind =
-  (typeof assistantTurnEventKindValues)[number]
-export type AssistantOutboxIntentStatus =
-  (typeof assistantOutboxIntentStatusValues)[number]
-export type AssistantCronScheduleKind = AutomationTimeScheduleKind
 export type AssistantCronTrigger = (typeof assistantCronTriggerValues)[number]
 export type AssistantCronRunOutcome =
   (typeof assistantCronRunOutcomeValues)[number]
-export type AssistantCronRunStatus =
-  (typeof assistantCronRunStatusValues)[number]
-export type AssistantTurnReceiptStatus =
-  (typeof assistantTurnReceiptStatusValues)[number]
-export type AssistantTurnDeliveryDisposition =
-  (typeof assistantTurnDeliveryDispositionValues)[number]
 export type AssistantTurnTimelineEventKind =
   (typeof assistantTurnTimelineEventKindValues)[number]
-export type AssistantOutboxStatus =
-  (typeof assistantOutboxStatusValues)[number]
 export type AssistantDiagnosticLevel =
   (typeof assistantDiagnosticLevelValues)[number]
 export type AssistantDiagnosticComponent =
   (typeof assistantDiagnosticComponentValues)[number]
 
-export type AssistantDoctorCheckStatus =
-  (typeof assistantDoctorCheckStatusValues)[number]
 export type AssistantProviderSessionOptions = z.infer<
   typeof assistantProviderSessionOptionsSchema
 >

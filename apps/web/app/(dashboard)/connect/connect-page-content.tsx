@@ -477,15 +477,6 @@ export default async function ConnectPage({
   );
 }
 
-export function listVisibleConnectSources(
-  env: Readonly<Record<string, string | undefined>> = process.env,
-): ConnectSource[] {
-  return [
-    ...listVisibleDeviceConnectSources(),
-    ...listHealthConnectRelayConnectSources(env),
-  ];
-}
-
 function listVisibleDeviceConnectSources(): ConnectSource[] {
   return DEVICE_CONNECT_SOURCES.flatMap((source) => {
     if (!isVisibleConnectSource(source)) {
@@ -793,20 +784,6 @@ export function resolveHistoricalResetIncompleteConnectSourceIds(
   }
 
   return resetIncompleteSourceIds;
-}
-
-export function resolveConnectedConnectSourceIds(
-  sources: readonly Pick<ConnectSource, "id">[],
-  settingsSources: readonly Pick<
-    HostedDeviceSyncSettingsSource,
-    "provider" | "state" | "upstreamSources"
-  >[],
-): Set<string> {
-  return new Set(
-    resolveConnectedConnectSourceConnections(sources, settingsSources).map(
-      (connection) => connection.sourceId,
-    ),
-  );
 }
 
 export function resolveConnectedConnectSourceConnections(

@@ -183,7 +183,7 @@ describe("hosted web warning filters", () => {
       forwardedWarnings.push([warning, ...args]);
     }) as typeof process.emitWarning;
 
-    const { installHostedWebWarningFilters, isHostedWebNoiseWarning } = await import(
+    const { installHostedWebWarningFilters } = await import(
       "@/src/lib/process-warnings"
     );
     installHostedWebWarningFilters();
@@ -212,8 +212,6 @@ describe("hosted web warning filters", () => {
       [differentAlgorithm, "ExperimentalWarning"],
       [cryptoFailure],
     ]);
-    expect(isHostedWebNoiseWarning(message, ["ExperimentalWarning"])).toBe(true);
-    expect(isHostedWebNoiseWarning(cryptoFailure, [])).toBe(false);
   });
 
   it("is idempotent", async () => {

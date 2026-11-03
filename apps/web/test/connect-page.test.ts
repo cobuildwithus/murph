@@ -1630,30 +1630,6 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
   assert.doesNotMatch(markup, />Accu-Chek</u);
   assert.doesNotMatch(markup, />Samsung Health</u);
 
-  const { listVisibleConnectSources } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const visibleSourceIds = new Set(
-    listVisibleConnectSources().map((source) => source.id),
-  );
-  const configuredSourceIds = new Set<string>(
-    (
-      await import("@murphai/device-syncd/config")
-    ).DEVICE_CONNECT_SOURCES.filter((source) =>
-      visibleSourceIds.has(source.connectSourceId),
-    ).map((source) => source.connectSourceId),
-  );
-  assert.deepEqual(
-    [...visibleSourceIds].sort(),
-    [...configuredSourceIds].sort(),
-  );
-  assert.equal(visibleSourceIds.has("mobvoi-health"), false);
-  assert.equal(
-    listVisibleConnectSources({ MURPH_ANDROID_APP_ENABLED: "1" })
-      .some((source) => source.id === "mobvoi-health"),
-    true,
-  );
-
   const logo = {
     className: "size-11 object-contain",
     height: 44,

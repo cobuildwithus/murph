@@ -13,8 +13,6 @@ import {
   buildHealthCommonsSourceArtifactIndex,
   buildHealthCommonsSourceIndex,
   collectArtifactPointers,
-  sortChangesById,
-  sortRedirects,
   validateHealthCommonsContent,
 } from "../src/catalog.ts";
 import type { HealthCommonsContentSet, HealthCommonsSourcePage } from "../src/load.ts";
@@ -233,36 +231,10 @@ describe("@murphai/health-commons catalog coverage", () => {
     expect(() => validatePages(biomarkerPage, measurementMethodPage, page)).not.toThrow();
   });
 
-  it("covers the collection and sorting helpers", () => {
+  it("collects artifact pointers", () => {
     expect(
       collectArtifactPointers([artifactManifest]).map(({ artifact }) => artifact.artifactId),
     ).toEqual(["art_example_pdf"]);
-    expect(
-      sortChangesById([
-        {
-          schemaVersion: "murph.commons.change.v1",
-          changeId: "b-change",
-          entityKey: "source_artifact:example",
-          changeType: "artifact_change",
-          minor: false,
-          editSummary: "b",
-        },
-        {
-          schemaVersion: "murph.commons.change.v1",
-          changeId: "a-change",
-          entityKey: "source_artifact:example",
-          changeType: "artifact_change",
-          minor: false,
-          editSummary: "a",
-        },
-      ]).map((change) => change.changeId),
-    ).toEqual(["a-change", "b-change"]);
-    expect(
-      sortRedirects([
-        { from: "b", to: "target-b" },
-        { from: "a", to: "target-a" },
-      ]).map((redirect) => redirect.from),
-    ).toEqual(["a", "b"]);
   });
 
   it("allows duplicate source keys and aliases from imported source copies", () => {

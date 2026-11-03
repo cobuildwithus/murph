@@ -111,22 +111,6 @@ export const eventBackedEditOptionShape = {
   clearTags: clearFieldOptionSchema('Clear all saved tags.'),
 }
 
-export interface EventBackedTypedEditOptions {
-  title?: string
-  note?: string
-  occurredAt?: string
-  timeZone?: string
-  dayKey?: string
-  source?: string
-  tag?: string[]
-  clearTitle?: boolean
-  clearNote?: boolean
-  clearTimeZone?: boolean
-  clearDayKey?: boolean
-  clearSource?: boolean
-  clearTags?: boolean
-}
-
 export function createEntityEditCommandConfig<TResult, TInput extends EntityEditCommandInput = EntityEditCommandInput>(
   config: EntityEditCommandConfig<TResult, TInput>,
 ) {

@@ -939,21 +939,6 @@ export function buildHostedExecutionPendingEffectsReconcileRequestedWake(input: 
   };
 }
 
-export function createRuntimeTimerSyntheticWake(input: {
-  acquiredAt: string;
-  timerId: string;
-  triggerKind: HostedRuntimeTimerTriggerKind;
-  userId: string;
-}): HostedExecutionRuntimeTimerWake {
-  // Runtime timers are internal continuation context, not persisted mailbox rows.
-  return buildHostedExecutionRuntimeTimerWake({
-    eventId: `hosted-runtime-timer:${input.timerId}`,
-    occurredAt: input.acquiredAt,
-    triggerKind: input.triggerKind,
-    userId: input.userId,
-  });
-}
-
 export function buildHostedExecutionDeviceSyncWake(input: {
   connectionId?: string | null;
   eventId: string;
