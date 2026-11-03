@@ -45,7 +45,22 @@ const DARE_PREVIEW: OpenPreview = {
   terms: { ...OPEN_PREVIEW.terms, schedule: { count: 50 }, stakes: [{ kind: "dare", item: "sing at karaoke", key: "stake_dare" }] },
 };
 
+const GROUP_PREVIEW: OpenPreview = {
+  ...OPEN_PREVIEW,
+  maxPlayers: 10,
+  group: { id: "design-group", word: "family" },
+  expiresAt: null,
+  lengthDays: 14,
+  terms: {
+    ...OPEN_PREVIEW.terms,
+    defaultTask: "A healthy meal",
+    tasks: [],
+    schedule: { days: [0, 1, 2, 3, 4] },
+  },
+};
+
 const STATES: ReadonlyArray<{ id: string; label: string; preview: GameInvitePreview | null }> = [
+  { id: "group", label: "Open group, shared task", preview: GROUP_PREVIEW },
   { id: "any-artifact", label: "Open, free artifact choice", preview: { ...OPEN_PREVIEW, terms: { ...OPEN_PREVIEW.terms, checkInKind: "any", schedule: { days: [0, 1, 2, 3, 4] } } } },
   { id: "dare", label: "Open, 75 days, dare", preview: DARE_PREVIEW },
   { id: "open", label: "Open, set weekdays", preview: OPEN_PREVIEW },
@@ -59,6 +74,7 @@ const STATES: ReadonlyArray<{ id: string; label: string; preview: GameInvitePrev
 
 // The link preview Messages shows for the same invite: the production card.
 const LINK_PREVIEWS: ReadonlyArray<{ id: string; label: string; preview: GameInvitePreview | null }> = [
+  { id: "link-group", label: "Group link preview", preview: GROUP_PREVIEW },
   { id: "link-dare", label: "Link preview, 75 days, dare", preview: DARE_PREVIEW },
   { id: "link-open", label: "Link preview, open", preview: OPEN_PREVIEW },
   { id: "link-open-any-days", label: "Link preview, any days, picked start", preview: { ...ANY_DAYS_PREVIEW, startsOn: "2026-10-19" } },

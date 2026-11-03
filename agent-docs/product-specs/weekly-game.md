@@ -105,6 +105,15 @@ masks apply before signing; private contact labels never enter this preview.
 Home computes `canStartGroups` per request from the admission switch and member
 allowlist. Both server create and join retain the admission gate.
 
+The public Web invite page and its metadata/image renderer opt into multiplayer
+without a member identity. An open group headline is "<Starter> started a
+<groupWord> challenge". Its description gives the shared task, schedule and
+duration, then the winner's prize. The page shows Everyone with the default
+task, Days and the prize; the image uses the same headline. Neither surface
+renders sparse seat overrides, authenticated preview extras, private labels or
+other players' names. Pair rendering, app links and closed/cancelled copy stay
+unchanged.
+
 Group history keeps each round's roster, frozen standings and previews, plus
 viewer-specific `task` and `prize` at group level. It returns at most twenty
 groups with the twenty-five most recent rounds each. Pair history independently

@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import { GameInviteView } from "@/app/g/[token]/game-invite-view";
+import { GameInviteShareCard } from "@/app/g/[token]/invite-share-card";
 import { gameInviteAppUrl } from "@/src/lib/game/access";
 import type { GameInvitePreview } from "@/src/lib/game/contract";
 
@@ -29,6 +30,22 @@ const OPEN: GameInvitePreview = {
 };
 
 describe("weekly game invite link", () => {
+  it("preserves the pair page and share card byte for byte", () => {
+    expect(renderToStaticMarkup(createElement(GameInviteView, {
+      appUrl: "ai.withmurph.app://invite/synthetic", preview: OPEN,
+    }))).toMatchSnapshot("pair page");
+    expect(renderToStaticMarkup(createElement(GameInviteShareCard, { preview: OPEN })))
+      .toMatchSnapshot("pair share card");
+    const capable = { ...OPEN, maxPlayers: 2 as const, alreadyIn: { count: 0, firstNames: [], avatarUrl: null } };
+    expect(renderToStaticMarkup(createElement(GameInviteView, {
+      appUrl: "ai.withmurph.app://invite/synthetic", preview: capable,
+    }))).toBe(renderToStaticMarkup(createElement(GameInviteView, {
+      appUrl: "ai.withmurph.app://invite/synthetic", preview: OPEN,
+    })));
+    expect(renderToStaticMarkup(createElement(GameInviteShareCard, { preview: capable })))
+      .toBe(renderToStaticMarkup(createElement(GameInviteShareCard, { preview: OPEN })));
+  });
+
   it("opens the Murph app by default, or the configured scheme", () => {
     expect(gameInviteAppUrl("tok_1", {})).toBe("ai.withmurph.app://invite/tok_1");
     expect(gameInviteAppUrl("tok_1", { MURPH_GAME_APP_URL_SCHEME: " ai.withmurph.app.dev " }))

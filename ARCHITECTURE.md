@@ -5516,6 +5516,9 @@ Persisted groups remain readable, settle and support deletion with admission off
 
 `http/capability.ts` reads `X-Murph-Game-Multiplayer: 1`; the command boundary,
 reads, public invite preview and media reads pass it to the existing service.
+The Web `/g/[token]` page, metadata and OG image are capable server renderers:
+they read with multiplayer enabled and no member identity, then render only
+public shared group terms and the starter headline.
 Group collection predicates precede query limits; direct targets fail with the
 existing not-found shape for legacy clients. One `views.ts` serializer uses the
 capability flag for participation, frozen standings, ticket parties and group
