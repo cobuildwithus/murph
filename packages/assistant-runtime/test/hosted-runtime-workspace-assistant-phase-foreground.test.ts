@@ -7,6 +7,7 @@ import {
   createExternalCompletionSystemMailboxItem,
   createGroupRoomModelInitializationSystemMailboxItem,
   createMaintenanceSystemMailboxItem,
+  createManualMealPhotoNotificationSystemMailboxItem,
   createMemberActionSystemMailboxItem,
   createMemberActivationSignupWelcomeSystemMailboxItem,
   createMemberPreferencesSystemMailboxItem,
@@ -4240,6 +4241,61 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         hostedSystemMailboxRecorded: 1,
       }),
     }));
+  });
+
+  it.each([
+    { delivered: true, label: "a manual app meal reply", origin: "manual" as const },
+    { delivered: false, label: "an ordinary background notification", origin: null },
+  ])("$label is delivered=$delivered when chat input arrives while it is prepared", async ({
+    delivered,
+    origin,
+  }) => {
+    let memberTextedDuringEstimation = false;
+    const item = origin === null
+      ? createSystemMailboxItem()
+      : createManualMealPhotoNotificationSystemMailboxItem({ origin });
+    const deliveryEffect = createDeliveryEffect();
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementationOnce(async () => {
+      memberTextedDuringEstimation = true;
+      return {
+        item,
+        itemId: item.itemId,
+        metrics: {
+          bootstrapResult: null,
+          conversationMetrics: null,
+          deliveryIntentIds: ["intent_estimation_reply"],
+          mailboxLane: "assistant-notification" as const,
+          redactedLogEntries: [],
+        },
+        status: "processed" as const,
+      };
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([deliveryEffect]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      createSentDeliveryOutcome(),
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      shouldYieldBackgroundMaintenance: () => memberTextedDuringEstimation,
+    }));
+    await result.afterCheckpoint?.();
+
+    if (delivered) {
+      expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith(
+        expect.objectContaining({ preferredIntentIds: ["intent_estimation_reply"] }),
+      );
+      expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
+        expect.objectContaining({ assistantDeliveryEffects: [deliveryEffect] }),
+      );
+      expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    } else {
+      expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalledWith(
+        expect.objectContaining({ preferredIntentIds: ["intent_estimation_reply"] }),
+      );
+      expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalledWith(
+        expect.objectContaining({ assistantDeliveryEffects: [deliveryEffect] }),
+      );
+    }
   });
 
   it("drains delivery effects created by system mailbox notifications after checkpoint", async () => {

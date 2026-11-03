@@ -1625,6 +1625,7 @@ function buildAssistantSkillRouteHintText(
   if (conversationScope === "direct") {
     routeLines.push(
       "- In a private direct conversation, when someone asks how to start recurring meal tracking or how Murph can track meals, load both automatic-meal-capture and food-journal even when they do not say \"automatic.\"",
+      "- In a private direct conversation, when someone asks whether a meal photo arrived or what was logged, show that meal. If it is still unclear what the meal was or how much was eaten, confirm it arrived and ask one short question for the missing contents or amount, unless their context is number-sensitive.",
       "- When the private longitudinal default in turn priority applies, read self-management-experiments. For any multi-day or repeated comparison, also read experiment-onboarding. For repeated plans, use behavior-followthrough to offer reminders and a check-in proactively.",
     );
   }
