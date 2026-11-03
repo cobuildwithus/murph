@@ -734,6 +734,8 @@ describe.skipIf(!enabled)("maximum-cardinality group projections", () => {
         FROM game CROSS JOIN generate_series(0,364) day WHERE game.id IN (${Prisma.join(liveIds)})`);
     }
     await db.gameTicket.createMany({ data: Array.from({ length: 200 }, (_, index) => ({ id: randomUUID(), gameId: liveIds[index % 50], stakeKey: "prize", owedBySeats: [1,2,3,4,5,6,7,8,9], owedToSeats: [0] })) });
+    // Refresh planner statistics after bulk seeding, as a populated database would.
+    await db.$executeRaw`ANALYZE game, game_player, game_entry, game_ticket`;
     const open = vi.spyOn(crypto, "openGameTexts");
     let signing = 0, peakSigning = 0;
     vi.spyOn(media, "servesSignedGameMedia").mockReturnValue(true);
@@ -742,7 +744,7 @@ describe.skipIf(!enabled)("maximum-cardinality group projections", () => {
       return { url: "https://images.example.test/signed", expiresAt: "2031-01-01T00:00:00Z" };
     });
     const metrics: Record<string, unknown> = {};
-    async function measure(name: string, run: () => Promise<unknown>) {
+    async function measure<T extends object | null>(name: string, run: () => Promise<T>) {
       const operations: import("@/src/lib/prisma-operation-timing").PrismaOperationTiming[] = [];
       const queries: import("@/src/lib/prisma-operation-timing").PrismaQueryTiming[] = [];
       open.mockClear(); sign.mockClear(); peakSigning = 0;
@@ -750,11 +752,12 @@ describe.skipIf(!enabled)("maximum-cardinality group projections", () => {
       const response = await runWithPrismaOperationTimings(operations, run, undefined, queries);
       const events = queries.flatMap(query => [{ at: query.startMs, change: 1 }, { at: query.startMs + query.ms, change: -1 }]).sort((a,b) => a.at - b.at || a.change - b.change);
       let active = 0, peakQueries = 0; for (const event of events) { active += event.change; peakQueries = Math.max(peakQueries, active); }
-      const bytes = Buffer.byteLength(JSON.stringify(response));
+      const { jsonOk } = await import("@/src/lib/hosted-onboarding/http");
+      const bytes = (await jsonOk(name === "detail" ? { ok: true, game: response } : { ok: true, ...response }).arrayBuffer()).byteLength;
       metrics[name] = { operations: operations.length, queries: queries.length, peakQueries, decryptFields: open.mock.calls.flatMap(([requests]) => requests.filter(request => request.value)).length,
         signatures: sign.mock.calls.length, peakSigning, bytes, ms: Math.round(performance.now() - started) };
-      if (name === "home") { expect(bytes).toBeLessThan(1_200_000); expect(sign).toHaveBeenCalledTimes(450); }
-      if (name === "history") expect(sign).toHaveBeenCalledTimes(300);
+      if (name === "home") { expect(sign).toHaveBeenCalledTimes(450); }
+      if (name === "history") { expect(sign).toHaveBeenCalledTimes(120); expect(bytes).toBeLessThan(3_000_000); }
       expect(operations.length).toBeLessThanOrEqual(60);
       expect(peakQueries).toBeLessThanOrEqual(6); expect(peakSigning).toBeLessThanOrEqual(6);
       return response;
@@ -763,6 +766,8 @@ describe.skipIf(!enabled)("maximum-cardinality group projections", () => {
     await measure("unlockedHome", async () => withLockedPreviewDeliveries(await readHome(viewer.id, true), viewer.id));
     await db.gameEntry.deleteMany({ where: { gameId: { in: liveIds }, memberId: viewer.id, dayIndex: 363 } });
     const home = await readHome(viewer.id, true); expect(home.games).toHaveLength(50); expect(home.wallet.held).toHaveLength(200);
+    expect(home.games.every(game => game.days.length === 365 && game.days.filter(day => day.mine?.text === "A".repeat(140)).length === 364)).toBe(true);
+    expect(home.games.every(game => game.days.filter(day => day.others.length > 0).map(day => day.index).join() === "363")).toBe(true);
     await measure("home", async () => withLockedPreviewDeliveries(await readHome(viewer.id, true), viewer.id));
     // Capture the full-calendar baseline with the same actual stored detail, before Home narrowing.
     const full = await readGame(liveIds[0], viewer.id, true);
@@ -773,20 +778,25 @@ describe.skipIf(!enabled)("maximum-cardinality group projections", () => {
     const pairRow = await gameRow(pair!.id);
     await db.gameTicket.create({ data: { id: randomUUID(), gameId: pair!.id, stakeKey: "prize", owedBySeats: [1], owedToSeats: [0], createdAt: new Date("2020-01-01T00:00:00Z") } });
     const legacy = await readHome(viewer.id); expect(legacy.games.map(game => game.id)).toEqual([pair!.id]); expect(legacy.wallet.held).toHaveLength(1);
-    // Existing history bounds: fifty audiences, fifty games each, ten frozen seats, six previews each.
-    const historyIds = Array.from({ length: 2500 }, () => randomUUID());
+    // Over-limit fixture proves separate twenty-group/twenty-five-round selection before hydration.
+    const historyIds = Array.from({ length: 21 * 26 }, () => randomUUID());
     const result = { v: 1, maxPlayers: 10, termsVersion: 1, scores: people.map((person, seat) => ({ seat, memberId: person.id, score: 365-seat, misses: seat, eligible: true })) };
     for (let offset = 0; offset < historyIds.length; offset += 100) {
       const batch = historyIds.slice(offset, offset + 100);
-      await db.game.createMany({ data: batch.map((id, index) => ({ ...template, id, maxPlayers: 10, status: "settled", audienceKey: `history-group-${Math.floor((offset + index) / 50)}`, round: (offset + index) % 50 + 1,
-        inviteTokenHash: null, inviteTokenEncrypted: null, lengthDays: 365, terms: storedTerms, termsWordsEncrypted: termWords!, startedAt: dayOne, settledAt: effectiveNow,
+      await db.game.createMany({ data: batch.map((id, index) => ({ ...template, id, maxPlayers: 10, status: "settled", audienceKey: `history-group-${Math.floor((offset + index) / 26)}`, round: (offset + index) % 26 + 1,
+        inviteTokenHash: null, inviteTokenEncrypted: null, lengthDays: 365, terms: storedTerms, termsWordsEncrypted: termWords!, startedAt: dayOne, settledAt: new Date(effectiveNow.getTime() + offset + index),
         pendingChange: Prisma.DbNull, result })) });
       await db.gamePlayer.createMany({ data: batch.flatMap(gameId => people.map((person, seat) => ({ gameId, memberId: person.id, seat, timeZone: "UTC", dayOne, joinedAt: dayOne }))) });
       await db.gameEntry.createMany({ data: batch.flatMap(gameId => people.slice(0,6).map((person, seat) => ({ id: `${gameId}-${seat}`, gameId, memberId: person.id, dayIndex: 0, attempt: 1, kind: "photo", receivedAt: dayOne, mediaKeys: [`game/${person.id}/${String(offset + batch.indexOf(gameId)).padStart(64, "0")}.jpg`] }))) });
     }
     await db.game.update({ where: { id: pair!.id }, data: { status: "settled", settledAt: new Date("2020-01-01T00:00:00Z"), result: { v: 1, termsVersion: 1, scores: pairRow.players.map(player => ({ memberId: player.memberId!, seat: player.seat, score: 3, misses: 1 })) } } });
     expect((await readHistory(viewer.id)).people[0].games[0].id).toBe(pair!.id);
-    const history = await readHistory(viewer.id, true); expect(history.groups).toHaveLength(50); expect(history.groups?.every(group => group.games.length === 50)).toBe(true);
+    await db.$executeRaw`ANALYZE game, game_player, game_entry`;
+    const history = await readHistory(viewer.id, true); expect(history.groups).toHaveLength(20); expect(history.groups?.every(group => group.games.length === 25)).toBe(true);
+    expect(history.groups?.map(group => group.id)).toEqual(Array.from({ length: 20 }, (_, i) => `history-group-${20-i}`));
+    expect(history.groups?.every(group => group.games.map(game => game.round).join() === Array.from({ length: 25 }, (_, i) => 26-i).join())).toBe(true);
+    expect(history.groups?.every(group => group.record.won === 25 && group.record.lost === 0 && group.record.tied === 0)).toBe(true);
+    expect(history.people[0].games[0].id).toBe(pair!.id);
     await measure("history", async () => withHistoryPhotoDeliveries(await readHistory(viewer.id, true), viewer.id));
     const { writeFile } = await import("node:fs/promises");
     await writeFile(".tmp-pr4-load.json", JSON.stringify(metrics, null, 2));

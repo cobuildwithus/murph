@@ -116,7 +116,7 @@ export async function withLockedPreviewDeliveries(home: GameHomeView, memberId: 
 }
 
 /** Sign the latest game per person or group, after the normal history filters.
- * At most 50 audiences × 6 previews; deduplicate keys and authorize/sign six at
+ * At most (50 people + 20 groups) × 6 previews; deduplicate keys and authorize/sign six at
  * a time. Missing or unavailable delivery leaves the stable media URL intact.
  */
 export async function withHistoryPhotoDeliveries(history: GameHistoryView, memberId: string): Promise<GameHistoryView> {

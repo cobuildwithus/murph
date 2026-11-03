@@ -1,3 +1,7 @@
+The PR 4 parent-review correction preserves full own-day Home film strips and
+bounds group history independently. Current owners are [Weekly Game](product-specs/weekly-game.md)
+and `../ARCHITECTURE.md`; [publication plan](exec-plans/active/2026-11-03-group-games-pr4-review.md).
+
 Dark group HTTP capability, privacy projections and two-slot daily pushes are
 owned by [Weekly Game](product-specs/weekly-game.md) and `../ARCHITECTURE.md`;
 [PR 4 proof](exec-plans/completed/2026-11-03-group-games-pr4.md) records contract,

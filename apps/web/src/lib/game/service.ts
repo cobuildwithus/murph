@@ -124,6 +124,8 @@ const HOME_CANDIDATE_LIMIT = 50;
 const HOME_SETTLED_SHOWN = 3;
 const HISTORY_PEOPLE_LIMIT = 50;
 const HISTORY_GAMES_PER_PERSON_LIMIT = 50;
+const HISTORY_GROUP_LIMIT = 20;
+const HISTORY_GAMES_PER_GROUP_LIMIT = 25;
 const HOME_EXPIRED_SHOWN = 3;
 const HOME_EXPIRED_FOR_MS = 7 * 24 * 60 * 60 * 1000;
 const WALLET_LIMIT = 200;
@@ -2195,12 +2197,12 @@ export async function readHome(memberId: string, multiplayer = false): Promise<G
 export async function readHistory(memberId: string, multiplayer = false): Promise<GameHistoryView> {
   const prisma = getPrisma();
   const candidates = await prisma.$queryRaw<Array<{ gameId: string }>>(Prisma.sql`
-    WITH settled_pair AS (
-      SELECT game.id AS game_id,
+    WITH settled_games AS (
+      SELECT game.id AS game_id, game.max_players,
         CASE WHEN game.max_players = 10 THEN game.audience_key ELSE opponent.member_id END AS opponent_id,
         game.settled_at AS settled_at,
         ROW_NUMBER() OVER (
-          PARTITION BY CASE WHEN game.max_players = 10 THEN game.audience_key ELSE opponent.member_id END
+          PARTITION BY game.max_players, CASE WHEN game.max_players = 10 THEN game.audience_key ELSE opponent.member_id END
           ORDER BY game.settled_at DESC, game.id DESC
         ) AS game_rank
       FROM game
@@ -2219,21 +2221,21 @@ export async function readHistory(memberId: string, multiplayer = false): Promis
           WHERE (blocked.blocker_member_id = ${memberId} AND blocked.blocked_member_id = opponent.member_id)
             OR (blocked.blocker_member_id = opponent.member_id AND blocked.blocked_member_id = ${memberId})
         )))
-    ), recent_people AS (
-      SELECT opponent_id, max(settled_at) AS latest_at
-      FROM settled_pair
-      GROUP BY opponent_id
-      ORDER BY latest_at DESC, opponent_id
-      LIMIT ${HISTORY_PEOPLE_LIMIT}
+    ), recent_audiences AS (
+      SELECT opponent_id, max_players, max(settled_at) AS latest_at,
+        ROW_NUMBER() OVER (PARTITION BY max_players ORDER BY max(settled_at) DESC, opponent_id) AS audience_rank
+      FROM settled_games
+      GROUP BY max_players, opponent_id
     )
-    SELECT settled_pair.game_id AS "gameId"
-    FROM settled_pair
-    JOIN recent_people USING (opponent_id)
-    WHERE settled_pair.game_rank <= ${HISTORY_GAMES_PER_PERSON_LIMIT}
-    ORDER BY recent_people.latest_at DESC,
-      settled_pair.opponent_id,
-      settled_pair.settled_at DESC,
-      settled_pair.game_id DESC
+    SELECT settled_games.game_id AS "gameId"
+    FROM settled_games
+    JOIN recent_audiences USING (max_players, opponent_id)
+    WHERE recent_audiences.audience_rank <= CASE WHEN max_players = 10 THEN ${HISTORY_GROUP_LIMIT}::int ELSE ${HISTORY_PEOPLE_LIMIT}::int END
+      AND settled_games.game_rank <= CASE WHEN max_players = 10 THEN ${HISTORY_GAMES_PER_GROUP_LIMIT}::int ELSE ${HISTORY_GAMES_PER_PERSON_LIMIT}::int END
+    ORDER BY recent_audiences.latest_at DESC,
+      settled_games.opponent_id,
+      settled_games.settled_at DESC,
+      settled_games.game_id DESC
   `);
   if (candidates.length === 0) return { people: [], ...(multiplayer ? { groups: [] } : {}) };
 
@@ -2619,7 +2621,7 @@ async function buildViewInputs(
     const visible = visibleEntryIds(game.state, viewerId, hiddenEntryIds, hiddenMemberIds);
     for (const entry of game.entries) {
       if (!visible.has(entry.id)) continue;
-      if (home && !isHomeEntry(game, viewerId, clock, entry.dayIndex)) continue;
+      if (home && !isHomeEntry(game, viewerId, clock, entry)) continue;
       const target = { memberId: entry.memberId, rowId: entry.id, table: "game_entry" as const };
       entryAt.set(entry.id, {
         text: ask({ ...target, field: "text" }, entry.textEncrypted),
@@ -2687,10 +2689,10 @@ async function buildViewInputs(
   });
 }
 
-function isHomeEntry(game: LoadedGame, viewerId: string, clock: Date, index: number): boolean {
-  if (game.row.maxPlayers === 2) return true;
+function isHomeEntry(game: LoadedGame, viewerId: string, clock: Date, entry: Pick<GameEntry, "memberId" | "dayIndex">): boolean {
+  if (game.row.maxPlayers === 2 || entry.memberId === viewerId) return true;
   const viewer = playerFor(game.state, viewerId);
-  return game.row.status === "live" && !!viewer && index === dayIndexAt(viewer, gameNow(clock, game.row));
+  return game.row.status === "live" && !!viewer && entry.dayIndex === dayIndexAt(viewer, gameNow(clock, game.row));
 }
 
 async function buildViews(games: readonly LoadedGame[], viewerId: string, clock: Date, knownBlocks?: GameBlocks, multiplayer = false): Promise<GameView[]> {

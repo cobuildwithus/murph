@@ -5519,13 +5519,15 @@ reads, public invite preview and media reads pass it to the existing service.
 Group collection predicates precede query limits; direct targets fail with the
 existing not-found shape for legacy clients. One `views.ts` serializer uses the
 capability flag for participation, frozen standings, ticket parties and group
-history, preserving legacy pair JSON and pending invitees. Home group days and
-entry decryption cover today's card only; full detail retains all days. The
-common capable JSON response streams byte-identical JSON in bounded chunks to
-accommodate the existing maximum history cardinality. This is transport only,
-with no new pagination or storage. Home/history signatures run at most six at
-a time; a post response authorizes and signs at most nine newly unlocked peer
-photos, bounded by the ten-player roster. See the weekly game spec for exact fields,
+history, preserving legacy pair JSON and pending invitees. Group Home retains
+the viewer's own entries for every calendar day, including settled cards, while
+peer entries and status appear only on the current live day. Detail retains all
+days and peers. History selects at most twenty groups with twenty-five recent
+rounds each, independently of the existing fifty people and fifty pair rounds.
+Records count the selected rounds for both forms. Ordinary `jsonOk` owns every
+response; there is no streaming helper, pagination or new storage. Home/history
+signatures run at most six at a time; a post response authorizes and signs at
+most nine newly unlocked peer photos. See the weekly game spec for exact fields,
 leave/terms routes, authenticated preview additions and `canStartGroups`.
 
 `audience.ts` owns exact addressed-set identity alongside the existing lore

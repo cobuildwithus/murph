@@ -93,13 +93,18 @@ Home computes `canStartGroups` per request from the admission switch and member
 allowlist. Both server create and join retain the admission gate.
 
 Group history keeps each round's roster, frozen standings and previews, plus
-viewer-specific `task` and `prize` at group level. Existing bounds remain fifty
-identities with fifty rounds each. Home keeps fifty games and two hundred wallet
-tickets; group cards contain only the current live day, while detail keeps all
-days. This reduces the measured ten-player, 365-day Home from over 80 MB to
-under 1.1 MB. Capable JSON responses stream unchanged JSON bytes because full
-history at those bounds exceeds the hosting platform's buffered response limit.
-There is no day pagination or new persisted projection.
+viewer-specific `task` and `prize` at group level. It returns at most twenty
+groups with the twenty-five most recent rounds each. Pair history independently
+retains its fifty-people/fifty-round limits. Each record counts the returned
+rounds, following existing pair semantics. Selection limits precede hydration.
+
+Home keeps fifty games and two hundred wallet tickets. Group cards retain every
+calendar day and the viewer's own entries/status for the live film strip and
+settled result card. Other players' entries/status appear only on the viewer's
+current live day. Detail keeps all days and peers. Ordinary JSON responses
+remain; there is no streaming, day pagination or window protocol. Home follows
+the accepted full-calendar pair scaling bound. Group history is measured against
+a 3 MB target at its maximum cardinality.
 
 ## Product
 

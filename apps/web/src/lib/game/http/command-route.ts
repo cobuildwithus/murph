@@ -1,6 +1,5 @@
-import { gameJsonOk } from "./response";
 import type { GameView } from "../contract";
-import { readJsonObject } from "../../hosted-onboarding/http";
+import { jsonOk, readJsonObject } from "../../hosted-onboarding/http";
 import { runGameCommand } from "../service";
 import { requireCurrentTermsFor, requireGameMember } from "./auth";
 import { gameCommandError } from "./errors";
@@ -31,5 +30,5 @@ export async function respondToGameCommand(
   const result = await runGameCommand({ actorMemberId: memberId, command: built, multiplayer: hasGameMultiplayer(request) });
   if (!result.ok) throw gameCommandError(result.error, result.status);
   const game = result.game && options.answer ? await options.answer(result.game, { command: built, memberId }) : result.game;
-  return gameJsonOk(request, { ok: true, game, ...(result.profile ? { profile: result.profile } : {}) });
+  return jsonOk({ ok: true, game, ...(result.profile ? { profile: result.profile } : {}) });
 }

@@ -175,12 +175,18 @@ describe("reduced multiplayer projection", () => {
     const history = buildGameHistoryView(input)!;
     expect(history).toHaveProperty("group"); expect(history.game).toMatchObject({ winnerSeats: [0, 1], players: expect.arrayContaining([expect.objectContaining({ seat: 0, participation: { state: "deleted", joinedOn: null, eligibleFromDay: null, canWin: true } })]) });
   });
-  it("measures the unbounded Home payload at the admitted calendar and collection cardinality", () => {
-    const state = stateFor(10, 365); state.entries = state.players.flatMap(({ memberId }) => Array.from({ length: 365 }, (_, day) => post(memberId, day)));
-    const input = { ...viewInput(state), multiplayer: true };
-    const detail = buildGameView(input);
-    const bytes = Buffer.byteLength(JSON.stringify({ games: Array(50).fill(detail) }));
-    console.info("group-full-home-baseline", JSON.stringify({ games: 50, players: 10, days: 365, bytes }));
-    expect(bytes).toBeGreaterThan(4_500_000);
+  it.each(["live", "settled"] as const)("keeps the own film strip and bounds peers on %s group Home cards", status => {
+    const state = stateFor(10, 365); state.game.status = status;
+    state.entries = state.players.flatMap(({ memberId }) => Array.from({ length: 365 }, (_, day) => post(memberId, day)));
+    const input = { ...viewInput(state), multiplayer: true, home: true };
+    const home = buildGameView(input);
+    expect(home.days).toHaveLength(365);
+    expect(home.days.every(day => day.mine?.entryId === `player-0-${day.index}-1`)).toBe(true);
+    expect(home.days[0].others).toHaveLength(status === "live" ? 9 : 0);
+    expect(home.days.slice(1).every(day => day.others.length === 0 && day.progress?.latestPosterSeats.length === 0)).toBe(true);
+    const pair = { ...state, game: { ...state.game, seats: 2 }, players: state.players.slice(0, 2), entries: state.entries.filter(entry => ["player-0", "player-1"].includes(entry.memberId)) };
+    const pairHome = buildGameView({ ...viewInput(pair), home: true });
+    // Same calendar/collection bounds as the established pair Home contract.
+    expect(Buffer.byteLength(JSON.stringify(home))).toBeLessThan(Buffer.byteLength(JSON.stringify(pairHome)) * 0.65);
   });
 });

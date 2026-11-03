@@ -1,10 +1,9 @@
-import { gameJsonOk } from "@/src/lib/game/http/response";
 import { hasGameMultiplayer } from "@/src/lib/game/http/capability";
 import { assertGameDevRoutesAllowed, requireGameMember } from "@/src/lib/game/http/auth";
 import { invalidGameRequest, withGameRuleErrors } from "@/src/lib/game/http/errors";
 import { GAME_DEV_ADVANCE_MAX_DAYS } from "@/src/lib/game/rules";
 import { devAdvanceDays } from "@/src/lib/game/service";
-import { readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
+import { jsonOk, readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 
 export const POST = withJsonError(async (
@@ -19,5 +18,5 @@ export const POST = withJsonError(async (
   }
   const gameId = await resolveDecodedRouteParam(context.params, "id");
   const game = await withGameRuleErrors(() => devAdvanceDays(gameId, memberId, days, hasGameMultiplayer(request)));
-  return gameJsonOk(request, { ok: true, game });
+  return jsonOk({ ok: true, game });
 });

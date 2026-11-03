@@ -469,23 +469,24 @@ function dayViews(input: GameViewInput, players: readonly RulePlayer[], entries:
   const visible = visibleEntryIds(state, viewerId, input.hiddenEntryIds, input.hiddenMemberIds, entries);
   const others = players.filter((player) => player.memberId !== viewerId && (state.game.seats === 10 || !input.hiddenMemberIds?.has(player.memberId)));
   const today = dayIndexAt(viewer, input.now);
-  const indices = input.home && state.game.seats === 10
-    ? state.game.status === "live" && today !== null && today >= 0 && today < state.game.lengthDays ? [today] : []
-    : Array.from({ length: state.game.lengthDays }, (_, index) => index);
-  return indices.map(index => {
+  return Array.from({ length: state.game.lengthDays }, (_, index) => {
+    const showOthers = !input.home || state.game.seats === 2 || state.game.status === "live" && today === index;
     const mine = liveEntry(entries, viewerId, index) ?? entriesForDay(entries, viewerId, index).find((entry) => entry.attempt === 0 && entry.withdrawnAt === null);
     return {
-      ...(input.multiplayer ? { progress: { latestPosterSeats: players
-        .filter(player => !player.leftAt && !input.hiddenMemberIds?.has(player.memberId))
-        .flatMap(player => { const post = liveEntry(entries, player.memberId, index); return post && !input.hiddenEntryIds?.has(post.id) ? [{ seat: player.seat, at: post.receivedAt.getTime() }] : []; })
-        .sort((a, b) => b.at - a.at || a.seat - b.seat).slice(0, 2).map(player => player.seat) } } : {}),
+      ...(input.multiplayer ? { progress: { latestPosterSeats: showOthers ? latestPosterSeats(input, players, index, entries) : [] } } : {}),
       index,
       localDate: addDays(viewer.dayOne!, index),
       mine: mine && visible.has(mine.id) ? entryView(mine, input) : null,
       off: !isScheduledDay(state, index),
-      others: others.map((other) => otherDayView(input, visible, other, index, entries)),
+      others: showOthers ? others.map((other) => otherDayView(input, visible, other, index, entries)) : [],
     };
   });
+}
+
+function latestPosterSeats(input: GameViewInput, players: readonly RulePlayer[], index: number, entries: GameEntryIndex): number[] {
+  return players.filter(player => !player.leftAt && !input.hiddenMemberIds?.has(player.memberId))
+    .flatMap(player => { const post = liveEntry(entries, player.memberId, index); return post && !input.hiddenEntryIds?.has(post.id) ? [{ seat: player.seat, at: post.receivedAt.getTime() }] : []; })
+    .sort((a, b) => b.at - a.at || a.seat - b.seat).slice(0, 2).map(player => player.seat);
 }
 
 /** Another player's day as this viewer may see it: locked until the viewer posts that day. */
