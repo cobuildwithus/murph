@@ -1992,7 +1992,8 @@ async function loadHistoryGames(db: Db, gameIds: readonly string[], viewerId: st
         SELECT entry.*,
           ROW_NUMBER() OVER (
             PARTITION BY entry.game_id
-            ORDER BY entry.day_index, player.seat, entry.received_at, entry.id
+            ORDER BY CASE WHEN entry.kind = 'photo' THEN 0 ELSE 1 END,
+              entry.day_index, player.seat, entry.received_at, entry.id
           ) AS preview_rank
         FROM game_entry entry
         JOIN game_player player

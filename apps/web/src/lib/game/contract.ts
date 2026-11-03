@@ -519,7 +519,7 @@ export interface GameHistoryGameView {
   previews: GameHistoryPreviewView[];
 }
 
-/** One of up to six visible posts, including words, in day and player-seat order. */
+/** One of up to six visible posts, preferring photos, then other kinds, returned in day and player-seat order. */
 export interface GameHistoryPreviewView extends GameEntryView {
   mine: boolean;
 }
