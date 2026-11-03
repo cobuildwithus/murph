@@ -5499,8 +5499,8 @@ under the pair and game locks. No alternate story store or queue exists. The Ops
 command and rollout/rollback contract live in the weekly game spec.
 
 `apps/web` owns the weekly game (product: `agent-docs/product-specs/weekly-game.md`).
-The pure roster helpers separate bounded member-set operations (up to ten) from
-released pair-only admission. Rule state retains the complete roster and entries;
+The pure roster helpers bound member-set operations to ten. The common rules
+select pair or group policy from immutable `max_players`, never roster length. Rule state retains the complete roster and entries;
 viewer projections receive hidden-member and hidden-entry sets, including before
 entry decryption. Task, result and scalar-ticket compatibility stays in `views.ts`.
 Views, shared progress and settlement reuse invocation-local entry indexes without
@@ -5510,8 +5510,45 @@ Postgres state tables are the truth: `game_profile`, `game_contact_label`,
 `game_event`, an append-only history (ids, numbers and fixed server-authored
 refusal reasons only). Change proposal identities use its nullable unique
 `command_key` for replay after resolution. `game.max_players` is immutable size
-policy (2 or 10); production creation and admission still require two.
-`audience_key` is reserved nullable storage for later addressed group admission.
+policy (2 or 10). `MURPH_GAME_GROUPS_ENABLED` in `access.ts` gates group creation
+and joining only: off unless `true` in production, on by default elsewhere.
+Persisted groups remain readable, settle and support deletion with admission off.
+
+`audience.ts` owns exact addressed-set identity alongside the existing lore
+fingerprint. Preparation normalizes one to nine transient recipient handles plus
+the starter's verified handle, resolves members and rejects duplicate handles or
+people. A narrow `game-audience` HMAC domain uses the existing privacy keyring's
+read candidates. Creation locks those candidates in stable order, revalidates
+prepared identities and counts at most ten open games per audience. It reuses a
+matching `audience_key`; retired unreadable keys cannot be reconstructed. No raw
+handle or extra identity table is stored.
+
+The starter joins at creation. A second remaining acceptance activates a group;
+waiting groups have no expiry. Original invitees claim seats 1–9, outside bearers
+10–18, with ten lifetime admissions including retained departures and no rejoin.
+Late joining keeps Day 1 and duration, freezing the effective `joined_at` and
+zone. Eligibility is `clamp(daysBetween(dayOne, localDate(joinedAt)), 0, length)`.
+The initial 20:00 cutoff does not discard a late joiner's current day. Join and
+leave settle due state first under the game lock. A starter's direct `editTerms`
+requires the expected version and rechecks that no activated participant has
+begun Day 1 under that same lock. Groups have no negotiated changes.
+
+Leaving before settlement retains evidence, excludes access and competition,
+and voids a waiting invitation or an activated group below two remaining players. Group settlement waits
+for the latest remaining final local day plus applicable existing offline grace.
+Count scores stay capped, weekdays count eligible scheduled completions, and
+pre-join days are never misses. Scores and eligibility freeze by seat; a proper
+subset tied first shares one prize ticket, while an all-way tie creates none.
+Any surviving participant eligible at settlement may redeem while both party
+sets have a survivor. Pair stakes and redemption remain unchanged.
+
+Same again requires a participant from the original addressed audience. It copies
+audience identity, invitations, group word and terms, remapping task seats when
+the starter changes; unclaimable erased invitations are dropped. Outside bearers
+may create a fresh challenge. Group words,
+shared task, sparse overrides and prize text remain in encrypted `TermWords`.
+HTTP capability, group serializers, notifications and chat admission are later
+rollout work; this lifecycle introduces no schema or route.
 
 Invitations retain original seats and optional member/keyed-lookup identity,
 never recipient destinations. An invitation's pending private label belongs to
@@ -5550,9 +5587,9 @@ words, route and reps, and stores per-poster sealed summaries in nullable
 `game_entry.payload_encrypted`. A separate nullable blur preview needs no
 decryption. New writes require 3–365 days (default seven) and one prize
 or dare; legacy lengths and stakes keep their read/settlement semantics. Both
-new stake kinds issue one loser-to-winner ticket, none for a tie or perfect game.
+new pair stake kinds issue one loser-to-winner ticket, none for a tie or perfect game.
 Ticket views derive kind from the existing stake key; no duplicate kind is stored.
-Tasks and stakes lock at `live`. Acceptance/approval uses the actor's local
+Pair tasks and stakes lock at `live`. Acceptance/approval uses the actor's local
 03:00–20:00 same-day window and the other player's current game date, preserving
 any selected later start. Streak derives from scheduled live entries; usual kind
 uses one bounded latest-entry read on the member index alongside Home's existing
@@ -5590,7 +5627,7 @@ joining an already counted invite or approving a negotiation consumes no extra
 slot. Unaddressed links acquire their pair only at join. There is
 no timer or cron: whether a game is over is computed from its state, and reads
 (and a player's next accept) settle it under the lock. A rematch of a settled
-1v1 records its addressed invitee (`game.invitee_member_id`), who alone besides
+1v1 records its addressed invitee (`game_invitee.member_id`), who alone besides
 the challenger can read it and its invite token. Reads are viewer-scoped:
 another player's entry is omitted from the response, not just its media URL,
 until the viewer has posted that day; media reads use the same rule. Media
@@ -5720,8 +5757,8 @@ calls no provider and checks no image; a provider would plug in at
 
 `game_block` (blocker, blocked) hides two people from each other until the
 blocker deletes it. Block takes the pair's transaction advisory lock
-(`blocks.ts` `lockGamePair`), then every game between them in id order: open
-and live games end `void` (no result, no tickets; an unshaken invite records
+(`blocks.ts` `lockGamePair`), then every pair game between them in id order: open
+and live pairs end `void` (no result, no tickets; an unshaken invite records
 `cancelled`, otherwise `blocked`), every game between them loses
 `chat_container_member_id`, and their waiting `game_lifecycle` receipts are
 skipped (`game_blocked`), so the chat funding gate finds no game and Murph sends
@@ -5733,6 +5770,13 @@ player who left (`left: true`, the viewer's name for them, no photo, posts or
 days; tickets `left`); the blocker's Home drops those games and tickets and
 lists everyone they blocked in `GameHomeView.blocked`. Media reads refuse a
 blocked pair. Unblocking changes no game.
+
+Groups retain blocked players and their scoring eligibility. Symmetric
+`hiddenMemberIds` masks strip post payloads, media, blur hashes and timestamps
+before decryption or signing, retaining only aggregate posted status. Recaps are
+suppressed for affected viewers. Left viewers cannot fetch new game content.
+Group player reports require an explicit member target; entry reports derive the
+author, and terms reports target the starter. Reports do not remove score credit.
 
 `game_report` holds one report: reporter, reported member, game, entry,
 `about` (post, player, terms), reason, a note and a snapshot of the reported

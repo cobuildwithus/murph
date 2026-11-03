@@ -9,6 +9,7 @@ import {
   playerStreak,
   decideDevAdvance,
   decideJoin,
+  decideLeave,
   decideNegotiationStart,
   decideNewTerms,
   decidePost,
@@ -136,6 +137,19 @@ function codeOf(run: () => unknown): string {
   }
   return "OK";
 }
+
+describe("group leave before activation", () => {
+  it("voids the starter's waiting game and preserves an idempotent departure", () => {
+    const state = invited();
+    state.game.seats = 10;
+    state.game.inviteExpiresAt = null;
+    expect(decideLeave(state, LEO)).toBe("void");
+    state.game.status = "void";
+    state.players[0].leftAt = JOIN_AT;
+    expect(decideLeave(state, LEO)).toBe("already-left");
+    expect(() => decideJoin(state, { memberId: AVA, now: JOIN_AT, termsVersion: 1, timeZone: NYC })).toThrow(GameRuleError);
+  });
+});
 
 describe("weekly game: terms", () => {
   it("defaults old stored terms to photos and rejects unknown requirements", () => {
@@ -843,10 +857,10 @@ describe("weekly game: self-play round 1 regressions", () => {
     expect(codeOf(() => decideNewTerms({ ...base, lengthDays: 3, schedule: { days: [4] } }, options))).toBe("OK");
   });
 
-  it("keeps group admission disabled despite group-capable storage", () => {
+  it("admits a group through the common scheduling rule", () => {
     const state = invited();
     state.game.seats = 10;
-    expect(codeOf(() => decideJoin(state, { memberId: AVA, now: JOIN_AT, termsVersion: 1, timeZone: SYD }))).toBe("GAME_NOT_FOUND");
+    expect(codeOf(() => decideJoin(state, { memberId: AVA, now: JOIN_AT, termsVersion: 1, timeZone: SYD }))).toBe("OK");
   });
 
   it("lets only a rematch's addressee take its seat", () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { firstOpenSeat, isGameMemberSet, isPairRoster, sameGameMembers } from "../src/lib/game/roster";
-import { gamePairLoreFingerprint } from "../src/lib/game/pair-fingerprint";
+import { gamePairLoreFingerprint } from "../src/lib/game/audience";
 import { attemptsUsed, completedEntry, decideSettle, gameDayOne, hasUnlockedDay, indexGameEntries, liveEntry, type RuleEntry, type RuleState } from "../src/lib/game/rules";
 import { buildGameHistoryView, buildGameView, visibleEntryIds, type GameViewInput } from "../src/lib/game/views";
 
@@ -8,7 +8,7 @@ const NOW = new Date("2026-10-12T12:00:00Z");
 
 function stateFor(count: number, lengthDays = 7): RuleState {
   return {
-    game: { id: "collection-game", status: "live", createdBy: "player-0", lengthDays, seats: count,
+    game: { id: "collection-game", status: "live", createdBy: "player-0", lengthDays, seats: count === 2 ? 2 : 10,
       inviteExpiresAt: null, startsOn: null,
       terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { count: lengthDays }, stakes: [{ key: "prize", kind: "prize" }] }] } },
     players: Array.from({ length: count }, (_, seat) => ({ memberId: `player-${seat}`, seat, dayOne: "2026-10-12", timeZone: "UTC" })),
@@ -131,12 +131,12 @@ describe("canonical game state and viewer visibility", () => {
     const input = { ...viewInput(state), hiddenMemberIds: new Set(["player-1", "player-2"]), hiddenEntryIds: new Set([state.entries[3].id]) };
     const before = decideSettle(state);
     const view = buildGameView(input);
-    expect(view.players.filter((player) => player.left).map(({ seat }) => seat)).toEqual([1, 2]);
-    expect(view.days[0].others).toEqual([{ seat: 3, status: "posted", hidden: true, entry: null }]);
+    expect(view.players.filter((player) => player.left)).toEqual([]);
+    expect(view.days[0].others).toEqual([1, 2, 3].map(seat => ({ seat, status: "posted", hidden: true, entry: null })));
     expect(view.players[3].score).toBe(1);
     expect(visibleEntryIds(state, input.viewerId, input.hiddenEntryIds, input.hiddenMemberIds)).toEqual(new Set([state.entries[0].id]));
     expect(decideSettle(state)).toEqual(before);
-    expect(buildGameView({ ...input, hiddenEntryIds: undefined }).days[0].others[0].entry?.entryId).toBe(state.entries[3].id);
+    expect(buildGameView({ ...input, hiddenEntryIds: undefined }).days[0].others.find(other => other.seat === 3)?.entry?.entryId).toBe(state.entries[3].id);
   });
 
   it("preserves withdrawn unlocks without granting visibility to an unseated viewer", () => {

@@ -49,14 +49,16 @@ export interface StoredTerms {
 }
 export interface TermWords {
   v: 1;
-  versions: { n: number; tasks: { seat: number; text: string }[]; stakes: { key: string; item: string }[] }[];
+  groupWord?: string;
+  versions: { n: number; defaultTask?: string; tasks: { seat: number; text: string }[]; stakes: { key: string; item: string }[] }[];
 }
 
 /** Frozen at settle. Ids and numbers only. */
 export interface StoredResult {
   v: 1;
+  maxPlayers?: number;
   termsVersion: number;
-  scores: { seat: number; memberId: string; score: number; misses: number }[];
+  scores: { seat: number; memberId: string; score: number; misses: number; eligible?: boolean }[];
 }
 
 export interface RulePlayer {
@@ -65,6 +67,8 @@ export interface RulePlayer {
   timeZone: string;
   /** Local date of this player's day 0, set at go-live. */
   dayOne: string | null;
+  joinedAt?: Date | null;
+  leftAt?: Date | null;
 }
 
 export interface RuleEntry {
@@ -91,7 +95,9 @@ export interface RuleGame {
   terms: StoredTerms;
   inviteExpiresAt: Date | null;
   /** A rematch's addressed opponent: the only member who may take its seat. */
-  invitees?: readonly { memberId: string | null }[];
+  invitees?: readonly { memberId: string | null; seat?: number }[];
+  /** Includes erased tombstones; lifetime admission never reuses a seat. */
+  admittedSeats?: readonly number[];
   /** The challenger's picked Day 1 (YYYY-MM-DD), if any. */
   startsOn: string | null;
 }
@@ -208,6 +214,16 @@ export function playerFor(state: RuleState, memberId: string): RulePlayer | null
   return state.players.find((player) => player.memberId === memberId) ?? null;
 }
 
+export function remainingPlayers(state: RuleState): RulePlayer[] {
+  return state.players.filter(player => !player.leftAt);
+}
+
+/** joinedAt is already in the effective game clock; never offset it again. */
+export function eligibleFromDay(state: RuleState, player: RulePlayer): number {
+  if (state.game.seats === 2 || !player.dayOne || !player.joinedAt) return 0;
+  return Math.max(0, Math.min(state.game.lengthDays, daysBetween(player.dayOne, gameLocalDate(player.joinedAt, player.timeZone))));
+}
+
 /** The player's current 0-based day; may be negative (not started) or past the end. */
 export function dayIndexAt(player: RulePlayer, now: Date): number | null {
   if (!player.dayOne) return null;
@@ -244,7 +260,7 @@ export function decideDayCompletion(state: RuleState, input: { memberId: string;
   if (isGameDue(state, input.now)) reject("GAME_NOT_LIVE", "This game has ended.");
   const dayIndex = daysBetween(player.dayOne!, input.date);
   const today = dayIndexAt(player, input.now)!;
-  if (dayIndex < 0 || dayIndex >= state.game.lengthDays || dayIndex > today) reject("INVALID_REQUEST", "Choose a game day that has already started.");
+  if (dayIndex < eligibleFromDay(state, player) || dayIndex >= state.game.lengthDays || dayIndex > today) reject("INVALID_REQUEST", "Choose a game day that has already started.");
   const entry = liveEntry(state.entries, input.memberId, dayIndex);
   const status = !entry ? "no_artifact" : input.incomplete
     ? entry.incomplete ? "already_incomplete" : "marked_incomplete"
@@ -287,7 +303,7 @@ export function hasFinishedGame(state: RuleState, player: RulePlayer, now: Date)
 /** A live game is waiting on this player today: a scheduled day they haven't posted yet. */
 export function needsPostToday(state: RuleState, memberId: string, now: Date): boolean {
   const player = playerFor(state, memberId);
-  const today = player && state.game.status === "live" ? dayIndexAt(player, now) : null;
+  const today = player && !player.leftAt && state.game.status === "live" ? dayIndexAt(player, now) : null;
   if (today === null || today < 0 || today >= state.game.lengthDays) return false;
   return isScheduledDay(state, today) && !liveEntry(state.entries, memberId, today);
 }
@@ -299,7 +315,7 @@ export function needsPostToday(state: RuleState, memberId: string, now: Date): b
 export function settleDueAt(state: RuleState): Date {
   const { lengthDays } = state.game;
   let due = 0;
-  for (const player of state.players) {
+  for (const player of remainingPlayers(state)) {
     if (!player.dayOne) continue;
     const end = dayStartInstant(addDays(player.dayOne, lengthDays), player.timeZone).getTime();
     due = Math.max(due, end + (graceOpen(state, player, lengthDays - 1) ? GAME_GRACE_MS : 0));
@@ -309,7 +325,7 @@ export function settleDueAt(state: RuleState): Date {
 
 /** A scheduled day that ended without a live post and still has an attempt left. */
 function graceOpen(state: RuleState, player: RulePlayer, dayIndex: number): boolean {
-  return isScheduledDay(state, dayIndex)
+  return dayIndex >= eligibleFromDay(state, player) && isScheduledDay(state, dayIndex)
     && !liveEntry(state.entries, player.memberId, dayIndex)
     && attemptsUsed(state.entries, player.memberId, dayIndex) < GAME_POSTS_PER_DAY;
 }
@@ -326,6 +342,8 @@ export function firstScheduledDate(date: string, schedule: GameSchedule): string
 
 // ------------------------------------------------------------------- terms
 
+export type GameTerms = GameTermsInput & { defaultTask?: string };
+
 export interface NewTerms {
   terms: StoredTerms;
   words: TermWords;
@@ -339,9 +357,9 @@ export interface NewTerms {
  * picked start date must fall from tomorrow to 60 days out, where `today` is
  * the challenger's own game day.
  */
-export function decideNewTerms(input: GameTermsInput, options: { newKey: () => string; today: string }): NewTerms {
+export function decideNewTerms(input: GameTerms, options: { newKey: () => string; today: string; maxPlayers?: number; inviteeSeats?: readonly number[]; currentStartsOn?: string | null }): NewTerms {
   const startsOn = input.startsOn ?? null;
-  if (startsOn && (startsOn <= options.today || startsOn > addDays(options.today, GAME_MAX_START_DAYS_OUT))) {
+  if (startsOn && startsOn !== options.currentStartsOn && (startsOn <= options.today || startsOn > addDays(options.today, GAME_MAX_START_DAYS_OUT))) {
     reject("INVALID_REQUEST", `Pick a start date from tomorrow to ${GAME_MAX_START_DAYS_OUT} days out.`);
   }
   const lengthDays = input.lengthDays ?? GAME_DEFAULT_LENGTH_DAYS;
@@ -349,7 +367,11 @@ export function decideNewTerms(input: GameTermsInput, options: { newKey: () => s
     reject("INVALID_REQUEST", `A game runs ${GAME_MIN_LENGTH_DAYS} to ${GAME_MAX_LENGTH_DAYS} days.`);
   }
   const tasks = [...input.tasks].sort((a, b) => a.seat - b.seat);
-  if (tasks.length !== GAME_SEATS_1V1 || tasks.some((task, seat) => task.seat !== seat)) {
+  if (options.maxPlayers === 10) {
+    if (!input.defaultTask || new Set(tasks.map(task => task.seat)).size !== tasks.length
+      || tasks.some(task => !(options.inviteeSeats ?? []).includes(task.seat))) reject("INVALID_REQUEST", "Choose a shared task and overrides for invitation seats only.");
+    if (input.stakes.length !== 1 || input.stakes[0].kind !== "prize") reject("INVALID_REQUEST", "Choose one winner's prize for the group.");
+  } else if (tasks.length !== GAME_SEATS_1V1 || tasks.some((task, seat) => task.seat !== seat)) {
     reject("INVALID_REQUEST", "Each player needs one task: seats 0 and 1.");
   }
   const schedule = validSchedule(input.schedule, lengthDays);
@@ -364,7 +386,7 @@ export function decideNewTerms(input: GameTermsInput, options: { newKey: () => s
     },
     words: {
       v: 1,
-      versions: [{ n: 1, stakes: stakes.map(({ item, key }) => ({ item, key })), tasks }],
+      versions: [{ n: 1, stakes: stakes.map(({ item, key }) => ({ item, key })), tasks, ...(options.maxPlayers === 10 ? { defaultTask: input.defaultTask } : {}) }],
     },
   };
 }
@@ -419,8 +441,14 @@ function scheduleFor(
 }
 
 /** Only seated players can call off an unstarted game; void is a no-op. */
-export function decideCancelInvite(state: RuleState, memberId: string): "cancel" | "already-void" {
+export function decideCancelInvite(state: RuleState, memberId: string, now?: Date): "cancel" | "already-void" {
   if (!playerFor(state, memberId)) reject("NOT_A_PLAYER", "Only a player can cancel this invite.");
+  if (state.game.seats === 10) {
+    if (state.game.createdBy !== memberId) reject("NOT_A_PLAYER", "Only the starter can cancel this game.");
+    if (state.game.status === "void") return "already-void";
+    assertGroupTermsOpen(state, memberId, now!);
+    return "cancel";
+  }
   if (state.game.status === "void") return "already-void";
   if (state.game.status !== "invited" && state.game.status !== "negotiating") reject("INVITE_USED", "This game has already started.");
   return "cancel";
@@ -428,48 +456,76 @@ export function decideCancelInvite(state: RuleState, memberId: string): "cancel"
 
 export type JoinDecision =
   | { kind: "already-joined" }
-  | ({ kind: "join"; seat: number; startedAt: Date } & Schedule);
+  | ({ kind: "join"; seat: number; startedAt: Date; activates?: boolean } & Schedule);
 
 /**
- * The last seat filling starts the game. `state.players` must carry each
+ * The second acceptance starts the game; subsequent group joins keep its calendar. `state.players` must carry each
  * current player's time zone as of now: it freezes here, at go-live.
  */
 export function decideJoin(
   state: RuleState,
-  input: { memberId: string; termsVersion: number; timeZone: string; now: Date; acceptNegotiation?: boolean },
+  input: { memberId: string; termsVersion: number; timeZone: string; now: Date; acceptNegotiation?: boolean; invitationSeat?: number },
 ): JoinDecision {
   const { game } = state;
-  if (game.seats !== GAME_SEATS_1V1) reject("GAME_NOT_FOUND", "Game not found.");
-  if (playerFor(state, input.memberId)) {
-    if (game.status === "invited" || game.status === "live") return { kind: "already-joined" };
-  }
+  const group = game.seats === 10;
+  if (game.seats !== 2 && !group) reject("GAME_NOT_FOUND", "Game not found.");
   const claimed = playerFor(state, input.memberId);
-  const acceptingNegotiation = input.acceptNegotiation && game.status === "negotiating"
+  if (claimed?.leftAt) reject("INVITE_USED", "You already left this game.");
+  if (claimed && (game.status === "invited" || game.status === "live")) return { kind: "already-joined" };
+  assertJoinOpen(state, input, claimed);
+  const seat = admissionSeat(state, input, claimed);
+  const joiner: RulePlayer = { memberId: input.memberId, seat, timeZone: input.timeZone, dayOne: gameDayOne(state.players), joinedAt: input.now };
+  if (group && game.status === "live") return { kind: "join", seat, startedAt: input.now, activates: false, players: [{ ...joiner, dayOne: joiner.dayOne! }] };
+  return { kind: "join", seat, startedAt: input.now, ...(group ? { activates: true } : {}),
+    ...scheduleFor(state, [...remainingPlayers(state).filter(player => player.memberId !== input.memberId), joiner],
+      player => player.memberId === input.memberId ? acceptanceStartDate(input.now, player.timeZone) : gameLocalDate(input.now, player.timeZone), game.startsOn) };
+}
+
+type JoinInput = Parameters<typeof decideJoin>[1];
+
+function assertJoinOpen(state: RuleState, input: JoinInput, claimed: RulePlayer | null): void {
+  const { game } = state;
+  const group = game.seats === 10;
+  const acceptingNegotiation = !group && input.acceptNegotiation && game.status === "negotiating"
     && claimed && input.memberId !== game.createdBy && state.players.length === game.seats;
-  if (game.status === "void" || isGameInviteExpired(game, input.now)) reject("INVITE_EXPIRED", "This invite isn't open anymore.");
-  if (!acceptingNegotiation && (game.status !== "invited" || state.players.length >= game.seats)) reject("INVITE_USED", "This invite was already used.");
-  if (!claimed) assertAddressee(game, input.memberId);
-  if (input.termsVersion !== currentTerms(game.terms).n) {
-    reject("TERMS_CHANGED", "The terms changed. Take another look.");
-  }
-  const joiner: RulePlayer = {
-    dayOne: null,
-    memberId: input.memberId,
-    seat: claimed?.seat ?? firstOpenSeat(state.players),
-    timeZone: input.timeZone,
-  };
-  // The accepter's cutoff and both local dates determine the shared Day 1.
-  return {
-    kind: "join",
-    seat: joiner.seat,
-    startedAt: input.now,
-    ...scheduleFor(
-      state,
-      [...state.players.filter((player) => player.memberId !== input.memberId), joiner],
-      (player) => player.memberId === input.memberId ? acceptanceStartDate(input.now, player.timeZone) : gameLocalDate(input.now, player.timeZone),
-      game.startsOn,
-    ),
-  };
+  if (game.status === "void" || isGameInviteExpired(game, input.now) || (group && isGameDue(state, input.now))) reject("INVITE_EXPIRED", "This invite isn't open anymore.");
+  const admissions = game.admittedSeats?.length ?? state.players.length;
+  const canJoin = game.status === "invited" || (group && game.status === "live");
+  if (!acceptingNegotiation && (!canJoin || admissions >= game.seats)) reject("INVITE_USED", "This invite was already used.");
+  if (!claimed && !group) assertAddressee(game, input.memberId);
+  if (input.termsVersion !== currentTerms(game.terms).n) reject("TERMS_CHANGED", "The terms changed. Take another look.");
+}
+
+function admissionSeat(state: RuleState, input: JoinInput, claimed: RulePlayer | null): number {
+  const seats = state.game.admittedSeats ?? state.players.map(player => player.seat);
+  const addressed = input.invitationSeat ?? state.game.invitees?.find(invitee => invitee.memberId === input.memberId)?.seat;
+  const seat = state.game.seats === 10 ? addressed ?? Array.from({ length: 9 }, (_, index) => index + 10).find(seat => !seats.includes(seat))
+    : claimed?.seat ?? firstOpenSeat(state.players);
+  if (seat === undefined || (!claimed && seats.includes(seat))) reject("INVITE_USED", "This invitation seat was already used.");
+  return seat;
+}
+
+export function assertGroupTermsOpen(state: RuleState, actor: string, now: Date, expectedVersion?: number): void {
+  if (state.game.seats !== 10 || state.game.createdBy !== actor || playerFor(state, actor)?.leftAt) reject("NOT_A_PLAYER", "Only the starter can edit this game.");
+  if (!["invited", "live"].includes(state.game.status) || state.players.some(player => (dayIndexAt(player, now) ?? -1) >= 0)) reject("GAME_NOT_LIVE", "Terms lock when Day 1 begins.");
+  if (expectedVersion !== undefined && expectedVersion !== currentTerms(state.game.terms).n) reject("TERMS_CHANGED", "The terms changed. Take another look.");
+}
+
+/** A changed schedule can move the unstarted calendar, but never renew acceptance. */
+export function scheduleEditedTerms(state: RuleState, changedStart: string | null): Schedule | null {
+  const dayOne = gameDayOne(state.players);
+  return state.game.status === "live" && dayOne
+    ? scheduleFor(state, remainingPlayers(state), () => changedStart ?? dayOne) : null;
+}
+
+export function decideLeave(state: RuleState, memberId: string): "left" | "void" | "already-left" {
+  if (state.game.seats !== 10) reject("INVALID_REQUEST", "Leaving is available for group games.");
+  const player = playerFor(state, memberId);
+  if (!player) reject("NOT_A_PLAYER", "You're not in this game.");
+  if (state.game.status === "settled") reject("GAME_NOT_LIVE", "This game has settled.");
+  if (player.leftAt) return "already-left";
+  if (!["live", "invited"].includes(state.game.status)) reject("GAME_NOT_LIVE", "This game has ended.");
+  return state.game.status === "invited" || remainingPlayers(state).length < 3 ? "void" : "left";
 }
 
 /** An addressed rematch seats only its addressee. */
@@ -542,7 +598,7 @@ function hasExcuse(entries: readonly RuleEntry[], memberId: string, dayIndex: nu
  */
 function excuseDay(state: RuleState, player: RulePlayer, now: Date): number {
   const today = dayIndexAt(player, now)!;
-  for (let day = Math.min(today, state.game.lengthDays) - 1; day >= 0; day -= 1) {
+  for (let day = Math.min(today, state.game.lengthDays) - 1; day >= eligibleFromDay(state, player); day -= 1) {
     const missed = isScheduledDay(state, day) && !liveEntry(state.entries, player.memberId, day);
     if (missed && !hasExcuse(state.entries, player.memberId, day)) return day;
   }
@@ -584,7 +640,7 @@ function postingDay(state: RuleState, player: RulePlayer, captureAgeMs: number |
       return yesterday;
     }
   }
-  if (today < 0) reject("DAY_CLOSED", "Day 1 hasn't started yet.");
+  if (today < eligibleFromDay(state, player)) reject("DAY_CLOSED", "Day 1 hasn't started yet.");
   if (today >= lengthDays) reject("DAY_CLOSED", "This game is over.");
   const offDay = gameOffDayMessage(state, player, today);
   if (offDay) reject("DAY_CLOSED", offDay);
@@ -644,7 +700,7 @@ export function decideDevAdvance(state: RuleState, days: number): { addMs: numbe
 
 function requireLivePlayer(state: RuleState, memberId: string): RulePlayer {
   const player = playerFor(state, memberId);
-  if (!player) reject("NOT_A_PLAYER", "You're not in this game.");
+  if (!player || player.leftAt) reject("NOT_A_PLAYER", "You're not in this game.");
   if (state.game.status !== "live" || !player.dayOne) reject("GAME_NOT_LIVE", "This game isn't live.");
   return player;
 }
@@ -667,7 +723,8 @@ export function scorePlayer(state: RuleState, player: RulePlayer, throughDay = s
   const { terms } = state.game;
   let credited = 0;
   let scheduledMissed = 0;
-  for (let day = 0; day <= Math.min(throughDay, state.game.lengthDays - 1); day += 1) {
+  const firstDay = eligibleFromDay(state, player);
+  for (let day = firstDay; day <= Math.min(throughDay, state.game.lengthDays - 1); day += 1) {
     const scheduled = isScheduledDay(state, day);
     const posted = completedEntry(entries, player.memberId, day) !== null;
     if (scheduled && posted) credited += 1;
@@ -676,7 +733,7 @@ export function scorePlayer(state: RuleState, player: RulePlayer, throughDay = s
   const schedule = currentTerms(terms).schedule;
   if ("count" in schedule) {
     const score = Math.min(credited, schedule.count);
-    return { memberId: player.memberId, misses: Math.max(0, schedule.count - credited), score, seat: player.seat };
+    return { memberId: player.memberId, misses: Math.max(0, Math.min(schedule.count, state.game.lengthDays - firstDay) - credited), score, seat: player.seat };
   }
   return { memberId: player.memberId, misses: scheduledMissed, score: credited, seat: player.seat };
 }
@@ -687,7 +744,7 @@ export function playerStreak(state: RuleState, player: RulePlayer, now: Date): n
   if (today === null) return 0;
   const posted = new Set(state.entries.filter((entry) => entry.memberId === player.memberId && entry.attempt > 0 && entry.withdrawnAt === null && !entry.incomplete).map((entry) => entry.dayIndex));
   let streak = 0;
-  for (let day = Math.min(today, state.game.lengthDays - 1); day >= 0; day -= 1) {
+  for (let day = Math.min(today, state.game.lengthDays - 1); day >= eligibleFromDay(state, player); day -= 1) {
     if (!isScheduledDay(state, day)) continue;
     if (posted.has(day)) streak += 1;
     else if (day !== today) break;
@@ -705,6 +762,17 @@ export function decideSettle(state: RuleState): SettleDecision {
   const entries = indexGameEntries(state.entries);
   const scores = players.map((player) => scorePlayer(state, player, undefined, entries));
   const version = currentTerms(state.game.terms);
+  if (state.game.seats === 10) {
+    const frozen = scores.map(score => ({ ...score, eligible: !players.find(player => player.seat === score.seat)!.leftAt }));
+    for (const seat of state.game.admittedSeats ?? []) if (!frozen.some(score => score.seat === seat)) frozen.push({ seat, memberId: "", score: 0, misses: 0, eligible: false });
+    frozen.sort((a, b) => a.seat - b.seat);
+    const eligible = frozen.filter(score => score.eligible);
+    const top = Math.max(...eligible.map(score => score.score));
+    const owedToSeats = eligible.filter(score => score.score === top).map(score => score.seat);
+    const owedBySeats = eligible.filter(score => score.score !== top).map(score => score.seat);
+    return { result: { scores: frozen, termsVersion: version.n, v: 1, maxPlayers: 10 },
+      tickets: owedBySeats.length && owedToSeats.length ? [{ stakeKey: version.stakes[0].key, owedToSeats, owedBySeats }] : [] };
+  }
   return { result: { scores, termsVersion: version.n, v: 1 }, tickets: legacyPairStakeTickets(scores, version.stakes) };
 }
 
@@ -738,11 +806,25 @@ function legacyPairStakeTickets(scores: readonly PlayerScore[], stakes: readonly
 }
 
 export function outcomeFor(result: StoredResult, memberId: string): "won" | "lost" | "tie" | "perfect" {
+  if (result.maxPlayers === 10) {
+    const eligible = result.scores.filter(score => score.eligible);
+    const top = Math.max(...eligible.map(score => score.score));
+    if (eligible.length && eligible.every(score => score.score === top)) return "tie";
+    return eligible.some(score => score.memberId === memberId && score.score === top) ? "won" : "lost";
+  }
   if (result.scores.every((score) => score.misses === 0)) return "perfect";
   const top = Math.max(...result.scores.map((score) => score.score));
   const winners = result.scores.filter((score) => score.score === top);
   if (winners.length > 1) return winners.some((score) => score.memberId === memberId) ? "tie" : "lost";
   return winners[0].memberId === memberId ? "won" : "lost";
+}
+
+/** Eligibility is frozen by seat; deletion changes availability, never the winners. */
+export function canRedeemGroupTicket(ticket: { owedBySeats: readonly number[]; owedToSeats: readonly number[] }, players: readonly { seat: number; memberId: string | null }[], result: StoredResult | null, actor: string): boolean {
+  const seat = players.find(player => player.memberId === actor)?.seat;
+  const survives = (seats: readonly number[]) => players.some(player => player.memberId !== null && seats.includes(player.seat));
+  return seat !== undefined && result?.scores.some(score => score.seat === seat && score.eligible === true) === true
+    && survives(ticket.owedBySeats) && survives(ticket.owedToSeats);
 }
 
 // ------------------------------------------------------------ stored shapes
@@ -806,9 +888,11 @@ export function parseTermWords(text: string): TermWords {
   if (root.v !== 1) malformed("words");
   return {
     v: 1,
+    ...(root.groupWord === undefined ? {} : { groupWord: asString(root.groupWord, "group word") }),
     versions: asList(root.versions, "words").map((raw) => {
       const version = asObject(raw, "words");
       return {
+        ...(version.defaultTask === undefined ? {} : { defaultTask: asString(version.defaultTask, "default task") }),
         n: asInt(version.n, "words"),
         stakes: asList(version.stakes, "words").map((rawStake) => {
           const stake = asObject(rawStake, "words");
@@ -827,9 +911,11 @@ export function parseStoredResult(value: unknown): StoredResult {
   const root = asObject(value, "result");
   if (root.v !== 1) malformed("result");
   return {
+    ...(root.maxPlayers === undefined ? {} : { maxPlayers: asInt(root.maxPlayers, "max players") }),
     scores: asList(root.scores, "result").map((raw) => {
       const score = asObject(raw, "result");
       return {
+        ...(score.eligible === undefined ? {} : { eligible: typeof score.eligible === "boolean" ? score.eligible : malformed("eligibility") }),
         memberId: asString(score.memberId, "result"),
         misses: asInt(score.misses, "result"),
         score: asInt(score.score, "result"),

@@ -19,7 +19,7 @@ import { deliverGameChangeProposal } from "./chat-delivery";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 import { isGameInviteExpired } from "./rules";
 import { firstDatesOfMissRuns } from "./missed-check-in";
-import { gamePairLoreFingerprint } from "./pair-fingerprint";
+import { gamePairLoreFingerprint } from "./audience";
 
 // One discovery (20 × 3s plus one 3s recheck) and one frozen recovery
 // (10s create + 3s roster check) cap provider wait at 76s per 180s cron.

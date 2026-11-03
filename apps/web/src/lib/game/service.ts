@@ -11,8 +11,10 @@ import { isUniqueViolation } from "../device-sync/prisma-store/prisma-errors";
 import { generateHostedRandomPrefixedId, isRecord, sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
-import { areGameDevToolsAllowed, gameOnSql, gameOnWhere, isGameEnabled, isGameEnabledFor, isGameOn, mediaKeyOwner, mediaKeyPrefixFor } from "./access";
-import { parseGameCommand } from "./command";
+import { areGameDevToolsAllowed, areGameGroupsEnabled, gameOnSql, gameOnWhere, isGameEnabled, isGameEnabledFor, isGameOn, mediaKeyOwner, mediaKeyPrefixFor } from "./access";
+import { parseGameCommand, type GameCommand } from "./command";
+import { lockGameAudience, prepareGameAudience, readGameVerifiedContacts, verifiedGameContactKeys } from "./audience";
+import { lookupHostedGroupParticipantMemberIdsByHandles } from "../hosted-groups/participant-member";
 import { moderateGameCommand } from "./moderation";
 import { parseStoredGameEntryData } from "./entry-data";
 import {
@@ -20,7 +22,6 @@ import {
   type GamePendingChange,
   type AcceptInviteBody,
   type GameChange,
-  type GameCommand,
   type GameDayOutcome,
   type GameEntryKind,
   type GameError,
@@ -35,12 +36,17 @@ import { labelTarget, openGameTexts, sealGameText, type GameSealTarget } from ".
 import { isGameMediaStorageAvailable, statGameMedia } from "./media";
 import {
   currentTerms,
+  canRedeemGroupTicket,
   gameDayOne,
   dayIndexAt,
   liveEntry,
   attemptsUsed,
   isScheduledDay,
   decideCancelInvite,
+  assertGroupTermsOpen,
+  scheduleEditedTerms,
+  decideLeave,
+  remainingPlayers,
   decideDayCompletion,
   decideDevAdvance,
   decideJoin,
@@ -53,7 +59,6 @@ import {
   GAME_ERROR_STATUS,
   GAME_INVITE_TTL_MS,
   GAME_MAX_LENGTH_DAYS,
-  GAME_SEATS_1V1,
   GameRuleError,
   gameOffDayMessage,
   isGameDue,
@@ -264,6 +269,8 @@ interface CommandContext {
 /** Applies one command; returns the game to show back, if any. */
 async function runCommand(context: CommandContext, command: Exclude<GameCommand, { type: "setProfile" }>): Promise<string | null | { gameId: string; dayOutcome: GameDayOutcome }> {
   switch (command.type) {
+    case "leave": return leave(context, command.gameId);
+    case "editTerms": return editTerms(context, command);
     case "setDayCompletion":
       return setDayCompletion(context, command);
     case "cancelInvite":
@@ -297,7 +304,7 @@ async function runCommand(context: CommandContext, command: Exclude<GameCommand,
 async function requireUploadedMedia(actor: string, command: GameCommand): Promise<void> {
   const labelPhoto = command.type === "setProfile" ? command.photoKey
     : command.type === "createGame" ? command.inviteeLabel?.photoKey : null;
-  const keys = command.type === "post" ? command.mediaKeys : labelPhoto ? [labelPhoto] : [];
+  const keys = command.type === "post" ? command.mediaKeys : [labelPhoto, ...(command.type === "createGame" ? command.invitees?.map(target => target.label?.photoKey) ?? [] : [])].filter((key): key is string => Boolean(key));
   if (keys.length === 0) return;
   const prefix = mediaKeyPrefixFor(actor);
   const owned = isGameMediaStorageAvailable() && keys.every((key) => key.startsWith(prefix));
@@ -314,7 +321,7 @@ interface LockedStep {
   clock: Date;
 }
 
-type GameEventType = "day_marked_incomplete" | "day_restored" | "cancelled" | "blocked" | "removed" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
+type GameEventType = "left" | "terms_edited" | "day_marked_incomplete" | "day_restored" | "cancelled" | "blocked" | "removed" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
 /** What changed, for the history: ids and numbers only, never words. */
 interface GameEventDraft {
   commandKey?: string;
@@ -428,6 +435,8 @@ function parsePendingLabel(value: Prisma.JsonValue | null): PendingLabel {
 }
 
 async function createGame(context: CommandContext, command: Extract<GameCommand, { type: "createGame" }>): Promise<string> {
+  if (command.maxPlayers === 10) return createGroupGame(context, command);
+  if (command.invitees || command.groupWord || command.terms.defaultTask) reject("INVALID_REQUEST", "Group terms require maxPlayers 10.");
   const { actor } = context;
   const { gameId } = command;
   const chatPlayers = context.chatPlayerMemberIds ?? [];
@@ -489,7 +498,7 @@ async function prepareGameCreateData(context: CommandContext, command: Extract<G
   const [termsWordsEncrypted, inviteTokenEncrypted, nameEncrypted, relationshipEncrypted] = await Promise.all([
     seal(gameTarget(where, "terms_words"), JSON.stringify(newTerms.words)),
     seal(gameTarget(where, "invite_token"), token),
-    chatOther ? null : seal(labelTarget(actor, "name"), command.inviteeFirstName),
+    chatOther ? null : seal(labelTarget(actor, "name"), command.inviteeFirstName!),
     inviteeLabel?.relationship ? seal(labelTarget(actor, "relationship"), inviteeLabel.relationship) : null,
   ]);
   const opponentMemberId = chatOther ?? rematch?.opponentMemberId ?? null;
@@ -511,6 +520,109 @@ function chatCreationOther(context: CommandContext): string | undefined {
   const other = players.find(id => id !== context.actor);
   if (!sameGamePlayers(players, [context.actor, other ?? ""])) reject("NOT_A_PLAYER", "Use a chat with just the two players and Murph.");
   return other;
+}
+
+/** Group preparation shares the command, term, encryption and storage owners. */
+async function createGroupGame(context: CommandContext, command: Extract<GameCommand, { type: "createGame" }>): Promise<string> {
+  if (!areGameGroupsEnabled()) reject("GAME_DISABLED", "Group games aren't available yet.");
+  if (context.chatContainerMemberId) reject("INVALID_REQUEST", "Group chat creation isn't available yet.");
+  const prisma = getPrisma();
+  const { actor } = context;
+  const profile = await prisma.gameProfile.findUnique({ where: { memberId: actor }, select: { timeZone: true } });
+  if (!profile) reject("PROFILE_REQUIRED", "Add your first name first.");
+  if (await isGameCreationReplay(prisma, actor, command.gameId)) return command.gameId;
+  const prepared = command.previousGameId
+    ? await prepareGroupRematch(actor, command.previousGameId)
+    : await prepareNewGroup(context, command, profile.timeZone);
+  if (!isGameOn({ players: [{ memberId: actor }], invitees: prepared.invitees })) reject("GAME_DISABLED", "Starting a game is invite only for now.");
+  const open = await prisma.game.findMany({ where: { audienceKey: { in: prepared.keys.candidates }, status: "live" }, select: { id: true }, take: GAME_MAX_OPEN_PER_PAIR });
+  await loadCurrent(open.map(game => game.id));
+  const token = randomBytes(24).toString("base64url");
+  const target = { id: command.gameId, wordsOwnerMemberId: actor };
+  const termsWordsEncrypted = await seal(gameTarget(target, "terms_words"), JSON.stringify(prepared.words));
+  const inviteTokenEncrypted = await seal(gameTarget(target, "invite_token"), token);
+  try {
+    await prisma.$transaction(async tx => {
+      await context.beforeMutationTx?.(tx);
+      await lockGameAudience(tx, prepared.keys.candidates);
+      if (await isGameCreationReplay(tx, actor, command.gameId)) return;
+      await prepared.revalidate(tx);
+      const existing = await tx.game.findFirst({ where: { audienceKey: { in: prepared.keys.candidates } }, select: { audienceKey: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+      const audienceKey = existing?.audienceKey ?? prepared.keys.current;
+      const count = await tx.game.count({ where: { audienceKey: { in: prepared.keys.candidates }, status: { in: ACTIVE_STATUSES } } });
+      if (count >= GAME_MAX_OPEN_PER_PAIR) reject("TOO_MANY_GAMES", "This audience already has ten open games.");
+      const now = context.now ?? await databaseNow(tx);
+      await tx.game.create({ data: {
+        id: command.gameId, createdBy: actor, wordsOwnerMemberId: actor, maxPlayers: 10, audienceKey,
+        inviteTokenHash: sha256Hex(token), inviteTokenEncrypted, inviteExpiresAt: null,
+        status: "invited", terms: toPrismaJsonObject(prepared.terms), termsWordsEncrypted,
+        lengthDays: prepared.lengthDays, startsOn: prepared.startsOn ? toDbDate(prepared.startsOn) : null,
+        round: prepared.round, previousGameId: command.previousGameId ?? null,
+        players: { create: { seat: 0, memberId: actor, timeZone: profile.timeZone, joinedAt: now } },
+        invitees: { create: prepared.invitees },
+      } });
+      await writeEvents(tx, command.gameId, actor, [{ type: "created", payload: { round: prepared.round } }]);
+    });
+  } catch (error) {
+    if (!isUniqueViolation(error)) throw error;
+    if (!await isGameCreationReplay(prisma, actor, command.gameId)) reject("INVALID_REQUEST", "That game id is taken.");
+  }
+  return command.gameId;
+}
+
+async function prepareNewGroup(context: CommandContext, command: Extract<GameCommand, { type: "createGame" }>, timeZone: string) {
+  if (!command.groupWord) reject("INVALID_REQUEST", "Choose a group word.");
+  const audience = await prepareGameAudience(context.actor, command.invitees ?? []);
+  const terms = decideNewTerms(command.terms, { maxPlayers: 10, inviteeSeats: audience.invitees.map(invitee => invitee.seat),
+    newKey: () => generateHostedRandomPrefixedId("gsk"), today: gameLocalDate(context.now ?? new Date(), timeZone) });
+  const invitees: Array<Prisma.GameInviteeUncheckedCreateWithoutGameInput & { memberId: string | null }> = [];
+  // At most nine; drain each seal before opening a transaction.
+  for (const invitee of audience.invitees) {
+    const pendingLabel = invitee.firstName || invitee.label ? {
+      nameEncrypted: invitee.firstName ? await seal(labelTarget(context.actor, "name"), invitee.firstName) : null,
+      relationshipEncrypted: invitee.label?.relationship ? await seal(labelTarget(context.actor, "relationship"), invitee.label.relationship) : null,
+      photoKey: invitee.label?.photoKey ?? null,
+    } : Prisma.DbNull;
+    invitees.push({ seat: invitee.seat, recipientLookupKey: invitee.recipientLookupKey, pendingLabel,
+      memberId: invitee.memberId });
+  }
+  return { ...terms, words: { ...terms.words, groupWord: command.groupWord }, keys: audience.keys, invitees, round: 1,
+    revalidate: async (tx: Tx) => {
+      if (!(await verifiedGameContactKeys(tx, context.actor, [audience.starter])).length) reject("PROFILE_REQUIRED", "Verify your invitation address again.");
+      const members = await lookupHostedGroupParticipantMemberIdsByHandles({ handles: audience.contacts.map(contact => contact.value), prisma: tx });
+      if (audience.contacts.some((contact, index) => (members.get(contact.value) ?? null) !== audience.invitees[index].memberId)) reject("INVALID_REQUEST", "The invitation audience changed. Try again.");
+    } };
+}
+
+/** Copy identity and words; only original addressed participants can start Same again. */
+async function prepareGroupRematch(actor: string, previousGameId: string) {
+  const prisma = getPrisma();
+  const previous = await prisma.game.findUnique({ where: { id: previousGameId }, include: { invitees: { orderBy: { seat: "asc" } }, players: { orderBy: { seat: "asc" } } } });
+  if (!previous || previous.maxPlayers !== 10 || previous.status !== "settled" || !previous.audienceKey
+    || !previous.players.some(player => player.memberId === actor)
+    || (previous.createdBy !== actor && !previous.invitees.some(invitee => invitee.memberId === actor))) reject("NOT_A_PLAYER", "Same again is for players in the original addressed audience.");
+  const [plain] = await openGameTexts([{ ...gameTarget(previous, "terms_words"), value: previous.termsWordsEncrypted }]);
+  const words = parseTermWords(plain ?? "");
+  const oldSeat = previous.createdBy === actor ? 0 : previous.invitees.find(invitee => invitee.memberId === actor)!.seat;
+  const remap = (seat: number) => seat === 0 ? oldSeat : seat === oldSeat ? 0 : seat;
+  const version = currentTerms(parseStoredTerms(previous.terms));
+  const currentWords = words.versions.find(words => words.n === version.n)!;
+  const invitees = [{ seat: 0, memberId: previous.createdBy, recipientLookupKey: null }, ...previous.invitees]
+    .filter(invitee => invitee.memberId !== actor && (invitee.memberId !== null || invitee.recipientLookupKey !== null))
+    .map(invitee => ({ seat: remap(invitee.seat), memberId: invitee.memberId,
+      recipientLookupKey: invitee.recipientLookupKey, pendingLabel: Prisma.DbNull }));
+  const snapshot = JSON.stringify(previous);
+  return { keys: { current: previous.audienceKey, candidates: [previous.audienceKey] }, invitees, round: previous.round + 1,
+    terms: { v: 1 as const, versions: [{ ...version, n: 1, fromDay: 0 }] },
+    words: { ...words, versions: [{ ...currentWords, n: 1, tasks: currentWords.tasks.map(task => ({ ...task, seat: remap(task.seat) })).sort((a, b) => a.seat - b.seat) }] },
+    lengthDays: previous.lengthDays, startsOn: null,
+    revalidate: async (tx: Tx) => {
+      await tx.$queryRaw`SELECT id FROM game WHERE id = ${previousGameId} FOR UPDATE`;
+      const current = await tx.game.findUnique({ where: { id: previousGameId }, include: { invitees: { orderBy: { seat: "asc" } }, players: { orderBy: { seat: "asc" } } } });
+      if (JSON.stringify(current) !== snapshot) reject("INVALID_REQUEST", "This game changed. Try again.");
+      const later = await tx.game.findFirst({ where: { previousGameId, status: { in: [...ACTIVE_STATUSES, "settled"] } }, select: { status: true } });
+      if (later) reject(later.status === "settled" ? "REMATCH_OUTDATED" : "ALREADY_IN_A_GAME", "This game already has a rematch.");
+    } };
 }
 
 /** Shared by the early replay, pair-locked replay and unique-key race. */
@@ -569,7 +681,7 @@ async function readRematch(
     where: { id: previousGameId },
   });
   const finished = previous?.status === "settled";
-  if (!previous || !finished || !previous.players.some((player) => player.memberId === actor)) {
+  if (!previous || previous.maxPlayers !== 2 || !finished || !previous.players.some((player) => player.memberId === actor)) {
     reject("INVALID_REQUEST", "A rematch needs a settled game you played.");
   }
   const others = previous.players.filter((player) => player.memberId !== actor);
@@ -631,20 +743,21 @@ async function maintainPair(first: string, second: string): Promise<void> {
 
 async function join(context: CommandContext, command: Extract<GameCommand, { type: "join" }>): Promise<string> {
   const target = await getPrisma().game.findUnique({
-    select: { createdBy: true, id: true },
+    select: { createdBy: true, id: true, maxPlayers: true },
     where: { inviteTokenHash: sha256Hex(command.token) },
   });
   if (!target) reject("INVITE_NOT_FOUND", "Invite not found.");
-  if (!target.createdBy) reject("INVITE_EXPIRED", "This invite isn't open anymore.");
-  return joinGame(context, { ...target, createdBy: target.createdBy }, command);
+  if (target.maxPlayers === 10 && !areGameGroupsEnabled()) reject("GAME_DISABLED", "Group games aren't available yet.");
+  if (target.maxPlayers === 2 && !target.createdBy) reject("INVITE_EXPIRED", "This invite isn't open anymore.");
+  return joinGame(context, target, command);
 }
 
-async function joinGame(context: CommandContext, target: { id: string; createdBy: string }, body: AcceptInviteBody): Promise<string> {
+async function joinGame(context: CommandContext, target: { id: string; createdBy: string | null; maxPlayers?: number }, body: AcceptInviteBody): Promise<string> {
   const { actor } = context;
   const prisma = getPrisma();
   const profile = await prisma.gameProfile.findUnique({ select: { memberId: true }, where: { memberId: actor } });
   if (!profile) reject("PROFILE_REQUIRED", "Add your first name first.");
-  await maintainPair(target.createdBy, actor);
+  if (target.maxPlayers !== 10) await maintainPair(target.createdBy!, actor);
   await accept(context, body, target.id, target.createdBy);
   return target.id;
 }
@@ -667,33 +780,38 @@ async function rejectBlockedJoin(tx: Tx, creator: string, actor: string): Promis
   await rejectBlockedPair(tx, actor, creator, "This invite isn't open anymore.");
 }
 
-async function accept(context: CommandContext, command: AcceptInviteBody, gameId: string, creator: string): Promise<void> {
+async function accept(context: CommandContext, command: AcceptInviteBody, gameId: string, creator: string | null): Promise<void> {
   const { actor } = context;
-  await runLocked(gameId, withPairLock(context, creator), async ({ loaded, now, tx }) => {
-    await rejectBlockedJoin(tx, creator, actor);
+  const row = await getPrisma().game.findUniqueOrThrow({ where: { id: gameId }, select: { maxPlayers: true } });
+  const contacts = row.maxPlayers === 10 ? await readGameVerifiedContacts(actor) : [];
+  let expired = false;
+  await runLocked(gameId, row.maxPlayers === 2 ? withPairLock(context, creator!) : context, async locked => {
+    const { loaded, now, tx } = locked;
     const { row } = loaded;
-    const decision = decideJoin(await withCurrentTimeZones(tx, loaded.state), {
-      acceptNegotiation: row.pendingChange === null,
-      memberId: actor,
-      now,
-      termsVersion: command.termsVersion,
-      timeZone: command.timeZone,
+    if (row.maxPlayers === 10 && !areGameGroupsEnabled()) reject("GAME_DISABLED", "Group games aren't available yet.");
+    if (row.maxPlayers === 2) await rejectBlockedJoin(tx, creator!, actor);
+    if (await settleLoaded(locked, actor)) { expired = true; return []; }
+    const keys = row.maxPlayers === 10 ? await verifiedGameContactKeys(tx, actor, contacts) : [];
+    const invitation = row.invitees.find(invitee => invitee.memberId === actor
+      || (invitee.memberId === null && invitee.recipientLookupKey && keys.includes(invitee.recipientLookupKey)));
+    const decision = decideJoin(row.status === "live" ? loaded.state : await withCurrentTimeZones(tx, loaded.state), {
+      acceptNegotiation: row.pendingChange === null, memberId: actor, now, termsVersion: command.termsVersion,
+      timeZone: command.timeZone, invitationSeat: invitation?.seat,
     });
     if (decision.kind === "already-joined") return [];
-    await assertPairCapacity(tx, creator, actor, now, gameId);
+    if (row.maxPlayers === 2) await assertPairCapacity(tx, creator!, actor, now, gameId);
     const claimed = playerFor(loaded.state, actor);
     if (!claimed) await tx.gamePlayer.create({ data: { gameId: row.id, memberId: actor, seat: decision.seat, timeZone: command.timeZone, joinedAt: now } });
     await writeSchedule(tx, row.id, decision);
-    await tx.game.update({
-      data: { startedAt: decision.startedAt, status: "live" },
-      where: { id: row.id },
-    });
+    const activates = decision.activates ?? true;
+    if (activates) await tx.game.update({ data: { startedAt: decision.startedAt, status: "live" }, where: { id: row.id } });
     await acceptInvitation(tx, row, actor, decision.seat);
     return [
       ...(!claimed ? [{ payload: { seat: decision.seat }, type: "joined" as const }] : []),
-      { payload: { startNow: false }, type: "started" },
+      ...(activates ? [{ payload: { startNow: false }, type: "started" as const }] : []),
     ];
   });
+  if (expired) reject("INVITE_EXPIRED", "This invite isn't open anymore.");
 }
 
 /** Everyone's time zone freezes at go-live, from their profile as of now. */
@@ -727,10 +845,10 @@ async function writeSchedule(tx: Tx, gameId: string, schedule: Schedule): Promis
  */
 async function acceptInvitation(tx: Tx, row: GameRow, joinerId: string, seat: number): Promise<void> {
   const invitation = row.invitees.find(invitee => invitee.seat === seat);
-  if (!invitation || !row.createdBy) return;
+  if (!invitation) return;
   const label = parsePendingLabel(invitation.pendingLabel);
   await tx.gameInvitee.update({ where: { gameId_seat: { gameId: row.id, seat } }, data: { memberId: joinerId, pendingLabel: Prisma.DbNull } });
-  if (!label.nameEncrypted && !label.relationshipEncrypted && !label.photoKey) return;
+  if (!row.createdBy || (!label.nameEncrypted && !label.relationshipEncrypted && !label.photoKey)) return;
   await tx.$executeRaw`
     INSERT INTO game_contact_label
       (owner_member_id, subject_member_id, name_encrypted, relationship_encrypted, photo_key, updated_at)
@@ -743,8 +861,8 @@ async function acceptInvitation(tx: Tx, row: GameRow, joinerId: string, seat: nu
 }
 
 async function cancelInvite(context: CommandContext, gameId: string): Promise<string> {
-  await runLocked(gameId, context, async ({ tx, loaded, clock }) => {
-    if (decideCancelInvite(loaded.state, context.actor) === "already-void") return [];
+  await runLocked(gameId, context, async ({ tx, loaded, clock, now }) => {
+    if (decideCancelInvite(loaded.state, context.actor, now) === "already-void") return [];
     await endGame(tx, gameId, { status: "void" });
     // Always reserve: the pending notice is also what keeps a game-funded room
     // able to deliver the one cancellation message after the game is void.
@@ -754,6 +872,51 @@ async function cancelInvite(context: CommandContext, gameId: string): Promise<st
     return [{ type: "cancelled", payload: {} }];
   });
   return gameId;
+}
+
+async function leave(context: CommandContext, gameId: string): Promise<null> {
+  let ended = false;
+  await runLocked(gameId, context, async locked => {
+    const { loaded, tx, now } = locked;
+    if (await settleLoaded(locked, context.actor)) { ended = true; return []; }
+    const decision = decideLeave(loaded.state, context.actor);
+    if (decision === "already-left") return [];
+    await tx.gamePlayer.update({ where: { gameId_memberId: { gameId, memberId: context.actor } }, data: { leftAt: now } });
+    if (decision === "void") await endGame(tx, gameId, { status: "void", result: Prisma.DbNull });
+    return [{ type: "left", payload: { seat: playerFor(loaded.state, context.actor)!.seat } }];
+  });
+  if (ended) reject("GAME_NOT_LIVE", "This game has ended.");
+  return null;
+}
+
+async function editTerms(context: CommandContext, command: Extract<GameCommand, { type: "editTerms" }>): Promise<string> {
+  const [before] = await loadGames(getPrisma(), [command.gameId]);
+  if (!before) reject("GAME_NOT_FOUND", "Game not found.");
+  assertGroupTermsOpen(before.state, context.actor, gameNow(context.now ?? new Date(), before.row), command.expectedTermsVersion);
+  const now = gameNow(context.now ?? new Date(), before.row);
+  const today = remainingPlayers(before.state).map(player => gameLocalDate(now, player.timeZone)).sort().at(-1)!;
+  const [plain] = await openGameTexts([{ ...gameTarget(before.row, "terms_words"), value: before.row.termsWordsEncrypted }]);
+  const words = parseTermWords(plain ?? "");
+  const taskSeats = before.row.invitees.map(invitee => invitee.seat);
+  // Same again can move an original invitation override to its new starter.
+  if (words.versions.at(-1)?.tasks.some(task => task.seat === 0)) taskSeats.push(0);
+  const prepared = decideNewTerms(command.terms, { maxPlayers: 10, inviteeSeats: taskSeats,
+    today, currentStartsOn: before.state.game.startsOn, newKey: () => generateHostedRandomPrefixedId("gsk") });
+  const n = command.expectedTermsVersion + 1;
+  words.versions.push({ ...prepared.words.versions[0], n });
+  const encrypted = await seal(gameTarget(before.row, "terms_words"), JSON.stringify(words));
+  await runLocked(command.gameId, context, async ({ tx, loaded, now }) => {
+    assertGroupTermsOpen(loaded.state, context.actor, now, command.expectedTermsVersion);
+    if (loaded.row.termsWordsEncrypted !== before.row.termsWordsEncrypted || loaded.row.wordsOwnerMemberId !== before.row.wordsOwnerMemberId) reject("TERMS_CHANGED", "The terms changed. Take another look.");
+    const terms = { ...loaded.state.game.terms, versions: [...loaded.state.game.terms.versions, { ...prepared.terms.versions[0], n }] };
+    const state = { ...loaded.state, game: { ...loaded.state.game, terms, lengthDays: prepared.lengthDays, startsOn: prepared.startsOn } };
+    const schedule = scheduleEditedTerms(state, prepared.startsOn === loaded.state.game.startsOn ? null : prepared.startsOn);
+    if (schedule) await writeSchedule(tx, command.gameId, schedule);
+    await tx.game.update({ where: { id: command.gameId }, data: { terms: toPrismaJsonObject(terms), termsWordsEncrypted: encrypted,
+      lengthDays: prepared.lengthDays, startsOn: prepared.startsOn ? toDbDate(prepared.startsOn) : null } });
+    return [{ type: "terms_edited", payload: { termsVersion: n } }];
+  });
+  return command.gameId;
 }
 
 /** Murph's reply in the bound chat already explains this outcome; a lifecycle notice there would repeat it. */
@@ -823,7 +986,7 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
       },
     });
     const { attempt, dayIndex, graceUsed } = decision;
-    if (kind !== "excuse" && attempt === 1) {
+    if (loaded.row.maxPlayers === 2 && kind !== "excuse" && attempt === 1) {
       notification = await claimGamePostNotification(tx, {
         gameId, actor, players: loaded.row.players, clock, entries: loaded.state.entries, dayIndex,
       });
@@ -867,10 +1030,13 @@ async function redeem(context: CommandContext, command: Extract<GameCommand, { t
   await runLocked(ticket.gameId, context, async ({ clock, now, tx, loaded }) => {
     const current = await tx.gameTicket.findUniqueOrThrow({ where: { id: ticketId } });
     const holder = loaded.row.players.find(player => player.memberId === actor);
-    if (!holder || !current.owedToSeats.includes(holder.seat)) reject("TICKET_NOT_HELD", "That prize isn't yours to mark done.");
+    const group = loaded.row.maxPlayers === 10;
+    const authorized = group ? canRedeemGroupTicket(current, loaded.row.players, loaded.row.result ? parseStoredResult(loaded.row.result) : null, actor)
+      : holder && current.owedToSeats.includes(holder.seat);
+    if (!authorized) reject("TICKET_NOT_HELD", "That prize isn't yours to mark done.");
     if (isTicketExpired(current, now)) reject("TICKET_EXPIRED", "This prize expired before it was used.");
     const debtor = loaded.row.players.find(player => current.owedBySeats.includes(player.seat))?.memberId;
-    if (current.status === "open" && (!debtor || await areGamePlayersBlocked(tx, actor, debtor))) {
+    if (!group && current.status === "open" && (!debtor || await areGamePlayersBlocked(tx, actor, debtor))) {
       reject("INVALID_REQUEST", "They left Murph, so this prize can't be marked done.");
     }
     const changed = await tx.gameTicket.updateMany({
@@ -939,7 +1105,7 @@ async function block(context: CommandContext, command: { memberId?: string; toke
     const ids: string[] = [];
     for (;;) {
       const batch = (await tx.game.findMany({ orderBy: { id: "asc" }, select: { id: true }, take: BLOCK_GAME_LIMIT,
-        where: { AND: [gamesBetween(actor, memberId), { status: { in: ACTIVE_STATUSES } }] } })).map((game) => game.id);
+        where: { maxPlayers: 2, AND: [gamesBetween(actor, memberId), { status: { in: ACTIVE_STATUSES } }] } })).map((game) => game.id);
       if (batch.length === 0) break;
       await tx.$queryRaw`SELECT id FROM game WHERE id = ANY(${batch}::text[]) ORDER BY id FOR UPDATE`;
       for (const game of await tx.game.findMany({ select: { id: true, status: true }, where: { id: { in: batch }, status: { in: ACTIVE_STATUSES } } })) {
@@ -985,7 +1151,10 @@ async function readReportSubject(actor: string, command: ReportCommand): Promise
   if (command.entryId !== undefined && (!entry || !visibleEntryIds(loaded.state, actor).has(entry.id))) {
     reject("INVALID_REQUEST", "You can only report a post you can see.");
   }
-  const reported = entry?.memberId ?? invite?.creator ?? loaded.state.players.find((player) => player.memberId !== actor)?.memberId;
+  if (loaded.row.maxPlayers === 10 && command.about === "player" && !command.reportedMemberId) reject("INVALID_REQUEST", "Choose the player to report.");
+  const reported = entry?.memberId ?? (command.about === "terms" ? loaded.row.createdBy : command.reportedMemberId
+    ?? invite?.creator ?? loaded.state.players.find((player) => player.memberId !== actor)?.memberId);
+  if (reported && !loaded.state.players.some(player => player.memberId === reported)) reject("NOT_A_PLAYER", "That player isn't in this game.");
   if (!reported || reported === actor) reject("NOT_A_PLAYER", "There's no one to report in this game.");
   return { entry, fromInvite: invite !== null, gameId, reportedMemberId: reported, ...await reportSnapshot(loaded, command.about, entry, reported) };
 }
@@ -996,7 +1165,7 @@ async function readReportedGame(actor: string, command: ReportCommand) {
   if (invite && !invite.open) reject("INVITE_EXPIRED", "This invite isn't open anymore.");
   const gameId = invite?.gameId ?? command.gameId ?? "";
   const [loaded] = await loadGames(getPrisma(), [gameId]);
-  if (!loaded || (!invite && !playerFor(loaded.state, actor))) reject("NOT_A_PLAYER", "You're not in this game.");
+  if (!loaded || (!invite && (!playerFor(loaded.state, actor) || playerFor(loaded.state, actor)?.leftAt))) reject("NOT_A_PLAYER", "You're not in this game.");
   return { gameId, invite, loaded };
 }
 
@@ -1046,7 +1215,7 @@ async function report(context: CommandContext, command: ReportCommand): Promise<
     // Under the lock: still theirs to see, still someone to report, still not blocked.
     const visible = subject.entry === null || visibleEntryIds(loaded.state, actor).has(subject.entry.id);
     const present = subject.fromInvite ? loaded.row.createdBy === subject.reportedMemberId && loaded.row.status === "invited"
-      : playerFor(loaded.state, actor) !== undefined && playerFor(loaded.state, subject.reportedMemberId) !== undefined;
+      : Boolean(playerFor(loaded.state, actor)) && !playerFor(loaded.state, actor)?.leftAt && Boolean(playerFor(loaded.state, subject.reportedMemberId));
     if (!visible || !present) reject("INVALID_REQUEST", "This changed. Take another look.");
     if (await areGamePlayersBlocked(tx, actor, subject.reportedMemberId)) reject("NOT_A_PLAYER", "There's no one to report in this game.");
     stored = await tx.gameReport.create({ data: {
@@ -1103,29 +1272,38 @@ export async function removeGamePostForReview(entryId: string): Promise<boolean>
  * day freezes its result and issues tickets.
  */
 async function settleGame(gameId: string, actor = SYSTEM_ACTOR): Promise<void> {
-  await getPrisma().$transaction(async (tx) => {
+  await getPrisma().$transaction(async tx => {
     const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
-    if (locked.length === 0) return;
-    const [{ row, state }] = await loadGames(tx, [gameId]);
+    if (!locked.length) return;
+    const [loaded] = await loadGames(tx, [gameId]);
     const clock = await databaseNow(tx);
-    if (!isGameDue(state, gameNow(clock, row))) return;
-    if (state.game.status === "invited" || state.game.status === "negotiating") {
-      await endGame(tx, gameId, { status: "void" });
-      await writeEvents(tx, gameId, actor, [{ payload: {}, type: "expired" }]);
-      return;
-    }
-    if (state.game.status !== "live") return;
-    const decision = decideSettle(state);
-    const tickets = decision.tickets.map((ticket) => ({ ...ticket, gameId, id: generateHostedRandomPrefixedId("gtk"),
-      ...(row.devClockOffsetMs === null ? {} : { createdAt: gameNow(clock, row) }) }));
-    await tx.gameTicket.createMany({ data: tickets });
-    await endGame(tx, gameId, { result: toPrismaJsonObject(decision.result), settledAt: clock, status: "settled" });
-    if (state.game.status === "live" && row.chatContainerMemberId) {
-      await reserveGameChatLifecycleTx({ gameId, kind: "recap", now: clock, tx });
-    }
-    const scores = decision.result.scores.map(({ score, seat }) => ({ score, seat }));
-    await writeEvents(tx, gameId, actor, [{ payload: { scores, ticketIds: tickets.map((ticket) => ticket.id) }, type: "settled" }]);
+    await settleLoaded({ loaded, tx, clock, now: gameNow(clock, loaded.row) }, actor);
   });
+}
+
+/** Reused by reads, join and leave, after the same game row lock. */
+async function settleLoaded({ loaded: { row, state }, tx, clock, now }: LockedStep, actor: string): Promise<boolean> {
+  if (!isGameDue(state, now)) return false;
+  const gameId = row.id;
+  if (state.game.status === "invited" || state.game.status === "negotiating") {
+    await endGame(tx, gameId, { status: "void" });
+    await writeEvents(tx, gameId, actor, [{ payload: {}, type: "expired" }]);
+    return true;
+  }
+  if (state.game.status !== "live") return false;
+  if (row.maxPlayers === 10 && remainingPlayers(state).length < 2) {
+    await endGame(tx, gameId, { status: "void" });
+    return true;
+  }
+  const decision = decideSettle(state);
+  const tickets = decision.tickets.map(ticket => ({ ...ticket, gameId, id: generateHostedRandomPrefixedId("gtk"),
+    ...(row.devClockOffsetMs === null ? {} : { createdAt: now }) }));
+  await tx.gameTicket.createMany({ data: tickets });
+  await endGame(tx, gameId, { result: toPrismaJsonObject(decision.result), settledAt: clock, status: "settled" });
+  if (row.chatContainerMemberId) await reserveGameChatLifecycleTx({ gameId, kind: "recap", now: clock, tx });
+  const scores = decision.result.scores.map(({ score, seat }) => ({ score, seat }));
+  await writeEvents(tx, gameId, actor, [{ payload: { scores, ticketIds: tickets.map(ticket => ticket.id) }, type: "settled" }]);
+  return true;
 }
 
 // --------------------------------------------------------------------- dev
@@ -1199,6 +1377,7 @@ async function negotiate(context: CommandContext, command: Extract<GameCommand, 
   const owner = await prisma.game.findUnique({ where: { inviteTokenHash: sha256Hex(command.token) } });
   if (!owner) reject("INVITE_NOT_FOUND", "Invite not found.");
   if (!owner.createdBy) reject("INVITE_EXPIRED", "This invite isn't open anymore.");
+  if (owner.maxPlayers !== 2) reject("INVALID_REQUEST", "Groups do not negotiate terms.");
   const creator = owner.createdBy;
   if (creator === context.actor) reject("NOT_A_PLAYER", "Only the invited player can suggest changes here.");
   if (!await prisma.gameProfile.findUnique({ where: { memberId: context.actor }, select: { memberId: true } })) reject("PROFILE_REQUIRED", "Add your first name first.");
@@ -1757,12 +1936,13 @@ function toRuleState(row: GameRow, entries: readonly GameEntry[]): RuleState {
       blurHash: entry.blurHash,
       incomplete: entry.incomplete === true,
     })),
-    game: toRuleStateGame(row, parseStoredTerms(row.terms)),
+    game: { ...toRuleStateGame(row, parseStoredTerms(row.terms)), admittedSeats: row.players.map(player => player.seat) },
     players: row.players.filter(hasGameIdentity).map((player) => ({
       dayOne: fromDbDate(player.dayOne),
       memberId: player.memberId,
       seat: player.seat,
       timeZone: player.timeZone,
+      joinedAt: player.joinedAt, leftAt: player.leftAt,
     })),
   };
 }
@@ -1842,7 +2022,8 @@ export async function readGame(gameId: string, memberId: string): Promise<GameVi
  */
 function canView(game: LoadedGame, memberId: string): boolean {
   if (!isGameOn(game.row)) return false;
-  if (playerFor(game.state, memberId)) return true;
+  const player = playerFor(game.state, memberId);
+  if (player) return !player.leftAt;
   // Also after its challenger left: the invitee sees it called off.
   return game.row.invitees.some(invitee => invitee.memberId === memberId)
     && (game.row.status === "invited" || game.row.players.some(player => player.leftAt !== null));
@@ -1921,7 +2102,7 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
     prisma.$queryRaw<Array<{ gameId: string }>>(Prisma.sql`
       SELECT seat.game_id AS "gameId" FROM game_player seat
       JOIN game ON game.id = seat.game_id
-      WHERE seat.member_id = ${memberId}
+      WHERE seat.member_id = ${memberId} AND seat.left_at IS NULL
         AND game.status IN ('invited', 'negotiating', 'live', 'settled', 'void')
         AND ${gameOnSql("game")}
         AND NOT EXISTS (SELECT 1 FROM game_event event WHERE event.game_id = game.id AND event.type = 'cancelled')
@@ -1932,10 +2113,10 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
     prisma.game.findMany({ select: { id: true }, take: HOME_CANDIDATE_LIMIT, where: { invitees: { some: { memberId } },
       OR: [{ status: "invited" }, { status: "void", players: { some: { leftAt: { not: null } } } }] } }),
     prisma.gameTicket.findMany({
-      include: { game: { select: { wordsOwnerMemberId: true, players: { select: { memberId: true, seat: true } }, devClockOffsetMs: true, id: true, terms: true, termsWordsEncrypted: true } } },
+      include: { game: { select: { maxPlayers: true, wordsOwnerMemberId: true, players: { select: { memberId: true, seat: true } }, devClockOffsetMs: true, id: true, terms: true, termsWordsEncrypted: true } } },
       orderBy: { createdAt: "desc" },
       take: WALLET_LIMIT,
-      where: { game: { AND: [gameOnWhere(), { players: { some: { memberId } } }] } },
+      where: { game: { AND: [gameOnWhere(), { players: { some: { memberId, leftAt: null } } }] } },
     }),
     prisma.gameEntry.findFirst({ where: { memberId, attempt: { gt: 0 }, withdrawnAt: null },
       orderBy: [{ receivedAt: "desc" }, { id: "desc" }], select: { kind: true } }),
@@ -1947,9 +2128,9 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
     ...visible.flatMap(participantsOf), ...tickets.flatMap((ticket) => counterpartyOf(ticket) ?? []),
   ]);
   // Someone you blocked is gone from your Home: their games and tickets too.
-  const shown = visible.filter((game) => !participantsOf(game).some((id) => blocks.blocked.has(id)));
+  const shown = visible.filter((game) => game.row.maxPlayers === 10 || !participantsOf(game).some((id) => blocks.blocked.has(id)));
   const games = sortForHome(homeGames(shown, current.clock, blocks), memberId, current.clock);
-  const kept = tickets.filter((ticket) => !blocks.blocked.has(counterpartyOf(ticket) ?? ""));
+  const kept = tickets.filter((ticket) => ticket.game.maxPlayers === 10 || !blocks.blocked.has(counterpartyOf(ticket) ?? ""));
   const [views, blocked] = await Promise.all([buildViews(games, memberId, current.clock, blocks), readBlockedPeople(memberId)]);
   const words = await readTermWords([...new Map(kept.map((ticket) => [ticket.gameId, ticket.game])).values()]);
   const [firstName] = await openGameTexts(profile
@@ -1996,6 +2177,7 @@ export async function readHistory(memberId: string): Promise<GameHistoryView> {
       WHERE game.status = 'settled'
         AND game.settled_at IS NOT NULL
         AND ${gameOnSql("game")}
+        AND game.max_players = 2
         AND (SELECT count(*) FROM game_player roster WHERE roster.game_id = game.id) = 2
         AND NOT EXISTS (
           SELECT 1 FROM game_block blocked
@@ -2161,8 +2343,10 @@ async function authorizeReads(memberId: string, mediaKeys: readonly string[], mo
           AND EXISTS (
             SELECT 1 FROM game
             WHERE ${gameOnSql("game")}
+              AND NOT EXISTS (SELECT 1 FROM game_player departed
+                WHERE departed.game_id = game.id AND departed.member_id = ${memberId} AND departed.left_at IS NOT NULL)
               AND (EXISTS (SELECT 1 FROM game_player player
-                WHERE player.game_id = game.id AND player.member_id = ${memberId})
+                WHERE player.game_id = game.id AND player.member_id = ${memberId} AND player.left_at IS NULL)
                 OR (game.status = 'invited' AND EXISTS (SELECT 1 FROM game_invitee invited WHERE invited.game_id = game.id AND invited.member_id = ${memberId})))
               AND (EXISTS (SELECT 1 FROM game_player player
                 WHERE player.game_id = game.id AND player.member_id = requested.owner)
@@ -2171,7 +2355,7 @@ async function authorizeReads(memberId: string, mediaKeys: readonly string[], mo
       ) OR EXISTS (
         SELECT 1 FROM game_entry entry
         JOIN game ON game.id = entry.game_id
-        JOIN game_player viewer ON viewer.game_id = game.id AND viewer.member_id = ${memberId}
+        JOIN game_player viewer ON viewer.game_id = game.id AND viewer.member_id = ${memberId} AND viewer.left_at IS NULL
         WHERE entry.member_id = requested.owner AND entry.media_keys @> ARRAY[requested.key]::text[]
           AND entry.attempt > 0 AND entry.withdrawn_at IS NULL
           AND ${gameOnSql("game")}
