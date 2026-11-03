@@ -227,7 +227,9 @@ export function normalizeHostedAiUsageLedgerModelId(value: string): HostedAiUsag
 export const HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS =
   [
     ...HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS,
-  ] as readonly HostedAiUsageAllowancePricedModel[];
+    // Historical usage evidence must retain its original Flex pricing basis.
+    "gpt-5.6-sol",
+  ] as readonly HostedAiUsageLedgerModel[];
 
 export type HostedAiUsageOpenAiFlexTokenPricingModel =
   (typeof HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS)[number];
@@ -362,12 +364,12 @@ export function normalizeHostedAiUsageAllowanceElevenLabsMusicModelId(
 
 export function isHostedAiUsageOpenAiFlexTokenPricingModelId(
   value: string | null | undefined,
-): value is HostedAiUsageAllowancePricedModel {
+): value is HostedAiUsageOpenAiFlexTokenPricingModel {
   if (typeof value !== "string") {
     return false;
   }
 
-  const normalized = normalizeHostedAiUsageAllowancePricedModelId(value);
+  const normalized = normalizeHostedAiUsageLedgerModelId(value);
   return normalized
     ? HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS.includes(normalized)
     : false;

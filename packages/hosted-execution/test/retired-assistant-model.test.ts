@@ -9,6 +9,7 @@ import {
   HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS,
   normalizeHostedAiUsageAllowancePricedModelId,
   normalizeHostedAiUsageLedgerModelId,
+  resolveHostedAiUsageTokenPricingBasis,
 } from "../src/runtime-control.ts";
 
 describe("retired model compatibility", () => {
@@ -20,6 +21,7 @@ describe("retired model compatibility", () => {
     for (const model of ["gpt-5.6-sol", "openai/gpt-5.6-sol-2026-07-08"]) {
       expect(normalizeHostedAiUsageAllowancePricedModelId(model)).toBeNull();
       expect(normalizeHostedAiUsageLedgerModelId(model)).toBe("gpt-5.6-sol");
+      expect(resolveHostedAiUsageTokenPricingBasis({ model, providerName: "hosted-openai", serviceTier: "flex" })).toBe("openai-flex");
     }
     expect(() => parseHostedRuntimeAssistantConfigurationControlRequest({
       action: "update", assistantInputId: `ain_${"a".repeat(32)}`, model: "gpt-5.6-sol",
