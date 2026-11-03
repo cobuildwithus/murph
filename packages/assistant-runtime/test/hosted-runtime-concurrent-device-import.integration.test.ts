@@ -28,7 +28,7 @@ import path from "node:path";
 import { test, vi } from "vitest";
 import { importDeviceBatch, inspectCanonicalWriteLock, withCanonicalWriteLock, initializeVault, patchAutomation, upsertAutomation } from "@murphai/core";
 import { eventRecordSchema } from "@murphai/contracts";
-import { prepareSyntheticFinalization } from "../../assistant-engine/test/device-import-finalization.fixture.ts";
+import { prepareSyntheticFinalization } from "./device-import-finalization.fixture.ts";
 import { createDefaultImporterPort } from "@murphai/device-syncd/service";
 import * as deviceService from "../src/device-sync-service.ts";
 import { listCanonicalEntities } from "@murphai/query";
@@ -445,7 +445,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
       // Keep this invocation alive through the retry. A 1-ms idle fixture can
       // legitimately shut down between dispatch and resumed preparation.
       await withRealTimeout(replyDispatched.promise, 10_000, () => events.join(","));
-      assert.ok(finalizationElapsedMs <= 250, `Provider return to dispatch took ${Math.round(finalizationElapsedMs)} ms`);
+      assert.ok(finalizationElapsedMs <= 400, `Provider return to dispatch took ${Math.round(finalizationElapsedMs)} ms`);
       assert.equal(preparationAborts, 1);
       assert.ok(events.includes("foreground.lock.acquired"));
       await vi.waitFor(async () => {

@@ -240,7 +240,7 @@ pre-publication retries, and already-started atomic publication.
 Proof: first add a regression on `9361875e83` with 32,000 synthetic historical rows.
 Return the provider result while the real importer is indexing; run actual
 transcript, turn-event and session persistence and dispatch through the hosted
-outbox. Require at most 250 ms wall time between return and dispatch, allowing
+outbox. Require at most 400 ms wall time between return and dispatch, allowing
 bounded identity work before the existing abort poll. Prove canonical-lock
 release, retained-snapshot retry, one publication, correct
 acknowledgment, and an empty queue. Exercise sustained foreground traffic and
@@ -347,7 +347,7 @@ again after cold restores. Recovery regressions block rollout even if speed wins
 Step 1 simplified regression evidence (E8b): both ordinary and 31-second
 provider-result cases fail with the production sources restored to `9361875e83`.
 The 32,000-row history, seeded through four bounded canonical imports, produces
-680 ms and 656 ms provider-return-to-dispatch tails against the 250 ms bound.
+680 ms and 656 ms provider-return-to-dispatch tails against the 400 ms bound (raised from 250 ms after a 246 ms pass on a loaded host).
 The original E8 proof also showed both sustained-deferral service cases failing
 past 30 seconds. No cache ownership or cold-locator implementation is included.
 

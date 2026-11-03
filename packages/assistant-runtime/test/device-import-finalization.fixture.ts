@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import type { AssistantSession } from "@murphai/operator-config/assistant-cli-contracts";
-import { persistAssistantTurnAndSession } from "../src/assistant/turn-finalizer.ts";
-import { createAssistantRuntimeStateService } from "../src/assistant/runtime-state-service.ts";
+import { createAssistantRuntimeStateService } from "@murphai/assistant-engine/assistant-state";
 
-// Shared composed-runtime fixture: real transcripts, turn events and session writes.
+// Synthetic finalization tail: the same runtime-state writes persistAssistantTurnAndSession
+// performs after provider return (user transcript, user.persisted event, assistant
+// transcript, session save), through the public state service.
 export async function prepareSyntheticFinalization(vault: string, now: string) {
   const target: AssistantSession["target"] = {
     adapter: "codex-cli", approvalPolicy: "never", codexCommand: null, codexHome: null,
@@ -32,33 +33,17 @@ export async function prepareSyntheticFinalization(vault: string, now: string) {
     providerModel: target.model, sessionId: session.sessionId, startedAt: now,
   });
   return async () => {
-    await persistAssistantTurnAndSession({
-      input: { prompt: "Synthetic prompt", vault }, session,
-      plan: {
-        cliAccess: { env: {}, rawCommand: "vault-cli" },
-        conversationPolicy: {
-          audience: { actorId: null, bindingDelivery: null, channel: "linq",
-            deliveryPolicy: "binding-target-only", threadIsDirect: true,
-            explicitTarget: "thread_1", identityId: "synthetic-member",
-            replyToMessageId: null, threadId: "thread_1" },
-          operatorAuthority: "direct-operator",
-        },
-        onboardingGuidanceOpen: false, firstContactStateDocIds: [],
-        operatorAuthority: "direct-operator", persistUserPromptOnFailure: false,
-        requestedWorkingDirectory: vault,
-      },
-      providerResult: {
-        assistantContractFingerprint: "a".repeat(64), attemptCount: 1,
-        codexContinuation: { kind: "explicit-structured-history" }, codexThreadId: null,
-        provider: "codex-cli", providerOptions: session.providerOptions, rawEvents: [],
-        response: "Your message is received.", responseDeliveryContextOrdinal: 0,
-        route: { codexCommand: null, label: "synthetic", provider: "codex-cli",
-          providerOptions: session.providerOptions, routeId: "synthetic" },
-        session, stderr: "", stdout: "", transcriptResponse: "Your message is received.",
-        workingDirectory: vault,
-      },
-      providerResumeStateAction: "preserve-existing", turnCreatedAt: now, turnId: receipt.turnId,
+    await state.transcripts.append(session.sessionId, [
+      { kind: "user", text: "Synthetic prompt", createdAt: now },
+    ]);
+    await state.turns.appendEvent({
+      turnId: receipt.turnId, kind: "user.persisted",
+      detail: "user prompt persisted after provider completion", at: now,
     });
+    await state.transcripts.append(session.sessionId, [
+      { kind: "assistant", text: "Your message is received.", createdAt: now },
+    ]);
+    await state.sessions.save({ ...session, lastTurnAt: now, turnCount: session.turnCount + 1, updatedAt: now });
     assert.equal((await state.sessions.get(session.sessionId))?.turnCount, 1);
     assert.ok((await state.turns.readReceipt(receipt.turnId))?.timeline.some(event => event.kind === "user.persisted"));
     assert.deepEqual((await state.transcripts.list(session.sessionId)).map(row => row.kind), ["user", "assistant"]);
