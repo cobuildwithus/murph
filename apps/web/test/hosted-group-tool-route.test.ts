@@ -71,6 +71,21 @@ describe("hosted group tool route", () => {
     });
   });
 
+  it.each([
+    { query: "", enabled: false },
+    { query: "?gameMultiplayer=1", enabled: true },
+    { query: "?gameMultiplayer=true", enabled: false },
+  ])("gates group games on the signed query $query", async ({ query, enabled }) => {
+    const body = { action: "read_game", origin: { kind: "accepted_input", assistantInputId: `ain_${"a".repeat(32)}` } };
+    mocks.handleTool.mockResolvedValue({ action: "read_game", result: { status: "ok", state: { games: [] } } });
+    const request = new Request(`https://web.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}${query}`, {
+      method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" },
+    });
+    expect((await route.POST(request)).status).toBe(200);
+    expect(mocks.requireJsonCallback).toHaveBeenCalledWith(request, expect.any(Object));
+    expect(mocks.handleTool).toHaveBeenCalledWith(expect.objectContaining({ gameMultiplayer: enabled, request: body }));
+  });
+
   it("forwards the signed game runtime identity for the mutation transaction fence", async () => {
     const body = { action: "read_game", origin: { kind: "accepted_input", assistantInputId: `ain_${"a".repeat(32)}` } };
     mocks.handleTool.mockResolvedValue({ action: "read_game", result: { status: "ok", state: { games: [] } } });
@@ -143,6 +158,7 @@ describe("hosted group tool route", () => {
       maxBodyBytes: HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
     });
     expect(mocks.handleTool).toHaveBeenCalledWith({
+      gameMultiplayer: false,
       includeMembershipAvailability: false,
       includeParticipantRosters: false,
       memberId: "member_group_runtime",
@@ -332,6 +348,7 @@ describe("hosted group tool route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.handleTool).toHaveBeenCalledWith({
+      gameMultiplayer: false,
       includeMembershipAvailability: false,
       includeParticipantRosters: false,
       memberId: "member_group_runtime",
@@ -560,6 +577,7 @@ describe("hosted group tool route", () => {
 
       expect(response.status).toBe(200);
       expect(mocks.handleTool).toHaveBeenCalledWith({
+        gameMultiplayer: false,
         includeMembershipAvailability: false,
         includeParticipantRosters: false,
         memberId: "member_group_runtime",

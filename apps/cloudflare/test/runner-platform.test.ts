@@ -95,6 +95,7 @@ function buildExpectedVaultShareActiveKindsPath(
 
 function buildExpectedGroupToolPath(): string {
   const params = new URLSearchParams();
+  params.set("gameMultiplayer", "1");
   params.set(
     HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM,
     HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE,

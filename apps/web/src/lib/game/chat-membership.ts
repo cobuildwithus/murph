@@ -73,6 +73,8 @@ export function gameChatPlayerIds(game: { maxPlayers?: number; status: string; p
 
 /** Bounded candidates; projection rechecks binding and the exact audience. */
 export async function readGameChatCandidateIds(playerMemberIds: readonly string[], multiplayer = true, containerMemberId?: string): Promise<string[]> {
+  // Group projections require a bound room; roomless notice context stays pair-only.
+  multiplayer = containerMemberId ? multiplayer : false;
   if (((!multiplayer || !containerMemberId) && !sameGamePlayers(playerMemberIds, playerMemberIds)) || !isGameAudienceOn(playerMemberIds)) return [];
   const prisma = getPrisma();
   const [active, settled] = await Promise.all([

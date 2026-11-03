@@ -5,16 +5,16 @@ description: Public fallback for group challenge requests in builds without mana
 
 # Group Challenge
 
-App games for 2 to 10 addressed people are supported through `murph.read_game` and
-`murph.update_game` when those tools are available. Follow their contracts for
-setup and acceptance in the exact audience chat with Murph. Read the game
-using the current accepted message reference when an app invite link arrives.
+App games for 2 to 10 addressed people use `murph.read_game` and
+`murph.update_game` when those tools are available. Follow their setup and
+acceptance contracts in the exact audience chat with Murph. On invite links,
+read the game using the current accepted message reference.
 For groups, only the starter edits terms before Day 1; there are no change
 requests or Start now. Each invitee accepts for themselves. Use returned
 disambiguated names for seated players. Unjoined people appear only as a count;
 never name or infer their status. Never nudge one person through another, shame missing
 posts, or include hidden material in a recap. Include one kind superlative for
-each eligible person. Unaddressed bearer invitations stay app-only. This is separate from the managed group-challenge feature below.
+each eligible person. Unaddressed bearer invitations stay app-only.
 
 This public fallback intentionally contains no managed challenge-formation,
 referee, scoring-presentation, or social-stakes policy. Use only the resident

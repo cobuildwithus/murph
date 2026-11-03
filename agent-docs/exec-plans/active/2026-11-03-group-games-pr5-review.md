@@ -64,3 +64,13 @@ Local candidate verification complete; external PR gates remain pending.
 ## Deployment and publication
 
 Web first, then Cloudflare runner. Old bundles against new Web remain pair-only; new bundles accept old Web pair responses and the ignored query capability. Group admission stays off. No schema change. Publish as draft, mark the candidate Ready, and run ReviewGPT pinned to vonneumann concurrently with CI. Do not merge or deploy.
+
+## Final ReviewGPT round 1
+
+- PR #4498, head ea764e128d0e9f04fd961ce477dfc5c6d18e760b; sensitive full snapshot, 48 changed blobs verified by the review. Pinned vonneumann, sent model verified as GPT-6 Pro, attachment confirmed, exact accepted turn and completed `REVIEW_COMPLETE` response captured. The accepted response remained pending beyond 11 minutes, exceeding the wrapper's 80-second marked-response gate; the exported UI exposes no separate reasoning-duration label.
+- Result: FINDINGS. Both accepted. The capable tool's post-mutation member-ID comparison discarded contrary complete handle evidence. Preserve fresh keyed audience evidence, compare it before projection, and retain legacy pair behavior. The lifecycle notice context passed an empty room to group projection. Pass the known bound room and constrain roomless candidate discovery to pairs. No new provider call, queue or state owner.
+- Proof: Added update/photo regressions for unresolved additions/replacements, unchanged rosters and key rotation. Added a PostgreSQL composition across canonical join, lifecycle instructions, shared projection, real receipt updates and replay, with one unjoined relative and roomless pair controls.
+- CI also exposed stale capability-parameter and pair-only skill expectations. Updated those tests and shortened redundant skill prose to preserve the existing size budget and rules. Web route and Cloudflare platform suites pass 370 tests; assistant deterministic selection passes 49.
+- Remediation verification: all 17 PostgreSQL game suites pass, 251 tests. Web selection: 939 pass initially plus the corrected roomless-pair query expectation (12-test suite passes). Hosted historical skew/contracts: 39 pass, 2 gated skips. Web/assistant typechecks, Web lint, complexity and runner bundle pass. The new composed regression proves both notices and replay while an addressed relative remains unjoined.
+- Focused real Codex rerun passed with one read and one approval; reply review Ready. Docs drift/gardening passed. The isolated database was dropped and catalog absence confirmed again.
+- Round 2 and final-head CI remain pending. The PR is Draft during remediation.

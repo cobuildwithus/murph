@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-const m = vi.hoisted(() => ({ exact: vi.fn(), runtime: vi.fn(), access: vi.fn(), wake: vi.fn(), route: vi.fn(), sender: vi.fn(), game: vi.fn(), run: vi.fn(), read: vi.fn(), profiles: vi.fn(), players: vi.fn(), photo: vi.fn(), recapMaterial: vi.fn(), sealRecap: vi.fn(), mailbox: vi.fn(), decodeMailbox: vi.fn() }));
-vi.mock("../src/lib/prisma", () => ({ getPrisma: () => ({ $transaction: (fn: (tx: object) => unknown) => fn({ game: { findFirst: m.game } }), hostedMailboxItem: { findMany: m.mailbox } }) }));
+const m = vi.hoisted(() => ({ audience: vi.fn(), groupAuthority: vi.fn(), exact: vi.fn(), runtime: vi.fn(), access: vi.fn(), wake: vi.fn(), route: vi.fn(), sender: vi.fn(), game: vi.fn(), run: vi.fn(), read: vi.fn(), profiles: vi.fn(), players: vi.fn(), photo: vi.fn(), recapMaterial: vi.fn(), sealRecap: vi.fn(), mailbox: vi.fn(), decodeMailbox: vi.fn() }));
+vi.mock("../src/lib/prisma", () => ({ getPrisma: () => ({ game: { findFirst: m.game }, $transaction: (fn: (tx: object) => unknown) => fn({ game: { findFirst: m.game } }), hostedMailboxItem: { findMany: m.mailbox } }) }));
 vi.mock("../src/lib/hosted-execution/runtime-owner", () => ({ requireHostedRuntimeCallbackTx: m.runtime }));
 vi.mock("../src/lib/hosted-mailbox/runtime-access", () => ({ requireHostedRuntimeActiveAccessForUpdateTx: m.access }));
 vi.mock("../src/lib/hosted-mailbox/store", () => ({
@@ -12,6 +12,7 @@ vi.mock("../src/lib/hosted-groups/group-message-sender", () => ({ resolveHostedG
 vi.mock("../src/lib/hosted-routing/thread-route-store", () => ({ assertHostedThreadRouteEgressAuthority: m.route }));
 vi.mock("../src/lib/game/chat-membership", async (importOriginal) => ({
   ...await importOriginal<object>(), requireExactGameChat: m.exact, readGameChatPlayerIds: m.players,
+  readGameChatAudience: m.audience, readGroupGameChatAuthority: m.groupAuthority,
 }));
 vi.mock("../src/lib/game/service", () => ({
   readGameRecapMaterial: m.recapMaterial,
@@ -186,6 +187,30 @@ describe("game chat tool authority", () => {
     expect((await bridge.authorize(tx, origin.assistantInputId)).actor).toBe(actor);
     m.players.mockResolvedValue([actor, "new_person"]);
     expect((await bridge.authorize(tx, origin.assistantInputId)).actor).toBeNull();
+  });
+  it.each(["update_game", "game_photo"] as const)("keeps the complete fresh audience after %s", async action => {
+    const initial = { memberIds: [actor, "other_synthetic"], threadId: "chat_synthetic", contacts: [{ kind: "email", value: "a@example.test" }, { kind: "email", value: "b@example.test" }], keys: { current: "key-old", candidates: ["key-old"] } };
+    const photo = { operation: "save" as const, gameId: "game_synthetic", sourceMessageRef: origin.assistantInputId, attachmentOrdinal: 1 };
+    const request = action === "update_game" ? update.request : { action, origin, photo };
+    m.photo.mockResolvedValue({ status: "ok", photoOutcome: "saved" });
+    for (const change of ["addition", "replacement", "unchanged", "rotation"] as const) {
+      m.read.mockClear(); m.run.mockClear(); m.photo.mockClear();
+      const groupGame = change === "replacement";
+      const before = groupGame ? { ...initial, contacts: [...initial.contacts, { kind: "email", value: "unjoined@example.test" }] } : initial;
+      m.game.mockResolvedValue({ id: "game_synthetic", maxPlayers: groupGame ? 10 : 2, chatContainerMemberId: group, invitees: [], players: initial.memberIds.map(memberId => ({ memberId })) });
+      m.groupAuthority.mockResolvedValue(before);
+      const after = { ...before, keys: change === "rotation" ? { current: "key-new", candidates: ["key-new", "key-old"] } : change === "unchanged" ? before.keys : { current: "different-audience", candidates: ["different-audience"] },
+        contacts: change === "addition" ? [...before.contacts, { kind: "email", value: "outside@example.test" }] : change === "replacement" ? [...initial.contacts, { kind: "email", value: "replacement@example.test" }] : before.contacts };
+      m.audience.mockResolvedValueOnce(before).mockResolvedValueOnce(after);
+      if (change === "addition" || change === "replacement") {
+        await expect(handleGameChatTool({ ...read, multiplayer: true, request })).rejects.toThrow("participants changed");
+        expect(m.read).not.toHaveBeenCalled();
+      } else {
+        expect((await handleGameChatTool({ ...read, multiplayer: true, request })).result.status).toBe("ok");
+        expect(m.read).toHaveBeenCalledExactlyOnceWith(group, initial.memberIds, actor, true, after);
+      }
+      expect(action === "update_game" ? m.run : m.photo).toHaveBeenCalledOnce();
+    }
   });
   it("passes the provider-proven pair to the shared projection", async () => {
     await handleGameChatTool(read);

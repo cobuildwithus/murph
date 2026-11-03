@@ -5886,6 +5886,11 @@ membership is not audience evidence. A stored binding never permits retargeting.
 Runtime funding derives bounded database eligibility; it never grants projection
 or delivery authority.
 
+After a chat mutation, tools compare the complete fresh keyed audience and use
+that proof for the response projection; equal resolved member IDs alone cannot
+hide an added unregistered handle. Group lifecycle context carries its bound
+room. Roomless notice lookups remain pair-only.
+
 Approval matches an addressed invitee by memberId or verified contact read keys
 and calls ordinary join, including legal and profile prerequisites. Unaddressed
 bearer acceptance remains app-only, and an outside seated joiner suppresses chat.

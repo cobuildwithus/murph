@@ -1705,9 +1705,9 @@ export async function readGameRematchNotice(gameId: string, playerMemberIds: rea
   };
 }
 
-/** Which game a room notice means, only when the pair has other open games to confuse it with. */
-export async function readGameNoticeRoom(gameId: string, playerMemberIds: readonly string[]): Promise<GameNoticeRoom | undefined> {
-  const { games } = await readGameChatState("", playerMemberIds);
+/** Which game a room notice means when other open games could confuse it. */
+export async function readGameNoticeRoom(gameId: string, playerMemberIds: readonly string[], containerMemberId = ""): Promise<GameNoticeRoom | undefined> {
+  const { games } = await readGameChatState(containerMemberId, playerMemberIds);
   const shared = games.find((game) => game.id === gameId);
   const others = games.filter((game) => game.id !== gameId && (game.status === "live" || game.status === "negotiating"));
   if (!shared || others.length === 0) return undefined;

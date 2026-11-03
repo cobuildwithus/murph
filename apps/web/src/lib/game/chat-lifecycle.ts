@@ -281,13 +281,15 @@ async function deliverCurrentGameChatLifecycle(input: {
 async function lifecycleInstructions(game: Pick<Game, "id" | "chatContainerMemberId" | "maxPlayers">, kind: GameChatLifecycleKind, players: readonly string[], proposalId?: string): Promise<string | null> {
   if (kind === "cancelled") return buildGameInviteCancelledInstructions();
   const { readGameNoticeRoom } = await import("./service");
+  const noticeRoom = () => game.maxPlayers === 10
+    ? readGameNoticeRoom(game.id, players, game.chatContainerMemberId ?? "") : readGameNoticeRoom(game.id, players);
   if (kind === "recap") {
     if (!game.chatContainerMemberId) return null;
     const { readGameRecapMaterial } = await import("./service");
     const { readGameRecapChatMessages } = await import("./chat-tool");
     const material = await readGameRecapMaterial(game.id, game.chatContainerMemberId, players);
     return material
-      ? buildGameRecapInstructions(await readGameRecapChatMessages({ containerMemberId: game.chatContainerMemberId, material }), await readGameNoticeRoom(game.id, players), game.maxPlayers === 10)
+      ? buildGameRecapInstructions(await readGameRecapChatMessages({ containerMemberId: game.chatContainerMemberId, material }), await noticeRoom(), game.maxPlayers === 10)
       : null;
   }
   if (kind === "rematch" && game.maxPlayers === 10) {
@@ -304,13 +306,13 @@ async function lifecycleInstructions(game: Pick<Game, "id" | "chatContainerMembe
   if (kind === "change_expired") {
     const event = await getPrisma().gameEvent.findUnique({ where: { commandKey: `game-change-resolved:${game.id}:${proposalId}` }, select: { type: true, payload: true } });
     return event?.type === "change_expired" && isRecord(event.payload) && typeof event.payload.reason === "string"
-      ? buildGameChangeExpiredInstructions(event.payload.reason, await readGameNoticeRoom(game.id, players)) : null;
+      ? buildGameChangeExpiredInstructions(event.payload.reason, await noticeRoom()) : null;
   }
   const { readGameChatState } = await import("./service");
   const state = await readGameChatState(game.chatContainerMemberId ?? "", players);
   const shared = state.games.find((candidate) => candidate.id === game.id);
   if (!shared || !lifecycleStatuses(kind).includes(shared.status)) return null;
-  const room = await readGameNoticeRoom(game.id, players);
+  const room = await noticeRoom();
   return kind === "started" ? buildGameKickoffInstructions({ kind, game: shared, room }) : buildGameChangeCancelledInstructions(room);
 }
 

@@ -15,8 +15,12 @@ import { prepareGameAccountDeletion, applyGameAccountDeletionTx } from "@/src/li
 import type { GameCommand, GameTerms } from "@/src/lib/game/command";
 
 const chatProof = vi.hoisted(() => ({ rooms: new Map<string, string[]>(), sender: "", wake: null as unknown }));
+const lifecycleProof = vi.hoisted(() => ({ destination: vi.fn(), bind: vi.fn(), route: vi.fn(), prepare: vi.fn(), append: vi.fn(), mailbox: vi.fn(), signal: vi.fn() }));
 vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", async importOriginal => ({
   ...await importOriginal<object>(),
+  resolveHostedAssistantNotificationDestination: lifecycleProof.destination,
+  bindHostedAssistantNotificationDestination: lifecycleProof.bind,
+  assertHostedAssistantNotificationRouteAuthority: lifecycleProof.route,
   readHostedThreadContainerLinqRouteAuthorities: async ({ containerMemberIds }: { containerMemberIds: string[] }) => ({ authorities: new Map(containerMemberIds.filter(id => chatProof.rooms.has(id)).map(id => [id, { channel: "linq", threadId: id, containerMemberId: id, accountLookupKey: "synthetic-line" }])) }),
 }));
 vi.mock("@/src/lib/hosted-onboarding/linq-client", async importOriginal => ({
@@ -28,7 +32,10 @@ vi.mock("@/src/lib/hosted-execution/runtime-owner", () => ({ requireHostedRuntim
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({ requireHostedRuntimeActiveAccessForUpdateTx: async () => {} }));
 vi.mock("@/src/lib/hosted-routing/thread-route-store", async importOriginal => ({ ...await importOriginal<object>(), assertHostedThreadRouteEgressAuthority: async () => {} }));
 vi.mock("@/src/lib/hosted-groups/group-message-sender", () => ({ resolveHostedGroupMessageSenderMemberId: async () => chatProof.sender }));
-vi.mock("@/src/lib/hosted-mailbox/store", async importOriginal => ({ ...await importOriginal<object>(), readHostedMailboxConversationWakeByAssistantInputId: async () => chatProof.wake }));
+vi.mock("@/src/lib/hosted-mailbox/store", async importOriginal => ({ ...await importOriginal<object>(), readHostedMailboxConversationWakeByAssistantInputId: async () => chatProof.wake,
+  prepareHostedMailboxEnvelopeAppend: lifecycleProof.prepare, appendPreparedHostedMailboxEnvelopeTx: lifecycleProof.append, readHostedMailboxItemByDedupeKey: lifecycleProof.mailbox,
+}));
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: lifecycleProof.signal }));
 vi.mock("@/src/lib/hosted-onboarding/linq-line-store", async importOriginal => ({
   ...await importOriginal<object>(), readHostedLinqIncomingLineState: async () => ({ kind: "assignable" }), listHostedLinqHealthyProactiveLines: async () => [{ phoneNumber: "+15555550100" }],
 }));
@@ -835,6 +842,48 @@ async function exactRoom(people: Person[]) {
 }
 
 describe.skipIf(!enabled)("exact group chat and composer persistence", () => {
+  it("enqueues group kickoff and recap with an unjoined relative and keeps roomless pair notices separate", async () => {
+    const people = await Promise.all([person(), person()]);
+    const relative = { id: "unjoined-relative", email: `${randomUUID()}@example.test` };
+    const room = await exactRoom(people);
+    chatProof.rooms.set(room, [...people.map(p => p.email), relative.email]);
+    const group = await create(people[0], [people[1], relative]);
+    await ok(people[1].id, join(group.token));
+    const { deliverGameChatLifecycle } = await vi.importActual<typeof import("@/src/lib/game/chat-lifecycle")>("@/src/lib/game/chat-lifecycle");
+    const { readGameNoticeRoom } = await import("@/src/lib/game/service");
+    lifecycleProof.destination.mockResolvedValue({ conversationShape: "thread-container", route: { channel: "linq" } });
+    lifecycleProof.bind.mockReturnValue({ route: { channel: "linq", delivery: { kind: "thread", target: room }, accountId: "line" }, externalThreadRouteAuthority: { channel: "linq", containerMemberId: room, threadId: room, accountLookupKey: "line-key" } });
+    lifecycleProof.prepare.mockResolvedValue({}); lifecycleProof.append.mockResolvedValue({ mailboxItemId: "synthetic-notice" });
+    lifecycleProof.mailbox.mockResolvedValue(null);
+    await expect(deliverGameChatLifecycle(group.id, "started")).resolves.toBe(true);
+    expect(lifecycleProof.append).toHaveBeenCalledOnce();
+    expect(lifecycleProof.prepare.mock.calls[0][0].envelope.notification).toMatchObject({ deliveryIdempotencyKey: `game-started:${group.id}`, responsePolicy: { kind: "require_send" } });
+    expect(await db.hostedLinqDelivery.findFirst({ where: { sourceRef: group.id, template: "game_started" } })).toMatchObject({ status: "generation_queued" });
+    lifecycleProof.mailbox.mockResolvedValue({ id: "synthetic-notice", consumedAt: null });
+    await expect(deliverGameChatLifecycle(group.id, "started")).resolves.toBe(true);
+    expect(lifecycleProof.append).toHaveBeenCalledOnce();
+    await expect(readGameNoticeRoom(group.id, people.map(p => p.id))).resolves.toBeUndefined();
+    await settle(group.id, people[0].id);
+    lifecycleProof.mailbox.mockResolvedValue(null);
+    await expect(deliverGameChatLifecycle(group.id, "recap")).resolves.toBe(true);
+    expect(lifecycleProof.append).toHaveBeenCalledTimes(2);
+    expect(lifecycleProof.prepare.mock.calls[1][0].envelope.notification).toMatchObject({ deliveryIdempotencyKey: `game-recap:${group.id}`, responsePolicy: { kind: "require_game_recap" } });
+    expect((await gameRow(group.id)).invitees[1].memberId).toBeNull();
+    lifecycleProof.mailbox.mockResolvedValue({ id: "synthetic-recap", consumedAt: null });
+    await expect(deliverGameChatLifecycle(group.id, "recap")).resolves.toBe(true);
+    expect(lifecycleProof.append).toHaveBeenCalledTimes(2);
+    // The pair notice reader must not load a group merely because its two seated IDs match.
+    const pairTerms = { ...terms, defaultTask: undefined, tasks: [{ seat: 0, text: "Pair walk" }, { seat: 1, text: "Pair read" }] };
+    const pairs = [];
+    for (let i = 0; i < 2; i++) {
+      const result = await runGameCommand({ actorMemberId: people[0].id, command: { type: "createGame", gameId: randomUUID(), inviteeFirstName: "Player", terms: pairTerms }, now: createdAt });
+      if (!result.ok) throw new Error(result.error.code);
+      if (!result.game?.inviteToken) throw new Error("Pair fixture token missing");
+      await runGameCommand({ actorMemberId: people[1].id, command: join(result.game.inviteToken), now: createdAt });
+      pairs.push(result.game.id);
+    }
+    expect(await readGameNoticeRoom(pairs[0], people.map(p => p.id))).toMatchObject({ tasks: ["Pair walk", "Pair read"], otherGames: [{ tasks: ["Pair walk", "Pair read"] }] });
+  });
   it("selects an exact room before create, keeps several games there, and disambiguates names", async () => {
     const people = await Promise.all([person(), person(), person()]);
     const room = await exactRoom(people);

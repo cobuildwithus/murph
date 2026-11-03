@@ -71,11 +71,23 @@ export async function handleGameChatTool(input: Input): Promise<HostedGameToolRe
     // Rule messages name only the rule and next step, so Murph can explain a refusal.
     if (!result.ok) return { action: input.request.action, result: { status: "rejected", error: `${result.error.code}: ${result.error.message}`.slice(0, 128) } };
     dayOutcome = result.dayOutcome;
-    const latestPlayers = await requireExactGameChat(input.memberId, input.multiplayer);
-    if (!sameRoomIdentities(latestPlayers, playerMemberIds)) throw new TypeError("Game chat participants changed.");
   }
-  if (input.request.action === "game_photo" && !sameRoomIdentities(await requireExactGameChat(input.memberId, input.multiplayer), playerMemberIds)) throw new TypeError("Game chat participants changed.");
+  if (input.request.action !== "read_game") input = await refreshGameChatAudience(input, playerMemberIds);
   return gameChatToolResponse(input, playerMemberIds, actor, dayOutcome, photoResult);
+}
+
+/** Preserve the fresh complete handle proof through the post-mutation projection. */
+async function refreshGameChatAudience(input: Input, players: readonly string[]): Promise<Input> {
+  if (!input.multiplayer) {
+    if (!sameRoomIdentities(await requireExactGameChat(input.memberId), players)) throw new TypeError("Game chat participants changed.");
+    return input;
+  }
+  const audience = await readGameChatAudience(input.memberId);
+  const previous = input.audience;
+  if (!previous || audience.threadId !== previous.threadId
+    || !audience.keys.candidates.some(key => previous.keys.candidates.includes(key))
+    || !sameRoomIdentities(audience.memberIds, players)) throw new TypeError("Game chat participants changed.");
+  return { ...input, audience };
 }
 
 function supportsGameChatRoster(input: Input, players: readonly string[]): boolean {

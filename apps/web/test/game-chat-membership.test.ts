@@ -38,10 +38,11 @@ describe("game pair discovery", () => {
   it("reads a bounded canonical history for the exact pair including finished games", async () => {
     await expect(readGameChatCandidateIds(players)).resolves.toEqual(["active-game", "finished-game"]);
     expect(m.games).toHaveBeenCalledWith({
-      where: { OR: [{ ...gamePairWhere(players), status: { in: ["negotiating", "live"] } }, expect.objectContaining({ ...addressedGameRematchWhere(players), AND: expect.any(Array) })] },
+      where: { maxPlayers: 2, OR: [{ ...gamePairWhere(players), status: { in: ["negotiating", "live"] } }, expect.objectContaining({ ...addressedGameRematchWhere(players), AND: expect.any(Array) })] },
       orderBy: [{ createdAt: "desc" }, { id: "asc" }], take: 10, select: { id: true },
     });
     expect(m.games.mock.calls[0][0].where).not.toHaveProperty("chatContainerMemberId");
+    expect(m.games.mock.calls[1][0].where).toMatchObject({ maxPlayers: 2, status: "settled" });
   });
 
   it.each([[], ["player-a"], ["player-a", "player-a"], Array.from({ length: 11 }, (_, i) => `person-${i}`)].map((ids) => ({ ids })))("does not discover from an invalid local roster $ids", async ({ ids }) => {
