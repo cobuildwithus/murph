@@ -523,6 +523,13 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /sandbox_mode = "danger-full-access"/u);
   assert.match(config, /^check_for_update_on_startup = false$/mu);
   assertHostedCodexConfigDisablesLoginShellAtTopLevel(config);
+  // Top-level so Codex skips ancestor root-marker probes; a section-scoped
+  // key would be ignored.
+  assert.ok(
+    config.indexOf("\nproject_root_markers = []\n") !== -1
+      && config.indexOf("\nproject_root_markers = []\n") < config.search(/^\[/mu),
+    "project_root_markers = [] must be a top-level Codex config key",
+  );
   assert.doesNotMatch(config, /^model_provider = "openai"$/mu);
   assert.doesNotMatch(config, /\[model_providers\."openai"\]/u);
   assert.match(config, /\[model_providers\."hosted-openai"\]/u);
@@ -2259,6 +2266,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       'sandbox_mode = "danger-full-access"',
       "check_for_update_on_startup = false",
       "allow_login_shell = false",
+      "project_root_markers = []",
       "",
       '[model_providers."hosted-openai"]',
       'name = "OpenAI"',

@@ -504,6 +504,48 @@ describe("startHostedContainerEntrypoint", () => {
       .toBeLessThanOrEqual(health.serverListeningAtEpochMs as number);
   });
 
+  it("warms the Codex binary once after hydration without holding up work", async () => {
+    const warmCodexBinary = vi.fn(
+      (_input: { signal: AbortSignal }) => new Promise<void>(() => {}),
+    );
+    const loadHeavyRuntime = vi.fn(async () => ({
+      ...hostedContainerHeavyRuntime,
+      warmCodexBinary,
+    }));
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        loadHeavyRuntime,
+        prepareWorkspaceRestore: vi.fn().mockResolvedValue(
+          createTestHostedWorkspaceRestorePreparation(),
+        ),
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    await vi.waitFor(() => {
+      expect(warmCodexBinary).toHaveBeenCalledTimes(1);
+    });
+    // The container shutdown signal: still live while the runner serves work.
+    expect(warmCodexBinary.mock.calls[0]![0].signal.aborted).toBe(false);
+
+    // The warmup never settles here; invocations still run normally.
+    const invocation = await sendHostedContainerJsonRequest({
+      body: JSON.stringify(buildWorkspaceJobBody()),
+      path: "/internal/workspace-invocation",
+      port: address.port,
+    });
+    expect(invocation.status).toBe(200);
+    expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(1);
+    expect(warmCodexBinary).toHaveBeenCalledTimes(1);
+    expect(loadHeavyRuntime).toHaveBeenCalledTimes(1);
+  });
+
   it("starts workspace restore preparation while one heavy hydration remains pending", async () => {
     const heavyRuntimeHydration = createDeferred<typeof hostedContainerHeavyRuntime>();
     const loadHeavyRuntime = vi.fn(() => heavyRuntimeHydration.promise);

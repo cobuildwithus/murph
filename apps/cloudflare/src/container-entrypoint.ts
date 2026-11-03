@@ -1269,7 +1269,16 @@ export async function startHostedContainerEntrypoint(input: {
       serverListeningAtEpochMs = Date.now();
       pendingColdNodeStartupMs =
         serverListeningAtEpochMs - HOSTED_CONTAINER_PROCESS_START_MS;
-      hydrateHeavyRuntime();
+      // After hydration, one throwaway Codex start pays the binary's
+      // first-launch reads while the workspace restores. Hydration failure
+      // stays owned by hydrateHeavyRuntime's poison handler.
+      void hydrateHeavyRuntime()
+        .then(async (heavyRuntime) => {
+          await heavyRuntime.warmCodexBinary?.({
+            signal: containerShutdownController.signal,
+          });
+        })
+        .catch(() => undefined);
       hostedContainerFatalRuntimeDrain = fatalRuntimeDrainOwner;
       resolve();
     });
