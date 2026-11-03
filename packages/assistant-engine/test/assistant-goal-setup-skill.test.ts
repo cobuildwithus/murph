@@ -71,7 +71,7 @@ describe('assistant goal setup skill', () => {
       'explicit achievable-outcome help (`help me ...`/Goals CTA) -> goal-setup before domain/Commons knowledge',
     )
     expect(prompt).toContain('facts -> domain.')
-    expect(prompt).toContain('For a new proposal, run `cat \"$MURPH_ASSISTANT_SKILLS_ROOT/goal-setup/SKILL.md\"` alone first; do not write yet.')
+    expect(prompt).toContain('For a new proposal, run `cat \"$MURPH_ASSISTANT_SKILLS_ROOT/goal-setup/SKILL.md\"` in the first tool round, alongside exactly one brief `murph.send_progress_update`; do not write yet.')
     expect(prompt).toContain('On acceptance, execute its persist section using the loaded instructions and completed research; do not restart setup.')
   })
 
@@ -295,6 +295,9 @@ describe('assistant goal setup skill', () => {
     expect(buildPrompt()).not.toContain('For routine planning, saves, and retrieval, read strength-training.')
     expect(buildPrompt()).toContain('daily-activity owns wearable facts, walking breaks, and everyday movement targets')
     expect(compact).toContain('Use successful save receipts (returned ids and saved fields) for dependent work.')
+    expect(compact).toContain("If this turn's Goal save returned `created: true`, skip regimen inventory and create its linked regimen directly.")
+    expect(compact).toContain('For existing Goals, run the all-status inventory and detail-read each plausible match on `kind=habit` plus `relatedGoalIds` containing the saved Goal id:')
+    expect(compact).not.toContain('Before creating or changing it, run the all-status inventory')
     expect(compact).toContain('Reuse completed discovery, skill and grounding reads; recover only required facts/reads that changed or are unavailable.')
     expect(compact).toContain('Save one Goal, then one habit regimen linked to its returned id for repeated action; a regimen alone is incomplete.')
     expect(compact).toContain('Keep `--schedule` to timing only (at most 160 characters); put the plan in `--note` (at most 4000 characters).')
