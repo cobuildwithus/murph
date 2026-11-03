@@ -4973,9 +4973,12 @@ not require a second idle snapshot. The published archive retains canonical
 imports and the recording journal; Web acknowledgements are idempotent and
 remain strictly after that durability barrier. On restore, the existing
 ready checkpoint-effect queue replays durable recording items after foreground
-admission and projection, before new device work. Cleanup and the next bounded
-pass share one idle save; completion wake hints remain qualified before they
-can cancel it. The runtime does not restart device work after that checkpoint. A completion-only fence replays monotonic cadence publication
+admission and projection, before new device work. Replay restores the prior
+retry owner without deferring or retiring newly imported webhook hints. Default
+processing rechecks pending work after replay releases its recording owner,
+joining the bounded pass through its foreground-interruptible completion wait.
+Cleanup and the next bounded pass share one idle save; completion wake hints
+remain qualified before they can cancel it. The runtime does not restart device work after that checkpoint. A completion-only fence replays monotonic cadence publication
 with the existing connection epoch/version checks. The existing metadata
 checkpoint publishes final wake/progress using the first archive reference.
 Failed recording, genuinely new mailbox input, and other non-replayable effects

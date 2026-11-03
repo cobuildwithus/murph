@@ -6787,7 +6787,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         let cleanVaultShareProjectionResult:
           HostedVaultShareProjectionOfferResult | undefined;
         let cleanVaultShareProjectionIncomplete = false;
-        const drainRestoredEffects = !runtimeStateDirty || readyDurableCheckpointEffects.length > 0;
+        const restoredEffectsPending = readyDurableCheckpointEffects.length > 0;
+        const drainRestoredEffects = !runtimeStateDirty || restoredEffectsPending;
         if (drainRestoredEffects) {
           const vaultShareOpportunity =
             await offerHostedVaultShareProjectionDuringIdle();
@@ -6806,17 +6807,24 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               requestIdKind: "idle-wake",
             });
           }
-        }
-        if (drainRestoredEffects) {
           // Replay-only mailbox consume acks are already backed by the restored
           // durable checkpoint. If the ack fails and returns a retry wake, route
           // that wake through the same follow-up checkpoint path as dirty turns.
           await drainCleanDurableCheckpointEffects({
-            ...(cleanVaultShareProjectionResult
-              ? { vaultShareProjectionResult: cleanVaultShareProjectionResult }
-              : {}),
+            vaultShareProjectionResult: cleanVaultShareProjectionResult,
             withholdVaultShareDependentEffects: cleanVaultShareProjectionIncomplete,
           });
+          // The foreground pass could not claim new work behind a restored
+          // recording owner. Recheck admission after replay, before idle saving.
+          if (restoredEffectsPending) {
+            workspaceSystemWork.kick();
+            await workspaceSystemWork.waitForCompletion(
+              options.runtimeWakeSignal ?? null,
+              async (notification) => await runPreCheckpointConversationWake(
+                createHostedRuntimeWakeLatencySeed(notification),
+              ),
+            );
+          }
         }
         if (mayFinishRuntime()) {
           // Closing is terminal for this invocation. Do it at the clean-return
