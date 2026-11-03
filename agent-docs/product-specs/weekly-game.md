@@ -97,6 +97,16 @@ existing locked commands. Group creation accepts transient addressed recipients,
 `groupWord`, `defaultTask` and sparse invitation-seat overrides. Groups never
 negotiate or use Start now. Creating with a chat container still rejects.
 
+Group app terms keep the effective task for every admitted seat and append stored
+overrides for unjoined seats accepted by the edit validator. Both derive override
+eligibility from `groupTaskOverrideSeats`: current invitation seats, plus seat 0
+when a rematch retained a starter override. Removed invitation seats are omitted.
+All players receive the same seat-number/task-text projection; these are shared
+game terms, with no invitation identity or private pending label. Editors return
+every override they retain; omitting an override still removes it. Chat continues
+to expose only admitted players' tasks, and link previews expose the default task
+plus authenticated `yourTask`, never the sparse override list.
+
 Open capable previews include `maxPlayers`, `group`, nullable `expiresAt` and
 `dayOne`. Authenticated addressed invitees also receive `yourTask`.
 `alreadyIn` is authenticated-only: joined nonstarter count, at most two own
@@ -104,6 +114,15 @@ profile names and the first named player's signed own photo. Block and report
 masks apply before signing; private contact labels never enter this preview.
 Home computes `canStartGroups` per request from the admission switch and member
 allowlist. Both server create and join retain the admission gate.
+
+The public Web invite page and its metadata/image renderer opt into multiplayer
+without a member identity. An open group headline is "<Starter> started a
+<groupWord> challenge". Its description gives the shared task, schedule and
+duration, then the winner's prize. The page shows Everyone with the default
+task, Days and the prize; the image uses the same headline. Neither surface
+renders sparse seat overrides, authenticated preview extras, private labels or
+other players' names. Pair rendering, app links and closed/cancelled copy stay
+unchanged.
 
 Group history keeps each round's roster, frozen standings and previews, plus
 viewer-specific `task` and `prize` at group level. It returns at most twenty

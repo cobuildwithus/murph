@@ -116,9 +116,9 @@ describe('assistant goal setup skill', () => {
       'apply its grounding gate, launch-offer contract, and support rules even if the public goal omits it.',
     )
     expect(compact).toContain(
-      'Continue bounded `sed` windows through EOF',
+      'Batch literal-slug skill reads in one command through EOF without truncation.',
     )
-    expect(compact).toContain(
+    expect(compact).not.toContain(
       'Run each skill read as its own shell command',
     )
     expect(compact).toContain(
@@ -299,7 +299,9 @@ describe('assistant goal setup skill', () => {
     expect(compact).toContain('Save one Goal, then one habit regimen linked to its returned id for repeated action; a regimen alone is incomplete.')
     expect(compact).toContain('Keep `--schedule` to timing only (at most 160 characters); put the plan in `--note` (at most 4000 characters).')
     expect(compact).toContain('Do not issue a post-save show solely to verify a successful write.')
-    expect(compact).toContain('Batch independent CLI reads with `vault-cli batch --compact --format json`; inspect results before dependent work.')
+    const batchReads = 'Batch this search with independent Goal/memory reads via `vault-cli batch --compact --format json`; inspect results before dependent work.'
+    expect(compact).toContain(batchReads)
+    expect(compact.indexOf(batchReads)).toBeLessThan(compact.indexOf('vault-cli commons goal list'))
     expect(compact).toContain('Read missing details needed for the next action, or canonical owners after a failed or ambiguous write.')
     expect(compact).toContain('For quiet support with regimen receipt `created: true`, skip support inventory and effects for that new id.')
     expect(compact).toContain('Existing regimens still require complete support inventory and quiet reconciliation.')

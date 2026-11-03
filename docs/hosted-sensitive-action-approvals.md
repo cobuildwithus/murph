@@ -116,6 +116,8 @@ Two generic mailbox shapes cover distinct continuation needs:
 
 Both commit durable work before signaling Temporal, keep the signal pointer-only, and leave execution with the runtime owner. Approval uses the second shape because the exact attachment and destination already live in the parked outbox intent.
 
+On the next reply turn, the assistant learns a resumed file delivery's outcome from outbox-derived prior-delivery attachment context, including deliveries from the same session. This context describes the file and provider acceptance without treating its filename as message text or adding a model turn during reconciliation.
+
 ## Privacy and retention
 
 Approval rows contain no action payload, file bytes, raw recipient identifier, signature, or wallet authorization material. They store only an exact-action hash and bounded presentation text. The pending-effects mailbox payload contains only its control kind, member owner, timestamp, and a hashed generation-scoped event identity; it contains no file or destination data. Rows are member-scoped, cascade with the hosted member, and are explicitly covered by account deletion. User exports omit the rows and their security metadata.

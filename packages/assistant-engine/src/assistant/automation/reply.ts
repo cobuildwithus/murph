@@ -54,6 +54,7 @@ import {
 import { sanitizeAssistantPortableStateString } from '../redaction.js'
 import { errorMessage, normalizeNullableString } from '../shared.js'
 import { sendAssistantMessage } from '../service.js'
+import { formatByteCount } from '../vault-file-send.js'
 import {
   AssistantActiveTurnInputBudgetExceededError,
   AssistantActiveTurnInputUnavailableError,
@@ -5123,6 +5124,7 @@ interface AssistantAutoReplyMatchingOutboxDelivery {
 }
 
 interface AssistantAutoReplyPriorDeliveryContext {
+  attachment: string | null
   automationContextReferences: AssistantAutoReplyContextDecision
   automationId: string | null
   exactReplyTarget: boolean
@@ -5223,10 +5225,13 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
     // carries only response media. The only non-sent exception is an exact
     // accepted Linq primary; media-only records keep a null message so no
     // consumer can quote text that never existed.
-    const message = normalizeNullableString(intent.message)
+    const media = intent.media ?? []
+    const message = media.some((item) => item.kind === 'vault_file')
+      ? null
+      : normalizeNullableString(intent.message)
     const sentAtMs = Date.parse(delivery.sentAt)
     if (
-      (!message && (intent.media?.length ?? 0) === 0) ||
+      (!message && media.length === 0) ||
       !Number.isFinite(sentAtMs)
     ) {
       return []
@@ -5253,7 +5258,7 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
       scheduledOccurrenceAt:
         normalizeNullableString(intent.scheduledOccurrenceAt) ?? null,
       intentId: intent.intentId,
-      media: intent.media ?? [],
+      media,
       message: message ?? null,
       order: {
         intentId: intent.intentId,
@@ -5340,17 +5345,22 @@ function projectAssistantAutoReplyUnanchoredPriorDeliveries(input: {
         input.settledThrough,
       ) <= 0
     ) {
+      const hasVaultFile = delivery.media.some((media) => media.kind === 'vault_file')
       if (
-        input.threadIsDirect === true &&
-        delivery.intentId === contextDecisionIntentId &&
-        delivery.automationContextReferences?.length === 1 &&
-        delivery.automationContextReferences[0]?.entityKind === 'activity_session'
+        hasVaultFile || (
+          input.threadIsDirect === true &&
+          delivery.intentId === contextDecisionIntentId &&
+          delivery.automationContextReferences?.length === 1 &&
+          delivery.automationContextReferences[0]?.entityKind === 'activity_session'
+        )
       ) {
         // Consumption prevents replaying a delivered message, not continuing its
-        // exact workout. Old reminder text and occurrence annotations must not
-        // become a new completion request.
+        // exact workout or learning a file's outcome. Older readers could consume
+        // file deliveries without ever showing them. Retain only attachment facts
+        // for those files, never a new claim or automation completion request.
         return [{
           ...delivery,
+          ...(hasVaultFile ? { automationContextReferences: null } : {}),
           automationId: null,
           message: null,
           plannedOccurrenceAt: null,
@@ -5384,11 +5394,14 @@ function projectAssistantAutoReplyPriorDelivery(input: {
 }): AssistantAutoReplyMatchingOutboxDelivery | null {
   const sameSession = input.sessionId !== null &&
     input.delivery.sessionId === input.sessionId
-  const message = sameSession
+  const hasVaultFile = input.delivery.media.some((media) => media.kind === 'vault_file')
+  // Approval reconciliation sends files without appending a transcript turn.
+  // The intent's message is only its filename, not provider-visible text.
+  const message = sameSession || hasVaultFile
     ? null
     : normalizeNullableString(input.delivery.message)
   if (
-    message === null &&
+    message === null && !hasVaultFile &&
     (
       input.delivery.automationContextReferences === null ||
       (
@@ -5439,9 +5452,20 @@ function buildAssistantAutoReplyPriorDeliveryContexts(input: {
     if (selected.has(delivery.intentId) || maxLength <= 0) {
       return
     }
-    const message = delivery.message?.slice(0, maxLength) ?? null
-    remainingBudget -= message?.length ?? 1
+    const attachment = delivery.media
+      .filter((media) => media.kind === 'vault_file')
+      .map((file) => `- attachment: ${JSON.stringify(file.filename)} (${file.contentType}, ${formatByteCount(file.sizeBytes)}), delivered after the member approved it`)
+      .join('\n') || null
+    // Keep attachment facts whole; count them against the same text budget.
+    if (attachment !== null && attachment.length > maxLength) {
+      return
+    }
+    const message = attachment === null
+      ? delivery.message?.slice(0, maxLength) ?? null
+      : null
+    remainingBudget -= attachment?.length ?? message?.length ?? 1
     selected.set(delivery.intentId, {
+      attachment,
       automationContextReferences: delivery.automationContextReferences,
       automationId: delivery.automationId,
       exactReplyTarget:
@@ -5639,6 +5663,7 @@ function buildAssistantAutoReplyCrossSessionTurnContext(
   deliveries: readonly AssistantAutoReplyPriorDeliveryContext[],
 ): string | null {
   const visibleDeliveries = deliveries.filter((delivery) =>
+    delivery.attachment !== null ||
     delivery.message !== null ||
     delivery.automationContextReferences !== undefined
   )
@@ -5678,7 +5703,9 @@ function buildAssistantAutoReplyCrossSessionTurnContext(
             '- plannedOccurrenceAt: unavailable; treat this reminder as context only and use ordinary session resolution',
           ]
         : [`- plannedOccurrenceAt: ${delivery.plannedOccurrenceAt}`]),
-      ...(delivery.message === null
+      ...(delivery.attachment !== null
+        ? [delivery.attachment]
+        : delivery.message === null
         ? ['Text: unavailable in this prior-delivery context.']
         : ['Text:', delivery.message]),
       '',

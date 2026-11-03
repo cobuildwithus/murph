@@ -813,6 +813,13 @@ describe('assistant execution prompt contract', () => {
       'On later approval or confirmation turns, do not list, recreate, rename, delete, overwrite, or call `send_vault_file` again for the same send',
     )
     expect(prompt).toContain('let the runtime resume it')
+    expect(prompt).toContain('until prior-delivery attachment context confirms it was delivered')
+    expect(prompt).toContain('File delivery evidence appears as a prior-delivery attachment in conversation context')
+    expect(prompt).toContain('a later request for that file or a new export is a new send: prepare it fresh and call `send_vault_file`')
+    expect(prompt).toContain('Never reuse an old approval link for a delivered file')
+    expect(prompt).toContain('confirm it was sent when context shows delivery; otherwise say it will come through once approved')
+    expect(prompt).toContain('Never call `finish_without_reply` on these later confirmation turns')
+    expect(prompt).not.toContain('After a pending send, the runtime owns that exact file.')
     expect(prompt).toContain(
       'On `status: "approved"`',
     )
@@ -1292,7 +1299,12 @@ describe('assistant system prompt cache stability', () => {
     // Dish-name and consumed-food guidance adds 478 characters. Complete
     // provider input grows 487 UTF-8 bytes for direct turns and zero for groups;
     // focused live naming and non-food closeout journeys cover the behavior.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(79_430)
+    // The private unresolved meal-photo arrival rule adds 307 characters so an
+    // ordinary reply asks for a photo's missing contents or amount instead of
+    // reporting it logged as unknown. Direct input grows 307 UTF-8 bytes and
+    // groups are unchanged; focused Terra arrival-check journeys moved from 0/3
+    // to 5/5. Retain the prior 128-character margin.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(79_737)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -1599,7 +1611,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toMatchInlineSnapshot(`"76af77f6c1d1efb2f1a0b4e344ed0d8408ca87a4dc236a01c0ebd9b8621feb30"`)
-    expect(promptA.cacheMetadata.stableRouteCapabilityPromptHash).toMatchInlineSnapshot(`"f1c1eeb7daa631b10f3da573106ccea2368e1be2ae7db98518904fcaa74c67c5"`)
+    expect(promptA.cacheMetadata.stableRouteCapabilityPromptHash).toMatchInlineSnapshot(`"d088960821d4ec4b6d91cf9a9bb8d4f05ca840dc65983fc06bca8a48f427049f"`)
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
     )

@@ -54,6 +54,7 @@ import {
   decideJoin,
   decideNegotiationStart,
   decideNewTerms,
+  groupTaskOverrideSeats,
   decidePost,
   decideSettle,
   decideStartNow,
@@ -996,9 +997,7 @@ async function editTerms(context: CommandContext, command: Extract<GameCommand, 
   const today = remainingPlayers(before.state).map(player => gameLocalDate(now, player.timeZone)).sort().at(-1)!;
   const [plain] = await openGameTexts([{ ...gameTarget(before.row, "terms_words"), value: before.row.termsWordsEncrypted }]);
   const words = parseTermWords(plain ?? "");
-  const taskSeats = before.row.invitees.map(invitee => invitee.seat);
-  // Same again can move an original invitation override to its new starter.
-  if (words.versions.at(-1)?.tasks.some(task => task.seat === 0)) taskSeats.push(0);
+  const taskSeats = groupTaskOverrideSeats(before.state.game, words.versions.at(-1)?.tasks ?? []);
   const prepared = decideNewTerms(command.terms, { maxPlayers: 10, inviteeSeats: taskSeats,
     today, currentStartsOn: before.state.game.startsOn, newKey: () => generateHostedRandomPrefixedId("gsk") });
   const n = command.expectedTermsVersion + 1;
@@ -1768,8 +1767,9 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
       else ticketGroups.set(key, { ...(row.maxPlayers === 10 ? { owedBySeats: ticket.owedBySeats, owedToSeats: ticket.owedToSeats } : {}), owedByMemberId: view.owedByMemberId, owedToMemberId: view.owedToMemberId, what: view.what, status: view.status, count: 1 });
     }
     const pendingChange = pendingGameChangeView(state, pendingViews.get(row.id) ?? null, gameNow(clock, row));
-    const sharedState = row.maxPlayers === 10 ? { ...state, game: { ...state.game, admittedSeats: row.players.filter(player => !player.leftAt).map(player => player.seat) } } : state;
-    const { checkInKind, ...terms } = termsView(sharedState, words, row.maxPlayers === 10);
+    const { checkInKind, ...terms } = termsView(state, words, row.maxPlayers === 10);
+    // Chat exposes unjoined invitees only as a count, never their task overrides.
+    if (row.maxPlayers === 10) terms.tasks = terms.tasks.filter(task => row.players.some(player => player.seat === task.seat && !player.leftAt));
     return { ...(row.maxPlayers === 10 ? { maxPlayers: 10 as const, pendingInviteeCount: row.invitees.filter(invitee => !row.players.some(player => player.seat === invitee.seat && !player.leftAt)).length } : {}), id: row.id, status: state.game.status, terms: { ...terms, ...(checkInKind === "any" ? {} : { checkInKind }) },
       progress: gameChatProgress(state, gameNow(clock, row)),
       result: result ? { scores: result.scores, tickets: [...ticketGroups.values()] } : null,
@@ -2444,6 +2444,8 @@ async function openInvitePreview(row: PreviewGame, multiplayer: boolean, memberI
   const game = toRuleStateGame(row, parseStoredTerms(row.terms));
   const termWords = parseTermWords(words ?? "");
   const previewTerms = termsView({ entries: [], game, players: [] }, termWords, multiplayer);
+  // Link previews share only the default task; addressed readers get yourTask separately.
+  if (row.maxPlayers === 10) previewTerms.tasks = [];
   const additions = multiplayer ? await capableInvitePreview(row, termWords, memberId, blocks) : {};
   return {
     ...additions,

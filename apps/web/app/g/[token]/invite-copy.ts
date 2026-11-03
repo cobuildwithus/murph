@@ -36,8 +36,40 @@ export function describeStartDate(date: string): string {
  */
 export function inviteShareCopy(preview: GameInvitePreview | null): { title: string; description: string } {
   if (preview?.status !== "open") return { description: "Ask for a new link.", title: CLOSED_INVITE_TITLE };
+  if (preview.maxPlayers === 10) {
+    return {
+      description: [
+        describeGroupTask(preview),
+        ...preview.terms.stakes.map((stake) => `Winner gets ${stake.item}.`),
+      ].join(" "),
+      title: `${preview.inviterFirstName} started a ${preview.group?.word || "group"} challenge`,
+    };
+  }
   return {
     description: preview.terms.stakes.map(describeStakeSentence).join(" "),
     title: `${preview.inviterFirstName} challenged you`,
   };
+}
+
+function describeGroupTask(preview: Extract<GameInvitePreview, { status: "open" }>): string {
+  const { schedule } = preview.terms;
+  const days = preview.lengthDays ?? 7;
+  const duration = days % 7 === 0
+    ? `${plainNumber(days / 7)} ${days === 7 ? "week" : "weeks"}`
+    : `${plainNumber(days)} ${days === 1 ? "day" : "days"}`;
+  const task = (preview.terms.defaultTask ?? "").trim().replace(/[.!?]+$/u, "");
+  if ("count" in schedule) {
+    return `${task} on any ${plainNumber(schedule.count)} ${schedule.count === 1 ? "day" : "days"} over ${duration}.`;
+  }
+  const when = schedule.days.length === 7 ? "every day"
+    : schedule.days.length === 5 && schedule.days.every((day) => day < 5) ? "every weekday"
+    : `on ${new Intl.ListFormat("en", { type: "conjunction" }).format(
+      [...schedule.days].sort((left, right) => left - right)
+        .map((day) => ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][day]),
+    )}`;
+  return `${task} ${when} for ${duration}.`;
+}
+
+function plainNumber(value: number): string {
+  return ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"][value] ?? String(value);
 }

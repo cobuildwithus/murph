@@ -26,6 +26,13 @@ import { gamePairLoreFingerprint } from "./audience";
 // Database/crypto work remains outside those provider calls and short locks.
 const LIFECYCLE_BATCH = 1;
 
+/**
+ * Selected in the query, before the batch limit: a receipt this build cannot
+ * process (for example one written by a newer build before a rollback) must
+ * never become the oldest due row that every sweep picks and skips.
+ */
+const LIFECYCLE_TEMPLATES = ["game_started", "game_rematch", "game_proposal", "game_change_cancelled", "game_change_expired", "game_cancelled", "game_recap", "game_missed"];
+
 /** The existing minute sweep recovers accepted intent even if the app never returns. */
 export async function drainGameChatLifecycle(input: { prisma?: PrismaClient; now?: Date; signal?: AbortSignal } = {}): Promise<{ attempted: number; queued: number; deferred: number }> {
   const prisma = input.prisma ?? getPrisma();
@@ -33,7 +40,7 @@ export async function drainGameChatLifecycle(input: { prisma?: PrismaClient; now
   const { reserveDueGameMissedDayCheckIns } = await import("./service");
   await reserveDueGameMissedDayCheckIns(now);
   const pending = await prisma.hostedLinqDelivery.findMany({
-    where: { source: "game_lifecycle", OR: [
+    where: { source: "game_lifecycle", template: { in: LIFECYCLE_TEMPLATES }, sourceRef: { not: null }, OR: [
       { status: "awaiting_generation", OR: [{ retryAfterAt: null }, { retryAfterAt: { lte: now } }] },
       { status: "generation_queued", retryAfterAt: { lte: now } },
     ] },
@@ -44,7 +51,7 @@ export async function drainGameChatLifecycle(input: { prisma?: PrismaClient; now
   let attempted = 0;
   for (const receipt of pending) {
     if (input.signal?.aborted) break;
-    if (!["game_started", "game_rematch", "game_proposal", "game_change_cancelled", "game_change_expired", "game_cancelled", "game_recap", "game_missed"].includes(receipt.template ?? "") || !receipt.sourceRef) continue;
+    if (!LIFECYCLE_TEMPLATES.includes(receipt.template ?? "") || !receipt.sourceRef) continue;
     const claimed = await prisma.hostedLinqDelivery.updateMany({
       where: { id: receipt.id, source: "game_lifecycle", status: receipt.status, attemptedAt: receipt.attemptedAt,
         OR: [{ retryAfterAt: null }, { retryAfterAt: { lte: now } }] },

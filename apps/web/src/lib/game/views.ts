@@ -25,6 +25,7 @@ import type {
 } from "./contract";
 import {
   currentTerms,
+  groupTaskOverrideSeats,
   assertGroupTermsOpen,
   canRedeemGroupTicket,
   decideCancelInvite,
@@ -172,10 +173,19 @@ export function termsView(state: RuleState, words: TermWords, multiplayer = fals
     n: version.n,
     schedule: version.schedule,
     stakes: version.stakes.map((stake) => ({ item: stakeItem(words, stake.key), key: stake.key, kind: stake.kind })),
-    tasks: state.game.seats === 10 && versionWords.defaultTask !== undefined ? (state.game.admittedSeats ?? state.players.map(player => player.seat)).map(seat => ({ seat,
-      text: versionWords.tasks.find(task => task.seat === seat)?.text ?? versionWords.defaultTask ?? "" }))
+    tasks: state.game.seats === 10 && versionWords.defaultTask !== undefined ? groupTasksView(state, versionWords)
       : versionWords.tasks.map((task) => ({ seat: task.seat, text: task.text })),
   };
+}
+
+function groupTasksView(state: RuleState, words: TermWords["versions"][number]) {
+  const admitted = state.game.admittedSeats ?? state.players.map(player => player.seat);
+  const overrideSeats = groupTaskOverrideSeats(state.game, words.tasks);
+  return [
+    ...admitted.map(seat => ({ seat, text: words.tasks.find(task => task.seat === seat)?.text ?? words.defaultTask ?? "" })),
+    ...words.tasks.filter(task => overrideSeats.includes(task.seat) && !admitted.includes(task.seat))
+      .map(task => ({ seat: task.seat, text: task.text })),
+  ];
 }
 
 /** `now` is the ticket's game clock: it decides whether an open ticket has expired. */

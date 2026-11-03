@@ -144,8 +144,8 @@ import {
   readAssistantContextSnapshotState,
   refreshAssistantContextSnapshot,
 } from '../src/assistant/context-snapshot.ts'
-import { requestAssistantVaultFileSend } from '../src/assistant/vault-file-send.ts'
-import { listAssistantOutboxIntents } from '../src/assistant/outbox.ts'
+import { applyAssistantVaultFileSendApprovalResult, requestAssistantVaultFileSend } from '../src/assistant/vault-file-send.ts'
+import { dispatchAssistantOutboxIntent, listAssistantOutboxIntents } from '../src/assistant/outbox.ts'
 import { upsertAssistantInputEvent, updateAssistantInputAttachmentEvidence } from '../src/assistant/input-store.js'
 import { readAnalyzeVideoConversationEvents, snapshotConversationAttachmentAuthorities } from '../src/assistant-codex/analyze-video-tool.js'
 import { assertNoSongAttachmentFailure } from './support/song-receipt-proof.ts'
@@ -2572,6 +2572,121 @@ describeRealCodex('real Codex retained image e2e', () => {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }
   }, 360_000)
+})
+
+describeRealCodex('real Codex approved vault-file continuity e2e', () => {
+  it('confirms an approved vault-file delivery and starts a fresh export on a later request', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-approved-file-e2e-'))
+    const refs: string[] = []
+    const oldApprovalUrl = 'https://murph.test/approve/synthetic-old-export'
+    const newApprovalUrl = 'https://murph.test/approve/synthetic-new-export'
+    try {
+      await mkdir(path.join(workingDirectory, 'documents'), { recursive: true })
+      await writeFile(path.join(workingDirectory, 'documents/export-2026-01-01.zip'), Buffer.alloc(2048))
+      await writeFile(path.join(workingDirectory, 'documents/reading-list.txt'), 'Synthetic field guide reading list.\n')
+      const common = {
+        allowFinishWithoutReply: true,
+        approvalPolicy: 'never' as const,
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildDirectConversationDeveloperInstructions(),
+        dynamicTools: [MURPH_SEND_VAULT_FILE_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL],
+        env: config.env,
+        hostedToolContext: {
+          ...createRealCodexSupportHostedToolContext('direct'),
+          vaultFileSendAvailable: true,
+          sendVaultFile: async (ref: string, toolCallId: string | null | undefined) => {
+            refs.push(ref)
+            return requestAssistantVaultFileSend({
+              actionApprovalPort: {
+                read: async () => { throw new Error('No active prior send expected') },
+                request: async () => ({
+                  status: 'pending', approvalId: `haa_${(refs.length === 1 ? 'a' : 'b').repeat(32)}`,
+                  approvalUrl: refs.length === 1 ? oldApprovalUrl : newApprovalUrl,
+                  expiresAt: '2099-01-01T00:00:00.000Z',
+                }),
+              },
+              bindingDelivery: { kind: 'thread', target: 'synthetic-file-chat' },
+              channel: 'linq', ref, sessionId: 'synthetic-file-session',
+              threadId: 'synthetic-file-chat', threadIsDirect: true, toolCallId,
+              turnId: `synthetic-file-turn-${refs.length}`, vault: workingDirectory,
+            })
+          },
+        } satisfies AssistantHostedToolContext,
+        model: config.model, modelProvider: config.modelProvider,
+        reasoningEffort: 'low' as const, sandbox: 'workspace-write' as const, workingDirectory,
+      }
+      const toolsFor = (result: Awaited<ReturnType<typeof executeRealCodexAppServerTurn>>) =>
+        readCapabilityRoutingActions(result.jsonEvents).flatMap(action => action.kind === 'dynamic' ? [action.tool] : [])
+      const printReply = (scenario: string, result: Awaited<ReturnType<typeof executeRealCodexAppServerTurn>>) => {
+        process.stdout.write(`[approved-vault-file-e2e] ${JSON.stringify({ scenario,
+          reply: result.finalMessage.replaceAll(workingDirectory, '<VAULT>'), tools: toolsFor(result) })}\n`)
+      }
+      const pending = await executeRealCodexAppServerTurn({
+        ...common, prompt: 'Please send my saved documents/export-2026-01-01.zip to this chat.',
+      })
+      printReply('initial pending send', pending)
+      expect(refs).toEqual(['documents/export-2026-01-01.zip'])
+      expect(toolsFor(pending)).toEqual(['send_vault_file'])
+      expect(pending.finalMessage).toMatch(/approv/iu)
+      const [parked] = await listAssistantOutboxIntents(workingDirectory)
+      if (!parked) throw new Error('Expected pending export')
+      expect(parked.status).toBe('awaiting_approval')
+      await saveAssistantOutboxIntent(workingDirectory, applyAssistantVaultFileSendApprovalResult({
+        approval: { status: 'approved', approvalId: `haa_${'a'.repeat(32)}`, approvalGeneration: 'c'.repeat(64) },
+        intent: parked, now: new Date('2026-01-01T12:05:00.000Z'),
+      }))
+      const dispatched = await dispatchAssistantOutboxIntent({
+        dependencies: { sendLinq: async () => ({ target: 'synthetic-file-chat', providerMessageId: 'synthetic-file-message' }) },
+        force: true, intentId: parked.intentId, now: new Date('2026-01-01T12:05:00.000Z'), vault: workingDirectory,
+      })
+      expect(dispatched.intent.status).toBe('sent')
+      // Synthetic turn-context data uses the attachment form proved through the
+      // indexed production reply path in assistant-automation-reply-event-path.
+      const context = [
+        'Conversation context:',
+        'The assistant previously sent these provider-accepted messages in the same conversation, oldest to newest:',
+        'Prior message 1:',
+        `- intentId: ${parked.intentId}`,
+        `- providerAcceptedAt: ${dispatched.intent.delivery?.sentAt}`,
+        '- attachment: "export-2026-01-01.zip" (application/zip, 2.0 KB), delivered after the member approved it',
+        'Provider acceptance is not a delivered/read receipt.',
+      ].join('\n')
+      const confirmed = await executeRealCodexAppServerTurn({
+        ...common, resumeSessionId: pending.sessionId,
+        prompt: `${context}\n\nCurrent member message: yea I approved it`,
+      })
+      printReply('approval confirmation on resumed thread', confirmed)
+      expect(confirmed.sessionId).toBe(pending.sessionId)
+      expect(toolsFor(confirmed)).toEqual([])
+      expect(refs).toHaveLength(1)
+      expect(confirmed.finalMessage).toMatch(/\b(?:sent|delivered)\b/iu)
+      expect(confirmed.finalMessage.length).toBeLessThan(300)
+      expect(confirmed.finalMessage).not.toMatch(/awaiting|pending|once approved|approval link|https?:|—|finish_without_reply|outbox|provider.accept/iu)
+      const fresh = await executeRealCodexAppServerTurn({
+        ...common, resumeSessionId: confirmed.sessionId,
+        prompt: `${context}\n\nCurrent member message: can you send me a zip of my vault`,
+      })
+      printReply('new export on resumed thread', fresh)
+      expect(fresh.sessionId).toBe(pending.sessionId)
+      expect(toolsFor(fresh)).toEqual(['send_vault_file'])
+      expect(refs).toHaveLength(2)
+      expect(isAssistantGeneratedDeliveryRef(refs[1] ?? '')).toBe(true)
+      expect(fresh.finalMessage).toMatch(/approv/iu)
+      expect(fresh.finalMessage).toContain(newApprovalUrl)
+      expect(fresh.finalMessage).not.toContain(oldApprovalUrl)
+      expect(fresh.finalMessage).not.toMatch(/still (?:awaiting|pending)|(?:old|previous|earlier).{0,45}(?:awaiting|pending)|can't (?:send|issue)|cannot (?:send|issue)|—/iu)
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      expect(intents).toHaveLength(2)
+      const newIntent = intents.find(intent => intent.intentId !== parked.intentId)
+      expect(newIntent).toMatchObject({ status: 'awaiting_approval', media: [expect.objectContaining({ kind: 'vault_file', contentType: 'application/zip' })] })
+      expect(fresh.responseMedia).toEqual([])
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 5 * 60_000)
 })
 
 describeRealCodex('real Codex Telegram file delivery e2e', () => {

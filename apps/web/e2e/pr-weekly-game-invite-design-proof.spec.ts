@@ -3,6 +3,8 @@ import path from "node:path";
 import { expect, test } from "@playwright/test";
 
 const STATES = {
+  group: "Leo started a family challenge",
+  "link-group": "Leo started a family challenge",
   "any-artifact": "Choose each day",
   dare: "Loser has to",
   "link-dare": "LOSER HAS TO",
@@ -31,6 +33,10 @@ for (const width of [390, 1280]) {
       expect(await surface.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
     }
     await expect(study.locator('[data-design-state="open"]')).toContainText("Leo challenged you");
+    await expect(study.locator('[data-design-state="group"]')).toContainText("Everyone");
+    await expect(study.locator('[data-design-state="group"]')).toContainText("A healthy meal");
+    await expect(study.locator('[data-design-state="group"]')).toContainText("Weekdays · 14 days");
+    await expect(study.locator('[data-design-state="group"]')).not.toContainText("Artifact");
     await expect(study.locator('[data-design-state="open"]')).toContainText("No Murph yet? Get it on the App Store");
     await expect(study.locator('[data-design-state="open"]')).toContainText("Mon, Wed, Fri");
     // The link preview names the challenger against "You" (never the invitee's private name), and nobody when closed.
@@ -50,7 +56,7 @@ for (const width of [390, 1280]) {
     await mkdir(output, { recursive: true });
     const style = "nextjs-portal { visibility: hidden; }";
     await study.locator('[data-design-state="heart-rate"]').screenshot({ path: path.join(output, `game-invite-heart-rate-${width}.png`), style });
-    for (const state of ["any-artifact", "dare", "link-dare"]) {
+    for (const state of ["group", "link-group", "any-artifact", "dare", "link-dare"]) {
       await study.locator(`[data-design-state="${state}"]`).screenshot({ path: path.join(output, `game-invite-${state}-${width}.png`), style });
     }
     if (width < 768) {
