@@ -6,6 +6,8 @@ Canonical cron wake parity with claim selection is owned by
 `../packages/assistant-engine/README.md`; regression proof is tracked in
 [the wake plan](exec-plans/completed/2026-11-02-cron-missed-wakes.md).
 
+Core-owned device identity cache local implementation and verification: [execution record](exec-plans/completed/2026-11-02-identity-warm-cache-local.md).
+
 Pair-preserving game collection preparation and visibility proof are recorded in
 [the PR 1 plan](exec-plans/completed/2026-11-02-game-roster-pr1.md).
 The weekly game architecture remains the behavior owner.

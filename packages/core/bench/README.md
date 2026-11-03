@@ -438,8 +438,10 @@ import finishes before the timer; use a history large enough to exercise the
 scan. Cancellation timings separate timer dispatch delay from abort-to-release
 latency. This synthetic timer does not measure hosted message admission.
 
-The harness reports process-to-module-ready time, initial import, a new batch,
-a disjoint session-cache hit, replay, and correction. It asserts replay is not
+The harness reports process-to-module-ready time, initial import, a cold new batch,
+a disjoint process-cache hit, replay, and correction. Seeding warms the core cache,
+so the harness changes synthetic shard metadata before its cold-scan scenarios.
+It asserts replay is not
 applied, correction retains IDs and advances revisions, and canonical readback
 contains the corrected value. Semantic hashes must match between compared
 builds. Module-ready time is for the core benchmark, **not** the hosted runner's
@@ -538,13 +540,15 @@ the same semantic hashes/readbacks, but the comparator correctly rejected
 incremental CPU (5.98 s against a 1.12 s allowance) and wall time. The injection
 is not part of production code or the committed benchmark.
 
-## Additional work elimination
+## Historical additional work elimination
 
 The follow-up removes two redundant copies of the read-only import identity
 baseline; mutating reconciliation still takes its own copy. Imports without a
 session no longer prepare an unused session fingerprint/index, and new external
 references only compute content fingerprints when historical owners exist.
-Ledger-change and overlapping-dependency invalidation remain unchanged.
+That revision retained ledger-change and overlapping-dependency invalidation.
+The current core-owned process cache replaces those session tokens and dependency
+lists with committed-row reduction; see [core's cache contract](../README.md).
 
 Three alternating one-vCPU mixed-zone Docker samples against the preceding
 timezone-cache revision had median CPU times of 7.28 s to 5.95 s for bulk import,

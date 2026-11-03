@@ -22,12 +22,12 @@ import {
   withRealTimeout,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readdir, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, vi } from "vitest";
 import { importDeviceBatch, inspectCanonicalWriteLock, withCanonicalWriteLock, initializeVault, patchAutomation, upsertAutomation } from "@murphai/core";
-import { eventRecordSchema } from "@murphai/contracts";
+import { EVENT_LEDGER_DIRECTORY, eventRecordSchema } from "@murphai/contracts";
 import { prepareSyntheticFinalization } from "./device-import-finalization.fixture.ts";
 import { createDefaultImporterPort } from "@murphai/device-syncd/service";
 import * as deviceService from "../src/device-sync-service.ts";
@@ -357,6 +357,12 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
                       fields: { metric: "synthetic", unit: "count", value: 1 },
                     })),
                   });
+                }
+                // Model a fresh restore: shard metadata this process never observed
+                // invalidates the warm identity cache, forcing the cold build.
+                const restoredAt = new Date(Date.parse(TEST_NOW) + 60_000);
+                for (const entry of await readdir(path.join(vaultRoot, EVENT_LEDGER_DIRECTORY), { recursive: true, withFileTypes: true })) {
+                  if (entry.isFile()) await utimes(path.join(entry.parentPath, entry.name), restoredAt, restoredAt);
                 }
               }
             }
