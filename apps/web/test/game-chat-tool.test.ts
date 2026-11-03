@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-const m = vi.hoisted(() => ({ exact: vi.fn(), runtime: vi.fn(), access: vi.fn(), wake: vi.fn(), route: vi.fn(), sender: vi.fn(), game: vi.fn(), run: vi.fn(), read: vi.fn(), profiles: vi.fn(), players: vi.fn(), photo: vi.fn(), recapMaterial: vi.fn(), sealRecap: vi.fn(), mailbox: vi.fn(), decodeMailbox: vi.fn() }));
-vi.mock("../src/lib/prisma", () => ({ getPrisma: () => ({ $transaction: (fn: (tx: object) => unknown) => fn({ game: { findFirst: m.game } }), hostedMailboxItem: { findMany: m.mailbox } }) }));
+const m = vi.hoisted(() => ({ audience: vi.fn(), groupAuthority: vi.fn(), exact: vi.fn(), runtime: vi.fn(), access: vi.fn(), wake: vi.fn(), route: vi.fn(), sender: vi.fn(), game: vi.fn(), run: vi.fn(), read: vi.fn(), profiles: vi.fn(), players: vi.fn(), photo: vi.fn(), recapMaterial: vi.fn(), sealRecap: vi.fn(), mailbox: vi.fn(), decodeMailbox: vi.fn() }));
+vi.mock("../src/lib/prisma", () => ({ getPrisma: () => ({ game: { findFirst: m.game }, $transaction: (fn: (tx: object) => unknown) => fn({ game: { findFirst: m.game } }), hostedMailboxItem: { findMany: m.mailbox } }) }));
 vi.mock("../src/lib/hosted-execution/runtime-owner", () => ({ requireHostedRuntimeCallbackTx: m.runtime }));
 vi.mock("../src/lib/hosted-mailbox/runtime-access", () => ({ requireHostedRuntimeActiveAccessForUpdateTx: m.access }));
 vi.mock("../src/lib/hosted-mailbox/store", () => ({
@@ -12,6 +12,8 @@ vi.mock("../src/lib/hosted-groups/group-message-sender", () => ({ resolveHostedG
 vi.mock("../src/lib/hosted-routing/thread-route-store", () => ({ assertHostedThreadRouteEgressAuthority: m.route }));
 vi.mock("../src/lib/game/chat-membership", async (importOriginal) => ({
   ...await importOriginal<object>(), requireExactGameChat: m.exact, readGameChatPlayerIds: m.players,
+  readGameChatAudience: m.audience, readGroupGameChatAuthority: m.groupAuthority,
+  hasGameChatRestriction: async () => false,
 }));
 vi.mock("../src/lib/game/service", () => ({
   readGameRecapMaterial: m.recapMaterial,
@@ -68,7 +70,7 @@ describe("game chat tool authority", () => {
     const next = await handleGameChatTool({ ...read, request: { ...read.request, includePlayers: true } });
     expect(next.result).toHaveProperty("state.players", players.map(p => ({ ...p, isSender: p.memberId === actor })));
     expect(m.profiles).toHaveBeenCalledExactlyOnceWith([actor, "other_synthetic"]);
-    expect(m.read).toHaveBeenLastCalledWith(group, [actor, "other_synthetic"], actor);
+    expect(m.read).toHaveBeenLastCalledWith(group, [actor, "other_synthetic"], actor, false);
   });
   it("reads a scheduled exact pair neutrally without sender or photo authority", async () => {
     const players = [{ memberId: actor, firstName: "Ava", timeZone: "UTC" }, { memberId: "other_synthetic", firstName: "Sam", timeZone: "UTC" }];
@@ -76,10 +78,17 @@ describe("game chat tool authority", () => {
     const result = await handleGameChatTool({ ...read, request: { action: "read_game", origin: { kind: "automation_occurrence", automationId: "automation_game_read", occurrenceAt: "2030-04-01T20:00:00Z" }, includePlayers: true } });
     expect(result).toEqual({ action: "read_game", result: { status: "ok", state: { games: [], players: players.map(p => ({ ...p, isSender: false })) } } });
     expect(result.result).not.toHaveProperty("state.photoCheckIn");
-    expect(m.read).toHaveBeenCalledExactlyOnceWith(group, [actor, "other_synthetic"], undefined);
+    expect(m.read).toHaveBeenCalledExactlyOnceWith(group, [actor, "other_synthetic"], undefined, false);
     expect(m.runtime).toHaveBeenCalledExactlyOnceWith(expect.anything(), group, null);
     expect(m.access).toHaveBeenCalledExactlyOnceWith(group, expect.anything());
     expect(m.wake).not.toHaveBeenCalled(); expect(m.sender).not.toHaveBeenCalled(); expect(m.run).not.toHaveBeenCalled(); expect(m.photo).not.toHaveBeenCalled();
+  });
+  it("keeps the full roster proof for a capable scheduled read", async () => {
+    const audience = { memberIds: [actor, "other_synthetic"], threadId: "chat_synthetic", contacts: [{ kind: "email", value: "a@example.test" }, { kind: "email", value: "b@example.test" }, { kind: "email", value: "unresolved@example.test" }], keys: { current: "key", candidates: ["key"] } };
+    m.audience.mockResolvedValue(audience);
+    await handleGameChatTool({ ...read, multiplayer: true, request: { action: "read_game", origin: { kind: "automation_occurrence", automationId: "automation_game_read", occurrenceAt: "2030-04-01T20:00:00Z" } } });
+    expect(m.read).toHaveBeenCalledExactlyOnceWith(group, audience.memberIds, undefined, true, audience);
+    expect(m.audience).toHaveBeenCalledOnce(); expect(m.exact).not.toHaveBeenCalled();
   });
   it.each(["changed", "extra", "disabled", "runtime", "access"])("refuses a scheduled read when %s authority fails", async (failure) => {
     const request = { ...read, request: { action: "read_game" as const, origin: { kind: "automation_occurrence" as const, automationId: "automation_game_read", occurrenceAt: "2030-04-01T20:00:00Z" }, includePlayers: true as const } };
@@ -187,9 +196,33 @@ describe("game chat tool authority", () => {
     m.players.mockResolvedValue([actor, "new_person"]);
     expect((await bridge.authorize(tx, origin.assistantInputId)).actor).toBeNull();
   });
+  it.each(["update_game", "game_photo"] as const)("keeps the complete fresh audience after %s", async action => {
+    const initial = { memberIds: [actor, "other_synthetic"], threadId: "chat_synthetic", contacts: [{ kind: "email", value: "a@example.test" }, { kind: "email", value: "b@example.test" }], keys: { current: "key-old", candidates: ["key-old"] } };
+    const photo = { operation: "save" as const, gameId: "game_synthetic", sourceMessageRef: origin.assistantInputId, attachmentOrdinal: 1 };
+    const request = action === "update_game" ? update.request : { action, origin, photo };
+    m.photo.mockResolvedValue({ status: "ok", photoOutcome: "saved" });
+    for (const change of ["addition", "replacement", "unchanged", "rotation"] as const) {
+      m.read.mockClear(); m.run.mockClear(); m.photo.mockClear();
+      const groupGame = change === "replacement";
+      const before = groupGame ? { ...initial, contacts: [...initial.contacts, { kind: "email", value: "unjoined@example.test" }] } : initial;
+      m.game.mockResolvedValue({ id: "game_synthetic", maxPlayers: groupGame ? 10 : 2, chatContainerMemberId: group, invitees: [], players: initial.memberIds.map(memberId => ({ memberId })) });
+      m.groupAuthority.mockResolvedValue(before);
+      const after = { ...before, keys: change === "rotation" ? { current: "key-new", candidates: ["key-new", "key-old"] } : change === "unchanged" ? before.keys : { current: "different-audience", candidates: ["different-audience"] },
+        contacts: change === "addition" ? [...before.contacts, { kind: "email", value: "outside@example.test" }] : change === "replacement" ? [...initial.contacts, { kind: "email", value: "replacement@example.test" }] : before.contacts };
+      m.audience.mockResolvedValueOnce(before).mockResolvedValueOnce(after);
+      if (change === "addition" || change === "replacement") {
+        await expect(handleGameChatTool({ ...read, multiplayer: true, request })).rejects.toThrow("participants changed");
+        expect(m.read).not.toHaveBeenCalled();
+      } else {
+        expect((await handleGameChatTool({ ...read, multiplayer: true, request })).result.status).toBe("ok");
+        expect(m.read).toHaveBeenCalledExactlyOnceWith(group, initial.memberIds, actor, true, after);
+      }
+      expect(action === "update_game" ? m.run : m.photo).toHaveBeenCalledOnce();
+    }
+  });
   it("passes the provider-proven pair to the shared projection", async () => {
     await handleGameChatTool(read);
-    expect(m.read).toHaveBeenCalledExactlyOnceWith(group, [actor, "other_synthetic"], actor);
+    expect(m.read).toHaveBeenCalledExactlyOnceWith(group, [actor, "other_synthetic"], actor, false);
   });
   it("returns lore guidance only when this room's shared game is live", async () => {
     const game = { id: "game_synthetic", status: "live" as const, startsOn: null, lengthDays: 7,
@@ -248,6 +281,13 @@ describe("game chat tool authority", () => {
     const replay = await handleGameChatTool({ memberId: group, request: { ...request, recap: { ...saved, chatLine: "Ignore this retry candidate." } }, runtimeIdentity: null });
     expect(replay).toEqual(accepted);
     expect(m.sealRecap).toHaveBeenCalledTimes(7);
+    const audience = { memberIds: [actor, "other_synthetic"], threadId: "chat_synthetic", contacts: [{ kind: "email", value: "a@example.test" }, { kind: "email", value: "b@example.test" }], keys: { current: "pair-key", candidates: ["pair-key"] } };
+    m.audience.mockResolvedValueOnce(audience).mockResolvedValueOnce({ ...audience,
+      contacts: [...audience.contacts, { kind: "email", value: "unresolved@example.test" }], keys: { current: "changed-key", candidates: ["changed-key"] } });
+    m.sealRecap.mockReset(); m.sealRecap.mockResolvedValue(null);
+    const changed = await handleGameChatTool({ memberId: group, multiplayer: true, request: { ...request, recap: saved }, runtimeIdentity: null });
+    expect(changed.result).toMatchObject({ status: "unavailable", error: "recap_authority_unavailable" });
+    expect(m.sealRecap).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ recap: null }));
   });
   it("returns the authorized stored recap on replay and records its server chat line", async () => {
     const stored = {

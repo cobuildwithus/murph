@@ -38,22 +38,23 @@ describe("game pair discovery", () => {
   it("reads a bounded canonical history for the exact pair including finished games", async () => {
     await expect(readGameChatCandidateIds(players)).resolves.toEqual(["active-game", "finished-game"]);
     expect(m.games).toHaveBeenCalledWith({
-      where: { OR: [{ ...gamePairWhere(players), status: { in: ["negotiating", "live"] } }, expect.objectContaining({ ...addressedGameRematchWhere(players), AND: expect.any(Array) })] },
+      where: { maxPlayers: 2, OR: [{ ...gamePairWhere(players), status: { in: ["negotiating", "live"] } }, expect.objectContaining({ ...addressedGameRematchWhere(players), AND: expect.any(Array) })] },
       orderBy: [{ createdAt: "desc" }, { id: "asc" }], take: 10, select: { id: true },
     });
     expect(m.games.mock.calls[0][0].where).not.toHaveProperty("chatContainerMemberId");
+    expect(m.games.mock.calls[1][0].where).toMatchObject({ maxPlayers: 2, status: "settled" });
   });
 
-  it.each([[], ["player-a"], ["player-a", "player-a"], [...players, "player-c"]].map((ids) => ({ ids })))("does not discover from an invalid local roster $ids", async ({ ids }) => {
+  it.each([[], ["player-a"], ["player-a", "player-a"], Array.from({ length: 11 }, (_, i) => `person-${i}`)].map((ids) => ({ ids })))("does not discover from an invalid local roster $ids", async ({ ids }) => {
     m.container.mockResolvedValue({ participants: ids.map((participantMemberId) => ({ participantMemberId })) });
-    await expect(requireExactGameChat("room")).rejects.toThrow("exactly two");
+    await expect(requireExactGameChat("room")).rejects.toThrow("2 to 10");
     await expect(readGameChatCandidateIds(ids)).resolves.toEqual([]);
     expect(m.games).not.toHaveBeenCalled(); expect(m.chat).not.toHaveBeenCalled();
   });
 
   it("has no game chat when neither player is on the game list", async () => {
     vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "player-c");
-    await expect(requireExactGameChat("room")).rejects.toThrow("exactly two");
+    await expect(requireExactGameChat("room")).rejects.toThrow("2 to 10");
     await expect(readGameChatCandidateIds(players)).resolves.toEqual([]);
     expect(m.chat).not.toHaveBeenCalled(); expect(m.games).not.toHaveBeenCalled();
   });
@@ -75,5 +76,25 @@ describe("game pair discovery", () => {
     m.identity.mockResolvedValue({ phoneNumber: phones[0], phoneNumberVerifiedAt: null });
     await expect(requireExactGameChat("room")).rejects.toThrow("verified players");
     expect(m.chat).not.toHaveBeenCalled();
+  });
+});
+
+describe("exact multi-person provider audiences", () => {
+  it("requires every person once, one Murph handle, and a complete roster", async () => {
+    const { isExactGameChat, gameChatNames } = await import("../src/lib/game/chat-membership");
+    for (const size of [2, 3, 10]) {
+      const people = Array.from({ length: size }, (_, i) => `+1555555${String(i + 101).padStart(4, "0")}`);
+      const room = { isGroup: true, handlesComplete: true, handles: [
+        { handle: "+15555550100", isMe: true, status: "active" },
+        ...people.map(handle => ({ handle, isMe: false, status: "active" })),
+      ] };
+      expect(isExactGameChat(room, [...people].reverse())).toBe(true);
+      expect(isExactGameChat({ ...room, handlesComplete: false }, people)).toBe(false);
+      expect(isExactGameChat({ ...room, handles: room.handles.slice(1) }, people)).toBe(false);
+      expect(isExactGameChat({ ...room, handles: room.handles.slice(0, -1) }, people)).toBe(false);
+      expect(isExactGameChat({ ...room, handles: [...room.handles, room.handles[1]] }, people)).toBe(false);
+      expect(isExactGameChat({ ...room, handles: [...room.handles, { handle: "+15555550999", isMe: false, status: "active" }] }, people)).toBe(false);
+    }
+    expect([...gameChatNames([{ memberId: "b", firstName: "Sam" }, { memberId: "a", firstName: "Sam" }, { memberId: "c", firstName: "Ava" }]).values()]).toEqual(["Sam (1)", "Sam (2)", "Ava"]);
   });
 });

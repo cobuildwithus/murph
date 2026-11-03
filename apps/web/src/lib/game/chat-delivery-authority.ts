@@ -6,14 +6,15 @@ import { Prisma } from "@prisma/client";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { isGameChangeExpired, parsePendingGameChange } from "./changes";
 import { isGameInviteExpired, parseStoredTerms } from "./rules";
-import { sameGamePlayers } from "./chat-membership";
+import { readGroupGameChatAuthority, type GameChatAudience, sameGamePlayers } from "./chat-membership";
 
 /** Returns true only for the current proposal and proven audience; stale outbox work cannot announce a replaced edit. */
 export async function assertGameProposalDeliveryCurrentTx(input: {
   deliveryIdempotencyKey: string | null;
   containerMemberId: string;
   playerMemberIds?: readonly string[];
-  tx: { game: Pick<Prisma.TransactionClient["game"], "findFirst"> };
+  audience?: GameChatAudience;
+  tx: Prisma.TransactionClient;
   now?: Date;
 }): Promise<boolean> {
   const key = input.deliveryIdempotencyKey ?? "";
@@ -39,9 +40,10 @@ async function assertGameRecapDeliveryCurrentTx(
   const game = await input.tx.game.findFirst({
     where: { id: gameId, chatContainerMemberId: input.containerMemberId, status: "settled", players: { none: { leftAt: { not: null } } },
       ...(regenerationId ? { events: { some: { commandKey: `${input.deliveryIdempotencyKey}:accepted`, type: "recap_regeneration_accepted" } } } : {}) },
-    include: { players: { take: 3 } },
+    include: { invitees: true, players: { take: 11 } },
   });
-  if (!game || !sameGamePlayers(game.players.map((player) => player.memberId), players)) return stale();
+  if (!game || !await deliveryAudienceCurrent(input, game, players)) return stale();
+  if (game.maxPlayers === 10 && await input.tx.gameReport?.findFirst({ where: { gameId }, select: { id: true } })) return stale();
   return true;
 }
 
@@ -51,10 +53,10 @@ async function assertGameMissedDeliveryCurrentTx(
   const players = input.playerMemberIds ?? [];
   const game = await input.tx.game.findFirst({
     where: { id: gameId, chatContainerMemberId: input.containerMemberId, status: "live" },
-    include: { players: { take: 3 } },
+    include: { invitees: true, players: { take: 11 } },
   });
-  if (!game || !players.includes(addressedMemberId)
-    || !sameGamePlayers(game.players.map((player) => player.memberId), players)) return stale();
+  if (!game || game.maxPlayers === 10 || !players.includes(addressedMemberId)
+    || !await deliveryAudienceCurrent(input, game, players)) return stale();
   return true;
 }
 
@@ -65,12 +67,12 @@ async function assertGameChangeProposalDeliveryCurrentTx(
   if (!match) return stale();
   const game = await input.tx.game.findFirst({
     where: { id: match[1], chatContainerMemberId: input.containerMemberId, status: { in: ["live", "negotiating"] } },
-    include: { players: { take: 3 } },
+    include: { invitees: true, players: { take: 11 } },
   });
   const pending = parsePendingGameChange(game?.pendingChange);
   if (!game || isGameInviteExpired(game, input.now ?? new Date())
     || !pending || pending.id !== match[2] || !isPairRoster(game.players)) return stale();
-  if (!sameGamePlayers(game.players.map((player) => player.memberId), input.playerMemberIds ?? [])) return stale();
+  if (!await deliveryAudienceCurrent(input, game, input.playerMemberIds ?? [])) return stale();
   const expired = game.status === "live" && isGameChangeExpired({
     entries: [],
     game: { id: game.id, createdBy: game.createdBy, status: "live", seats: 2, lengthDays: game.lengthDays, terms: parseStoredTerms(game.terms), inviteExpiresAt: game.inviteExpiresAt, startsOn: game.startsOn?.toISOString().slice(0, 10) ?? null },
@@ -85,8 +87,12 @@ async function assertGameRematchDeliveryCurrentTx(
 ): Promise<true> {
   const game = await input.tx.game.findFirst({
     where: { id: gameId, chatContainerMemberId: input.containerMemberId, status: "invited" },
-    include: { invitees: true, players: { take: 2 } },
+    include: { invitees: true, players: { take: 11 } },
   });
+  if (game?.maxPlayers === 10) {
+    if (!await deliveryAudienceCurrent(input, game, input.playerMemberIds ?? [])) return stale();
+    return true;
+  }
   if (!game?.createdBy || !game.invitees[0]?.memberId || game.players.length !== 1
     || isGameInviteExpired(game, input.now ?? new Date())
     || game.players[0]?.memberId !== game.createdBy
@@ -99,9 +105,9 @@ async function assertGameCancelledDeliveryCurrentTx(input: Parameters<typeof ass
   const game = await input.tx.game.findFirst({
     where: { id: cancelled[1], chatContainerMemberId: input.containerMemberId, status: "void",
       events: { some: { type: "cancelled" } } },
-    include: { players: { take: 3 } },
+    include: { invitees: true, players: { take: 11 } },
   });
-  if (!game || !sameGamePlayers(game.players.map((player) => player.memberId), input.playerMemberIds ?? [])) return stale();
+  if (!game || !await deliveryAudienceCurrent(input, game, input.playerMemberIds ?? [])) return stale();
   return true;
 }
 async function assertGameChangeResolvedDeliveryCurrentTx(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0]): Promise<true> {
@@ -110,9 +116,9 @@ async function assertGameChangeResolvedDeliveryCurrentTx(input: Parameters<typeo
   const game = await input.tx.game.findFirst({
     where: { id: cancelled[2], chatContainerMemberId: input.containerMemberId, status: { in: cancelled[1] === "expired" ? ["live", "negotiating", "settled", "void"] : ["live", "negotiating"] },
       events: { some: { type: `change_${cancelled[1]}`, commandKey: `game-change-resolved:${cancelled[2]}:${cancelled[3]}` } } },
-    include: { players: { take: 3 } },
+    include: { invitees: true, players: { take: 11 } },
   });
-  if (!game || !sameGamePlayers(game.players.map((player) => player.memberId), input.playerMemberIds ?? [])) return stale();
+  if (!game || !await deliveryAudienceCurrent(input, game, input.playerMemberIds ?? [])) return stale();
   return true;
 }
 async function assertGameStartedDeliveryCurrentTx(
@@ -120,12 +126,17 @@ async function assertGameStartedDeliveryCurrentTx(
 ): Promise<true> {
   const game = await input.tx.game.findFirst({
     where: { id: gameId, chatContainerMemberId: input.containerMemberId, status: "live" },
-    include: { players: { take: 3 } },
+    include: { invitees: true, players: { take: 11 } },
   });
-  if (!game || !sameGamePlayers(game.players.map((player) => player.memberId), input.playerMemberIds ?? [])) return stale();
+  if (!game || !await deliveryAudienceCurrent(input, game, input.playerMemberIds ?? [])) return stale();
   return true;
 }
 
 function stale(): never {
   throw hostedOnboardingError({ code: "GAME_CHANGE_SUPERSEDED", httpStatus: 409, message: "This proposed game change is no longer current.", retryable: false });
+}
+
+async function deliveryAudienceCurrent(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], game: Parameters<typeof readGroupGameChatAuthority>[0], players: readonly string[]): Promise<boolean> {
+  if (game.maxPlayers !== 10) return sameGamePlayers(game.players.map(player => player.memberId), players);
+  return Boolean(input.audience && await readGroupGameChatAuthority(game, input.containerMemberId, input.audience, input.tx));
 }

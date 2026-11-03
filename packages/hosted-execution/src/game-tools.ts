@@ -10,20 +10,22 @@ export const hostedGameScheduleSchema = z.union([
 export const hostedGameChangeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("start_now") }).strict(),
   z.object({ kind: z.literal("edit"), schedule: hostedGameScheduleSchema.optional(), lengthDays: z.number().int().min(1).max(365).optional(), startsOn: date.nullable().optional(),
-    tasks: z.array(z.object({ seat: z.number().int().min(0).max(1), text: z.string().min(1).max(200) }).strict()).length(2).optional(),
+    tasks: z.array(z.object({ seat: z.number().int().min(0).max(1), text: z.string().min(1).max(200) }).strict()).min(2).max(2).optional(),
     stakes: z.array(z.object({ kind: z.enum(["winner_gets", "per_miss", "prize", "dare"]), item: z.string().min(1).max(200) }).strict()).min(1).max(3).optional(),
     stakesApplyToWholeGame: z.literal(true).optional(),
   }).strict(),
 ]);
 export const hostedGameCreateTermsSchema = z.object({
-  tasks: z.array(z.object({ memberId: ref, text: z.string().min(1).max(200) }).strict()).length(2),
+  defaultTask: z.string().min(1).max(200).optional(),
+  tasks: z.array(z.object({ memberId: ref, text: z.string().min(1).max(200) }).strict()).min(2).max(10),
   schedule: hostedGameScheduleSchema,
   stakes: z.array(z.object({ kind: z.enum(["prize", "dare"]), item: z.string().min(1).max(200) }).strict()).length(1),
   lengthDays: z.number().int().min(3).max(365).optional(),
   startsOn: date.optional(),
 }).strict();
 export const hostedGameUpdateSchema = z.discriminatedUnion("operation", [
-  z.object({ operation: z.literal("create"), gameId, terms: hostedGameCreateTermsSchema, previousGameId: gameId.optional() }).strict(),
+  z.object({ operation: z.literal("create"), gameId, terms: hostedGameCreateTermsSchema, previousGameId: gameId.optional(), groupWord: z.string().trim().min(1).max(40).optional() }).strict(),
+  z.object({ operation: z.literal("edit_terms"), gameId, expectedTermsVersion: z.number().int().min(1), terms: hostedGameCreateTermsSchema.extend({ defaultTask: z.string().min(1).max(200), tasks: z.array(hostedGameCreateTermsSchema.shape.tasks.element).min(1).max(10) }) }).strict(),
   z.object({ operation: z.enum(["mark_incomplete", "restore_day"]), gameId, date }).strict(),
   z.object({ operation: z.literal("propose"), gameId, proposalId: gameId, expectedTermsVersion: z.number().int().min(1), change: hostedGameChangeSchema }).strict(),
   z.object({ operation: z.literal("approve"), gameId, proposalId: gameId.optional(), expectedTermsVersion: z.number().int().min(1).optional() }).strict().refine(value => (value.proposalId !== undefined) !== (value.expectedTermsVersion !== undefined), "Approval needs proposalId or expectedTermsVersion."),
@@ -55,9 +57,9 @@ const recapSuperlatives = z.array(z.object({
     return words >= 2 && words <= 6 && !/[.。]$/u.test(title) && !/^most\s+likely\s+to\b/iu.test(title);
   }),
   line: z.string().trim().min(1).max(160),
-}).strict()).length(2).refine((items) =>
-  new Set(items.map((item) => item.memberId)).size === 2
-  && new Set(items.map((item) => item.title.toLowerCase())).size === 2);
+}).strict()).min(2).max(10).refine((items) =>
+  new Set(items.map((item) => item.memberId)).size === items.length
+  && new Set(items.map((item) => item.title.toLowerCase())).size === items.length);
 
 export const hostedGameRecapSchema = z.object({
   pages: z.array(z.object({
@@ -78,9 +80,10 @@ export const hostedGameToolRequestSchema = z.discriminatedUnion("action", [
 ]);
 export type HostedGameToolRequest = z.infer<typeof hostedGameToolRequestSchema>;
 const terms = z.object({
+  defaultTask: z.string().max(500).optional(),
   n: z.number().int().min(1), fromDay: z.number().int().min(0),
   checkInKind: z.enum(["photo", "heart_rate", "any"]).optional(),
-  tasks: z.array(z.object({ seat: z.number().int(), text: z.string().max(500) }).strict()).max(2),
+  tasks: z.array(z.object({ seat: z.number().int(), text: z.string().max(500) }).strict()).max(10),
   schedule: hostedGameScheduleSchema,
   stakes: z.array(z.object({ kind: z.enum(["winner_gets", "per_miss", "prize", "dare"]), item: z.string().max(500), key: z.string().optional() }).strict()).max(20),
 }).strict();
@@ -96,18 +99,20 @@ const progress = z.object({
     currentDayIndex: z.number().int().nullable(), attemptsRemaining: z.number().int().min(0).max(2),
     currentEntryId: ref.nullable(),
     days: z.array(z.object({ dayIndex: z.number().int(), date, status: z.enum(["posted", "due", "missed", "off", "upcoming", "not_posted"]) }).strict()).max(365),
-  }).strict()).max(2),
+  }).strict()).max(10),
 }).strict();
 const result = z.object({
-  scores: z.array(z.object({ memberId: ref, seat: z.number().int(), score: z.number().int(), misses: z.number().int() }).strict()).max(2),
-  tickets: z.array(z.object({ owedByMemberId: ref, owedToMemberId: ref, what: z.string().max(500), status: z.enum(["open", "redeemed", "expired"]), count: z.number().int().min(1) }).strict()).max(48),
+  scores: z.array(z.object({ memberId: ref, seat: z.number().int(), score: z.number().int(), misses: z.number().int(), eligible: z.boolean().optional() }).strict()).max(10),
+  tickets: z.array(z.object({ owedByMemberId: z.string().max(128), owedToMemberId: z.string().max(128), owedBySeats: z.array(z.number().int()).max(10).optional(), owedToSeats: z.array(z.number().int()).max(10).optional(), what: z.string().max(500), status: z.enum(["open", "redeemed", "expired"]), count: z.number().int().min(1) }).strict()).max(48),
 }).strict();
 export const hostedGameChatStateSchema = z.object({
-  players: z.array(z.object({ memberId: ref, firstName: z.string().max(200).nullable(), timeZone: z.string().max(100).nullable(), isSender: z.boolean() }).strict()).length(2).optional(),
+  players: z.array(z.object({ memberId: ref, firstName: z.string().max(200).nullable(), timeZone: z.string().max(100).nullable(), isSender: z.boolean() }).strict()).min(1).max(10).optional(),
   games: z.array(z.object({
+  maxPlayers: z.literal(10).optional(),
+  pendingInviteeCount: z.number().int().min(0).max(9).optional(),
   id: ref, status: z.enum(["invited", "negotiating", "live", "settled", "void"]), terms,
   startsOn: date.nullable(), lengthDays: z.number().int().min(1).max(365),
-  players: z.array(z.object({ memberId: ref, seat: z.number().int(), firstName: z.string().max(200), dayOne: date.nullable(), timeZone: z.string().max(100) }).strict()).max(2),
+  players: z.array(z.object({ memberId: ref, seat: z.number().int(), firstName: z.string().max(200), dayOne: date.nullable(), timeZone: z.string().max(100) }).strict()).max(10),
   pendingChange: pending.nullable(),
   progress: progress.optional(), result: result.nullable().optional(),
   changeControls: z.object({ canStartNow: z.boolean(), canEdit: z.boolean(), canEditSchedule: z.boolean(), canEditStartDate: z.boolean(), canEditTasks: z.boolean().optional(), canEditStakes: z.boolean().optional(), editableFromDay: z.number().int().nullable() }).strict(),

@@ -17,7 +17,7 @@ export { buildGameProposalInstructions } from "@murphai/hosted-execution/runtime
 import { openGameTexts } from "./crypto";
 import { isGameInviteExpired } from "./rules";
 
-import { bindPairGameChat, findExistingGameChat, requireExactChat, requireExactGameChat } from "./chat-membership";
+import { bindPairGameChat, findExistingGameChat, readGroupGameChatAuthority, type GameChatAudience, requireExactChat, requireExactGameChat } from "./chat-membership";
 export { isExactGameChat, requireExactGameChat } from "./chat-membership";
 import { prepareGameChatBootstrap } from "./chat-bootstrap";
 import { markGameChatGenerationQueuedTx } from "./chat-lifecycle-receipt";
@@ -61,8 +61,14 @@ async function prepareGameChatPlayers(game: Game & { players: GamePlayer[] }, pr
 }
 
 /** Revalidate the audience outside the existing provider dispatch transaction. */
-export async function readGameProposalDeliveryPlayers(key: string | null, containerMemberId: string): Promise<readonly string[] | undefined> {
-  return /^(game-change|game-started|game-rematch|game-change-cancelled|game-change-expired|game-cancelled|game-recap|game-missed):/.test(key ?? "") ? requireExactGameChat(containerMemberId) : undefined;
+export async function readGameProposalDeliveryPlayers(key: string | null, containerMemberId: string, target?: string | null): Promise<readonly string[] | GameChatAudience | undefined> {
+  const match = /^(game-change|game-started|game-rematch|game-change-cancelled|game-change-expired|game-cancelled|game-recap|game-missed):([^:]+)/.exec(key ?? "");
+  if (!match) return undefined;
+  const game = await getPrisma().game.findUnique({ where: { id: match[2] }, include: { players: { take: 11 } } });
+  if (game?.maxPlayers !== 10) return requireExactGameChat(containerMemberId);
+  const audience = await readGroupGameChatAuthority(game, containerMemberId);
+  if (!audience || game.chatContainerMemberId !== containerMemberId || target != null && audience.threadId !== target) throw new Error("Game delivery audience changed.");
+  return audience;
 }
 
 

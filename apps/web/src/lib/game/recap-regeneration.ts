@@ -1,7 +1,7 @@
 import "server-only";
 import { getPrisma } from "../prisma";
-import { areGamePlayersBlocked, lockGamePair } from "./blocks";
-import { sameGamePlayers } from "./chat-membership";
+import { lockGamePair } from "./blocks";
+import { hasGameChatBlock, sameGamePlayers } from "./chat-membership";
 import { isGameOn } from "./access";
 import { gameChatLifecycleEventId, reserveGameChatLifecycleTx } from "./chat-lifecycle-receipt";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
@@ -18,7 +18,7 @@ export async function requestGameRecapRegeneration(input: GameRecapRegenerationR
   const eventId = gameChatLifecycleEventId(input.gameId, "recap", undefined, input.regenerationId);
   const result = (outcome: string) => ({ gameId: input.gameId, regenerationId: input.regenerationId, eventId,
     dryRun: !input.execute, outcome });
-  const seed = await prisma.game.findUnique({ where: { id: input.gameId }, select: { players: { select: { memberId: true, leftAt: true }, take: 3 } } });
+  const seed = await prisma.game.findUnique({ where: { id: input.gameId }, select: { players: { select: { memberId: true, leftAt: true }, take: 11 } } });
   const players = seed?.players.map((player) => player.memberId) ?? [];
   if (!sameGamePlayers(players, players)) return result("ineligible_roster");
   return prisma.$transaction(async (tx) => {
@@ -27,14 +27,14 @@ export async function requestGameRecapRegeneration(input: GameRecapRegenerationR
     await tx.$queryRaw`SELECT id FROM game WHERE id = ${input.gameId} FOR UPDATE`;
     const game = await tx.game.findUnique({ where: { id: input.gameId }, select: {
       status: true, chatContainerMemberId: true, recapEncrypted: true,
-      players: { select: { memberId: true, leftAt: true }, take: 3 },
+      players: { select: { memberId: true, leftAt: true }, take: 11 },
     } });
     if (!game || !sameGamePlayers(game.players.map((player) => player.memberId), players)) return result("ineligible_roster");
     if (game.status !== "settled") return result("not_settled");
     if (game.players.some(player => player.leftAt !== null)) return result("player_departed");
     if (!isGameOn(game)) return result("game_disabled");
     if (!game.chatContainerMemberId) return result("chat_unavailable");
-    if (await areGamePlayersBlocked(tx, players[0]!, players[1]!)) return result("players_blocked");
+    if (await hasGameChatBlock(tx, players)) return result("players_blocked");
     const prior = await tx.gameEvent.findUnique({ where: { commandKey: eventId }, select: { id: true } });
     if (prior) return result("already_requested");
     if (!game.recapEncrypted) return result("recap_unavailable");

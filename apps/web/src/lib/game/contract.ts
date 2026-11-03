@@ -598,3 +598,8 @@ export interface GameError {
   message: string;
   retryable?: boolean;
 }
+
+/** Returned only when creation explicitly prepares a Messages handoff. */
+export interface CreateGameView extends GameView {
+  composer?: { murphPhoneNumber: string };
+}
