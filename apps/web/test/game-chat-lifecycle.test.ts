@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const m = vi.hoisted(() => ({
+  challengeCase: vi.fn(), challengeInstructions: vi.fn(),
   event: vi.fn(), receipts: vi.fn(), frozen: vi.fn(), recover: vi.fn(), receiptUpdate: vi.fn(), game: vi.fn(), current: vi.fn(), bind: vi.fn(),
   state: vi.fn(), rematchNotice: vi.fn(), identity: vi.fn(), discover: vi.fn(), exact: vi.fn(), bootstrap: vi.fn(), proposal: vi.fn(),
   destination: vi.fn(), mailbox: vi.fn(), prepare: vi.fn(), append: vi.fn(), signal: vi.fn(), route: vi.fn(),
@@ -10,6 +11,7 @@ vi.mock("../src/lib/prisma", () => {
   return { getPrisma: () => ({ ...db, $transaction: async (fn: (tx: typeof db) => unknown) => fn(db) }) };
 });
 vi.mock("../src/lib/game/service", () => ({ readGameChatState: m.state, readGameNoticeRoom: m.room, readGameMissedCheckInBatch: m.missedBatch, readGameRematchNotice: m.rematchNotice,
+  readGameChallengeCase: m.challengeCase, readGameChallengeInstructions: m.challengeInstructions,
   readGameRecapMaterial: m.recapMaterial, reserveDueGameMissedDayCheckIns: m.reserveMissed }));
 vi.mock("../src/lib/game/chat-tool", () => ({ readGameRecapChatMessages: m.recapMessages, readGameChatTranscript: m.transcript }));
 vi.mock("../src/lib/game/chat-membership", () => ({ bindPairGameChat: async (_id: string, _players: string[], candidate: string | null) => candidate, findExistingGameChat: m.discover, requireExactChat: m.exact }));
@@ -26,6 +28,7 @@ vi.mock("../src/lib/hosted-routing/assistant-notification-destination", () => ({
   assertHostedAssistantNotificationRouteAuthority: m.route,
 }));
 import { deliverGameChatLifecycle, drainGameChatLifecycle } from "../src/lib/game/chat-lifecycle";
+import { buildGameChallengeInstructions } from "../src/lib/game/challenge";
 const now = new Date("2030-03-04T12:00:00Z");
 const players = ["person-a", "person-b"];
 const game = { id: "game", status: "live", chatContainerMemberId: "room", players: players.map((memberId) => ({ memberId })) };
@@ -49,6 +52,48 @@ describe("durable game chat lifecycle", () => {
     m.discover.mockResolvedValue(null); m.bootstrap.mockResolvedValue("room"); m.proposal.mockResolvedValue(true);
     m.destination.mockResolvedValue({ conversationShape: "thread-container", route: { channel: "linq" } });
     m.mailbox.mockResolvedValue(null); m.prepare.mockResolvedValue({}); m.append.mockResolvedValue({ mailboxItemId: "notice" });
+  });
+  it("filters supported templates and non-null references before the bounded drain", async () => {
+    await drainGameChatLifecycle({ now });
+    expect(m.receipts).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
+      template: { in: ["game_started", "game_rematch", "game_proposal", "game_change_cancelled", "game_change_expired", "game_cancelled", "game_recap", "game_missed", "game_challenge"] },
+      sourceRef: { not: null },
+    }), take: 1 }));
+  });
+
+  it.each(["awaiting_generation", "generation_queued"])("queues or recovers one bound Prove it notice: %s", async status => {
+    const eventId = "game-challenge:game:entry";
+    m.receipts.mockResolvedValue([{ ...receipt, status, sourceRef: "game:entry", template: "game_challenge", idempotencyKey: `hash:${eventId}` }]);
+    m.challengeCase.mockResolvedValue({ row: game, state: { players: players.map(memberId => ({ memberId })) },
+      challenge: { actor: players[0] }, status: "open" });
+    const instructions = buildGameChallengeInstructions({ challengerName: "Maya", accusedName: "Sam", dayNumber: 1, task: "Read a chapter",
+      postedAt: now, deadlineAt: new Date(now.getTime() + 12 * 3_600_000), timeZone: "UTC" });
+    m.challengeInstructions.mockResolvedValue(instructions);
+    if (status === "generation_queued") m.mailbox.mockResolvedValue({ id: "mailbox", consumedAt: null });
+    await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });
+    if (status === "awaiting_generation") {
+      expect(m.prepare.mock.calls[0][0].envelope.notification).toMatchObject({ instructions, responsePolicy: { kind: "require_send" },
+        deliveryDedupeToken: eventId, deliveryIdempotencyKey: eventId, deliveryDispatchMode: "queue-only" });
+      expect(m.append).toHaveBeenCalledOnce();
+    } else {
+      expect(m.prepare).not.toHaveBeenCalled();
+      expect(m.challengeInstructions).not.toHaveBeenCalled();
+    }
+    expect(m.signal).toHaveBeenCalledOnce();
+    expect(m.discover).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
+  });
+
+  it.each(["conceded", "stood", "void", "missing", "unbound"])("supersedes a queued case before generation or recovery: %s", async status => {
+    for (const receiptStatus of ["awaiting_generation", "generation_queued"]) {
+      m.receipts.mockResolvedValue([{ ...receipt, status: receiptStatus, sourceRef: "game:entry", template: "game_challenge", idempotencyKey: "hash:game-challenge:game:entry" }]);
+      m.challengeCase.mockResolvedValue(status === "missing" ? null : { row: { ...game, chatContainerMemberId: status === "unbound" ? null : "room" },
+        state: { players: players.map(memberId => ({ memberId })) }, challenge: { actor: players[0] }, status: status === "unbound" ? "open" : status });
+      await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 0, deferred: 1 });
+      expect(m.receiptUpdate).toHaveBeenLastCalledWith(expect.objectContaining({ data: { status: "skipped", skippedAt: now,
+        skipReason: "game_lifecycle_superseded", retryAfterAt: null } }));
+    }
+    expect(m.prepare).not.toHaveBeenCalled(); expect(m.signal).not.toHaveBeenCalled();
+    expect(m.discover).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
   });
   it("queues a rematch only in its inherited room while it is still invited", async () => {
     const rematchGame = { ...game, status: "invited", createdBy: players[0], invitees: [{ memberId: players[1] }], players: [{ memberId: players[0] }] };

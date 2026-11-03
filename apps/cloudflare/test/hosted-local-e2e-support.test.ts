@@ -970,6 +970,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       && name !== "murph.send_vault_file"
       && name !== "murph.ask_grok"
       && name !== "murph.attach_response_card"
+      && name !== "murph.attach_sleep_card"
       && name !== "murph.attach_exercise_routine_card"
       && name !== "murph.attach_telegram_rich_content"
     );
@@ -1024,6 +1025,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expect(allToolNames).toContain("murph.send_progress_update");
     expect(allToolNames).toContain("murph.ask_grok");
     expect(allToolNames).toContain("murph.attach_response_card");
+    expect(allToolNames).toContain("murph.attach_sleep_card");
     expect(allToolNames).toContain("murph.attach_exercise_routine_card");
     expect(allToolNames).toContain("murph.attach_telegram_rich_content");
 
@@ -1323,6 +1325,7 @@ function buildResponsesRequest(
       .filter((name) =>
         name !== "murph.automation"
         && name !== "murph.attach_response_card"
+        && name !== "murph.attach_sleep_card"
         && name !== "murph.attach_exercise_routine_card"
         && name !== "murph.attach_telegram_rich_content"
         && name !== "murph.generate_image"

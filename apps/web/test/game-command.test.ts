@@ -6,6 +6,14 @@ import { GameRuleError } from "@/src/lib/game/rules";
 const PHOTO_KEY = `game/hbm_leo/${"a".repeat(64)}.jpg`;
 const SUMMARY = { durationSec: 60, avgBpm: 120, lowBpm: 100, peakBpm: 140 };
 
+it("parses Prove it client ids without accepting caller identity or deadline", () => {
+  expect(parseGameCommand({ type: "challenge", gameId: "game_prove_it", entryId: "entry_prove_it", memberId: "other", deadlineAt: "later" }))
+    .toEqual({ type: "challenge", gameId: "game_prove_it", entryId: "entry_prove_it" });
+  for (const entryId of [undefined, "", "with:colon", 123]) {
+    expect(() => parseGameCommand({ type: "challenge", gameId: "game_prove_it", entryId })).toThrow(GameRuleError);
+  }
+});
+
 function codeOf(run: () => unknown): string {
   try {
     run();

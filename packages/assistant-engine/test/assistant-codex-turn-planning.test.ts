@@ -450,11 +450,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "740068d5a629ec79aa2805ff611341731e8299551abd412dd4260026196d4918",
+        "direct": "1713ee0145c08dd20f7cfad9451c00f354df34747394a9a8d53ae21b52ec94ee",
         "group": "3f10d23569735e17bbdf717cbf8beff93468a7b093fd76954244bee57a21370b",
         "maintenance": "52f122f38125b96ccf960ea62ada87ef983f3e1060cdafef33eae3309b970038",
         "outputOnly": "b87c76c464b664e3d9dcbf947b1cd7a3c823dad67b72a8597c8a462e1bd3dd54",
-        "scheduledEmail": "bd08875e24f7d7a728bcff1930a08724f1666dc8cac2f22dc0245b8948803035",
+        "scheduledEmail": "44d0d051beb95fe26636ebd4dfcfa00f9c6ac23ba3876806a70bc8b3adeed61e",
       }
     `)
   })
@@ -1320,6 +1320,7 @@ describe('assistant Codex turn planning', () => {
     )
     expect(scheduledNewsletterPlan.dynamicTools.map((tool) => tool.name)).toEqual(
       ordinaryToolNames.filter((name) =>
+        name !== 'attach_sleep_card' &&
         name !== 'attach_response_card' &&
         name !== 'attach_exercise_routine_card' &&
         name !== 'attach_telegram_rich_content'
@@ -3514,6 +3515,7 @@ describe('assistant Codex turn planning', () => {
       direct.dynamicTools
         .map((tool) => tool.name)
         .filter((name) =>
+          name !== 'attach_sleep_card' &&
           name !== 'attach_response_card' &&
           name !== 'attach_exercise_routine_card' &&
           name !== 'attach_telegram_rich_content'

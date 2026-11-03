@@ -2043,6 +2043,55 @@ describe("hosted Linq egress authority", () => {
     expect(mocks.readGameProposalDeliveryPlayers).toHaveBeenCalledWith(eventId, "member-1", "chat-authorized-group");
   });
 
+  it.each(["open", "conceded", "restored", "retaken", "withdrawn", "expired", "settled", "void", "due", "other-audience", "unbound", "missing-event"])(
+    "requires an open Prove it case at final provider claim in a quiet room: %s", async scenario => {
+      const prisma = createPrismaStub({ threadRouteContainerMemberId: "member-1" });
+      prisma.hostedLinqDailyState.findFirst.mockResolvedValue(null);
+      prisma.hostedMailboxItem.findFirst.mockResolvedValue(null);
+      const now = new Date();
+      const dayOne = new Date(now.getTime() - 86_400_000).toISOString().slice(0, 10);
+      const entry = { id: "entry", memberId: "person-b", gameId: "game", dayIndex: 0, attempt: 1, kind: "photo", mediaKeys: [],
+        receivedAt: now, withdrawnAt: ["withdrawn", "retaken"].includes(scenario) ? now : null, blurHash: null, incomplete: scenario === "conceded" };
+      prisma.game.findMany.mockResolvedValue([{
+        id: "game", createdBy: "person-a", maxPlayers: 2, status: ["settled", "void"].includes(scenario) ? scenario : "live",
+        lengthDays: 7, chatContainerMemberId: scenario === "unbound" ? null : "member-1", inviteExpiresAt: null,
+        startsOn: null, devClockOffsetMs: null, invitees: [],
+        terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { count: 7 }, stakes: [] }] },
+        players: ["person-a", "person-b"].map((memberId, seat) => ({ memberId, seat, leftAt: null, timeZone: "UTC",
+          dayOne: new Date(`${scenario === "due" ? "2000-01-01" : dayOne}T00:00:00Z`) })),
+      }]);
+      prisma.gameEntry.findMany.mockResolvedValue(scenario === "retaken" ? [entry, { ...entry, id: "replacement", attempt: 2, withdrawnAt: null }] : [entry]);
+      const idempotencyKey = "game-challenge:game:entry";
+      prisma.$queryRaw.mockImplementation(async query => JSON.stringify(query).includes("FROM game_event challenge") && scenario !== "missing-event" ? [{
+        id: 10n, gameId: "game", actor: "person-a", commandKey: idempotencyKey,
+        payload: { v: 1, entryId: "entry", deadlineAt: new Date(now.getTime() + (scenario === "expired" ? -1 : 3_600_000)).toISOString() },
+        concessionEventId: ["conceded", "restored"].includes(scenario) ? 11n : null,
+      }] : []);
+      mocks.readGameProposalDeliveryPlayers.mockResolvedValue(scenario === "other-audience" ? ["person-a", "outsider"] : ["person-a", "person-b"]);
+      mocks.getPrisma.mockReturnValue(prisma);
+      const dispatch = () => postHostedLinqEgressEngagement(new Request("https://internal.example.test/engagement", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ authorityCheckOnly: false,
+          answeredMailboxItemIds: [], idempotencyKey, target: "chat-authorized-group", targetKind: "thread" }),
+      }));
+      const response = await dispatch();
+      if (scenario === "open") {
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ providerDispatchClaimed: true });
+        expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledOnce();
+        expect(prisma.hostedLinqDailyState.findFirst).not.toHaveBeenCalled();
+        prisma.hostedLinqDelivery.findUnique.mockResolvedValue({ id: "delivery-1", status: "provider_dispatch_started", attemptedAt: now,
+          acceptedAt: null, deliveredAt: null, failedAt: null, lastReceiptAt: null, messageLookupKey: null, phoneNumberLookupKey: null,
+          retryAfterAt: null, skippedAt: null, source: "hosted_runtime_linq_delivery" });
+        expect(await (await dispatch()).json()).toMatchObject({ providerDispatchClaimed: false });
+        expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledOnce();
+      } else {
+        expect(response.status).toBe(409);
+        expect(await response.json()).toMatchObject({ error: { code: "GAME_CHANGE_SUPERSEDED" } });
+        expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+      }
+    },
+  );
+
   it.each(["current", "recap", "regenerated-recap", "refusal", "cancelled", "replaced", "expired", "other-audience", "unrelated", "line-blocked", "inactive-runtime"])(
     "requires canonical game proposal authority before exempting an inactive group: %s",
     async (scenario) => {
@@ -2765,7 +2814,8 @@ function createPrismaStub(input: {
   const prisma = {
     $executeRaw: vi.fn().mockResolvedValue(1),
     $queryRaw: vi.fn().mockResolvedValue([]),
-    game: { findFirst: vi.fn().mockResolvedValue(null) },
+    game: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) },
+    gameEntry: { findMany: vi.fn().mockResolvedValue([]) },
     deviceConnectionSource: {
       findUnique: vi.fn().mockResolvedValue(null),
     },

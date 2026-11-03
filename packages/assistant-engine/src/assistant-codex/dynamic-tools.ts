@@ -1,3 +1,5 @@
+import { sleepSummaryCardRequestSchema } from '@murphai/contracts'
+import { resolveTrustedSleepSummaryCard } from './dynamic-tools/sleep-summary-card.js'
 import { readGameDynamicToolRequest, executeGameTool, type GameDynamicRequest } from './dynamic-tools/games.js'
 import { types } from 'node:util'
 import { executeGetSenderContactDynamicTool, readSenderContactDynamicToolRequest, type SenderContactDynamicToolRequest } from './dynamic-tools/sender-contact.js'
@@ -350,6 +352,7 @@ import {
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
+  MURPH_ATTACH_SLEEP_CARD_TOOL,
   MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_COMPUTER_ACT_TOOL,
@@ -1457,6 +1460,7 @@ export type MurphDynamicToolRequest =
       kind: 'attach-response-media'
       media: AssistantResponseMedia[]
     }
+  | { kind: 'attach-sleep-card'; date: string }
   | {
       kind: 'attach-response-card'
       card: AssistantResponseCard
@@ -1746,6 +1750,25 @@ function isMurphDynamicToolNamespace(namespace: string | null): boolean {
   return namespace === MURPH_SEND_PROGRESS_UPDATE_TOOL.namespace
 }
 
+function readSleepCardDynamicToolRequest(request: { tool: string | null; arguments: unknown }): MurphDynamicToolRequest | null {
+  if (request.tool !== MURPH_ATTACH_SLEEP_CARD_TOOL.name) return null
+  const parsed = sleepSummaryCardRequestSchema.safeParse(request.arguments)
+  if (!parsed.success) {
+    return {
+      kind: 'invalid-response-card-arguments',
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: request.arguments,
+        schemaName: 'murph.attach_sleep_card.input',
+        toolName: 'murph.attach_sleep_card',
+        schemaPaths: collectSafeJsonSchemaValidationPaths(MURPH_ATTACH_SLEEP_CARD_TOOL.inputSchema),
+        schemaRootKeys: ['date'],
+      }),
+    }
+  }
+  return { kind: 'attach-sleep-card', date: parsed.data.date }
+}
+
 export function readMurphDynamicToolRequest(
   message: CodexRpcMessage,
   input?: {
@@ -1787,6 +1810,7 @@ export function readMurphDynamicToolRequest(
     readConnectedAppsDynamicToolRequest,
     readAssistantStyleDynamicToolRequest,
     readSenderContactDynamicToolRequest,
+    readSleepCardDynamicToolRequest,
     readPhoneCallDynamicToolRequest,
     readPhysicalNoteDynamicToolRequest,
     readClinicalRecordsConnectLinkDynamicToolRequest,
@@ -3364,6 +3388,35 @@ async function executeOversizedResponseCardDynamicTool(
   }
 }
 
+async function executeSleepCardDynamicTool(
+  input: ExecuteMurphDynamicToolRequestInput,
+  request: Extract<MurphDynamicToolRequest, { kind: 'attach-sleep-card' }>,
+): Promise<MurphDynamicToolExecutionResult> {
+  if (input.privateDirectResponseCardAllowed !== true) {
+    return toolTextResult(false, 'response cards require a private direct conversation', 'authority_rejected')
+  }
+  const card = await resolveTrustedSleepSummaryCard({ date: request.date, vaultRoot: input.vaultRoot ?? null })
+  if (card === null) {
+    return toolTextResult(false, 'no_sleep_for_date: No eligible completed sleep night is available for that date. Answer truthfully in text.', 'not_found')
+  }
+  return await executeResponseCardAttachmentDynamicTool(input, { kind: 'attach-response-card', card })
+}
+
+async function executeGroupChallengeCardDynamicTool(
+  input: ExecuteMurphDynamicToolRequestInput,
+  request: Extract<MurphDynamicToolRequest, { kind: 'attach-group-challenge-response-card' }>,
+): Promise<MurphDynamicToolExecutionResult> {
+  return await executeGroupChallengeResponseCardAttachment({
+    allowed: input.groupChallengeResponseCardAllowed === true,
+    currentResponseCard: input.currentResponseCard ?? null,
+    currentResponseMedia: input.currentResponseMedia ?? [],
+    knowledgePageReadTextFile: input.knowledgePageReadTextFile ?? null,
+    request: request.input,
+    turnState: input.groupSharedReadTurnState ?? null,
+    vaultRoot: input.vaultRoot ?? null,
+  })
+}
+
 async function executeResponseCardAttachmentDynamicTool(
   input: ExecuteMurphDynamicToolRequestInput,
   request: Extract<MurphDynamicToolRequest, { kind: 'attach-response-card' }>,
@@ -3680,15 +3733,9 @@ async function dispatchMurphDynamicToolRequest(
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool', 'unsupported_request')
     case 'attach-group-challenge-response-card':
-      return await executeGroupChallengeResponseCardAttachment({
-        allowed: input.groupChallengeResponseCardAllowed === true,
-        currentResponseCard: input.currentResponseCard ?? null,
-        currentResponseMedia: input.currentResponseMedia ?? [],
-        knowledgePageReadTextFile: input.knowledgePageReadTextFile ?? null,
-        request: input.request.input,
-        turnState: input.groupSharedReadTurnState ?? null,
-        vaultRoot: input.vaultRoot ?? null,
-      })
+      return await executeGroupChallengeCardDynamicTool(input, input.request)
+    case 'attach-sleep-card':
+      return await executeSleepCardDynamicTool(input, input.request)
     case 'attach-response-card':
       return await executeResponseCardAttachmentDynamicTool(input, input.request)
     case 'attach-response-media':

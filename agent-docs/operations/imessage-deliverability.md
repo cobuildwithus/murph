@@ -193,6 +193,23 @@ Daily nutrition targets are optional. Fresh V2 authoring is exactly all-null tot
 
 The only companion allowance is the fixed, brief optional-goals introduction on a first suitable complete totals-only card. It is frozen in the same semantic message/outbox effect, not a second send or arbitrary analysis. Canonical memory/instructions and conversation own prior decline and number preferences; an existing managed proposal of any status or the canonical sent note suppresses introduction. The outbox records that note only after successful send evidence, including definitive text fallback; a confirmation failure retries reconciliation without resending. Pending/staged copy is not delivery. Concurrent pre-confirmation turns can both select the optional introduction; no new global reservation, store or workflow is introduced. See `agent-docs/product-specs/nutrition-totals-card.md` for the bounded tradeoff and proof requirements.
 
+Sleep summaries use strict envelope 8, with envelope 7 reserved. The private-direct
+selector tool builds the night from canonical wearable data by local wake date.
+A general nightly summary receives one card and no final text; specific metrics,
+compound questions and advice stay text. Linq sends `sleep_summary` with
+`interactive:false` via `LINQ_SLEEP_SUMMARY_CARD_INTERACTIVE`; this static-only
+rollout protects old installed extensions as well as app-absent and macOS
+recipients. Its bitmap shows present values, its caption is the short wake date,
+there is no subcaption, and `fallback_text` is `Your sleep summary.` Text recovery
+and Telegram preserve the same values and HRV method. Deploy Web's envelope-8
+reader before the runner. Once any sleep intent is persisted, including a sent
+intent, the sleep-capable reader and text renderer are the runner rollback
+floor. Draining pending work is insufficient. Disable the producer by a forward
+fix retaining those readers. Native delivery needs a separate explicit owner
+decision after old-extension, new-extension, no-extension and macOS checks;
+App Store availability alone does not prove installed-client compatibility.
+See `agent-docs/product-specs/sleep-summary-card.md`.
+
 Generic compact tables use V3. Workout static images use the compact V4 tuple
 wire, while an editable native workout uses V6 with its opaque action binding.
 V3 and V4 reuse their authority-free presentation envelope in the same bounded

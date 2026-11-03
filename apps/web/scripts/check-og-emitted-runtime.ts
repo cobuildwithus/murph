@@ -103,6 +103,7 @@ const probeRoutes: ProbeRoute[] = [
     url: "http://localhost/connect/opengraph-image",
   },
   createIMessageCardProbe(),
+  createSleepCardProbe(),
 ];
 
 const requiredAssetNames = [
@@ -461,4 +462,16 @@ function ignoreExisting(error: NodeJS.ErrnoException): void {
   if (error.code !== "EEXIST") {
     throw error;
   }
+}
+
+function createSleepCardProbe(): ProbeRoute {
+  const payload = `${Buffer.from(JSON.stringify({ schemaVersion: 8, card: {
+    kind: "sleep_summary", version: 1, localDate: "2026-11-03", bedtime: "00:18", wakeTime: "08:02",
+    totalSleepMinutes: 436, score: 85, stages: { deepMinutes: 141, remMinutes: 118, lightMinutes: 177 },
+    awakeMinutes: 28, efficiencyPercent: 94, hrv: { milliseconds: 66, method: "rmssd" }, restingHeartRate: 45, wakeUps: 3,
+  } })).toString("base64url")}.png`;
+  return {
+    entry: "server/app/imessage/card/v1/[payload]/route.js", expectedHeight: 780, expectedWidth: 1200,
+    params: { payload }, url: `http://localhost/imessage/card/v1/${payload}`,
+  };
 }

@@ -18,6 +18,7 @@ export async function assertGameProposalDeliveryCurrentTx(input: {
   now?: Date;
 }): Promise<boolean> {
   const key = input.deliveryIdempotencyKey ?? "";
+  if (key.startsWith("game-challenge:")) return assertGameChallengeDeliveryCurrentTx(input, key);
   const recap = parseGameRecapEventId(key);
   if (recap) return assertGameRecapDeliveryCurrentTx(input, recap.gameId, recap.regenerationId);
   if (key.startsWith("game-recap:")) return stale();
@@ -31,6 +32,21 @@ export async function assertGameProposalDeliveryCurrentTx(input: {
   if (lifecycle) return assertGameStartedDeliveryCurrentTx(input, lifecycle[1]);
   if (!key.startsWith("game-change:")) return false;
   return assertGameChangeProposalDeliveryCurrentTx(input, key);
+}
+
+async function assertGameChallengeDeliveryCurrentTx(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], key: string): Promise<true> {
+  const match = /^game-challenge:([^:]+):([^:]+)$/u.exec(key);
+  if (!match) return stale();
+  // Serialize the claim with concessions, retakes, withdrawal and game end.
+  await input.tx.$queryRaw`SELECT id FROM game WHERE id = ${match[1]} FOR UPDATE`;
+  const { readGameChallengeCase } = await import("./service");
+  const current = await readGameChallengeCase(input.tx, match[1], match[2], input.now ?? new Date());
+  const players = current?.state.players.filter(player => !player.leftAt).map(player => player.memberId) ?? [];
+  const entry = current?.state.entries.find(entry => entry.id === match[2]);
+  if (!current || current.status !== "open" || current.row.chatContainerMemberId !== input.containerMemberId
+    || !isPairRoster(players) || !players.includes(current.challenge.actor) || !entry || entry.memberId === current.challenge.actor
+    || !players.includes(entry.memberId) || !sameGamePlayers(players, input.playerMemberIds ?? [])) return stale();
+  return true;
 }
 
 async function assertGameRecapDeliveryCurrentTx(

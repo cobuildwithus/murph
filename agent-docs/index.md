@@ -1,6 +1,8 @@
 Group app terms preserve valid unjoined invitation overrides through edits using
 the validator's shared seat eligibility; chat and public preview privacy stay
 unchanged. The projection contract is owned by [Weekly Game](product-specs/weekly-game.md).
+Group history uses the latest round's shared default task for every viewer,
+including players with a seat override; the same spec owns that contract.
 
 Public group invite Web rendering and pair preservation are owned by
 [Weekly Game](product-specs/weekly-game.md); proof and the PR lane are tracked in
@@ -1020,6 +1022,8 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/compliance/vendor-health-data-addendum.md` | Vendor clause library and procurement checklist for providers that process identifiable health data or health-context metadata. | Vendor health-data contracting | High | 2026-04-29 |
 | `agent-docs/compliance/health-data-tracking-and-ads-rule.md` | Hard rule and review checklist for analytics, telemetry, ad pixels, attribution, and marketing tools on health-data surfaces. | Health-data tracking policy | High | 2026-04-29 |
 | `agent-docs/product-specs/index.md` | Index for product-spec docs. | Product-spec inventory | High | 2026-07-16 |
+| `agent-docs/product-specs/sleep-summary-card.md` | Host-built private nightly summaries, envelope 8, static rollout and wake-date selection. | Sleep card product spec | High | 2026-11-03 |
+| `agent-docs/exec-plans/completed/2026-11-03-sleep-summary-card.md` | Completed backend and Web sleep summary plan with ReviewGPT plan dispositions. | Completed execution plan | High | 2026-11-03 |
 | `agent-docs/product-specs/nutrition-totals-card.md` | Logged-so-far nutrition cards without mandatory targets; invitation evidence, recovery, and native skew. | Nutrition card product spec | High | 2026-09-11 |
 | `agent-docs/exec-plans/completed/2026-09-11-nutrition-totals-card.md` | Completed implementation, assistant proof and review for optional-goal daily cards. | Completed execution plan | High | 2026-09-11 |
 | `agent-docs/exec-plans/completed/2026-09-12-channel-welcome-reader-rollout.md` | Consumer-first release extraction for channel welcomes; production rollout remains with the deployment owners. | Historical implementation evidence | Low | 2026-09-12 |

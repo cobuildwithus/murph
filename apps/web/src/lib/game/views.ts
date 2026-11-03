@@ -26,6 +26,9 @@ import type {
 import {
   currentTerms,
   groupTaskOverrideSeats,
+  canChallengeGame,
+  gameChallengeStatus,
+  type RuleChallenge,
   assertGroupTermsOpen,
   canRedeemGroupTicket,
   decideCancelInvite,
@@ -91,6 +94,7 @@ export interface GameTicketRow {
 }
 
 export interface GameViewInput {
+  challenges?: readonly RuleChallenge[];
   multiplayer?: boolean;
   home?: boolean;
   groupsEnabled?: boolean;
@@ -229,7 +233,10 @@ function canRedeemTicketView(row: GameTicketRow, input: GameViewInput, owedBy: s
 
 function entryView(entry: RuleEntry, input: GameViewInput): GameEntryView {
   const words = input.entryWords.get(entry.id);
+  const challenge = input.challenges?.find(challenge => challenge.entryId === entry.id);
+  const status = challenge && gameChallengeStatus(input.state, challenge, input.now);
   return {
+    ...(challenge && (status === "open" || status === "stood") ? { challenge: { status, deadlineAt: challenge.deadlineAt.toISOString(), byYou: challenge.actor === input.viewerId } } : {}),
     ...(entry.incomplete ? { incomplete: true as const } : {}),
     entryId: entry.id,
     kind: entry.kind,
@@ -278,7 +285,7 @@ export function buildGameHistoryView(input: GameViewInput): BuiltGameHistoryView
     .map((entry) => ({ entry: entryView(entry, input), mine: entry.memberId === input.viewerId, seat: seats.get(entry.memberId)! }));
 
   if (group) return {
-    group: { ...groupView(input), task: taskFor(viewer.seat), prize: stake?.item ?? null },
+    group: { ...groupView(input), task: terms.defaultTask ?? "", prize: stake?.item ?? null },
     game: { id: input.state.game.id, round: input.round, startedOn: viewer.dayOne,
       endsOn: addDays(viewer.dayOne, input.state.game.lengthDays - 1), lengthDays: input.state.game.lengthDays,
       schedule: terms.schedule, players: rosterViews(input, entries), result: historyOutcome,
@@ -333,6 +340,8 @@ export function buildGameView(input: GameViewInput): GameView {
     players: playerViews,
     result: resultView(input.result, viewerId, input.multiplayer),
     recap: input.recap,
+    canChallenge: !state.players.some(player => input.hiddenMemberIds?.has(player.memberId))
+      && canChallengeGame(state, input.challenges ?? [], viewerId, input.now),
     retakeAvailable: retakeAvailable(state, viewerId, input.now, entries),
     round: input.round,
     previousGameId: input.previousGameId,
@@ -523,7 +532,7 @@ function otherDayView(input: GameViewInput, visible: ReadonlySet<string>, other:
       return today === index && key ? { ...locked, preview: { kind: posted.kind, mediaUrl: gameMediaUrl(key) } } : locked;
     }
     // Its blur stays once it's open, for the app to show while the picture loads.
-    return { entry: entryView(posted, input), seat: other.seat, status: "posted", ...(posted.blurHash ? { blurHash: posted.blurHash } : {}) };
+    return { entry: entryView(posted, input), seat: other.seat, status: "posted", postedAt: posted.receivedAt.toISOString(), ...(posted.blurHash ? { blurHash: posted.blurHash } : {}) };
   }
   return { entry: null, seat: other.seat, status: unpostedStatus(input, other, index) };
 }

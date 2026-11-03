@@ -162,8 +162,8 @@ describe("game proposal chat delivery", () => {
     m.chat.mockResolvedValue({ ...chat, handlesComplete: false });
     await expect(requireExactGameChat("room")).rejects.toThrow("participants have changed");
   });
-  it("revalidates the exact roster for rematch delivery", async () => {
-    await expect(readGameProposalDeliveryPlayers("game-rematch:game", "room"))
+  it.each(["game-rematch:game", "game-challenge:game:entry"])("revalidates the exact roster for delivery: %s", async key => {
+    await expect(readGameProposalDeliveryPlayers(key, "room"))
       .resolves.toEqual(["person-a", "person-b"]);
     await expect(readGameProposalDeliveryPlayers("assistant-outbox:scheduled", "room"))
       .resolves.toBeUndefined();
