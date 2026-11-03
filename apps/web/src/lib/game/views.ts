@@ -70,9 +70,9 @@ export interface GameTicketRow {
   id: string;
   gameId: string;
   stakeKey: string;
-  /** Null once that member deleted their account. */
-  owedBy: string | null;
-  owedTo: string | null;
+  owedBySeats: readonly number[];
+  owedToSeats: readonly number[];
+  players: readonly { seat: number; memberId: string | null }[];
   status: "open" | "redeemed";
   createdAt: Date;
   redeemedAt: Date | null;
@@ -96,7 +96,7 @@ export interface GameViewInput {
   /** Per member: the relationship the viewer typed for them, if any. */
   relationships: ReadonlyMap<string, string | null>;
   /** A player who deleted their account: their seat and the name the viewer knew them by. */
-  departed?: { seat: number; name: string } | null;
+  departed?: readonly { seat: number; name: string }[];
   /**
    * The invitee while nobody has joined: the challenger's own words for them,
    * or, for an addressed rematch's invitee, their own name.
@@ -162,8 +162,12 @@ export function termsView(state: RuleState, words: TermWords): GameTermsVersion 
 /** `now` is the ticket's game clock: it decides whether an open ticket has expired. */
 export function ticketView(row: GameTicketRow, words: TermWords | null, viewerId: string, now: Date, terms?: StoredTerms, hiddenMembers: ReadonlySet<string> = NO_HIDDEN): GameTicketView {
   // Legacy scalar parties, including the pair block/departure presentation.
-  const owedBy = row.owedBy !== null && !hiddenMembers.has(row.owedBy) ? row.owedBy : null;
-  const owedTo = row.owedTo !== null && !hiddenMembers.has(row.owedTo) ? row.owedTo : null;
+  const party = (seats: readonly number[]) => {
+    const member = seats.length === 1 ? row.players.find(player => player.seat === seats[0])?.memberId : null;
+    return member && !hiddenMembers.has(member) ? member : null;
+  };
+  const owedBy = party(row.owedBySeats);
+  const owedTo = party(row.owedToSeats);
   return {
     createdAt: row.createdAt.toISOString(),
     id: row.id,
@@ -254,7 +258,7 @@ export function buildGameView(input: GameViewInput): GameView {
   const playerViews = players.map((player) => input.hiddenMemberIds?.has(player.memberId)
     ? departedView(input, { seat: player.seat, name: input.names.get(player.memberId) ?? "" })
     : playerView(input, player, entries));
-  if (input.departed) playerViews.push(departedView(input, input.departed));
+  for (const departed of input.departed ?? []) playerViews.push(departedView(input, departed));
   if (input.invitee && playerViews.length < game.seats) playerViews.push(inviteeView(input, input.invitee, firstOpenSeat(playerViews), viewerId));
   playerViews.sort((a, b) => a.seat - b.seat);
   return {
@@ -278,7 +282,8 @@ export function buildGameView(input: GameViewInput): GameView {
     startsOn: game.startsOn,
     terms: termsView(state, input.words),
     tickets: input.tickets
-      .filter((ticket) => ticket.owedBy === viewerId || ticket.owedTo === viewerId)
+      .filter((ticket) => ticket.players.some(player => player.memberId === viewerId
+        && [...ticket.owedBySeats, ...ticket.owedToSeats].includes(player.seat)))
       .map((ticket) => ticketView(ticket, input.words, viewerId, input.now, state.game.terms, input.hiddenMemberIds)),
   };
 }
@@ -311,7 +316,7 @@ function playerView(input: GameViewInput, player: RulePlayer, entries: GameEntry
 }
 
 /** A player who deleted their account: only their seat, final score and the viewer's name for them remain. */
-function departedView(input: GameViewInput, departed: NonNullable<GameViewInput["departed"]>): GamePlayerView {
+function departedView(input: GameViewInput, departed: NonNullable<GameViewInput["departed"]>[number]): GamePlayerView {
   return {
     avatarUrl: null,
     dayIndex: null,

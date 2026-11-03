@@ -5506,18 +5506,42 @@ entry decryption. Task, result and scalar-ticket compatibility stays in `views.t
 Views, shared progress and settlement reuse invocation-local entry indexes without
 persisted counts or caches. Production admission and pair policy remain unchanged.
 Postgres state tables are the truth: `game_profile`, `game_contact_label`,
-`game`, `game_player`, `game_entry`, `game_ticket`, plus `game_event`, an append-only history (one row per accepted change, ids and
-numbers and fixed server-authored refusal reasons only). Change proposal identities use its nullable unique `command_key`
-for replay after resolution. Every member link cascades from `game_profile`, which cascades
-from `HostedMember`. Account deletion's game step (`game/account-deletion.ts`) runs first,
-so the cascade only removes the leaver's own rows and games nobody else kept: before the
-deletion transaction it seals, under the remaining member's key, the name they knew the
-leaver by and (when the creator leaves) the game's terms words, since the leaver's key
-goes with them. Inside it, under the game locks, it revalidates each game, calls off open
-and live ones (`void`), records `game.departed_player` (seat, time, sealed name, remaining
-member), clears `created_by` and the leaver's ticket side, and deletes games with nobody left. Words (names, tasks, stakes, labels, excuse transcripts)
-are app-encrypted before any transaction; the structure that rules and
-settlement read stays plain, so neither decrypts.
+`game`, `game_invitee`, `game_player`, `game_entry`, `game_ticket`, plus
+`game_event`, an append-only history (ids, numbers and fixed server-authored
+refusal reasons only). Change proposal identities use its nullable unique
+`command_key` for replay after resolution. `game.max_players` is immutable size
+policy (2 or 10); production creation and admission still require two.
+`audience_key` is reserved nullable storage for later addressed group admission.
+
+Invitations retain original seats and optional member/keyed-lookup identity,
+never recipient destinations. An invitation's pending private label belongs to
+its creator; acceptance copies it into that viewer's contact label and clears
+the pending value. Joined players use primary key `(game_id, seat)` and retain
+unique `(game_id, member_id)` for the entry FK. A deleted player retains their
+seat with null member and non-null `left_at`; seats never move. Ticket parties
+reference seat arrays; `views.ts` alone produces released scalar pair parties
+and the unjoined-invitee placeholder. No placeholder is a joined player.
+
+`words_owner_member_id` explicitly owns shared ciphertext independently of the
+starter's nullable `created_by`. Its restrictive profile FK prevents accidental
+key loss. Account deletion prepares crypto outside the transaction, then locks
+games in id order and compares the complete roster/invitation/ciphertext snapshot
+before applying. It transfers shared words to the lowest-seat surviving profile,
+deletes the leaver's entries before nulling the member FK, clears pending changes
+and recap, and retains only each survivor's own encrypted name on the tombstone.
+No viewer inherits another viewer's private label. A never-joined pair invitee
+stays in `game_invitee`; its deletion display is kept there, not as a player.
+Open pairs become `void`; storage-level groups stay live with at least two joined
+survivors. Settled scores and ticket seats stay frozen. Nobody remaining means
+explicit game deletion. The bounded preparation reads at most 1,001 games and
+rejects overflow above 1,000; apply uses one caller-owned database-only transaction.
+Names, tasks, stakes, labels and excuse transcripts are app-encrypted before any
+transaction; rule and settlement structure remains plain.
+
+Migration `20261102230000_game_seat_storage` is an owner-approved direct
+cutover, including conversion and old-column removal. It intentionally breaks
+old Web game readers during the predeploy/build window. `apps/web/README.md`
+§ Direct game storage cutover owns the deploy order and rollback floor.
 
 The v1 schema widens retained game lengths to 1–365 and entry kinds to include
 words, route and reps, and stores per-poster sealed summaries in nullable

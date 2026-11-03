@@ -197,7 +197,7 @@ async function seedSettledGame(input: {
   const misses = input.misses ?? [7, 7];
   await getPrisma().game.create({ data: {
     id: gameId,
-    createdBy: input.challenger,
+    createdBy: input.challenger, wordsOwnerMemberId: input.challenger,
     status: "settled",
     terms: toPrismaJsonObject(terms.terms),
     termsWordsEncrypted,
@@ -214,8 +214,8 @@ async function seedSettledGame(input: {
       v: 1,
     }),
     players: { create: [
-      { memberId: input.challenger, seat: 0, timeZone: "UTC", dayOne },
-      { memberId: input.opponent, seat: 1, timeZone: "UTC", dayOne },
+      { memberId: input.challenger, seat: 0, joinedAt: new Date("2030-01-01T12:00:00Z"), timeZone: "UTC", dayOne },
+      { memberId: input.opponent, seat: 1, joinedAt: new Date("2030-01-01T12:00:00Z"), timeZone: "UTC", dayOne },
     ] },
   } });
   const entryIds: string[] = [];
@@ -248,9 +248,31 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
   });
 
   afterAll(async () => {
+    await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: memberIds } } });
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: memberIds } } });
     delete process.env.MURPH_GAME_MEDIA_DIR;
     await rm(mediaDir, { force: true, recursive: true });
+  });
+
+  it("freezes admission at the effective command clock and creates only pair storage", async () => {
+    const starter = await member("Starter", "UTC"), peer = await member("Peer", "UTC");
+    const gameId = randomUUID(), createdAt = new Date(), joinedAt = new Date(createdAt.getTime() + 60_000);
+    const created = await runAndRespond({ actorMemberId: starter, now: createdAt, command: {
+      type: "createGame", gameId, inviteeFirstName: "Teammate", terms: TERMS,
+    } });
+    expect(created.ok).toBe(true);
+    if (!created.ok || !created.game?.inviteToken) throw new Error("Synthetic invite was not created.");
+    await getPrisma().game.update({ where: { id: gameId }, data: { devClockOffsetMs: BigInt(3_600_000) } });
+    expect(await runAndRespond({ actorMemberId: peer, now: joinedAt, command: {
+      type: "join", token: created.game.inviteToken, termsVersion: 1, timeZone: "UTC",
+    } })).toMatchObject({ ok: true });
+    const row = await getPrisma().game.findUniqueOrThrow({ where: { id: gameId }, include: { players: { orderBy: { seat: "asc" } }, invitees: true } });
+    expect(row).toMatchObject({ maxPlayers: 2, audienceKey: null, wordsOwnerMemberId: starter });
+    expect(row.players.map(player => player.joinedAt)).toEqual([createdAt, new Date(joinedAt.getTime() + 3_600_000)]);
+    expect(row.invitees).toEqual([expect.objectContaining({ seat: 1, memberId: peer, pendingLabel: null })]);
+    await devAdvanceDays(gameId, starter, 1);
+    expect((await getPrisma().gamePlayer.findMany({ where: { gameId }, orderBy: { seat: "asc" } })).map(player => player.joinedAt))
+      .toEqual(row.players.map(player => player.joinedAt));
   });
 
   it("never opens locked payloads, keeps previews separate, and reveals data on recap", async () => {
@@ -356,7 +378,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const deletion = getPrisma().$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
       await tx.game.update({ where: { id: gameId }, data: { recapEncrypted: null,
-        departedPlayer: toPrismaJsonObject({ v: 1, at: new Date().toISOString(), nameEncrypted: "synthetic", seat: 1, viewerMemberId: ava }) } });
+        players: { update: { where: { gameId_seat: { gameId, seat: 1 } }, data: { leftAt: new Date() } } } } });
       deletionLocked();
       await held;
     }, { timeout: 20_000 });
@@ -716,7 +738,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await ok(ava, { type: "setProfile", photoKey });
     await devSettleNow(first.gameId, leo);
     const rematch = await ok(leo, { gameId: randomUUID(), inviteeFirstName: "Babe", previousGameId: first.gameId, terms: TERMS, type: "createGame" });
-    expect(await getPrisma().game.findUniqueOrThrow({ where: { id: rematch!.id } })).toMatchObject({ inviteeMemberId: ava });
+    expect(await getPrisma().gameInvitee.findUniqueOrThrow({ where: { gameId_seat: { gameId: rematch!.id, seat: 1 } } })).toMatchObject({ memberId: ava });
 
     expect(rematch!.players[1].avatarUrl).toContain(encodeURIComponent(photoKey));
     expect(rematch!.players[1].profileAvatarUrl).toBe(rematch!.players[1].avatarUrl);
@@ -1001,7 +1023,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const seat = await getPrisma().gamePlayer.findUniqueOrThrow({ where: { gameId_memberId: { gameId: first.gameId, memberId: leo } } });
     for (let n = 0; n < 51; n += 1) {
       const id = randomUUID();
-      await getPrisma().game.create({ data: { id, createdBy: leo, status: "invited",
+      await getPrisma().game.create({ data: { id, createdBy: leo, wordsOwnerMemberId: leo, status: "invited",
         terms: toPrismaJsonObject(template.terms), termsWordsEncrypted: template.termsWordsEncrypted,
         inviteExpiresAt: new Date(Date.now() + 86_400_000) } });
       await getPrisma().gamePlayer.create({ data: { gameId: id, memberId: leo, seat: 0, timeZone: seat.timeZone, joinedAt: new Date(Date.now() + n + 1) } });

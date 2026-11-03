@@ -18,7 +18,7 @@ export async function requestGameRecapRegeneration(input: GameRecapRegenerationR
   const eventId = gameChatLifecycleEventId(input.gameId, "recap", undefined, input.regenerationId);
   const result = (outcome: string) => ({ gameId: input.gameId, regenerationId: input.regenerationId, eventId,
     dryRun: !input.execute, outcome });
-  const seed = await prisma.game.findUnique({ where: { id: input.gameId }, select: { players: { select: { memberId: true }, take: 3 } } });
+  const seed = await prisma.game.findUnique({ where: { id: input.gameId }, select: { players: { select: { memberId: true, leftAt: true }, take: 3 } } });
   const players = seed?.players.map((player) => player.memberId) ?? [];
   if (!sameGamePlayers(players, players)) return result("ineligible_roster");
   return prisma.$transaction(async (tx) => {
@@ -26,12 +26,12 @@ export async function requestGameRecapRegeneration(input: GameRecapRegenerationR
     // Account deletion also owns this row before changing the roster or recap.
     await tx.$queryRaw`SELECT id FROM game WHERE id = ${input.gameId} FOR UPDATE`;
     const game = await tx.game.findUnique({ where: { id: input.gameId }, select: {
-      status: true, departedPlayer: true, chatContainerMemberId: true, recapEncrypted: true,
-      players: { select: { memberId: true }, take: 3 },
+      status: true, chatContainerMemberId: true, recapEncrypted: true,
+      players: { select: { memberId: true, leftAt: true }, take: 3 },
     } });
     if (!game || !sameGamePlayers(game.players.map((player) => player.memberId), players)) return result("ineligible_roster");
     if (game.status !== "settled") return result("not_settled");
-    if (game.departedPlayer !== null) return result("player_departed");
+    if (game.players.some(player => player.leftAt !== null)) return result("player_departed");
     if (!isGameOn(game)) return result("game_disabled");
     if (!game.chatContainerMemberId) return result("chat_unavailable");
     if (await areGamePlayersBlocked(tx, players[0]!, players[1]!)) return result("players_blocked");

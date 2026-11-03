@@ -5,9 +5,9 @@ import { assertGameProposalDeliveryCurrentTx } from "../src/lib/game/chat-delive
 const now = new Date("2030-03-04T16:00:00Z");
 const row = () => ({
   id: "game", createdBy: "person-a", chatContainerMemberId: "room", pendingChange: { v: 1, id: "proposal", proposedByMemberId: "person-a", expectedTermsVersion: 1, change: { kind: "edit", schedule: { days: [5, 6] } }, effectiveFromDay: 0, startsOn: null, deliveryStatus: "queued" },
-  previousGameId: null, inviteeMemberId: null, round: 1, status: "live", terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: [0, 1, 2, 3, 4] }, stakes: [] }] }, termsWordsEncrypted: "synthetic", inviteTokenHash: null, inviteTokenEncrypted: null, inviteExpiresAt: null, pendingLabel: null, lengthDays: 7, startsOn: null, startedAt: now, devClockOffsetMs: null, result: null, recapEncrypted: null, departedPlayer: null, settledAt: null, createdAt: now, updatedAt: now,
+  previousGameId: null, invitees: [], maxPlayers: 2, audienceKey: null, wordsOwnerMemberId: "person-a", round: 1, status: "live", terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: [0, 1, 2, 3, 4] }, stakes: [] }] }, termsWordsEncrypted: "synthetic", inviteTokenHash: null, inviteTokenEncrypted: null, inviteExpiresAt: null, lengthDays: 7, startsOn: null, startedAt: now, devClockOffsetMs: null, result: null, recapEncrypted: null, settledAt: null, createdAt: now, updatedAt: now,
   players: ["person-a", "person-b"].map((memberId, seat) => ({ memberId, seat, timeZone: "UTC", dayOne: new Date("2030-03-05T00:00:00Z") })),
-} satisfies Game & { players: Array<{ memberId: string; seat: number; timeZone: string; dayOne: Date }> });
+} satisfies Game & { invitees: { memberId: string | null }[]; players: Array<{ memberId: string; seat: number; timeZone: string; dayOne: Date }> });
 function setup() {
   const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: "postgresql://localhost/synthetic_unused" }) });
   const findFirst = vi.spyOn(prisma.game, "findFirst");
@@ -71,7 +71,7 @@ describe("game proposal provider dispatch authority", () => {
     await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "game-recap:game" })).resolves.toBe(true);
     expect(findFirst).toHaveBeenCalledTimes(1);
     expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
-      id: "game", chatContainerMemberId: "room", status: "settled", departedPlayer: expect.anything(),
+      id: "game", chatContainerMemberId: "room", status: "settled", players: expect.anything(),
     }) }));
     await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "game-recap:game", playerMemberIds: ["person-a", "outsider"] }))
       .rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
@@ -95,7 +95,7 @@ describe("game proposal provider dispatch authority", () => {
   });
   it("allows a rematch only while its addressed pair is still invited in the inherited room", async () => {
     const { input, findFirst } = setup();
-    const invited = { ...row(), status: "invited", inviteeMemberId: "person-b", pendingChange: null,
+    const invited = { ...row(), status: "invited", invitees: [{ memberId: "person-b" }], pendingChange: null,
       players: [row().players[0]!] };
     findFirst.mockResolvedValue(invited);
     const rematch = { ...input, deliveryIdempotencyKey: "game-rematch:game" };

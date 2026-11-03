@@ -119,6 +119,11 @@ The Settings vault export does not include:
    source/target identity, routing, and email-authorization snapshot, then
    allocates both mailbox sequences and inserts the prepared row atomically
    with the other database-only mutations.
+   The game owner prepares shared-word transfers and viewer-private departure
+   labels before this transaction. Under ordered game locks it revalidates the
+   snapshot, transfers encryption ownership to the lowest-seat survivor, deletes
+   account-owned entries, and retains anonymous seats and frozen ticket parties.
+   Labels never transfer between viewers; games with nobody remaining are deleted.
 8. Best-effort terminate the per-user hosted Temporal runtime workflow again after the Prisma transaction commits.
 9. Immediately attempt the receipt-owned Cloudflare Durable Object/R2, isolated runtime-log, Stripe-customer cleanup. Persist completion independently per target. Each target shares the five-second response-path budget plus a small receipt-settlement margin. Unconfigured, partial, timed-out, and failed targets remain pending.
 10. Best-effort terminate the per-user hosted Temporal runtime workflow again after Cloudflare cleanup, so any sleeping workflow state that survived a concurrent wake attempt is neutralized.

@@ -32,7 +32,8 @@ function negotiate(token: string, proposalId = randomUUID()): Extract<GameComman
 }
 
 describe.skipIf(!enabled)("game negotiation persistence", () => {
-  afterAll(async () => { await getPrisma().hostedMember.deleteMany({where:{id:{in:members}}}); });
+  afterAll(async () => { await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: members } } });
+    await getPrisma().hostedMember.deleteMany({where:{id:{in:members}}}); });
   it("keeps a delayed fixed start date when negotiation approval arrives after the default cutoff", async () => {
     const {a,b,room,gameId,token}=await setup();
     const db=getPrisma();

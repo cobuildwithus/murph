@@ -1740,3 +1740,9 @@ Member ChatGPT-linking callback retirement and mixed-version behavior are owned 
 The retained database schema remains available to account export/deletion.
 
 Local device daemon and fixture capture retirement is tracked in [the deletion plan](exec-plans/completed/2026-11-02-remove-device-npm-jobs.md). Hosted CLI command signatures and source availability types remain.
+
+Canonical game seats, invitation ownership and direct storage cutover are tracked
+in [the storage plan](exec-plans/completed/2026-11-02-group-games-storage-pr2.md).
+Current owners: `../ARCHITECTURE.md` § Weekly Game and `../apps/web/README.md`
+§ Direct game storage cutover; released pair behavior remains in
+`product-specs/weekly-game.md`.

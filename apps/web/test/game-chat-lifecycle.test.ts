@@ -51,7 +51,7 @@ describe("durable game chat lifecycle", () => {
     m.mailbox.mockResolvedValue(null); m.prepare.mockResolvedValue({}); m.append.mockResolvedValue({ mailboxItemId: "notice" });
   });
   it("queues a rematch only in its inherited room while it is still invited", async () => {
-    const rematchGame = { ...game, status: "invited", createdBy: players[0], inviteeMemberId: players[1], players: [{ memberId: players[0] }] };
+    const rematchGame = { ...game, status: "invited", createdBy: players[0], invitees: [{ memberId: players[1] }], players: [{ memberId: players[0] }] };
     m.game.mockResolvedValue(rematchGame);
     m.receipts.mockResolvedValue([{ ...receipt, template: "game_rematch", idempotencyKey: "hash:game-rematch:game" }]);
     await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });
@@ -107,13 +107,13 @@ describe("durable game chat lifecycle", () => {
     expect(m.receiptUpdate).toHaveBeenLastCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "skipped", skipReason: "game_lifecycle_superseded" }) }));
     expect(m.prepare).not.toHaveBeenCalled(); expect(m.discover).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
 
-    m.game.mockResolvedValue({ ...game, status: "invited", createdBy: players[0], inviteeMemberId: players[1], chatContainerMemberId: null, players: [{ memberId: players[0] }] });
+    m.game.mockResolvedValue({ ...game, status: "invited", createdBy: players[0], invitees: [{ memberId: players[1] }], chatContainerMemberId: null, players: [{ memberId: players[0] }] });
     await expect(deliverGameChatLifecycle("game", "rematch")).resolves.toBe(false);
     expect(m.discover).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
   });
   it.each(["awaiting_generation", "generation_queued"])("terminally skips an expired invited rematch receipt from %s", async (status) => {
     m.receipts.mockResolvedValue([{ ...receipt, template: "game_rematch", status, idempotencyKey: "hash:game-rematch:game" }]);
-    m.game.mockResolvedValue({ ...game, status: "invited", inviteExpiresAt: now, createdBy: players[0], inviteeMemberId: players[1], players: [{ memberId: players[0] }] });
+    m.game.mockResolvedValue({ ...game, status: "invited", inviteExpiresAt: now, createdBy: players[0], invitees: [{ memberId: players[1] }], players: [{ memberId: players[0] }] });
     await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 0, deferred: 1 });
     expect(m.receiptUpdate).toHaveBeenLastCalledWith(expect.objectContaining({
       data: expect.objectContaining({ status: "skipped", skippedAt: now, retryAfterAt: null }),
@@ -121,7 +121,7 @@ describe("durable game chat lifecycle", () => {
     expect(m.prepare).not.toHaveBeenCalled(); expect(m.signal).not.toHaveBeenCalled();
   });
   it("lets the recovery sweep reuse the immediately queued rematch mailbox", async () => {
-    const rematchGame = { ...game, status: "invited", createdBy: players[0], inviteeMemberId: players[1], players: [{ memberId: players[0] }] };
+    const rematchGame = { ...game, status: "invited", createdBy: players[0], invitees: [{ memberId: players[1] }], players: [{ memberId: players[0] }] };
     m.game.mockResolvedValue(rematchGame);
     await expect(deliverGameChatLifecycle("game", "rematch")).resolves.toBe(true);
     expect(m.append).toHaveBeenCalledOnce();

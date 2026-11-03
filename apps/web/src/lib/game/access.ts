@@ -18,9 +18,9 @@ export function isGameEnabledFor(memberId: string, env: GameEnv = process.env): 
 
 /** The people who decide whether a game is on. */
 export interface GamePeople {
-  players: readonly { memberId: string }[];
+  players: readonly { memberId: string | null }[];
   /** An addressed rematch's invitee, who isn't seated until they accept. */
-  inviteeMemberId?: string | null;
+  invitees?: readonly { memberId: string | null }[];
 }
 
 /**
@@ -32,7 +32,7 @@ export interface GamePeople {
  * for database reads.
  */
 export function isGameOn(game: GamePeople, env: GameEnv = process.env): boolean {
-  return [...game.players.map((player) => player.memberId), game.inviteeMemberId]
+  return [...game.players.map((player) => player.memberId), ...(game.invitees ?? []).map(invitee => invitee.memberId)]
     .some((memberId) => typeof memberId === "string" && isGameEnabledFor(memberId, env));
 }
 
@@ -40,7 +40,7 @@ export function isGameOn(game: GamePeople, env: GameEnv = process.env): boolean 
 export function gameOnWhere(env: GameEnv = process.env): Prisma.GameWhereInput {
   if (!isGameEnabled(env)) return { id: { in: [] } };
   const listed = listedGameMembers(env);
-  return listed === null ? {} : { OR: [{ players: { some: { memberId: { in: [...listed] } } } }, { inviteeMemberId: { in: [...listed] } }] };
+  return listed === null ? {} : { OR: [{ players: { some: { memberId: { in: [...listed] } } } }, { invitees: { some: { memberId: { in: [...listed] } } } }] };
 }
 
 /** `isGameOn` as a SQL condition on the `game` row named `alias`. */
@@ -49,7 +49,7 @@ export function gameOnSql(alias: "game", env: GameEnv = process.env): Prisma.Sql
   const listed = listedGameMembers(env);
   if (listed === null) return Prisma.sql`TRUE`;
   const game = Prisma.raw(alias);
-  return Prisma.sql`(${game}.invitee_member_id IN (${Prisma.join(listed)})
+  return Prisma.sql`(EXISTS (SELECT 1 FROM game_invitee invited WHERE invited.game_id = ${game}.id AND invited.member_id IN (${Prisma.join(listed)}))
     OR EXISTS (SELECT 1 FROM game_player listed WHERE listed.game_id = ${game}.id AND listed.member_id IN (${Prisma.join(listed)})))`;
 }
 

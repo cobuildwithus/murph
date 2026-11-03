@@ -32,7 +32,9 @@ async function appRematch(f: Awaited<ReturnType<typeof setup>>) {
 }
 describe.skipIf(!enabled)("chat game setup persistence", () => {
   afterEach(() => vi.unstubAllEnvs());
-  afterAll(async () => { await getPrisma().hostedMember.deleteMany({ where: { id: { in: members } } }); });
+  afterAll(async () => {
+    await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: members } } });
+    await getPrisma().hostedMember.deleteMany({ where: { id: { in: members } } }); });
   it("shows an addressed app rematch to both players and only its invitee can shake in chat", async () => {
     const f = await setup(), id = await appRematch(f);
     for (const actor of [f.a, f.b]) expect((await readGameChatState(f.room, [f.a, f.b], actor)).games.find(g => g.id === id)).toMatchObject({ status: "invited", players: [{ memberId: f.a, seat: 0, dayOne: null }] });
@@ -55,7 +57,7 @@ describe.skipIf(!enabled)("chat game setup persistence", () => {
   it("refuses wrong-pair and bearer-link approval, and hides expired or blocked rematches", async () => {
     const f = await setup(), id = await appRematch(f), other = await setup();
     expect(await other.run(other.b, { operation: "approve", gameId: id, expectedTermsVersion: 1 })).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
-    await getPrisma().game.update({ where: { id }, data: { previousGameId: null, inviteeMemberId: null } });
+    await getPrisma().game.update({ where: { id }, data: { previousGameId: null, invitees: { deleteMany: {} } } });
     expect(await f.run(f.b, { operation: "approve", gameId: id, expectedTermsVersion: 1 })).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
     expect((await readGameChatState(f.room, [f.a, f.b])).games.map(g => g.id)).not.toContain(id);
     const expired = await appRematch(f);

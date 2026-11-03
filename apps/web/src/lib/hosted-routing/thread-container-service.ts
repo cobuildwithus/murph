@@ -126,7 +126,7 @@ export async function createHostedGameThreadContainerTx(input: {
     throw new TypeError("A new game chat requires an agreed two-player audience.");
   }
   const members = await input.prisma.hostedMember.findMany({
-    where: { id: { in: game.players.map((player) => player.memberId) }, suspendedAt: null, threadContainer: { is: null } },
+    where: { id: { in: game.players.flatMap(player => player.memberId ? [player.memberId] : []) }, suspendedAt: null, threadContainer: { is: null } },
     select: { id: true }, take: 2,
   });
   if (members.length !== 2) throw new TypeError("Game chat players are unavailable.");

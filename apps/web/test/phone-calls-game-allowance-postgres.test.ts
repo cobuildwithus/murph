@@ -100,10 +100,10 @@ describe.skipIf(!enabled)("game room phone-call allowance PostgreSQL", () => {
       await db.gameProfile.createMany({ data: [first, second].map(memberId => ({
         memberId, firstNameEncrypted: "synthetic-name", timeZone: "UTC",
       })) });
-      await db.game.create({ data: { id: gameId, createdBy: first, status: "live",
+      await db.game.create({ data: { id: gameId, createdBy: first, wordsOwnerMemberId: first, status: "live",
         chatContainerMemberId: primary,
         terms: { v: 1, versions: [] }, termsWordsEncrypted: "synthetic-terms",
-        players: { create: [first, second].map((memberId, seat) => ({ memberId, seat, timeZone: "UTC", dayOne: now })) },
+        players: { create: [first, second].map((memberId, seat) => ({ memberId, seat, joinedAt: new Date("2030-01-01T12:00:00Z"), timeZone: "UTC", dayOne: now })) },
       } });
       edges.accepted.mockResolvedValue(buildHostedExecutionLinqConversationMessageWake({
         accountLookupKey: authority.accountLookupKey, contactKind: "phone", contactLookupKey: "synthetic-contact",
@@ -168,6 +168,7 @@ describe.skipIf(!enabled)("game room phone-call allowance PostgreSQL", () => {
       await db.game.deleteMany({ where: { id: gameId } });
       await db.hostedGroup.deleteMany({ where: { id: groupId } });
       await db.hostedThreadContainer.deleteMany({ where: { memberId: { in: ids } } });
+      await db.game.deleteMany({ where: { wordsOwnerMemberId: { in: ids } } });
       await db.hostedMember.deleteMany({ where: { id: { in: ids } } });
       await db.$disconnect(); vi.unstubAllEnvs();
     }

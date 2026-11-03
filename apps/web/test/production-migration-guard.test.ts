@@ -1105,6 +1105,22 @@ describe("hosted web production migration guard", () => {
     }
   });
 
+  test("permits only the exact owner-approved direct game storage cutover", async () => {
+    const migrationsDir = await mkdtemp(path.join(tmpdir(), "game-storage-cutover-"));
+    const migrationId = "20261102230000_game_seat_storage";
+    const sql = await readFile(new URL(`../prisma/migrations/${migrationId}/migration.sql`, import.meta.url), "utf8");
+    try {
+      await writeMigrationSql(migrationsDir, migrationId, sql);
+      assert.deepEqual(await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir), []);
+      await writeMigrationSql(migrationsDir, migrationId, `${sql}\nDROP TABLE game_profile;`);
+      assert.equal((await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir)).length, 1);
+      await writeMigrationSql(migrationsDir, "20261102230001_unreviewed_game_cutover", sql);
+      assert.equal((await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir)).length, 2);
+    } finally {
+      await rm(migrationsDir, { recursive: true, force: true });
+    }
+  });
+
   test("blocks newly introduced backdated destructive Prisma migrations", async () => {
     const migrationsDir = await mkdtemp(
       path.join(tmpdir(), "hosted-web-prisma-migrations-"),

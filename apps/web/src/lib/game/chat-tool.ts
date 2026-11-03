@@ -127,7 +127,7 @@ export async function authorizeGameChatActorTx(input: Input, tx: Prisma.Transact
   if (input.request.action === "read_game" || (input.request.action === "update_game" && input.request.update.operation === "create")) return actor;
   const game = await tx.game.findFirst({
     where: { OR: [{ ...gamePairWhere(players), status: { in: ["negotiating", "live", "settled"] } }, addressedGameRematchWhere(players)], ...(input.request.action === "update_game" ? { id: input.request.update.gameId } : input.request.action === "game_photo" ? { id: input.request.photo.gameId } : {}) },
-    select: { id: true, status: true, createdBy: true, inviteeMemberId: true, previousGameId: true, players: { select: { memberId: true }, take: 3 } },
+    select: { id: true, status: true, createdBy: true, invitees: { select: { memberId: true } }, previousGameId: true, players: { select: { memberId: true }, take: 3 } },
   });
   if (!game || !areGamePlayersAllowed(game, players)) return null;
   return actor;

@@ -32,7 +32,9 @@ async function fixture() {
 describe.skipIf(!enabled)("shared game progress canonical PostgreSQL proof", () => {
   beforeEach(() => { vi.stubEnv("VERCEL_ENV", "preview"); imageControl.putGameImage.mockClear(); });
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
-  afterAll(async () => { await getPrisma().hostedMember.deleteMany({ where: { id: { in: members } } }); });
+  afterAll(async () => {
+    await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: members } } });
+    await getPrisma().hostedMember.deleteMany({ where: { id: { in: members } } }); });
   it("projects five extended legacy games without truncating their per-miss tickets", async () => {
     const { a, b, room, gameId: initialId, db } = await fixture();
     await db.game.delete({ where: { id: initialId } });
@@ -45,10 +47,10 @@ describe.skipIf(!enabled)("shared game progress canonical PostgreSQL proof", () 
           stakes: stakes.map((stake, index) => ({ key: stake.key, item: `Synthetic favor ${index}` })) }],
       }));
       await db.game.create({ data: {
-        id: gameId, createdBy: a, status: "live", lengthDays: 365,
+        id: gameId, createdBy: a, wordsOwnerMemberId: a, status: "live", lengthDays: 365,
         terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes }] },
         termsWordsEncrypted: termsWordsEncrypted!,
-        players: { create: [{ memberId: a, seat: 0, timeZone: "UTC", dayOne }, { memberId: b, seat: 1, timeZone: "UTC", dayOne }] },
+        players: { create: [{ memberId: a, seat: 0, joinedAt: new Date("2030-01-01T12:00:00Z"), timeZone: "UTC", dayOne }, { memberId: b, seat: 1, joinedAt: new Date("2030-01-01T12:00:00Z"), timeZone: "UTC", dayOne }] },
       } });
       await db.gameEntry.createMany({ data: Array.from({ length: 365 }, (_, dayIndex) => ({
         id: randomUUID(), gameId, memberId: a, dayIndex, attempt: 1, kind: "photo", receivedAt: new Date(),

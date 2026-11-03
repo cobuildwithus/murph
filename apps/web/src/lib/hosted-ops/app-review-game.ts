@@ -215,7 +215,7 @@ async function apply(input: {
     await revalidatePreparedHostedDomainRootForWebTx({ prepared: reviewerRoot, tx });
     const stale = await tx.$queryRaw<{ id: string }[]>`
       SELECT g.id FROM game g
-      WHERE g.invitee_member_id = ${members.partner}
+      WHERE EXISTS (SELECT 1 FROM game_invitee invited WHERE invited.game_id = g.id AND invited.member_id = ${members.partner})
          OR EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = g.id AND p.member_id = ${members.partner})
       ORDER BY g.id FOR UPDATE`;
     if (stale.length > 0) await tx.game.deleteMany({ where: { id: { in: stale.map((row) => row.id) } } });
@@ -262,7 +262,7 @@ async function inspect(prisma: PrismaClient, reviewer: string | null): Promise<I
     prisma.game.findMany({
       orderBy: { createdAt: "asc" },
       select: { id: true, round: true, status: true },
-      where: { OR: [{ players: { some: { memberId: partner } } }, { inviteeMemberId: partner }] },
+      where: { OR: [{ players: { some: { memberId: partner } } }, { invitees: { some: { memberId: partner } } }] },
     }),
     reviewer ? areGamePlayersBlocked(prisma, reviewer, partner) : false,
   ]);
@@ -399,7 +399,7 @@ function buildGame(seed: SeedGame, members: Members, now: Date, mediaKeys: Reado
   }));
   const state: RuleState = {
     entries,
-    game: { createdBy: members.partner, id, inviteExpiresAt: null, inviteeMemberId: seed.round > 1 ? members.reviewer : null,
+    game: { createdBy: members.partner, id, inviteExpiresAt: null, invitees: seed.round > 1 ? [{ memberId: members.reviewer }] : [],
       lengthDays: seed.lengthDays, seats: GAME_SEATS_1V1, startsOn: null, status: "live", terms },
     players: (["partner", "reviewer"] as const).map((by) => ({
       dayOne, memberId: members[by], seat: seatOf(by), timeZone: APP_REVIEW_GAME_TIME_ZONE })),
@@ -463,7 +463,8 @@ async function writeGame(tx: Prisma.TransactionClient, game: BuiltGame, members:
       createdAt: game.createdAt,
       createdBy: members.partner,
       id: game.id,
-      inviteeMemberId: state.game.inviteeMemberId ?? null,
+      wordsOwnerMemberId: members.partner,
+      invitees: { create: state.game.invitees?.map(invitee => ({ memberId: invitee.memberId, seat: 1 })) },
       lengthDays: seed.lengthDays,
       previousGameId,
       result: settled ? toPrismaJsonObject(settled.result) : Prisma.DbNull,

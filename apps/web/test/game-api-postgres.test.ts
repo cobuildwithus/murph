@@ -111,6 +111,7 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
     vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "http://localhost:3237");
   });
   afterAll(async () => {
+    await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: memberIds } } });
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: memberIds } } });
     await rm(mediaDir, { recursive: true, force: true });
     vi.unstubAllEnvs();

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { isPairRoster } from "./roster";
+import { isPairRoster, hasGameIdentity } from "./roster";
 import { parseGameRecapEventId } from "@murphai/hosted-execution/runtime-control";
 import { Prisma } from "@prisma/client";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
@@ -37,7 +37,7 @@ async function assertGameRecapDeliveryCurrentTx(
 ): Promise<true> {
   const players = input.playerMemberIds ?? [];
   const game = await input.tx.game.findFirst({
-    where: { id: gameId, chatContainerMemberId: input.containerMemberId, status: "settled", departedPlayer: { equals: Prisma.DbNull },
+    where: { id: gameId, chatContainerMemberId: input.containerMemberId, status: "settled", players: { none: { leftAt: { not: null } } },
       ...(regenerationId ? { events: { some: { commandKey: `${input.deliveryIdempotencyKey}:accepted`, type: "recap_regeneration_accepted" } } } : {}) },
     include: { players: { take: 3 } },
   });
@@ -74,7 +74,7 @@ async function assertGameChangeProposalDeliveryCurrentTx(
   const expired = game.status === "live" && isGameChangeExpired({
     entries: [],
     game: { id: game.id, createdBy: game.createdBy, status: "live", seats: 2, lengthDays: game.lengthDays, terms: parseStoredTerms(game.terms), inviteExpiresAt: game.inviteExpiresAt, startsOn: game.startsOn?.toISOString().slice(0, 10) ?? null },
-    players: game.players.map((player) => ({ memberId: player.memberId, seat: player.seat, timeZone: player.timeZone, dayOne: player.dayOne?.toISOString().slice(0, 10) ?? null })),
+    players: game.players.filter(hasGameIdentity).map((player) => ({ memberId: player.memberId, seat: player.seat, timeZone: player.timeZone, dayOne: player.dayOne?.toISOString().slice(0, 10) ?? null })),
   }, pending, input.now ?? new Date());
   if (expired) stale();
   return true;
@@ -85,12 +85,12 @@ async function assertGameRematchDeliveryCurrentTx(
 ): Promise<true> {
   const game = await input.tx.game.findFirst({
     where: { id: gameId, chatContainerMemberId: input.containerMemberId, status: "invited" },
-    include: { players: { take: 2 } },
+    include: { invitees: true, players: { take: 2 } },
   });
-  if (!game?.createdBy || !game.inviteeMemberId || game.players.length !== 1
+  if (!game?.createdBy || !game.invitees[0]?.memberId || game.players.length !== 1
     || isGameInviteExpired(game, input.now ?? new Date())
     || game.players[0]?.memberId !== game.createdBy
-    || !sameGamePlayers([game.createdBy, game.inviteeMemberId], input.playerMemberIds ?? [])) return stale();
+    || !sameGamePlayers([game.createdBy, game.invitees[0]?.memberId], input.playerMemberIds ?? [])) return stale();
   return true;
 }
 async function assertGameCancelledDeliveryCurrentTx(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0]): Promise<true> {

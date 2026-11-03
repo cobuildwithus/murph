@@ -91,7 +91,7 @@ export interface RuleGame {
   terms: StoredTerms;
   inviteExpiresAt: Date | null;
   /** A rematch's addressed opponent: the only member who may take its seat. */
-  inviteeMemberId?: string | null;
+  invitees?: readonly { memberId: string | null }[];
   /** The challenger's picked Day 1 (YYYY-MM-DD), if any. */
   startsOn: string | null;
 }
@@ -439,6 +439,7 @@ export function decideJoin(
   input: { memberId: string; termsVersion: number; timeZone: string; now: Date; acceptNegotiation?: boolean },
 ): JoinDecision {
   const { game } = state;
+  if (game.seats !== GAME_SEATS_1V1) reject("GAME_NOT_FOUND", "Game not found.");
   if (playerFor(state, input.memberId)) {
     if (game.status === "invited" || game.status === "live") return { kind: "already-joined" };
   }
@@ -473,7 +474,7 @@ export function decideJoin(
 
 /** An addressed rematch seats only its addressee. */
 function assertAddressee(game: RuleGame, memberId: string): void {
-  if (game.inviteeMemberId && game.inviteeMemberId !== memberId) reject("NOT_A_PLAYER", "This rematch is for someone else.");
+  if (game.invitees?.some(invitee => invitee.memberId !== null) && !game.invitees.some(invitee => invitee.memberId === memberId)) reject("NOT_A_PLAYER", "This rematch is for someone else.");
 }
 
 /** Agreement starts a negotiation at approval time, never at the invitee's arrival. */
@@ -696,7 +697,7 @@ export function playerStreak(state: RuleState, player: RulePlayer, now: Date): n
 
 export interface SettleDecision {
   result: StoredResult;
-  tickets: { stakeKey: string; owedBy: string; owedTo: string }[];
+  tickets: { stakeKey: string; owedBySeats: number[]; owedToSeats: number[] }[];
 }
 
 export function decideSettle(state: RuleState): SettleDecision {
@@ -720,14 +721,14 @@ function legacyPairStakeTickets(scores: readonly PlayerScore[], stakes: readonly
       if (perfect || winners.length !== 1) continue;
       for (const loser of scores) {
         if (loser.memberId === winners[0].memberId) continue;
-        tickets.push({ owedBy: loser.memberId, owedTo: winners[0].memberId, stakeKey: stake.key });
+        tickets.push({ owedBySeats: [loser.seat], owedToSeats: [winners[0].seat], stakeKey: stake.key });
       }
     } else {
       // Everyone vs everyone: each pair settles the difference in misses.
       for (const debtor of scores) {
         for (const creditor of scores) {
           for (let i = 0; i < debtor.misses - creditor.misses; i += 1) {
-            tickets.push({ owedBy: debtor.memberId, owedTo: creditor.memberId, stakeKey: stake.key });
+            tickets.push({ owedBySeats: [debtor.seat], owedToSeats: [creditor.seat], stakeKey: stake.key });
           }
         }
       }

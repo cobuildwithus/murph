@@ -1921,6 +1921,56 @@ roll back independently because final provider authorization remains Web-owned.
 exact SQL transition, while `production-migration-guard.test.ts` pins the
 production-alias proof, drain, second alias proof, and migration-owner order.
 
+### Direct game storage cutover
+
+`20261102230000_game_seat_storage` is the explicitly approved exception to the
+normal expand/contract sequence. Production has only a small pair-only dataset;
+the owner accepts downtime and a direct conversion. The predeploy guard allows
+only this migration id and its exact SHA-256. Any edit or copied migration loses
+the exception. No old/new dual writer, fallback reader or later PK cleanup exists.
+
+Deploy order: merge, run the normal predeploy migration wrapper, build the new
+Web deployment, then promote it. One atomic SQL transaction locks the four game
+tables, rejects legacy departures, an unproven words owner, or an unmappable
+ticket party, converts invitations/ownership/tickets, replaces the roster PK
+while preserving the entry FK, installs checks, and drops the old columns. A
+failed conversion rolls back. Resolve the diagnosed data or migration failure
+before retrying through the normal hosted migration owner; never guess an owner
+or mark an unapplied migration successful.
+
+The downtime window starts when that transaction commits and ends when the
+schema-aware Web deployment is live and old invocations have drained. During
+that interval old Web reads/writes can fail on removed columns or required new
+fields: `/api/game/v1/home`, `/history`, `/games` and its per-game entry/change/
+report/dev operations; `/invites/[token]` and acceptance/negotiation/report/block;
+`/tickets/[id]/redeem`; `/blocks/[memberId]`; shared game-media authorization;
+`/g/[token]`; game-dependent recap, tool and lifecycle operations; and
+`/api/settings/privacy/delete` for every account, because its preparation always
+queries game storage. These are paths under `/api/game/v1` unless shown otherwise. Profile,
+push-route and upload-only handlers have no direct dropped-column dependency,
+but callers may still encounter the affected game admission/read paths. No
+fixed duration is promised: a failed build or promotion extends the outage until
+a compatible forward deployment succeeds. Game-sponsored runtime access and
+allowance fallback queries also fail on old Web. With a nonempty game allowlist,
+shared access predicates include the dropped invitation column, so dependent
+runtime admission and sweeps can fail even for otherwise unrelated members. Worker and released app contracts do
+not change; group creation/admission remain disabled.
+
+The committed migration immediately establishes the schema-aware Web as the
+rollback floor. Disabling games does not make an old Web safe. No reverse
+migration is shipped; restoring a pre-cutover database backup and matching Web
+would discard later writes and requires separate operator authorization. Prefer
+a compatible forward fix. Verify schema presence, a pair Home/game read, an
+addressed invite, a ticket read, and bounded game error aggregates after promotion.
+The real PostgreSQL migration test proves conversion, atomic refusal, entry FK
+preservation and complete pair views. Mixed-version compatibility is intentionally
+unsupported for this one accepted cutover.
+
+The postdeploy runner retires the immutable one-off
+`20261031190000_recover_missing_game_recap`, whose SQL references the removed
+departure column. Existing lifecycle receipts remain; subsequent recap recovery
+uses the existing Ops regeneration owner. It must not be replayed on the new schema.
+
 ### Production-secret boundary for maintenance
 
 Murph's production `DATABASE_URL` and `DIRECT_DATABASE_URL` are Vercel

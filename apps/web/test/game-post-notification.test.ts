@@ -21,7 +21,7 @@ const target = { token: "ab".repeat(32), environment: "development", topic: "ai.
 const route = { ...target, gameSessionId: "session-one" };
 const clock = new Date("2026-10-21T12:00:00Z");
 const players: GamePlayer[] = ["poster", "recipient"].map((memberId, seat) => ({
-  gameId: "game-a", memberId, seat, timeZone: "America/New_York", dayOne: clock, joinedAt: clock,
+  gameId: "game-a", memberId, seat, timeZone: "America/New_York", dayOne: clock, leftAt: null, departedLabel: null, joinedAt: clock,
 }));
 // Only the transaction methods used by this owner; the PostgreSQL suite proves
 // real lock, unique-key and commit behavior through runGameCommand.
