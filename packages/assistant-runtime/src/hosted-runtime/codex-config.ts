@@ -579,6 +579,12 @@ export function buildHostedCodexConfigToml(input: {
     // image has no profile.d content worth sourcing, so force non-login
     // shells and let shell_environment_policy own the exec environment.
     "allow_login_shell = false",
+    // Hosted threads run in the vault (normally cwd /proc/self/cwd), and no
+    // ancestor in the runner image is a project root. Codex still probes every
+    // ancestor for a `.git` marker through its sandboxed filesystem helper on
+    // each thread start and cold resume. With no markers the vault stays the
+    // only AGENTS.md / project-config directory, so this only skips probes.
+    "project_root_markers = []",
     "",
     ...providerConfigLines,
     ...buildMurphHostedPermissionProfileTomlLines(),

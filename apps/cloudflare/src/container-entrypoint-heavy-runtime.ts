@@ -8,6 +8,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 
 import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
+import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import {
   buildHostedRunnerExecutablePath,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
@@ -28,6 +29,7 @@ import {
 import {
   runHostedWorkspaceInvocation,
 } from "./hosted-workspace-invocation.ts";
+import { warmHostedContainerCodexBinary } from "./container-codex-binary-warmup.ts";
 import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
 } from "./runner-injected-credential.ts";
@@ -99,6 +101,8 @@ export interface HostedContainerHeavyRuntimeCore {
     signal: AbortSignal;
   }): Promise<HostedContainerLiveModelTurnSmokeResult>;
   runWorkspaceInvocation: typeof runHostedWorkspaceInvocation;
+  // Best-effort and never rejects; optional so entrypoint test doubles opt in.
+  warmCodexBinary?(input: { signal: AbortSignal }): Promise<void>;
 }
 
 export interface HostedContainerHeavyRuntime extends HostedContainerHeavyRuntimeCore {
@@ -1039,4 +1043,27 @@ export const hostedContainerHeavyRuntime: HostedContainerHeavyRuntimeCore = {
   runDirectR2PresignedPutSmoke: runHostedContainerDirectR2PresignedPutSmoke,
   runLiveModelTurnSmoke: runHostedContainerLiveModelTurnSmoke,
   runWorkspaceInvocation: runHostedWorkspaceInvocation,
+  async warmCodexBinary(input) {
+    // Only the runner image bakes this catalog beside the pinned Codex binary.
+    // Without it (unit tests, local dev runtimes) there is no binary to warm.
+    const modelCatalogJsonPath = readHostedCodexModelCatalogJsonPath();
+    if (!modelCatalogJsonPath) {
+      return;
+    }
+    const result = await warmHostedContainerCodexBinary({
+      executablePath: buildHostedRunnerExecutablePath(process.env.PATH),
+      modelCatalogJsonPath,
+      signal: input.signal,
+    });
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      details: {
+        codexBinaryWarmupElapsedMs: result.elapsedMs,
+        codexBinaryWarmupOutcome: result.outcome,
+      },
+      level: result.outcome === "ready" || result.outcome === "aborted" ? "info" : "warn",
+      message: "Hosted container Codex binary warmup finished.",
+      phase: "wake.running",
+    });
+  },
 };
