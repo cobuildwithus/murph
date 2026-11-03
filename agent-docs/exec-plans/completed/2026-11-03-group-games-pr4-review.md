@@ -1,6 +1,6 @@
 # Group games PR 4 parent review and publication
 
-Status: active
+Status: completed
 Created: 2026-11-03
 Updated: 2026-11-03
 
@@ -81,6 +81,20 @@ retains the accepted pair-style full-calendar scaling. Detail remains unchanged
 at about 1.61 MB. The live/settled serializer proof also compares group Home's
 size with a full-calendar pair card. No pagination or window protocol was added.
 
-ReviewGPT (pinned vonneumann), exact-head CI and final publication evidence are
-pending. The isolated database was dropped after the final 244-test clean aggregate run. A repeat bulk fixture first exceeded its 60-second test budget on a reused database; refreshing planner statistics after bulk seeding made the clean aggregate pass without relaxing its timeout. No production query or schema optimization was added.
+Published as PR #4494, Ready on candidate
+`d11cbc4685ecf49eb5ea0c4b93942432039cc200`. Final ReviewGPT round 1 returned
+PASS with zero findings on the pinned vonneumann lane. The guarded full snapshot
+matched all 36 changed files, immutable first head and sensitive context. Capture
+verified the exact accepted turn, one attachment, selected/sent `gpt-6-pro`, and
+`REVIEW_COMPLETE`. Send-to-completed-capture elapsed 250.179 seconds, above the
+80-second minimum; the source review covered capability, privacy, projections,
+claims and collection limits. No tooling retry or remediation round was needed.
+Parent final review found no further production edit. The only post-review
+change is this explanatory closeout and its index link, exempt from another
+substantive round. Exact-head required CI remains the publication gate after
+this documentation commit; runtime-candidate host, billing and Temporal checks
+already passed while the release aggregate continued. No merge or deployment.
 
+The isolated database was dropped after the final 244-test clean aggregate run. A repeat bulk fixture first exceeded its 60-second test budget on a reused database; refreshing planner statistics after bulk seeding made the clean aggregate pass without relaxing its timeout. No production query or schema optimization was added.
+
+Completed: 2026-11-03
