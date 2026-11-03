@@ -190,6 +190,7 @@ import {
 import {
   findNextHostedSystemMailboxQueueItem,
   readHostedSystemMailboxState,
+  resolveHostedSystemMailboxWakeCandidates,
 } from "./system-mailbox-state.ts";
 import type {
   HostedAssistantLinqDeliveryContext,
@@ -5340,11 +5341,27 @@ async function runSystemMailboxMaintenancePhase(
     };
   }
 
+  // A member's manual meal needs a model turn before it has an outbox owner.
+  // Neither a model-free handoff nor a cron preflight should skip that turn.
+  const canSelectMailboxOwner = !foregroundCausalAttempted && !hasBackgroundSelection;
+  const manualMealWake = canSelectMailboxOwner
+    ? (await resolveHostedSystemMailboxWakeCandidates({
+        allowedRouteActions: ["dispatch-assistant-notification"],
+        allowedWakeKinds: ["meal-photo.captured"],
+        now: () => new Date(resolveHostedAssistantPhaseNowMs(phaseInput)).toISOString(),
+        vaultRoot: phaseInput.restored.vaultRoot,
+      })).next
+    : createHostedRuntimeWakeCandidate(null, null);
+  const hasDueManualMeal = hostedRuntimeWakeCandidateIsDue(
+    manualMealWake,
+    resolveHostedAssistantPhaseNowMs(phaseInput),
+  );
+  const shouldPreflightAssistantLane = pendingAssistantInputBlocksMaintenance
+    && canSelectMailboxOwner
+    && !hasDueManualMeal;
   let staleDefaultProjectionDisproved = false;
   if (
-    pendingAssistantInputBlocksMaintenance
-    && !foregroundCausalAttempted
-    && !hasBackgroundSelection
+    shouldPreflightAssistantLane
     && shouldPreflightHostedDefaultProcessingWake(phaseInput)
   ) {
     const defaultProcessingWakeState =
@@ -5365,8 +5382,7 @@ async function runSystemMailboxMaintenancePhase(
   }
 
   let deferSystemMailboxPreparationForDelivery = false;
-  const initialOwnerWake = !foregroundCausalAttempted
-    && !hasBackgroundSelection
+  const initialOwnerWake = canSelectMailboxOwner
     ? await resolveDueModelFreeSystemMailboxOwnerSelection({
         pendingAssistantInputWakeAt,
         phaseInput,
@@ -5379,9 +5395,7 @@ async function runSystemMailboxMaintenancePhase(
     initialOwnerWake?.reason === HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON;
 
   if (
-    pendingAssistantInputBlocksMaintenance
-    && !foregroundCausalAttempted
-    && !hasBackgroundSelection
+    shouldPreflightAssistantLane
     && !hostedSystemMailboxWakeIsDueForModelFreeOwner(
       initialOwnerWake,
       resolveHostedAssistantPhaseNowMs(phaseInput),
@@ -5400,8 +5414,7 @@ async function runSystemMailboxMaintenancePhase(
     }
   }
 
-  const memberPreferencesPrePlanning = foregroundCausalAttempted
-    || hasBackgroundSelection
+  const memberPreferencesPrePlanning = !canSelectMailboxOwner
     ? {
         continueAssistantLane: true,
         result: null,
@@ -5432,15 +5445,15 @@ async function runSystemMailboxMaintenancePhase(
   }
 
   const refreshedOwnerWake = !deferSystemMailboxPreparationForDelivery
-    && !foregroundCausalAttempted
-    && !hasBackgroundSelection
+    && canSelectMailboxOwner
     ? await resolveDueModelFreeSystemMailboxOwnerSelection({
         pendingAssistantInputWakeAt,
         phaseInput,
       })
     : null;
   if (
-    hostedSystemMailboxWakeIsDueForModelFreeOwner(
+    !hasDueManualMeal
+    && hostedSystemMailboxWakeIsDueForModelFreeOwner(
       refreshedOwnerWake,
       resolveHostedAssistantPhaseNowMs(phaseInput),
     )
@@ -5533,20 +5546,36 @@ async function runSystemMailboxMaintenancePhase(
         result: mergeMemberPreferencesPrePlanningResult(null),
       };
     }
+    const idleMaintenanceResult = mergeMemberPreferencesPrePlanningResult(
+      await runIdleSystemMailboxMaintenance({
+        backgroundMaintenanceYielded,
+        pendingAssistantInputWakeAt,
+        phaseInput,
+        readAssistantCronWakeState,
+        staleDefaultProjectionDisproved,
+      }),
+    );
+    // A maintenance result (context refresh, receipts) would otherwise end the
+    // pass before delivery; a null result already continues into the lane.
+    // Re-derive readiness from the durable outbox, not the workspace's
+    // potentially older default wake projection.
+    const continueToDueDelivery = idleMaintenanceResult !== null
+      && hostedRuntimeWakeCandidateIsDue(
+        createHostedRuntimeWakeCandidate(
+          await resolveHostedAssistantOutboxNextWakeAt({
+            now: new Date(resolveHostedAssistantPhaseNowMs(phaseInput)),
+            vaultRoot: phaseInput.restored.vaultRoot,
+          }),
+          HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+        ),
+        resolveHostedAssistantPhaseNowMs(phaseInput),
+      );
     return {
       backgroundMaintenanceYielded,
-      continueAssistantLane: false,
+      continueAssistantLane: continueToDueDelivery,
       initialProviderCleanupCheckpoint,
       pendingAssistantInputWakeAt,
-      result: mergeMemberPreferencesPrePlanningResult(
-        await runIdleSystemMailboxMaintenance({
-          backgroundMaintenanceYielded,
-          pendingAssistantInputWakeAt,
-          phaseInput,
-          readAssistantCronWakeState,
-          staleDefaultProjectionDisproved,
-        }),
-      ),
+      result: idleMaintenanceResult,
     };
   }
   const {
