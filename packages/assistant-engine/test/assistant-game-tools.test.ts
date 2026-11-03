@@ -28,12 +28,37 @@ async function execute(args: unknown, ctx = context()) {
   return executeMurphDynamicToolRequest({ request, hostedToolContext: ctx, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
 }
 describe('game dynamic tools', () => {
+  it('reads a scheduled group occurrence without a message selector or write guidance', async () => {
+    const scheduledOrigin = { kind: 'automation_occurrence' as const, automationId: 'automation_game_read', occurrenceAt: '2030-04-01T20:00:00Z' }
+    const response = { action: 'read_game' as const, result: { status: 'ok' as const, state: { games: [{ status: 'live' }, { status: 'live' }] } } }
+    const requestPort = vi.fn().mockResolvedValue(response)
+    const ctx: AssistantHostedToolContext = { ...context(), groupTool: { request: requestPort }, currentUserActionScope: () => null,
+      currentInvocationScope: () => ({ conversationScope: 'group', origin: scheduledOrigin }) }
+    const result = await executeMurphDynamicToolRequest({ request: parse('read_game', { messageRef: 'ignored-stale-ref' })!, hostedToolContext: ctx, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    expect(result.rpcResult.success).toBe(true)
+    expect(requestPort).toHaveBeenCalledExactlyOnceWith({ action: 'read_game', origin: scheduledOrigin, includePlayers: true })
+    expect(result.rpcResult.contentItems[0]?.text).toBe(JSON.stringify(response))
+    expect((await execute(approval, ctx)).rpcResult.success).toBe(false)
+    const photo = await executeMurphDynamicToolRequest({ request: parse('game_photo', { messageRef: inputId, operation: 'save', gameId: 'game_synthetic' })!, hostedToolContext: ctx, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    expect(photo.rpcResult.success).toBe(false)
+    expect(requestPort).toHaveBeenCalledTimes(1)
+  })
+  it.each(['direct', 'missing', 'accepted_input'] as const)('rejects a read without group occurrence authority: %s', async (kind) => {
+    port.mockClear()
+    const ctx: AssistantHostedToolContext = { ...context(), currentUserActionScope: () => null,
+      currentInvocationScope: () => kind === 'missing' ? null : kind === 'accepted_input'
+        ? { conversationScope: 'group', origin: { kind: 'accepted_input', assistantInputId: inputId, sessionId: 'session_synthetic' } }
+        : { conversationScope: 'direct', origin: { kind: 'automation_occurrence', automationId: 'automation_game_read', occurrenceAt: '2030-04-01T20:00:00Z' } } }
+    const result = await executeMurphDynamicToolRequest({ request: parse('read_game', {})!, hostedToolContext: ctx, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    expect(result.rpcResult.success).toBe(false)
+    expect(port).not.toHaveBeenCalled()
+  })
   it('advertises only when the group game capability is available', () => {
-    expect(resolveMurphDynamicTools({ gamesAvailable: true })).toEqual(expect.arrayContaining([MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL]))
+    expect(resolveMurphDynamicTools({ gameReadAvailable: true , gamesAvailable: true })).toEqual(expect.arrayContaining([MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL]))
     expect(resolveMurphDynamicTools({})).not.toContain(MURPH_UPDATE_GAME_TOOL)
-    expect(resolveMurphDynamicTools({ gamesAvailable: true })).not.toContain(MURPH_GAME_PHOTO_TOOL)
-    expect(resolveMurphDynamicTools({ gamesAvailable: true, gamePhotosAvailable: true })).toContain(MURPH_GAME_PHOTO_TOOL)
-    expect(resolveMurphDynamicTools({ gamesAvailable: true })).not.toContain(MURPH_WRITE_RECAP_TOOL)
+    expect(resolveMurphDynamicTools({ gameReadAvailable: true , gamesAvailable: true })).not.toContain(MURPH_GAME_PHOTO_TOOL)
+    expect(resolveMurphDynamicTools({ gameReadAvailable: true, gamesAvailable: true, gamePhotosAvailable: true })).toContain(MURPH_GAME_PHOTO_TOOL)
+    expect(resolveMurphDynamicTools({ gameReadAvailable: true , gamesAvailable: true })).not.toContain(MURPH_WRITE_RECAP_TOOL)
     expect(MURPH_UPDATE_GAME_TOOL.description).toContain('ordinary conversational agreement')
     expect(MURPH_UPDATE_GAME_TOOL.description).toContain('do not demand special words')
     expect(MURPH_READ_GAME_TOOL.description).toContain('Call what the loser owes a prize')

@@ -984,6 +984,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       computerToolsAvailable: true,
       exerciseRoutineResponseCardAvailable: true,
       groupAvailable: true,
+      gameReadAvailable: true,
       gamesAvailable: true,
       gamePhotosAvailable: true,
       groupRoomModelAvailable: true,

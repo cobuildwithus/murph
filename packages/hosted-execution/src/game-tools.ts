@@ -32,6 +32,7 @@ export const hostedGameUpdateSchema = z.discriminatedUnion("operation", [
 ]);
 export type HostedGameUpdate = z.infer<typeof hostedGameUpdateSchema>;
 const acceptedInputOrigin = z.object({ kind: z.literal("accepted_input"), assistantInputId: ref }).strict();
+const automationOccurrenceOrigin = z.object({ kind: z.literal("automation_occurrence"), automationId: z.string().min(1).max(191), occurrenceAt: z.isoDateTime({ offset: true }) }).strict();
 const gameRecapOrigin = z.object({ kind: z.literal("game_recap"), gameId, eventId: ref }).strict();
 export const hostedGamePhotoSchema = z.object({
   operation: z.enum(["offer", "save", "dismiss"]), gameId,
@@ -69,7 +70,7 @@ export const hostedGameRecapSchema = z.object({
 }).strict();
 export type HostedGameRecap = z.infer<typeof hostedGameRecapSchema>;
 export const hostedGameToolRequestSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("read_game"), origin: z.union([acceptedInputOrigin, gameRecapOrigin]), includePlayers: z.literal(true).optional() }).strict(),
+  z.object({ action: z.literal("read_game"), origin: z.union([acceptedInputOrigin, gameRecapOrigin, automationOccurrenceOrigin]), includePlayers: z.literal(true).optional() }).strict(),
   z.object({ action: z.literal("game_photo"), origin: acceptedInputOrigin, photo: hostedGamePhotoSchema }).strict(),
   z.object({ action: z.literal("update_game"), origin: acceptedInputOrigin, update: hostedGameUpdateSchema }).strict(),
   z.object({ action: z.literal("write_recap"), origin: gameRecapOrigin, recap: hostedGameRecapSchema,

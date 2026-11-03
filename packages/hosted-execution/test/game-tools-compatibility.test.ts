@@ -17,6 +17,20 @@ const game = {
 const response = <T extends object>(value: T) => ({ action: "read_game", result: { status: "ok", state: { games: [value] } } });
 
 describe("additive game reader compatibility", () => {
+  it("accepts strict scheduled origins only for shared game reads", () => {
+    const scheduledOrigin = { kind: "automation_occurrence", automationId: "automation_game_read", occurrenceAt: "2030-04-01T20:00:00-04:00" };
+    const request = { action: "read_game", origin: scheduledOrigin, includePlayers: true };
+    expect(parseHostedRuntimeGroupToolRequest(request)).toEqual(request);
+    for (const origin of [{ ...scheduledOrigin, assistantInputId: "ain_synthetic" }, { ...scheduledOrigin, automationId: "" }, { ...scheduledOrigin, occurrenceAt: "yesterday" }]) {
+      expect(() => parseHostedRuntimeGroupToolRequest({ ...request, origin })).toThrow();
+    }
+    expect(() => parseHostedRuntimeGroupToolRequest({ ...request, actorMemberId: "player_synthetic" })).toThrow();
+    for (const action of [
+      { action: "update_game", update: { operation: "cancel_game", gameId: game.id } },
+      { action: "game_photo", photo: { operation: "save", gameId: game.id } },
+      { action: "write_recap", recap: { pages: [], chatLine: "Finished." }, priorChatLines: [] },
+    ]) expect(() => parseHostedRuntimeGroupToolRequest({ ...action, origin: scheduledOrigin })).toThrow();
+  });
   it("preserves legacy requests and responses without new optional fields", () => {
     for (const request of [
       { action: "read_game", origin },

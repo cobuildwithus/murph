@@ -1853,6 +1853,7 @@ export interface MurphDynamicToolAvailability {
   planUsageAvailable?: boolean | null
   usageDiagnosticsAvailable?: boolean | null
   pollsAvailable?: boolean | null
+  gameReadAvailable?: boolean | null
   gamesAvailable?: boolean | null
   gamePhotosAvailable?: boolean | null
   gameLoreAvailable?: boolean | null
@@ -1925,7 +1926,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_PLAN_USAGE_TOOL, defaultOff((a) => a.planUsageAvailable)],
     [MURPH_USAGE_DIAGNOSTICS_TOOL, defaultOff((a) => a.usageDiagnosticsAvailable)],
     [MURPH_POLL_TOOL, defaultOff((a) => a.pollsAvailable)],
-    [MURPH_READ_GAME_TOOL, defaultOff((a) => a.gamesAvailable)],
+    [MURPH_READ_GAME_TOOL, defaultOff((a) => a.gameReadAvailable)],
     [MURPH_UPDATE_GAME_TOOL, defaultOff((a) => a.gamesAvailable)],
     [MURPH_GAME_PHOTO_TOOL, defaultOff((a) => a.gamePhotosAvailable)],
     [MURPH_GAME_LORE_TOOL, defaultOff((a) => a.gameLoreAvailable)],

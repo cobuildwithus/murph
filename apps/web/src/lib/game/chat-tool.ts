@@ -23,7 +23,7 @@ type Input = { memberId: string; runtimeIdentity: HostedRuntimeIdentity | null; 
 /** The signed runtime selects only a game and accepted Message ref, never an actor. */
 export async function handleGameChatTool(input: Input): Promise<HostedGameToolResponse> {
   if (!isGameEnabled()) return { action: input.request.action, result: { status: "unavailable", error: "GAME_DISABLED: Games are unavailable right now." } };
-  if (input.request.origin.kind === "game_recap") return handleGameRecapTool(input as Input & { request: Extract<HostedGameToolRequest, { action: "read_game" | "write_recap" }> & { origin: { kind: "game_recap" } } });
+  if (input.request.origin.kind !== "accepted_input") return handleNonPlayerOriginGameTool(input);
   const prisma = getPrisma();
   const actor = await prisma.$transaction((tx) => authorizeGameChatActorTx(input, tx));
   if (!actor) return { action: input.request.action, result: { status: "unavailable", error: "Games are one-on-one. Use a chat with just the two players and Murph, or start in the app." } };
@@ -73,11 +73,34 @@ export async function handleGameChatTool(input: Input): Promise<HostedGameToolRe
 }
 
 /** Preserve the unmarked response shape for older strict runtime readers. */
-async function readGameToolState(input: Input, playerMemberIds: readonly string[], actor: string) {
+async function readGameToolState(input: Input, playerMemberIds: readonly string[], actor?: string) {
   return hostedGameChatStateSchema.parse({
     ...await readGameChatState(input.memberId, playerMemberIds, actor),
     ...(input.request.action === "read_game" && input.request.includePlayers ? { players: (await readGameChatProfiles(playerMemberIds)).map(player => ({ ...player, isSender: player.memberId === actor })) } : {}),
   });
+}
+
+/** Recap and scheduled origins never resolve a player actor. */
+function handleNonPlayerOriginGameTool(input: Input): Promise<HostedGameToolResponse> {
+  if (input.request.origin.kind === "game_recap") return handleGameRecapTool(input as Input & { request: Extract<HostedGameToolRequest, { action: "read_game" | "write_recap" }> & { origin: { kind: "game_recap" } } });
+  return handleScheduledGameRead(input);
+}
+
+/** A verified room occurrence can read shared state without acting for a player. */
+async function handleScheduledGameRead(input: Input): Promise<HostedGameToolResponse> {
+  if (input.request.action !== "read_game") return { action: input.request.action, result: { status: "unavailable", error: "game_player_unavailable" } };
+  await getPrisma().$transaction(async (tx) => {
+    await requireHostedRuntimeCallbackTx(tx, input.memberId, input.runtimeIdentity);
+    await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
+  });
+  let players: readonly string[];
+  try { players = await requireExactGameChat(input.memberId); }
+  catch { return { action: "read_game", result: { status: "unavailable", error: "Use a chat with just the two players and Murph, or start a one-on-one game in the app." } }; }
+  if (players.length !== 2) return { action: "read_game", result: { status: "unavailable", error: "game_player_unavailable" } };
+  if (!isGameOn({ players: players.map(memberId => ({ memberId })) })) return { action: "read_game", result: { status: "unavailable", error: "GAME_DISABLED: Games are invite-only for now." } };
+  const state = await readGameToolState(input, players);
+  const loreGuidance = gameLiveLoreGuidanceForState(state);
+  return { action: "read_game", result: { status: "ok", state, ...(loreGuidance ? { loreGuidance, loreFingerprint: gamePairLoreFingerprint(players) } : {}) } };
 }
 
 /** A free player may agree to their game without gaining personal AI access. */
