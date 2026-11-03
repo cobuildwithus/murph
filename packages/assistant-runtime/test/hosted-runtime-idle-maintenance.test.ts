@@ -11,11 +11,13 @@ import {
 } from "@murphai/hosted-execution/assistant-usage";
 
 const compactWarmCodexThread = vi.fn();
+const runAssistantCodexResumeRetention = vi.fn();
 const runAssistantTranscriptContentRetention = vi.fn();
 vi.mock("@murphai/assistant-engine/assistant-codex", () => ({
   compactWarmCodexThread: (input: unknown) => compactWarmCodexThread(input),
 }));
 vi.mock("@murphai/assistant-engine/assistant-store", () => ({
+  runAssistantCodexResumeRetention: (input: unknown) => runAssistantCodexResumeRetention(input),
   runAssistantTranscriptContentRetention: (input: unknown) =>
     runAssistantTranscriptContentRetention(input),
 }));
@@ -96,6 +98,7 @@ async function waitForAtomicArchiveTempFile(
 }
 
 beforeEach(() => {
+  runAssistantCodexResumeRetention.mockReset().mockResolvedValue(undefined);
   runMealPhotoMaintenance.mockReset().mockResolvedValue({ thumbnailCount: 0, retiredPhotoCount: 0, blockedMealCount: 0, hasMore: false, nextEligibleAt: null });
   compactWarmCodexThread.mockReset();
   runAssistantTranscriptContentRetention.mockReset();

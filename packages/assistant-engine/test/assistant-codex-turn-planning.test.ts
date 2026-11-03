@@ -151,6 +151,8 @@ import {
 import {
   appendAssistantTranscriptEntries,
   listAssistantTranscriptEntries,
+  getAssistantSession,
+  runAssistantCodexResumeRetention,
   saveAssistantSession,
 } from '../src/assistant/store.js'
 import {
@@ -6715,6 +6717,33 @@ describe('assistant Codex turn planning', () => {
       ])
     } finally {
       await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('plans a retired session as a fresh thread with the current canonical context snapshot', async () => {
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportsNativeResume: true })
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue('Synthetic canonical context: prefers morning walks.')
+    const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-retired-plan-'))
+    try {
+      const session = await saveAssistantSession(vault, createSession({
+        turnCount: 1,
+        resumeState: { routeFingerprint: 'synthetic-route', threadId: 'retired-thread' },
+      }))
+      await runAssistantCodexResumeRetention({ vault, now: new Date('2026-11-02T12:00:00.000Z') })
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: { ...createMessageInput(), vault },
+        profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
+        promptTimeContext: { currentLocalDate: '2026-11-02', currentTimeZone: 'UTC' },
+        route: createRoute(),
+        session: await getAssistantSession(vault, session.sessionId),
+        sharedPlan: createPrivateSharedPlan(),
+      })
+      expect(plan.resume).toBeNull()
+      expect(JSON.stringify(plan)).toContain('Synthetic canonical context: prefers morning walks.')
+      expect(JSON.stringify(plan)).not.toContain('retired-thread')
+    } finally {
+      await rm(vault, { recursive: true, force: true })
     }
   })
 
