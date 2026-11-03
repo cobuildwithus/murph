@@ -38,6 +38,32 @@ function input(viewerSeat: number, sameTask: boolean, kind: GameStakeKind | null
 }
 
 describe("game history terms", () => {
+  it.each([0, 1])("preserves pair history JSON for seat %s with either capability", seat => {
+    const fixture = input(seat, false, "prize");
+    const legacy = JSON.stringify(buildGameHistoryView(fixture));
+    expect(legacy).toMatchSnapshot();
+    expect(JSON.stringify(buildGameHistoryView({ ...fixture, multiplayer: true }))).toBe(legacy);
+  });
+
+  it.each([0, 1])("uses the shared task in group history for seat %s, with or without an override", seat => {
+    const fixture = input(seat, false, "prize");
+    fixture.state.game.seats = 10;
+    fixture.words.versions = [
+      { n: 1, defaultTask: "Old shared task", tasks: [], stakes: [] },
+      { n: 2, defaultTask: "Cycle for 20 minutes", tasks: [{ seat: 0, text: "Practice balance" }], stakes: [] },
+      { n: 4, defaultTask: "Future shared task", tasks: [], stakes: [] },
+    ];
+    expect(buildGameHistoryView(fixture)).toBeNull();
+    fixture.multiplayer = true;
+    const history = buildGameHistoryView(fixture)!;
+    if (!("group" in history)) throw new Error("Expected group history");
+    expect(history.group.task).toBe("Cycle for 20 minutes");
+    const live = buildGameView(fixture);
+    expect(history.group.task).toBe(live.terms.defaultTask);
+    expect(live.terms.tasks.find(task => task.seat === seat)?.text)
+      .toBe(seat === 0 ? "Practice balance" : "Cycle for 20 minutes");
+  });
+
   for (const seat of [0, 1]) {
     for (const sameTask of [false, true]) {
       it.each(["prize", "dare", null] as const)(`uses final live-view wording for seat ${seat}, same task ${sameTask}, stake %s`, kind => {

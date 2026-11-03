@@ -5744,7 +5744,8 @@ eight set-based queries (including the database clock and player relation), at
 most four in flight, and decrypts task/stake terms, names, labels and visible
 entry payloads in the existing batch; recap stories and relationships are not
 opened. History uses the same final terms projection as live game views,
-orienting tasks by viewer seat without any per-game query. The history route
+orienting pair tasks by viewer seat and using the shared default task for groups,
+without any per-game query. The history route
 reuses the existing request-scoped root unwrap owner across native auth and
 hydration; exact roots are zeroized before signing. Session rows and revocation
 are still read on every request. Root-envelope metadata and provider unwraps

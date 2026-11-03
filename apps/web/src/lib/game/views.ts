@@ -285,7 +285,7 @@ export function buildGameHistoryView(input: GameViewInput): BuiltGameHistoryView
     .map((entry) => ({ entry: entryView(entry, input), mine: entry.memberId === input.viewerId, seat: seats.get(entry.memberId)! }));
 
   if (group) return {
-    group: { ...groupView(input), task: taskFor(viewer.seat), prize: stake?.item ?? null },
+    group: { ...groupView(input), task: terms.defaultTask ?? "", prize: stake?.item ?? null },
     game: { id: input.state.game.id, round: input.round, startedOn: viewer.dayOne,
       endsOn: addDays(viewer.dayOne, input.state.game.lengthDays - 1), lengthDays: input.state.game.lengthDays,
       schedule: terms.schedule, players: rosterViews(input, entries), result: historyOutcome,
