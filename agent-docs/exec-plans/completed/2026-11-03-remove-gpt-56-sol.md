@@ -1,6 +1,6 @@
 # Remove retired Sol model
 
-Status: active
+Status: completed
 Created: 2026-11-03
 Updated: 2026-11-03
 
@@ -118,4 +118,20 @@ and scheduler/outbox reconciliation; the following due job runs, pending
 references clear, explicit reasoning survives and new retired writes reject.
 Native child admission also rejects the retired model before another request.
 Query owner tests, workspace typechecks and complexity guard pass. No findings
-were rejected; no retrospective is required. Round two and final CI pending.
+were rejected; no retrospective is required. Round two is resolved; final CI and release are tracked in PR #4503.
+
+## Final implementation review
+
+Round two: GPT-6 Pro on vonneumann reviewed the full corrected snapshot at
+0914003bd6f481f65fcab747511de3d0e85e7ee0 and returned PASS after more than
+three minutes. Exact accepted turn, model, attachment, marker, head and ancestry
+metadata validated. Zero outstanding accepted findings. Parent rechecked the
+query correction, composed regressions, privacy, persisted read/write distinction
+and historical pricing boundary; no further behavior changes are needed.
+
+The implementation plan is closed. PR #4503 remains the release owner for final
+exact-head CI, native patch/image build proof, matched-head merge, automatic
+managed Web admission, then protected Cloudflare gradual rollout and receipts.
+These external gates were pending at plan closure and are not claimed complete
+here. Repair billing remains the explicitly deferred design described above.
+Completed: 2026-11-03
