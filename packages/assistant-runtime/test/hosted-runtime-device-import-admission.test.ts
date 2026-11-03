@@ -27,6 +27,7 @@ test.each([
   ["default", "provider"], ["system_mailbox", "provider"],
   ["default", "no-provider"], ["system_mailbox", "no-provider"],
   ["default", "admission-cap"], ["system_mailbox", "admission-cap"],
+  ["default", "sustained-foreground"], ["system_mailbox", "sustained-foreground"],
   ["default", "failure"], ["system_mailbox", "failure"],
   ["default", "shutdown"], ["system_mailbox", "shutdown"],
   ["default", "abort"], ["system_mailbox", "abort"],
@@ -48,6 +49,7 @@ test.each([
   let runtime: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | undefined;
   let shouldYieldImport: (() => boolean) | null | undefined;
   let phaseRan = false;
+  let stagedSequence = 0;
   let importCalls = 0;
   let acknowledgments = 0;
   const acknowledgedPayloads: string[] = [];
@@ -91,7 +93,7 @@ test.each([
             const result = await importDeviceBatch({
               vaultRoot, provider: "synthetic", events: [observation(resourceId)],
             }, { signal: options.signal });
-            assert.equal(shouldYieldImport?.(), false);
+            assert.equal(shouldYieldImport?.(), closeAt === "sustained-foreground");
             events.push("import.completed");
             importCompleted.resolve();
             return result;
@@ -170,6 +172,7 @@ test.each([
         }
         assert.equal(shouldYieldImport?.(), true);
         const assistantInputId = await stagePendingLinqAssistantInputForMailboxItem({ item, vaultRoot });
+        stagedSequence = Number(item.laneSeq);
         if (item.laneSeq === "1") conversationStaged.resolve();
         else secondStaged.resolve();
         return { status: "imported", assistantInputId };
@@ -181,6 +184,21 @@ test.each([
         await importYielded.promise;
         assert.equal(importCalls, partialProgress ? 2 : 1);
         assert.equal(shouldYieldImport?.(), true);
+        if (closeAt === "sustained-foreground") {
+          for (let seq = 2; seq <= 4; seq += 1) {
+            vi.setSystemTime(Date.now() + 9_000);
+            items.push(createMailboxItem({ id: `synthetic_traffic_${seq}`, laneSeq: String(seq) }));
+            wakeSignal.notify();
+            await waitUntil(() => assert.equal(stagedSequence, seq));
+            await new Promise(resolve => setTimeout(resolve, 150));
+            assert.equal(shouldYieldImport?.(), true);
+            assert.equal(importCalls, 1);
+          }
+          vi.setSystemTime(Date.now() + 3_001);
+          assert.equal(shouldYieldImport?.(), true);
+          await importCompleted.promise;
+          return { progressed: false };
+        }
         if (closeAt === "provider") {
           input.onProviderRequestStarted?.();
           assert.equal(shouldYieldImport?.(), false);

@@ -49,7 +49,6 @@ import {
   computeAssistantCronBackgroundMaintenanceYieldRetryAt,
   executeClaimedAssistantCronJob,
   isAssistantCronBackgroundMaintenanceYieldError,
-  resolveAssistantCronWakeEntries,
   type AssistantCronRunnableProjectionInput,
 } from './cron/execution.ts'
 import {
@@ -505,16 +504,9 @@ export async function getAssistantCronStatus(
     runtimeStore,
   })
   const canonicalJobs = projection.jobs
-  const wakeEntries = await resolveAssistantCronWakeEntries({
-    entries: projection.canonicalEntries,
-    vault,
-  })
   const now = new Date().toISOString()
   const enabledJobs = canonicalJobs.filter((job) => job.enabled)
-  const dueJobs = [
-    ...projection.visibleLocalStore.jobs,
-    ...wakeEntries.map((entry) => entry.job),
-  ].filter((job) => job.enabled && isAssistantCronJobDue(job, now)).length
+  const dueJobs = enabledJobs.filter((job) => isAssistantCronJobDue(job, now)).length
   const runningJobs = canonicalJobs.filter((job) => job.state.runningAt !== null).length
   // A canonical running claim keeps its historical occurrence as nextRunAt so
   // execution can resume that exact occurrence after reclamation. Status owns
@@ -524,7 +516,7 @@ export async function getAssistantCronStatus(
     ...projection.visibleLocalStore.jobs
       .filter((job) => job.enabled)
       .map((job) => job.state.nextRunAt),
-    ...wakeEntries
+    ...projection.canonicalEntries
       .filter((entry) => entry.job.enabled)
       .map((entry) =>
         entry.runtimeState.state.runningAt === null
@@ -535,9 +527,8 @@ export async function getAssistantCronStatus(
       ),
   )
   // Background maintenance hidden by active foreground yield still needs a
-  // wake: a released claim carries its persisted retry time, and a due but
-  // never-claimed occurrence gets the same short catch-up deferral so it is
-  // not disarmed until an unrelated wake.
+  // wake: preserve future occurrences and persisted retry times, and give a
+  // due but never-claimed occurrence the same short catch-up deferral.
   const backgroundMaintenanceRetryWakeAt = earliestAssistantAutomationWakeAt(
     ...projection.yieldDeferredBackgroundMaintenanceEntries.map((entry) => {
       if (entry.runtimeState.state.runningAt !== null) {
@@ -550,7 +541,7 @@ export async function getAssistantCronStatus(
       }
       return isAssistantCronJobDue(entry.job, now)
         ? computeAssistantCronBackgroundMaintenanceYieldRetryAt(now)
-        : null
+        : entry.job.state.nextRunAt
     }),
   )
   const nextRunAt = earliestAssistantAutomationWakeAt(

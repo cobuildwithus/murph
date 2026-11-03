@@ -4604,6 +4604,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                   }
                   consumeReadyImageCompletionInputs(assistantInputIds);
                   return () => {
+                    // The accepted-input scope ends at provider return, before
+                    // transcript/session persistence and reply dispatch. Re-arm
+                    // even when the provider outlasted the admission window.
+                    if (acceptedInputContext.foregroundPriorityInputAccepted) {
+                      deviceImportAdmissionOpenedAt = Date.now();
+                    }
                     currentAssistantInputId = null;
                   };
                 },
