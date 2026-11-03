@@ -353,7 +353,7 @@ async function readHostedRuntimeProgressObservation(input: {
         excludedUsageBlockedConversationLaneCount += 1;
         continue;
       }
-      if (isImportedAssistantNotificationHead(row, now)
+      if (isImportedDefaultOwnedSystemHead(row, now)
         && usageReadCount < HOSTED_RUNTIME_PROGRESS_USAGE_READ_LIMIT) {
         usageReadCount += 1;
         // Each page has one head per lane. Bound sequential, read-only allowance
@@ -405,12 +405,11 @@ async function readHostedRuntimeProgressObservation(input: {
 
 // Fresh suffix arrivals do not inherit the paused head's age. Import must
 // cover every live pending row already at the stall boundary.
-function isImportedAssistantNotificationHead(
+function isImportedDefaultOwnedSystemHead(
   row: HostedRuntimeProgressHealthRow,
   now: Date,
 ): boolean {
   return row.lane === "system"
-    && row.headKind === "assistant.notification.requested"
     && row.headDedupeKey != null
     && classifyHostedSystemMailboxExecutionClass({
       kind: row.headKind,
@@ -596,7 +595,7 @@ async function readHostedRuntimeProgressCandidatePage(input: {
           SELECT candidate.runtime_attempt_id, candidate.phase_breakdown_json
           FROM hosted_ingress_latency_trace AS candidate
           WHERE workspace_evidence.lane = 'system'
-            AND workspace_evidence.head_kind IN ('member.activated', 'device-sync.wake')
+            AND workspace_evidence.head_kind IN ('member.activated', 'device-sync.wake', 'meal-photo.captured')
             AND candidate.user_id = workspace_evidence.user_id
             AND candidate.accepted_at >= workspace_evidence.head_created_at
             AND candidate.accepted_at <= ${input.now}
@@ -969,7 +968,9 @@ function isSystemWorkAwaitingForegroundCheckpoint(
 ): boolean {
   if (
     row.lane !== "system"
-    || (row.headKind !== "member.activated" && row.headKind !== "device-sync.wake")
+    || (row.headKind !== "member.activated"
+      && row.headKind !== "device-sync.wake"
+      && row.headKind !== "meal-photo.captured")
     || row.workspaceSystemImportedSeq === null
     || row.workspaceSystemImportedSeq < row.headLaneSeq
     || row.workspaceSystemImportedSeq > row.durableHighWaterSeq
@@ -977,8 +978,8 @@ function isSystemWorkAwaitingForegroundCheckpoint(
   ) {
     return false;
   }
-  // Activation and device sync yield to foreground work and publish handling
-  // through checkpoints. Only current-owner evidence may defer their alerts.
+  // Activation, device sync and meal photos publish handling through checkpoints.
+  // Only current-owner foreground evidence may defer their alerts.
   const completedAt = readHostedRuntimeTerminalReplyCommittedAt(row.foregroundCheckpointEvidence)
     ?? readHostedRuntimeTerminalNonReplyCommittedAt(row.foregroundCheckpointEvidence);
   return completedAt !== null

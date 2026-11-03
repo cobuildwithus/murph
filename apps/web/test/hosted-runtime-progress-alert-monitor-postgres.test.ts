@@ -34,7 +34,7 @@ if (
 describe.skipIf(!runPostgresProof)(
   "hosted runtime progress alert PostgreSQL boundary",
   () => {
-    it("uses current allowance for an imported assistant notification without hiding deterministic heads", async () => {
+    it.each(["assistant.notification.requested", "member.action.requested"])("uses current allowance for imported %s without hiding deterministic heads", async (kind) => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       const rollback = new Error("Rollback usage-pause proof.");
       const userId = `progress-usage-proof-${randomUUID()}`;
@@ -47,7 +47,7 @@ describe.skipIf(!runPostgresProof)(
             ...member(userId, HostedBillingStatus.active), usageCreditBalanceUsdMicros: 0n,
           } });
           await seedProgressLaneItems({ tx, userId, lane: "system", rows: [
-            { createdAt, laneSeq: 1n, kind: "assistant.notification.requested" },
+            { createdAt, laneSeq: 1n, kind },
             { createdAt, laneSeq: 2n, kind: "device-sync.wake" },
           ] });
           await tx.hostedWorkspace.create({ data: { userId,
@@ -69,7 +69,9 @@ describe.skipIf(!runPostgresProof)(
             "assistant.notification.requested:group-join:synthetic",
             "assistant.notification.requested:device-delivery-stalled:v1:synthetic",
           ]) {
-            await tx.hostedMailboxItem.update({ where: { id: `${userId}-system-item-1` }, data: { dedupeKey } });
+            await tx.hostedMailboxItem.update({ where: { id: `${userId}-system-item-1` }, data: {
+              kind: "assistant.notification.requested", dedupeKey,
+            } });
             await expect(read()).resolves.toMatchObject({ anomalous: true, excludedUsageBlockedSystemLaneCount: 0 });
           }
           await tx.hostedMailboxItem.update({ where: { id: `${userId}-system-item-1` }, data: { kind: "device-sync.wake" } });
@@ -276,7 +278,7 @@ describe.skipIf(!runPostgresProof)(
       }
     }, 60_000);
 
-    it.each(["member.activated", "device-sync.wake"])("bounds %s deferral to imported work and the current owner's latest completed foreground input", async (kind) => {
+    it.each(["member.activated", "device-sync.wake", "meal-photo.captured"])("bounds %s deferral to imported work and the current owner's latest completed foreground input", async (kind) => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       const userId = `progress-activation-proof-${randomUUID()}`;
       const acceptedAt = new Date("2026-08-10T15:00:00Z");
@@ -292,7 +294,10 @@ describe.skipIf(!runPostgresProof)(
           .resolves.toMatchObject({ stalledSystemLaneCount: count });
       };
       try {
-        await prisma.hostedMember.create({ data: member(userId, HostedBillingStatus.active) });
+        // Keep usage allowed so only foreground checkpoint evidence defers alerts.
+        await prisma.hostedMember.create({ data: {
+          ...member(userId, HostedBillingStatus.active), usageCreditBalanceUsdMicros: 1_000_000n,
+        } });
         await seedProgressLane({ createdAt: acceptedAt, kind, lane: "system", tx: prisma, userId });
         await seedProgressLane({ createdAt: foregroundAt, lane: "conversation", tx: prisma, userId });
         // Production shape: the progress counter starts at zero and advances

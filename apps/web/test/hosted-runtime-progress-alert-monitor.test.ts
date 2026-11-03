@@ -44,7 +44,7 @@ function createVoidDeferred(): {
   return { promise, resolve };
 }
 
-describe("usage-paused system notification progress", () => {
+describe("usage-paused default-owned system progress", () => {
   const notification = (runtimeKey = "runtime_paused", overrides: Partial<HostedRuntimeProgressHealthRow> = {}) => ({
     ...progressRow({ runtimeKey, lane: "system", headKind: "assistant.notification.requested",
       progressOriginAt: "2026-08-10T15:00:00Z", durableHighWaterSeq: 5n,
@@ -77,7 +77,6 @@ describe("usage-paused system notification progress", () => {
 
   it.each([
     { headKind: "device-sync.wake" },
-    { headKind: "unknown.future-kind" },
     { headDedupeKey: "assistant.notification.requested:group-join:synthetic" },
     { headDedupeKey: "assistant.notification.requested:device-delivery-stalled:v1:synthetic" },
     { headDedupeKey: undefined },
@@ -120,6 +119,27 @@ describe("usage-paused system notification progress", () => {
     const fixture = createProgressMonitorFixture([notification(), notification("runtime_device", { headKind: "device-sync.wake" })]);
     expect(await readHostedRuntimeProgressHealth({ now, prisma: fixture.prisma }))
       .toMatchObject({ anomalous: true, excludedUsageBlockedSystemLaneCount: 1, stalledSystemLaneCount: 1 });
+  });
+
+  it.each(["member.action.requested", "unknown.future-kind"])("excludes a usage-paused %s head while keeping model-free work alertable", async (headKind) => {
+    usageGate.mockResolvedValue({ allowed: false, reason: "ai_usage_limit_exceeded" });
+    const action = notification("runtime_action", {
+      headKind,
+      headDedupeKey: `${headKind}:synthetic`,
+    });
+    const fixture = createProgressMonitorFixture([action]);
+    const read = () => readHostedRuntimeProgressHealth({ now, prisma: fixture.prisma });
+    expect(await read()).toMatchObject({ anomalous: false,
+      excludedUsageBlockedSystemLaneCount: 1, stalledSystemLaneCount: 0 });
+    fixture.setRows([action, notification("runtime_device", {
+      headKind: "device-sync.wake", headDedupeKey: "device-sync.wake:synthetic",
+    })]);
+    expect(await read()).toMatchObject({ anomalous: true,
+      excludedUsageBlockedSystemLaneCount: 1, stalledSystemLaneCount: 1 });
+    expect(usageGate).toHaveBeenCalledTimes(2);
+    usageGate.mockResolvedValue({ allowed: true });
+    expect(await read()).toMatchObject({ anomalous: true,
+      excludedUsageBlockedSystemLaneCount: 0, stalledSystemLaneCount: 2 });
   });
 
   it.each(["unavailable", "inactive"])("does not infer usage exhaustion from %s", async (mode) => {
@@ -251,7 +271,7 @@ describe("hosted runtime progress health", () => {
     }
   });
 
-  it.each(["member.activated", "device-sync.wake"])("defers imported %s behind a current foreground checkpoint only until its deadline", (headKind) => {
+  it.each(["member.activated", "device-sync.wake", "meal-photo.captured"])("defers imported %s behind a current foreground checkpoint only until its deadline", (headKind) => {
     const row = progressRow({
       progressOriginAt: "2026-08-10T15:30:00Z", lane: "system", runtimeKey: "runtime_a",
       headKind, workspaceCheckpointedAt: instant("2026-08-10T15:40:00Z"),
