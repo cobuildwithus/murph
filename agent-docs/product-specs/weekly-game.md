@@ -377,8 +377,10 @@ this default without deleting other people's private contact choices.
   and sees the leaver as a player with `left: true`, named the way they knew
   them (their own label, else the leaver's first name), with no photo or days.
   A ticket with the leaver stays visible with `left: true` and can't be marked
-  done. The leaver's seat, check-ins, labels, profile and photos are deleted;
-  so is any game nobody else is in (including an unjoined plain invite). An
+  done. The leaver's check-ins, labels, profile and photos are deleted; their
+  seat stays as an anonymous tombstone, with each survivor's own private name
+  sealed for that viewer. Any game nobody else is in is deleted (including an
+  unjoined plain invite). An
   addressed rematch whose challenger left stays on its invitee's Home, called
   off.
 

@@ -1,8 +1,7 @@
 import { requestGameRecapRegeneration } from "../src/lib/game/recap-regeneration";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Prisma } from "@prisma/client";
 import pg from "pg";
 import { getPrisma } from "../src/lib/prisma";
 import { sealGameText } from "../src/lib/game/crypto";
@@ -10,7 +9,7 @@ import { readGameRecapMaterial, readGame, sealGameRecap } from "../src/lib/game/
 import { assertGameProposalDeliveryCurrentTx } from "../src/lib/game/chat-delivery-authority";
 import { gameChatLifecycleEventId, markGameChatGenerationQueuedTx, reserveGameChatLifecycleTx } from "../src/lib/game/chat-lifecycle-receipt";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../src/lib/hosted-onboarding/linq-observability-identifiers";
-import { recordHostedLinqRuntimeProviderDispatchFenceTx, buildHostedLinqDeliveryId } from "../src/lib/hosted-onboarding/linq-delivery-store";
+import { recordHostedLinqRuntimeProviderDispatchFenceTx } from "../src/lib/hosted-onboarding/linq-delivery-store";
 import { applyHostedWebContractMigrations, listHostedWebContractMigrations } from "../scripts/run-production-contract-migrations";
 
 vi.mock("../src/lib/game/chat-lifecycle", () => ({ deliverGameChatLifecycle: async () => false }));
@@ -21,7 +20,8 @@ if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murp
 }
 const migrationId = "20261031190000_recover_missing_game_recap";
 const migrationSql = readFileSync(new URL(`../prisma/contract-migrations/${migrationId}/migration.sql`, import.meta.url), "utf8");
-const targetId = "5325824e-9e5f-48a1-91b0-2fe954e616c7";
+// Historical SQL owns its fixed selector; never duplicate it in new fixtures.
+const targetId = /target_game CONSTANT text := '([^']+)'/u.exec(migrationSql)![1];
 const members: string[] = [], games: string[] = [], deliveries: string[] = [];
 const recap = { pages: [
   { background: "paper" as const, blocks: [{ kind: "headline" as const, text: "A synthetic finished week" }] },
@@ -29,7 +29,7 @@ const recap = { pages: [
   { background: "slate" as const, blocks: [{ kind: "headline" as const, text: "Six days, six posts" }] },
 ], scoreLine: "Alex and Sam tied.", chatLine: "Six posts each and a weekend off. The story is in the app." };
 
-async function fixture(gameId = randomUUID()) {
+async function fixture(gameId: string = randomUUID()) {
   const db = getPrisma();
   const players = [randomUUID(), randomUUID()], room = randomUUID();
   members.push(...players, room); games.push(gameId);
@@ -42,21 +42,21 @@ async function fixture(gameId = randomUUID()) {
     v: 1, versions: [{ n: 1, tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Walk" }], stakes: [] }],
   })))!;
   await db.game.create({ data: {
-    id: gameId, createdBy: players[0], status: "settled", lengthDays: 8, chatContainerMemberId: room,
+    id: gameId, createdBy: players[0], wordsOwnerMemberId: players[0], status: "settled", lengthDays: 8, chatContainerMemberId: room,
     createdAt: new Date("2030-01-01T00:00:00Z"), settledAt: new Date("2030-01-11T12:00:00Z"),
     terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: [0, 1, 2, 3, 4] }, stakes: [] }] },
     termsWordsEncrypted,
     result: { v: 1, termsVersion: 1, scores: players.map((memberId, seat) => ({ memberId, seat, score: 6, misses: 0 })) },
-    players: { create: players.map((memberId, seat) => ({ memberId, seat, timeZone: "UTC", dayOne: new Date("2030-01-02T00:00:00Z") })) },
+    players: { create: players.map((memberId, seat) => ({ memberId, seat, joinedAt: new Date("2030-01-01T12:00:00Z"), timeZone: "UTC", dayOne: new Date("2030-01-02T00:00:00Z") })) },
   } });
   await db.gameEntry.createMany({ data: players.flatMap((memberId) => [0, 1, 2, 5, 6, 7].map((dayIndex) => ({
     id: randomUUID(), gameId, memberId, dayIndex, attempt: 1, kind: "photo", receivedAt: new Date("2030-01-10T12:00:00Z"),
   }))) });
   const newerId = randomUUID(); games.push(newerId);
   await db.game.create({ data: {
-    id: newerId, createdBy: players[0], ...withStatus("live"), lengthDays: 7, chatContainerMemberId: room,
+    id: newerId, createdBy: players[0], wordsOwnerMemberId: players[0], ...withStatus("live"), lengthDays: 7, chatContainerMemberId: room,
     terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { count: 3 }, stakes: [] }] }, termsWordsEncrypted: "unused",
-    players: { create: players.map((memberId, seat) => ({ memberId, seat, timeZone: "UTC" })) },
+    players: { create: players.map((memberId, seat) => ({ memberId, seat, joinedAt: new Date("2030-01-01T12:00:00Z"), timeZone: "UTC" })) },
   } });
   const eventId = gameChatLifecycleEventId(gameId, "recap");
   const key = createHostedLinqDeliveryIdempotencyLookupKey(eventId)!;
@@ -73,6 +73,7 @@ describe.skipIf(!enabled)("late settled-game recap PostgreSQL proof", () => {
   afterEach(async () => {
     await getPrisma().hostedLinqDelivery.deleteMany({ where: { id: { in: deliveries.splice(0) } } });
     await getPrisma().hostedLinqDelivery.deleteMany({ where: { source: "game_lifecycle", OR: games.splice(0).flatMap((gameId) => [{ sourceRef: gameId }, { sourceRef: { startsWith: `${gameId}:` } }]) } });
+    await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: members } } });
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: members.splice(0) } } });
   });
 
@@ -100,7 +101,7 @@ describe.skipIf(!enabled)("late settled-game recap PostgreSQL proof", () => {
     expect(stored.recapEncrypted).toBeTruthy(); expect(stored.recapEncrypted).not.toContain("synthetic");
     expect((await db.game.findUniqueOrThrow({ where: { id: newerId } })).recapEncrypted).toBeNull();
     await expect(assertGameProposalDeliveryCurrentTx({ tx: db, containerMemberId: room, playerMemberIds: players, deliveryIdempotencyKey: eventId })).resolves.toBe(true);
-    await db.game.update({ where: { id: gameId }, data: { departedPlayer: { seat: 1 } } });
+    await db.game.update({ where: { id: gameId }, data: { players: { update: { where: { gameId_seat: { gameId, seat: 1 } }, data: { leftAt: new Date() } } } } });
     expect(await readGameRecapMaterial(gameId, room, players)).toBeNull();
     expect(await sealGameRecap(sealInput)).toBeNull();
     await expect(assertGameProposalDeliveryCurrentTx({ tx: db, containerMemberId: room, playerMemberIds: players, deliveryIdempotencyKey: eventId })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
@@ -195,7 +196,7 @@ describe.skipIf(!enabled)("late settled-game recap PostgreSQL proof", () => {
   it.each(["live", "negotiating", "void", "departed", "blocked"])("refuses operator regeneration for %s games", async (condition) => {
     const { db, gameId, players } = await fixture();
     await db.game.update({ where: { id: gameId }, data: { recapEncrypted: "synthetic-old-ciphertext",
-      ...(condition === "departed" ? { departedPlayer: { seat: 1 } } : condition === "blocked" ? {} : withStatus(condition)) } });
+      ...(condition === "departed" ? { players: { update: { where: { gameId_seat: { gameId, seat: 1 } }, data: { leftAt: new Date() } } } } : condition === "blocked" ? {} : withStatus(condition)) } });
     if (condition === "blocked") await db.gameBlock.create({ data: { blockerMemberId: players[0]!, blockedMemberId: players[1]! } });
     for (const execute of [false, true]) {
       expect(await requestGameRecapRegeneration({ gameId, regenerationId: "synthetic_request", execute, operatorMemberId: "system" }))
@@ -219,8 +220,9 @@ describe.skipIf(!enabled)("late settled-game recap PostgreSQL proof", () => {
     const deletion = db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
       acquired(); await releasePromise;
-      await tx.game.update({ where: { id: gameId }, data: { recapEncrypted: null, departedPlayer: { seat: 1 } } });
-      await tx.gamePlayer.deleteMany({ where: { gameId, memberId: players[1] } });
+      await tx.game.update({ where: { id: gameId }, data: { recapEncrypted: null } });
+      await tx.gameEntry.deleteMany({ where: { gameId, memberId: players[1] } });
+      await tx.gamePlayer.update({ where: { gameId_seat: { gameId, seat: 1 } }, data: { memberId: null, leftAt: new Date() } });
     });
     await acquiredPromise;
     let entered!: () => void;
@@ -232,54 +234,52 @@ describe.skipIf(!enabled)("late settled-game recap PostgreSQL proof", () => {
     expect((await db.game.findUniqueOrThrow({ where: { id: gameId } })).recapEncrypted).toBeNull();
   });
 
-  it("runs the fixed-target SQL through the existing ledger and never rearms a receipt on replay", async () => {
-    const { db, gameId, key, room, eventId, sealInput } = await fixture(targetId);
-    const migration = (await listHostedWebContractMigrations()).filter((item) => item.id === migrationId);
-    expect(migration).toHaveLength(1);
+  it("keeps historical recovery proof on its old schema and retires it from dispatch", async () => {
+    const { gameId, players, room } = await fixture(targetId);
+    expect((await listHostedWebContractMigrations()).some(item => item.id === migrationId)).toBe(false);
     const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+    const schema = `legacy_recap_${randomUUID().replaceAll("-", "")}`;
     await client.connect();
     try {
+      await client.query(`CREATE SCHEMA "${schema}"`);
+      await client.query(`SET search_path TO "${schema}"`);
+      // Isolate the immutable recovery's prior shape from current application tables.
+      await client.query(`CREATE TABLE game AS SELECT * FROM public.game WHERE id = $1`, [gameId]);
+      await client.query("ALTER TABLE game ADD COLUMN departed_player jsonb");
+      await client.query(`CREATE TABLE game_player AS SELECT * FROM public.game_player WHERE game_id = $1`, [gameId]);
+      await client.query("CREATE TABLE game_block AS TABLE public.game_block WITH NO DATA");
+      await client.query("CREATE TABLE hosted_linq_delivery (LIKE public.hosted_linq_delivery INCLUDING DEFAULTS INCLUDING INDEXES)");
+      const count = async () => Number((await client.query("SELECT count(*) AS n FROM hosted_linq_delivery")).rows[0].n);
+      for (const patch of [
+        "status = 'live'", "status = 'negotiating'", "status = 'settled', chat_container_member_id = NULL",
+        "departed_player = '{\"seat\":1}'", "departed_player = NULL, recap_encrypted = 'already-sealed'",
+      ]) {
+        await client.query(`UPDATE game SET ${patch}`);
+        await client.query(migrationSql);
+        expect(await count()).toBe(0);
+      }
+      await client.query("UPDATE game SET chat_container_member_id = $1, recap_encrypted = NULL", [room]);
+      await client.query("INSERT INTO game_block(blocker_member_id, blocked_member_id, created_at) VALUES ($1,$2,now())", players);
+      await client.query(migrationSql); expect(await count()).toBe(0);
+      await client.query("DELETE FROM game_block");
+      const migration = [{ id: migrationId, sqlPath: "historical-recovery/migration.sql", sql: migrationSql, checksum: createHash("sha256").update(migrationSql).digest("hex") }];
       expect(await applyHostedWebContractMigrations(client, migration)).toEqual({ applied: 1, skipped: 0 });
       expect(await applyHostedWebContractMigrations(client, migration)).toEqual({ applied: 0, skipped: 1 });
-      const receipt = await db.hostedLinqDelivery.findUniqueOrThrow({ where: { idempotencyKey: key } });
-      expect(receipt).toMatchObject({ id: buildHostedLinqDeliveryId(key), source: "game_lifecycle", sourceRef: gameId,
-        template: "game_recap", status: "awaiting_generation", targetKind: "thread", payloadOwnerMemberId: null });
+      expect((await client.query("SELECT source,template,status FROM hosted_linq_delivery")).rows).toEqual([{ source: "game_lifecycle", template: "game_recap", status: "awaiting_generation" }]);
       for (const status of ["generation_queued", "sent", "skipped", "failed"]) {
-        await db.hostedLinqDelivery.update({ where: { id: receipt.id }, data: { status } });
-        const before = await db.hostedLinqDelivery.findUnique({ where: { id: receipt.id } });
-        await db.$executeRawUnsafe(migrationSql);
-        expect(await db.hostedLinqDelivery.findUnique({ where: { id: receipt.id } })).toEqual(before);
+        await client.query("UPDATE hosted_linq_delivery SET status = $1", [status]);
+        const before = (await client.query("SELECT * FROM hosted_linq_delivery")).rows;
+        await client.query(migrationSql);
+        expect((await client.query("SELECT * FROM hosted_linq_delivery")).rows).toEqual(before);
       }
-      await db.hostedLinqDelivery.update({ where: { id: receipt.id }, data: { status: "awaiting_generation" } });
-      await markGameChatGenerationQueuedTx(eventId, db, room);
-      expect(await sealGameRecap(sealInput)).toEqual(recap);
-      await db.hostedLinqDelivery.delete({ where: { id: receipt.id } });
-      await db.$executeRawUnsafe(migrationSql);
-      expect(await db.hostedLinqDelivery.count({ where: { sourceRef: gameId } })).toBe(0);
+      await client.query("DELETE FROM hosted_linq_delivery");
+      await client.query("DELETE FROM game_player WHERE member_id = $1", [players[1]]);
+      await client.query(migrationSql); expect(await count()).toBe(0);
+      await client.query("DELETE FROM game");
+      await client.query(migrationSql); expect(await count()).toBe(0);
     } finally {
-      await client.query('DELETE FROM "_hosted_web_contract_migration" WHERE migration_id = $1', [migrationId]);
+      await client.query(`DROP SCHEMA "${schema}" CASCADE`);
       await client.end();
     }
-  });
-
-  it("leaves unrelated and ineligible targets alone", async () => {
-    const other = await fixture();
-    await other.db.$executeRawUnsafe(migrationSql); // target absent
-    expect(await other.db.hostedLinqDelivery.count({ where: { sourceRef: other.gameId } })).toBe(0);
-    const { db, gameId, players, room } = await fixture(targetId);
-    for (const data of [withStatus("live"), withStatus("negotiating"), { ...withStatus("settled"), chatContainerMemberId: null },
-      { chatContainerMemberId: room, departedPlayer: { seat: 1 } }, { departedPlayer: Prisma.DbNull, recapEncrypted: "already-sealed" }]) {
-      await db.game.update({ where: { id: gameId }, data });
-      await db.$executeRawUnsafe(migrationSql);
-      expect(await db.hostedLinqDelivery.count({ where: { sourceRef: gameId } })).toBe(0);
-    }
-    await db.game.update({ where: { id: gameId }, data: { recapEncrypted: null } });
-    await db.gameBlock.create({ data: { blockerMemberId: players[0]!, blockedMemberId: players[1]! } });
-    await db.$executeRawUnsafe(migrationSql);
-    expect(await db.hostedLinqDelivery.count({ where: { sourceRef: gameId } })).toBe(0);
-    await db.gameBlock.deleteMany({ where: { blockerMemberId: players[0] } });
-    await db.gamePlayer.deleteMany({ where: { gameId, memberId: players[1] } });
-    await db.$executeRawUnsafe(migrationSql);
-    expect(await db.hostedLinqDelivery.count({ where: { sourceRef: gameId } })).toBe(0);
   });
 });

@@ -42,9 +42,9 @@ describe.skipIf(!enabled)("shared game allowance PostgreSQL", () => {
       await prisma.gameProfile.createMany({ data: [first, second].map(memberId => ({
         memberId, firstNameEncrypted: "synthetic-sealed", timeZone: "UTC",
       })) });
-      await prisma.game.create({ data: { id: gameId, createdBy: first, status: "live",
+      await prisma.game.create({ data: { id: gameId, createdBy: first, wordsOwnerMemberId: first, status: "live",
         chatContainerMemberId: primary, terms: { v: 1, versions: [] }, termsWordsEncrypted: "synthetic-sealed",
-        players: { create: [first, second].map((memberId, seat) => ({ memberId, seat, timeZone: "UTC" })) },
+        players: { create: [first, second].map((memberId, seat) => ({ memberId, seat, joinedAt: new Date("2030-01-01T12:00:00Z"), timeZone: "UTC" })) },
       } });
       const claims = await Promise.all([primary, alternate].map(userId => claimHostedRuntime({ prisma, userId, now, processingMode: "default" })));
       const owners = claims.map(claim => {

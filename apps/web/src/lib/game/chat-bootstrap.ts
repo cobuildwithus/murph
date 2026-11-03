@@ -1,6 +1,6 @@
 import "server-only";
 
-import { isPairRoster } from "./roster";
+import { isPairRoster, gameMemberIds } from "./roster";
 
 import { Prisma } from "@prisma/client";
 import * as z from "@murphai/contracts/zod-runtime";
@@ -44,13 +44,13 @@ export async function prepareGameChatBootstrap(gameId: string, eventId: string, 
     const game = await readBootstrapGame(gameId);
     if (!game || !bootstrapEventCurrent(game, eventId)) return null;
     if (game.chatContainerMemberId) return queueExistingBootstrap(gameId, eventId, instructions, game.chatContainerMemberId);
-    const existingRoom = await bindPairGameChat(gameId, game.players.map((player) => player.memberId), null);
+    const existingRoom = await bindPairGameChat(gameId, gameMemberIds(game.players), null);
     if (existingRoom) return queueExistingBootstrap(gameId, eventId, instructions, existingRoom);
-    const phones = await readPlayerPhones(game.players.map((player) => player.memberId));
+    const phones = await readPlayerPhones(gameMemberIds(game.players));
     const prepared = await prepareHostedThreadContainerBootstrap({ prisma });
     const now = new Date();
     const result = await prisma.$transaction((tx) => runWithHostedDomainRootProviderCallsDisabled(async () => {
-      const pairRoom = await readPairGameChatTx(tx, game.players.map((player) => player.memberId));
+      const pairRoom = await readPairGameChatTx(tx, gameMemberIds(game.players));
       await lockGame(tx, gameId);
       const current = await tx.game.findUnique({ where: { id: gameId }, include: { players: { select: { memberId: true, seat: true }, orderBy: { seat: "asc" }, take: 3 } } });
       if (!current || !bootstrapEventCurrent(current, eventId) || !samePlayers(current.players, game.players)) return null;
@@ -59,11 +59,11 @@ export async function prepareGameChatBootstrap(gameId: string, eventId: string, 
         await tx.game.update({ where: { id: gameId }, data: { chatContainerMemberId: pairRoom } });
         return { containerMemberId: pairRoom, mailboxIds: [] };
       }
-      const created = await createHostedGameThreadContainerTx({ gameId, ownerMemberId: game.players[0]!.memberId, occurredAt: now, prepared, prisma: tx });
-      await tx.hostedThreadContainerParticipant.createMany({ data: game.players.map((player, index) => {
+      const created = await createHostedGameThreadContainerTx({ gameId, ownerMemberId: gameMemberIds(game.players)[0]!, occurredAt: now, prepared, prisma: tx });
+      await tx.hostedThreadContainerParticipant.createMany({ data: gameMemberIds(game.players).map((memberId, index) => {
         const handleLookupKey = createHostedLinqParticipantContactLookupKey({ kind: "phone", value: phones[index]! });
         if (!handleLookupKey) throw new TypeError("Game player identity is unavailable.");
-        return { containerMemberId: created.containerMemberId, participantMemberId: player.memberId, handleLookupKey, firstSeenAt: now, lastSeenAt: now };
+        return { containerMemberId: created.containerMemberId, participantMemberId: memberId, handleLookupKey, firstSeenAt: now, lastSeenAt: now };
       }) });
       await tx.game.update({ where: { id: gameId }, data: { chatContainerMemberId: created.containerMemberId } });
       const appended = await appendHostedMailboxEnvelopeTx({ tx, envelope: buildBootstrapWake(gameId, eventId, instructions, created.containerMemberId, now) });
@@ -115,7 +115,7 @@ async function queueExistingBootstrap(gameId: string, eventId: string, instructi
     return containerMemberId;
   }
   const prepared = await prepareHostedMailboxEnvelopeAppend({ prisma, envelope: buildBootstrapWake(gameId, eventId, instructions, containerMemberId, new Date()) });
-  const players = (await readBootstrapGame(gameId))?.players.map((player) => player.memberId) ?? [];
+  const players = gameMemberIds((await readBootstrapGame(gameId))?.players ?? []);
   const appended = await prisma.$transaction(async (tx) => {
     await readPairGameChatTx(tx, players);
     await lockGame(tx, gameId);
@@ -153,7 +153,7 @@ export async function handleGameChatBootstrapControl(input: ControlInput): Promi
     await prisma.$transaction((tx) => authorizeRuntimeTx(input, tx));
     const game = await readBootstrapGame(input.request.gameId);
     if (!game || game.chatContainerMemberId !== input.memberId || !isPairRoster(game.players)) return unavailable();
-    const phones = await readPlayerPhones(game.players.map((player) => player.memberId));
+    const phones = await readPlayerPhones(gameMemberIds(game.players));
     const receipt = await readFrozenBootstrap(input.request.eventId, input.memberId);
     if (receipt?.skipped) return unavailable();
     if (receipt && (receipt.payload.gameId !== input.request.gameId || receipt.payload.eventId !== input.request.eventId || !samePhones(phones, receipt.payload.to))) return unavailable();
@@ -180,10 +180,10 @@ async function authorizeRuntimeTx(input: ControlInput, tx: Prisma.TransactionCli
   await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
 }
 function readBootstrapGame(gameId: string) { return getPrisma().game.findUnique({ where: { id: gameId }, include: { players: { select: { memberId: true, seat: true }, orderBy: { seat: "asc" }, take: 3 } } }); }
-function samePlayers(a: readonly { memberId: string }[], b: readonly { memberId: string }[]) { return isPairRoster(a) && isPairRoster(b) && a.every((player) => b.some((other) => other.memberId === player.memberId)); }
+function samePlayers(a: readonly { memberId: string | null }[], b: readonly { memberId: string | null }[]) { return isPairRoster(a) && isPairRoster(b) && a.every((player) => b.some((other) => other.memberId === player.memberId)); }
 function samePhones(a: readonly string[], b: readonly string[]) { return isPairRoster(a) && isPairRoster(b) && new Set(b).size === b.length && a.every((phone) => b.includes(phone)); }
-function bootstrapEventCurrent(game: { id: string; status: string; pendingChange: unknown; players: readonly { memberId: string }[] }, eventId: string): boolean {
-  if (!isPairRoster(game.players) || !isGameOn(game)) return false;
+function bootstrapEventCurrent(game: { id: string; status: string; pendingChange: unknown; players: readonly { memberId: string | null }[] }, eventId: string): boolean {
+  if (!isPairRoster(game.players) || game.players.some(player => player.memberId === null) || !isGameOn(game)) return false;
   if (eventId.startsWith(`game-change-cancelled:${game.id}:`)) return ["live", "negotiating"].includes(game.status);
   if (eventId === `game-started:${game.id}`) return game.status === "live";
   const proposal = parsePendingGameChange(game.pendingChange);
@@ -332,7 +332,7 @@ export async function reconcileFrozenGameChatBootstrap(gameId: string, eventId: 
     if (!receipt || receipt.skipped || receipt.payload.gameId !== gameId || receipt.payload.eventId !== eventId) return false;
     const game = await readBootstrapGame(gameId);
     if (!game || game.chatContainerMemberId !== containerMemberId || !isPairRoster(game.players)) return skipBootstrapRecovery(receipt.id);
-    const phones = await readPlayerPhones(game.players.map((player) => player.memberId));
+    const phones = await readPlayerPhones(gameMemberIds(game.players));
     if (!samePhones(phones, receipt.payload.to)) return skipBootstrapRecovery(receipt.id);
     // A known accepted receipt can attach after agreement changes. Never replay
     // an ambiguous provider effect after the game closes; retain it for inspection.

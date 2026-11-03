@@ -13,8 +13,9 @@ import { readHostedLinqIncomingLineState } from "../hosted-onboarding/linq-line-
 import { readHostedThreadContainerLinqRouteAuthorities } from "../hosted-routing/assistant-notification-destination";
 
 /** Released chat admission and binding remain pair-only. */
-export function sameGamePlayers(actual: readonly string[], expected: readonly string[]): boolean {
-  return isPairRoster(actual) && sameGameMembers(actual, expected);
+export function sameGamePlayers(actual: readonly (string | null)[], expected: readonly (string | null)[]): actual is readonly string[] {
+  return actual.every((id): id is string => id !== null) && expected.every((id): id is string => id !== null)
+    && isPairRoster(actual) && sameGameMembers(actual, expected);
 }
 
 /** Local roster narrows discovery; the provider roster independently proves sharing. */
@@ -45,16 +46,18 @@ export function addressedGameRematchWhere(players: readonly string[], now = new 
   if (!sameGamePlayers(players, players)) return { id: { in: [] } };
   return { status: "invited", previousGameId: { not: null },
     AND: [{ OR: [{ inviteExpiresAt: null }, { inviteExpiresAt: { gt: now } }] }],
-    OR: players.map((createdBy) => ({ createdBy, inviteeMemberId: players.find((id) => id !== createdBy),
+    OR: players.map((createdBy) => ({ createdBy, invitees: { some: { memberId: players.find((id) => id !== createdBy) } },
       players: { some: { memberId: createdBy, seat: 0 }, every: { memberId: createdBy } } })),
   };
 }
 
 /** Shared-chat authority includes the known addressee, never an unclaimed bearer link. */
-export function gameChatPlayerIds(game: { status: string; previousGameId: string | null; createdBy: string | null; inviteeMemberId: string | null; players: readonly { memberId: string }[] }): string[] {
-  const seated = game.players.map(player => player.memberId);
-  return game.status === "invited" && game.previousGameId && game.inviteeMemberId && seated.length === 1 && seated[0] === game.createdBy
-    ? [...seated, game.inviteeMemberId] : seated;
+export function gameChatPlayerIds(game: { status: string; previousGameId: string | null; createdBy: string | null; invitees: readonly { memberId: string | null }[]; players: readonly { memberId: string | null }[] }): string[] {
+  if (game.players.some(player => player.memberId === null)) return [];
+  const seated = game.players.flatMap(player => player.memberId ? [player.memberId] : []);
+  const invitee = game.invitees.find(invitee => invitee.memberId !== null)?.memberId;
+  return game.status === "invited" && game.previousGameId && invitee && seated.length === 1 && seated[0] === game.createdBy
+    ? [...seated, invitee] : seated;
 }
 
 /** Bounded canonical games for the pair, independent of their announcement room. */

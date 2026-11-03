@@ -113,11 +113,11 @@ describe("canonical game state and viewer visibility", () => {
     state.game.status = status;
     const input = viewInput(state);
     input.result = status === "settled" ? decideSettle(state).result : null;
-    input.tickets = [{ id: "ticket", gameId: state.game.id, stakeKey: "prize", owedBy: "player-1", owedTo: "player-0", status: "open", createdAt: NOW, redeemedAt: null }];
+    input.tickets = [{ id: "ticket", gameId: state.game.id, stakeKey: "prize", owedBySeats: [1], owedToSeats: [0], players: state.players, status: "open", createdAt: NOW, redeemedAt: null }];
     const before = structuredClone(state);
     const masked = { ...input, hiddenMemberIds: new Set(["player-1"]) };
     const legacy = { ...input, state: { ...state, players: state.players.slice(0, 1), entries: state.entries.slice(0, 1) },
-      departed: { seat: 1, name: "Name 1" }, tickets: input.tickets.map((ticket) => ({ ...ticket, owedBy: null })) };
+      departed: [{ seat: 1, name: "Name 1" }], tickets: input.tickets.map((ticket) => ({ ...ticket, players: state.players.map(player => ({ ...player, memberId: player.seat === 1 ? null : player.memberId })) })) };
     expect(buildGameView(masked)).toEqual(buildGameView(legacy));
     expect(visibleEntryIds(state, input.viewerId, undefined, masked.hiddenMemberIds)).toEqual(new Set([state.entries[0].id]));
     expect(buildGameHistoryView(masked)).toBeNull();

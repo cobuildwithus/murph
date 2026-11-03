@@ -1,6 +1,6 @@
 import "server-only";
 
-import { isPairRoster } from "./roster";
+import { isPairRoster, hasGameIdentity, gameMemberIds } from "./roster";
 
 import type { Game, GamePlayer } from "@prisma/client";
 import { buildHostedExecutionAssistantNotificationRequestedWake } from "@murphai/hosted-execution";
@@ -33,7 +33,7 @@ export async function deliverGameChangeProposal(gameId: string, proposalId: stri
   if (proposal.deliveryStatus === "sent") return true;
   if (proposal.origin === "chat") return false;
   const { phones, message } = await prepareGameChatPlayers(game, proposal);
-  const players = game.players.map((player) => player.memberId);
+  const players = gameMemberIds(game.players);
   const containerMemberId = game.chatContainerMemberId
     ?? await bindPairGameChat(gameId, players, await findExistingGameChat(players, phones));
   const destination = containerMemberId ? await resolveHostedAssistantNotificationDestination({ memberId: containerMemberId, prisma }) : null;
@@ -44,7 +44,7 @@ export async function deliverGameChangeProposal(gameId: string, proposalId: stri
 
 async function prepareGameChatPlayers(game: Game & { players: GamePlayer[] }, proposal: GamePendingChange): Promise<{ phones: string[]; message: string }> {
   const prisma = getPrisma();
-  const players = game.players;
+  const players = game.players.filter(hasGameIdentity);
   const allowedPlayers = await prisma.hostedMember.count({ where: { id: { in: players.map((player) => player.memberId) }, suspendedAt: null } });
   if (allowedPlayers !== 2) throw new Error("Game chat players are unavailable.");
   const identities = await Promise.all(players.map((player) => readHostedMemberIdentity({ memberId: player.memberId, prisma })));

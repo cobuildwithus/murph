@@ -575,6 +575,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         expect(await deletion.gamePlayer.count({ where: { gameId, memberId: leaver } })).toBe(0);
       } finally {
         setHostedSecureBoxStringTestCodecForTests(null);
+        await deletion.game.deleteMany({ where: { wordsOwnerMemberId: { in: [leaver, stayer] } } });
         await deletion.hostedMember.deleteMany({ where: { id: { in: [leaver, stayer] } } });
         await disconnectClients([deletion]);
       }

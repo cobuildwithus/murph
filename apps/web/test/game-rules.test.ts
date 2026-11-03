@@ -538,8 +538,8 @@ describe("weekly game: schedules and scoring", () => {
     expect(scorePlayer(state, playerFor(state, AVA)!)).toMatchObject({ misses: 2, score: 1 });
     const settled = decideSettle(state);
     expect(settled.tickets).toEqual([
-      { owedBy: AVA, owedTo: LEO, stakeKey: PER_MISS.key },
-      { owedBy: AVA, owedTo: LEO, stakeKey: PER_MISS.key },
+      { owedBySeats: [1], owedToSeats: [0], stakeKey: PER_MISS.key },
+      { owedBySeats: [1], owedToSeats: [0], stakeKey: PER_MISS.key },
     ]);
   });
 
@@ -550,7 +550,7 @@ describe("weekly game: schedules and scoring", () => {
     const win = decideSettle(state);
     expect(win.result.scores.map((score) => [score.seat, score.score, score.misses])).toEqual([[0, 7, 0], [1, 5, 2]]);
     expect(win.tickets.filter((ticket) => ticket.stakeKey === WINNER_GETS.key)).toEqual([
-      { owedBy: AVA, owedTo: LEO, stakeKey: WINNER_GETS.key },
+      { owedBySeats: [1], owedToSeats: [0], stakeKey: WINNER_GETS.key },
     ]);
     expect(win.tickets.filter((ticket) => ticket.stakeKey === PER_MISS.key)).toHaveLength(2);
     expect(outcomeFor(win.result, LEO)).toBe("won");
@@ -626,23 +626,23 @@ describe("weekly game: access", () => {
 
     it("keeps a game between two unlisted members off", () => {
       expect(isGameOn({ players: seats(LEO, SAM) }, listedAva)).toBe(false);
-      expect(isGameOn({ players: seats(LEO), inviteeMemberId: SAM }, listedAva)).toBe(false);
+      expect(isGameOn({ players: seats(LEO), invitees: [{ memberId: SAM }] }, listedAva)).toBe(false);
       expect(isGameOn({ players: [] }, listedAva)).toBe(false);
     });
 
     it("refuses an unlisted member's fresh game, which has no one else in it", () => {
-      expect(isGameOn({ players: seats(LEO), inviteeMemberId: null }, listedAva)).toBe(false);
+      expect(isGameOn({ players: seats(LEO), invitees: [{ memberId: null }] }, listedAva)).toBe(false);
       expect(isGameOn({ players: seats(LEO) }, listedAva)).toBe(false);
     });
 
     it("lets an unlisted member rematch the listed player, who is that invite's addressee", () => {
-      expect(isGameOn({ players: seats(LEO), inviteeMemberId: AVA }, listedAva)).toBe(true);
+      expect(isGameOn({ players: seats(LEO), invitees: [{ memberId: AVA }] }, listedAva)).toBe(true);
     });
 
     it("is off for everyone when the global switch is off, and on for every game with an empty list", () => {
       const off = { MURPH_GAME_ENABLED: "false", MURPH_GAME_MEMBER_ALLOWLIST: AVA, NODE_ENV: "production" };
       expect(isGameOn({ players: seats(AVA, LEO) }, off)).toBe(false);
-      expect(isGameOn({ players: seats(AVA), inviteeMemberId: AVA }, off)).toBe(false);
+      expect(isGameOn({ players: seats(AVA), invitees: [{ memberId: AVA }] }, off)).toBe(false);
       expect(gameOnWhere(off)).toEqual({ id: { in: [] } });
       expect(gameOnSql("game", off).sql).toBe("FALSE");
       const everyone = { MURPH_GAME_ENABLED: "true", NODE_ENV: "production" };
@@ -654,10 +654,10 @@ describe("weekly game: access", () => {
     it("states the same rule for database reads: a listed player or a listed addressee", () => {
       expect(gameOnWhere(listedAva)).toEqual({ OR: [
         { players: { some: { memberId: { in: [AVA] } } } },
-        { inviteeMemberId: { in: [AVA] } },
+        { invitees: { some: { memberId: { in: [AVA] } } } },
       ] });
       const sql = gameOnSql("game", listedAva);
-      expect(sql.sql.replace(/\s+/gu, " ")).toBe("(game.invitee_member_id IN (?) OR EXISTS (SELECT 1 FROM game_player listed WHERE listed.game_id = game.id AND listed.member_id IN (?)))");
+      expect(sql.sql.replace(/\s+/gu, " ")).toBe("(EXISTS (SELECT 1 FROM game_invitee invited WHERE invited.game_id = game.id AND invited.member_id IN (?)) OR EXISTS (SELECT 1 FROM game_player listed WHERE listed.game_id = game.id AND listed.member_id IN (?)))");
       expect(sql.values).toEqual([AVA, AVA]);
     });
   });
@@ -711,7 +711,7 @@ describe("v1 rule boundaries", () => {
     let state = live(invited(EVERY_DAY,[{key:"stake_v1",kind}]));
     expect(decideSettle(state).tickets).toEqual([]);
     state = post(state, LEO, at(state,LEO,0,9));
-    expect(decideSettle(state).tickets).toEqual([{owedBy:AVA,owedTo:LEO,stakeKey:"stake_v1"}]);
+    expect(decideSettle(state).tickets).toEqual([{owedBySeats: [1],owedToSeats: [0],stakeKey:"stake_v1"}]);
     state = post(state, AVA, at(state,AVA,0,9));
     expect(decideSettle(state).tickets).toEqual([]);
     state.game.terms.versions[0].schedule = {count:1};
@@ -754,7 +754,7 @@ describe("self-reported incomplete days", () => {
     expect(progress.score).toBe(2);
     expect(progress.days.find((day) => day.dayIndex === 1)?.status).toBe("count" in schedule ? "not_posted" : "missed");
     expect(playerStreak(state, player, at(state, LEO, 3, 12))).toBe(1);
-    expect(decideSettle(state).tickets).toEqual([{ owedBy: LEO, owedTo: AVA, stakeKey: WINNER_GETS.key }]);
+    expect(decideSettle(state).tickets).toEqual([{ owedBySeats: [0], owedToSeats: [1], stakeKey: WINNER_GETS.key }]);
     marked.incomplete = false;
     expect(scorePlayer(state, player).score).toBe(3);
     expect(playerStreak(state, player, at(state, LEO, 3, 12))).toBe(3);
@@ -843,9 +843,15 @@ describe("weekly game: self-play round 1 regressions", () => {
     expect(codeOf(() => decideNewTerms({ ...base, lengthDays: 3, schedule: { days: [4] } }, options))).toBe("OK");
   });
 
+  it("keeps group admission disabled despite group-capable storage", () => {
+    const state = invited();
+    state.game.seats = 10;
+    expect(codeOf(() => decideJoin(state, { memberId: AVA, now: JOIN_AT, termsVersion: 1, timeZone: SYD }))).toBe("GAME_NOT_FOUND");
+  });
+
   it("lets only a rematch's addressee take its seat", () => {
     const rematch = invited();
-    rematch.game.inviteeMemberId = AVA;
+    rematch.game.invitees = [{ memberId: AVA }];
     expect(codeOf(() => decideJoin(rematch, { memberId: "hbm_liam", now: JOIN_AT, termsVersion: 1, timeZone: NYC }))).toBe("NOT_A_PLAYER");
     expect(decideJoin(rematch, { memberId: AVA, now: JOIN_AT, termsVersion: 1, timeZone: SYD })).toMatchObject({ kind: "join", seat: 1 });
     // The challenger re-opening their own rematch is a no-op, not a refusal.

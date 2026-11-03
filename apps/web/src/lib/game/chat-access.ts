@@ -39,8 +39,7 @@ export async function readGameChatFundingRooms(input: {
           WHERE rematch.chat_container_member_id = room.id AND rematch.status = 'invited'
             AND (rematch.invite_expires_at IS NULL OR rematch.invite_expires_at > ${input.now})
             AND rematch.created_by = ANY(pair.player_ids)
-            AND rematch.invitee_member_id = ANY(pair.player_ids)
-            AND rematch.created_by <> rematch.invitee_member_id
+            AND EXISTS (SELECT 1 FROM game_invitee invited WHERE invited.game_id = rematch.id AND invited.member_id = ANY(pair.player_ids) AND invited.member_id <> rematch.created_by)
             AND EXISTS (SELECT 1 FROM hosted_linq_delivery receipt
               WHERE receipt.source = 'game_lifecycle' AND receipt.source_ref = rematch.id
                 AND receipt.template = 'game_rematch'
@@ -105,8 +104,7 @@ export async function readGameChatFundingRooms(input: {
                         AND (bootstrap.invite_expires_at IS NULL OR bootstrap.invite_expires_at > ${input.now})))
                       AND ((bootstrap.status = 'invited'
                           AND bootstrap.created_by = ANY(pair.player_ids)
-                          AND bootstrap.invitee_member_id = ANY(pair.player_ids)
-                          AND bootstrap.created_by <> bootstrap.invitee_member_id)
+                          AND EXISTS (SELECT 1 FROM game_invitee invited WHERE invited.game_id = bootstrap.id AND invited.member_id = ANY(pair.player_ids) AND invited.member_id <> bootstrap.created_by))
                         OR (bootstrap.status <> 'invited'
                           AND EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = bootstrap.id AND p.seat = 0)
                           AND EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = bootstrap.id AND p.seat = 1)
@@ -125,8 +123,7 @@ export async function readGameChatFundingRooms(input: {
           (game.status = 'void' AND game.chat_container_member_id = room.id))
         AND ((game.status = 'invited'
               AND game.created_by = ANY(pair.player_ids)
-              AND game.invitee_member_id = ANY(pair.player_ids)
-              AND game.created_by <> game.invitee_member_id)
+              AND EXISTS (SELECT 1 FROM game_invitee invited WHERE invited.game_id = game.id AND invited.member_id = ANY(pair.player_ids) AND invited.member_id <> game.created_by))
           OR (game.status <> 'invited'
               AND EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = game.id AND p.seat = 0)
               AND EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = game.id AND p.seat = 1)

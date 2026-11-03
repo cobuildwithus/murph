@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { spawn, type SpawnOptions } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
@@ -482,7 +483,12 @@ export async function findHostedWebPrismaPredeployDestructiveMigrations(
     }
 
     const sqlPath = path.join(migrationsDir, entry.name, "migration.sql");
-    const sqlStatements = splitSqlStatements(await readFile(sqlPath, "utf8"))
+    const sql = await readFile(sqlPath, "utf8");
+    // Owner-approved direct game cutover (2026-11-02): exact bytes only.
+    // Old Web game routes are unavailable until the replacement deploy is live.
+    if (entry.name === "20261102230000_game_seat_storage"
+      && createHash("sha256").update(sql).digest("hex") === "4e0e426e22ebeda0969b90e91f0543dc1efcc33eaeb6eb24bf78e1397be18dff") continue;
+    const sqlStatements = splitSqlStatements(sql)
       .filter((statement) => entry.name !== "20261022071000_game_negotiation"
         || !gameNegotiationCompatibleStatements.has(statement.replace(/\s+/gu, " ").trim()))
       .filter((statement) => entry.name !== "20261022220000_game_v1"

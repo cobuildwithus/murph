@@ -34,7 +34,7 @@ function wake(overrides: object = {}) {
 describe("game chat tool authority", () => {
   afterEach(() => vi.unstubAllEnvs());
   beforeEach(() => {
-    vi.resetAllMocks(); vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://recaps.murph.test"); m.players.mockResolvedValue([actor, "other_synthetic"]); m.exact.mockResolvedValue([actor, "other_synthetic"]); m.wake.mockResolvedValue(wake()); m.sender.mockResolvedValue(actor); m.game.mockResolvedValue({ id: "game_synthetic", players: [{ memberId: actor }, { memberId: "other_synthetic" }] }); m.read.mockResolvedValue({ games: [] }); m.mailbox.mockResolvedValue([]); m.decodeMailbox.mockResolvedValue([]);
+    vi.resetAllMocks(); vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://recaps.murph.test"); m.players.mockResolvedValue([actor, "other_synthetic"]); m.exact.mockResolvedValue([actor, "other_synthetic"]); m.wake.mockResolvedValue(wake()); m.sender.mockResolvedValue(actor); m.game.mockResolvedValue({ id: "game_synthetic", invitees: [], players: [{ memberId: actor }, { memberId: "other_synthetic" }] }); m.read.mockResolvedValue({ games: [] }); m.mailbox.mockResolvedValue([]); m.decodeMailbox.mockResolvedValue([]);
     m.run.mockResolvedValue({ ok: true, game: { privateRelationship: "synthetic-private", entries: ["private-image"] } });
   });
   it("disables paid-group reads and mutations when the game flag is off", async () => {
@@ -105,12 +105,12 @@ describe("game chat tool authority", () => {
     expect(m.run).toHaveBeenCalledTimes(1);
   });
   it("authorizes an addressed rematch's signed invitee, never an unknown bearer or wrong pair", async () => {
-    m.game.mockResolvedValue({ id: "game_rematch", status: "invited", previousGameId: "game_previous", createdBy: "other_synthetic", inviteeMemberId: actor, players: [{ memberId: "other_synthetic" }] });
+    m.game.mockResolvedValue({ id: "game_rematch", status: "invited", previousGameId: "game_previous", createdBy: "other_synthetic", invitees: [{ memberId: actor }], players: [{ memberId: "other_synthetic" }] });
     const request = { ...read, request: { action: "update_game" as const, origin, update: { operation: "approve" as const, gameId: "game_rematch", expectedTermsVersion: 1 } } };
     expect((await handleGameChatTool(request)).result.status).toBe("ok");
     expect(m.run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ actorMemberId: actor, update: request.request.update }));
     for (const inviteeMemberId of [null, "third_synthetic"]) {
-      m.game.mockResolvedValue({ id: "game_rematch", status: "invited", previousGameId: "game_previous", createdBy: "other_synthetic", inviteeMemberId, players: [{ memberId: "other_synthetic" }] });
+      m.game.mockResolvedValue({ id: "game_rematch", status: "invited", previousGameId: "game_previous", createdBy: "other_synthetic", invitees: [{ memberId: inviteeMemberId }], players: [{ memberId: "other_synthetic" }] });
       expect((await handleGameChatTool(request)).result.status).toBe("unavailable");
     }
     expect(m.run).toHaveBeenCalledTimes(1);
@@ -279,7 +279,7 @@ describe("game chat tool authority", () => {
   it("rejects an addressed game from a different pair within the same reused container", async () => {
     await handleGameChatTool(update);
     const callback = m.run.mock.calls[0]?.[0].beforeMutationTx;
-    m.game.mockResolvedValue({ id: "game_synthetic", players: [{ memberId: actor }, { memberId: "former_player" }] });
+    m.game.mockResolvedValue({ id: "game_synthetic", invitees: [], players: [{ memberId: actor }, { memberId: "former_player" }] });
     await expect(callback({ game: { findFirst: m.game } })).rejects.toThrow("authority changed");
   });
   it("rejects stale runtime before reading shared state", async () => {
@@ -308,7 +308,7 @@ describe("game chat tool authority", () => {
 
 it("uses accepted speaker authority for day corrections and returns only the shared receipt", async () => {
   m.sender.mockResolvedValue(actor); m.wake.mockResolvedValue(wake()); m.players.mockResolvedValue([actor, "other_synthetic"]);
-  m.exact.mockResolvedValue([actor, "other_synthetic"]); m.game.mockResolvedValue({ id: "game_synthetic", players: [{ memberId: actor }, { memberId: "other_synthetic" }] });
+  m.exact.mockResolvedValue([actor, "other_synthetic"]); m.game.mockResolvedValue({ id: "game_synthetic", invitees: [], players: [{ memberId: actor }, { memberId: "other_synthetic" }] });
   m.read.mockResolvedValue({ games: [] }); m.run.mockClear();
   const dayOutcome = { date: "2030-04-01", status: "marked_incomplete" };
   m.run.mockResolvedValue({ ok: true, game: { private: "never shared" }, dayOutcome });

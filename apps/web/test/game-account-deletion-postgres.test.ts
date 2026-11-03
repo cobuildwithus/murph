@@ -7,6 +7,7 @@ vi.mock("@/src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: vi.f
 import type { GameCommand, GameTermsInput } from "@/src/lib/game/contract";
 import { applyGameAccountDeletionTx, prepareGameAccountDeletion } from "@/src/lib/game/account-deletion";
 import { devSettleNow, devStartNow, readGame, readHome, runGameCommand } from "@/src/lib/game/service";
+import { labelTarget, sealGameText, openGameTexts } from "@/src/lib/game/crypto";
 import { getPrisma } from "@/src/lib/prisma";
 
 const runPostgresProof = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -68,6 +69,7 @@ async function deleteAccount(memberId: string) {
 
 describe.skipIf(!runPostgresProof)("weekly game when a player deletes their account", () => {
   afterAll(async () => {
+    await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: memberIds } } });
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: memberIds } } });
   });
 
@@ -153,9 +155,32 @@ describe.skipIf(!runPostgresProof)("weekly game when a player deletes their acco
     if (stays === leo) {
       expect(await run(leo, { ticketId: ticket.id, type: "redeem" })).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
     }
-    expect(await getPrisma().gameTicket.findUniqueOrThrow({ where: { id: ticket.id } })).toMatchObject({ status: "open", ...(gone === ava ? { owedBy: null } : { owedTo: null }) });
+    expect(await getPrisma().gameTicket.findUniqueOrThrow({ where: { id: ticket.id } })).toMatchObject({ status: "open", owedBySeats: [1], owedToSeats: [0] });
     const stored = await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } });
     expect(JSON.stringify(stored.result)).not.toContain(gone);
+  });
+
+  it("uses an anonymous seat for a never-joined invitee and clears the invitation", async () => {
+    const creator = await member("Alex"), invitee = await member("Sam");
+    const { gameId } = await invite(creator);
+    const db = getPrisma();
+    await db.gameInvitee.update({ where: { gameId_seat: { gameId, seat: 1 } },
+      data: { memberId: invitee, recipientLookupKey: "synthetic_lookup" } });
+    expect(await db.gamePlayer.count({ where: { gameId } })).toBe(1);
+    expect(await deleteAccount(invitee)).toEqual({ calledOff: 1, deleted: 0, kept: 1 });
+    const view = (await readGame(gameId, creator))!;
+    expect(view.status).toBe("void");
+    expect(view.players).toHaveLength(2);
+    expect(view.players[1]).toEqual({ avatarUrl: null, dayIndex: null, firstName: "Bestie",
+      isMe: false, left: true, memberId: null, profileAvatarUrl: null,
+      relationship: null, score: 0, seat: 1, streak: 0 });
+    expect((await readHome(creator)).games.find(game => game.id === gameId)).toEqual(view);
+    expect(await db.gamePlayer.findUniqueOrThrow({ where: { gameId_seat: { gameId, seat: 1 } } }))
+      .toMatchObject({ memberId: null, joinedAt: null, timeZone: null, leftAt: expect.any(Date),
+        departedLabel: [{ ownerMemberId: creator, nameEncrypted: expect.any(String) }] });
+    expect(await db.gameInvitee.findMany({ where: { gameId } })).toEqual([
+      { gameId, seat: 1, memberId: null, recipientLookupKey: null, pendingLabel: null },
+    ]);
   });
 
   it("deletes a finished game once both players have left", async () => {
@@ -177,12 +202,13 @@ describe.skipIf(!runPostgresProof)("weekly game when a player deletes their acco
     // Rematches Leo addressed to Ava and cancelled: only Leo's seat, void, no departure.
     const ids = Array.from({ length: 1_001 }, () => randomUUID());
     const template = await getPrisma().game.findUniqueOrThrow({ where: { id: settled } });
-    await getPrisma().game.createMany({ data: ids.map((id) => ({ createdBy: leo, id, inviteeMemberId: ava, lengthDays: 7, previousGameId: settled, round: 2,
+    await getPrisma().game.createMany({ data: ids.map((id) => ({ createdBy: leo, wordsOwnerMemberId: leo, id, lengthDays: 7, previousGameId: settled, round: 2,
       status: "void", terms: template.terms ?? {}, termsWordsEncrypted: template.termsWordsEncrypted })) });
-    await getPrisma().gamePlayer.createMany({ data: ids.map((gameId) => ({ gameId, memberId: leo, seat: 0, timeZone: "America/New_York" })) });
+    await getPrisma().gameInvitee.createMany({ data: ids.map(gameId => ({ gameId, seat: 1, memberId: ava })) });
+    await getPrisma().gamePlayer.createMany({ data: ids.map((gameId) => ({ gameId, memberId: leo, seat: 0, joinedAt: new Date("2030-01-01T12:00:00Z"), timeZone: "America/New_York" })) });
 
     expect(await deleteAccount(ava)).toEqual({ calledOff: 0, deleted: 0, kept: 1 });
-    expect(await getPrisma().game.count({ where: { id: { in: ids }, inviteeMemberId: { not: null } } })).toBe(0);
+    expect(await getPrisma().game.count({ where: { id: { in: ids }, invitees: { some: { memberId: { not: null } } } } })).toBe(0);
     expect((await readGame(settled, leo))!.players.find((player) => player.left)).toMatchObject({ seat: 1 });
   });
 
@@ -196,4 +222,52 @@ describe.skipIf(!runPostgresProof)("weekly game when a player deletes their acco
       .rejects.toMatchObject({ code: "ACCOUNT_DELETION_GAME_STATE_CHANGED", retryable: true });
     expect((await readGame(gameId, leo))!.players.some((player) => player.left)).toBe(false);
   });
+
+  it.each(["live", "settled"] as const)("retains seats, isolated labels and words through successive three-player %s deletions", async (status) => {
+    const first = await member("Alex"), second = await member("Blair"), third = await member("Casey");
+    const gameId = await live(first, second);
+    const db = getPrisma();
+    if (status === "settled") await devSettleNow(gameId, first);
+    const row = await db.game.findUniqueOrThrow({ where: { id: gameId }, include: { players: true } });
+    await db.game.update({ where: { id: gameId }, data: { maxPlayers: 10 } });
+    await db.gamePlayer.create({ data: { gameId, memberId: third, seat: 2, timeZone: "UTC", joinedAt: new Date(), dayOne: row.players[0]!.dayOne } });
+    for (const [ownerMemberId, subjectMemberId, name] of [[second, first, "Coach"], [third, first, "Sibling"], [third, second, "Neighbor"]]) {
+      await db.gameContactLabel.upsert({ where: { ownerMemberId_subjectMemberId: { ownerMemberId, subjectMemberId } },
+        create: { ownerMemberId, subjectMemberId, nameEncrypted: await sealGameText(labelTarget(ownerMemberId, "name"), name) },
+        update: { nameEncrypted: await sealGameText(labelTarget(ownerMemberId, "name"), name) } });
+    }
+    const frozen = { v: 1, termsVersion: 1, scores: [first, second, third].map((memberId, seat) => ({ memberId, seat, score: 3 - seat, misses: seat })) };
+    if (status === "settled") {
+      await db.game.update({ where: { id: gameId }, data: { result: frozen } });
+      await db.gameTicket.create({ data: { id: randomUUID(), gameId, stakeKey: "synthetic", owedBySeats: [2], owedToSeats: [0, 1] } });
+    }
+    const staleSecond = await prepareGameAccountDeletion({ memberIds: [second], prisma: db });
+    expect(await deleteAccount(first)).toEqual({ calledOff: 0, deleted: 0, kept: 1 });
+    await expect(db.$transaction(tx => applyGameAccountDeletionTx({ memberIds: [second], now: new Date(), prepared: staleSecond, tx })))
+      .rejects.toMatchObject({ code: "ACCOUNT_DELETION_GAME_STATE_CHANGED" });
+    const afterFirst = await db.game.findUniqueOrThrow({ where: { id: gameId }, include: { players: true, invitees: true } });
+    expect(afterFirst).toMatchObject({ createdBy: null, wordsOwnerMemberId: second, status });
+    expect(afterFirst.players.find(player => player.seat === 0)).toMatchObject({ memberId: null, leftAt: expect.any(Date) });
+    expect((await readGame(gameId, second))!.players.find(player => player.seat === 0)!.firstName).toBe("Coach");
+    expect((await readGame(gameId, third))!.players.find(player => player.seat === 0)!.firstName).toBe("Sibling");
+    expect(afterFirst.invitees.every(invitee => invitee.pendingLabel === null)).toBe(true);
+    expect(await deleteAccount(second)).toEqual({ calledOff: status === "live" ? 1 : 0, deleted: 0, kept: 1 });
+    const afterSecond = await db.game.findUniqueOrThrow({ where: { id: gameId }, include: { players: true, tickets: true } });
+    expect(afterSecond.wordsOwnerMemberId).toBe(third);
+    expect(afterSecond.players).toHaveLength(3);
+    expect(afterSecond.players.filter(player => player.memberId === null)).toHaveLength(2);
+    expect(JSON.stringify(afterSecond.players.map(player => player.departedLabel))).not.toContain(second);
+    const view = (await readGame(gameId, third))!;
+    expect(view.players.filter(player => player.left).map(player => player.firstName)).toEqual(["Sibling", "Neighbor"]);
+    expect(view.terms.tasks.map(task => task.text)).toEqual(["100 pushups", "10 min abs"]);
+    await expect(openGameTexts([{ table: "game", field: "terms_words", rowId: gameId, memberId: third, value: afterSecond.termsWordsEncrypted }]))
+      .resolves.toEqual([expect.stringContaining("100 pushups")]);
+    if (status === "settled") {
+      expect(afterSecond.result).toEqual({ ...frozen, scores: frozen.scores.map(score => ({ ...score, memberId: score.seat < 2 ? "" : third })) });
+      expect(afterSecond.tickets).toEqual([expect.objectContaining({ owedBySeats: [2], owedToSeats: [0, 1] })]);
+    }
+    expect(await deleteAccount(third)).toEqual({ calledOff: 0, deleted: 1, kept: 0 });
+    expect(await db.game.findUnique({ where: { id: gameId } })).toBeNull();
+  });
+
 });

@@ -81,7 +81,8 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       await observer.hostedRuntimeOrphan.deleteMany({ where: { userId: { in: members } } });
       await observer.hostedRuntimeOwner.deleteMany({ where: { userId: { in: members } } });
       await observer.hostedThreadContainer.deleteMany({ where: { memberId: { in: members } } });
-      await observer.hostedMember.deleteMany({ where: { id: { in: members } } });
+      await observer.game.deleteMany({ where: { wordsOwnerMemberId: { in: members } } });
+    await observer.hostedMember.deleteMany({ where: { id: { in: members } } });
       await observer.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase: previousPhase } });
     }
     await Promise.all([first?.$disconnect(), second?.$disconnect(), observer?.$disconnect(), blockerClient?.$disconnect()]);
@@ -122,11 +123,11 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       memberId, firstNameEncrypted: "synthetic-sealed-name", timeZone: "UTC",
     })) });
     const game = await observer.game.create({ data: {
-      id: `runtime_funding_${randomUUID()}`, createdBy: firstPlayer, status: "live",
+      id: `runtime_funding_${randomUUID()}`, createdBy: firstPlayer, wordsOwnerMemberId: firstPlayer, status: "live",
       chatContainerMemberId: primary,
       terms: { v: 1, versions: [] }, termsWordsEncrypted: "synthetic-sealed-terms",
       players: { create: [firstPlayer, secondPlayer].map((memberId, seat) => ({
-        memberId, seat, timeZone: "UTC", dayOne: now,
+        memberId, seat, joinedAt: new Date("2030-01-01T12:00:00Z"), timeZone: "UTC", dayOne: now,
       })) },
     } });
     return { primary, duplicate, firstPlayer, secondPlayer, game };

@@ -632,6 +632,7 @@ model CompanionWearableCommand {
 }
 
 model HostedMember {
+  gameInvitations GameInvitee[] @relation("GameInviteeMember")
   chatHostedGames Game[] @relation("GameChatContainer")
   companionLastContactAt         DateTime?                       @map("companion_last_contact_at")
   companionLastForegroundAt      DateTime?                       @map("companion_last_foreground_at")
@@ -2764,12 +2765,11 @@ model GameProfile {
   createdAt          DateTime           @default(now()) @map("created_at")
   updatedAt          DateTime           @updatedAt @map("updated_at")
   member             HostedMember       @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  gamesCreated       Game[]
+  gamesCreated       Game[] @relation("GameCreator")
+  gamesWordsOwned    Game[] @relation("GameWordsOwner")
   players            GamePlayer[]
   labelsOwned        GameContactLabel[] @relation("GameContactLabelOwner")
   labelsAbout        GameContactLabel[] @relation("GameContactLabelSubject")
-  ticketsOwed        GameTicket[]       @relation("GameTicketOwedBy")
-  ticketsHeld        GameTicket[]       @relation("GameTicketOwedTo")
   blocksMade         GameBlock[]        @relation("GameBlockBlocker")
   blocksReceived     GameBlock[]        @relation("GameBlockBlocked")
   reportsMade        GameReport[]       @relation("GameReportReporter")
@@ -2799,14 +2799,13 @@ model Game {
   chatContainerMember HostedMember? @relation("GameChatContainer", fields: [chatContainerMemberId], references: [id], onDelete: SetNull)
   pendingChange Json? @map("pending_change")
   id                   String       @id
-  // Null once the creator deleted their account and the other player kept the game.
-  // Account deletion clears it first; the cascade only removes games nobody kept.
+  // Starter identity is independent of shared-ciphertext ownership.
   createdBy            String?      @map("created_by")
   // Rematches chain through previous_game_id; round counts the chain.
   previousGameId       String?      @map("previous_game_id")
-  // A rematch's invitee: the one other player of the settled previous game.
-  // They see the invite on Home and accept it there, with no link to text.
-  inviteeMemberId      String?      @map("invitee_member_id")
+  maxPlayers           Int          @default(2) @map("max_players")
+  audienceKey          String?      @map("audience_key")
+  wordsOwnerMemberId   String       @map("words_owner_member_id")
   round                Int          @default(1)
   // invited, negotiating, live, settled, or void (an invite/negotiation that expired)
   status               String
@@ -2815,7 +2814,6 @@ model Game {
   inviteTokenHash      String?      @unique @map("invite_token_hash")
   inviteTokenEncrypted String?      @map("invite_token_encrypted")
   inviteExpiresAt      DateTime?    @map("invite_expires_at")
-  pendingLabel         Json?        @map("pending_label")
   lengthDays           Int          @default(7) @map("length_days")
   // The challenger's picked Day 1, used when later than acceptance's eligible day.
   startsOn             DateTime?    @map("starts_on") @db.Date
@@ -2825,13 +2823,12 @@ model Game {
   devClockOffsetMs     BigInt?      @map("dev_clock_offset_ms")
   result               Json?
   recapEncrypted       String?      @map("recap_encrypted")
-  // Set when a player deleted their account: their seat, when, and the name the
-  // remaining member knew them by, sealed under that member's key.
-  departedPlayer       Json?        @map("departed_player")
   settledAt            DateTime?    @map("settled_at")
   createdAt            DateTime     @default(now()) @map("created_at")
   updatedAt            DateTime     @updatedAt @map("updated_at")
-  creator              GameProfile? @relation(fields: [createdBy], references: [memberId], onDelete: Cascade)
+  creator              GameProfile? @relation("GameCreator", fields: [createdBy], references: [memberId], onDelete: SetNull)
+  wordsOwner           GameProfile  @relation("GameWordsOwner", fields: [wordsOwnerMemberId], references: [memberId], onDelete: Restrict)
+  invitees             GameInvitee[]
   players              GamePlayer[]
   tickets              GameTicket[]
   events               GameEvent[]
@@ -2840,23 +2837,45 @@ model Game {
   @@index([chatContainerMemberId])
   @@index([previousGameId])
   @@index([createdBy])
-  @@index([inviteeMemberId])
+  @@index([audienceKey, status])
+  @@index([wordsOwnerMemberId])
   @@map("game")
+}
+
+// Invitation identity survives acceptance; labels belong only to the inviter.
+model GameInvitee {
+  gameId             String @map("game_id")
+  seat               Int
+  memberId           String? @map("member_id")
+  recipientLookupKey String? @map("recipient_lookup_key")
+  pendingLabel       Json? @map("pending_label")
+  game               Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  member             HostedMember? @relation("GameInviteeMember", fields: [memberId], references: [id], onDelete: SetNull)
+
+  @@id([gameId, seat])
+  @@unique([gameId, memberId])
+  @@unique([gameId, recipientLookupKey])
+  @@index([memberId, gameId])
+  @@index([recipientLookupKey, gameId])
+  @@map("game_invitee")
 }
 
 model GamePlayer {
   gameId             String      @map("game_id")
-  memberId           String      @map("member_id")
+  memberId           String?     @map("member_id")
   seat               Int
-  timeZone           String      @map("time_zone")
+  timeZone           String?     @map("time_zone")
   dayOne             DateTime?   @map("day_one") @db.Date
-  joinedAt           DateTime    @default(now()) @map("joined_at")
+  joinedAt           DateTime?   @map("joined_at")
+  leftAt             DateTime?   @map("left_at")
+  // Bounded labels, each encrypted for and visible only to its original viewer.
+  departedLabel      Json?       @map("departed_label")
   game               Game        @relation(fields: [gameId], references: [id], onDelete: Cascade)
-  profile            GameProfile @relation(fields: [memberId], references: [memberId], onDelete: Cascade)
+  profile            GameProfile? @relation(fields: [memberId], references: [memberId], onDelete: SetNull)
   entries            GameEntry[]
 
-  @@id([gameId, memberId])
-  @@unique([gameId, seat])
+  @@id([gameId, seat])
+  @@unique([gameId, memberId])
   @@index([memberId])
   @@map("game_player")
 }
@@ -2895,18 +2914,13 @@ model GameTicket {
   id         String      @id
   gameId     String      @map("game_id")
   stakeKey   String      @map("stake_key")
-  // Null once that member deleted their account; the ticket stays as history.
-  owedBy     String?     @map("owed_by")
-  owedTo     String?     @map("owed_to")
+  owedBySeats Int[]      @map("owed_by_seats")
+  owedToSeats Int[]      @map("owed_to_seats")
   status     String      @default("open")
   redeemedAt DateTime?   @map("redeemed_at")
   createdAt  DateTime    @default(now()) @map("created_at")
   game       Game        @relation(fields: [gameId], references: [id], onDelete: Cascade)
-  debtor     GameProfile? @relation("GameTicketOwedBy", fields: [owedBy], references: [memberId], onDelete: Cascade)
-  holder     GameProfile? @relation("GameTicketOwedTo", fields: [owedTo], references: [memberId], onDelete: Cascade)
 
-  @@index([owedTo, status])
-  @@index([owedBy, status])
   @@index([gameId])
   @@map("game_ticket")
 }

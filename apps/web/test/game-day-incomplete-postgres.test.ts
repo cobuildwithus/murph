@@ -32,7 +32,9 @@ async function setup() {
 }
 
 describe.skipIf(!enabled)("self-reported game days against PostgreSQL", () => {
-  afterAll(async () => { await getPrisma().hostedMember.deleteMany({ where: { id: { in: members } } }); });
+  afterAll(async () => {
+    await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: members } } });
+    await getPrisma().hostedMember.deleteMany({ where: { id: { in: members } } }); });
 
   it("marks only the speaker's own post, preserves visibility, and is idempotent under concurrent retries", async () => {
     const f = await setup(), db = getPrisma();

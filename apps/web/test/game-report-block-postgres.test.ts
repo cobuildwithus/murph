@@ -77,6 +77,7 @@ describe.skipIf(!runPostgresProof)("weekly game report and block", () => {
   });
   afterAll(async () => {
     vi.unstubAllEnvs();
+    await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: memberIds } } });
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: memberIds } } });
   });
 
@@ -161,9 +162,10 @@ describe.skipIf(!runPostgresProof)("weekly game report and block", () => {
     // Leo addressed rematches to Ava and cancelled each one, far past any bound.
     const template = await getPrisma().game.findUniqueOrThrow({ where: { id: settled } });
     const cancelled = Array.from({ length: 201 }, () => randomUUID());
-    await getPrisma().game.createMany({ data: cancelled.map((id) => ({ createdBy: leo, id, inviteeMemberId: ava, lengthDays: 7, previousGameId: settled,
+    await getPrisma().game.createMany({ data: cancelled.map((id) => ({ createdBy: leo, wordsOwnerMemberId: leo, id, lengthDays: 7, previousGameId: settled,
       round: 2, status: "void", terms: template.terms ?? {}, termsWordsEncrypted: template.termsWordsEncrypted })) });
-    await getPrisma().gamePlayer.createMany({ data: cancelled.map((gameId) => ({ gameId, memberId: leo, seat: 0, timeZone: "America/New_York" })) });
+    await getPrisma().gameInvitee.createMany({ data: cancelled.map(gameId => ({ gameId, seat: 1, memberId: ava })) });
+    await getPrisma().gamePlayer.createMany({ data: cancelled.map((gameId) => ({ gameId, memberId: leo, seat: 0, joinedAt: new Date("2030-01-01T12:00:00Z"), timeZone: "America/New_York" })) });
     // And one more rematch, still open on Ava's Home.
     const open = (await ok(leo, { gameId: randomUUID(), inviteeFirstName: "Ava", previousGameId: settled, terms: TERMS, type: "createGame" }))!;
 
@@ -183,9 +185,10 @@ describe.skipIf(!runPostgresProof)("weekly game report and block", () => {
     // More open addressed invites than one batch, as overlapping rematch requests could leave.
     const template = await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } });
     const invites = Array.from({ length: 55 }, () => randomUUID());
-    await getPrisma().game.createMany({ data: invites.map((id) => ({ createdBy: leo, id, inviteeMemberId: ava, lengthDays: 7, round: 2,
+    await getPrisma().game.createMany({ data: invites.map((id) => ({ createdBy: leo, wordsOwnerMemberId: leo, id, lengthDays: 7, round: 2,
       inviteExpiresAt: new Date(Date.now() + 86_400_000), status: "invited", terms: template.terms ?? {}, termsWordsEncrypted: template.termsWordsEncrypted })) });
-    await getPrisma().gamePlayer.createMany({ data: invites.map((id) => ({ gameId: id, memberId: leo, seat: 0, timeZone: "America/New_York" })) });
+    await getPrisma().gameInvitee.createMany({ data: invites.map(gameId => ({ gameId, seat: 1, memberId: ava })) });
+    await getPrisma().gamePlayer.createMany({ data: invites.map((id) => ({ gameId: id, memberId: leo, seat: 0, joinedAt: new Date("2030-01-01T12:00:00Z"), timeZone: "America/New_York" })) });
 
     await ok(ava, { memberId: leo, type: "block" });
 

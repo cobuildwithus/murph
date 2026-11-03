@@ -39,6 +39,7 @@ describe.skipIf(!enabled)("game bootstrap lifecycle recovery against PostgreSQL"
   afterAll(async () => {
     await getPrisma().hostedLinqDelivery.deleteMany({ where: { id: { in: receiptIds } } });
     await getPrisma().hostedThreadContainer.deleteMany({ where: { memberId: { in: members } } });
+    await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: members } } });
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: members } } });
     await getPrisma().hostedLinqLine.deleteMany({ where: { phoneNumberLookupKey: { in: lineKeys } } });
   });

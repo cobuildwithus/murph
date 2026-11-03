@@ -167,12 +167,12 @@ function lifecycleStatuses(kind: GameChatLifecycleKind): string[] {
   return kind === "rematch" ? ["invited"] : kind === "recap" ? ["settled"] : kind === "missed" ? ["live"] : kind === "change_expired" ? ["live", "negotiating", "settled", "void"] : kind === "cancelled" ? ["void"] : kind === "started" ? ["live"] : ["live", "negotiating"];
 }
 
-type GameChatLifecycleRecord = Game & { players: Array<{ memberId: string }> };
+type GameChatLifecycleRecord = Game & { players: Array<{ memberId: string | null }>; invitees: Array<{ memberId: string | null }> };
 
 function lifecyclePlayerMemberIds(game: GameChatLifecycleRecord | null, kind: GameChatLifecycleKind): string[] {
-  if (kind !== "rematch") return game?.players.map((player) => player.memberId) ?? [];
-  if (!game?.createdBy || !game.inviteeMemberId || game.players.length !== 1 || game.players[0]?.memberId !== game.createdBy) return [];
-  return [game.createdBy, game.inviteeMemberId];
+  if (kind !== "rematch") return game?.players.flatMap(player => player.memberId ? [player.memberId] : []) ?? [];
+  if (!game?.createdBy || !game.invitees[0]?.memberId || game.players.length !== 1 || game.players[0]?.memberId !== game.createdBy) return [];
+  return [game.createdBy, game.invitees[0]?.memberId];
 }
 
 function isCurrentGameChatLifecycle(
@@ -190,7 +190,7 @@ function isCurrentGameChatLifecycle(
 export async function deliverGameChatLifecycle(gameId: string, kind: GameChatLifecycleKind, proposalId?: string, now = new Date(), regenerationId?: string): Promise<boolean> {
   const prisma = getPrisma();
   const eventId = gameChatLifecycleEventId(gameId, kind, proposalId, regenerationId);
-  const game = await prisma.game.findUnique({ where: { id: gameId }, include: { players: { select: { memberId: true }, take: 3 } } });
+  const game = await prisma.game.findUnique({ where: { id: gameId }, include: { invitees: true, players: { select: { memberId: true }, take: 3 } } });
   const statuses = lifecycleStatuses(kind);
   const boundOnly = ["rematch", "cancelled", "change_expired", "recap"].includes(kind);
   const players = lifecyclePlayerMemberIds(game, kind);
@@ -209,8 +209,8 @@ export async function deliverGameChatLifecycle(gameId: string, kind: GameChatLif
 
 async function deliverGameMissedDayLifecycle(gameId: string, memberId: string, firstMissedDate: string): Promise<boolean> {
   const prisma = getPrisma();
-  const game = await prisma.game.findUnique({ where: { id: gameId }, include: { players: { select: { memberId: true }, take: 3 } } });
-  const players = game?.players.map((player) => player.memberId) ?? [];
+  const game = await prisma.game.findUnique({ where: { id: gameId }, include: { invitees: true, players: { select: { memberId: true }, take: 3 } } });
+  const players = game?.players.flatMap(player => player.memberId ? [player.memberId] : []) ?? [];
   const statuses = lifecycleStatuses("missed");
   if (!game || !game.chatContainerMemberId || !statuses.includes(game.status) || !isPairRoster(players) || !players.includes(memberId)) return false;
   const { readGameChatState, readGameMissedCheckInBatch } = await import("./service");

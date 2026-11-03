@@ -34,7 +34,8 @@ async function setup(schedule: GameSchedule = { days: [0,1,2,3,4] }, startsOn?: 
 const fence = async () => {};
 
 describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL", () => {
-  afterAll(async () => { await getPrisma().hostedMember.deleteMany({where:{id:{in:members}}}); });
+  afterAll(async () => { await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: members } } });
+    await getPrisma().hostedMember.deleteMany({where:{id:{in:members}}}); });
   it("reserves acceptance and app proposals once, but never a second chat announcement", async () => {
     const { a,b,room,gameId } = await setup();
     const db = getPrisma();

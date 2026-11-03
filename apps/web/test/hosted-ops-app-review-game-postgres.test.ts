@@ -101,6 +101,7 @@ describe.skipIf(!enabled)("App Review game seed against PostgreSQL", () => {
 
   afterEach(async () => {
     vi.unstubAllEnvs();
+    await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: [reviewer, partner] } } });
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: [reviewer, partner] } } });
   });
 

@@ -1,199 +1,175 @@
 import "server-only";
 
-import { Prisma, type Game, type GamePlayer } from "@prisma/client";
-
+import { Prisma, type Game, type GamePlayer, type GameInvitee } from "@prisma/client";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { isRecord } from "../primitives";
 import { toPrismaJsonObject } from "../device-sync/prisma-store/prisma-json";
 import { labelTarget, openGameTexts, sealGameText } from "./crypto";
 
-/**
- * Account deletion and the weekly game. A member who deletes their account
- * leaves every game they're in: an open or live game is called off (void, no
- * result, no tickets), a finished one keeps its result. The other player keeps
- * the game, their own posts and any tickets, and sees the name they knew the
- * leaver by. The leaver's seat, posts and labels go with their profile; a game
- * nobody else is in goes with them.
- *
- * Sealing calls KMS, so `prepare` runs before the deletion transaction and
- * `apply` revalidates every game under its row lock inside it.
- */
-
 const GAME_DELETION_LIMIT = 1_000;
 const ACTIVE = new Set(["invited", "negotiating", "live"]);
-
-/** Stored on `game.departed_player`. */
-export interface GameDepartedPlayer {
-  v: 1;
-  seat: number;
-  at: string;
-  /** The remaining member: their key seals the name, and the game's words once the creator left. */
-  viewerMemberId: string;
-  /** The name the remaining member knew them by, sealed as that member's own contact label. */
-  nameEncrypted: string | null;
-}
-
-export function parseGameDepartedPlayer(value: Prisma.JsonValue | null): GameDepartedPlayer | null {
-  if (value === null) return null;
-  if (!isRecord(value) || value.v !== 1 || !Number.isInteger(value.seat) || typeof value.at !== "string"
-    || typeof value.viewerMemberId !== "string" || (value.nameEncrypted !== null && typeof value.nameEncrypted !== "string")) {
-    throw new Error("Stored game departure is malformed.");
-  }
-  return { v: 1, seat: Number(value.seat), at: value.at, viewerMemberId: value.viewerMemberId, nameEncrypted: value.nameEncrypted };
-}
-
-/** Whose key seals the game's own words: its creator, or the remaining member once the creator left. */
-export function gameWordsMemberId(row: Pick<Game, "createdBy" | "departedPlayer">): string {
-  const owner = row.createdBy ?? parseGameDepartedPlayer(row.departedPlayer)?.viewerMemberId;
-  if (!owner) throw new Error("Stored game has no words owner.");
-  return owner;
-}
-
-type GameRow = Game & { players: GamePlayer[] };
+type GameRow = Game & { players: GamePlayer[]; invitees: GameInvitee[] };
 type Db = Pick<Prisma.TransactionClient, "game" | "gameContactLabel" | "gameProfile">;
+
+/** Each viewer keeps only their own encrypted name for a deleted person. */
+export type DepartedLabel = { ownerMemberId: string; nameEncrypted: string | null };
+export function departedLabels(value: Prisma.JsonValue | null): DepartedLabel[] {
+  if (value === null) return [];
+  if (!Array.isArray(value) || value.length > 9) throw new Error("Stored departure labels are malformed.");
+  return value.map(label => {
+    if (!isRecord(label) || typeof label.ownerMemberId !== "string"
+      || (label.nameEncrypted !== null && typeof label.nameEncrypted !== "string")) throw new Error("Stored departure label is malformed.");
+    return { ownerMemberId: label.ownerMemberId, nameEncrypted: label.nameEncrypted };
+  });
+}
 
 interface PreparedGame {
   id: string;
   fingerprint: string;
-  departure: { seat: number; viewerMemberId: string; nameEncrypted: string | null; termsWordsEncrypted: string | null; leaverIds: string[] } | null;
+  kept: null | {
+    owner: string;
+    termsWordsEncrypted: string;
+    departures: { seat: number; joined: boolean; labels: DepartedLabel[] }[];
+  };
 }
-
-export interface PreparedGameAccountDeletion {
-  games: PreparedGame[];
-}
+export interface PreparedGameAccountDeletion { games: PreparedGame[] }
 
 function participantOf(memberIds: readonly string[]): Prisma.GameWhereInput {
   return { OR: [
     { players: { some: { memberId: { in: [...memberIds] } } } },
+    { wordsOwnerMemberId: { in: [...memberIds] } },
     { createdBy: { in: [...memberIds] } },
-    // Only an open addressed invite, or one kept after its creator left: cancelled
-    // or expired ones they never joined need no plan (their reference is cleared below).
-    { inviteeMemberId: { in: [...memberIds] }, OR: [{ status: "invited" }, { status: "void", departedPlayer: { not: Prisma.DbNull } }] },
+    { invitees: { some: { memberId: { in: [...memberIds] } } }, OR: [
+      { status: "invited" }, { status: "void", players: { some: { leftAt: { not: null } } } },
+    ] },
   ] };
 }
-
 async function readAffectedGames(db: Pick<Db, "game">, memberIds: readonly string[]): Promise<GameRow[]> {
-  const rows = await db.game.findMany({ include: { players: true }, orderBy: { id: "asc" }, take: GAME_DELETION_LIMIT + 1, where: participantOf(memberIds) });
+  const rows = await db.game.findMany({ include: { players: true, invitees: true }, orderBy: { id: "asc" }, take: GAME_DELETION_LIMIT + 1, where: participantOf(memberIds) });
   if (rows.length > GAME_DELETION_LIMIT) throw new Error("Account deletion game set exceeds its bound.");
   return rows;
 }
-
-/** Players, plus an open addressed rematch's invitee (or one kept after its creator left). */
-function participants(row: GameRow): string[] {
-  const players = row.players.map((player) => player.memberId);
-  const invitee = row.inviteeMemberId && !players.includes(row.inviteeMemberId)
-    && (row.status === "invited" || row.departedPlayer !== null) ? [row.inviteeMemberId] : [];
-  return [...players, ...invitee];
+function participants(row: GameRow) {
+  const players = row.players.flatMap(player => player.memberId ? [{ memberId: player.memberId, seat: player.seat, joined: true }] : []);
+  const invitees = row.maxPlayers === 2 && (row.status === "invited" || row.players.some(player => player.leftAt !== null))
+    ? row.invitees.flatMap(invitee => invitee.memberId && !players.some(player => player.memberId === invitee.memberId)
+      ? [{ memberId: invitee.memberId, seat: invitee.seat, joined: false }] : []) : [];
+  return [...players, ...invitees].sort((a, b) => a.seat - b.seat);
 }
-
 function fingerprint(row: GameRow): string {
-  return JSON.stringify([row.status, row.createdBy, row.inviteeMemberId, row.termsWordsEncrypted, row.departedPlayer,
-    row.players.map((player) => [player.memberId, player.seat]).sort()]);
+  return JSON.stringify([row.updatedAt, row.maxPlayers, row.status, row.createdBy, row.wordsOwnerMemberId, row.termsWordsEncrypted,
+    row.inviteTokenEncrypted, row.pendingChange, row.result,
+    [...row.players].sort((a, b) => a.seat - b.seat), [...row.invitees].sort((a, b) => a.seat - b.seat)]);
 }
 
+/** Bounded crypto preparation runs without a transaction or game lock. */
 export async function prepareGameAccountDeletion(input: { memberIds: readonly string[]; prisma: Db }): Promise<PreparedGameAccountDeletion> {
   const leaving = new Set(input.memberIds);
   const rows = await readAffectedGames(input.prisma, input.memberIds);
-  const plans = rows.map((row) => {
-    const everyone = participants(row);
-    const survivors = everyone.filter((memberId) => !leaving.has(memberId));
-    const leavers = everyone.filter((memberId) => leaving.has(memberId));
-    // A 1v1 keeps its one remaining member; with nobody left the game goes too.
-    return { row, survivor: survivors.length === 1 ? survivors[0] : null, leavers };
-  });
-  const kept = plans.filter((plan) => plan.survivor !== null && plan.leavers.length > 0);
+  const plans = rows.map(row => ({ row, survivors: participants(row).filter(player => !leaving.has(player.memberId)),
+    leavers: participants(row).filter(player => leaving.has(player.memberId)) }));
+  const owners = [...new Set(plans.flatMap(plan => plan.survivors.map(player => player.memberId)))];
   const [labels, profiles] = await Promise.all([
-    input.prisma.gameContactLabel.findMany({ where: { OR: kept.map((plan) => ({ ownerMemberId: plan.survivor!, subjectMemberId: { in: plan.leavers } })) } }),
-    input.prisma.gameProfile.findMany({ select: { firstNameEncrypted: true, memberId: true }, where: { memberId: { in: [...leaving] } } }),
+    input.prisma.gameContactLabel.findMany({ where: { ownerMemberId: { in: owners }, subjectMemberId: { in: [...leaving] } } }),
+    input.prisma.gameProfile.findMany({ select: { firstNameEncrypted: true, memberId: true }, where: { memberId: { in: [...leaving, ...owners] } } }),
   ]);
-  // One open batch: each leaver's own name, and each kept game's words while the creator still holds them.
-  const firstNames = await openGameTexts(profiles.map((profile) => ({ field: "first_name", memberId: profile.memberId, rowId: profile.memberId, table: "game_profile" as const, value: profile.firstNameEncrypted })));
-  const nameOf = new Map(profiles.map((profile, index) => [profile.memberId, firstNames[index] ?? ""]));
-  const creatorLeft = kept.filter((plan) => plan.row.createdBy !== null && leaving.has(plan.row.createdBy));
-  const words = await openGameTexts(creatorLeft.map(({ row }) => ({ field: "terms_words", memberId: row.createdBy!, rowId: row.id, table: "game" as const, value: row.termsWordsEncrypted })));
-  const wordsOf = new Map(creatorLeft.map(({ row }, index) => [row.id, words[index]]));
+  const firstNames = await openGameTexts(profiles.filter(profile => leaving.has(profile.memberId)).map(profile => ({ field: "first_name", memberId: profile.memberId, rowId: profile.memberId, table: "game_profile" as const, value: profile.firstNameEncrypted })));
+  const names = new Map(profiles.filter(profile => leaving.has(profile.memberId)).map((profile, index) => [profile.memberId, firstNames[index] ?? ""]));
+  const transfers = plans.filter(plan => plan.survivors.length > 0 && leaving.has(plan.row.wordsOwnerMemberId));
+  const words = await openGameTexts(transfers.map(({ row }) => ({ field: "terms_words", memberId: row.wordsOwnerMemberId, rowId: row.id, table: "game" as const, value: row.termsWordsEncrypted })));
+  const wordsOf = new Map(transfers.map(({ row }, index) => [row.id, words[index]]));
   const games: PreparedGame[] = [];
-  for (const { row, survivor, leavers } of plans) {
-    if (leavers.length === 0) continue;
-    if (survivor === null) {
-      games.push({ id: row.id, fingerprint: fingerprint(row), departure: null });
-      continue;
+  for (const { row, survivors, leavers } of plans) {
+    const owner = leaving.has(row.wordsOwnerMemberId)
+      ? survivors.find(player => profiles.some(profile => profile.memberId === player.memberId))?.memberId
+      : row.wordsOwnerMemberId;
+    if (survivors.length === 0) { games.push({ id: row.id, fingerprint: fingerprint(row), kept: null }); continue; }
+    if (!owner) throw new Error("A surviving game has no encryption-capable owner.");
+    const departures: NonNullable<PreparedGame["kept"]>["departures"] = [];
+    for (const leaver of leavers) {
+      const keptLabels: DepartedLabel[] = [];
+      for (const survivor of survivors) {
+        const label = labels.find(item => item.ownerMemberId === survivor.memberId && item.subjectMemberId === leaver.memberId);
+        // An unaccepted invitation's label is still private to its creator.
+        const pending = !leaver.joined && survivor.memberId === row.createdBy ? row.invitees.find(invitee => invitee.seat === leaver.seat)?.pendingLabel : null;
+        const pendingName = isRecord(pending) && typeof pending.nameEncrypted === "string" ? pending.nameEncrypted : null;
+        const nameEncrypted = pendingName ?? label?.nameEncrypted ?? await sealGameText(labelTarget(survivor.memberId, "name"), names.get(leaver.memberId) ?? "");
+        keptLabels.push({ ownerMemberId: survivor.memberId, nameEncrypted });
+      }
+      departures.push({ seat: leaver.seat, joined: leaver.joined, labels: keptLabels });
     }
-    const leaver = leavers[0];
-    const label = labels.find((candidate) => candidate.ownerMemberId === survivor && candidate.subjectMemberId === leaver);
-    // Labels bind to their owner, so the survivor's own label moves as-is.
-    const nameEncrypted = label?.nameEncrypted ?? await sealGameText(labelTarget(survivor, "name"), nameOf.get(leaver) ?? "");
     const plainWords = wordsOf.get(row.id);
-    const termsWordsEncrypted = plainWords === undefined ? null
-      : await sealGameText({ field: "terms_words", memberId: survivor, rowId: row.id, table: "game" }, plainWords ?? "");
-    const seat = row.players.find((player) => player.memberId === leaver)?.seat ?? row.players.length;
-    games.push({ id: row.id, fingerprint: fingerprint(row), departure: { leaverIds: leavers, nameEncrypted, seat, termsWordsEncrypted, viewerMemberId: survivor } });
+    const termsWordsEncrypted = plainWords === undefined ? row.termsWordsEncrypted
+      : await sealGameText({ field: "terms_words", memberId: owner, rowId: row.id, table: "game" }, plainWords);
+    if (!termsWordsEncrypted) throw new Error("Game words transfer returned no ciphertext.");
+    games.push({ id: row.id, fingerprint: fingerprint(row), kept: { owner, termsWordsEncrypted, departures } });
   }
   return { games };
 }
 
-/**
- * Inside the deletion transaction, after the deleting members are locked
- * (owner before game, matching game chat commands). Any game that changed
- * since `prepare` fails the deletion closed for a retry.
- */
+/** Caller locks deleting members first; revalidation fails closed for a fresh preparation. */
 export async function applyGameAccountDeletionTx(input: { memberIds: readonly string[]; now: Date; prepared: PreparedGameAccountDeletion; tx: Prisma.TransactionClient }): Promise<{ calledOff: number; deleted: number; kept: number }> {
   const { tx } = input;
-  const ids = [...new Set([...input.prepared.games.map((game) => game.id),
-    ...(await tx.game.findMany({ select: { id: true }, where: participantOf(input.memberIds), take: GAME_DELETION_LIMIT + 1 })).map((game) => game.id)])].sort();
-  if (ids.length > 0) await tx.$queryRaw`SELECT id FROM game WHERE id = ANY(${ids}::text[]) ORDER BY id FOR UPDATE`;
-  const current = await readAffectedGames(tx, input.memberIds);
-  const prepared = new Map(input.prepared.games.map((game) => [game.id, game]));
-  const relevant = current.filter((row) => participants(row).some((memberId) => input.memberIds.includes(memberId)));
-  if (relevant.length !== prepared.size || relevant.some((row) => prepared.get(row.id)?.fingerprint !== fingerprint(row))) {
-    throw hostedOnboardingError({
-      code: "ACCOUNT_DELETION_GAME_STATE_CHANGED",
-      httpStatus: 503,
-      message: "A game changed while your account was being deleted. Retry account deletion.",
-      retryable: true,
-    });
+  const leaving = [...input.memberIds];
+  const discovered = await readAffectedGames(tx, leaving);
+  const ids = [...new Set([...input.prepared.games.map(game => game.id), ...discovered.map(game => game.id)])].sort();
+  if (ids.length) await tx.$queryRaw`SELECT id FROM game WHERE id = ANY(${ids}::text[]) ORDER BY id FOR UPDATE`;
+  const current = await readAffectedGames(tx, leaving);
+  const prepared = new Map(input.prepared.games.map(game => [game.id, game]));
+  if (current.length !== prepared.size || current.some(row => prepared.get(row.id)?.fingerprint !== fingerprint(row))) {
+    throw hostedOnboardingError({ code: "ACCOUNT_DELETION_GAME_STATE_CHANGED", httpStatus: 503,
+      message: "A game changed while your account was being deleted. Retry account deletion.", retryable: true });
   }
   let calledOff = 0;
   let deleted = 0;
-  for (const row of relevant) {
-    const plan = prepared.get(row.id)!;
-    if (!plan.departure) {
-      await tx.game.delete({ where: { id: row.id } });
-      deleted += 1;
-      continue;
-    }
-    const { departure } = plan;
-    const active = ACTIVE.has(row.status);
+  for (const row of current) {
+    const plan = prepared.get(row.id)!.kept;
+    if (!plan) { await tx.game.delete({ where: { id: row.id } }); deleted += 1; continue; }
+    const remaining = row.players.filter(player => player.memberId && !leaving.includes(player.memberId) && player.leftAt === null);
+    const active = ACTIVE.has(row.status) && (row.maxPlayers === 2 || (row.status !== "invited" && remaining.length < 2));
     if (active) calledOff += 1;
-    const leftCreator = row.createdBy !== null && departure.leaverIds.includes(row.createdBy);
-    const leftInvitee = row.inviteeMemberId !== null && departure.leaverIds.includes(row.inviteeMemberId);
-    const departed: GameDepartedPlayer = { v: 1, at: input.now.toISOString(), nameEncrypted: departure.nameEncrypted, seat: departure.seat, viewerMemberId: departure.viewerMemberId };
-    await tx.game.update({
-      where: { id: row.id },
-      data: {
-        departedPlayer: toPrismaJsonObject({ ...departed }),
-        recapEncrypted: null,
-        // Called off: no winner and no tickets. A finished game keeps its result.
-        ...(active ? { status: "void", pendingChange: Prisma.DbNull } : {}),
-        // Cleared here, before the member row goes, so the creator cascade never reaches a kept game.
-        ...(leftCreator ? { createdBy: null, termsWordsEncrypted: departure.termsWordsEncrypted ?? row.termsWordsEncrypted, inviteTokenEncrypted: null, pendingLabel: Prisma.DbNull } : {}),
-        ...(leftInvitee ? { inviteeMemberId: null } : {}),
-        ...(row.result !== null ? { result: withoutMembers(row.result, departure.leaverIds) } : {}),
-      },
-    });
-    // Tickets stay as history for the other player, with the leaver's side cleared.
-    await tx.gameTicket.updateMany({ data: { owedBy: null }, where: { gameId: row.id, owedBy: { in: departure.leaverIds } } });
-    await tx.gameTicket.updateMany({ data: { owedTo: null }, where: { gameId: row.id, owedTo: { in: departure.leaverIds } } });
-    await tx.gameEvent.create({ data: { actor: "system", gameId: row.id, payload: { v: 1, calledOff: active, seat: departure.seat }, type: "player_left" } });
+    await tx.game.update({ where: { id: row.id }, data: {
+      wordsOwnerMemberId: plan.owner, termsWordsEncrypted: plan.termsWordsEncrypted,
+      recapEncrypted: null, pendingChange: Prisma.DbNull,
+      ...(active ? { status: "void", result: Prisma.DbNull } : {}),
+      ...(row.createdBy && leaving.includes(row.createdBy) ? { createdBy: null, inviteTokenEncrypted: null } : {}),
+      ...(!active && row.result !== null ? { result: withoutMembers(row.result, leaving) } : {}),
+    } });
+    // Remove entries before changing the member key referenced by their FK.
+    await tx.gameEntry.deleteMany({ where: { gameId: row.id, memberId: { in: leaving } } });
+    await retainDeparturesTx(tx, row, plan, leaving, input.now);
+    if (active) await tx.gameTicket.deleteMany({ where: { gameId: row.id } });
+    for (const departure of plan.departures) await tx.gameEvent.create({ data: { actor: "system", gameId: row.id,
+      payload: { v: 1, calledOff: active, seat: departure.seat }, type: "player_left" } });
   }
-  // An expired addressed invite the leaver never took keeps no trace of them.
-  await tx.game.updateMany({ data: { inviteeMemberId: null }, where: { inviteeMemberId: { in: [...input.memberIds] } } });
-  return { calledOff, deleted, kept: relevant.length - deleted };
+  // Cancelled/expired invitations need no crypto plan, but keep no lookup or label.
+  await tx.gameInvitee.updateMany({ where: { memberId: { in: leaving } }, data: { memberId: null, recipientLookupKey: null, pendingLabel: Prisma.DbNull } });
+  await tx.gameEvent.updateMany({ where: { actor: { in: leaving } }, data: { actor: "system" } });
+  return { calledOff, deleted, kept: current.length - deleted };
 }
 
-/** A frozen result keeps every seat's score; only the leaver's member id goes. */
+/** Keep seat identities and each surviving viewer's encrypted labels together. */
+async function retainDeparturesTx(tx: Prisma.TransactionClient, row: GameRow, plan: NonNullable<PreparedGame["kept"]>, leaving: readonly string[], now: Date): Promise<void> {
+  for (const player of row.players) {
+    const departure = plan.departures.find(item => item.joined && item.seat === player.seat);
+    const labels = departure?.labels ?? departedLabels(player.departedLabel).filter(label => !leaving.includes(label.ownerMemberId));
+    if (!departure && player.departedLabel === null) continue;
+    await tx.gamePlayer.update({ where: { gameId_seat: { gameId: row.id, seat: player.seat } }, data: {
+      departedLabel: labels.length ? labels : Prisma.DbNull,
+      ...(departure ? { memberId: null, leftAt: player.leftAt ?? now } : {}),
+    } });
+  }
+  for (const departure of plan.departures.filter(item => !item.joined)) {
+    await tx.gamePlayer.create({ data: { gameId: row.id, seat: departure.seat,
+      memberId: null, joinedAt: null, timeZone: null, leftAt: now, departedLabel: departure.labels } });
+  }
+  if (row.createdBy && leaving.includes(row.createdBy)) {
+    await tx.gameInvitee.updateMany({ where: { gameId: row.id }, data: { pendingLabel: Prisma.DbNull } });
+  }
+}
+
 function withoutMembers(result: Prisma.JsonValue, memberIds: readonly string[]): Prisma.InputJsonObject {
   const root = isRecord(result) ? result : {};
   const scores = Array.isArray(root.scores) ? root.scores : [];
-  return toPrismaJsonObject({ ...root, scores: scores.map((score) => isRecord(score) && memberIds.includes(String(score.memberId)) ? { ...score, memberId: "" } : score) });
+  return toPrismaJsonObject({ ...root, scores: scores.map(score => isRecord(score) && memberIds.includes(String(score.memberId)) ? { ...score, memberId: "" } : score) });
 }

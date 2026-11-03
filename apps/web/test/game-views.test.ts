@@ -162,8 +162,8 @@ describe("weekly game views: tickets", () => {
       createdAt: new Date("2026-10-24T17:00:00Z"),
       gameId: "game_views_1",
       id: "gtk_1",
-      owedBy: AVA,
-      owedTo: LEO,
+      owedBySeats: [1],
+      owedToSeats: [0], players: [{ seat: 0, memberId: LEO }, { seat: 1, memberId: AVA }],
       redeemedAt: null,
       stakeKey: "gsk_breakfast",
       status: "open" as const,
@@ -309,7 +309,7 @@ it("derives streaks from scheduled live posts, ignoring off days and unposted to
 
 it.each(["prize","dare","winner_gets","per_miss"] as const)("returns ticket kind %s from its canonical stake key", (kind) => {
   const state=liveState();state.game.terms.versions[0].stakes[0].kind=kind;
-  const row={id:"ticket_kind",gameId:state.game.id,stakeKey:"gsk_breakfast",owedBy:AVA,owedTo:LEO,status:"open" as const,createdAt:JOIN_AT,redeemedAt:null};
+  const row={id:"ticket_kind",gameId:state.game.id,stakeKey:"gsk_breakfast",owedBySeats: [1],owedToSeats: [0], players: state.players,status:"open" as const,createdAt:JOIN_AT,redeemedAt:null};
   expect(ticketView(row,WORDS,LEO,JOIN_AT,state.game.terms)).toMatchObject({kind,youHold:true});
 });
 

@@ -22,3 +22,13 @@ export function firstOpenSeat(roster: readonly { seat: number }[]): number {
   while (seats.has(seat)) seat += 1;
   return seat;
 }
+
+/** Deleted seats remain in storage; only extant identities can authorize work. */
+export function gameMemberIds(rows: readonly { memberId: string | null }[]): string[] {
+  return rows.flatMap(row => row.memberId === null ? [] : [row.memberId]);
+}
+
+/** A rule participant has the scheduling metadata required by the SQL check. */
+export function hasGameIdentity<T extends { memberId: string | null; timeZone: string | null }>(row: T): row is T & { memberId: string; timeZone: string } {
+  return row.memberId !== null && row.timeZone !== null;
+}

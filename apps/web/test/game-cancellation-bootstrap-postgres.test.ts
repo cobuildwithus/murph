@@ -50,8 +50,8 @@ async function fixture() {
   await db.hostedThreadContainer.create({ data: { memberId: room, ownerMemberId: first,
     participants: { create: [first, second].map(participantMemberId => ({ participantMemberId, handleLookupKey: participantMemberId, firstSeenAt: now, lastSeenAt: now })) } } });
   await db.gameProfile.createMany({ data: [first, second].map(memberId => ({ memberId, firstNameEncrypted: "synthetic", timeZone: "UTC" })) });
-  await db.game.create({ data: { id: gameId, createdBy: first, status: "negotiating", chatContainerMemberId: room, terms: { v: 1, versions: [] }, termsWordsEncrypted: "synthetic",
-    players: { create: [first, second].map((memberId, seat) => ({ memberId, seat, timeZone: "UTC" })) } } });
+  await db.game.create({ data: { id: gameId, createdBy: first, wordsOwnerMemberId: first, status: "negotiating", chatContainerMemberId: room, terms: { v: 1, versions: [] }, termsWordsEncrypted: "synthetic",
+    players: { create: [first, second].map((memberId, seat) => ({ memberId, seat, joinedAt: new Date("2030-01-01T12:00:00Z"), timeZone: "UTC" })) } } });
   const oldProposal = randomUUID(), cancellation = `game-change-cancelled:${gameId}:${oldProposal}`;
   await reserveGameChatProposalTx({ gameId, proposalId: oldProposal, now, tx: db });
   await markGameChatGenerationQueuedTx(`game-change:${gameId}:${oldProposal}`, db, room);
@@ -68,6 +68,7 @@ describe.skipIf(!enabled)("cancellation bootstrap ordering PostgreSQL", () => {
   afterAll(async () => {
     await getPrisma().game.deleteMany({ where: { id: { in: games } } });
     await getPrisma().hostedThreadContainer.deleteMany({ where: { memberId: { in: members } } });
+    await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: members } } });
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: members } } });
     vi.unstubAllEnvs();
   });

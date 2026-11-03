@@ -6,7 +6,7 @@ import { sendApplePush, type ApplePushRequest } from "../apple-push/send";
 import { companionPushRouteRegistrationSchema, forgetCompanionPushRoute } from "../companion/push-route";
 import { sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
-import { isPairRoster } from "./roster";
+import { isPairRoster, hasGameIdentity } from "./roster";
 import { isGameOn } from "./access";
 import { hasUnlockedDay, type RuleEntry } from "./rules";
 import { addDays, dayStartInstant, gameLocalDate } from "./time";
@@ -36,7 +36,7 @@ export async function claimGamePostNotification(
   },
 ): Promise<ClaimedPostNotification | null> {
   if (!isPairRoster(input.players) || !isGameOn(input)) return null;
-  const recipient = input.players.find((player) => player.memberId !== input.actor);
+  const recipient = input.players.filter(hasGameIdentity).find((player) => player.memberId !== input.actor);
   if (!recipient) return null;
   const route = await tx.companionPushRoute.findFirst({
     where: { userId: recipient.memberId, alertsAllowed: true, gameSessionId: { not: null }, member: { suspendedAt: null } },
@@ -59,7 +59,7 @@ export async function claimGamePostNotification(
   });
   if (claimed.count !== 1) return null;
   return {
-    commandKey, memberId: recipient.memberId, players: input.players, sessionId: route.gameSessionId, day,
+    commandKey, memberId: recipient.memberId, players: input.players.filter(hasGameIdentity), sessionId: route.gameSessionId, day,
     request: {
       collapseId: sha256Hex(commandKey),
       data: { gameId: input.gameId, notification: "game_post" },
