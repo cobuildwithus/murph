@@ -78,13 +78,14 @@ describe("game history terms", () => {
 
 
 describe("game history previews", () => {
-  it("includes words and photos in day, seat, receipt and id order before applying the cap", () => {
+  const entry = (id: string, dayIndex: number, seat: number, received: number, kind: RuleEntry["kind"] = "words"): RuleEntry => ({
+    id, dayIndex, memberId: `player-${seat}`, receivedAt: new Date(received), kind,
+    attempt: 1, withdrawnAt: null, blurHash: null,
+    mediaKeys: kind === "photo" ? [`game/player-${seat}/${id}.jpg`] : [],
+  });
+
+  it("prefers photos and fills with earliest other posts, returning day, seat, receipt and id order", () => {
     const fixture = input(0, false, null);
-    const entry = (id: string, dayIndex: number, seat: number, received: number, kind: "words" | "photo" = "words"): RuleEntry => ({
-      id, dayIndex, memberId: `player-${seat}`, receivedAt: new Date(received), kind,
-      attempt: 1, withdrawnAt: null, blurHash: null,
-      mediaKeys: kind === "photo" ? [`game/player-${seat}/${id}.jpg`] : [],
-    });
     const ordered = [
       entry("a", 0, 0, 100), entry("b", 0, 0, 100, "photo"),
       entry("c", 0, 0, 200), entry("d", 0, 1, 0, "photo"),
@@ -93,16 +94,51 @@ describe("game history previews", () => {
     ];
     fixture.state.entries = [
       ...[...ordered].reverse(),
-      { ...entry("withdrawn", 0, 0, 0), withdrawnAt: new Date(1) },
-      entry("reported", 0, 1, 0),
+      { ...entry("withdrawn", 0, 0, 0, "photo"), withdrawnAt: new Date(1) },
+      entry("reported", 0, 1, 0, "photo"),
       { ...entry("hidden", 0, 1, 0), attempt: 0, kind: "excuse" },
     ];
     fixture.hiddenEntryIds = new Set(["reported"]);
     fixture.entryWords = new Map([["a", { text: "Finished my walk." }]]);
     const previews = buildGameHistoryView(fixture)!.game.previews;
-    expect(previews.map(preview => preview.entryId)).toEqual(ordered.slice(0, GAME_HISTORY_PREVIEW_LIMIT).map(entry => entry.id));
+    expect(previews.map(preview => preview.entryId)).toEqual(["a", "b", "c", "d", "f", "h"]);
     expect(previews).toHaveLength(GAME_HISTORY_PREVIEW_LIMIT);
     expect(previews[0]).toEqual({ entryId: "a", kind: "words", mediaUrls: [], text: "Finished my walk.", data: null, mine: true });
     expect(previews[1]).toMatchObject({ kind: "photo", mediaUrls: ["/api/game/v1/media/game%2Fplayer-0%2Fb.jpg"] });
+  });
+
+  it("returns six photos from seven photo days mixed with words", () => {
+    const fixture = input(0, false, null);
+    fixture.state.entries = Array.from({ length: 7 }, (_, day) => [
+      entry(`words-${day}`, day, 0, 0), entry(`photo-${day}`, day, 1, 0, "photo"),
+    ]).flat().reverse();
+    const previews = buildGameHistoryView(fixture)!.game.previews;
+    expect(previews.map(preview => preview.entryId)).toEqual([
+      "photo-0", "photo-1", "photo-2", "photo-3", "photo-4", "photo-5",
+    ]);
+    expect(previews.every(preview => preview.kind === "photo")).toBe(true);
+  });
+
+  it.each(["photo", "words"] as const)("keeps the first six posts in day order for an all-%s game", kind => {
+    const fixture = input(0, false, null);
+    fixture.state.entries = Array.from({ length: 7 }, (_, day) => entry(`day-${day}`, day, day % 2, 0, kind)).reverse();
+    expect(buildGameHistoryView(fixture)!.game.previews.map(preview => preview.entryId)).toEqual([
+      "day-0", "day-1", "day-2", "day-3", "day-4", "day-5",
+    ]);
+  });
+
+  it("preserves eligible non-photo kinds, including the viewer's own excuse", () => {
+    const fixture = input(0, false, null);
+    const kinds = ["excuse", "words", "reps", "heart_rate", "route", "words", "reps"] as const;
+    fixture.state.entries = kinds.map((kind, day) => ({
+      ...entry(`day-${day}`, day, 0, 0, kind), attempt: kind === "excuse" ? 0 : 1,
+    })).reverse();
+    expect(buildGameHistoryView(fixture)!.game.previews.map(preview => preview.kind)).toEqual(kinds.slice(0, GAME_HISTORY_PREVIEW_LIMIT));
+  });
+
+  it("returns fewer than six previews when fewer posts are visible", () => {
+    const fixture = input(0, false, null);
+    fixture.state.entries = [entry("photo", 1, 1, 0, "photo"), entry("words", 0, 0, 0)];
+    expect(buildGameHistoryView(fixture)!.game.previews.map(preview => preview.entryId)).toEqual(["words", "photo"]);
   });
 });

@@ -253,13 +253,18 @@ export function buildGameHistoryView(input: GameViewInput): BuiltGameHistoryView
   const taskFor = (seat: number) => terms.tasks.find(task => task.seat === seat)?.text ?? terms.defaultTask ?? "";
   const visible = visibleEntryIds(input.state, input.viewerId, input.hiddenEntryIds, input.hiddenMemberIds, entries);
   const seats = new Map(input.state.players.map((player) => [player.memberId, player.seat]));
-  const previews = input.state.entries
+  const dayOrder = (a: RuleEntry, b: RuleEntry) => a.dayIndex - b.dayIndex
+    || (seats.get(a.memberId) ?? 0) - (seats.get(b.memberId) ?? 0)
+    || a.receivedAt.getTime() - b.receivedAt.getTime()
+    || a.id.localeCompare(b.id);
+  const shown = input.state.entries
     .filter((entry) => visible.has(entry.id))
-    .sort((a, b) => a.dayIndex - b.dayIndex
-      || (seats.get(a.memberId) ?? 0) - (seats.get(b.memberId) ?? 0)
-      || a.receivedAt.getTime() - b.receivedAt.getTime()
-      || a.id.localeCompare(b.id))
-    .slice(0, GAME_HISTORY_PREVIEW_LIMIT)
+    .sort(dayOrder);
+  const previews = [
+    ...shown.filter((entry) => entry.kind === "photo"),
+    ...shown.filter((entry) => entry.kind !== "photo"),
+  ].slice(0, GAME_HISTORY_PREVIEW_LIMIT)
+    .sort(dayOrder)
     .map((entry) => ({ entry: entryView(entry, input), mine: entry.memberId === input.viewerId, seat: seats.get(entry.memberId)! }));
 
   if (group) return {
