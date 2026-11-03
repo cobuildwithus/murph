@@ -1,3 +1,5 @@
+import { sleepSummaryResponseCardV1Schema, type SleepSummaryResponseCardV1 } from "./sleep-summary-card.ts";
+
 import * as z from "./zod-runtime.ts";
 
 import {
@@ -135,7 +137,8 @@ export type AssistantResponseCard =
   | CompactTableResponseCardV1
   | ExerciseRoutineResponseCardV1
   | TelegramRichContentResponseCardV1
-  | ChallengeStandingsResponseCardV1;
+  | ChallengeStandingsResponseCardV1
+  | SleepSummaryResponseCardV1;
 
 export function assistantResponseCardMatchesConversationAudience(input: {
   card: AssistantResponseCard;
@@ -440,6 +443,7 @@ export const assistantResponseCardSchema: z.ZodType<AssistantResponseCard> =
     exerciseRoutineResponseCardV1Schema,
     telegramRichContentResponseCardV1Schema,
     challengeStandingsResponseCardV1Schema,
+    sleepSummaryResponseCardV1Schema,
   ]);
 
 function isValidLocalCalendarDate(value: string): boolean {

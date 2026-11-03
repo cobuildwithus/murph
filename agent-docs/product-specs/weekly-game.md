@@ -125,8 +125,9 @@ other players' names. Pair rendering, app links and closed/cancelled copy stay
 unchanged.
 
 Group history keeps each round's roster, frozen standings and previews, plus
-viewer-specific `task` and `prize` at group level. It returns at most twenty
-groups with the twenty-five most recent rounds each. Pair history independently
+the shared default `task` and `prize` from the latest round's final terms at group
+level. The task is the same for every viewer, including players with a seat override.
+It returns at most twenty groups with the twenty-five most recent rounds each. Pair history independently
 retains its fifty-people/fifty-round limits. Each record counts the returned
 rounds, following existing pair semantics. Selection limits precede hydration.
 

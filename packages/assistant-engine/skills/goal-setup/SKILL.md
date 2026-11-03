@@ -193,10 +193,10 @@ until ownership is resolved. Because this list has no cursor, any exactly-200 re
 the person's reason in their own words, constraints and prior attempts, baseline, target and date, progression, standard/
 tiny/fallback versions, action window, accepted support/privacy boundary, review point, and off-ramp:
 ```text
-vault-cli regimen save "<title>" --kind habit --status active --related-goal-id <goal-id> --schedule "<action window>" --note "<accepted plan>" --format json
+vault-cli regimen save "<title>" --kind habit --status active --related-goal-id <goal-id> --started-on <accepted-start-date> --schedule "<action window>" --note "<accepted plan>" --format json
 ```
 Keep `--schedule` to timing only (at most 160 characters); put the plan in `--note` (at most 4000 characters).
-For an existing regimen add `--id <regimen-id>`. Inspect the saved `entity` in the receipt.
+For an existing regimen add `--id <regimen-id>`.
 If the Goal, regimen, and support already exactly match the accepted package, make no mutation.
 For quiet support with regimen receipt `created: true`, skip support inventory and effects for that new id.
 Existing regimens still require complete support inventory and quiet reconciliation.

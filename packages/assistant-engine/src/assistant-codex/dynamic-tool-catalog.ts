@@ -305,6 +305,18 @@ export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
   },
 } as const
 
+export const MURPH_ATTACH_SLEEP_CARD_TOOL = {
+  deferLoading: true,
+  namespace: 'murph',
+  name: 'attach_sleep_card',
+  description: 'Attach a host-built sleep summary for a general nightly request such as how did I sleep or sleep recap. Pass the local wake date. Never use for a specific metric, compound question, or advice request, answer those in text. The card is the whole reply: after success, send no final text and attach no media. On no_sleep_for_date, answer truthfully in text.',
+  inputSchema: {
+    type: 'object', additionalProperties: false,
+    properties: { date: { type: 'string', format: 'date', description: 'Local wake date, YYYY-MM-DD.' } },
+    required: ['date'],
+  },
+} as const
+
 export const MURPH_ATTACH_RESPONSE_CARD_TOOL = {
   deferLoading: true,
   namespace: 'murph',
@@ -1769,6 +1781,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_ASSISTANT_STYLE_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
+  MURPH_ATTACH_SLEEP_CARD_TOOL,
   MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
   MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
@@ -1912,6 +1925,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_DEVICE_TOOL, defaultOff((a) => a.deviceAvailable)],
     [MURPH_ASSISTANT_STYLE_TOOL, defaultOff((a) => a.assistantStyleSettingsAvailable)],
     [MURPH_ATTACH_RESPONSE_CARD_TOOL, defaultOff((a) => a.responseCardsAvailable)],
+    [MURPH_ATTACH_SLEEP_CARD_TOOL, defaultOff((a) => a.responseCardsAvailable)],
     [MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL, defaultOff((a) =>
       a.exerciseRoutineResponseCardsAvailable)],
     [MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL, defaultOff((a) =>

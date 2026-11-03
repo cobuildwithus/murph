@@ -1,3 +1,4 @@
+import { SleepSummaryCardImage, getSleepSummaryCardImageSize } from "@/src/components/imessage/sleep-summary-card-image";
 import { Buffer } from "node:buffer";
 import { readFile } from "node:fs/promises";
 
@@ -8,6 +9,8 @@ import {
   dailyNutritionResponseCardV2Schema,
   challengeStandingsResponseCardV1Schema,
   parseCompactTableAppCardEnvelope,
+  parseSleepSummaryAppCardEnvelopeV8,
+  type SleepSummaryResponseCardV1,
   type ChallengeStandingsResponseCardV1,
   type CompactTablePresentationCardV1,
   type DailyNutritionResponseCard,
@@ -64,14 +67,18 @@ export async function GET(
     readFile(dmSans400FontPath).then(toArrayBuffer),
     readFile(dmSans600FontPath).then(toArrayBuffer),
   ]);
-  const size = card.kind === "daily_nutrition"
+  const size = card.kind === "sleep_summary"
+    ? getSleepSummaryCardImageSize(card)
+    : card.kind === "daily_nutrition"
     ? IMESSAGE_NUTRITION_CARD_IMAGE_SIZE
     : card.kind === "compact_table"
       ? getCompactTableCardImageSize(card)
       : getChallengeStandingsCardImageSize(card);
 
   return new ImageResponse(
-    card.kind === "daily_nutrition"
+    card.kind === "sleep_summary"
+      ? <SleepSummaryCardImage card={card} />
+      : card.kind === "daily_nutrition"
       ? <NutritionCardImage card={card} />
       : card.kind === "compact_table"
         ? <CompactTableCardImage card={card} />
@@ -90,6 +97,7 @@ export async function GET(
 function parseResponseCardPayload(
   segment: string,
 ):
+  | SleepSummaryResponseCardV1
   | DailyNutritionResponseCard
   | CompactTablePresentationCardV1
   | ChallengeStandingsResponseCardV1
@@ -122,6 +130,7 @@ function parseResponseCardPayload(
   if (!isExactEnvelope(parsed)) {
     return null;
   }
+  if (parsed.schemaVersion === 8) return parseSleepSummaryAppCardEnvelopeV8(parsed);
   if (parsed.schemaVersion === 1) {
     const result = dailyNutritionResponseCardV1Schema.safeParse(parsed.card);
     return result.success ? result.data : null;

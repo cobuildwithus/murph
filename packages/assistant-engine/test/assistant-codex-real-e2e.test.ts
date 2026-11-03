@@ -1,6 +1,7 @@
 import { listCanonicalWriteEvidence, readCanonicalAuditRecords } from './canonical-audit-test-helpers.js'
 import { GAME_CHAT_SETUP_SCENARIOS, SETUP_PLAYERS, SETUP_TERMS } from './support/game-chat-setup-scenarios.js'
 import { buildBluetoothHelpInstructions } from './support/bluetooth-help.js'
+import { SYNTHETIC_SLEEP_NIGHT_VALUES, seedSyntheticSleepNight } from './support/sleep-card-fixture.js'
 import { readHostedDelegationHintOverrides } from './support/hosted-delegation-hints.js'
 import { materializeRegimenLabelFixture, REGIMEN_FUZZY_FOOD_NAMES, REGIMEN_LABEL_SCENARIOS, REGIMEN_SHAKE_TOTALS } from './support/supplement-regimen-label-fixture.js'
 import { seedImportedRecallMeal, seedImportedRecallPhoto, SYNTHETIC_IMPORTED_MEAL } from './support/imported-record-recall-fixture.js'
@@ -211,6 +212,7 @@ import {
 import {
   MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
+  MURPH_ATTACH_SLEEP_CARD_TOOL,
   MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
   MURPH_CREATE_CALENDAR_LINK_TOOL,
   MURPH_GROUP_CONSULT_TOOL,
@@ -1712,6 +1714,81 @@ function readFocusedSleepPatternProjectionCommand(command: string): string {
   expect(unwrapped).not.toMatch(/[^A-Za-z0-9_= \t-]/u)
   return unwrapped
 }
+
+describeRealCodex('real Codex sleep summary cards', () => {
+  it.each([
+    ['sleep card: general sleep question attaches the host-built card', 'How did I sleep last night?', 'general'],
+    ['sleep card: specific deep sleep question answers in text', 'What was my deep sleep last night?', 'specific'],
+    ['sleep card: compound sleep and training question stays text', 'How did I sleep and should I train today?', 'compound'],
+    ['sleep card: missing night answers truthfully without a card', 'How did I sleep last night?', 'missing'],
+  ] as const)('%s', { timeout: 900_000 }, async (_name, prompt, scenario) => {
+    const config = await resolveRealCodexE2eConfig()
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-sleep-card-live-'))
+    try {
+      const vaultRoot = path.join(root, 'vault')
+      const binDirectory = path.join(root, 'bin')
+      const skillsRoot = path.join(root, 'skills')
+      const commandLogPath = path.join(root, 'commands.log')
+      if (scenario === 'missing') {
+        await initializeVault({ vaultRoot, timezone: 'UTC', createdAt: '2026-01-01T00:00:00Z' })
+      } else {
+        await seedSyntheticSleepNight(vaultRoot, 'oura', { ...SYNTHETIC_SLEEP_NIGHT_VALUES }, { timeZone: 'UTC' })
+      }
+      await cp(resolveAssistantSkillsRoot(), skillsRoot, { recursive: true })
+      await materializeFocusedActivityProjectionCli({ binDirectory, commandLogPath, vaultRoot })
+      const before = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const manifest = await readAssistantCliLlmsFullManifestFromCliEntry({
+        cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
+        workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+      })
+      const assistantCliContract = buildAssistantCliSurfaceContract(manifest)
+      if (!assistantCliContract) throw new Error('Expected the production CLI contract for sleep card journeys.')
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, groupConversation: false, vaultRoot,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract,
+          assistantContextSnapshotPrompt: null, assistantHostedDeviceConnectAvailable: false,
+          assistantHostedDeviceConnectProviders: [], assistantKnowledgeToolsAvailable: false,
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'direct',
+          currentInstant: '2026-11-03T12:00:00Z', currentLocalDate: '2026-11-03', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+          ordinaryInboundTurn: true, turnTrigger: 'automation-auto-reply',
+        }),
+        dynamicTools: [MURPH_ATTACH_SLEEP_CARD_TOOL, MURPH_ATTACH_RESPONSE_CARD_TOOL],
+        env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot }, fixtureBinDirectory: binDirectory,
+        model: config.model, modelProvider: config.modelProvider, prompt,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory: root,
+      })
+      const attachments = readCapabilityRoutingActions(result.jsonEvents).filter(action => action.kind === 'dynamic' && action.tool.startsWith('attach_'))
+      const authoredReply = result.providerAuthoredFinalMessage?.trim() ?? ''
+      process.stdout.write('[sleep-card-journey-reply] ' + JSON.stringify({ scenario, reply: authoredReply, cardKind: result.responseCard?.kind ?? null }) + '\n')
+      // The card path never writes health records. Ordinary memory and audit
+      // notes stay allowed, so compare only the canonical ledger and vault.
+      const healthRecords = (snapshot: Record<string, string>) => Object.fromEntries(
+        Object.entries(snapshot).filter(([file]) => file.startsWith('ledger/') || file === 'vault.json'))
+      expect(healthRecords(await snapshotRealCodexCanonicalVault(vaultRoot))).toEqual(healthRecords(before))
+      expect(result.responseMedia ?? []).toEqual([])
+      if (scenario === 'general') {
+        expect(attachments).toHaveLength(1)
+        expect(attachments[0]).toMatchObject({ tool: 'attach_sleep_card', argumentsValue: { date: '2026-11-03' } })
+        expect(result.responseCard).toMatchObject({ kind: 'sleep_summary', localDate: '2026-11-03', totalSleepMinutes: 436, stages: { deepMinutes: 141, remMinutes: 118, lightMinutes: 177 } })
+        expect(authoredReply).toBe('')
+      } else {
+        expect(result.responseCard).toBeNull()
+        expect(authoredReply).not.toBe('')
+        if (scenario !== 'missing') expect(attachments).toHaveLength(0)
+        if (scenario === 'specific') expect(authoredReply).toMatch(/141|2\s*(?:h|hours?)\s*(?:and\s*)?21/iu)
+        if (scenario === 'compound') expect(authoredReply).toMatch(/train|workout|exercise|rest/iu)
+        if (scenario === 'missing') {
+          expect(authoredReply).toMatch(/(?:no|not|don't|haven't|couldn't|missing|isn't|can’t|can't).*(?:sleep|data|record|night)|(?:sleep|data|record).*(?:missing|available|synced)/iu)
+          expect(authoredReply).not.toMatch(/you (?:got|slept) \d|score (?:was|is) \d/iu)
+        }
+      }
+    } finally { await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths]) }
+  })
+})
 
 describeRealCodex('real Codex focused sleep-pattern projection e2e', () => {
   it('preserves provider-labelled sleep reads after scout retirement', async () => {

@@ -348,3 +348,12 @@ and selected metric points cannot reconstruct cross-provider ranking or session
 overlap reduction. Publication uses secure deletion to clear retired payloads;
 freed pages remain reusable within SQLite. There is no foreground VACUUM or full
 rebuild for this storage change.
+
+### Sleep summary card read
+
+`resolveWearableSleepCardNight(vaultRoot, { wakeDate })` selects one eligible
+night by localized wake date from a bounded adjacent stored-date read. It
+retains total-only evidence, excludes naps/short/tentative sessions, returns
+recovery for the selected stored date, and optionally enriches absent RMSSD
+with canonical SDNN samples inside the sleep window. Night timezone precedes
+validated vault reporting timezone. `wearables day` semantics are unchanged.
