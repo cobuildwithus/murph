@@ -1,0 +1,21 @@
+{
+  "publishedOn": "2026-11-03",
+  "order": 100,
+  "item": {
+    "id": "meal-photos-answered-while-syncing",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Meal photos don't wait behind device syncs",
+    "summary": "When your phone or wearable is syncing, Murph now starts on a meal photo you send from the app without waiting for the sync to settle.",
+    "details": "A reply that's ready to go out also sends on Murph's next check, even while new device data keeps arriving.",
+    "relevanceTags": [
+      "nutrition",
+      "meals",
+      "device-sync",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      4512
+    ]
+  }
+}
