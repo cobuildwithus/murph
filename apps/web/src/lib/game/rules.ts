@@ -515,7 +515,7 @@ export function assertGroupTermsOpen(state: RuleState, actor: string, now: Date,
 export function scheduleEditedTerms(state: RuleState, changedStart: string | null): Schedule | null {
   const dayOne = gameDayOne(state.players);
   return state.game.status === "live" && dayOne
-    ? scheduleFor(state, remainingPlayers(state), () => changedStart ?? dayOne) : null;
+    ? scheduleFor(state, state.players, () => changedStart ?? dayOne) : null;
 }
 
 export function decideLeave(state: RuleState, memberId: string): "left" | "void" | "already-left" {

@@ -41,3 +41,13 @@ Product journeys are Ready for internal testing. Production group admission rema
 Frozen dependency installation, isolated PostgreSQL migration deployment, Web typecheck and lint passed on the new base. `pnpm complexity:diff` passed with zero changed-source hotspots above 20. Focused rules, group PostgreSQL, service, deletion and collection proof passed 5 suites / 192 tests. `pnpm docs:drift`, `pnpm docs:gardening` and `git diff --check HEAD` passed. The isolated `murph_test_group_games_pr3` database was removed after verification.
 
 Prior implementation proof passed all 43 game suites (793 tests), with subsequent focused regression additions passing separately. The final PR evidence will report the new-base counts. Final ReviewGPT and required CI remain pending the pushed candidate. The active plan stays open through that gate.
+
+## Final review round 1
+
+PR #4489 reviewed candidate `1d90cc6a09` on the pinned vonneumann lane. GPT-6 Pro was selected and verified on the accepted message; the full guarded attachment and exact response marker were confirmed. Send-to-capture elapsed time was approximately 373 seconds, above the 80-second marked-response minimum. The exact-turn export matched the captured response. The UI exposed no separate reasoning-time label, so the runbook's marked-response elapsed-time fallback applies. The known metadata-cleanup friction applies; canonical launch inputs preserve the round-one full-snapshot scope and immutable baseline.
+
+One original-PR finding was accepted: a pre-Day-1 leaver retained the old calendar after terms moved the start, making weekday scoring and later joins depend on roster order. A focused rule regression reproduced an incorrect shared prize. Reschedule all retained identified players through the existing schedule owner; departure timestamps and eligibility remain unchanged. Add PostgreSQL proof for persistence, access revocation, later joining, and the correct all-way tie. No new state or abstraction.
+
+CI also exposed the suite's redundant task-specific database-name guard. Remove it and rely on the canonical PostgreSQL runner's existing loopback test-database validation, matching the other game suites. This is test setup only; local verification still uses an owned isolated database. Existing Frog entries cover differing database guards and round-metadata cleanup.
+
+After correction, the five focused suites pass 194 tests. Lint, complexity and documentation checks pass. The one-line production correction reduces filtering without adding a new owner; round 2 will re-send the full sensitive snapshot.

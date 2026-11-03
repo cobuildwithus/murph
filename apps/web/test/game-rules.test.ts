@@ -4,6 +4,7 @@ import { gameChatProgress } from "@/src/lib/game/chat-progress";
 import type { GameEntryKind, GameSchedule } from "@/src/lib/game/contract";
 import { areGameDevToolsAllowed, gameOnSql, gameOnWhere, isGameEnabled, isGameEnabledFor, isGameOn, mediaKeyOwner, mediaKeyPrefixFor } from "@/src/lib/game/access";
 import {
+  assertGroupTermsOpen,
   decideCancelInvite,
   decideDayCompletion,
   playerStreak,
@@ -24,6 +25,7 @@ import {
   parseStoredTerms,
   playerFor,
   scorePlayer,
+  scheduleEditedTerms,
   type RuleState,
   type Schedule,
   type StoredStake,
@@ -148,6 +150,33 @@ describe("group leave before activation", () => {
     state.players[0].leftAt = JOIN_AT;
     expect(decideLeave(state, LEO)).toBe("already-left");
     expect(() => decideJoin(state, { memberId: AVA, now: JOIN_AT, termsVersion: 1, timeZone: NYC })).toThrow(GameRuleError);
+  });
+});
+
+describe("group calendar after leaving", () => {
+  it("keeps weekday scoring and later joins independent of retained roster order after an edit", () => {
+    const now = new Date("2030-03-01T12:00:00Z");
+    const third = "hbm_third";
+    let state = invited({ days: [0, 2] }, [WINNER_GETS], "2030-03-11");
+    state.game = { ...state.game, seats: 10, status: "live", inviteExpiresAt: null };
+    state.players = [LEO, AVA, third].map((memberId, seat) => ({ memberId, seat, timeZone: "UTC", dayOne: "2030-03-11", joinedAt: now }));
+    expect(decideLeave(state, AVA)).toBe("left");
+    state.players[1].leftAt = now;
+    assertGroupTermsOpen(state, LEO, now, 1);
+    const schedule = scheduleEditedTerms(state, "2030-03-13")!;
+    state.players = state.players.map(player => ({ ...player, dayOne: schedule.players.find(next => next.memberId === player.memberId)?.dayOne ?? player.dayOne }));
+    state = post(post(state, LEO, at(state, LEO, 0, 12)), third, at(state, third, 5, 12));
+    for (const players of [state.players, [state.players[1], state.players[0], state.players[2]]]) {
+      const reordered = { ...state, players };
+      expect(decideSettle(reordered)).toMatchObject({ tickets: [], result: { scores: [
+        { seat: 0, score: 1, eligible: true }, { seat: 1, eligible: false }, { seat: 2, score: 1, eligible: true },
+      ] } });
+      expect(decideJoin(reordered, { memberId: "hbm_late", now: new Date("2030-03-14T12:00:00Z"), termsVersion: 1, timeZone: "UTC" }))
+        .toMatchObject({ players: [{ dayOne: "2030-03-13" }] });
+    }
+    expect(state.players.map(player => player.dayOne)).toEqual(Array(3).fill("2030-03-13"));
+    expect(state.players[1]).toMatchObject({ leftAt: now, joinedAt: now });
+    expect(codeOf(() => post(state, AVA, at(state, AVA, 0, 12)))).toBe("NOT_A_PLAYER");
   });
 });
 

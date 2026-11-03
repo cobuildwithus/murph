@@ -38,11 +38,6 @@ vi.mock("@/src/lib/hosted-crypto/env", async () => {
 
 vi.mock("@/src/lib/game/report-alert", () => ({ GAME_REPORT_ALERTS_PER_REPORTER_DAY: 10, sendGameReportAlert: vi.fn() }));
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
-if (enabled) {
-  const url = new URL(process.env.DATABASE_URL ?? "");
-  if (!["postgresql:", "postgres:"].includes(url.protocol) || !["127.0.0.1", "localhost"].includes(url.hostname)
-    || url.searchParams.has("host") || url.pathname !== "/murph_test_group_games_pr3") throw new Error("Group proof requires its isolated loopback database.");
-}
 const db = getPrisma();
 const ids: string[] = [];
 const createdAt = new Date("2030-03-01T12:00:00Z");
@@ -187,6 +182,31 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     expect(race[1].ok).toBe(true);
     expect((await gameRow(game.id)).players.map(player => player.dayOne?.toISOString().slice(0, 10))).toEqual(["2030-03-09", "2030-03-09", "2030-03-09"]);
     expect(await run(b.id, { ...edit, expectedTermsVersion: 2 })).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
+  });
+
+  it("reschedules a retained leaver with the shared calendar before scoring and later admission", async () => {
+    const [a, b, c, late] = await Promise.all([person(), person(), person(), person()]);
+    const initial: GameTerms = { ...terms, startsOn: "2030-03-11", lengthDays: 7, schedule: { days: [0, 2] } };
+    const game = await create(a, [b, c], { terms: initial });
+    await ok(b.id, join(game.token)); await ok(c.id, join(game.token));
+    await ok(b.id, { type: "leave", gameId: game.id });
+    await ok(a.id, { type: "editTerms", gameId: game.id, expectedTermsVersion: 1, terms: { ...initial, startsOn: "2030-03-13" } });
+    const changed = await gameRow(game.id);
+    expect(changed.players.map(player => player.dayOne?.toISOString().slice(0, 10))).toEqual(Array(3).fill("2030-03-13"));
+    expect(changed.players[1]).toMatchObject({ leftAt: createdAt, joinedAt: createdAt });
+    expect(await readGame(game.id, b.id)).toBeNull();
+    const post = (actor: string, now: Date) => run(actor, { type: "post", gameId: game.id, entryId: randomUUID(), kind: "words", mediaKeys: [], text: "Done" }, now);
+    expect(await post(b.id, new Date("2030-03-13T12:00:00Z"))).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
+    expect((await post(a.id, new Date("2030-03-13T12:00:00Z"))).ok).toBe(true);
+    expect((await post(c.id, new Date("2030-03-18T12:00:00Z"))).ok).toBe(true);
+    await ok(late.id, join(game.token, "UTC", 2), new Date("2030-03-18T12:00:00Z"));
+    expect((await gameRow(game.id)).players.at(-1)?.dayOne?.toISOString().slice(0, 10)).toBe("2030-03-13");
+    expect((await post(late.id, new Date("2030-03-18T12:00:00Z"))).ok).toBe(true);
+    const settled = await settle(game.id, a.id);
+    expect(parseStoredResult(settled.result).scores).toMatchObject([
+      { seat: 0, score: 1, eligible: true }, { seat: 1, eligible: false }, { seat: 2, score: 1, eligible: true }, { seat: 10, score: 1, eligible: true },
+    ]);
+    expect(settled.tickets).toEqual([]);
   });
 
   it("rechecks Day 1 after an edit waits for the game lock", async () => {
