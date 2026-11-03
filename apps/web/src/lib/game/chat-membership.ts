@@ -88,10 +88,10 @@ export async function readGameChatCandidateIds(playerMemberIds: readonly string[
 
 /** Pair lock must precede every game lock that can establish a primary room. */
 export async function readPairGameChatTx(tx: Prisma.TransactionClient, players: readonly string[]): Promise<string | null> {
-  if (!sameGamePlayers(players, players)) throw new Error("Game chat requires 2 to 10 players.");
+  if (players.length !== 2 || !sameGamePlayers(players, players)) throw new Error("Game chat requires exactly two players.");
   await lockGamePair(tx, players[0]!, players[1]!);
   const bound = await tx.game.findFirst({
-    where: { ...gamePairWhere(players), status: { in: ["negotiating", "live", "settled"] }, chatContainerMemberId: { not: null } },
+    where: { maxPlayers: 2, ...gamePairWhere(players), status: { in: ["negotiating", "live", "settled"] }, chatContainerMemberId: { not: null } },
     orderBy: [{ createdAt: "desc" }, { id: "asc" }], select: { chatContainerMemberId: true },
   });
   return bound?.chatContainerMemberId ?? null;

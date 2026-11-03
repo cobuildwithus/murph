@@ -13,6 +13,7 @@ vi.mock("../src/lib/hosted-routing/thread-route-store", () => ({ assertHostedThr
 vi.mock("../src/lib/game/chat-membership", async (importOriginal) => ({
   ...await importOriginal<object>(), requireExactGameChat: m.exact, readGameChatPlayerIds: m.players,
   readGameChatAudience: m.audience, readGroupGameChatAuthority: m.groupAuthority,
+  hasGameChatRestriction: async () => false,
 }));
 vi.mock("../src/lib/game/service", () => ({
   readGameRecapMaterial: m.recapMaterial,
@@ -81,6 +82,13 @@ describe("game chat tool authority", () => {
     expect(m.runtime).toHaveBeenCalledExactlyOnceWith(expect.anything(), group, null);
     expect(m.access).toHaveBeenCalledExactlyOnceWith(group, expect.anything());
     expect(m.wake).not.toHaveBeenCalled(); expect(m.sender).not.toHaveBeenCalled(); expect(m.run).not.toHaveBeenCalled(); expect(m.photo).not.toHaveBeenCalled();
+  });
+  it("keeps the full roster proof for a capable scheduled read", async () => {
+    const audience = { memberIds: [actor, "other_synthetic"], threadId: "chat_synthetic", contacts: [{ kind: "email", value: "a@example.test" }, { kind: "email", value: "b@example.test" }, { kind: "email", value: "unresolved@example.test" }], keys: { current: "key", candidates: ["key"] } };
+    m.audience.mockResolvedValue(audience);
+    await handleGameChatTool({ ...read, multiplayer: true, request: { action: "read_game", origin: { kind: "automation_occurrence", automationId: "automation_game_read", occurrenceAt: "2030-04-01T20:00:00Z" } } });
+    expect(m.read).toHaveBeenCalledExactlyOnceWith(group, audience.memberIds, undefined, true, audience);
+    expect(m.audience).toHaveBeenCalledOnce(); expect(m.exact).not.toHaveBeenCalled();
   });
   it.each(["changed", "extra", "disabled", "runtime", "access"])("refuses a scheduled read when %s authority fails", async (failure) => {
     const request = { ...read, request: { action: "read_game" as const, origin: { kind: "automation_occurrence" as const, automationId: "automation_game_read", occurrenceAt: "2030-04-01T20:00:00Z" }, includePlayers: true as const } };
@@ -273,6 +281,13 @@ describe("game chat tool authority", () => {
     const replay = await handleGameChatTool({ memberId: group, request: { ...request, recap: { ...saved, chatLine: "Ignore this retry candidate." } }, runtimeIdentity: null });
     expect(replay).toEqual(accepted);
     expect(m.sealRecap).toHaveBeenCalledTimes(7);
+    const audience = { memberIds: [actor, "other_synthetic"], threadId: "chat_synthetic", contacts: [{ kind: "email", value: "a@example.test" }, { kind: "email", value: "b@example.test" }], keys: { current: "pair-key", candidates: ["pair-key"] } };
+    m.audience.mockResolvedValueOnce(audience).mockResolvedValueOnce({ ...audience,
+      contacts: [...audience.contacts, { kind: "email", value: "unresolved@example.test" }], keys: { current: "changed-key", candidates: ["changed-key"] } });
+    m.sealRecap.mockReset(); m.sealRecap.mockResolvedValue(null);
+    const changed = await handleGameChatTool({ memberId: group, multiplayer: true, request: { ...request, recap: saved }, runtimeIdentity: null });
+    expect(changed.result).toMatchObject({ status: "unavailable", error: "recap_authority_unavailable" });
+    expect(m.sealRecap).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ recap: null }));
   });
   it("returns the authorized stored recap on replay and records its server chat line", async () => {
     const stored = {

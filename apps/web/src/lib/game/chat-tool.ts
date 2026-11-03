@@ -72,21 +72,24 @@ export async function handleGameChatTool(input: Input): Promise<HostedGameToolRe
     if (!result.ok) return { action: input.request.action, result: { status: "rejected", error: `${result.error.code}: ${result.error.message}`.slice(0, 128) } };
     dayOutcome = result.dayOutcome;
   }
-  if (input.request.action !== "read_game") input = await refreshGameChatAudience(input, playerMemberIds);
+  if (input.request.action !== "read_game") {
+    const refreshed = await refreshGameChatAudience(input, playerMemberIds);
+    if (!refreshed) throw new TypeError("Game chat participants changed.");
+    input = refreshed;
+  }
   return gameChatToolResponse(input, playerMemberIds, actor, dayOutcome, photoResult);
 }
 
 /** Preserve the fresh complete handle proof through the post-mutation projection. */
-async function refreshGameChatAudience(input: Input, players: readonly string[]): Promise<Input> {
+async function refreshGameChatAudience(input: Input, players: readonly string[]): Promise<Input | null> {
   if (!input.multiplayer) {
-    if (!sameRoomIdentities(await requireExactGameChat(input.memberId), players)) throw new TypeError("Game chat participants changed.");
-    return input;
+    return sameRoomIdentities(await requireExactGameChat(input.memberId), players) ? input : null;
   }
   const audience = await readGameChatAudience(input.memberId);
   const previous = input.audience;
   if (!previous || audience.threadId !== previous.threadId
     || !audience.keys.candidates.some(key => previous.keys.candidates.includes(key))
-    || !sameRoomIdentities(audience.memberIds, players)) throw new TypeError("Game chat participants changed.");
+    || !sameRoomIdentities(audience.memberIds, players)) return null;
   return { ...input, audience };
 }
 
@@ -131,7 +134,10 @@ async function handleScheduledGameRead(input: Input): Promise<HostedGameToolResp
     await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
   });
   let players: readonly string[];
-  try { players = await requireExactGameChat(input.memberId, input.multiplayer); }
+  try {
+    if (input.multiplayer) input = { ...input, audience: await readGameChatAudience(input.memberId) };
+    players = input.audience?.memberIds ?? await requireExactGameChat(input.memberId);
+  }
   catch { return { action: "read_game", result: { status: "unavailable", error: "Use the game’s exact group chat with Murph, or start in the app." } }; }
   if (!input.multiplayer && players.length !== 2) return { action: "read_game", result: { status: "unavailable", error: "game_player_unavailable" } };
   if (!isGameOn({ players: players.map(memberId => ({ memberId })) })) return { action: "read_game", result: { status: "unavailable", error: "GAME_DISABLED: Games are invite-only for now." } };
@@ -199,7 +205,7 @@ async function handleGameRecapTool(input: Input & { request: Extract<HostedGameT
   const errors = validateGameRecap({ recap: input.request.recap, players: material.players, entries: material.entries,
     chatMessages, priorChatLines: input.request.priorChatLines, result: material.validation.result, group: material.validation.group });
   if (errors.length > 0) return { action: "write_recap", result: { status: "rejected", recapOutcome: gameRecapToolResult(errors) } };
-  if (!sameRoomIdentities(await requireExactGameChat(input.memberId, input.multiplayer), players)) return { action: "write_recap", result: { status: "unavailable", error: "recap_authority_unavailable" } };
+  if (!await refreshGameChatAudience({ ...input, audience }, players)) return { action: "write_recap", result: { status: "unavailable", error: "recap_authority_unavailable" } };
   const saved = await sealGameRecap({ beforeMutationTx: authorizeMutation, containerMemberId: input.memberId, eventId, gameId, playerMemberIds: players, recap: withValidGameSuperlatives(input.request.recap, material.validation.result.map(player => player.memberId)) });
   return saved
     ? { action: "write_recap", result: { status: "ok", recapOutcome: gameRecapToolResult([]), recap: recapForWriter(saved, input.request.recap), chatLine: gameRecapMessage(gameId, saved.chatLine) } }

@@ -842,6 +842,55 @@ async function exactRoom(people: Person[]) {
 }
 
 describe.skipIf(!enabled)("exact group chat and composer persistence", () => {
+  it("delivers and replays pair kickoff in the exact pair room beside a partially joined group", async () => {
+    Object.values(lifecycleProof).forEach(mock => mock.mockReset());
+    const people = await Promise.all([person(), person()]);
+    const groupRoom = await exactRoom(people);
+    const relative = { id: "unjoined-relative", email: `${randomUUID()}@example.test` };
+    chatProof.rooms.set(groupRoom, [...people.map(p => p.email), relative.email]);
+    const group = await create(people[0], [people[1], relative]);
+    await ok(people[1].id, join(group.token));
+    const phones = ["+15555550301", "+15555550302"];
+    for (const [index, p] of people.entries()) await db.$transaction(tx => upsertHostedMemberIdentity({ ...buildHostedMemberPhoneIdentityFields(phones[index]), memberId: p.id, prisma: tx,
+      phoneNumberVerifiedAt: createdAt, signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null, signupPhoneCodeSentAt: null, signupPhoneNumber: null }));
+    const pairRoom = await exactRoom(people);
+    chatProof.rooms.set(pairRoom, phones);
+    const pair = await runGameCommand({ actorMemberId: people[0].id, command: { type: "createGame", gameId: randomUUID(), inviteeFirstName: "Player",
+      terms: { ...terms, defaultTask: undefined, tasks: [{ seat: 0, text: "Pair walk" }, { seat: 1, text: "Pair read" }] } }, now: createdAt });
+    if (!pair.ok || !pair.game?.inviteToken) throw new Error("Pair fixture creation failed");
+    expect(await runGameCommand({ actorMemberId: people[1].id, command: join(pair.game.inviteToken), now: createdAt })).toMatchObject({ ok: true });
+    expect((await gameRow(pair.game.id)).chatContainerMemberId).toBeNull();
+    lifecycleProof.destination.mockResolvedValue({ conversationShape: "thread-container", route: { channel: "linq" } });
+    lifecycleProof.bind.mockImplementation(({ memberId }: { memberId: string }) => ({ route: { channel: "linq", delivery: { kind: "thread", target: memberId }, accountId: "line" }, externalThreadRouteAuthority: { channel: "linq", containerMemberId: memberId, threadId: memberId, accountLookupKey: "line-key" } }));
+    lifecycleProof.prepare.mockResolvedValue({}); lifecycleProof.append.mockResolvedValue({ mailboxItemId: "pair-notice" });
+    lifecycleProof.mailbox.mockResolvedValue(null);
+    const { deliverGameChatLifecycle } = await vi.importActual<typeof import("@/src/lib/game/chat-lifecycle")>("@/src/lib/game/chat-lifecycle");
+    await expect(deliverGameChatLifecycle(pair.game.id, "started")).resolves.toBe(true);
+    expect((await gameRow(pair.game.id)).chatContainerMemberId).toBe(pairRoom);
+    expect((await gameRow(group.id)).chatContainerMemberId).toBe(groupRoom);
+    expect(lifecycleProof.prepare.mock.calls[0][0].envelope.notification.route.delivery.target).toBe(pairRoom);
+    lifecycleProof.mailbox.mockResolvedValue({ id: "pair-notice", consumedAt: null });
+    await expect(deliverGameChatLifecycle(pair.game.id, "started")).resolves.toBe(true);
+    expect(lifecycleProof.append).toHaveBeenCalledOnce();
+    Object.values(lifecycleProof).forEach(mock => mock.mockReset());
+  });
+  it("withholds scheduled pair state when the capable provider roster adds an unresolved handle", async () => {
+    const people = await Promise.all([person(), person()]);
+    const room = await exactRoom(people);
+    const result = await runGameCommand({ actorMemberId: people[0].id, command: { type: "createGame", gameId: randomUUID(), inviteeFirstName: "Player",
+      terms: { ...terms, defaultTask: undefined, tasks: [{ seat: 0, text: "Private pair walk" }, { seat: 1, text: "Private pair read" }] } }, now: createdAt });
+    if (!result.ok || !result.game?.inviteToken) throw new Error("Pair fixture creation failed");
+    expect(await runGameCommand({ actorMemberId: people[1].id, command: join(result.game.inviteToken), now: createdAt })).toMatchObject({ ok: true });
+    const { handleGameChatTool } = await import("@/src/lib/game/chat-tool");
+    const input = { memberId: room, multiplayer: true, runtimeIdentity: null, request: { action: "read_game" as const,
+      origin: { kind: "automation_occurrence" as const, automationId: "synthetic-automation", occurrenceAt: "2030-03-01T12:00:00Z" } } };
+    expect(JSON.stringify(await handleGameChatTool(input))).toContain("Private pair walk");
+    chatProof.rooms.set(room, [...people.map(p => p.email), "unresolved@example.test"]);
+    expect(await handleGameChatTool(input)).toMatchObject({ action: "read_game", result: { status: "ok", state: { games: [] } } });
+    const addressed = await create(people[0], [people[1], { id: "unjoined-relative", email: "unresolved@example.test" }]);
+    await ok(people[1].id, join(addressed.token));
+    expect(await handleGameChatTool(input)).toMatchObject({ result: { status: "ok", state: { games: [{ id: addressed.id, maxPlayers: 10, pendingInviteeCount: 1 }] } } });
+  });
   it("enqueues group kickoff and recap with an unjoined relative and keeps roomless pair notices separate", async () => {
     const people = await Promise.all([person(), person()]);
     const relative = { id: "unjoined-relative", email: `${randomUUID()}@example.test` };
