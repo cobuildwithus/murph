@@ -13,7 +13,6 @@ import {
 } from "@murphai/hosted-execution/env";
 import {
   HOSTED_ELEVENLABS_ENV_NAMES,
-  HOSTED_EXA_SEARCH_CODEX_SHELL_ENV_NAMES,
   HOSTED_GEMINI_VIDEO_ANALYSIS_ENV_NAMES,
   HOSTED_MAPBOX_ROUTES_CODEX_SHELL_ENV_NAMES,
   HOSTED_MURPH_DATA_API_CODEX_SHELL_ENV_NAMES,
@@ -87,7 +86,6 @@ export const HOSTED_RUNTIME_ENV_PROFILE_KEYS = {
   // Linq webhook verification stays on the ingress boundary. The runtime only
   // receives outbound Linq API config.
   linq: HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS.linqConfigured,
-  exa: HOSTED_EXA_SEARCH_CODEX_SHELL_ENV_NAMES,
   mapbox: HOSTED_MAPBOX_ROUTES_CODEX_SHELL_ENV_NAMES,
   // Parser support is a semantic runner capability. Concrete native binary and
   // model paths are image-owned toolchain config, not forwarded runtime env.

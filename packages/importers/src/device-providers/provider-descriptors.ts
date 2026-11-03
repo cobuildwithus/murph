@@ -208,27 +208,7 @@ export const GARMIN_DEVICE_PROVIDER_DESCRIPTOR = {
 
 export const OURA_DEVICE_PROVIDER_DESCRIPTOR = {
   ...OURA_WEARABLE_PROVIDER_DESCRIPTOR,
-  transportModes: ["oauth_callback", "scheduled_poll", "webhook_push"],
-  connection: {
-    kind: "oauth2",
-    callbackPath: "/oauth/oura/callback",
-    defaultScopes: ["personal", "daily", "workout", "session", "spo2"],
-  },
-  webhook: {
-    path: "/webhooks/oura",
-    deliveryMode: "resource",
-    supportsAdmin: true,
-  },
-  sync: {
-    windows: {
-      backfillDays: DEFAULT_DEVICE_SYNC_BACKFILL_DAYS,
-      reconcileDays: 21,
-      reconcileIntervalMs: 6 * 60 * 60_000,
-    },
-    jobKinds: ["backfill", "reconcile", "resource", "delete"],
-    supportsRemoteDisconnect: true,
-    supportsTokenRefresh: true,
-  },
+  transportModes: [],
   normalization: {
     metricFamilies: [
       "activity",
@@ -245,27 +225,7 @@ export const OURA_DEVICE_PROVIDER_DESCRIPTOR = {
 
 export const STRAVA_DEVICE_PROVIDER_DESCRIPTOR = {
   ...STRAVA_WEARABLE_PROVIDER_DESCRIPTOR,
-  transportModes: ["oauth_callback", "scheduled_poll", "webhook_push"],
-  connection: {
-    kind: "oauth2",
-    callbackPath: "/oauth/strava/callback",
-    defaultScopes: ["activity:read"],
-  },
-  webhook: {
-    path: "/webhooks/strava",
-    deliveryMode: "notification",
-    supportsAdmin: true,
-  },
-  sync: {
-    windows: {
-      backfillDays: 30,
-      reconcileDays: 7,
-      reconcileIntervalMs: 6 * 60 * 60_000,
-    },
-    jobKinds: ["backfill", "reconcile", "resource", "delete", "deauthorize"],
-    supportsRemoteDisconnect: true,
-    supportsTokenRefresh: true,
-  },
+  transportModes: [],
   normalization: {
     metricFamilies: ["activity", "cardio", "session"],
     snapshotParser: "schema",
@@ -274,35 +234,7 @@ export const STRAVA_DEVICE_PROVIDER_DESCRIPTOR = {
 
 export const WHOOP_DEVICE_PROVIDER_DESCRIPTOR = {
   ...WHOOP_WEARABLE_PROVIDER_DESCRIPTOR,
-  transportModes: ["oauth_callback", "scheduled_poll", "webhook_push"],
-  connection: {
-    kind: "oauth2",
-    callbackPath: "/oauth/whoop/callback",
-    defaultScopes: [
-      "offline",
-      "read:profile",
-      "read:body_measurement",
-      "read:sleep",
-      "read:recovery",
-      "read:cycles",
-      "read:workout",
-    ],
-  },
-  webhook: {
-    path: "/webhooks/whoop",
-    deliveryMode: "resource",
-    supportsAdmin: false,
-  },
-  sync: {
-    windows: {
-      backfillDays: DEFAULT_DEVICE_SYNC_BACKFILL_DAYS,
-      reconcileDays: 21,
-      reconcileIntervalMs: 6 * 60 * 60_000,
-    },
-    jobKinds: ["backfill", "reconcile", "resource", "delete"],
-    supportsRemoteDisconnect: true,
-    supportsTokenRefresh: true,
-  },
+  transportModes: [],
   normalization: {
     metricFamilies: ["activity", "sleep", "recovery", "body", "respiration", "temperature"],
     snapshotParser: "schema",

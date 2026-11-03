@@ -10,7 +10,7 @@ import {
   MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
-  MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
+  MURPH_RETIRED_RESEARCH_SCOUT_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.js'
 
 const occurrenceAt = '2026-04-08T13:00:00.000Z'
@@ -62,7 +62,7 @@ describe('canonical notification freshness', () => {
     ['morning journal', MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID, { kind: 'dailyLocal', localTime: '13:00' }],
     ['weekly digest', MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID, { kind: 'cron', expression: '0 13 * * 3' }],
     ['weekly insight', MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID, { kind: 'cron', expression: '0 13 * * 3' }],
-    ['research scout', MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID, { kind: 'cron', expression: '0 13 * * 3' }],
+
     ['monthly coach', MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID, { kind: 'cron', expression: '0 13 8 * *' }],
   ] as const)('keeps the %s recoverable through six hours of Flex retries', (_label, automationId, schedule) => {
     const flexRetry = { automationId, schedule }

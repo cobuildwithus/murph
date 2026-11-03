@@ -73,7 +73,7 @@ describe("check-provider-request-boundaries", () => {
       undiciFetch("https://api.openai.com/v1/responses");
       require("https").request("https://api.resend.com/emails");
       import http = require("node:http");
-      http.request("https://api.exa.ai/search");
+      http.request("https://api.resend.com/emails");
     `)).toEqual(Array(6).fill("raw-provider-http"));
   });
 

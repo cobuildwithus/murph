@@ -13,7 +13,7 @@ import { readHostedSystemMailboxState } from "../src/hosted-runtime/system-mailb
 import {
   TEST_NOW, TEST_USER_ID, createDeviceSyncResolvedConfig, createMailboxItem,
   createMailboxPort, createPlatform, createResolvedDeviceSyncSystemMailboxItem,
-  createSnapshotDeviceSyncPort, createVaultSnapshotBundle, createWorkspacePort,
+  buildJunctionSleepFixtureResponse, createSnapshotDeviceSyncPort, createVaultSnapshotBundle, createWorkspacePort,
   createWorkspaceRuntimeJobInput, createWorkspaceState, removeTempRoot,
   runHostedWorkspaceRuntimeJobInProcess, writeMailboxImportStateFile,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
@@ -36,6 +36,7 @@ test.each([
   let followUpAcknowledged = false;
   let ackCalls = 0;
   let providerCalls = 0;
+  let sleepResourceCalls = 0;
   let replay = false;
   const hasPayload = !scenario.startsWith("empty");
   const basePort = createSnapshotDeviceSyncPort({ connectionId, nextReconcileAt: hasPayload ? futureAt : TEST_NOW });
@@ -49,11 +50,12 @@ test.each([
           connectionId, dirtyRevision: followUp ? "8" : "7", processedRevision: followUp ? "7" : "0",
           dirtyResources: [{
             count: 1, dirtyPayloadId: followUp ? "synthetic-followup-payload" : "synthetic-sleep-payload", jobKind: "resource",
-            payload: { resourceType: "sleep", resourceId: followUp ? "synthetic-followup-sleep" : "synthetic-sleep" },
+            payload: { resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop_v2",
+              objectId: followUp ? "synthetic-followup-sleep" : "synthetic-sleep" },
             resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop",
             windowEnd: null, windowStart: null,
           }],
-          eventCount: "1", latestDirtyAt: TEST_NOW, provider: "whoop",
+          eventCount: "1", latestDirtyAt: TEST_NOW, provider: "junction",
           resourceCategoryCounts: { summary: 1 }, sourceProviderCounts: { whoop: 1 },
           userId: TEST_USER_ID, windowEnd: null, windowStart: null,
         }],
@@ -75,13 +77,20 @@ test.each([
   };
   const providerFetch: typeof fetch = async (request) => {
     const url = new URL(request instanceof Request ? request.url : String(request));
-    assert.equal(url.origin, "https://whoop.example.test");
+    assert.equal(url.origin, "https://junction.example.test");
     providerCalls++;
-    return Response.json(url.pathname.endsWith("/synthetic-sleep") || url.pathname.endsWith("/synthetic-followup-sleep") ? {
-      id: url.pathname.split("/").at(-1), nap: false,
+    if (url.pathname.includes("/summary/sleep/")) sleepResourceCalls++;
+    // Junction returns the sleep summary for the dirty day; the restored
+    // continuation pass sees only the follow-up sleep from that same day.
+    return Response.json(buildJunctionSleepFixtureResponse(url.pathname, replay && scenario === "continuation" ? {
+      id: "synthetic-followup-sleep",
+      start: "2026-04-26T13:00:00.000Z", end: "2026-04-26T15:00:00.000Z",
+      updated_at: "2026-04-26T16:00:00.000Z",
+    } : {
+      id: "synthetic-sleep",
       start: "2026-04-26T00:30:00.000Z", end: "2026-04-26T07:30:00.000Z",
       updated_at: "2026-04-26T08:00:00.000Z",
-    } : { records: [] });
+    }));
   };
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date(TEST_NOW));
@@ -94,7 +103,7 @@ test.each([
       item: createResolvedDeviceSyncSystemMailboxItem(item), vaultRoot,
       wake: { connectionId, eventId: item.dedupeKey, expectedConnectedAt: TEST_NOW,
         hint: { occurredAt: TEST_NOW, reason: "webhook_dirty_transition" },
-        kind: "device-sync.wake", occurredAt: TEST_NOW, provider: "whoop",
+        kind: "device-sync.wake", occurredAt: TEST_NOW, provider: "junction",
         reason: hasPayload ? "webhook_hint" : "reconcile_due", userId: TEST_USER_ID },
     });
     const importState = createEmptyHostedMailboxImportState();
@@ -141,17 +150,28 @@ test.each([
     assert.ok(scenario === "continuation" || !completion.nextWakeAt || Date.parse(completion.nextWakeAt) > Date.now(),
       "recording must not leave an already-serviced due wake in Web");
     const before = await listCanonicalEntities(vaultRoot, { family: "event" });
-    if (hasPayload) assert.ok(before.some((entry) => JSON.stringify(entry.attributes).includes("synthetic-sleep")));
+    const sleepRows = (rows: typeof before) => rows.filter((row) => row.kind === "sleep_session")
+      .map((row) => ({ startAt: row.attributes.startAt, endAt: row.attributes.endAt, dataOrigin: row.attributes.dataOrigin }))
+      .sort((left, right) => String(left.startAt).localeCompare(String(right.startAt)));
+    const junctionSleep = (startAt: string, endAt: string) => ({
+      startAt, endAt,
+      dataOrigin: { version: 1, aggregatorProvider: "junction", sourceProviderSlug: "whoop-v2",
+        normalizerVersion: "junction-normalizer.v1", observedAtRaw: "2026-04-26T00:00:00.000Z", timestampSemantics: "utc" },
+    });
+    const firstSleep = junctionSleep("2026-04-26T00:30:00.000Z", "2026-04-26T07:30:00.000Z");
+    if (hasPayload) assert.deepEqual(sleepRows(before), [firstSleep]);
     if (scenario === "continuation") {
       replay = true;
       const previousProviderCalls = providerCalls;
+      const previousSleepResourceCalls = sleepResourceCalls;
       const continued = await run(snapshots[0]!, "1");
       assert.equal(snapshots.length, 2, "restore cleanup and the second device pass share one snapshot");
       assert.ok(followUpAcknowledged, "the restored invocation must process the new dirty payload");
       assert.equal(ackCalls, 3, "replay the durable ack, then acknowledge newly checkpointed work");
-      assert.equal(providerCalls, previousProviderCalls + 1, "only the new resource is fetched");
-      assert.ok((await listCanonicalEntities(vaultRoot, { family: "event" }))
-        .some((entry) => JSON.stringify(entry.attributes).includes("synthetic-followup-sleep")));
+      assert.equal(sleepResourceCalls, previousSleepResourceCalls + 1, "only the new resource is fetched");
+      assert.equal(providerCalls, previousProviderCalls + 2, "plus one Junction source check for that import");
+      assert.deepEqual(sleepRows(await listCanonicalEntities(vaultRoot, { family: "event" })),
+        [firstSleep, junctionSleep("2026-04-26T13:00:00.000Z", "2026-04-26T15:00:00.000Z")]);
       assert.ok(!continued.nextWakeAt || Date.parse(continued.nextWakeAt) > Date.now());
     }
     if (scenario.includes("crash-")) {

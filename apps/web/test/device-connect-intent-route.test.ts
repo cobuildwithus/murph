@@ -44,16 +44,10 @@ describe("hosted device connect intent route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client");
-    vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-secret");
-    vi.stubEnv("JUNCTION_API_KEY", "");
-    vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "");
-    vi.stubEnv("JUNCTION_ENV", "");
-    vi.stubEnv("JUNCTION_REGION", "");
-    vi.stubEnv("OURA_CLIENT_ID", "");
-    vi.stubEnv("OURA_CLIENT_SECRET", "");
-    vi.stubEnv("STRAVA_CLIENT_ID", "");
-    vi.stubEnv("STRAVA_CLIENT_SECRET", "");
+    vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+    vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
+    vi.stubEnv("JUNCTION_ENV", "sandbox");
+    vi.stubEnv("JUNCTION_REGION", "us");
     mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
       member: {
         id: "member_123",
@@ -72,7 +66,7 @@ describe("hosted device connect intent route", () => {
     });
     mocks.startHostedDeviceSyncConnection.mockResolvedValue({
       authorizationUrl: "https://provider.example.test/oauth/start",
-      callbackProofCookie: "murph-device-sync-whoop=proof; Path=/; HttpOnly",
+      callbackProofCookie: "murph-device-sync-junction=proof; Path=/; HttpOnly",
     });
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
   });
@@ -81,7 +75,7 @@ describe("hosted device connect intent route", () => {
     vi.unstubAllEnvs();
   });
 
-  it("redirects available direct claim links to the connect page intent flow", async () => {
+  it("redirects available Junction claim links to the connect page intent flow", async () => {
     const response = await deviceConnectIntentRoute.GET(
       new Request("https://join.example.test/device/connect/dc_opaque"),
       createRouteContext({ claim: "dc_opaque" }),
@@ -124,7 +118,7 @@ describe("hosted device connect intent route", () => {
     expect(response.headers.get("location")).toBe("https://provider.example.test/oauth/start");
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("referrer-policy")).toBe("no-referrer");
-    expect(response.headers.get("set-cookie")).toContain("murph-device-sync-whoop=proof");
+    expect(response.headers.get("set-cookie")).toContain("murph-device-sync-junction=proof");
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.claimHostedDeviceConnectIntentForStart).toHaveBeenCalledWith({
       claim: "dc_opaque",
@@ -137,16 +131,12 @@ describe("hosted device connect intent route", () => {
       target: expect.objectContaining({
         connectSourceId: "whoop",
         connectTarget: "whoop",
-        provider: "whoop",
+        provider: "junction",
       }),
     });
   });
 
-  it("rejects existing Strava intents while direct and Junction provider support remain configured", async () => {
-    vi.stubEnv("WHOOP_CLIENT_ID", "");
-    vi.stubEnv("WHOOP_CLIENT_SECRET", "");
-    vi.stubEnv("STRAVA_CLIENT_ID", "strava-client");
-    vi.stubEnv("STRAVA_CLIENT_SECRET", "strava-secret");
+  it("rejects existing Strava intents while Junction provider support remains configured", async () => {
     vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
     vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
     vi.stubEnv("JUNCTION_ENV", "sandbox");
@@ -195,7 +185,7 @@ describe("hosted device connect intent route", () => {
       authorizationUrl: "https://provider.example.test/oauth/start",
     });
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(response.headers.get("set-cookie")).toContain("murph-device-sync-whoop=proof");
+    expect(response.headers.get("set-cookie")).toContain("murph-device-sync-junction=proof");
   });
 
   it("maps JSON app-page start failures through the hosted browser mutation guard", async () => {
@@ -312,7 +302,7 @@ function createIntentRecord(
   overrides: Partial<{
     connectSourceId: string;
     connectTarget: string;
-    provider: "junction" | "whoop";
+    provider: "junction";
     sourceProviderSlug: string | null;
     startedAt: Date | null;
   }> = {},
@@ -320,10 +310,10 @@ function createIntentRecord(
   return {
     claimHash: "claim_hash",
     memberId: "member_123",
-    provider: overrides.provider ?? "whoop",
+    provider: overrides.provider ?? "junction",
     connectSourceId: overrides.connectSourceId ?? "whoop",
     connectTarget: overrides.connectTarget ?? "whoop",
-    sourceProviderSlug: overrides.sourceProviderSlug ?? null,
+    sourceProviderSlug: overrides.sourceProviderSlug ?? "whoop_v2",
     createdAt: new Date("2026-05-08T12:00:00.000Z"),
     expiresAt: new Date("2026-05-08T12:15:00.000Z"),
     startedAt: overrides.startedAt ?? null,

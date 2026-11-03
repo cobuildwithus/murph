@@ -216,7 +216,6 @@ test('early parse, validation, handler and broken-pipe results/exits remain unch
   assert.deepEqual(await invoke(argv, true), baseline)
 })
 
-
 // Only the handler is synthetic: entrypoint, shell, Incur middleware/errors,
 // rendering, exit handling, invocation ALS and loopback sender remain real.
 async function syntheticSession(run: () => Promise<unknown>) {
@@ -379,87 +378,6 @@ test('real batch exit rewrites do not multiply failures; mixed stages, stop and 
   assert.equal(JSON.parse(nested.result.stdout).failed, 1)
   assert.equal(nested.timing.batchContainers, 1)
   assert.deepEqual(nested.timing.commands, [], 'Unsupported nested batch is rejected before opening a child invocation.')
-})
-
-
-test('real research scout-batch rejects before egress and preserves output/exit with loopback diagnostics on or off', async () => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'research-timing-PRIVATE_PATH-'))
-  roots.push(directory)
-  vi.stubEnv('HOME', directory)
-  // Freeze only output-envelope wall durations, not the monotonic timing owner.
-  vi.spyOn(performance, 'now').mockReturnValue(0)
-  const fetchImpl = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
-    throw new Error('PRIVATE_UNEXPECTED_PROVIDER_REQUEST')
-  })
-  const file = path.join(directory, 'PRIVATE_ARGUMENT.json')
-  const valid = JSON.stringify({ lanes: [{ label: 'sleep', profile: { topics: ['sleep'] } }] })
-  const argv = ['research', 'scout-batch', '--vault', directory, '--input', `@${file}`,
-    '--since', '2026-04-18', '--until', '2026-06-17', '--format', 'json']
-  delete process.env.MURPH_CLI_TIMING_ENDPOINT
-  const fixtures = [
-    { payload: '{"PRIVATE_PAYLOAD":', code: 'invalid_payload' },
-    { payload: '{}', code: 'research_scout_invalid_batch_payload', rejection: 'envelope' },
-    { payload: '{"lanes":[],"PRIVATE_PAYLOAD":"PRIVATE_VALUE"}', code: 'research_scout_invalid_batch_payload',
-      rejection: 'lane_count' },
-    { payload: `${valid.slice(0, -1)},"since":"PRIVATE_VALUE"}`, code: 'research_scout_invalid_batch_payload',
-      rejection: 'unexpected_root_field' },
-    { payload: valid.replace('"sleep"', '"PRIVATE Label"'), code: 'research_scout_invalid_batch_payload',
-      rejection: 'lane_label' },
-    { payload: valid.replace('"topics"', '"mode":"focused","topics"'), code: 'research_scout_invalid_batch_payload',
-      rejection: 'unexpected_lane_field' },
-    { payload: valid.replace('["sleep"]', '"sleep"'), code: 'research_scout_invalid_batch_payload',
-      rejection: 'profile_shape' },
-    { payload: valid.replace('["sleep"]', '["PRIVATE_CONCEPT"]'), code: 'research_scout_invalid_batch_payload',
-      rejection: 'public_concept' },
-    { payload: valid, code: 'research_scout_invalid_window', since: '2026-06-18' },
-    { payload: valid, code: 'research_exa_token_missing', token: '' },
-  ]
-  for (const fixture of fixtures) {
-    vi.stubEnv('EXA_API_KEY', fixture.token ?? 'PRIVATE_TOKEN')
-    await writeFile(file, fixture.payload)
-    const args = [...argv]
-    if (fixture.since) args[args.indexOf('--since') + 1] = fixture.since
-    const baseline = await invoke(args)
-    const captured = await collect(() => invoke(args))
-    assert.deepEqual(captured.result, baseline)
-    assert.equal(captured.result.thrown, null)
-    assert.deepEqual(captured.result.exits, [1])
-    assert.equal(JSON.parse(captured.result.stdout).code, fixture.code)
-    assert.equal(JSON.parse(captured.result.stdout).stage, undefined)
-    assert.equal(fetchImpl.mock.calls.length, 0)
-    assert.equal(captured.timing.reportCount, 1)
-    assert.equal(captured.timing.commands.length, 1)
-    assert.equal(captured.timing.commands[0]!.command, 'research scout-batch')
-    assert.equal(captured.timing.commands[0]!.outcome, 'error')
-    assert.equal(captured.timing.commands[0]!.calls, 1)
-    assert.deepEqual(captured.timing.commands[0]!.failures, [{ code: fixture.code, stage: 'unknown', count: 1,
-      ...(fixture.rejection ? { rejection: fixture.rejection } : {}) }])
-    assert.equal(captured.timing.droppedCalls, 0)
-    assert.equal(captured.timing.commands[0]!.droppedFailures, undefined)
-    assert.equal(captured.wire.includes('PRIVATE'), false)
-    // The category exists only on the timing wire, never in model-visible output.
-    for (const text of [captured.result.stdout, captured.result.stderr]) {
-      assert.equal(/cliTimingRejection|"rejection"|_field|lane_|public_concept|profile_shape|envelope/u.test(text), false)
-    }
-    assert.deepEqual(await readdir(directory), [path.basename(file)], 'Rejected input performs no canonical writes.')
-  }
-  // Nearby valid input uses the real client; only the external provider is fake.
-  vi.stubEnv('EXA_API_KEY', 'PRIVATE_TOKEN')
-  await writeFile(file, valid)
-  const payload = { results: [{ title: 'Synthetic paper', url: 'https://example.test/paper' }],
-    output: { content: { candidates: [{ resultIndex: 0 }] } }, extraProviderField: 'PRIVATE_PROVIDER_PAYLOAD' }
-  fetchImpl.mockImplementation(async () => new Response(JSON.stringify(payload)))
-  const baseline = await invoke(argv)
-  const succeeded = await collect(() => invoke(argv))
-  assert.deepEqual(succeeded.result, baseline)
-  assert.equal(succeeded.result.thrown, null)
-  assert.deepEqual(succeeded.result.exits, [])
-  assert.deepEqual(JSON.parse(succeeded.result.stdout).lanes, [{ label: 'sleep', response: payload }])
-  assert.equal(fetchImpl.mock.calls.length, 2, 'Exactly one fake request per successful invocation.')
-  assert.equal(succeeded.timing.commands[0]!.outcome, 'ok')
-  assert.equal(succeeded.timing.commands[0]!.calls, 1)
-  assert.equal(succeeded.timing.commands[0]!.failures, undefined)
-  assert.equal(succeeded.wire.includes('PRIVATE_'), false)
 })
 
 test('real event and knowledge validation preserve output, effects and finite loopback evidence', async () => {
@@ -1205,45 +1123,22 @@ test('real source-cause meal errors preserve output, original bridge errors and 
   } finally { vi.useRealTimers() }
 })
 
-test('real source-cause food and research responses preserve CLI output and distinguish source-owned failures', async () => {
+test('real source-cause food responses preserve CLI output and distinguish source-owned failures', async () => {
   const baseTiming = await sourceCauseBaseline()
   const directory = await mkdtemp(path.join(os.tmpdir(), 'cli-response-PRIVATE_SENTINEL-'))
   roots.push(directory)
   vi.stubEnv('HOME', directory)
   vi.stubEnv('MURPH_HOSTED_RUNTIME_PROCESS', '1')
   vi.stubEnv('MURPH_DATA_API_KEY', 'PRIVATE_SENTINEL')
-  vi.stubEnv('EXA_API_KEY', 'PRIVATE_SENTINEL')
   vi.spyOn(process, 'loadEnvFile').mockImplementation(() => {})
   vi.spyOn(performance, 'now').mockReturnValue(0)
-  // Date-only until clamps to new Date(), not Date.now(). Freeze both while
-  // leaving monotonic timing, socket delivery and timeout handling unchanged.
-  const researchNow = '2030-01-15T12:00:00.000Z'
   vi.useFakeTimers({ toFake: ['Date'] })
-  vi.setSystemTime(new Date(researchNow))
   const { syntheticOats } = await import('./fixtures/food-label-response.ts')
   const labels = await import('../src/food-labels.ts')
-  const research = await import('../src/research-scout-client.ts')
-  const contracts = await import('@murphai/contracts')
   const { VaultCliError } = await import('@murphai/operator-config/vault-cli-errors')
   const timingOwner = await import('@murphai/runtime-state/node/cli-timing')
   const observed = vi.spyOn(timingOwner, 'noteCliTimingFailure')
   const foodHandler = vi.spyOn(labels, 'searchFoodLabelsBatch')
-  const researchHandler = vi.spyOn(research, 'fetchExaResearchScoutBatchCandidates')
-  const file = path.join(directory, 'PRIVATE_SENTINEL.json')
-  const lanes = [{ label: 'sleep', profile: { topics: ['sleep'] } }]
-  await writeFile(file, JSON.stringify({ lanes }))
-  const researchInput = contracts.researchScoutBatchInputSchema.parse({ lanes,
-    since: '2030-01-01T00:00:00.000Z', until: researchNow, maxCandidatesPerLane: 1 })
-  const expectedResearchBody = contracts.buildExaResearchScoutBatchLaneRequest({
-    profile: researchInput.lanes[0]!.profile, since: researchInput.since, until: researchInput.until, maxCandidates: 1,
-  })
-  const timeout = AbortSignal.timeout.bind(AbortSignal)
-  let researchDeadline: AbortController | undefined
-  vi.spyOn(AbortSignal, 'timeout').mockImplementation(milliseconds => {
-    if (milliseconds !== 60_000) return timeout(milliseconds)
-    researchDeadline = new AbortController()
-    return researchDeadline.signal
-  })
   const bodyFailure = (name = 'TypeError') => new Response(new ReadableStream<Uint8Array>({
     start(controller) { controller.error(Object.assign(new Error('PRIVATE_SENTINEL'), { name })) },
   }))
@@ -1267,25 +1162,7 @@ test('real source-cause food and research responses preserve CLI output and dist
         { code: 'food_labels_api_invalid_response', response: invalidJson },
         { code: 'food_labels_api_invalid_response', response: invalidShape },
       ] },
-    { command: 'research scout-batch', handler: researchHandler,
-      args: ['research', 'scout-batch', '--input', `@${file}`, '--since', '2030-01-01', '--until', '2030-01-15', '--max-candidates-per-lane', '1'],
-      target: 'https://api.exa.ai/search', body: expectedResearchBody,
-      success: { results: [{ title: 'Synthetic paper', url: 'https://example.test/paper' }],
-        output: { content: { candidates: [{ resultIndex: 0 }] } }, extraProviderField: 'PRIVATE_SENTINEL' },
-      failures: [
-        { code: 'research_exa_auth_failed', response: http(401) },
-        { code: 'research_exa_rate_limited', response: http(429) },
-        { code: 'research_exa_unavailable', response: http(503) },
-        { code: 'research_exa_request_rejected', response: http(422) },
-        { code: 'research_exa_unavailable', response: () => bodyFailure() },
-        { code: 'research_exa_invalid_response', response: invalidJson },
-        { code: 'research_exa_invalid_response', response: invalidShape },
-        { code: 'research_exa_timeout', response: () => {
-          assert.ok(researchDeadline)
-          researchDeadline.abort(new Error('PRIVATE_SENTINEL'))
-          return bodyFailure()
-        } },
-      ] },
+
   ]
   let active = owners[0]!
   let respond: () => Response = invalidJson
@@ -1293,7 +1170,7 @@ test('real source-cause food and research responses preserve CLI output and dist
     assert.equal(String(target), active.target)
     assert.equal(init?.method, 'POST')
     assert.deepEqual(JSON.parse(String(init?.body)), active.body,
-      'Use the real command contract and research prompt builder, without altered inputs.')
+      'Use the real food command contract, without altered inputs.')
     return respond()
   })
   const files = await vaultFiles(directory)

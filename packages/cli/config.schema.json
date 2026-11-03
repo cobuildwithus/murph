@@ -3376,7 +3376,7 @@
                           "maxLength": 128
                         },
                         "baseUrl": {
-                          "description": "Override the local device sync control-plane URL. Read-only list commands use an explicit target when set; daemon-backed commands may manage the selected vault daemon when omitted.",
+                          "description": "Optional control-plane URL. Hosted device operations use the authenticated runtime.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -3416,7 +3416,7 @@
                                   "maxLength": 128
                                 },
                                 "baseUrl": {
-                                  "description": "Override the local device sync control-plane URL. Read-only list commands use an explicit target when set; daemon-backed commands may manage the selected vault daemon when omitted.",
+                                  "description": "Optional control-plane URL. Hosted device operations use the authenticated runtime.",
                                   "type": "string",
                                   "minLength": 1
                                 }
@@ -3451,14 +3451,14 @@
                                   "maxLength": 128
                                 },
                                 "baseUrl": {
-                                  "description": "Override the local device sync control-plane URL. Read-only list commands use an explicit target when set; daemon-backed commands may manage the selected vault daemon when omitted.",
+                                  "description": "Optional control-plane URL. Hosted device operations use the authenticated runtime.",
                                   "type": "string",
                                   "minLength": 1
                                 },
                                 "provider": {
                                   "type": "string",
                                   "minLength": 1,
-                                  "description": "Live device-sync provider key such as junction, whoop, or oura."
+                                  "description": "Hosted device-sync provider key (junction)."
                                 },
                                 "source-provider": {
                                   "type": "string",
@@ -3484,7 +3484,7 @@
                                   "maxLength": 128
                                 },
                                 "baseUrl": {
-                                  "description": "Override the local device sync control-plane URL. Read-only list commands use an explicit target when set; daemon-backed commands may manage the selected vault daemon when omitted.",
+                                  "description": "Optional control-plane URL. Hosted device operations use the authenticated runtime.",
                                   "type": "string",
                                   "minLength": 1
                                 }
@@ -3507,7 +3507,7 @@
                                   "maxLength": 128
                                 },
                                 "baseUrl": {
-                                  "description": "Override the local device sync control-plane URL. Read-only list commands use an explicit target when set; daemon-backed commands may manage the selected vault daemon when omitted.",
+                                  "description": "Optional control-plane URL. Hosted device operations use the authenticated runtime.",
                                   "type": "string",
                                   "minLength": 1
                                 }
@@ -3530,88 +3530,7 @@
                                   "maxLength": 128
                                 },
                                 "baseUrl": {
-                                  "description": "Override the local device sync control-plane URL. Read-only list commands use an explicit target when set; daemon-backed commands may manage the selected vault daemon when omitted.",
-                                  "type": "string",
-                                  "minLength": 1
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                },
-                "daemon": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "commands": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "status": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "requestId": {
-                                  "description": "Optional caller-supplied request id for audit correlation.",
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 128
-                                },
-                                "baseUrl": {
-                                  "description": "Override the loopback control-plane URL that Murph should manage for this vault.",
-                                  "type": "string",
-                                  "minLength": 1
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "start": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "requestId": {
-                                  "description": "Optional caller-supplied request id for audit correlation.",
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 128
-                                },
-                                "baseUrl": {
-                                  "description": "Override the loopback control-plane URL that Murph should manage for this vault.",
-                                  "type": "string",
-                                  "minLength": 1
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "stop": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "requestId": {
-                                  "description": "Optional caller-supplied request id for audit correlation.",
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 128
-                                },
-                                "baseUrl": {
-                                  "description": "Override the loopback control-plane URL that Murph should manage for this vault.",
+                                  "description": "Optional control-plane URL. Hosted device operations use the authenticated runtime.",
                                   "type": "string",
                                   "minLength": 1
                                 }
@@ -3944,88 +3863,6 @@
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 24
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "research": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "commands": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "payload-schema": {
-                  "type": "object",
-                  "additionalProperties": false
-                },
-                "scout-batch-payload-schema": {
-                  "type": "object",
-                  "additionalProperties": false
-                },
-                "scout": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "input": {
-                          "type": "string",
-                          "description": "Focused structured JSON using required {\"mode\":\"focused\"} plus exact server-owned public concepts. Pass @file.json or - for stdin. Focused concept values: topics=[cardiometabolic risk, cognition, memory, metabolic health, mitochondrial complex i, phase i trials, recovery, sleep, sleep duration, sleep regularity, systematic reviews, type i interferon signaling, us guidelines]; biomarkers=[apob, glucose, hba1c, hdl cholesterol, hs-crp, ldl cholesterol]; behaviors=[exercise, meal timing, morning light, resistance training, screen curfew, sleep timing, yoga, zone 2 training]; supplements=[caffeine, creatine, magnesium, omega-3, vitamin d]; conditionsOrConcerns=[adults, anxiety, healthy adults, insomnia, menopause, migraine, older adults, parkinsons disease, sleep deprivation, type 2 diabetes]; goals=[better recovery, cardiometabolic health, cognitive performance, longevity, memory, sleep quality]; activeExperiments=[creatine supplementation, meal timing, morning light, resistance training, screen curfew]. Never include arbitrary values, names, organizations, private notes, contacts, identifiers, credentials, exact personal measurements, or medical records."
-                        },
-                        "since": {
-                          "type": "string",
-                          "description": "Inclusive lower publication date bound as YYYY-MM-DD or an ISO timestamp."
-                        },
-                        "until": {
-                          "type": "string",
-                          "description": "Inclusive upper publication date bound as YYYY-MM-DD or an ISO timestamp."
-                        },
-                        "maxCandidates": {
-                          "default": 12,
-                          "description": "Maximum research candidates to request from Exa.",
-                          "type": "integer",
-                          "minimum": 1,
-                          "maximum": 12
-                        }
-                      }
-                    }
-                  }
-                },
-                "scout-batch": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "input": {
-                          "type": "string",
-                          "description": "Finite public-concept lane JSON in @file.json form or - for stdin. Use {\"lanes\":[{\"label\":\"sleep\",\"profile\":{\"topics\":[\"sleep\"]}}]}. Lane profiles accept tag-only bucket fields with the same server-owned provider concepts and must not include focused mode, arbitrary values, raw labs, names, dates of birth, full notes, or medical records."
-                        },
-                        "since": {
-                          "type": "string",
-                          "description": "Inclusive lower publication date bound as YYYY-MM-DD or an ISO timestamp."
-                        },
-                        "until": {
-                          "type": "string",
-                          "description": "Inclusive upper publication date bound as YYYY-MM-DD or an ISO timestamp."
-                        },
-                        "maxCandidatesPerLane": {
-                          "default": 5,
-                          "description": "Maximum research candidates to request from Exa for each lane.",
-                          "type": "integer",
-                          "minimum": 1,
-                          "maximum": 12
                         }
                       }
                     }

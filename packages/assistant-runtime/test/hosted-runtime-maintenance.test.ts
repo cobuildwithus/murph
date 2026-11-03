@@ -225,12 +225,7 @@ type AssistantAutomationOperationScope =
 type HostedTimerRuntime = Parameters<typeof runHostedAssistantAutomationLane>[0]["runtime"];
 
 const DEVICE_SYNC_CONFIG = {
-  providerConfigs: {
-    oura: {
-      clientId: "oura-client",
-      clientSecret: "oura-secret",
-    },
-  },
+  providerConfigs: { junction: { environment: "sandbox", region: "us" } },
   publicBaseUrl: "https://device-sync.example.test",
   secret: "secret_123",
 } as const;
@@ -2010,12 +2005,7 @@ describe("resolveHostedDeviceSyncNextWakeAt", () => {
         "2026-04-08T00:00:00.000Z",
         async () => resolveHostedDeviceSyncNextWakeAt({
           deviceSyncConfig: {
-            providerConfigs: {
-              oura: {
-                clientId: "oura-client",
-                clientSecret: "oura-secret",
-              },
-            },
+            providerConfigs: { junction: { environment: "sandbox", region: "us" } },
             publicBaseUrl: "https://device-sync.example.test",
             secret: "secret_123",
           },
@@ -2566,9 +2556,6 @@ describe("runHostedDeviceSyncPass", () => {
     // and uses the same snapshot-restored maintenance owner as retention.
     await expectDenseRawRetentionMailboxWakeAt("2026-08-11T10:05:30.000Z");
   });
-
-
-
 
   it("logs stage-specific wearable import latency after successful dirty payload work", async () => {
     const service = {

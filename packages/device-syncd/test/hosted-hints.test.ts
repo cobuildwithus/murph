@@ -32,12 +32,7 @@ test("hosted job hint payload shaping keeps only the provider-specific job-defin
         ignored: "discarded",
       },
     }),
-    {
-      dataType: "sleep",
-      objectId: "sleep_123",
-      occurredAt: "2026-04-07T00:00:00.000Z",
-      sourceEventType: "sleep.deleted",
-    },
+    {},
   );
 
   assert.deepEqual(
@@ -51,12 +46,7 @@ test("hosted job hint payload shaping keeps only the provider-specific job-defin
         unexpected: false,
       },
     }),
-    {
-      eventType: "sleep.updated",
-      occurredAt: "2026-04-07T00:00:00.000Z",
-      resourceId: "sleep_456",
-      resourceType: "sleep",
-    },
+    {},
   );
 
   assert.deepEqual(
@@ -93,14 +83,7 @@ test("hosted job hint payload shaping ignores unsupported kinds and empty nested
         windowStart: "2026-04-07T00:00:00.000Z",
       },
     }),
-    {
-      dataType: "sleep",
-      includePersonalInfo: true,
-      objectId: "sleep_123",
-      occurredAt: "2026-04-07T00:00:00.000Z",
-      windowEnd: "2026-04-07T01:00:00.000Z",
-      windowStart: "2026-04-07T00:00:00.000Z",
-    },
+    {},
   );
 
   assert.deepEqual(
@@ -135,9 +118,7 @@ test("hosted job hint payload shaping ignores unsupported kinds and empty nested
         webhookPayload: [],
       },
     }),
-    {
-      dataType: "sleep",
-    },
+    {},
   );
 
   assert.deepEqual(
@@ -148,10 +129,7 @@ test("hosted job hint payload shaping ignores unsupported kinds and empty nested
         windowStart: "2026-04-07T00:00:00.000Z",
       },
     }),
-    {
-      windowEnd: "2026-04-07T01:00:00.000Z",
-      windowStart: "2026-04-07T00:00:00.000Z",
-    },
+    {},
   );
 
   assert.deepEqual(
@@ -173,10 +151,7 @@ test("hosted job hint payload shaping covers Strava job hints and deauthorizatio
         ignored: true,
       },
     }),
-    {
-      windowEnd: "2026-04-07T01:00:00.000Z",
-      windowStart: "2026-04-07T00:00:00.000Z",
-    },
+    {},
   );
 
   assert.deepEqual(
@@ -190,12 +165,7 @@ test("hosted job hint payload shaping covers Strava job hints and deauthorizatio
         unexpected: "discarded",
       },
     }),
-    {
-      eventType: "activity.update",
-      occurredAt: "2026-04-07T00:00:00.000Z",
-      resourceId: "activity-123",
-      resourceType: "activity",
-    },
+    {},
   );
 
   assert.deepEqual(
@@ -208,12 +178,7 @@ test("hosted job hint payload shaping covers Strava job hints and deauthorizatio
         resourceType: "athlete",
       },
     }),
-    {
-      eventType: "athlete.deauthorized",
-      occurredAt: "2026-04-07T00:00:00.000Z",
-      resourceId: "athlete-123",
-      resourceType: "athlete",
-    },
+    {},
   );
 
   assert.deepEqual(

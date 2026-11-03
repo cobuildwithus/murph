@@ -63,7 +63,6 @@ import {
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
   MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
-  MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
 } from './managed-automation-ids.js'
 import { assistantRouteSupportsGroupRoomModel } from './group-room-model.js'
 
@@ -72,7 +71,6 @@ export {
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
   MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
-  MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
 } from './managed-automation-ids.js'
 
 export { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION }
@@ -100,7 +98,6 @@ export interface MurphManagedAutomationSeed {
   ownerScope?: MurphManagedAutomationOwnerScope
   hostedRuntimeOnly?: boolean
   instructions: string
-  requiredRuntimeEnvKeys?: readonly string[]
   schedule: MurphManagedAutomationSchedule
   slug: string
   summary?: string
@@ -185,11 +182,15 @@ export const MURPH_RETIRED_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID =
 export const MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID =
   'automation_01KZZM3A9C7P4R6T8V2W5X0YQZ'
 
+export const MURPH_RETIRED_RESEARCH_SCOUT_AUTOMATION_ID =
+  'automation_01K0EXA5C0VT9F7X3KG6JMPZ5A'
+
 const MURPH_RETIRED_MANAGED_AUTOMATION_IDS = new Set<string>([
   MURPH_RETIRED_GROUP_SUNDAY_SUPERLATIVES_AUTOMATION_ID,
   MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID,
   MURPH_RETIRED_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
+  MURPH_RETIRED_RESEARCH_SCOUT_AUTOMATION_ID,
 ])
 
 export function isRetiredMurphManagedAutomationId(
@@ -271,12 +272,7 @@ const MURPH_MANAGED_WEEKLY_SCHEDULE_SPREADS: Partial<Record<
     slotMinutes: 30,
     slotsPerDay: 14,
   },
-  [MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID]: {
-    daysOfWeek: [3, 4],
-    startMinuteOfDay: 14 * 60,
-    slotMinutes: 30,
-    slotsPerDay: 12,
-  },
+
 }
 
 const MURPH_MANAGED_AUTOMATION_LEGACY_SLUGS: Partial<
@@ -668,100 +664,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'Do not diagnose, do not alarm, do not shame, and do not turn ordinary fluctuation into a problem.',
     ].join('\n'),
   },
-  {
-    automationId: MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
-    slug: 'weekly-health-research-scout',
-    title: 'Weekly health research scout',
-    summary:
-      'A weekly scout for new studies, therapies, treatments, and health research that may relate to your current context.',
-    schedule: {
-      kind: 'cron',
-      expression: '30 19 * * 3',
-    },
-    continuityPolicy: 'fresh',
-    ownerScope: 'member',
-    requiredRuntimeEnvKeys: ['EXA_API_KEY'],
-    assistantTargetOverride: {
-      reasoningEffort: 'high',
-    },
-    tags: [
-      'murph-managed:weekly-health-research-scout',
-    ],
-    instructions: [
-      'On this scheduled weekly run, run a quiet weekly health research scout for the configured automation route.',
-      '',
-      'Proactive-health pacing policy:',
-      MURPH_PROACTIVE_HEALTH_PACING_POLICY,
-      '',
-      'Outcome:',
-      "Surface 0-1 useful research-backed insight related to the user's ongoing health goals, stated interests, habits, or current questions. A clear explanation that helps them understand something they care about is enough; it need not change an immediate decision.",
-      'The unit of value is the insight, not the paper: one insight may synthesize several returned sources when they converge on the same practical interpretation.',
-      'A send-worthy insight answers: what would this help the user understand about something they care about, are doing, or are watching?',
-      'The user should still remember the point ten seconds after reading it and want to repeat it to someone; if the note reads as read-and-forget commentary, it does not clear the bar.',
-      'If nothing clears that bar as a natural chat message from Murph, send nothing.',
-      '',
-      'Language and conversational style:',
-      "- Write the outbound note in the user's normal Murph chat language. If unclear, use English.",
-      '- Do not infer the output language from Telegram, source language, vault timezone, current location, or foreign-language text in retrieved sources.',
-      '- Do not mix languages except for proper nouns, study names, product names, or unavoidable technical terms.',
-      '- The sent note should feel like a thoughtful chat message, not a research digest, literature review, or evidence table.',
-      '- Do not use a numbered list of studies.',
-      '- Do not use fixed labels like `Why it matters`, `Evidence strength`, `Confidence`, `Practically`, `Do not overinterpret`, or `Basically` in the user-facing message.',
-      '- Do not lead with journal, publisher, study type, or publication date. Lead with the useful point for the user.',
-      '',
-      'Evidence and retrieval budget:',
-      '- Read the derived knowledge index.',
-      '- Read `vault-cli knowledge show weekly-health-research-scout --if-exists`. If missing, treat as no prior research scout ledger. If the read fails, return skip.',
-      '- Check that `EXA_API_KEY` is available in the runtime environment. If it is missing, suppress the scheduled message and do not append to the wiki.',
-      '- Before calling external research, identify at least one ongoing goal, stated health interest, habit, experiment, plan, metric, symptom, lab, wearable trend, or clinician question that makes the search relevant. An ongoing goal or interest is enough without a recent change or open decision. If none exists, suppress the scheduled message without calling `vault-cli research scout-batch` and do not append to the wiki.',
-      '- Build a compact local research profile from the vault: labs/biomarkers, activity, sleep, recovery, supplements, conditions or concerns, active experiments, and stated goals.',
-      '- The external profile must be tag-level only. Do not send raw lab values, names, dates of birth, full notes, medical records, precise private identifiers, organizations, locations, events, or raw measurements to external providers.',
-      '- Before composing external lanes, run `vault-cli research scout-batch-payload-schema --format json` and treat its field-specific values as the sole provider-value catalog.',
-      '- Translate the relevant goals, interests, habits, or questions only when every provider value is an exact concept allowed for that field. Lane labels stay local and may describe the current mechanism in ordinary non-identifying language.',
-      '- Define 1-4 focused, mechanism-shaped research lanes. Group related concepts into one lane; do not create one lane per concept. If no relevant topic can be represented exactly, suppress the scheduled message without calling `vault-cli research scout-batch` and do not append to the wiki.',
-      '- Use `vault-cli research scout-batch` once. The `--input` body uses `{"lanes":[{"label":"...","profile":{...}}]}`. Each lane profile uses bucket fields `topics`, `biomarkers`, `behaviors`, `supplements`, `conditionsOrConcerns`, `goals`, and `activeExperiments`; do not use focused mode, arbitrary values, or a generic `tags` field.',
-      '- Pass publication bounds as `--since` and `--until`; YYYY-MM-DD dates or full ISO timestamps are accepted. Prefer the last two years and cap `--maxCandidatesPerLane` at 8 for this automation.',
-      '- Treat the returned results as a candidate pool only. Review, dedupe, and rank candidates locally against the current vault context and prior research scout ledger, then either send one conversational insight or suppress the run.',
-      '- The scout-batch call is the retrieval budget. Make another research/provider/web call only if the batch result is structurally unusable, the payload schema is unclear, or the chosen candidate lacks enough source evidence to summarize safely. Do not search again just to find something sendable or improve phrasing.',
-      '- Do not perform an open-ended web browsing loop.',
-      '',
-      'Selection rules:',
-      '- Hard provenance gate: if the note could have been written without this run\'s retrieved sources, it is not a research note — suppress the run. Never send notes whose substance is re-interpreting one of Murph\'s own earlier messages, general device-accuracy commentary, or caveats about a previous send.',
-      '- Before ranking, identify the ongoing goal, stated interest, habit, or current question each candidate connects to and what it helps the user understand. Prefer a clear personal connection; do not require a recent conversation, new problem, or immediate action.',
-      '- Recent conversation and automation/regimen changes are veto context. If the user recently removed, paused, archived, or down-ranked a habit or reminder, do not send research that nudges them back toward it unless there is a clear safety reason.',
-      "- Reject candidates that match only abandoned goals, contradicted interests, or isolated historic context. Do not treat an ongoing goal or stated interest as stale just because it has not come up recently.",
-      '- Choose candidates with clear personal relevance, a worthwhile takeaway beyond repeated basics, credible supporting evidence, and a low-pressure fit for the conversation.',
-      '- Value can be a useful explanation, an interesting finding, or a practical implication. Prefer something new to this user over repeating familiar advice.',
-      '- Decision impact is a bonus, not a requirement. Helping the user learn about an ongoing goal or interest is valuable on its own.',
-      '- Burden check: usually do not add a new task. Prefer interpreting, simplifying, keeping a variable stable, or ignoring noisy signals. Add a behavior only when evidence is strong, the burden is tiny, and it clearly fits a current priority.',
-      '- Taste check: the note should feel interesting and welcome. If it feels like nagging, compliance policing, generic optimization, stale reminder resurrection, or a homework assignment, suppress it.',
-      "- Do not reuse the provider candidate's `actionOrQuestion` as advice unless it survives the local relevance, burden, and taste checks.",
-      '- Prefer human studies, clinical guidelines, meta-analyses, systematic reviews, randomized trials, and large prospective cohorts, but do not send a stronger-but-irrelevant source over a weaker-but-practical one.',
-      '- Include therapies or treatments only when source quality is credible.',
-      '- Treat preprints, animal studies, cell studies, press releases, supplement marketing, podcasts, and tweets as weak evidence.',
-      '- Automatically skip generic health news, obvious habit advice, mildly topical findings, narrow supplement-timing, performance-hack, or biomarker trivia.',
-      '- Automatically skip device and measurement meta-commentary: wearable accuracy, what a ring or watch can or cannot capture, sleep-stage validity, sensor methodology, vendor score construction, or how to weigh one exported metric against another. Research about the instrument is not research about the user. The only exception is when a known measurement limitation materially changes a decision the user is actively making, and even then it is one supporting sentence inside a note about the user, never the point of the note.',
-      '- Automatically skip findings whose practical move is mainly `do more support work`, `be consistent`, `sleep better`, `eat protein`, `manage stress`, or similar known basics unless the research changes a specific live interpretation.',
-      '- Reject alarmist or fear-mongering interpretations.',
-      '- Do not recommend starting, stopping, or changing medications.',
-      '- For medical topics, frame the item as a clinician discussion prompt, not a diagnosis or prescription.',
-      '',
-      'If nothing clears the bar:',
-      '- Suppress the scheduled message and do not append to the wiki.',
-      '- Look for one worthwhile note each week, without a send quota or an expectation to skip most weeks. Skip when the available research is weak, repetitive, unrelated, or poorly timed; do not force a message to fill the schedule.',
-      '',
-      'If something clears the bar:',
-      '- Send exactly one short note about the single best insight. Never send a second item, even if several candidates are interesting.',
-      '- The insight may be supported by one source or a small cluster of sources; do not stack unrelated findings.',
-      "- Lead with the useful or interesting takeaway and its connection to the user, not with source metadata.",
-      '- Mention source provenance naturally only when it helps trust, such as `I found a recent sleep paper...`; do not include source URLs unless the user asks.',
-      '- Keep study names, publication dates, study type, evidence strength, source URLs, candidate ranking notes, and detailed caveats in the `weekly-health-research-scout` wiki section instead of the outbound note unless the user asks for sources.',
-      '- Explain any technical term in ordinary language before using it.',
-      '- No action or follow-up question is required; an informative note can stand on its own. If useful, put at most one optional practical next move in the prose. Prefer keep one variable stable, measure one thing, ignore a metric their own data shows is noisy for them, ask a clinician a better question, or avoid changing the plan based on weak/noisy evidence. Suggest adding behavior only when it passes the burden check.',
-      '- Keep the message practical, calm, and non-alarmist.',
-      '- Before returning a send decision, append one dated section to `weekly-health-research-scout` and verify its successful write receipt; if persistence fails, skip the send so an unrecorded insight cannot be repeated. Include the source URLs and study details, synthesis notes, candidate ranking notes, why the final insight was chosen, and why close alternatives were suppressed.',
-    ].join('\n'),
-  },
+
   {
     automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
     slug: 'overnight-memory-consolidation',
@@ -1239,10 +1142,6 @@ async function createMurphManagedAutomation({
     return 'skipped'
   }
 
-  if (!murphManagedAutomationRuntimeRequirementsMet(seed, input.runtimeEnv)) {
-    return 'skipped'
-  }
-
   if (isStaleMurphManagedOneShotSeed(seed, now)) {
     return 'skipped'
   }
@@ -1309,10 +1208,6 @@ async function reconcileMurphManagedAutomation({
   const reactivateReconciledLifecycleOneShot =
     canReactivateReconciledLifecycleOneShot({ existing, now, seed: rawSeed })
   if (existing.status !== 'active' && !reactivateReconciledLifecycleOneShot) {
-    return 'skipped'
-  }
-
-  if (!murphManagedAutomationRuntimeRequirementsMet(seed, input.runtimeEnv)) {
     return 'skipped'
   }
 
@@ -2034,19 +1929,6 @@ function resolveMurphManagedAutomationContinuity(
   seed: MurphManagedAutomationSeed,
 ): AutomationContinuityPolicy {
   return seed.continuityPolicy ?? 'preserve'
-}
-
-function murphManagedAutomationRuntimeRequirementsMet(
-  seed: MurphManagedAutomationSeed,
-  runtimeEnv: Readonly<Record<string, string | undefined>> | undefined,
-): boolean {
-  if (!runtimeEnv || !seed.requiredRuntimeEnvKeys?.length) {
-    return true
-  }
-
-  return seed.requiredRuntimeEnvKeys.every((key) =>
-    typeof runtimeEnv[key] === 'string' && runtimeEnv[key].trim().length > 0
-  )
 }
 
 function murphManagedAutomationAppliesToRuntime(

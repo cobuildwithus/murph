@@ -59,12 +59,6 @@ export const HOSTED_GEMINI_VIDEO_ANALYSIS_ENV_NAMES = [
   ...HOSTED_GEMINI_VIDEO_ANALYSIS_ENV.workerSecrets,
 ] as const;
 
-const HOSTED_EXA_SEARCH_ENV = {
-  codexShellWorkerSecrets: [
-    "EXA_API_KEY",
-  ],
-} as const;
-
 const HOSTED_XAI_SEARCH_ENV = {
   forwardedConfig: [
     "XAI_X_SEARCH_MODEL",
@@ -112,10 +106,6 @@ export const HOSTED_ELEVENLABS_ENV_NAMES = [
   ...HOSTED_ELEVENLABS_ENV.forwardedConfig,
 ] as const;
 
-export const HOSTED_EXA_SEARCH_CODEX_SHELL_ENV_NAMES = [
-  ...HOSTED_EXA_SEARCH_ENV.codexShellWorkerSecrets,
-] as const;
-
 export const HOSTED_XAI_SEARCH_ENV_NAMES = [
   ...HOSTED_XAI_SEARCH_ENV.workerSecrets,
   ...HOSTED_XAI_SEARCH_ENV.forwardedConfig,
@@ -141,7 +131,6 @@ export const HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES = [
   ...HOSTED_GEMINI_VIDEO_ANALYSIS_ENV.workerSecrets,
   ...HOSTED_ELEVENLABS_ENV.workerSecrets,
   ...HOSTED_XAI_SEARCH_ENV.workerSecrets,
-  ...HOSTED_EXA_SEARCH_ENV.codexShellWorkerSecrets,
   ...HOSTED_MAPBOX_ROUTES_ENV.codexShellWorkerSecrets,
   ...HOSTED_MURPH_DATA_API_ENV.codexShellWorkerSecrets,
   ...HOSTED_LINQ_DELIVERY_ENV.workerSecrets,
@@ -156,7 +145,6 @@ export const HOSTED_ASSISTANT_FORWARDED_CONFIG_ENV_NAMES = [
 ] as const;
 
 export const HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES = [
-  ...HOSTED_EXA_SEARCH_CODEX_SHELL_ENV_NAMES,
   ...HOSTED_MAPBOX_ROUTES_CODEX_SHELL_ENV_NAMES,
   ...HOSTED_MURPH_DATA_API_CODEX_SHELL_ENV_NAMES,
 ] as const;

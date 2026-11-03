@@ -268,7 +268,7 @@ import {
   MURPH_RETIRED_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
-  MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
+  MURPH_RETIRED_RESEARCH_SCOUT_AUTOMATION_ID,
   MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
 import type { AssistantRunEvent } from '../src/assistant/automation/shared.ts'
@@ -6599,7 +6599,7 @@ describe('assistant cron runtime orchestration', () => {
     ...[
       [MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID, 'Weekly digest'],
       [MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID, 'Weekly insight'],
-      [MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID, 'Weekly research'],
+
       [MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID, 'Monthly coach'],
     ].map(([automationId, name]) => ({ automationId: automationId!, name, occurrenceAt: '2026-04-08T13:00:00.000Z' })),
   ].flatMap(testCase => [5, 6, 7].flatMap(successAttempt => [false, true].map(delayed => ({
@@ -11080,6 +11080,7 @@ describe('assistant cron runtime orchestration', () => {
     { automationId: 'automation_01K55N7S9X4Q2M6P8R3T0V1WYZ', slug: 'group-sunday-superlatives', threadIsDirect: false },
     { automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID, slug: 'journal-connected-context-afternoon', threadIsDirect: true },
     { automationId: MURPH_RETIRED_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID, slug: 'personal-patterns-update', threadIsDirect: true },
+    { automationId: MURPH_RETIRED_RESEARCH_SCOUT_AUTOMATION_ID, slug: 'weekly-health-research-scout', threadIsDirect: true },
   ])('skips a persisted $slug occurrence after the seed is retired', async ({ automationId, slug, threadIsDirect }) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-12T18:10:00.000Z'))
@@ -12433,11 +12434,7 @@ describe('assistant cron runtime orchestration', () => {
       'murph-managed:monthly-improvement-coach',
       'open',
     ],
-    [
-      MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
-      'murph-managed:weekly-health-research-scout',
-      'open',
-    ],
+
     [
       MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
       'murph-managed:weekly-health-insight',
@@ -12448,11 +12445,7 @@ describe('assistant cron runtime orchestration', () => {
       'murph-managed:monthly-improvement-coach',
       'unreadable',
     ],
-    [
-      MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
-      'murph-managed:weekly-health-research-scout',
-      'unreadable',
-    ],
+
   ] as const)(
     'skips exact managed research automation %s tagged %s before provider work while onboarding is %s',
     async (automationId, tag, onboardingState) => {
@@ -12509,7 +12502,6 @@ describe('assistant cron runtime orchestration', () => {
   it.each([
     MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
     MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
-    MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   ])('omits onboarding-blocked research wakes and restores %s after completion', async (automationId) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T09:20:00.000Z'))
@@ -12599,44 +12591,6 @@ describe('assistant cron runtime orchestration', () => {
     const runtime = await readAssistantCronCanonicalRuntimeStore(resolveAssistantStatePaths(vaultRoot))
     expect(runtime.jobs[0]?.state.pendingDeliveryIntentId).toBe(
       kind === 'delivery' ? 'outbox_synthetic_accepted' : null,
-    )
-  })
-
-  it('runs managed research cron normally after onboarding is complete', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
-    const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-managed-research-onboarding-complete-',
-    )
-    addManagedResearchAutomation({
-      automationId: MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
-      tag: 'murph-managed:weekly-health-research-scout',
-      vaultRoot,
-    })
-    await completeAssistantOnboarding({
-      completedAt: '2026-04-08T09:00:00.000Z',
-      reason: 'user_answered',
-      vault: vaultRoot,
-    })
-    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
-
-    const result = await executeClaimedAssistantCronJob({
-      job: claimed,
-      paths,
-      trigger: 'scheduled',
-      vault: vaultRoot,
-    })
-
-    expect(result.run.status).toBe('succeeded')
-    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
-    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        deliveryDedupeToken: expect.stringContaining(claimed.job.jobId),
-        instructions: expect.not.stringContaining(
-          'Run weekly-health-research-scout.\n\nIndependent automation authority (engine-supplied):',
-        ),
-        turnTrigger: 'automation-cron',
-      }),
     )
   })
 

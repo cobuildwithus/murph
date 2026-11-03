@@ -11905,7 +11905,7 @@ async function waitForCondition(predicate: () => boolean, timeoutMs = 1_000): Pr
 }
 
 // This composes the real workspace runner and automation lane, mailbox owner,
-// WHOOP provider, importer, WriteBatch/receipt persistence, and query. The engine
+// Junction provider with WHOOP-labelled data, importer, WriteBatch/receipt persistence, and query. The engine
 // pass is a held model stand-in and device HTTP is synthetic. Cross-process projection coherence is a separate query
 // owner requirement: these reads intentionally start after the commit settles.
 describe("foreground device ingestion", () => {
@@ -12082,7 +12082,7 @@ describe("foreground device ingestion", () => {
       assert.ok(eventId);
       assert.ok(await readEvent({ vaultRoot: fixture.vaultRoot, eventId }));
       await rebuildQueryProjection(fixture.vaultRoot);
-      assert.ok((await listMetricPoints(fixture.vaultRoot, { limit: null })).some((point) => point.metricKey === "readiness-score"));
+      assert.ok((await listMetricPoints(fixture.vaultRoot, { limit: null })).some((point) => point.metricKey === "sleep-score"));
       assert.ok(fixture.receiptCounts.length > 0, "canonical publication must be durable before ack");
       assert.equal(fixture.acks.length, 0);
       for (const effect of fixture.effects.splice(0)) await effect();
@@ -12133,10 +12133,10 @@ describe("foreground device ingestion", () => {
         assert.equal(failJob.mock.calls.length, 0);
         const records = await readIntegrationIngestEntries(fixture.vaultRoot);
         assert.ok(records.some((entry) => entry.record.id === prior.id));
-        assert.ok(records.some((entry) => entry.record.provider === "whoop"));
+        assert.ok(records.some((entry) => entry.record.provider === "junction"));
         assert.deepEqual((await readHostedMediaReferenceCatalogue({ vaultRoot: fixture.vaultRoot })).entries, []);
         await rebuildQueryProjection(fixture.vaultRoot);
-        assert.ok((await listMetricPoints(fixture.vaultRoot, { limit: null })).some((point) => point.metricKey === "readiness-score"));
+        assert.ok((await listMetricPoints(fixture.vaultRoot, { limit: null })).some((point) => point.metricKey === "sleep-score"));
         for (const effect of fixture.effects.splice(0)) await effect();
         assert.deepEqual(fixture.acks[0]?.processedDirtyPayloadIds, ["payload_concurrent"]);
         assert.notEqual(createHash("sha256").update(await readFile(path.join(fixture.vaultRoot, relativePath))).digest("hex"), cold.sha256);
@@ -12243,7 +12243,7 @@ describe("foreground device ingestion", () => {
       await afterWrite.promise;
       await rebuildQueryProjection(fixture.vaultRoot);
       const points = await listMetricPoints(fixture.vaultRoot, { limit: null });
-      assert.ok(points.some((point) => point.metricKey === "readiness-score"));
+      assert.ok(points.some((point) => point.metricKey === "sleep-score"));
       assert.equal(modelFinished, false);
       assert.equal(fixture.acks.length, 0);
       const log = await readHostedCanonicalWriteReceiptLog({
@@ -12317,7 +12317,7 @@ describe("foreground device ingestion", () => {
       await waitForCondition(() => fixture.effects.length > 0, 5_000);
       await rebuildQueryProjection(fixture.vaultRoot);
       assert.ok((await listMetricPoints(fixture.vaultRoot, { limit: null })).some(
-        (point) => point.metricKey === "readiness-score",
+        (point) => point.metricKey === "sleep-score",
       ));
       assert.equal(fixture.conversationImports, 1);
       assert.equal(fixture.acks.length, 0);
@@ -12409,7 +12409,7 @@ describe("foreground device ingestion", () => {
       await Promise.allSettled(fixture.tracked);
       await rebuildQueryProjection(fixture.vaultRoot);
       assert.equal((await listMetricPoints(fixture.vaultRoot, { limit: null })).some(
-        (point) => point.metricKey === "readiness-score",
+        (point) => point.metricKey === "sleep-score",
       ), false);
       assert.equal(fixture.acks.length, 0);
     } finally {
@@ -12423,6 +12423,9 @@ describe("foreground device ingestion", () => {
 
 async function createForegroundDeviceFixture(limitPerLane = 10, history?: { now: string; start: string; end: string }) {
   const now = history?.now ?? TEST_NOW;
+  const sleepStart = history?.start ?? "2026-04-24T22:00:00.000Z";
+  const sleepEnd = history?.end ?? "2026-04-25T06:00:00.000Z";
+  const sleepDay = sleepEnd.slice(0, 10);
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "synthetic-concurrent-device-"));
   await initializeVault({ createdAt: now, vaultRoot, timezone: "UTC" });
   const authority = new AbortController();
@@ -12441,7 +12444,7 @@ async function createForegroundDeviceFixture(limitPerLane = 10, history?: { now:
     hint: { reason: "dirty" },
     kind: "device-sync.wake",
     occurredAt: now,
-    provider: "whoop",
+    provider: "junction",
     reason: "webhook_hint",
     userId: TEST_USER_ID,
   };
@@ -12460,20 +12463,16 @@ async function createForegroundDeviceFixture(limitPerLane = 10, history?: { now:
             accessTokenExpiresAt: "2099-01-01T00:00:00.000Z",
             connectedAt: now, createdAt: now, updatedAt: now,
             displayName: "Synthetic device", externalAccountId: "synthetic_device",
-            id: "connection_concurrent", metadata: {}, provider: "whoop",
+            id: "connection_concurrent", metadata: {}, provider: "junction",
             scopes: ["offline", "read:sleep", "read:recovery"], status: "active",
           },
-          credential: { kind: "oauth_tokens", tokenBundle: {
-            accessToken: "synthetic-token", refreshToken: "synthetic-refresh",
-            accessTokenExpiresAt: "2099-01-01T00:00:00.000Z",
-            keyVersion: "synthetic", tokenVersion: 1,
-          } },
+          credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
           localState: {
             lastErrorCode: null, lastErrorMessage: null, lastSyncCompletedAt: null,
             lastSyncErrorAt: null, lastSyncStartedAt: null, lastWebhookAt: null,
             nextReconcileAt: "2099-01-01T00:00:00.000Z",
           },
-          sources: [],
+          sources: [{ sourceProviderSlug: "whoop_v2", displayName: null, status: "connected", resourceCount: 1, resourceAvailabilitySummary: { sleep: true }, lastErrorCode: null, lastErrorMessage: null, firstSeenAt: now, lastSeenAt: now, lastDataAt: null }],
         }],
         generatedAt: now, userId: TEST_USER_ID,
       };
@@ -12484,10 +12483,10 @@ async function createForegroundDeviceFixture(limitPerLane = 10, history?: { now:
         items: [{
           connectionId: "connection_concurrent", dirtyRevision: "7", processedRevision: "0",
           dirtyResources: [{ count: 1, dirtyPayloadId: "payload_concurrent", jobKind: "resource",
-            payload: { resourceType: "recovery", resourceId: "sleep_concurrent" },
+            payload: { resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop_v2", windowStart: sleepStart, windowEnd: sleepEnd },
             resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop",
             windowEnd: null, windowStart: null }],
-          eventCount: "1", latestDirtyAt: now, provider: "whoop",
+          eventCount: "1", latestDirtyAt: now, provider: "junction",
           resourceCategoryCounts: { summary: 1 }, sourceProviderCounts: { whoop: 1 },
           userId: TEST_USER_ID, windowEnd: null, windowStart: null,
         }],
@@ -12517,11 +12516,11 @@ async function createForegroundDeviceFixture(limitPerLane = 10, history?: { now:
     now: () => now,
     operatorHomeRoot: path.join(vaultRoot, ".runtime", "synthetic-operator"),
     runtime: {
-      commitTimeoutMs: null, forwardedEnv: {}, platform, platformEnv: {}, userEnv: {},
+      commitTimeoutMs: null, forwardedEnv: {}, platform, platformEnv: { JUNCTION_API_KEY: "sk_us_synthetic", JUNCTION_CLIENT_USER_ID_SECRET: "synthetic-secret", JUNCTION_ENV: "sandbox", JUNCTION_REGION: "us", JUNCTION_API_BASE_URL: "https://junction.example.test" }, userEnv: {},
       resolvedConfig: {
         channelCapabilities: { emailSendReady: false, telegramBotConfigured: false },
         deviceSync: {
-          providerConfigs: { whoop: { baseUrl: "https://whoop.example.test", clientId: "synthetic-client", clientSecret: "synthetic-secret" } },
+          providerConfigs: { junction: { environment: "sandbox", region: "us" } },
           publicBaseUrl: "https://sync.example.test", secret: "synthetic-device-secret",
         },
       },
@@ -12628,7 +12627,7 @@ async function createForegroundDeviceFixture(limitPerLane = 10, history?: { now:
   };
   vi.stubGlobal("fetch", async (request: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof request === "string" ? request : request instanceof URL ? request.href : request.url);
-    assert.equal(url.hostname, "whoop.example.test");
+    assert.equal(url.hostname, "junction.example.test");
     assert.ok(init?.signal);
     fixture.providerFetches += 1;
     fixture.activeProviderRequests += 1;
@@ -12646,9 +12645,9 @@ async function createForegroundDeviceFixture(limitPerLane = 10, history?: { now:
           },
         }));
       }
-      const response = url.pathname.endsWith("/recovery")
-        ? { sleep_id: "sleep_concurrent", updated_at: now, score: { recovery_score: 72, resting_heart_rate: 54 } }
-        : { id: "sleep_concurrent", cycle_id: "cycle_concurrent", start: history?.start ?? "2026-04-24T22:00:00.000Z", end: history?.end ?? "2026-04-25T06:00:00.000Z", updated_at: now };
+      const response = url.pathname.includes("/user/providers/")
+        ? { providers: [{ slug: "whoop_v2", name: "WHOOP", status: "connected", resource_availability: { sleep: true } }] }
+        : { sleep: [{ id: "sleep_concurrent", user_id: "synthetic_device", date: `${sleepDay}T00:00:00.000Z`, calendar_date: sleepDay, bedtime_start: sleepStart, bedtime_stop: sleepEnd, type: "long_sleep", duration: 28800, total: 27000, awake: 1800, light: 15000, rem: 6000, deep: 6000, score: 72, created_at: now, updated_at: now, source: { provider: "whoop_v2" } }] };
       return new Response(JSON.stringify(response), { headers: { "content-type": "application/json" } });
     } finally {
       fixture.activeProviderRequests -= 1;

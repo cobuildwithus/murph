@@ -392,7 +392,6 @@ specimens omit the comparator.
 
 The `/settings` Data & privacy export uses that same in-browser browser-vault replica path. It downloads the decrypted `murph.browser-vault-replica` JSON that dashboard pages can already read, rather than making the primary user export the older hosted account metadata bundle.
 
-
 ## Core responsibilities
 
 - Garmin connect plus Oura, Strava, and WHOOP OAuth start/callback flows
@@ -825,12 +824,6 @@ Required for the hosted device-sync lane in addition:
 - `JUNCTION_CLIENT_USER_ID_SECRET`
 - `JUNCTION_ENV`
 - `JUNCTION_REGION`
-- `WHOOP_CLIENT_ID`
-- `WHOOP_CLIENT_SECRET`
-- `OURA_CLIENT_ID`
-- `OURA_CLIENT_SECRET`
-- `STRAVA_CLIENT_ID`
-- `STRAVA_CLIENT_SECRET`
 
 Required for hosted Linq ingress:
 
@@ -1038,10 +1031,6 @@ or `Set-Cookie` from the origin. Then test a recap link from Messages with and
 without the compatible app installed.
 
 Provider-owned webhook-admin settings:
-
-- `OURA_WEBHOOK_VERIFICATION_TOKEN` when the shared Oura provider config should answer webhook preflight challenges and maintain Oura webhook subscriptions. This secret should stay on the provider-owned config path rather than the generic hosted env surface.
-- `STRAVA_WEBHOOK_SIGNING_SECRET` when direct Strava webhook POST delivery is enabled, plus optional `STRAVA_WEBHOOK_TIMESTAMP_TOLERANCE_MS`; these stay on the provider-owned config path and are not needed for hosted connect-source flows that do not use direct Strava webhook delivery.
-- `STRAVA_WEBHOOK_VERIFY_TOKEN` when the shared Strava provider config should answer webhook preflight challenges and maintain the one app-global Strava webhook subscription. This secret should stay on the provider-owned config path rather than the generic hosted env surface.
 
 Hosted onboarding extras:
 

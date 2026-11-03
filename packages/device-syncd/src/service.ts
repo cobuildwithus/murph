@@ -226,8 +226,6 @@ export interface CreateDeviceSyncServiceInput {
   store?: SqliteDeviceSyncStore;
   clock?: DeviceSyncClock;
   schedulerMutex?: DeviceSyncTickMutex;
-  workerMutex?: DeviceSyncTickMutex;
-  workerExecutor?: DeviceSyncWorkerExecutor;
 }
 
 export interface DeviceSyncClock {
@@ -238,9 +236,6 @@ export interface DeviceSyncTickMutex {
   runIfIdle<T>(operation: () => Promise<T>): Promise<T | undefined>;
 }
 
-export interface DeviceSyncWorkerExecutor {
-  drainWorker(limit: number): Promise<number>;
-}
 
 export interface DeviceSyncService {
   readonly vaultRoot: string;
@@ -254,8 +249,6 @@ export interface DeviceSyncService {
   getAccount(accountId: string): PublicDeviceSyncAccount | null;
   listJobFailureDiagnostics(): DeviceSyncJobFailureDiagnostic[];
   listJobTimingDiagnostics(): DeviceSyncJobTimingDiagnostic[];
-  start(): void;
-  stop(): void;
   close(): void;
   startConnection(input: StartConnectionInput): Promise<BeginConnectionResult>;
   handleConnectionCallback(input: HandleConnectionCallbackInput): Promise<CompleteConnectionResult>;
@@ -316,18 +309,12 @@ class DeviceSyncServiceController {
   private readonly codec: ReturnType<typeof createSecretCodec>;
   private readonly clock: DeviceSyncClock;
   private readonly schedulerMutex: DeviceSyncTickMutex;
-  private readonly workerMutex: DeviceSyncTickMutex;
-  private readonly workerExecutor: DeviceSyncWorkerExecutor;
   private readonly workerLeaseMs: number;
-  private readonly workerPollMs: number;
   private readonly workerBatchSize: number;
-  private readonly schedulerPollMs: number;
   private readonly shouldYieldImportPreparation: (() => boolean) | null;
   private readonly shouldYieldJobExecution: (() => boolean) | null;
   private readonly workerId: string;
   private readonly ownsStore: boolean;
-  private workerTimer: NodeJS.Timeout | null = null;
-  private schedulerTimer: NodeJS.Timeout | null = null;
   private readonly jobFailureDiagnostics: DeviceSyncJobFailureDiagnostic[] = [];
   private readonly jobTimingDiagnostics: DeviceSyncJobTimingDiagnostic[] = [];
   private readonly connectionMutationStates = new Map<string, {
@@ -345,14 +332,8 @@ class DeviceSyncServiceController {
     this.logger = input.config.log ?? console;
     this.clock = input.clock ?? defaultDeviceSyncClock;
     this.schedulerMutex = input.schedulerMutex ?? createDeviceSyncTickMutex();
-    this.workerMutex = input.workerMutex ?? createDeviceSyncTickMutex();
-    this.workerExecutor = input.workerExecutor ?? {
-      drainWorker: (limit) => this.drainWorker(limit),
-    };
     this.workerLeaseMs = Math.max(60_000, input.config.workerLeaseMs ?? 5 * 60_000);
-    this.workerPollMs = Math.max(1_000, input.config.workerPollMs ?? 5_000);
     this.workerBatchSize = Math.max(1, input.config.workerBatchSize ?? 4);
-    this.schedulerPollMs = Math.max(5_000, input.config.schedulerPollMs ?? 60_000);
     this.shouldYieldImportPreparation = input.config.shouldYieldImportPreparation ?? null;
     this.shouldYieldJobExecution = input.config.shouldYieldJobExecution ?? null;
     this.workerId = generatePrefixedId("worker");
@@ -651,37 +632,7 @@ class DeviceSyncServiceController {
     }));
   }
 
-  start(): void {
-    if (!this.workerTimer) {
-      void this.runWorkerBatchOnce();
-      this.workerTimer = setInterval(() => {
-        void this.runWorkerBatchOnce();
-      }, this.workerPollMs);
-    }
-
-    if (!this.schedulerTimer) {
-      void this.runSchedulerOnce();
-      this.schedulerTimer = setInterval(() => {
-        void this.runSchedulerOnce();
-      }, this.schedulerPollMs);
-    }
-  }
-
-  stop(): void {
-    if (this.workerTimer) {
-      clearInterval(this.workerTimer);
-      this.workerTimer = null;
-    }
-
-    if (this.schedulerTimer) {
-      clearInterval(this.schedulerTimer);
-      this.schedulerTimer = null;
-    }
-  }
-
   close(): void {
-    this.stop();
-
     if (this.ownsStore) {
       this.store.close();
     }
@@ -1906,19 +1857,6 @@ class DeviceSyncServiceController {
     return [input.normalizedSeedJob, ...claimed];
   }
 
-  private async runWorkerBatchOnce(): Promise<void> {
-    await this.workerMutex.runIfIdle(async () => {
-      try {
-        await this.workerExecutor.drainWorker(this.workerBatchSize);
-      } catch (error) {
-        this.logger.error?.("Device sync worker tick failed.", {
-          failureCode: "DEVICE_SYNC_WORKER_TICK_FAILED",
-          error: summarizeError(error),
-        });
-      }
-    });
-  }
-
   private nowIso(): string {
     return toIsoTimestamp(this.clock.now());
   }
@@ -2204,8 +2142,6 @@ export function createDeviceSyncService(input: CreateDeviceSyncServiceInput): De
     getAccount: (accountId) => controller.getAccount(accountId),
     listJobFailureDiagnostics: () => controller.listJobFailureDiagnostics(),
     listJobTimingDiagnostics: () => controller.listJobTimingDiagnostics(),
-    start: () => controller.start(),
-    stop: () => controller.stop(),
     close: () => controller.close(),
     startConnection: (startConnectionInput) => controller.startConnection(startConnectionInput),
     handleConnectionCallback: (callbackInput) => controller.handleConnectionCallback(callbackInput),

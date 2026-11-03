@@ -29,7 +29,6 @@ import {
 import { openSqliteRuntimeDatabase, writeSqliteRuntimeUserVersion } from "@murphai/runtime-state/node";
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
 
-import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
 import { DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE } from "../src/public-account.ts";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "../src/local-secret-codec.ts";
 import { JunctionTimeseriesProgressError } from "../src/junction-timeseries-progress.ts";
@@ -73,7 +72,6 @@ import {
 
 import type {
   DeviceSyncTickMutex,
-  DeviceSyncWorkerExecutor,
 } from "../src/service.ts";
 import type {
   DeviceConnectionHandler,
@@ -298,17 +296,6 @@ function assertJunctionWorkoutStreamRetryCoordinate(
   } else {
     assert.equal(job.payload.workoutStreamCursor, undefined);
   }
-}
-
-function createWhoopWebhookHeaders(clientSecret: string, rawBody: Buffer, timestamp = Date.now().toString()): Headers {
-  const signature = createHmac("sha256", clientSecret).update(Buffer.concat([Buffer.from(timestamp, "utf8"), rawBody])).digest(
-    "base64",
-  );
-
-  return new Headers({
-    "x-whoop-signature": signature,
-    "x-whoop-signature-timestamp": timestamp,
-  });
 }
 
 function createJunctionSvixWebhook(input: {
@@ -4891,10 +4878,8 @@ test("device sync service fails closed when stored token integrity validation fa
   close();
 });
 
-test("device sync service starts and stops its timers, closes owned stores, and rejects missing provider or account lookups", async () => {
+test("device sync service closes owned stores, and rejects missing provider or account lookups", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-lifecycle");
-  const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
-  const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
   const closeSpy = vi.spyOn(SqliteDeviceSyncStore.prototype, "close");
   const service = createDeviceSyncService({
     secret: "secret-for-tests",
@@ -4925,17 +4910,10 @@ test("device sync service starts and stops its timers, closes owned stores, and 
         && error.httpStatus === 404,
     );
 
-    service.start();
-    service.start();
-    service.stop();
     service.close();
 
-    assert.equal(setIntervalSpy.mock.calls.length, 2);
-    assert.equal(clearIntervalSpy.mock.calls.length, 2);
     assert.equal(closeSpy.mock.calls.length, 1);
   } finally {
-    setIntervalSpy.mockRestore();
-    clearIntervalSpy.mockRestore();
     closeSpy.mockRestore();
   }
 });
@@ -5333,84 +5311,6 @@ test("device sync service scheduler logs failures once and skips reentrant ticks
   });
 
   close();
-});
-
-test("device sync service worker batch logs drain failures once and skips reentrant ticks", async () => {
-  const vaultRoot = await makeTempDirectory("murph-device-syncd-worker-batch-error");
-  const workerErrors: Array<{ context?: Record<string, unknown>; message: string }> = [];
-  let workerErrorLoggedResolve: (() => void) | null = null;
-  const workerErrorLogged = new Promise<void>((resolve) => {
-    workerErrorLoggedResolve = resolve;
-  });
-  let drainCalls = 0;
-  const drainLimits: number[] = [];
-  const failingWorkerExecutor: DeviceSyncWorkerExecutor = {
-    async drainWorker(limit) {
-      drainCalls += 1;
-      drainLimits.push(limit);
-      throw new Error("worker batch exploded");
-    },
-  };
-  const { service, close } = createServiceFixture({
-    secret: "secret-for-tests",
-    config: {
-      vaultRoot,
-      publicBaseUrl: "https://sync.example.test/device-sync",
-      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
-      workerBatchSize: 7,
-      log: {
-        error(message, context) {
-          workerErrors.push({
-            message,
-            context: context as Record<string, unknown> | undefined,
-          });
-          workerErrorLoggedResolve?.();
-        },
-      },
-    },
-    workerExecutor: failingWorkerExecutor,
-    providers: [createFakeProvider()],
-  });
-
-  service.start();
-  await workerErrorLogged;
-  assert.equal(drainCalls, 1);
-  assert.deepEqual(drainLimits, [7]);
-  assert.equal(workerErrors.length, 1);
-  assert.equal(workerErrors[0]?.message, "Device sync worker tick failed.");
-  assert.deepEqual(workerErrors[0]?.context, {
-    failureCode: "DEVICE_SYNC_WORKER_TICK_FAILED",
-    error: {
-      category: "unexpected_error",
-      name: "Error",
-      message: "worker batch exploded",
-    },
-  });
-  close();
-
-  const skippedVaultRoot = await makeTempDirectory("murph-device-syncd-worker-batch-skip");
-  let skippedDrainCalls = 0;
-  const skipped = createServiceFixture({
-    secret: "secret-for-tests",
-    config: {
-      vaultRoot: skippedVaultRoot,
-      publicBaseUrl: "https://sync.example.test/device-sync",
-      stateDatabasePath: path.join(skippedVaultRoot, ".runtime", "device-syncd.sqlite"),
-    },
-    workerMutex: createSkippingTickMutex(() => true),
-    workerExecutor: {
-      async drainWorker() {
-        skippedDrainCalls += 1;
-        return 0;
-      },
-    },
-    providers: [createFakeProvider()],
-  });
-
-  skipped.service.start();
-  await Promise.resolve();
-  assert.equal(skippedDrainCalls, 0);
-  skipped.close();
 });
 
 test("device sync service worker handles missing providers, disconnected jobs, and reauthorization-required jobs", async () => {
@@ -8807,116 +8707,6 @@ test("device sync service accepts legacy Strava delete jobs that rely on the def
   assert.equal(store.getJobById(job.id)?.status, "succeeded");
 
   close();
-});
-
-test("device sync service durably suppresses WHOOP webhook replays without trace_id even when retry deliveries have a new signature timestamp", async () => {
-  const vaultRoot = await makeTempDirectory("murph-device-syncd-whoop-replay");
-  const imports: unknown[] = [];
-  const importer: DeviceSyncImporterPort = {
-    async importDeviceProviderSnapshot(input) {
-      imports.push(input);
-      return {
-        ok: true,
-      };
-    },
-  };
-  const provider = createWhoopDeviceSyncProvider({
-    clientId: "whoop-client-id",
-    clientSecret: "whoop-client-secret",
-    fetchImpl: async (input) => {
-      const url = readUrl(input);
-
-      if (url === "https://api.prod.whoop.com/oauth/oauth2/token") {
-        return createJsonResponse({
-          access_token: "access-token",
-          refresh_token: "refresh-token",
-          expires_in: 3600,
-          scope: "offline read:profile",
-        });
-      }
-
-      if (url === "https://api.prod.whoop.com/developer/v2/user/profile/basic") {
-        return createJsonResponse({
-          user_id: "whoop-user-1",
-          first_name: "Whoop",
-          last_name: "User",
-        });
-      }
-
-      if (
-        url.startsWith("https://api.prod.whoop.com/developer/v2/activity/sleep?") ||
-        url.startsWith("https://api.prod.whoop.com/developer/v2/recovery?") ||
-        url.startsWith("https://api.prod.whoop.com/developer/v2/cycle?") ||
-        url.startsWith("https://api.prod.whoop.com/developer/v2/activity/workout?")
-      ) {
-        return createJsonResponse({
-          records: [],
-        });
-      }
-
-      throw new Error(`Unexpected request: ${url}`);
-    },
-  });
-  const service = createDeviceSyncService({
-    secret: "secret-for-tests",
-    config: {
-      vaultRoot,
-      publicBaseUrl: "https://sync.example.test/device-sync",
-      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
-    },
-    providers: [provider],
-    importer,
-  });
-
-  const begin = await service.startConnection({
-    provider: "whoop",
-  });
-  const connected = await service.handleOAuthCallback({
-    provider: "whoop",
-    state: begin.state,
-    code: "abc",
-  });
-
-  assert.equal(connected.account.externalAccountId, "whoop-user-1");
-
-  await service.runWorkerOnce();
-  assert.equal(imports.length, 1);
-
-  const rawBody = Buffer.from(
-    JSON.stringify({
-      user_id: "whoop-user-1",
-      type: "sleep.deleted",
-      id: "sleep-1",
-    }),
-    "utf8",
-  );
-  const firstTimestamp = String(Date.now());
-  const retryTimestamp = String(Number(firstTimestamp) + 120_000);
-  const headers = createWhoopWebhookHeaders("whoop-client-secret", rawBody, firstTimestamp);
-
-  const firstWebhook = await service.handleWebhook("whoop", headers, rawBody);
-  assert.equal(firstWebhook.accepted, true);
-  assert.equal(firstWebhook.duplicate, false);
-  assert.match(firstWebhook.traceId ?? "", /^[a-f0-9]{64}$/u);
-
-  const firstWebhookJob = await service.runWorkerOnce();
-  assert.equal(firstWebhookJob?.kind, "delete");
-  assert.equal(imports.length, 2);
-
-  const duplicateWebhook = await service.handleWebhook(
-    "whoop",
-    createWhoopWebhookHeaders("whoop-client-secret", rawBody, retryTimestamp),
-    rawBody,
-  );
-  assert.equal(duplicateWebhook.accepted, true);
-  assert.equal(duplicateWebhook.duplicate, true);
-  assert.equal(duplicateWebhook.traceId, firstWebhook.traceId);
-
-  const duplicateWebhookJob = await service.runWorkerOnce();
-  assert.equal(duplicateWebhookJob, null);
-  assert.equal(imports.length, 2);
-
-  service.close();
 });
 
 test("sqlite device-sync store clears lastSyncErrorAt when clearErrors removes the error fields", async () => {
@@ -15894,7 +15684,6 @@ test("canonical lock contention does not override foreground abort or ordinary s
   }
 });
 
-
 test("an active account can pull a nearby full reconcile forward without widening the global scheduler", async () => {
   const now = new Date("2026-06-12T12:00:00.000Z");
   const vaultRoot = await makeTempDirectory("murph-device-syncd-coalescing");
@@ -15924,7 +15713,6 @@ test("an active account can pull a nearby full reconcile forward without widenin
       "the full pull retains its durable queue owner until completed");
   } finally { close(); }
 });
-
 
 test.each([false, true])("device sync credits continuation progress only after owned commit: %s", async (commitSucceeds) => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-continuation-progress");

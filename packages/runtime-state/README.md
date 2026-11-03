@@ -142,7 +142,7 @@ load".
 The original-error timing observer can add `sourceCause: { code, vaultCode? }`
 to an existing `unknown` failure. It preserves the established failure code,
 stage, count and command/outcome identity; it does not widen the global code
-catalog or change an error, output, exit, tool contract or prompt. Only four
+catalog or change an error, output, exit, tool contract or prompt. Only three
 registered commands admit this detail:
 
 | Command | Existing source decisions retained |
@@ -150,7 +150,6 @@ registered commands admit this detail:
 | `meal edit` | `contract_invalid`, `invalid_timestamp`, or `vault_error` from the event mutation/usecase owners; the admitted nested codes below distinguish contract, ledger and lock failures. |
 | `meal remove-photo` | `contract_invalid` from stored-record reads or `vault_error`; nested codes distinguish ledger, lock, retained-byte integrity, manifest and lingering-reference failures. The already classified `invalid_operation` is unchanged. |
 | `food search-labels-batch` | The labels client's existing auth, rate limit, HTTP timeout, service availability, other HTTP rejection, body timeout, body-read failure and invalid-response codes. |
-| `research scout-batch` | The scout client's existing auth, rate limit, availability, invalid-response, request-rejection and timeout codes reached by response handling. |
 
 The timing allowlists live in `src/cli-timing.ts`. Provider configuration,
 transport-only errors and other commands gain no new admission. Existing codes

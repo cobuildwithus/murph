@@ -12,7 +12,6 @@ import { runNodeCommand, runNpmCommand, runPnpmCommand } from "./process.js";
 
 const HEALTH_COMMONS_PACKAGE_NAME = "@murphai/health-commons";
 const CONTRACTS_PACKAGE_NAME = "@murphai/contracts";
-const CLI_PACKAGE_NAME = "@murphai/murph";
 const ASSISTANT_ENGINE_PACKAGE_NAME = "@murphai/assistant-engine";
 const HEALTH_COMMONS_RUNTIME_GENERATED_FILES = [
   "generated/biomarker-desired-directions.json",
@@ -21,8 +20,6 @@ const HEALTH_COMMONS_RUNTIME_GENERATED_FILES = [
 ] as const;
 
 interface WorkspacePackageManifest {
-  bundleDependencies?: string[];
-  bundledDependencies?: string[];
   dependencies?: Record<string, string>;
   engines?: Record<string, string>;
   exports?: Record<string, unknown> | string;
@@ -283,14 +280,6 @@ async function prepareRunnerPackagePackRoot(
   tarballsDir: string,
   workspacePackageTarballSpecifiers: ReadonlyMap<string, string>,
 ): Promise<string | null> {
-  if (packageName === CLI_PACKAGE_NAME) {
-    return await prepareRunnerCliPackagePackRoot(
-      sourcePackageDir,
-      tarballsDir,
-      workspacePackageTarballSpecifiers,
-    );
-  }
-
   if (packageName === HEALTH_COMMONS_PACKAGE_NAME) {
     return await prepareRunnerHealthCommonsPackagePackRoot(
       sourcePackageDir,
@@ -305,38 +294,6 @@ async function prepareRunnerPackagePackRoot(
     tarballsDir,
     workspacePackageTarballSpecifiers,
   );
-}
-
-async function prepareRunnerCliPackagePackRoot(
-  sourcePackageDir: string,
-  tarballsDir: string,
-  workspacePackageTarballSpecifiers: ReadonlyMap<string, string>,
-): Promise<string> {
-  const packRoot = await mkdtemp(path.join(tarballsDir, ".runner-cli-pack-"));
-  const packageJson = await readWorkspacePackageManifest(sourcePackageDir);
-
-  delete packageJson.bundleDependencies;
-  delete packageJson.bundledDependencies;
-  rewritePackedWorkspaceDependencySpecs(
-    packageJson,
-    packageJson.name ?? CLI_PACKAGE_NAME,
-    workspacePackageTarballSpecifiers,
-  );
-
-  await copyPackageEntries(sourcePackageDir, packRoot, [
-    "dist",
-    "README.md",
-    "CHANGELOG.md",
-    "config.schema.json",
-    "LICENSE",
-  ]);
-  await writeFile(
-    path.join(packRoot, "package.json"),
-    `${JSON.stringify(packageJson, null, 2)}\n`,
-    "utf8",
-  );
-
-  return packRoot;
 }
 
 async function prepareRunnerHealthCommonsPackagePackRoot(

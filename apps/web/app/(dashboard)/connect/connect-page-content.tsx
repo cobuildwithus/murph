@@ -622,7 +622,7 @@ function isVisibleConnectSource(
   return (
     DISPLAY_ONLY_CONNECT_SOURCE_IDS.has(source.connectSourceId) ||
     source.routes.some(
-      (route) => route.kind === "direct" || route.kind === "junction_link",
+      (route) => route.kind === "junction_link",
     )
   );
 }

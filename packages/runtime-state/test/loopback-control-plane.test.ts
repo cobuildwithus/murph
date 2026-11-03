@@ -177,3 +177,12 @@ test("hasMatchingLoopbackControlBearerToken accepts matching tokens and rejects 
     false,
   );
 });
+
+test("isLoopbackRemoteAddress accepts localhost forms and rejects non-loopback values", () => {
+  assert.equal(isLoopbackRemoteAddress("127.0.0.1"), true);
+  assert.equal(isLoopbackRemoteAddress(" ::1 "), true);
+  assert.equal(isLoopbackRemoteAddress("::ffff:127.0.0.1"), true);
+  assert.equal(isLoopbackRemoteAddress("::ffff:10.0.0.1"), false);
+  assert.equal(isLoopbackRemoteAddress("203.0.113.10"), false);
+  assert.equal(isLoopbackRemoteAddress(null), false);
+});

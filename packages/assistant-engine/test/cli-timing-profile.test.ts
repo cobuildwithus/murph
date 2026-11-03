@@ -266,161 +266,7 @@ test.skipIf(!failureCompatibilityBase)('actual pre-failure reader preserves comm
   }
 })
 
-
-test('research source codes survive profile and hosted readback without changing native accounting', async () => {
-  const codes = ['research_scout_invalid_batch_payload', 'research_scout_invalid_window', 'research_exa_token_missing'] as const
-  let report!: CliTiming
-  await withCliTiming(() => timeCliDispatch('batch', async () => {
-    for (const code of codes) {
-      const error = Object.assign(new Error('PRIVATE_SENTINEL'), { code })
-      await assert.rejects(withCliTiming(() => timeCliDispatch('research scout-batch', async () => { throw error })),
-        (caught) => caught === error)
-    }
-    await withCliTiming(() => timeCliDispatch('research scout-batch', async () => {}))
-  }), (value) => { report = value })
-  const rawEvents = [...baseEvents, native('vault-cli research scout-batch --input @/PRIVATE_SENTINEL',
-    'PRIVATE_SENTINEL', { exitCode: 1 })]
-  const untouched = structuredClone(rawEvents)
-  const baseline = buildAssistantCodexTurnProfileJson({ rawEvents, turnId })!
-  const profile = buildAssistantCodexTurnProfileJson({ rawEvents: [...rawEvents,
-    { method: 'murph/cliTiming', params: { turnId, timing: report } }], turnId })!
-  const { cliTiming, ...legacy } = profile
-  assert.deepEqual(legacy, baseline)
-  assert.deepEqual(rawEvents, untouched)
-  assert.deepEqual(cliTiming, report)
-  assert.deepEqual(report.commands[0]!.failures, codes.map((code) => ({ code, stage: 'unknown', count: 1 })))
-  assert.deepEqual(report.commands.map(({ calls, outcome }) => ({ calls, outcome })), [
-    { calls: 3, outcome: 'error' }, { calls: 1, outcome: 'ok' },
-  ])
-  assert.equal(report.commands[1]!.failures, undefined)
-  const parsed = usage(JSON.parse(JSON.stringify(profile)))
-  assert.deepEqual(parsed.turnProfileJson, profile)
-  assert.equal(parsed.inputTokens, 17)
-  assert.equal(parsed.outputTokens, 11)
-  assert.ok(!JSON.stringify(parsed).includes('PRIVATE_SENTINEL'))
-  const future = structuredClone(report)
-  const futureInput = { ...future, commands: [{ ...future.commands[0]!, failures: [
-    { code: 'PRIVATE_FUTURE_CODE', stage: 'PRIVATE_FUTURE_STAGE', count: 3 },
-  ] }, future.commands[1]!] }
-  future.commands[0]!.failures = [{ code: 'unknown', stage: 'unknown', count: 3 }]
-  assert.deepEqual(usage({ ...profile, cliTiming: futureInput }).turnProfileJson, { ...profile, cliTiming: future })
-  delete future.commands[0]!.failures
-  assert.deepEqual(usage({ ...profile, cliTiming: future }).turnProfileJson, { ...profile, cliTiming: future })
-})
-
 // Bind both hosted readback and its portable normalizer to the actual old base.
-const researchCompatibilityBase = process.env.MURPH_CLI_RESEARCH_FAILURE_COMPAT_BASE
-test.skipIf(!researchCompatibilityBase)('actual pre-research hosted reader loses only specificity, not counts or tokens', async () => {
-  assert.match(researchCompatibilityBase ?? '', /^[a-f0-9]{7,40}$/u)
-  const source = (file: string) => execFileSync('git', ['show', `${researchCompatibilityBase}:${file}`],
-    { encoding: 'utf8', maxBuffer: 1_000_000 })
-  const moduleUrl = (text: string) => `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(text)).toString('base64')}`
-  const oldTimingUrl = moduleUrl(source('packages/runtime-state/src/cli-timing.ts'))
-  const oldTiming: { cliTimingFailureCode: (code: unknown) => string } = await import(oldTimingUrl)
-  const oldUsageSource = source('packages/hosted-execution/src/assistant-usage.ts')
-  assert.ok(oldUsageSource.includes('"@murphai/runtime-state/cli-timing"'))
-  const old: { parseAssistantUsageRecord: typeof parseAssistantUsageRecord } = await import(moduleUrl(
-    oldUsageSource.replace('"@murphai/runtime-state/cli-timing"', JSON.stringify(oldTimingUrl))))
-  let report!: CliTiming
-  await withCliTiming(() => timeCliDispatch('batch', async () => {
-    for (const code of ['research_scout_invalid_batch_payload', 'research_scout_invalid_window', 'research_exa_token_missing']) {
-      assert.equal(oldTiming.cliTimingFailureCode(code), 'unknown')
-      await assert.rejects(withCliTiming(() => timeCliDispatch('research scout-batch', async () => {
-        throw Object.assign(new Error('PRIVATE_SENTINEL'), { code })
-      })))
-    }
-    await withCliTiming(() => timeCliDispatch('research scout-batch', async () => {}))
-  }), (value) => { report = value })
-  const oldReport = structuredClone(report)
-  oldReport.commands[0]!.failures = [{ code: 'unknown', stage: 'unknown', count: 3 }]
-  const legacy = buildAssistantCodexTurnProfileJson({ rawEvents: baseEvents, turnId })!
-  for (const schema of ['murph.assistant-turn-profile.v1', 'murph.assistant-turn-profile.v2']) {
-    const profile = { ...legacy, schema, tools: [], cliTiming: report }
-    const input = usage(profile)
-    const expected = { ...input, turnProfileJson: { ...profile, cliTiming: oldReport } }
-    assert.deepEqual(old.parseAssistantUsageRecord(JSON.parse(JSON.stringify(input))), expected)
-    assert.deepEqual(parseAssistantUsageRecord(expected), expected)
-    assert.equal(expected.inputTokens, 17)
-    assert.equal(expected.outputTokens, 11)
-    const absent = structuredClone(expected)
-    delete absent.turnProfileJson.cliTiming.commands[0]!.failures
-    assert.deepEqual(old.parseAssistantUsageRecord(absent), absent)
-    assert.deepEqual(parseAssistantUsageRecord(absent), absent)
-    assert.ok(!JSON.stringify(expected).includes('PRIVATE_SENTINEL'))
-  }
-})
-
-async function researchRejectionReport(): Promise<CliTiming> {
-  let report!: CliTiming
-  await withCliTiming(() => timeCliDispatch('batch', async () => {
-    for (const rejection of ['public_concept', 'public_concept', 'unexpected_lane_field', undefined]) {
-      const error = Object.assign(new Error('PRIVATE_SENTINEL'), { code: 'research_scout_invalid_batch_payload' })
-      if (rejection) Object.defineProperty(error, 'cliTimingRejection', { value: rejection })
-      await assert.rejects(withCliTiming(() => timeCliDispatch('research scout-batch', async () => { throw error })),
-        (caught) => caught === error)
-    }
-    await withCliTiming(() => timeCliDispatch('research scout-batch', async () => {}))
-  }), (value) => { report = value })
-  return report
-}
-
-test('research batch rejection category survives profile and hosted readback; native accounting is unchanged', async () => {
-  const report = await researchRejectionReport()
-  const code = 'research_scout_invalid_batch_payload'
-  assert.deepEqual(report.commands[0]!.failures, [
-    { code, stage: 'unknown', count: 2, rejection: 'public_concept' },
-    { code, stage: 'unknown', count: 1, rejection: 'unexpected_lane_field' },
-    { code, stage: 'unknown', count: 1 },
-  ])
-  assert.equal(report.commands[1]!.failures, undefined)
-  const rawEvents = [...baseEvents, native('vault-cli research scout-batch --input @/PRIVATE_SENTINEL',
-    'PRIVATE_SENTINEL', { exitCode: 1 })]
-  const baseline = buildAssistantCodexTurnProfileJson({ rawEvents, turnId })!
-  const profile = buildAssistantCodexTurnProfileJson({ rawEvents: [...rawEvents,
-    { method: 'murph/cliTiming', params: { turnId, timing: report } }], turnId })!
-  const { cliTiming, ...legacy } = profile
-  assert.deepEqual(legacy, baseline)
-  assert.deepEqual(cliTiming, report)
-  const parsed = usage(JSON.parse(JSON.stringify(profile)))
-  assert.deepEqual(parsed.turnProfileJson, profile)
-  assert.equal(parsed.inputTokens, 17)
-  assert.ok(!JSON.stringify(parsed).includes('PRIVATE_SENTINEL'))
-  // Unknown future categories drop only the detail, never the observation.
-  const future = structuredClone(report)
-  future.commands[0]!.failures![0] = { ...future.commands[0]!.failures![0]!, rejection: 'PRIVATE_FUTURE' as 'envelope' }
-  const expected = structuredClone(report)
-  expected.commands[0]!.failures = [
-    { code, stage: 'unknown', count: 3 },
-    { code, stage: 'unknown', count: 1, rejection: 'unexpected_lane_field' },
-  ]
-  assert.deepEqual(usage({ ...profile, cliTiming: future }).turnProfileJson, { ...profile, cliTiming: expected })
-})
-
-const researchRejectionCompatibilityBase = process.env.MURPH_CLI_RESEARCH_REJECTION_COMPAT_BASE
-test.skipIf(!researchRejectionCompatibilityBase)('actual pre-rejection hosted reader drops only the category', async () => {
-  assert.match(researchRejectionCompatibilityBase ?? '', /^[a-f0-9]{40}$/u)
-  const source = (file: string) => execFileSync('git', ['show', `${researchRejectionCompatibilityBase}:${file}`],
-    { encoding: 'utf8', maxBuffer: 1_000_000 })
-  const moduleUrl = (text: string) => `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(text)).toString('base64')}`
-  const oldTimingUrl = moduleUrl(source('packages/runtime-state/src/cli-timing.ts'))
-  const oldUsageSource = source('packages/hosted-execution/src/assistant-usage.ts')
-  assert.ok(oldUsageSource.includes('"@murphai/runtime-state/cli-timing"'))
-  const old: { parseAssistantUsageRecord: typeof parseAssistantUsageRecord } = await import(moduleUrl(
-    oldUsageSource.replace('"@murphai/runtime-state/cli-timing"', JSON.stringify(oldTimingUrl))))
-  const report = await researchRejectionReport()
-  const oldReport = structuredClone(report)
-  oldReport.commands[0]!.failures = [{ code: 'research_scout_invalid_batch_payload', stage: 'unknown', count: 4 }]
-  const legacy = buildAssistantCodexTurnProfileJson({ rawEvents: baseEvents, turnId })!
-  for (const schema of ['murph.assistant-turn-profile.v1', 'murph.assistant-turn-profile.v2']) {
-    const profile = { ...legacy, schema, tools: [], cliTiming: report }
-    const input = usage(profile)
-    const expected = { ...input, turnProfileJson: { ...profile, cliTiming: oldReport } }
-    assert.deepEqual(old.parseAssistantUsageRecord(JSON.parse(JSON.stringify(input))), expected)
-    assert.deepEqual(parseAssistantUsageRecord(expected), expected)
-    assert.equal(expected.inputTokens, 17)
-    assert.equal(expected.outputTokens, 11)
-  }
-})
 
 for (const [label, compatibilityBase, command, phases] of [
   ['Patterns', process.env.MURPH_PATTERN_TIMING_COMPAT_BASE, 'wearables patterns',
@@ -612,8 +458,7 @@ const sourceCauseCases: Array<{ command: string; stage: CliFailureTiming['stage'
   { command: 'meal remove-photo', stage: 'read', sourceCause: { code: 'contract_invalid', vaultCode: 'EVENT_CONTRACT_INVALID' } },
   { command: 'food search-labels-batch', stage: 'response', sourceCause: { code: 'food_labels_api_response_failed' } },
   { command: 'food search-labels-batch', stage: 'response', sourceCause: { code: 'food_labels_api_invalid_response' } },
-  { command: 'research scout-batch', stage: 'response', sourceCause: { code: 'research_exa_request_rejected' } },
-  { command: 'research scout-batch', stage: 'response', sourceCause: { code: 'research_exa_invalid_response' } },
+
 ]
 
 // Real CLI origin/bridge coverage lives in the CLI owner. Here original typed
@@ -670,7 +515,7 @@ test('source causes cross real UDP, receiver, profile and hosted admission for d
         { command: 'meal edit', outcome: 'error', calls: 9 },
         { command: 'meal remove-photo', outcome: 'error', calls: 6 },
         { command: 'food search-labels-batch', outcome: 'error', calls: 2 },
-        { command: 'research scout-batch', outcome: 'error', calls: 2 },
+
         { command: 'meal edit', outcome: 'ok', calls: 1 },
       ])
       for (const command of report.commands.filter(command => command.outcome === 'error')) {

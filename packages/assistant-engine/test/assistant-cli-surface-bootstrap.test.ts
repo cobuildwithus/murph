@@ -423,7 +423,7 @@ test('scopeAssistantCliSurfaceContractForAssistant removes hosted-invalid action
     '- `device provider list`: List supported providers.',
     'Command index:',
     '- `automation`: `edit`, `import-json`, `list`, `save`, `scaffold`, `set-status`, `show`.',
-    '- `device`: `account disconnect`, `account list`, `account reconcile`, `account show`, `connect`, `daemon start`, `daemon status`, `daemon stop`, `provider list`.',
+    '- `device`: `account disconnect`, `account list`, `account reconcile`, `account show`, `connect`, `provider list`.',
   ].join('\n')
 
   assert.equal(
@@ -444,40 +444,6 @@ test('scopeAssistantCliSurfaceContractForAssistant removes hosted-invalid action
     scopeAssistantCliSurfaceContractForAssistant({
       contract,
       hostedRuntime: false,
-    }),
-    contract,
-  )
-})
-
-test('scopeAssistantCliSurfaceContractForAssistant hides the research family when Exa is unavailable', async () => {
-  const {
-    scopeAssistantCliSurfaceContractForAssistant,
-  } = await import('../src/assistant/cli-surface-bootstrap.ts')
-  const contract = [
-    'Murph CLI Contract:',
-    '- `research scout`: Search current human research.',
-    '- `goal list`: List goals.',
-    'Command index:',
-    '- `research`: `payload-schema`, `scout`, `scout-batch`.',
-    '- `goal`: `list`, `save`.',
-  ].join('\n')
-
-  assert.equal(
-    scopeAssistantCliSurfaceContractForAssistant({
-      contract,
-      researchAvailable: false,
-    }),
-    [
-      'Murph CLI Contract:',
-      '- `goal list`: List goals.',
-      'Command index:',
-      '- `goal`: `list`, `save`.',
-    ].join('\n'),
-  )
-  assert.equal(
-    scopeAssistantCliSurfaceContractForAssistant({
-      contract,
-      researchAvailable: true,
     }),
     contract,
   )
@@ -1181,7 +1147,6 @@ test('buildAssistantCliSurfaceContract keeps hot-path option signatures beside a
   assert.match(goalSaveLine, /--horizon=short_term\|medium_term\|long_term\|ongoing/u)
   assert.match(goalSaveLine, /--priority=integer/u)
 })
-
 
 test('CLI discovery uses concise help for syntax and reserves schemas for structured contracts', async () => {
   const { buildAssistantCliSurfaceContract } = await import('../src/assistant/cli-surface-bootstrap.ts')

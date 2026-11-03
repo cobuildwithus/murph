@@ -4577,26 +4577,26 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("sync hydrates a fresh WHOOP OAuth runtime snapshot before running device jobs", async () => {
+  test("sync hydrates a fresh synthetic OAuth runtime snapshot before running device jobs", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
     await mkdir(vaultRoot, { recursive: true });
 
     const observedAccessTokens: string[] = [];
-    const whoopProvider = createFakeProvider({
-      provider: "whoop",
+    const demoProvider = createFakeProvider({
+      provider: "demo",
       descriptor: {
-        provider: "whoop",
-        displayName: "WHOOP",
+        provider: "demo",
+        displayName: "synthetic",
         transportModes: ["oauth_callback", "scheduled_poll", "webhook_push"],
         connection: {
           kind: "oauth2",
-          callbackPath: "/oauth/whoop/callback",
+          callbackPath: "/oauth/demo/callback",
           defaultScopes: ["offline", "read:recovery"],
         },
         webhook: {
-          path: "/webhooks/whoop",
+          path: "/webhooks/demo",
           deliveryMode: "notification",
           supportsAdmin: false,
         },
@@ -4613,7 +4613,7 @@ describe("hosted device-sync runtime", () => {
       },
       jobExecutor: {
         async executeJob(context) {
-          assert.equal(context.account.provider, "whoop");
+          assert.equal(context.account.provider, "demo");
           assert.equal(context.account.credential.kind, "oauth_tokens");
           observedAccessTokens.push(context.account.credential.tokens.accessToken);
           return {
@@ -4622,19 +4622,19 @@ describe("hosted device-sync runtime", () => {
         },
       },
     });
-    const service = createDeviceSyncServiceForVault(vaultRoot, [whoopProvider]);
+    const service = createDeviceSyncServiceForVault(vaultRoot, [demoProvider]);
 
     try {
       const snapshot = buildRuntimeSnapshot({
-        connectionId: "hosted_conn_whoop_token_snapshot",
-        displayName: "Hosted WHOOP",
-        externalAccountId: "whoop-account-token-snapshot",
+        connectionId: "hosted_conn_demo_token_snapshot",
+        displayName: "Hosted synthetic",
+        externalAccountId: "demo-account-token-snapshot",
         hostedUpdatedAt: "2026-04-06T09:10:00.000Z",
-        provider: "whoop",
+        provider: "demo",
         tokenBundle: {
-          accessToken: "hosted-whoop-access",
+          accessToken: "hosted-demo-access",
           accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
-          refreshToken: "hosted-whoop-refresh",
+          refreshToken: "hosted-demo-refresh",
           tokenVersion: 6,
         },
       });
@@ -4650,7 +4650,7 @@ describe("hosted device-sync runtime", () => {
           };
         },
         async createConnectLink() {
-          throw new Error("createConnectLink should not be called during WHOOP sync");
+          throw new Error("createConnectLink should not be called during synthetic sync");
         },
         async fetchSnapshot() {
           return snapshot;
@@ -4660,12 +4660,12 @@ describe("hosted device-sync runtime", () => {
       const state = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
         wake: buildDeviceSyncWake({
-          connectionId: "hosted_conn_whoop_token_snapshot",
-          eventId: "evt_whoop_token_snapshot",
+          connectionId: "hosted_conn_demo_token_snapshot",
+          eventId: "evt_demo_token_snapshot",
           hint: {
             jobs: [
               {
-                dedupeKey: "hosted-whoop-token-snapshot",
+                dedupeKey: "hosted-demo-token-snapshot",
                 kind: "reconcile",
                 priority: 80,
               },
@@ -4673,17 +4673,17 @@ describe("hosted device-sync runtime", () => {
             reason: "scheduled-reconcile",
           },
           occurredAt: "2026-04-06T09:20:00.000Z",
-          provider: "whoop",
+          provider: "demo",
           reason: "webhook_hint",
         }),
         secret: DEVICE_SYNC_SECRET,
         service,
       });
 
-      assert.equal(state.observedTokenVersions.get("hosted_conn_whoop_token_snapshot"), 6);
+      assert.equal(state.observedTokenVersions.get("hosted_conn_demo_token_snapshot"), 6);
       const stored = getStore(service).getAccountByExternalAccount(
-        "whoop",
-        "whoop-account-token-snapshot",
+        "demo",
+        "demo-account-token-snapshot",
       );
       assert.ok(stored);
       assert.equal(stored.status, "active");
@@ -4698,11 +4698,11 @@ describe("hosted device-sync runtime", () => {
             purpose: "device-sync-access-token",
           }),
         ),
-        "hosted-whoop-access",
+        "hosted-demo-access",
       );
 
       assert.equal(await service.drainWorker(), 1);
-      assert.deepEqual(observedAccessTokens, ["hosted-whoop-access"]);
+      assert.deepEqual(observedAccessTokens, ["hosted-demo-access"]);
 
       const afterJob = getStore(service).getAccountById(stored.id);
       assert.ok(afterJob);
@@ -5906,17 +5906,17 @@ describe("hosted device-sync runtime", () => {
 
   test("maximum dirty responses admit one retained-owner page with one scoped pending read", async () => {
     const baseProvider = createFakeProvider();
-    const stravaProvider: DeviceSyncProvider = {
+    const demoProvider: DeviceSyncProvider = {
       ...baseProvider,
-      provider: "strava",
+      provider: "demo",
       descriptor: {
         ...baseProvider.descriptor,
-        displayName: "Strava",
-        provider: "strava",
+        displayName: "synthetic",
+        provider: "demo",
       },
     };
-    const connectionId = "hosted_strava_max_dirty_page";
-    const unrelatedConnectionId = "hosted_strava_unrelated_dirty_page";
+    const connectionId = "hosted_demo_max_dirty_page";
+    const unrelatedConnectionId = "hosted_demo_unrelated_dirty_page";
     const buildResources = (prefix: string, indexes: readonly number[]) =>
       indexes.map((index) => ({
         count: 1,
@@ -5930,7 +5930,7 @@ describe("hosted device-sync runtime", () => {
         },
         resource: "activity",
         resourceCategory: "activity",
-        sourceProviderSlug: "strava",
+        sourceProviderSlug: "demo",
         windowEnd: null,
         windowStart: null,
       }));
@@ -5946,20 +5946,20 @@ describe("hosted device-sync runtime", () => {
         `hosted-device-sync-runtime-max-dirty-page-${pass}-`,
       );
       await mkdir(vaultRoot, { recursive: true });
-      const service = createDeviceSyncServiceForVault(vaultRoot, [stravaProvider]);
+      const service = createDeviceSyncServiceForVault(vaultRoot, [demoProvider]);
 
       try {
         const snapshot = buildRuntimeSnapshot({
           connectionId,
-          externalAccountId: "strava-max-dirty-page",
-          provider: "strava",
+          externalAccountId: "demo-max-dirty-page",
+          provider: "demo",
         });
         const store = getStore(service);
         const iteratePendingJobsForAccount = vi.spyOn(store, "iteratePendingJobsForAccount");
         const wake = buildDirtyDeviceSyncWake(
           connectionId,
           `2026-04-04T10:0${pass}:00.000Z`,
-          "strava",
+          "demo",
         );
         const state = await syncHostedDeviceSyncControlPlaneState({
           deviceSyncPort: {
@@ -5980,14 +5980,14 @@ describe("hosted device-sync runtime", () => {
                     dirtyRevision: "500",
                     dirtyResources: buildResources("dsp_selected", [...pendingIndexes]),
                     eventCount: String(pendingIndexes.size),
-                    provider: "strava",
+                    provider: "demo",
                   }),
                   buildDirtyState({
                     connectionId: unrelatedConnectionId,
                     dirtyRevision: "500",
                     dirtyResources: unrelatedResources,
                     eventCount: "500",
-                    provider: "strava",
+                    provider: "demo",
                   }),
                 ],
                 nextWakeAt: "2026-04-04T10:10:00.000Z",
@@ -6187,28 +6187,28 @@ describe("hosted device-sync runtime", () => {
     await mkdir(firstWorkspace.vaultRoot, { recursive: true });
     await mkdir(restoredWorkspace.vaultRoot, { recursive: true });
     const baseProvider = createFakeProvider();
-    const stravaProvider: DeviceSyncProvider = {
+    const demoProvider: DeviceSyncProvider = {
       ...baseProvider,
-      provider: "strava",
+      provider: "demo",
       descriptor: {
         ...baseProvider.descriptor,
-        displayName: "Strava",
-        provider: "strava",
+        displayName: "synthetic",
+        provider: "demo",
       },
     };
     const firstService = createDeviceSyncServiceForVault(
       firstWorkspace.vaultRoot,
-      [stravaProvider],
+      [demoProvider],
     );
     const restoredService = createDeviceSyncServiceForVault(
       restoredWorkspace.vaultRoot,
-      [stravaProvider],
+      [demoProvider],
     );
-    const connectionId = "hosted_strava_dirty_relink";
+    const connectionId = "hosted_demo_dirty_relink";
     const snapshot = buildRuntimeSnapshot({
       connectionId,
-      externalAccountId: "strava-dirty-relink",
-      provider: "strava",
+      externalAccountId: "demo-dirty-relink",
+      provider: "demo",
     });
     const dirtyResources = Array.from({ length: 100 }, (_, index) => ({
       count: 1,
@@ -6217,12 +6217,12 @@ describe("hosted device-sync runtime", () => {
       payload: {
         eventType: "activity.create",
         occurredAt: "2026-04-04T10:00:00.000Z",
-        resourceId: `strava-dirty-relink-activity-${index}`,
+        resourceId: `demo-dirty-relink-activity-${index}`,
         resourceType: "activity",
       },
       resource: "activity",
       resourceCategory: "activity",
-      sourceProviderSlug: "strava",
+      sourceProviderSlug: "demo",
       windowEnd: null,
       windowStart: null,
     }));
@@ -6231,7 +6231,7 @@ describe("hosted device-sync runtime", () => {
       dirtyRevision: "100",
       dirtyResources,
       eventCount: "100",
-      provider: "strava",
+      provider: "demo",
     });
     const port: HostedRuntimeDeviceSyncPort = {
       ...createNoDirtyStateDeviceSyncPortMethods(),
@@ -6267,7 +6267,7 @@ describe("hosted device-sync runtime", () => {
     const initialWake = buildDirtyDeviceSyncWake(
       connectionId,
       "2026-04-04T10:00:00.000Z",
-      "strava",
+      "demo",
     );
     let firstClosed = false;
 
@@ -6292,7 +6292,7 @@ describe("hosted device-sync runtime", () => {
           dedupeKey: `relink-follow-up-${index}`,
           kind: "reconcile",
           payload: {},
-          provider: "strava",
+          provider: "demo",
         });
       }
 
@@ -6360,28 +6360,28 @@ describe("hosted device-sync runtime", () => {
     await mkdir(firstWorkspace.vaultRoot, { recursive: true });
     await mkdir(restoredWorkspace.vaultRoot, { recursive: true });
     const baseProvider = createFakeProvider();
-    const stravaProvider: DeviceSyncProvider = {
+    const demoProvider: DeviceSyncProvider = {
       ...baseProvider,
-      provider: "strava",
+      provider: "demo",
       descriptor: {
         ...baseProvider.descriptor,
-        displayName: "Strava",
-        provider: "strava",
+        displayName: "synthetic",
+        provider: "demo",
       },
     };
     const firstService = createDeviceSyncServiceForVault(
       firstWorkspace.vaultRoot,
-      [stravaProvider],
+      [demoProvider],
     );
     const restoredService = createDeviceSyncServiceForVault(
       restoredWorkspace.vaultRoot,
-      [stravaProvider],
+      [demoProvider],
     );
-    const connectionId = "hosted_strava_dirty_mixed";
+    const connectionId = "hosted_demo_dirty_mixed";
     const snapshot = buildRuntimeSnapshot({
       connectionId,
-      externalAccountId: "strava-dirty-mixed",
-      provider: "strava",
+      externalAccountId: "demo-dirty-mixed",
+      provider: "demo",
     });
     const buildResource = (index: number, dirtyPayloadId = `dsp_dirty_mixed_${index}`) => ({
       count: 1,
@@ -6390,12 +6390,12 @@ describe("hosted device-sync runtime", () => {
       payload: {
         eventType: "activity.create",
         occurredAt: "2026-04-04T10:00:00.000Z",
-        resourceId: `strava-dirty-mixed-activity-${index}`,
+        resourceId: `demo-dirty-mixed-activity-${index}`,
         resourceType: "activity",
       },
       resource: "activity",
       resourceCategory: "activity",
-      sourceProviderSlug: "strava",
+      sourceProviderSlug: "demo",
       windowEnd: null,
       windowStart: null,
     });
@@ -6424,7 +6424,7 @@ describe("hosted device-sync runtime", () => {
             dirtyRevision: "101",
             dirtyResources: currentDirtyResources,
             eventCount: String(currentDirtyResources.length),
-            provider: "strava",
+            provider: "demo",
           })],
           nextWakeAt: null,
           userId: "member_123",
@@ -6437,7 +6437,7 @@ describe("hosted device-sync runtime", () => {
     const initialWake = buildDirtyDeviceSyncWake(
       connectionId,
       "2026-04-04T10:00:00.000Z",
-      "strava",
+      "demo",
     );
     let firstClosed = false;
 
@@ -7153,64 +7153,64 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("generic Strava payloads honor local retry timing and survive a cold restore", async () => {
+  test("generic synthetic payloads honor local retry timing and survive a cold restore", async () => {
     const firstWorkspace = await createHostedRuntimeWorkspace(
-      "hosted-device-sync-runtime-strava-retry-first-",
+      "hosted-device-sync-runtime-demo-retry-first-",
     );
     const restoredWorkspace = await createHostedRuntimeWorkspace(
-      "hosted-device-sync-runtime-strava-retry-restored-",
+      "hosted-device-sync-runtime-demo-retry-restored-",
     );
     await mkdir(firstWorkspace.vaultRoot, { recursive: true });
     await mkdir(restoredWorkspace.vaultRoot, { recursive: true });
     const baseProvider = createFakeProvider();
-    const stravaProvider: DeviceSyncProvider = {
+    const demoProvider: DeviceSyncProvider = {
       ...baseProvider,
-      provider: "strava",
+      provider: "demo",
       descriptor: {
         ...baseProvider.descriptor,
-        displayName: "Strava",
-        provider: "strava",
+        displayName: "synthetic",
+        provider: "demo",
       },
       jobExecutor: {
         async executeJob(_context, job) {
-          const terminal = job.payload.resourceId === "strava-activity-terminal";
+          const terminal = job.payload.resourceId === "demo-activity-terminal";
           throw deviceSyncError({
             code: terminal ? "STRAVA_ACTIVITY_INVALID" : "STRAVA_API_RATE_LIMITED",
             httpStatus: terminal ? 400 : 429,
             message: terminal
-              ? "Strava activity fetch cannot be retried."
-              : "Strava activity fetch was rate limited.",
+              ? "synthetic activity fetch cannot be retried."
+              : "synthetic activity fetch was rate limited.",
             retryable: !terminal,
           });
         },
       },
     };
-    const service = createDeviceSyncServiceForVault(firstWorkspace.vaultRoot, [stravaProvider]);
+    const service = createDeviceSyncServiceForVault(firstWorkspace.vaultRoot, [demoProvider]);
     const restoredService = createDeviceSyncServiceForVault(
       restoredWorkspace.vaultRoot,
       [{
-        ...stravaProvider,
+        ...demoProvider,
         jobExecutor: baseProvider.jobExecutor,
       }],
     );
-    const connectionId = "hosted_strava_retry";
-    const dirtyPayloadId = "dsp_strava_retry";
-    const terminalDirtyPayloadId = "dsp_strava_terminal";
+    const connectionId = "hosted_demo_retry";
+    const dirtyPayloadId = "dsp_demo_retry";
+    const terminalDirtyPayloadId = "dsp_demo_terminal";
     const pendingPayloadIds = new Set([dirtyPayloadId, terminalDirtyPayloadId]);
     const ackRequests: Array<Parameters<HostedRuntimeDeviceSyncPort["ackDirtyStateProcessed"]>[0]> = [];
     let firstClosed = false;
 
     try {
-      const begin = await service.startConnection({ provider: "strava" });
+      const begin = await service.startConnection({ provider: "demo" });
       const connected = await service.handleOAuthCallback({
-        code: "strava-retry",
-        provider: "strava",
+        code: "demo-retry",
+        provider: "demo",
         state: begin.state,
       });
       const snapshot = buildRuntimeSnapshot({
         connectionId,
         externalAccountId: connected.account.externalAccountId,
-        provider: "strava",
+        provider: "demo",
       });
       const dirtyState = buildDirtyState({
         connectionId,
@@ -7222,12 +7222,12 @@ describe("hosted device-sync runtime", () => {
           payload: {
             eventType: "activity.create",
             occurredAt: "2026-04-04T10:00:00.000Z",
-            resourceId: "strava-activity-123",
+            resourceId: "demo-activity-123",
             resourceType: "activity",
           },
           resource: "activity",
           resourceCategory: "activity",
-          sourceProviderSlug: "strava",
+          sourceProviderSlug: "demo",
           windowEnd: null,
           windowStart: null,
         }, {
@@ -7237,16 +7237,16 @@ describe("hosted device-sync runtime", () => {
           payload: {
             eventType: "activity.create",
             occurredAt: "2026-04-04T10:00:00.000Z",
-            resourceId: "strava-activity-terminal",
+            resourceId: "demo-activity-terminal",
             resourceType: "activity",
           },
           resource: "activity",
           resourceCategory: "activity",
-          sourceProviderSlug: "strava",
+          sourceProviderSlug: "demo",
           windowEnd: null,
           windowStart: null,
         }],
-        provider: "strava",
+        provider: "demo",
       });
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
         async ackDirtyStateProcessed(input) {
@@ -7294,7 +7294,7 @@ describe("hosted device-sync runtime", () => {
         wake: buildDeviceSyncWake({
           connectionId,
           occurredAt: "2026-04-04T10:00:00.000Z",
-          provider: "strava",
+          provider: "demo",
           reason: "webhook_hint",
         }),
         secret: DEVICE_SYNC_SECRET,
@@ -7305,10 +7305,10 @@ describe("hosted device-sync runtime", () => {
       promoteHostedCompletedDirtyPayloadAcks({ service, state });
       const jobs = readJobsForAccount(service, connected.account.id);
       const retryJob = jobs.find((job) =>
-        JSON.parse(job.payloadJson).resourceId === "strava-activity-123"
+        JSON.parse(job.payloadJson).resourceId === "demo-activity-123"
       );
       const terminalJob = jobs.find((job) =>
-        JSON.parse(job.payloadJson).resourceId === "strava-activity-terminal"
+        JSON.parse(job.payloadJson).resourceId === "demo-activity-terminal"
       );
       assert.equal(retryJob?.status, "queued");
       assert.ok(Date.parse(retryJob?.availableAt ?? "") > retryScheduledAfter);
@@ -7325,7 +7325,7 @@ describe("hosted device-sync runtime", () => {
         jobId: retryJob?.id,
         processedRevision: "7",
         resource: "activity",
-        sourceProviderSlug: "strava",
+        sourceProviderSlug: "demo",
       }]);
 
       const [ack] = state.pendingDirtyAcks;
@@ -7360,7 +7360,7 @@ describe("hosted device-sync runtime", () => {
         wake: buildDeviceSyncWake({
           connectionId,
           occurredAt: "2026-04-04T10:00:01.000Z",
-          provider: "strava",
+          provider: "demo",
           reason: "webhook_hint",
         }),
         secret: DEVICE_SYNC_SECRET,
@@ -10291,6 +10291,7 @@ describe("hosted device-sync runtime", () => {
     });
     const baseProvider = createFakeProvider();
     const importedJobIds: string[] = [];
+    // Synthetic registered adapter: the legacy Oura tombstone identity remains a live epoch contract.
     const ouraProvider: DeviceSyncProvider = {
       ...baseProvider,
       provider: "oura",
@@ -12731,15 +12732,14 @@ describe("hosted device-sync runtime", () => {
     const snapshotInput = {
       connectedAt,
       connectionId,
+      localState: { nextReconcileAt: "2099-01-01T00:00:00.000Z" },
       externalAccountId: "whoop-dirty-version-retry",
-      provider: "whoop",
-      tokenBundle: {
-        accessToken: "whoop-access-version-retry",
-        accessTokenExpiresAt: "2099-01-01T00:00:00.000Z",
-        refreshToken: "whoop-refresh-version-retry",
-        tokenVersion: 1,
-      },
-    } as const;
+      provider: "junction",
+      credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
+      sources: [{ sourceProviderSlug: "whoop_v2", displayName: "WHOOP", status: "connected",
+        resourceCount: 1, resourceAvailabilitySummary: { sleep: true }, firstSeenAt: connectedAt,
+        lastSeenAt: occurredAt, lastDataAt: null, lastErrorCode: null, lastErrorMessage: null }],
+    } satisfies Parameters<typeof buildRuntimeSnapshot>[0];
     let canonicalSnapshot = buildRuntimeSnapshot({
       ...snapshotInput,
       hostedUpdatedAt: "2026-04-04T09:30:00.000Z",
@@ -12747,6 +12747,7 @@ describe("hosted device-sync runtime", () => {
     let applyCalls = 0;
     let dirtyFetches = 0;
     let snapshotFetches = 0;
+    let sourceAuthorityFetches = 0;
     const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
       async ackDirtyStateProcessed() {
         throw new Error("dirty acknowledgement must wait for the checkpoint");
@@ -12785,19 +12786,19 @@ describe("hosted device-sync runtime", () => {
             dirtyResources: [{
               count: 1,
               dirtyPayloadId,
-              jobKind: "reconcile",
+              jobKind: "resource",
               resource: "sleep",
               resourceCategory: "summary",
-              sourceProviderSlug: "whoop",
+              sourceProviderSlug: "whoop_v2",
               windowEnd: "2026-04-04T00:00:00.000Z",
               windowStart: "2026-04-03T00:00:00.000Z",
             }],
             eventCount: "1",
             latestDirtyAt: occurredAt,
             processedRevision: "0",
-            provider: "whoop",
+            provider: "junction",
             resourceCategoryCounts: { summary: 1 },
-            sourceProviderCounts: { whoop: 1 },
+            sourceProviderCounts: { whoop_v2: 1 },
             userId: "member_123",
             windowEnd: "2026-04-04T00:00:00.000Z",
             windowStart: "2026-04-03T00:00:00.000Z",
@@ -12806,12 +12807,22 @@ describe("hosted device-sync runtime", () => {
           userId: "member_123",
         };
       },
-      async fetchSnapshot() {
-        snapshotFetches += 1;
+      async fetchSnapshot(input) {
+        if (input?.includeCredentialMaterial === false) sourceAuthorityFetches += 1;
+        else snapshotFetches += 1;
         return canonicalSnapshot;
       },
     };
 
+    const platformEnv = { JUNCTION_API_KEY: "sk_us_synthetic", JUNCTION_CLIENT_USER_ID_SECRET: "synthetic-secret", JUNCTION_ENV: "sandbox", JUNCTION_REGION: "us" };
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = new URL(readTestUrl(input));
+      if (url.pathname === "/v2/user/providers/whoop-dirty-version-retry") {
+        return createTestJsonResponse({ providers: [{ slug: "whoop_v2", name: "WHOOP", status: "connected", resource_availability: { sleep: true } }] });
+      }
+      assert.equal(url.pathname, "/v2/summary/sleep/whoop-dirty-version-retry");
+      return createTestJsonResponse({ sleep: [] });
+    });
     try {
       await initializeVault({ createdAt: occurredAt, vaultRoot });
       const result = await withHostedCanonicalWritePort(
@@ -12820,39 +12831,40 @@ describe("hosted device-sync runtime", () => {
           async persistRuntimeState() {},
         },
         () => runHostedDeviceSyncPass(
-          buildDirtyDeviceSyncWake(connectionId, occurredAt, "whoop"),
+          buildDirtyDeviceSyncWake(connectionId, occurredAt, "junction"),
           vaultRoot,
           {
             providerConfigs: {
-              whoop: {
-                baseUrl: "https://whoop.example.test",
-                clientId: "whoop-client",
-                clientSecret: "whoop-secret",
-              },
+              junction: { environment: "sandbox", region: "us" },
             },
             publicBaseUrl: "https://device-sync.example.test",
             secret: DEVICE_SYNC_SECRET,
           },
           deviceSyncPort,
           45_000,
+          { platformEnv },
         ),
       );
 
       assert.equal(result.processedJobs, 1);
       assert.equal(dirtyFetches, 1);
       assert.equal(snapshotFetches, 2);
+      assert.equal(sourceAuthorityFetches, 1);
       assert.equal(applyCalls, 2);
-      assert.equal(result.postCheckpointRecord?.kind, "device-sync.dirty-processed");
-      if (result.postCheckpointRecord?.kind !== "device-sync.dirty-processed") {
+      assert.equal(result.postCheckpointRecord?.kind, "device-sync.dirty-processed-batch");
+      if (result.postCheckpointRecord?.kind !== "device-sync.dirty-processed-batch") {
         throw new Error("Expected one completed dirty-state record.");
       }
-      assert.deepEqual(result.postCheckpointRecord, {
+      // Junction retains a completion fence; the single deferred acknowledgement
+      // must still contain exactly the completed payload, without readmission.
+      assert.equal(result.postCheckpointRecord.retainedWake?.hint?.reason, "retained_completion_fence");
+      assert.deepEqual(result.postCheckpointRecord.retainedWake?.hint?.jobs, []);
+      assert.deepEqual(result.postCheckpointRecord.records, [{
         connectionId,
-        kind: "device-sync.dirty-processed",
         nextWakeAt: null,
         processedDirtyPayloadIds: [dirtyPayloadId],
         processedRevision: "7",
-      });
+      }]);
 
       const database = openSqliteRuntimeDatabase(path.join(
         vaultRoot,
@@ -12874,6 +12886,7 @@ describe("hosted device-sync runtime", () => {
         database.close();
       }
     } finally {
+      fetchSpy.mockRestore();
       await cleanup();
     }
   });
@@ -13255,6 +13268,7 @@ describe("hosted device-sync runtime", () => {
     let outcome: "cold" | "transport" | "valid" = "cold";
     const base = createFakeProvider();
     const provider = createFakeProvider({
+      // Synthetic transport; WHOOP remains a live importer source identity.
       provider: "whoop", descriptor: { ...base.descriptor, provider: "whoop" },
       jobExecutor: { async executeJob(context) {
         if (outcome !== "valid") {
@@ -13452,7 +13466,7 @@ describe("hosted device-sync runtime", () => {
     },
   );
 
-  test("rebuilds a real Strava scheduler retry from manifest-shaped durable fields", async () => {
+  test("rebuilds a real Junction scheduler retry from manifest-shaped durable fields", async () => {
     const occurredAt = "2026-04-04T09:10:00.000Z";
     const retryAt = "2026-04-04T09:10:15.000Z";
     vi.useFakeTimers();
@@ -13463,24 +13477,27 @@ describe("hosted device-sync runtime", () => {
     const restoredWorkspace = await createHostedRuntimeWorkspace(
       "hosted-device-sync-exact-recovery-restored-",
     );
-    const [stravaProvider] = createConfiguredDeviceSyncProvidersFromConfigs({
-      strava: {
-        clientId: "strava-client-id",
-        clientSecret: "strava-client-secret",
+    const [junctionProvider] = createConfiguredDeviceSyncProvidersFromConfigs({
+      junction: {
+        apiKey: "sk_us_synthetic",
+        clientUserIdSecret: "synthetic-secret",
+        environment: "sandbox",
+        region: "us",
         reconcileDays: 7,
+        summaryBackfillDays: 1, summaryResources: [], timeseriesResources: [],
         fetchImpl: async () => {
-          throw new Error("Strava network access is not expected in scheduler recovery proof.");
+          throw new Error("Junction network access is not expected in scheduler recovery proof.");
         },
       },
     });
-    assert.ok(stravaProvider);
+    assert.ok(junctionProvider);
     const firstService = createDeviceSyncServiceForVault(
       firstWorkspace.vaultRoot,
-      [stravaProvider],
+      [junctionProvider],
     );
     const restoredService = createDeviceSyncServiceForVault(
       restoredWorkspace.vaultRoot,
-      [stravaProvider],
+      [junctionProvider],
     );
     const connectionId = "hosted_conn_exact_recovery";
     const wake = buildDeviceSyncWake({
@@ -13488,7 +13505,7 @@ describe("hosted device-sync runtime", () => {
       eventId: "device-sync.wake:exact-recovery",
       hint: { nextReconcileAt: occurredAt },
       occurredAt,
-      provider: "strava",
+      provider: "junction",
       reason: "reconcile_due",
     });
     const appliedRequests: ApplyUpdatesRequest[] = [];
@@ -13508,12 +13525,14 @@ describe("hosted device-sync runtime", () => {
       async fetchSnapshot() {
         return buildRuntimeSnapshot({
           connectionId,
-          externalAccountId: "strava-exact-recovery",
+          externalAccountId: "junction-exact-recovery",
           hostedUpdatedAt: occurredAt,
+          metadata: { junctionHistoricalBackfillStatus: "coverage_v3_complete", junctionHistoricalBackfillWindowStart: "2026-04-03T00:00:00.000Z", junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z" },
           localState: {
             nextReconcileAt: occurredAt,
           },
-          provider: "strava",
+          provider: "junction",
+          credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
         });
       },
     });
@@ -13531,7 +13550,10 @@ describe("hosted device-sync runtime", () => {
       await firstService.runSchedulerOnce(firstAccountId);
       const [scheduled] = readJobsForAccount(firstService, firstAccountId);
       assert.ok(scheduled);
-      assert.equal(JSON.parse(scheduled.payloadJson).windowKind, "reconcile");
+      assert.deepEqual(JSON.parse(scheduled.payloadJson), {
+        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowStart: "2026-03-28T00:00:00.000Z",
+      });
       const claimed = firstStore.claimDueJob("worker_exact_recovery", occurredAt, 60_000);
       assert.ok(claimed);
       assert.equal(claimed.attempts, 1);
@@ -13566,10 +13588,10 @@ describe("hosted device-sync runtime", () => {
       assert.equal(retainedJob?.dedupeKey, scheduled.dedupeKey);
       assert.equal(retainedJob?.kind, "reconcile");
       assert.equal(retainedJob?.maxAttempts, 4);
-      assert.equal(retainedJob?.priority, 25);
+      assert.equal(retainedJob?.priority, 40);
       assert.deepEqual(retainedJob?.payload, {
-        windowEnd: occurredAt,
-        windowStart: "2026-03-28T09:10:00.000Z",
+        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowStart: "2026-03-28T00:00:00.000Z",
       });
       assert.equal("windowKind" in (retainedJob?.payload ?? {}), false);
       assert.deepEqual(parseHostedExecutionWake(recovery.wake), recovery.wake);
@@ -13585,7 +13607,7 @@ describe("hosted device-sync runtime", () => {
             reason: "retained_completion_fence",
           },
           occurredAt,
-          provider: "strava",
+          provider: "junction",
           reason: "reconcile_due",
         }),
       });
@@ -13643,8 +13665,8 @@ describe("hosted device-sync runtime", () => {
       assert.equal(restoredJob.kind, "reconcile");
       assert.equal(restoredJob.maxAttempts, 4);
       assert.deepEqual(JSON.parse(restoredJob.payloadJson), {
-        windowEnd: occurredAt,
-        windowStart: "2026-03-28T09:10:00.000Z",
+        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowStart: "2026-03-28T00:00:00.000Z",
       });
 
       const restoredStore = getStore(restoredService);
@@ -13702,7 +13724,7 @@ describe("hosted device-sync runtime", () => {
       const historyRetryAt = "2026-04-05T12:00:00.000Z";
       const connectionId = "hosted_conn_retained_cadence";
       let wake: HostedExecutionDeviceSyncWake = buildDeviceSyncWake({
-        connectionId, occurredAt: cadenceAt, provider: "strava", reason,
+        connectionId, occurredAt: cadenceAt, provider: "junction", reason,
         hint: { nextReconcileAt: cadenceAt, jobs: [{
           availableAt: historyRetryAt, dedupeKey: "history-waiting",
           kind: "backfill", maxAttempts: 3, payload: { windowStart: "2026-01-01T00:00:00.000Z" }, priority: 30,
@@ -13711,14 +13733,16 @@ describe("hosted device-sync runtime", () => {
       let publishedCadence = cadenceAt;
       const scheduledAt: string[] = [];
       const executedKinds: string[] = [];
-      const [stravaProvider] = createConfiguredDeviceSyncProvidersFromConfigs({ strava: {
-        clientId: "synthetic-client", clientSecret: "synthetic-secret", reconcileIntervalMs: 21_600_000,
+      const [junctionProvider] = createConfiguredDeviceSyncProvidersFromConfigs({ junction: {
+        apiKey: "sk_us_synthetic", clientUserIdSecret: "synthetic-secret",
+        environment: "sandbox", region: "us", reconcileIntervalMs: 21_600_000,
+        summaryBackfillDays: 1, summaryResources: [], timeseriesResources: [],
+        fetchImpl: async () => { throw new Error("Unexpected network access in cadence fixture."); },
       } });
-      assert.ok(stravaProvider?.jobExecutor?.createScheduledJobs);
-      const createScheduledJobs = stravaProvider.jobExecutor.createScheduledJobs;
+      assert.ok(junctionProvider?.jobExecutor?.createScheduledJobs);
+      const createScheduledJobs = junctionProvider.jobExecutor.createScheduledJobs;
       let failScheduler = true;
-      const provider: DeviceSyncProvider = { ...stravaProvider, jobExecutor: {
-        ...stravaProvider.jobExecutor,
+      const provider: DeviceSyncProvider = { ...junctionProvider, jobExecutor: {
         createScheduledJobs(account, now, context) {
           if (failScheduler) throw new Error("Synthetic scheduler failure.");
           scheduledAt.push(now);
@@ -13741,7 +13765,7 @@ describe("hosted device-sync runtime", () => {
           const port: HostedRuntimeDeviceSyncPort = {
             ...createNoDirtyStateDeviceSyncPortMethods(),
             async fetchSnapshot() {
-              return buildRuntimeSnapshot({ connectionId, provider: "strava", externalAccountId: "retained-cadence", localState: { nextReconcileAt: publishedCadence } });
+              return buildRuntimeSnapshot({ connectionId, provider: "junction", credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} }, externalAccountId: "retained-cadence", metadata: { junctionHistoricalBackfillStatus: "coverage_v3_complete", junctionHistoricalBackfillWindowStart: "2026-04-03T00:00:00.000Z", junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z" }, localState: { nextReconcileAt: publishedCadence } });
             },
             async applyUpdates(input) {
               for (const update of input.updates) {

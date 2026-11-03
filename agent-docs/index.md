@@ -5,6 +5,10 @@ The deferred schema inventory belongs to `references/hosted-postgres-runtime.md`
 
 Device-sync single-snapshot retirement and cold journal replay: [implementation plan](exec-plans/active/2026-11-02-device-sync-single-snapshot.md).
 
+Research scout is retired through the existing managed-automation tombstone and archival path. Personal Patterns remains retired. `../packages/assistant-engine/README.md` owns reconciliation; the [deletion plan](exec-plans/completed/2026-11-02-remove-device-npm-jobs.md) records deployment skew and verification.
+
+Npm publication is retired; hosted runner CLI dependencies are derived from the private CLI manifest and use the common workspace packer. The protected CI coverage matrix and hosted runtime artifact checks remain owned by `operations/verification-and-runtime.md` and `references/testing-ci-map.md`. The [deletion plan](exec-plans/completed/2026-11-02-remove-device-npm-jobs.md) records the unchanged runner package closure.
+
 Cold-history write and receipt-replay rollback floor: [completed plan](exec-plans/completed/2026-11-02-ingest-cold-write-floor.md).
 
 Private meal thumbnail delivery, capture-based retention and deletion are owned by
@@ -937,8 +941,8 @@ Package verifier worker-exit result preservation is tracked in
 | `docs/architecture.md` | Concise architecture summary, repo-shape overview, package-boundary hygiene notes, and hosted ownership baseline. | Current architectural baseline | High | 2026-05-13 |
 | `docs/contracts/` | Frozen contract docs for vault layout, schemas, commands, and cross-cutting invariants. | Canonical vault interface decisions | High | 2026-07-20 |
 | `docs/contracts/06-hosted-workspace-file-count.md` | Hosted workspace checkpoint/restore and canonical receipt media recovery contract. | Hosted workspace checkpoint/restore contract | High | 2026-09-10 |
-| `docs/device-sync-hosted-control-plane.md` | Current hosted control-plane direction for device sync. | Device-sync architecture direction | Medium | 2026-09-08 |
-| `docs/device-provider-contribution-kit.md` | Maintainer guide for adding wearable providers. | Provider contribution workflow | Medium | 2026-05-13 |
+| `docs/device-sync-hosted-control-plane.md` | Junction-only hosted device control plane; companion ingestion and source-labelled reads. | Device-sync architecture direction | Medium | 2026-09-08 |
+| `docs/device-provider-contribution-kit.md` | Junction transport and source-normalization contribution boundaries. | Provider contribution workflow | Medium | 2026-05-13 |
 | `docs/device-provider-compatibility-matrix.md` | Canonical provider planning matrix and evidence expectations. | Device-provider normalization planning | Medium | 2026-07-14 |
 | `docs/hosted-auth-migration.md` | Four-stage Privy removal, reviewed candidate heads, merge/deploy order, transition-only import, session continuity, recovery and guarded schema/vendor retirement. | Hosted auth migration rollout | High | 2026-09-10 |
 | `agent-docs/exec-plans/completed/2026-09-28-passkey-smoke-origin.md` | Domain-origin browser proof for the passkey smoke harness. | Historical browser proof implementation | Low | 2026-09-28 |
@@ -1136,7 +1140,7 @@ Package verifier worker-exit result preservation is tracked in
 | `apps/cloudflare/scripts/benchmark-workspace-restore.md` | Synthetic encrypted restore benchmark, measurement controls, and local/Linux limitations. | Cloudflare workspace restore | Medium | 2026-09-04 |
 | `apps/cloudflare/DEPLOY.md` | Current deployment procedure for hosted execution, consumer-first Web runtime admission, single-pool capacity, isolated artifact smoke, compatible native gradual rollout, and member shell-hint transport retirement. | Hosted deploy flow | Medium | 2026-09-10 |
 | `packages/assistant-runtime/README.md` | Headless hosted runtime, retired member-linking mailbox handling, durable completion, Browser Vault wake qualification, and compiled-worker prerequisites for focused entrypoint tests. | `packages/assistant-runtime/**` | Medium | 2026-09-11 |
-| `packages/device-syncd/README.md` | Local wearable sync runtime boundary and env contract. | `packages/device-syncd/**` | Medium | 2026-04-02 |
+| `packages/device-syncd/README.md` | Hosted wearable ingestion and finite reconciliation boundary. | `packages/device-syncd/**` | Medium | 2026-04-02 |
 | `packages/clinical-records/README.md` | Pure Clinical Records Intake contracts for raw FHIR retrieval manifests, deterministic source references, import-plan decisions, and bounded document-extraction proposals. | `packages/clinical-records/**` | Medium | 2026-09-11 |
 | `packages/health-metrics/README.md` | Neutral metric contracts, wearable catalogs, sample summaries, reviewed lab ranges, normalization, display formatting, and selection policy. | `packages/health-metrics/**` | Medium | 2026-09-10 |
 | `packages/hosted-execution/README.md` | Shared hosted execution contracts, auth, env, and client seam; browser-vault owns replica contracts without legacy dashboard wrappers. | `packages/hosted-execution/**` | Medium | 2026-03-28 |
@@ -1577,7 +1581,6 @@ Security runtime and dependency patching is tracked in
 Requested game proposal inactivity handling and CI repair proof are recorded in
 [the delivery remediation](exec-plans/completed/2026-10-21-game-proposal-requested-delivery.md).
 
-
 Daily game post push limits, session-bound device enrollment and verification are
 recorded in [game post notifications](exec-plans/completed/2026-10-21-game-daily-notifications.md).
 
@@ -1726,3 +1729,5 @@ Local product retirement: the CLI owns hosted onboarding; verification inventori
 Member ChatGPT-linking callback retirement and mixed-version behavior are owned by
 [`references/hosted-runtime-protocol.md`](references/hosted-runtime-protocol.md).
 The retained database schema remains available to account export/deletion.
+
+Local device daemon and fixture capture retirement is tracked in [the deletion plan](exec-plans/completed/2026-11-02-remove-device-npm-jobs.md). Hosted CLI command signatures and source availability types remain.

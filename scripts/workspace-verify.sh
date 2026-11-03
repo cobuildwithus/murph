@@ -67,10 +67,6 @@ readonly shell_syntax_check_scripts=(
   "scripts/package-audit-context-full.sh"
   "scripts/package-data-context.sh"
   "scripts/repo-tools.config.sh"
-  "scripts/release.sh"
-  "scripts/release-check.sh"
-  "scripts/update-changelog.sh"
-  "scripts/generate-release-notes.sh"
   "scripts/workspace-verify.sh"
   "apps/web/scripts/verify-fast.sh"
   "apps/cloudflare/scripts/verify-fast.sh"
@@ -85,11 +81,7 @@ readonly node_syntax_check_scripts=(
   "scripts/check-runner-bundle-budget-ci.mjs"
   "scripts/check-hosted-crypto-hardcut.mjs"
   "scripts/release-artifact-secret-guard.mjs"
-  "scripts/release-helpers.mjs"
   "scripts/release-verification-plan.mjs"
-  "scripts/verify-release-target.mjs"
-  "scripts/pack-publishables.mjs"
-  "scripts/publish-publishables.mjs"
   "scripts/verify-workspace-boundaries.mjs"
   "scripts/verify-dependency-policy.mjs"
   "scripts/rm-paths.mjs"
@@ -590,7 +582,6 @@ readonly cli_verify_test_files=(
   "packages/cli/test/cli-expansion-samples-audit.test.ts"
   "packages/cli/test/cli-expansion-workout.test.ts"
   "packages/cli/test/device-cli.test.ts"
-  "packages/cli/test/device-daemon.test.ts"
   "packages/cli/test/health-tail.test.ts"
   "packages/cli/test/canonical-write-source-audit.test.ts"
   "packages/cli/test/assistant-cron.test.ts"
@@ -912,7 +903,7 @@ prepare_repo_vitest_runtime_artifacts() {
   else
     run_timed_step "Health Commons generated artifacts" generate_health_commons_artifacts_with_retry || return $?
   fi
-  run_timed_step "CLI package shape verification" pnpm exec tsx "packages/cli/scripts/verify-package-shape.ts"
+  run_timed_step "CLI runtime artifacts verification" pnpm exec tsx "packages/cli/scripts/verify-runtime-artifacts.ts"
 }
 
 run_repo_acceptance_guards() {
@@ -939,7 +930,7 @@ run_workspace_package_coverage() {
   if [[ "$package_dir" == "packages/cli" ]]; then
     run_timed_step \
       "$label" \
-      env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_CLI_RELEASE_TARBALL_TEST=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_cli_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage
+      env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_cli_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage
     return $?
   fi
 
@@ -1740,7 +1731,7 @@ run_verify_cli() {
   run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts || return $?
   run_timed_step \
     "CLI workspace Vitest" \
-    env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_CLI_RELEASE_TARBALL_TEST=1 pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" "${cli_verify_test_files[@]}" --no-coverage
+    env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" "${cli_verify_test_files[@]}" --no-coverage
 }
 
 log_acceptance_resource_plan() {

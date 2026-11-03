@@ -62,7 +62,6 @@ const serviceMocks = vi.hoisted(() => ({
 
 
   resolveDeviceProviderApplicationForConnection: vi.fn(),
-  revokeStravaDeviceSyncAccess: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-production-canary", () => ({
@@ -109,10 +108,6 @@ vi.mock("@/src/lib/hosted-web/encryption", async (importOriginal) => {
       serviceMocks.decryptHostedWebNullableStrings,
   };
 });
-
-vi.mock("@murphai/device-syncd/providers/strava", () => ({
-  revokeStravaDeviceSyncAccess: serviceMocks.revokeStravaDeviceSyncAccess,
-}));
 
 vi.mock("@/src/lib/connected-apps/composio", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/src/lib/connected-apps/composio")>()),
@@ -430,8 +425,6 @@ beforeEach(() => {
     get: vi.fn(() => null),
   });
 
-  serviceMocks.revokeStravaDeviceSyncAccess.mockReset();
-  serviceMocks.revokeStravaDeviceSyncAccess.mockResolvedValue(undefined);
 
 
   serviceMocks.decryptHostedWebNullableFields.mockReset();
@@ -3009,7 +3002,7 @@ describe("deleteHostedAccountData", () => {
       deviceConnections: [
         {
           id: "dsc_before",
-          provider: "oura",
+          provider: "synthetic_oauth",
           providerAccountBlindIndex: "hbdi_before",
         },
       ],
@@ -3019,7 +3012,7 @@ describe("deleteHostedAccountData", () => {
       transactionDeviceConnections: [
         {
           id: "dsc_current",
-          provider: "oura",
+          provider: "synthetic_oauth",
           providerAccountBlindIndex: "hbdi_current",
         },
       ],
@@ -3047,7 +3040,7 @@ describe("deleteHostedAccountData", () => {
     const original = {
       connectedAt: new Date("2026-04-27T00:07:00.000Z"),
       id: "dsc_credential_epoch",
-      provider: "oura",
+      provider: "synthetic_oauth",
       providerAccountBlindIndex: "hbdi_epoch",
 
       sources: [],
@@ -3082,7 +3075,7 @@ describe("deleteHostedAccountData", () => {
     const connection = {
       connectedAt: new Date("2026-04-27T00:07:00.000Z"),
       id: "dsc_refresh_in_flight",
-      provider: "oura",
+      provider: "synthetic_oauth",
       providerAccountBlindIndex: "hbdi_refresh_in_flight",
 
       refreshLeaseExpiresAt: new Date("2099-04-27T00:12:00.000Z"),
@@ -3128,7 +3121,7 @@ describe("deleteHostedAccountData", () => {
       connectedAt: new Date("2026-04-27T00:07:00.000Z"),
       credentialKind: "oauth_tokens",
       id: "dsc_refresh_expired",
-      provider: "oura",
+      provider: "synthetic_oauth",
       providerAccountBlindIndex: "hbdi_refresh_expired",
 
       refreshLeaseExpiresAt: new Date("2020-04-27T00:12:00.000Z"),
@@ -3144,7 +3137,7 @@ describe("deleteHostedAccountData", () => {
         getConnectionForUser: vi.fn(async () => ({
           connectedAt: "2026-04-27T00:07:00.000Z",
           createdAt: "2026-04-27T00:07:00.000Z",
-          displayName: "Oura",
+          displayName: "Synthetic Oauth",
           externalAccountId: "provider-account",
           id: connection.id,
           lastErrorCode: null,
@@ -3216,7 +3209,7 @@ describe("deleteHostedAccountData", () => {
       credentialKind: "oauth_tokens",
       id: "dsc_oauth_cleanup",
       lastErrorCode: null as string | null,
-      provider: "oura",
+      provider: "synthetic_oauth",
       providerAccountBlindIndex: "hbdi_refresh_expired",
 
       refreshLeaseExpiresAt: new Date("2020-04-27T00:12:00.000Z") as Date | null,
@@ -3300,9 +3293,9 @@ describe("deleteHostedAccountData", () => {
       code: "ACCOUNT_DELETION_DEVICE_TOKEN_REFRESH_RECOVERY_REQUIRED",
       details: {
         connectionId: connection.id,
-        providerLabel: "Oura",
+        providerLabel: "Synthetic Oauth",
       },
-      message: "The Oura credential refresh did not finish safely. Reconnect that source, then retry account deletion.",
+      message: "The Synthetic Oauth credential refresh did not finish safely. Reconnect that source, then retry account deletion.",
       retryable: false,
     });
     await expect(deleteHostedAccountData(deletionInput)).rejects.toMatchObject({
@@ -3329,7 +3322,7 @@ describe("deleteHostedAccountData", () => {
     const connection = {
       connectedAt: new Date("2026-04-27T00:07:00.000Z"),
       id: "dsc_refresh_race",
-      provider: "oura",
+      provider: "synthetic_oauth",
       providerAccountBlindIndex: "hbdi_refresh_race",
 
       sources: [],
@@ -3369,7 +3362,7 @@ describe("deleteHostedAccountData", () => {
     const connection = {
       connectedAt: new Date("2026-04-27T00:07:00.000Z"),
       id: "dsc_refresh_ambiguous_race",
-      provider: "oura",
+      provider: "synthetic_oauth",
       providerAccountBlindIndex: "hbdi_refresh_ambiguous_race",
 
       sources: [],
@@ -3432,7 +3425,7 @@ describe("deleteHostedAccountData", () => {
       deviceOauthSessions: [{
         consumedAt: new Date("2026-04-27T00:00:00.000Z"),
         expiresAt: new Date("2026-04-27T00:15:00.000Z"),
-        provider: "oura",
+        provider: "synthetic_oauth",
         state: "oauth-state-ambiguous",
       }],
       onTransaction: () => undefined,
@@ -3446,9 +3439,9 @@ describe("deleteHostedAccountData", () => {
       code: "ACCOUNT_DELETION_DEVICE_AUTHORIZATION_RECOVERY_REQUIRED",
       details: {
         providerAccessRemovalConfirmationToken: expect.any(String),
-        providerLabels: ["Oura"],
+        providerLabels: ["Synthetic Oauth"],
       },
-      message: "Remove Murph access from Oura, then confirm below.",
+      message: "Remove Murph access from Synthetic Oauth, then confirm below.",
       retryable: false,
     });
     expect(deleteCalls).toEqual([]);
@@ -3462,7 +3455,7 @@ describe("deleteHostedAccountData", () => {
       deviceOauthSessions: [{
         consumedAt: new Date("2026-04-27T00:00:00.000Z"),
         expiresAt,
-        provider: "oura",
+        provider: "synthetic_oauth",
         state: "oauth-state-ambiguous",
       }],
       onTransaction: () => undefined,
@@ -3506,7 +3499,7 @@ describe("deleteHostedAccountData", () => {
       deviceOauthSessions: [{
         consumedAt: new Date("2026-04-27T00:00:00.000Z"),
         expiresAt: new Date("2026-04-27T00:15:00.000Z"),
-        provider: "oura",
+        provider: "synthetic_oauth",
         state: "oauth-state-changed",
       }],
       hostedMemberUpdateCalls,
@@ -3545,7 +3538,7 @@ describe("deleteHostedAccountData", () => {
     const deviceOauthSessions = [{
       consumedAt: new Date("2026-04-27T00:00:00.000Z"),
       expiresAt: new Date("2026-04-27T00:15:00.000Z"),
-      provider: "oura",
+      provider: "synthetic_oauth",
       state: "oauth-state-a",
     }];
     const prisma = createHostedAccountDeletionPrismaForTest({
@@ -3587,7 +3580,7 @@ describe("deleteHostedAccountData", () => {
         providerAccessRemovalConfirmationToken: expect.not.stringMatching(
           olderConfirmationToken!,
         ),
-        providerLabels: ["Oura", "WHOOP"],
+        providerLabels: ["Synthetic Oauth", "WHOOP"],
       },
     });
     expect(deleteCalls).toEqual([]);
@@ -3604,7 +3597,7 @@ describe("deleteHostedAccountData", () => {
     const connection = {
       connectedAt: new Date("2026-04-27T00:07:00.000Z"),
       id: "dsc_current",
-      provider: "oura",
+      provider: "synthetic_oauth",
       providerAccountBlindIndex: "hbdi_current",
 
       sources: [],
@@ -3628,7 +3621,7 @@ describe("deleteHostedAccountData", () => {
       rawDeletionQueries,
       "dependents",
     );
-    expect(dependents.values).toContain("oura");
+    expect(dependents.values).toContain("synthetic_oauth");
     expect(dependents.values).toContain("hbdi_current");
   });
 
@@ -3648,17 +3641,17 @@ describe("deleteHostedAccountData", () => {
         },
         {
           id: "dsc_oura_b",
-          provider: "oura",
+          provider: "synthetic_oauth",
           providerAccountBlindIndex: "hbdi_b",
         },
         {
           id: "dsc_oura_a",
-          provider: "oura",
+          provider: "synthetic_oauth",
           providerAccountBlindIndex: "hbdi_a",
         },
         {
           id: "dsc_oura_a_duplicate",
-          provider: "oura",
+          provider: "synthetic_oauth",
           providerAccountBlindIndex: "hbdi_a",
         },
       ],
@@ -3672,17 +3665,17 @@ describe("deleteHostedAccountData", () => {
         },
         {
           id: "dsc_oura_b",
-          provider: "oura",
+          provider: "synthetic_oauth",
           providerAccountBlindIndex: "hbdi_b",
         },
         {
           id: "dsc_oura_a",
-          provider: "oura",
+          provider: "synthetic_oauth",
           providerAccountBlindIndex: "hbdi_a",
         },
         {
           id: "dsc_oura_a_duplicate",
-          provider: "oura",
+          provider: "synthetic_oauth",
           providerAccountBlindIndex: "hbdi_a",
         },
       ],
@@ -3795,7 +3788,7 @@ describe("deleteHostedAccountData", () => {
       deviceConnections: [{
         credentialKind: "oauth_tokens",
         id: "dsc_missing_oauth_secret",
-        provider: "strava",
+        provider: "synthetic_oauth",
         providerAccountBlindIndex: "blind-index",
         status: "reauthorization_required",
       }],
@@ -3828,7 +3821,7 @@ describe("deleteHostedAccountData", () => {
       deviceConnections: [{
         credentialKind: "oauth_tokens",
         id: "dsc_legacy_missing_oauth_secret",
-        provider: "strava",
+        provider: "synthetic_oauth",
         providerAccountBlindIndex: "blind-index",
         status: "disconnected",
       }],
@@ -3875,7 +3868,7 @@ describe("deleteHostedAccountData", () => {
       deviceConnections: [{
         credentialKind: "oauth_tokens",
         id: "dsc_oauth_cleanup",
-        provider: "oura",
+        provider: "synthetic_oauth",
         providerAccountBlindIndex: "blind-index",
         status: "reauthorization_required",
       }],
@@ -3923,7 +3916,7 @@ describe("deleteHostedAccountData", () => {
       deviceConnections: [{
         credentialKind: "oauth_tokens",
         id: "dsc_oauth_cleanup",
-        provider: "oura",
+        provider: "synthetic_oauth",
         providerAccountBlindIndex: "blind-index",
       }],
       onTransaction: () => undefined,
@@ -3939,7 +3932,7 @@ describe("deleteHostedAccountData", () => {
       details: {
         providerRevocations: [{
           errorCode: "PROVIDER_REVOKE_NOT_CONFIGURED",
-          providerLabel: "Oura",
+          providerLabel: "Synthetic Oauth",
         }],
       },
       retryable: true,
@@ -4667,7 +4660,7 @@ function buildStoredOAuthDeviceAccountForDeletion() {
       },
     },
     disconnectGeneration: 0,
-    displayName: "Oura",
+    displayName: "Synthetic Oauth",
     externalAccountId: "provider-account",
     id: "dsc_oauth_cleanup",
     keyVersion: "key-v1",
@@ -4677,7 +4670,7 @@ function buildStoredOAuthDeviceAccountForDeletion() {
     lastWebhookAt: null,
     metadata: {},
     nextReconcileAt: null,
-    provider: "oura",
+    provider: "synthetic_oauth",
     scopes: ["daily"],
     setupExpiresAt: null,
     setupPhase: null,

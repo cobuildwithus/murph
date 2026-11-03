@@ -118,11 +118,7 @@ import {
   foodLabelBatchSearchResultSchema,
   foodLabelSearchResultSchema,
 } from './food-labels.js'
-import { registerResearchCommands } from './commands/research.js'
-import {
-  RESEARCH_SCOUT_FOCUSED_CONCEPT_GUIDANCE,
-  researchScoutResultSchema,
-} from './research-scout.js'
+
 import { registerRouteCommands } from './commands/route.js'
 import {
   knowledgeChallengeScoreCommandDescription,
@@ -832,9 +828,6 @@ export const vaultCliCommandDescriptors = [
         'showAccount',
         'reconcileAccount',
         'disconnectAccount',
-        'daemonStatus',
-        'daemonStart',
-        'daemonStop',
       ],
     },
     register({ cli, services }) {
@@ -900,32 +893,7 @@ export const vaultCliCommandDescriptors = [
       registerRouteCommands(cli)
     },
   },
-  {
-    id: 'research',
-    bindingMode: 'none',
-    rootCommandNames: ['research'],
-    leafCommands: [
-      {
-        path: ['research', 'payload-schema'],
-        description:
-          'Emit the exact finite focused-scope JSON body schema for research scout --input.',
-        hint:
-          'Use this before research scout when constructing the stdin or @file JSON body.',
-        output: payloadSchemaResultSchema,
-      },
-      {
-        path: ['research', 'scout'],
-        description:
-          'Search Exa for bounded human-research candidates from one finite focused structured scope without writing vault records.',
-        hint:
-          `Requires EXA_API_KEY and {"mode":"focused"}. Use only exact server-owned public concepts: ${RESEARCH_SCOUT_FOCUSED_CONCEPT_GUIDANCE}. If the question cannot be represented exactly, make no Exa call. Managed broad discovery and automation use research scout-batch. Never include arbitrary values, names, organizations, private notes, or personal data. Trust only candidates whose resultIndex maps to a returned source with a title, web URL, and enough publication metadata for the claim; otherwise report no usable current source without fabricating or repeating the lookup blindly.`,
-        output: researchScoutResultSchema,
-      },
-    ],
-    register({ cli }) {
-      registerResearchCommands(cli)
-    },
-  },
+
   {
     id: 'meal',
     bindingMode: 'none',
@@ -1945,7 +1913,6 @@ assertValidVaultCliCommandManifest(vaultCliCommandDescriptors)
 const ROOT_COMMAND_NAMES_EXEMPT_FROM_VAULT = new Set([
   'commons',
   'model',
-  'research',
   'route',
 ])
 

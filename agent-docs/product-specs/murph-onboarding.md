@@ -66,7 +66,7 @@ privacy, authorization, or provider boundaries.
 - Keep the existing `open | completed` onboarding state. Open onboarding does
   not gate ordinary Murph use.
 - While onboarding is open, the cron wake projection omits unclaimed weekly
-  health insight, monthly improvement coach, and weekly research scout work,
+  health insight and monthly improvement coach work,
   using the execution owner's exact managed identities. Canonical schedules
   stay active; running claims, pending deliveries, retries, and uncertain
   onboarding reads keep their ordinary wakes. After foreground delivery, the

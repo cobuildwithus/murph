@@ -34,8 +34,7 @@
     "test:vitest": "pnpm generate && pnpm --dir ../.. exec vitest run --config packages/exercise-library/vitest.config.ts --no-coverage",
     "test:coverage": "pnpm generate && pnpm --dir ../.. exec vitest run --config packages/exercise-library/vitest.config.ts --coverage",
     "test": "pnpm test:vitest",
-    "verify": "pnpm typecheck && pnpm test && pnpm generate:check",
-    "prepack": "pnpm build"
+    "verify": "pnpm typecheck && pnpm test && pnpm generate:check"
   },
   "devDependencies": {
     "@types/node": "^24.12.4",

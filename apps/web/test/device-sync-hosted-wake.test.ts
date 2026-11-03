@@ -53,7 +53,6 @@ const mocks = vi.hoisted(() => {
     markDirtyConnectionProcessed: vi.fn(),
     persistStoredConnectionTokenBundle: vi.fn(),
 
-    revokeStravaDeviceSyncAccess: vi.fn(),
     readHostedDeviceSyncEnvironment: vi.fn(),
     readPendingDirtyConnectionSnapshot: vi.fn(),
     registryGet: vi.fn(),
@@ -78,6 +77,7 @@ const mocks = vi.hoisted(() => {
     upsertDirtyConnectionWithPreparedPlanTx: vi.fn(),
     upsertConnectionSource: vi.fn(),
 
+    webhookProvider: "oura",
     webhookAccountConnectedAt: "2026-03-26T12:00:00.000Z",
     webhookProcessingAttemptedAt: "2026-03-26T12:00:00.000Z",
     withConnectionMutationLock: vi.fn(),
@@ -191,10 +191,6 @@ vi.mock("@murphai/device-syncd/public-ingress", async () => {
     isDeviceSyncError: actual.isDeviceSyncError,
   };
 });
-
-vi.mock("@murphai/device-syncd/providers/strava", () => ({
-  revokeStravaDeviceSyncAccess: mocks.revokeStravaDeviceSyncAccess,
-}));
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: vi.fn(() => mocks.prisma),
@@ -728,6 +724,7 @@ function mockFitbitMigrationAdmissionSources(input: {
 describe("hosted device-sync wakes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.webhookProvider = "oura";
     mocks.webhookAccountConnectedAt = "2026-03-26T12:00:00.000Z";
     mocks.webhookProcessingAttemptedAt = "2026-03-26T12:00:00.000Z";
     mocks.getConnectionForUser.mockReset();
@@ -737,8 +734,6 @@ describe("hosted device-sync wakes", () => {
     mocks.listMemberConnectionStatuses.mockResolvedValue([]);
     mocks.materializeStoredConnectionAccount.mockReset();
 
-    mocks.revokeStravaDeviceSyncAccess.mockReset();
-    mocks.revokeStravaDeviceSyncAccess.mockResolvedValue(undefined);
     mocks.upsertConnectionSource.mockReset();
     mocks.toIsoTimestamp.mockReset();
     mocks.toIsoTimestamp.mockReturnValue("2026-03-26T12:00:00.000Z");
@@ -781,7 +776,7 @@ describe("hosted device-sync wakes", () => {
           },
         ],
         occurredAt: "2026-03-26T11:59:00.000Z",
-        provider: "oura",
+        provider: mocks.webhookProvider,
         receivedAt: "2026-03-26T12:00:00.000Z",
         resourceCategory: "daily_sleep",
         schema: "murph.device-sync-prepared-webhook.v1" as const,
@@ -6828,9 +6823,13 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("persists dirty state before sparse webhook audit and appends a mailbox wake only for dirty transitions", async () => {
+    mocks.webhookProvider = "junction";
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
+      buildWebhookAdmissionRecord({ provider: "junction" }),
+    );
     mocks.webhookProcessingAttemptedAt = "2026-03-26T12:30:00.000Z";
     const controlPlane = createHostedDeviceSyncPublicIngressService(
-      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+      new Request("https://control.example.test/api/device-sync/webhooks/junction", {
         body: JSON.stringify({
           event: "sleep.updated",
         }),
@@ -6841,7 +6840,7 @@ describe("hosted device-sync wakes", () => {
       }),
     );
 
-    await controlPlane.handleWebhook("oura");
+    await controlPlane.handleWebhook("junction");
 
     const signalInput = mocks.createSignal.mock.calls[0]?.[0];
     expect(mocks.createSignal).toHaveBeenCalledWith(
@@ -6854,7 +6853,7 @@ describe("hosted device-sync wakes", () => {
         sourceProviderSlug: null,
         traceId: "trace_123",
         userId: "user-123",
-        provider: "oura",
+        provider: "junction",
         createdAt: "2026-03-26T12:00:00.000Z",
         tx: mocks.prismaTx,
       },
@@ -6865,7 +6864,7 @@ describe("hosted device-sync wakes", () => {
       connectionId: "dsc_123",
       dirtyAt: "2026-03-26T11:59:00.000Z",
       eventType: "sleep.updated",
-      provider: "oura",
+      provider: "junction",
       resourceCategory: "daily_sleep",
       resources: [
         {
@@ -6881,7 +6880,7 @@ describe("hosted device-sync wakes", () => {
           resource: null,
           resourceCategory: null,
           sourceProviderSlug: null,
-          timingSourceProviderSlug: "oura",
+          timingSourceProviderSlug: "junction",
           windowEnd: "2026-03-26T00:00:00.000Z",
           windowStart: "2026-03-19T00:00:00.000Z",
         },
@@ -6890,7 +6889,7 @@ describe("hosted device-sync wakes", () => {
       tx: mocks.prismaTx,
       userId: "user-123",
     });
-    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", "claim-token", mocks.prismaTx);
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("junction", "trace_123", "claim-token", mocks.prismaTx);
     expect(mocks.upsertDirtyConnection.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.completeWebhookTrace.mock.invocationCallOrder[0],
     );
@@ -6906,7 +6905,7 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(
       expect.objectContaining({
         envelope: expect.objectContaining({
-          eventId: "device-sync:dirty:v1:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z:1",
+          eventId: "device-sync:dirty:v1:user-123:junction:dsc_123:2026-03-26T12:00:00.000Z:1",
           expectedConnectedAt: "2026-03-26T12:00:00.000Z",
           kind: "device-sync.wake",
           reason: "webhook_hint",
@@ -8137,6 +8136,10 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("performs one full fresh-cache replan after the real mailbox root preparation drifts", async () => {
+    mocks.webhookProvider = "junction";
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
+      buildWebhookAdmissionRecord({ provider: "junction" }),
+    );
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const preparationCaches: unknown[] = [];
@@ -8152,14 +8155,14 @@ describe("hosted device-sync wakes", () => {
       new HostedDomainRootPreparationMismatchError(),
     );
     const controlPlane = createHostedDeviceSyncPublicIngressService(
-      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+      new Request("https://control.example.test/api/device-sync/webhooks/junction", {
         body: JSON.stringify({ event: "sleep.updated" }),
         headers: { "content-type": "application/json" },
         method: "POST",
       }),
     );
 
-    await expect(controlPlane.handleWebhook("oura")).resolves.toMatchObject({
+    await expect(controlPlane.handleWebhook("junction")).resolves.toMatchObject({
       accepted: true,
     });
 
@@ -8182,19 +8185,23 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("returns a retryable error when the real mailbox root preparation drifts twice", async () => {
+    mocks.webhookProvider = "junction";
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
+      buildWebhookAdmissionRecord({ provider: "junction" }),
+    );
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.appendHostedMailboxEnvelopeTx
       .mockRejectedValueOnce(new HostedDomainRootPreparationMismatchError())
       .mockRejectedValueOnce(new HostedDomainRootPreparationMismatchError());
     const controlPlane = createHostedDeviceSyncPublicIngressService(
-      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+      new Request("https://control.example.test/api/device-sync/webhooks/junction", {
         body: JSON.stringify({ event: "sleep.updated" }),
         headers: { "content-type": "application/json" },
         method: "POST",
       }),
     );
 
-    await expect(controlPlane.handleWebhook("oura")).rejects.toMatchObject({
+    await expect(controlPlane.handleWebhook("junction")).rejects.toMatchObject({
       code: "HOSTED_DEVICE_SYNC_PREPARATION_STALE",
       httpStatus: 503,
       retryable: true,
@@ -8219,6 +8226,10 @@ describe("hosted device-sync wakes", () => {
     ["dirty_owner_changed", "dirty_owner_changed"],
     ["synthetic-private-reason", "admission_or_wake_changed"],
   ])("logs bounded preparation reason %s without private exception details", async (reason, expectedReason) => {
+    mocks.webhookProvider = "junction";
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
+      buildWebhookAdmissionRecord({ provider: "junction" }),
+    );
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const failure = Object.assign(new Error("synthetic-private-exception"), {
       code: "HOSTED_DEVICE_SYNC_DIRTY_PREPARATION_MISMATCH", reason,
@@ -8226,12 +8237,12 @@ describe("hosted device-sync wakes", () => {
     mocks.upsertDirtyConnectionWithPreparedPlanTx
       .mockRejectedValueOnce(failure).mockRejectedValueOnce(failure);
     const controlPlane = createHostedDeviceSyncPublicIngressService(new Request(
-      "https://control.example.test/api/device-sync/webhooks/oura", {
+      "https://control.example.test/api/device-sync/webhooks/junction", {
         body: JSON.stringify({ event: "sleep.updated" }),
         headers: { "content-type": "application/json" }, method: "POST",
       },
     ));
-    await expect(controlPlane.handleWebhook("oura")).rejects.toMatchObject({
+    await expect(controlPlane.handleWebhook("junction")).rejects.toMatchObject({
       code: "HOSTED_DEVICE_SYNC_PREPARATION_STALE", httpStatus: 503,
     });
     expect(warn).toHaveBeenCalledWith("Hosted device-sync prepared write changed before commit.", {
@@ -8561,6 +8572,10 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("shapes hosted webhook dirty resources by provider and job allowlists instead of key redaction", async () => {
+    mocks.webhookProvider = "junction";
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
+      buildWebhookAdmissionRecord({ provider: "junction" }),
+    );
     mocks.createDeviceSyncPublicIngress.mockImplementationOnce((input: {
       hooks?: {
         onConnectionEstablished?: (value: unknown) => Promise<void> | void;
@@ -8574,7 +8589,7 @@ describe("hosted device-sync wakes", () => {
           account: {
             connectedAt: "2026-03-26T12:00:00.000Z",
             id: "dsc_123",
-            provider: "oura",
+            provider: "junction",
             scopes: ["heartrate"],
           },
           connectionOwnerId: "user-123",
@@ -8621,7 +8636,7 @@ describe("hosted device-sync wakes", () => {
       startConnection: vi.fn(),
     }));
     const controlPlane = createHostedDeviceSyncPublicIngressService(
-      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+      new Request("https://control.example.test/api/device-sync/webhooks/junction", {
         body: JSON.stringify({
           event: "sleep.updated",
         }),
@@ -8632,7 +8647,7 @@ describe("hosted device-sync wakes", () => {
       }),
     );
 
-    await controlPlane.handleWebhook("oura");
+    await controlPlane.handleWebhook("junction");
 
     const signalInput = mocks.createSignal.mock.calls[0]?.[0];
     const signalJson = JSON.stringify(signalInput ?? {});
@@ -8673,7 +8688,7 @@ describe("hosted device-sync wakes", () => {
         resource: null,
         resourceCategory: null,
         sourceProviderSlug: null,
-        timingSourceProviderSlug: "oura",
+        timingSourceProviderSlug: "junction",
         windowEnd: null,
         windowStart: "2026-03-19T00:00:00.000Z",
       },
@@ -8681,7 +8696,7 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(expect.objectContaining({
       envelope: expect.objectContaining({
-        eventId: "device-sync:dirty:v1:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z:1",
+        eventId: "device-sync:dirty:v1:user-123:junction:dsc_123:2026-03-26T12:00:00.000Z:1",
         expectedConnectedAt: "2026-03-26T12:00:00.000Z",
         kind: "device-sync.wake",
       }),
@@ -9089,7 +9104,11 @@ describe("hosted device-sync wakes", () => {
     expect(dirtyResources.map((resource) => resource.sourceProviderSlug)).toEqual(["garmin", "garmin"]);
   });
 
-  it("shapes Whoop hosted dirty resources through the provider-owned allowlists", async () => {
+  it("shapes Junction provider-labelled dirty resources through the provider-owned allowlists", async () => {
+    mocks.webhookProvider = "junction";
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
+      buildWebhookAdmissionRecord({ provider: "junction" }),
+    );
     mocks.createDeviceSyncPublicIngress.mockImplementationOnce((input: {
       hooks?: {
         onConnectionEstablished?: (value: unknown) => Promise<void> | void;
@@ -9103,14 +9122,14 @@ describe("hosted device-sync wakes", () => {
           account: {
             connectedAt: "2026-03-26T12:00:00.000Z",
             id: "dsc_123",
-            provider: "whoop",
+            provider: "junction",
             scopes: ["offline"],
           },
           connectionOwnerId: "user-123",
           now: "2026-03-26T12:00:00.000Z",
           processingAttemptedAt: "2026-03-26T12:00:00.000Z",
           provider: {},
-          traceId: "trace_whoop_123",
+          traceId: "trace_junction_123",
           webhook: {
             acceptanceMode: "durable_webhook_work",
             eventType: "workout.updated",
@@ -9120,21 +9139,23 @@ describe("hosted device-sync wakes", () => {
                 payload: {
                   eventType: "workout.updated",
                   occurredAt: "2026-03-26T11:58:00.000Z",
-                  resourceId: "workout-7",
-                  resourceType: "workout",
-                  sessionToken: "whoop-session-secret",
+                  objectId: "workout-7",
+                  resource: "workouts",
+                  sourceProviderSlug: "whoop_v2",
+                  sessionToken: "junction-session-secret",
                   webhookPayload: {
                     extra: "drop-me",
                   },
                 },
               },
               {
-                kind: "delete",
+                kind: "resource",
                 payload: {
                   eventType: "workout.deleted",
                   occurredAt: "2026-03-26T11:59:00.000Z",
-                  resourceId: "workout-8",
-                  resourceType: "workout",
+                  objectId: "workout-8",
+                  resource: "workouts",
+                  sourceProviderSlug: "whoop_v2",
                   traceId: "drop-trace",
                 },
               },
@@ -9150,10 +9171,10 @@ describe("hosted device-sync wakes", () => {
       startConnection: vi.fn(),
     }));
     mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
-      buildWebhookAdmissionRecord({ provider: "whoop" }),
+      buildWebhookAdmissionRecord({ provider: "junction" }),
     );
     const controlPlane = createHostedDeviceSyncPublicIngressService(
-      new Request("https://control.example.test/api/device-sync/webhooks/whoop", {
+      new Request("https://control.example.test/api/device-sync/webhooks/junction", {
         body: JSON.stringify({
           event: "workout.updated",
         }),
@@ -9164,22 +9185,22 @@ describe("hosted device-sync wakes", () => {
       }),
     );
 
-    await controlPlane.handleWebhook("whoop");
+    await controlPlane.handleWebhook("junction");
 
     const signalInput = mocks.createSignal.mock.calls[0]?.[0];
     const signalJson = JSON.stringify(signalInput ?? {});
     const dirtyResources = mocks.upsertDirtyConnection.mock.calls[0]?.[0]?.resources;
 
-    expect(signalJson).not.toContain("whoop-session-secret");
+    expect(signalJson).not.toContain("junction-session-secret");
     expect(signalJson).not.toContain("drop-me");
     expect(signalJson).not.toContain("drop-trace");
     expect(signalInput).toEqual(expect.objectContaining({
       eventType: "workout.updated",
       occurredAt: "2026-03-26T11:59:00.000Z",
       resourceCategory: "workout",
-      traceId: "trace_whoop_123",
+      traceId: "trace_junction_123",
     }));
-    expect(JSON.stringify(dirtyResources ?? [])).not.toContain("whoop-session-secret");
+    expect(JSON.stringify(dirtyResources ?? [])).not.toContain("junction-session-secret");
     expect(JSON.stringify(dirtyResources ?? [])).not.toContain("drop-me");
     expect(JSON.stringify(dirtyResources ?? [])).not.toContain("drop-trace");
     expect(dirtyResources).toEqual([
@@ -9192,13 +9213,14 @@ describe("hosted device-sync wakes", () => {
         payload: {
           eventType: "workout.updated",
           occurredAt: "2026-03-26T11:58:00.000Z",
-          resourceId: "workout-7",
-          resourceType: "workout",
+          objectId: "workout-7",
+          resource: "workouts",
+                  sourceProviderSlug: "whoop_v2",
         },
-        resource: null,
+        resource: "workouts",
         resourceCategory: null,
-        sourceProviderSlug: null,
-        timingSourceProviderSlug: "whoop",
+        sourceProviderSlug: "whoop_v2",
+        timingSourceProviderSlug: "whoop_v2",
         windowEnd: null,
         windowStart: null,
       },
@@ -9207,17 +9229,18 @@ describe("hosted device-sync wakes", () => {
         eventToProviderSendBucket: null,
         firstWebhookReceivedAt: "2026-03-26T12:00:00.000Z",
         providerSendToWebhookMs: null,
-        jobKind: "delete",
+        jobKind: "resource",
         payload: {
           eventType: "workout.deleted",
           occurredAt: "2026-03-26T11:59:00.000Z",
-          resourceId: "workout-8",
-          resourceType: "workout",
+          objectId: "workout-8",
+          resource: "workouts",
+                  sourceProviderSlug: "whoop_v2",
         },
-        resource: null,
+        resource: "workouts",
         resourceCategory: null,
-        sourceProviderSlug: null,
-        timingSourceProviderSlug: "whoop",
+        sourceProviderSlug: "whoop_v2",
+        timingSourceProviderSlug: "whoop_v2",
         windowEnd: null,
         windowStart: null,
       },
@@ -9299,23 +9322,27 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("keeps delete webhook dirty resources narrow across the hosted handoff", async () => {
+    mocks.webhookProvider = "junction";
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
+      buildWebhookAdmissionRecord({ provider: "junction" }),
+    );
     const deleteWebhook = {
       eventType: "session.deleted",
       jobs: [
         {
-          kind: "delete",
-          dedupeKey: "oura-webhook:trace_delete_123",
+          kind: "resource",
+          dedupeKey: "junction-webhook:trace_delete_123",
           payload: {
-            dataType: "session",
+            resource: "sleep",
             objectId: "session-42",
             occurredAt: "2026-03-26T11:59:00.000Z",
-            sourceEventType: "session.deleted",
+            eventType: "session.deleted",
             webhookPayload: {
               data_type: "session",
               event_time: "2026-03-26T11:59:00.000Z",
               event_type: "delete",
               object_id: "session-42",
-              user_id: "oura-user-1",
+              user_id: "junction-user-1",
             },
           },
         },
@@ -9336,13 +9363,13 @@ describe("hosted device-sync wakes", () => {
           account: {
             connectedAt: "2026-03-26T12:00:00.000Z",
             id: "dsc_123",
-            provider: "oura",
+            provider: "junction",
           },
           connectionOwnerId: "user-123",
           now: "2026-03-26T12:00:00.000Z",
           processingAttemptedAt: "2026-03-26T12:00:00.000Z",
           provider: {
-            provider: "oura",
+            provider: "junction",
           },
           traceId: "trace_delete_123",
           webhook: deleteWebhook,
@@ -9354,7 +9381,7 @@ describe("hosted device-sync wakes", () => {
       startConnection: vi.fn(),
     }));
     const controlPlane = createHostedDeviceSyncPublicIngressService(
-      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+      new Request("https://control.example.test/api/device-sync/webhooks/junction", {
         body: JSON.stringify({
           event: "session.deleted",
         }),
@@ -9365,7 +9392,7 @@ describe("hosted device-sync wakes", () => {
       }),
     );
 
-    await controlPlane.handleWebhook("oura");
+    await controlPlane.handleWebhook("junction");
 
     const dirtyResources = mocks.upsertDirtyConnection.mock.calls[0]?.[0]?.resources;
 
@@ -9375,23 +9402,23 @@ describe("hosted device-sync wakes", () => {
         eventToProviderSendBucket: null,
         firstWebhookReceivedAt: "2026-03-26T12:00:00.000Z",
         providerSendToWebhookMs: null,
-        jobKind: "delete",
+        jobKind: "resource",
         payload: {
-          dataType: "session",
+          resource: "sleep",
           objectId: "session-42",
           occurredAt: "2026-03-26T11:59:00.000Z",
-          sourceEventType: "session.deleted",
+          eventType: "session.deleted",
         },
-        providerDedupeKey: "oura-webhook:trace_delete_123",
-        resource: null,
+        providerDedupeKey: "junction-webhook:trace_delete_123",
+        resource: "sleep",
         resourceCategory: null,
         sourceProviderSlug: null,
-        timingSourceProviderSlug: "oura",
+        timingSourceProviderSlug: "junction",
         windowEnd: null,
         windowStart: null,
       },
     ]);
-    expect(JSON.stringify(dirtyResources)).not.toContain("oura-user-1");
+    expect(JSON.stringify(dirtyResources)).not.toContain("junction-user-1");
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",

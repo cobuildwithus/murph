@@ -5,16 +5,6 @@ import { Buffer } from "node:buffer";
 import { waitUntil } from "cloudflare:workers";
 
 import {
-  buildExaResearchScoutBatchLaneRequest,
-  buildExaResearchScoutRequest,
-  clampExaResearchScoutPublishedWindow,
-  EXA_RESEARCH_SCOUT_METHOD,
-  EXA_RESEARCH_SCOUT_PATH,
-  parseExaResearchScoutRequestBody,
-  type ExaResearchScoutRequestBody,
-  type ExaResearchScoutParsedRequest,
-} from "@murphai/contracts";
-import {
   buildHostedExecutionSafeErrorDetails,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
@@ -142,7 +132,7 @@ const OPENAI_AUTHORIZATION_ALERT_REPORT_FAILURE_CODE =
   "openai_authorization_alert_report_failed";
 const OPENAI_AUTHORIZATION_ALERT_REPORT_FAILURE_MESSAGE =
   "OpenAI authorization alert report failed.";
-const DEFAULT_EXA_API_BASE_URL = "https://api.exa.ai";
+
 const DEFAULT_MAPBOX_API_BASE_URL = "https://api.mapbox.com";
 const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 const DEFAULT_TELEGRAM_FILE_BASE_URL = "https://api.telegram.org/file";
@@ -173,7 +163,6 @@ export const HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS = {
   dataApi: HOSTED_DATA_API_RUNTIME_HOST,
   effectsPort: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort,
   elevenLabs: "api.elevenlabs.io",
-  exa: "api.exa.ai",
   gemini: "generativelanguage.googleapis.com",
   linq: "api.linqapp.com",
   mapbox: "api.mapbox.com",
@@ -238,14 +227,6 @@ const MAPBOX_EGRESS_POLICY = [
   },
 ] as const;
 
-const EXA_EGRESS_POLICY = [
-  {
-    method: EXA_RESEARCH_SCOUT_METHOD,
-    pathname: EXA_RESEARCH_SCOUT_PATH,
-  },
-] as const;
-const HOSTED_EXA_RESEARCH_SCOUT_MAX_BODY_BYTES = 32 * 1024;
-
 interface ProviderBaseConfig {
   knownHosts: readonly string[];
   routes: readonly ProviderBaseRoute[];
@@ -291,7 +272,6 @@ interface HostedProviderEgressWriteFenceMetadata {
 const HOSTED_PLATFORM_METERED_PROVIDER_KINDS = new Set([
   "elevenlabs",
   "gemini",
-  "exa",
   "mapbox",
   "openai",
   "xai",
@@ -303,7 +283,6 @@ export const HOSTED_RUNNER_OUTBOUND_BY_HOST: Record<string, HostedRunnerOutbound
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.dataApi]: handleHostedRunnerOpenInternetOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.effectsPort]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.elevenLabs]: handleHostedRunnerElevenLabsOutbound,
-  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.exa]: handleHostedRunnerExaOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.gemini]: handleHostedRunnerGeminiOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.linq]: handleHostedRunnerLinqOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.mapbox]: handleHostedRunnerMapboxOutbound,
@@ -339,7 +318,6 @@ export async function handleHostedRunnerOpenInternetOutbound(
     ?? await maybeHandleXaiRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleGeminiRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleOpenAiRequest({ ctx, env, request, url, userId })
-    ?? await maybeHandleExaRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleMapboxRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleLinqRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleTelegramRequest({ ctx, env, request, url, userId });
@@ -499,23 +477,6 @@ export async function handleHostedRunnerMapboxOutbound(
   const url = new URL(request.url);
   return await requireHandledProviderEgress(
     await maybeHandleMapboxRequest({
-      ctx: _ctx,
-      env,
-      request,
-      url,
-      userId: readHostedRunnerBoundUserId(request),
-    }),
-  );
-}
-
-export async function handleHostedRunnerExaOutbound(
-  request: Request,
-  env: RunnerOutboundEnvironmentSource,
-  _ctx: HostedRunnerOutboundContext,
-): Promise<Response> {
-  const url = new URL(request.url);
-  return await requireHandledProviderEgress(
-    await maybeHandleExaRequest({
       ctx: _ctx,
       env,
       request,
@@ -1996,127 +1957,6 @@ function readOpenAiCacheDiagnosticFingerprintSecret(
   return normalized.length > 0 ? normalized : null;
 }
 
-async function maybeHandleExaRequest(input: {
-  ctx?: HostedRunnerOutboundContext;
-  env: RunnerOutboundEnvironmentSource;
-  request: Request;
-  url: URL;
-  userId: string | null;
-}): Promise<Response | null> {
-  const providerBase = readProviderBaseConfig(undefined, DEFAULT_EXA_API_BASE_URL, input.env);
-  const pathMatch = readProviderPathMatch(input.url, providerBase);
-  if (!pathMatch) {
-    if (isKnownProviderHost(input.url, providerBase)) {
-      return disallowedProviderEgress();
-    }
-    return null;
-  }
-
-  const { pathnameSuffix } = pathMatch;
-  if (!isAllowedExaRequest(input.request.method, pathnameSuffix)) {
-    return disallowedProviderEgress();
-  }
-  if (input.url.search || input.url.hash) {
-    return disallowedProviderEgress();
-  }
-
-  const startedAt = Date.now();
-  const authorization = await authorizeHostedProviderEgress({
-    ctx: input.ctx,
-    userId: input.userId,
-    env: input.env,
-    providerKind: "exa",
-    request: input.request,
-  });
-  if (!authorization.authorized) {
-    return unauthorizedProviderEgress({
-      authorization,
-      providerKind: "exa",
-      request: input.request,
-      startedAt,
-      url: input.url,
-    });
-  }
-
-  const upstreamBody = await readBoundedRequestBody(
-    input.request,
-    HOSTED_EXA_RESEARCH_SCOUT_MAX_BODY_BYTES,
-  );
-  if (upstreamBody === null) {
-    return new Response("Payload Too Large", { status: 413 });
-  }
-  const validatedBody = readHostedExaResearchScoutRequestBody(upstreamBody);
-  if (!validatedBody) {
-    return disallowedProviderEgress();
-  }
-
-  const token = readRequiredInterceptSecret(input.env.EXA_API_KEY, "EXA_API_KEY");
-  const headers = new Headers({
-    accept: "application/json",
-    "content-type": "application/json; charset=utf-8",
-  });
-  headers.set("x-api-key", token);
-
-  return await fetchAuthorizedProviderUpstream({
-    authorization,
-    providerKind: "exa",
-    request: input.request,
-    startedAt,
-    upstreamRequest: await createHostedRunnerUpstreamRequest(
-      input.request,
-      createProviderCanonicalUpstreamUrl(pathMatch),
-      headers,
-      {
-        body: JSON.stringify(buildHostedExaResearchScoutCanonicalRequest(validatedBody)),
-      },
-    ),
-    url: input.url,
-  });
-}
-
-function readHostedExaResearchScoutRequestBody(
-  body: ArrayBuffer,
-): ExaResearchScoutParsedRequest | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(new TextDecoder().decode(body));
-  } catch {
-    return null;
-  }
-
-  const request = parseExaResearchScoutRequestBody(parsed);
-  if (!request) {
-    return null;
-  }
-  const clamped = clampExaResearchScoutPublishedWindow({
-    now: new Date(),
-    since: request.since,
-    until: request.until,
-  });
-  if (!clamped) {
-    return null;
-  }
-  return { ...request, ...clamped };
-}
-
-function buildHostedExaResearchScoutCanonicalRequest(
-  input: ExaResearchScoutParsedRequest,
-): ExaResearchScoutRequestBody {
-  return "mode" in input.profile
-    ? buildExaResearchScoutRequest({
-        maxCandidates: input.numResults,
-        profile: input.profile,
-        since: input.since,
-        until: input.until,
-      })
-    : buildExaResearchScoutBatchLaneRequest({
-        maxCandidates: input.numResults,
-        profile: input.profile,
-        since: input.since,
-        until: input.until,
-      });
-}
-
 async function maybeHandleMapboxRequest(input: {
   ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
@@ -2382,12 +2222,6 @@ function isValidWebSocketKeyHeader(value: string | null): boolean {
 function isAllowedMapboxRequest(method: string, pathname: string): boolean {
   return MAPBOX_EGRESS_POLICY.some((policy) =>
     method === policy.method && pathname.startsWith(policy.pathPrefix)
-  );
-}
-
-function isAllowedExaRequest(method: string, pathname: string): boolean {
-  return EXA_EGRESS_POLICY.some((policy) =>
-    method === policy.method && pathname === policy.pathname
   );
 }
 

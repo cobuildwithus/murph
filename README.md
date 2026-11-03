@@ -71,7 +71,7 @@ Only four packages are published to npm: `@murphai/murph`, `@murphai/contracts`,
 | `packages/parsers`           | Workspace-private local-first attachment parsing and derived artifact publication.                                                         |
 | `packages/query`             | Workspace-private read helpers, summaries, list/search helpers, export-pack generation, and derived-knowledge parser/search/index helpers. |
 | `packages/health-commons`    | Workspace-private public Health Commons owner for protocol pages, biomarker pages, sources, generated catalogs, and aggregate outcome summaries. |
-| `packages/device-syncd`      | Workspace-private local wearable/device OAuth, webhook, and reconcile daemon.                                                              |
+| `packages/device-syncd`      | Workspace-private hosted wearable/device ingestion and reconciliation.                                                              |
 | `packages/assistant-engine`  | Workspace-private headless assistant execution/runtime owner.                                                                              |
 | `packages/operator-config`   | Workspace-private operator config, setup/runtime-env, and hosted assistant config owner.                                                   |
 | `packages/gateway-core`      | Headless transport-neutral gateway boundary.                                                                                               |
@@ -102,7 +102,7 @@ The root CLI is no longer just a vault editor. The built command surface include
 
 - health-vault operations such as `init`, `show`, `list`, `timeline`, `journal`, `document`, `meal`, `samples`, `audit`, `vault`, and the health registry commands
 - `assistant onboarding` for hosted onboarding resume context, status, completion, and reopening
-- `device` for local wearable/device auth, status, and daemon control
+- `device` for hosted wearable/device connection and account inspection
 - env-gated route estimation through `vault-cli route estimate`, which uses temporary Mapbox geocoding and Search Box lookups for distance, duration, hiking POIs, and optional approximate elevation between two points without persisting the route payload in Murph state
 - AI-assisted synthesis helpers such as `knowledge`
 
@@ -133,7 +133,6 @@ pnpm vault-cli --help
 ```bash
 pnpm vault-cli init --vault ./vault
 pnpm vault-cli assistant onboarding status --vault ./vault
-pnpm vault-cli device daemon start --vault ./vault
 ```
 
 ### Developer flows
@@ -195,7 +194,7 @@ pnpm verify:acceptance
 ## Development notes
 
 - Root workspace scripts live in [`package.json`](package.json).
-- The release source of truth is [`scripts/release-manifest.json`](scripts/release-manifest.json).
+- All workspace packages are private. Hosted deployments own distribution; npm publishing is retired.
 - The Cloudflare deployment path is documented in [`apps/cloudflare/DEPLOY.md`](apps/cloudflare/DEPLOY.md).
 - Package-local operational details live in each package `README.md`.
 
@@ -215,13 +214,13 @@ Then `pnpm dev` runs as usual and the browser-facing URL becomes `https://local.
 
 ## License
 
-Murph is licensed under Apache-2.0. The published `@murphai/*` packages now carry Apache 2.0 metadata and include a copy of the license text in their package contents. See [`LICENSE`](LICENSE) for the full terms.
+Murph is licensed under Apache-2.0. See [`LICENSE`](LICENSE) for the full terms.
 
 ## Read next
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) for the top-level system map and trust boundaries
 - [`docs/architecture.md`](docs/architecture.md) for the one-page architecture summary
 - [`docs/device-provider-contribution-kit.md`](docs/device-provider-contribution-kit.md) for the wearable-provider contribution guide, compatibility matrix, and scaffolds
-- [`packages/cli/README.md`](packages/cli/README.md) for the CLI package and release flow
+- [`packages/cli/README.md`](packages/cli/README.md) for the hosted CLI package
 - [`apps/web/README.md`](apps/web/README.md) for the hosted control plane
 - [`apps/cloudflare/README.md`](apps/cloudflare/README.md) for the hosted execution plane

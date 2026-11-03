@@ -684,7 +684,6 @@ test("hosted runtime forwarded env profiles are runtime-owned and transport-mapp
     buildHostedRuntimeForwardedEnv({
       FFMPEG_COMMAND: "/stale/ffmpeg",
       ELEVENLABS_API_KEY: "elevenlabs-token",
-      EXA_API_KEY: "exa-token",
       GEMINI_API_KEY: "gemini-token",
       HOSTED_EMAIL: {
         send: async (_message: unknown) => undefined,
@@ -693,7 +692,7 @@ test("hosted runtime forwarded env profiles are runtime-owned and transport-mapp
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_EMAIL_SIGNING_SECRET: "signing-secret",
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,parsers,telegram",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email,linq,mapbox,parsers,telegram",
       LINQ_API_BASE_URL: "http://127.0.0.1:4011",
       LINQ_API_TOKEN: "linq-token",
       LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
@@ -716,7 +715,6 @@ test("hosted runtime forwarded env profiles are runtime-owned and transport-mapp
     }),
     {
       ELEVENLABS_API_KEY: "elevenlabs-token",
-      EXA_API_KEY: "exa-token",
       GEMINI_API_KEY: "gemini-token",
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_INGRESS_READY: "true",
@@ -741,7 +739,6 @@ test("hosted runtime forwarded env profiles are runtime-owned and transport-mapp
 });
 
 test("hosted runtime parsers profile is semantic and forwards no native paths", () => {
-  assert.deepEqual(HOSTED_RUNTIME_ENV_PROFILE_KEYS.exa, ["EXA_API_KEY"]);
   assert.deepEqual(HOSTED_RUNTIME_ENV_PROFILE_KEYS.parsers, []);
   assert.deepEqual(
     buildHostedRuntimeForwardedEnv({
@@ -834,12 +831,7 @@ test("hosted runtime resolved config derives typed channel and device-sync state
     telegramBotConfigured: true,
   });
   assert.deepEqual(resolved.deviceSync, {
-    providerConfigs: {
-      whoop: {
-        clientId: "whoop-client",
-        clientSecret: "whoop-secret",
-      },
-    },
+    providerConfigs: {},
     publicBaseUrl: "https://device-sync.example.test",
     secret: "secret_123",
   });
@@ -1134,86 +1126,21 @@ test("hosted platform-backed env strips non-platform entries from platform env",
 
 test("hosted runtime config deep-clones resolved device-sync provider config", () => {
   const platform = createHostedRuntimePlatformStub();
-  const ouraScopes = ["daily", "sleep"];
+  const providerFilter = ["garmin", "oura", "whoop"];
   const resolvedConfig = createHostedRuntimeResolvedConfig({
     deviceSync: {
-      providerConfigs: {
-        junction: {
-          environment: "sandbox",
-          providerFilter: ["garmin"],
-          region: "us",
-        },
-        oura: {
-          clientId: "oura-client",
-          clientSecret: "oura-secret",
-          scopes: ouraScopes,
-        },
-        whoop: {
-          clientId: "whoop-client",
-          clientSecret: "whoop-secret",
-          scopes: ["read:profile", "offline"],
-        },
-      },
+      providerConfigs: { junction: { environment: "sandbox", providerFilter, region: "us" } },
       publicBaseUrl: "https://device-sync.example.test",
       secret: "secret_123",
     },
   });
-  const normalized = normalizeHostedAssistantRuntimeConfig(
-    {
-      resolvedConfig,
-    },
-    platform,
-  );
-
-  assert.deepEqual(
-    normalized.resolvedConfig.channelCapabilities,
-    resolvedConfig.channelCapabilities,
-  );
-  assert.equal(
-    normalized.resolvedConfig.deviceSync?.publicBaseUrl,
-    resolvedConfig.deviceSync?.publicBaseUrl,
-  );
-  assert.equal(
-    normalized.resolvedConfig.deviceSync?.secret,
-    resolvedConfig.deviceSync?.secret,
-  );
-  assert.deepEqual(
-    normalized.resolvedConfig.deviceSync?.providerConfigs.junction,
-    {
-      environment: "sandbox",
-      providerFilter: ["garmin"],
-      region: "us",
-    },
-  );
-  assert.deepEqual(
-    normalized.resolvedConfig.deviceSync?.providerConfigs.oura,
-    {
-      clientId: "oura-client",
-      clientSecret: "oura-secret",
-      scopes: ["daily", "sleep"],
-    },
-  );
-  assert.deepEqual(
-    normalized.resolvedConfig.deviceSync?.providerConfigs.whoop,
-    resolvedConfig.deviceSync?.providerConfigs.whoop,
-  );
+  const normalized = normalizeHostedAssistantRuntimeConfig({ resolvedConfig }, platform);
+  assert.deepEqual(normalized.resolvedConfig, resolvedConfig);
   assert.notEqual(normalized.resolvedConfig.deviceSync, resolvedConfig.deviceSync);
-  assert.notEqual(
-    normalized.resolvedConfig.deviceSync?.providerConfigs,
-    resolvedConfig.deviceSync?.providerConfigs,
-  );
-  assert.notEqual(
-    normalized.resolvedConfig.deviceSync?.providerConfigs.oura?.scopes,
-    resolvedConfig.deviceSync?.providerConfigs.oura?.scopes,
-  );
-  assert.notEqual(
-    normalized.resolvedConfig.deviceSync?.providerConfigs.whoop?.scopes,
-    resolvedConfig.deviceSync?.providerConfigs.whoop?.scopes,
-  );
-  assert.notEqual(
-    normalized.resolvedConfig.deviceSync?.providerConfigs.oura?.scopes,
-    ouraScopes,
-  );
+  assert.notEqual(normalized.resolvedConfig.deviceSync?.providerConfigs, resolvedConfig.deviceSync?.providerConfigs);
+  assert.notEqual(normalized.resolvedConfig.deviceSync?.providerConfigs.junction?.providerFilter, providerFilter);
+  providerFilter.push("strava");
+  assert.deepEqual(normalized.resolvedConfig.deviceSync?.providerConfigs.junction?.providerFilter, ["garmin", "oura", "whoop"]);
 });
 
 test("withHostedProcessEnvironment restores overwritten and newly introduced env values", async () => {

@@ -169,19 +169,19 @@ describe('assistant dynamic context prompt blocks', () => {
     expect(direct).not.toContain('Group sharing recovery in the current group chat:')
   })
 
-  it('keeps static late-result and research policy resident while changing only current turn facts', () => {
+  it('keeps static late-result and policy resident while changing only current turn facts', () => {
     const ordinary = buildAssistantSystemPromptLayers({
       ...baseConversationInput, hostedRuntime: true, ordinaryInboundTurn: true,
-      assistantResearchAvailable: true,
+
     })
     const later = buildAssistantSystemPromptLayers({
       ...baseConversationInput, hostedRuntime: true, ordinaryInboundTurn: true,
-      assistantResearchAvailable: true, currentLocalDate: '2026-06-30',
+      currentLocalDate: '2026-06-30',
       assistantDynamicContextPrompts: ['A new trusted result for this turn.'],
     })
     for (const layers of [ordinary, later]) {
       expect(layers.stableRouteCapabilityPrompt).toContain('Late child results for ordinary inbound turns:')
-      expect(layers.stableRouteCapabilityPrompt).toContain('Configured Exa research:')
+      expect(layers.stableRouteCapabilityPrompt).not.toContain('Configured Exa research:')
       expect(layers.dynamicTurnContextPrompt).not.toContain('Late child results for ordinary inbound turns:')
       expect(layers.dynamicTurnContextPrompt).not.toContain('Configured Exa research:')
       expect(layers.dynamicTurnContextPrompt).toContain('Turn kind: ordinary inbound.')
@@ -190,13 +190,13 @@ describe('assistant dynamic context prompt blocks', () => {
     expect(later.dynamicTurnContextPrompt).toContain('A new trusted result for this turn.')
     const unavailable = buildAssistantSystemPromptLayers({
       ...baseConversationInput, hostedRuntime: true, ordinaryInboundTurn: true,
-      assistantResearchAvailable: false,
+
     })
     expect(unavailable.stableRouteCapabilityPrompt).not.toContain('Configured Exa research:')
-    expect(unavailable.stableRouteCapabilityPrompt).not.toBe(ordinary.stableRouteCapabilityPrompt)
+    expect(unavailable.stableRouteCapabilityPrompt).toBe(ordinary.stableRouteCapabilityPrompt)
     const scheduled = buildAssistantSystemPromptLayers({
       ...baseConversationInput, hostedRuntime: true, ordinaryInboundTurn: false,
-      assistantResearchAvailable: true, scheduledOccurrenceAt: '2026-06-29T12:00:00Z',
+      scheduledOccurrenceAt: '2026-06-29T12:00:00Z',
     })
     expect(scheduled.dynamicTurnContextPrompt).not.toContain('Turn kind: ordinary inbound.')
     expect(scheduled.stableRouteCapabilityPrompt).toContain('Never perform this recheck during a scheduled automation')
@@ -206,7 +206,7 @@ describe('assistant dynamic context prompt blocks', () => {
     const layers = buildAssistantSystemPromptLayers({
       ...baseConversationInput, channel: 'email', conversationScope: 'group',
       hostedRuntime: true, assistantHostedGroupToolSurface: 'shared_read',
-      assistantResearchAvailable: true,
+
     })
     const prompt = layers.prompt
     expect(prompt).not.toContain('Murph skill router:')

@@ -119,7 +119,6 @@ export function buildAssistantCliSurfaceContract(
 export function scopeAssistantCliSurfaceContractForAssistant(input: {
   contract: string | null
   hostedRuntime?: boolean
-  researchAvailable?: boolean
 }): string | null {
   if (input.contract === null) {
     return input.contract
@@ -130,7 +129,6 @@ export function scopeAssistantCliSurfaceContractForAssistant(input: {
     .flatMap((line) => scopeAssistantCliSurfaceContractLine(
       line,
       input.hostedRuntime ?? false,
-      input.researchAvailable ?? true,
     ))
     .join('\n')
     .trim()
@@ -141,7 +139,6 @@ export function scopeAssistantCliSurfaceContractForAssistant(input: {
 function scopeAssistantCliSurfaceContractLine(
   line: string,
   hostedRuntime: boolean,
-  researchAvailable: boolean,
 ): string[] {
   const normalizedLine = line.trim()
   const commandMatch = /^- `([^`]+)`/u.exec(normalizedLine)
@@ -150,7 +147,6 @@ function scopeAssistantCliSurfaceContractLine(
     && shouldOmitAssistantCliSurfaceCommand(
       commandMatch[1],
       hostedRuntime,
-      researchAvailable,
     )
   ) {
     return []
@@ -172,7 +168,6 @@ function scopeAssistantCliSurfaceContractLine(
     return !shouldOmitAssistantCliSurfaceCommand(
       commandName,
       hostedRuntime,
-      researchAvailable,
     )
   })
   if (retainedLeaves.length === leaves.length) {
@@ -188,10 +183,8 @@ function scopeAssistantCliSurfaceContractLine(
 function shouldOmitAssistantCliSurfaceCommand(
   commandName: string,
   hostedRuntime: boolean,
-  researchAvailable: boolean,
 ): boolean {
   return assistantCliSurfaceRetiredCommandNames.has(commandName)
-    || (!researchAvailable && readAssistantCliCommandFamily(commandName) === 'research')
     || (hostedRuntime
       && assistantCliSurfaceHostedUnavailableCommandNames.has(commandName))
 }

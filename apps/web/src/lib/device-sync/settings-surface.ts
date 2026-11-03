@@ -646,15 +646,6 @@ export function resolveHostedDeviceSyncConnectTargetForConnection(input: {
     return upstreamTarget;
   }
 
-  const directTarget = input.targets.find((target) =>
-    normalizeProviderKey(target.provider) === provider
-    && normalizeProviderKey(target.connectTarget) === provider
-  );
-
-  if (directTarget) {
-    return directTarget;
-  }
-
   return null;
 }
 

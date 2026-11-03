@@ -6,7 +6,7 @@ Status: frozen baseline plus health extension fence for `vault-cli`
 
 - `vault-cli` is the raw explicit-vault and operator surface. The command synopses below list that explicit-vault contract because every canonical vault command names its target with `--vault <path>`.
 - `packages/cli` owns command registration, schema validation, and delegation into `core`, `importers`, and `query`.
-- `device` commands delegate to the local `@murphai/device-syncd` control plane for provider OAuth/account actions while leaving canonical health writes behind the existing importer/core boundary, and the CLI may start or reuse that local daemon for the selected vault when no explicit control-plane target is provided.
+- `device` retains hosted provider discovery, connect and account command signatures. Authenticated device effects belong to the invocation-scoped hosted device tool; canonical health writes remain behind importers/core.
 - Native `incur` owns the transport envelope and human-oriented formatting behavior.
 - `packages/cli` must not write vault files directly. Write commands delegate to `packages/core` or `packages/importers`; read commands delegate to `packages/query`.
 - Canonical write commands run through the core mutation runtime, which acquires declared canonical file resources before any read-modify-write work begins. Commands may overlap only when those declared resources are disjoint; singleton documents and shared monthly ledger or audit shards still serialize by design.
@@ -56,9 +56,6 @@ vault-cli device account list --vault <path> [--baseUrl <url>] [--provider <prov
 vault-cli device account show <accountId> --vault <path> [--baseUrl <url>]
 vault-cli device account reconcile <accountId> --vault <path> [--baseUrl <url>]
 vault-cli device account disconnect <accountId> --vault <path> [--baseUrl <url>]
-vault-cli device daemon status --vault <path> [--baseUrl <url>]
-vault-cli device daemon start --vault <path> [--baseUrl <url>]
-vault-cli device daemon stop --vault <path> [--baseUrl <url>]
 vault-cli commons goal list [--query <query>] [--category <category> ...] [--limit <n>]
 vault-cli commons goal show <key-or-slug>
 vault-cli commons knowledge search <query> [--limit <n>]
@@ -352,7 +349,7 @@ The placeholder grammar above applies to health nouns that expose the shared sca
 - `assistant onboarding` exposes the hosted lifecycle commands `status`, `resume-context`, `complete`, and `reopen`; canonical health writes remain owned by their existing vault commands.
 - `memory` is a canonical product noun backed by the single curated `bank/memory.md` document; operators inspect the whole document with `show`, save the user's preferred display name with the typed `set-name` command, and mutate individual records with `upsert`, `update`, or `forget`. `memoryId` arguments use `mem_<ULID>` ids. Group runtimes receive the preferred display name through the consented `profile-name.v0` vault-share projection from memory.
 - `automation` is a canonical product noun backed by `bank/automations/*.md` and exposes typed `save`, explicit `import-json`, readable/list, and scaffold surfaces.
-- `device` is backed locally by `@murphai/device-syncd`; it exposes provider discovery plus browser-based connect/reconcile/disconnect actions, and it can also start, inspect, or stop the Murph-managed local daemon for the selected vault. In hosted execution, `device account list` and `device account reconcile` use the invocation-scoped bridge instead of starting a local daemon.
+- `device` retains the hosted catalog and account command contracts. The local daemon and launcher are retired.
 
 These are semantic groupings, not a parallel command registry. For example, `event` remains the generic write/read surface for non-specialized event kinds, and `provider` remains the registry-backed noun for `bank/providers/*.md`.
 
@@ -385,8 +382,8 @@ Read surfaces intentionally separate summary from detail:
 
 ## Shared Option Rules
 
-- `--vault <path>` is required for canonical vault commands so the target vault is explicit. `device` commands also require it so Murph can manage the local daemon and its launcher state for that vault, even when callers override the control-plane endpoint with `--baseUrl`.
-- `--baseUrl <url>` overrides the reachable local control-plane endpoint for `device` commands. If omitted, the CLI uses `DEVICE_SYNC_BASE_URL` and then the Murph-managed local daemon default.
+- `--vault <path>` is required for canonical vault commands so the target vault is explicit.
+- `--baseUrl <url>` remains in device command signatures. Hosted execution rejects explicit local control-plane targets.
 - `--request-id` is optional where exposed, forwarded to package service calls, and reserved for audit correlation.
 - Incur's global output flags are available everywhere; this contract freezes only the command-specific option semantics and JSON payload shapes described below.
 - Machine-stable callers that need metadata or CTA suggestions should prefer `--full-output --format json`. The payload examples below describe the `data` body emitted by plain JSON mode.

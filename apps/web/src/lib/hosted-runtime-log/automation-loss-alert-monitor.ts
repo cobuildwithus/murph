@@ -26,7 +26,7 @@ const EMAIL_AUTOMATION_SLUGS = [
   "automatic-meal-daily-closeout", "finish-onboarding-followup", "group-room-model-consolidation",
   "journal-connected-context-morning", "monthly-improvement-coach",
   "onboarding-early-stall-check-in", "onboarding-goal-checkin", "overnight-memory-consolidation",
-  "weekly-health-digest", "weekly-health-insight", "weekly-health-research-scout",
+  "weekly-health-digest", "weekly-health-insight",
   "weekly-improvement-coach", "weekly-usage-optimizer",
 ];
 const EMAIL_ERROR_CODES = [

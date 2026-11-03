@@ -9,6 +9,7 @@ import {
   createPlatform,
   createResolvedDeviceSyncSystemMailboxItem,
   createSnapshotDeviceSyncPort,
+  buildJunctionSleepFixtureResponse,
   createWorkspacePort,
   createWorkspaceRuntimeJobInput,
   createWorkspaceState,
@@ -95,7 +96,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
       });
     }
     events.push(`provider.fetch:${pathname}`);
-    if (pathname.endsWith("/synthetic-concurrent-sleep")) {
+    if (pathname.includes("/summary/sleep/")) {
       providerStarted.resolve();
       if (persistent || (scenario === "stalled" && !replySent)) {
         const signal = init?.signal ?? (request instanceof Request ? request.signal : null);
@@ -116,11 +117,11 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
         });
       }
     }
-    return new Response(JSON.stringify(pathname.endsWith("/synthetic-concurrent-sleep") ? {
-      id: "synthetic-concurrent-sleep", nap: false,
+    return new Response(JSON.stringify(buildJunctionSleepFixtureResponse(pathname, {
+      id: "synthetic-concurrent-sleep",
       start: "2026-04-26T00:30:00.000Z", end: "2026-04-26T07:30:00.000Z",
       updated_at: "2026-04-26T08:00:00.000Z",
-    } : { records: [] }), { headers: { "content-type": "application/json" }, status: 200 });
+    })), { headers: { "content-type": "application/json" }, status: 200 });
   }));
   try {
     mocks.runAssistantAutomationPass.mockImplementation(async (input: RunAssistantAutomationPassInput) => {
@@ -144,7 +145,16 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
       }
       if (completesBeforeReply) {
         const rows = await listCanonicalEntities(vaultRoot, { family: "event" });
-        assert.ok(rows.some((row) => JSON.stringify(row.attributes).includes("synthetic-concurrent-sleep")));
+        assert.deepEqual(rows.filter((row) => row.kind === "sleep_session").map((row) => ({
+          occurredAt: row.occurredAt, startAt: row.attributes.startAt,
+          endAt: row.attributes.endAt, durationMinutes: row.attributes.durationMinutes,
+          dataOrigin: row.attributes.dataOrigin,
+        })), [{
+          occurredAt: "2026-04-26T07:30:00.000Z", startAt: "2026-04-26T00:30:00.000Z",
+          endAt: "2026-04-26T07:30:00.000Z", durationMinutes: 420,
+          dataOrigin: { version: 1, aggregatorProvider: "junction", sourceProviderSlug: "whoop-v2",
+            normalizerVersion: "junction-normalizer.v1", observedAtRaw: "2026-04-26T00:00:00.000Z", timestampSemantics: "utc" },
+        }]);
         events.push("model.reads.imported.data");
         if (handledInputIds.size === 2) {
           assert.equal(dirtyAcks.length, 0);
@@ -195,11 +205,11 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
             connectionId, dirtyRevision: "7", processedRevision: "0",
             dirtyResources: [{
               count: 1, dirtyPayloadId: "synthetic-concurrent-payload", jobKind: "resource",
-              payload: { resourceType: "sleep", resourceId: "synthetic-concurrent-sleep" },
+              payload: { resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop_v2", objectId: "synthetic-concurrent-sleep" },
               resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop",
               windowEnd: null, windowStart: null,
             }],
-            eventCount: "1", latestDirtyAt: TEST_NOW, provider: "whoop",
+            eventCount: "1", latestDirtyAt: TEST_NOW, provider: "junction",
             resourceCategoryCounts: { summary: 1 }, sourceProviderCounts: { whoop: 1 },
             userId: TEST_USER_ID, windowEnd: null, windowStart: null,
           }],
@@ -291,7 +301,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
             wake: {
               connectionId, eventId: deviceItem.dedupeKey, expectedConnectedAt: TEST_NOW,
               hint: { occurredAt: TEST_NOW, reason: "webhook_dirty_transition" },
-              kind: "device-sync.wake", occurredAt: TEST_NOW, provider: "whoop", reason: "webhook_hint", userId: TEST_USER_ID,
+              kind: "device-sync.wake", occurredAt: TEST_NOW, provider: "junction", reason: "webhook_hint", userId: TEST_USER_ID,
             },
           });
           events.push("device.staged");
@@ -345,7 +355,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
       assert.equal(dirtyAcks.length, 0);
       if (persistent) {
         assert.equal(events.includes("provider.aborted"), false, events.join(","));
-        assert.equal(events.filter((event) => event.endsWith("/synthetic-concurrent-sleep")).length, 1);
+        assert.equal(events.filter((event) => event.includes("/summary/sleep/")).length, 1);
         assert.equal(events.includes("device.receipt.uploaded"), false, events.join(","));
         releaseDownload.resolve();
         await withRealTimeout(imported.promise, 5_000, () => events.join(","));
@@ -385,7 +395,16 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
         });
         assert.equal(operations.filter((operation) => operation === "device_batch_import").length, 1);
         const rows = await listCanonicalEntities(vaultRoot, { family: "event" });
-        assert.ok(rows.some((row) => JSON.stringify(row.attributes).includes("synthetic-concurrent-sleep")));
+        assert.deepEqual(rows.filter((row) => row.kind === "sleep_session").map((row) => ({
+          occurredAt: row.occurredAt, startAt: row.attributes.startAt,
+          endAt: row.attributes.endAt, durationMinutes: row.attributes.durationMinutes,
+          dataOrigin: row.attributes.dataOrigin,
+        })), [{
+          occurredAt: "2026-04-26T07:30:00.000Z", startAt: "2026-04-26T00:30:00.000Z",
+          endAt: "2026-04-26T07:30:00.000Z", durationMinutes: 420,
+          dataOrigin: { version: 1, aggregatorProvider: "junction", sourceProviderSlug: "whoop-v2",
+            normalizerVersion: "junction-normalizer.v1", observedAtRaw: "2026-04-26T00:00:00.000Z", timestampSemantics: "utc" },
+        }]);
       }
     } else if (scenario === "stalled") {
       assert.ok(events.includes("provider.aborted"), events.join(","));
@@ -422,7 +441,7 @@ test.each(["workspace boundary", "pass timeout"] as const)("retains unstarted de
   const wake = {
     connectionId, eventId: deviceItem.dedupeKey, expectedConnectedAt: TEST_NOW,
     hint: { occurredAt: TEST_NOW, reason: "webhook_dirty_transition" },
-    kind: "device-sync.wake" as const, occurredAt: TEST_NOW, provider: "whoop" as const,
+    kind: "device-sync.wake" as const, occurredAt: TEST_NOW, provider: "junction" as const,
     reason: "webhook_hint" as const, userId: TEST_USER_ID,
   };
   let firstInvocation = true;
@@ -476,11 +495,11 @@ test.each(["workspace boundary", "pass timeout"] as const)("retains unstarted de
           connectionId, dirtyRevision: "7", processedRevision: "0",
           dirtyResources: [{
             count: 1, dirtyPayloadId: "synthetic-preload-payload", jobKind: "resource",
-            payload: { resourceType: "sleep", resourceId: "synthetic-preload-sleep" },
+            payload: { resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop_v2", objectId: "synthetic-preload-sleep" },
             resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop",
             windowEnd: null, windowStart: null,
           }],
-          eventCount: "1", latestDirtyAt: TEST_NOW, provider: "whoop",
+          eventCount: "1", latestDirtyAt: TEST_NOW, provider: "junction",
           resourceCategoryCounts: { summary: 1 }, sourceProviderCounts: { whoop: 1 },
           userId: TEST_USER_ID, windowEnd: null, windowStart: null,
         }],
@@ -489,7 +508,16 @@ test.each(["workspace boundary", "pass timeout"] as const)("retains unstarted de
     async ackDirtyStateProcessed(request) {
       assert.equal(firstInvocation, false);
       const rows = await listCanonicalEntities(vaultRoot, { family: "event" });
-      assert.ok(rows.some((row) => JSON.stringify(row.attributes).includes("synthetic-preload-sleep")));
+      assert.deepEqual(rows.filter((row) => row.kind === "sleep_session").map((row) => ({
+          occurredAt: row.occurredAt, startAt: row.attributes.startAt,
+          endAt: row.attributes.endAt, durationMinutes: row.attributes.durationMinutes,
+          dataOrigin: row.attributes.dataOrigin,
+        })), [{
+          occurredAt: "2026-04-26T07:30:00.000Z", startAt: "2026-04-26T00:30:00.000Z",
+          endAt: "2026-04-26T07:30:00.000Z", durationMinutes: 420,
+          dataOrigin: { version: 1, aggregatorProvider: "junction", sourceProviderSlug: "whoop-v2",
+            normalizerVersion: "junction-normalizer.v1", observedAtRaw: "2026-04-26T00:00:00.000Z", timestampSemantics: "utc" },
+        }]);
       assert.ok(checkpointRequests.some((request) => request.reason === "idle_shutdown"));
       assert.deepEqual(request.processedDirtyPayloadIds, ["synthetic-preload-payload"]);
       assert.equal(request.processedRevision, "7");
@@ -499,11 +527,11 @@ test.each(["workspace boundary", "pass timeout"] as const)("retains unstarted de
   };
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date(TEST_NOW));
-  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
-    id: "synthetic-preload-sleep", nap: false,
+  vi.stubGlobal("fetch", vi.fn(async (request: string | URL | Request) => new Response(JSON.stringify(buildJunctionSleepFixtureResponse(new URL(request instanceof Request ? request.url : String(request)).pathname, {
+    id: "synthetic-preload-sleep",
     start: "2026-04-26T00:30:00.000Z", end: "2026-04-26T07:30:00.000Z",
     updated_at: "2026-04-26T08:00:00.000Z",
-  }), { headers: { "content-type": "application/json" } })));
+  })), { headers: { "content-type": "application/json" } })));
   try {
     let workspace = createWorkspaceState();
     const run = () => runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({

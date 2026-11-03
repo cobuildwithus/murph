@@ -17,6 +17,7 @@ import {
   createResolvedDeviceSyncSystemMailboxItem,
   createResolvedRuntimeControlSystemMailboxItem,
   createSnapshotDeviceSyncPort,
+  buildJunctionSleepFixtureResponse,
   createVaultSnapshotBundle,
   createWorkspacePort,
   createWorkspaceRuntimeJobInput,
@@ -48,6 +49,7 @@ import {
 } from "../src/hosted-runtime/runtime-logs.ts";
 
 import assert from "node:assert/strict";
+import { listCanonicalEntities } from "@murphai/query";
 import { access, appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -1376,9 +1378,9 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         item: createResolvedDeviceSyncSystemMailboxItem(deviceItem), vaultRoot,
         wake: { connectionId: "device_connection_independent", eventId: deviceItem.dedupeKey,
           expectedConnectedAt: TEST_NOW, kind: "device-sync.wake", occurredAt: TEST_NOW,
-          provider: "whoop", reason: "reconcile_due", userId: TEST_USER_ID,
+          provider: "junction", reason: "reconcile_due", userId: TEST_USER_ID,
           hint: { nextReconcileAt: retryAt, jobs: [{ availableAt: retryAt, dedupeKey: "future_history", kind: "resource",
-            maxAttempts: 1, payload: { resourceType: "sleep" }, priority: 30 }] } },
+            maxAttempts: 1, payload: { resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop_v2" }, priority: 30 }] } },
       });
       await updateHostedSystemMailboxState(vaultRoot, (state) => ({ pending: state.pending.map(
         (item) => ({ ...item, deviceSyncContinuationOwner: true, attemptCount: 1,
@@ -1392,7 +1394,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           occurredAt: TEST_NOW, userId: TEST_USER_ID }
           : { connectionId: "device_connection_independent", eventId: maintenance.dedupeKey,
             expectedConnectedAt: TEST_NOW, kind: "device-sync.wake", occurredAt: TEST_NOW,
-            provider: "whoop", reason: "reconcile_due", userId: TEST_USER_ID,
+            provider: "junction", reason: "reconcile_due", userId: TEST_USER_ID,
             hint: { nextReconcileAt: TEST_NOW } },
       });
       if (kind === "covered-schedules") {
@@ -1413,7 +1415,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
               expectedConnectedAt: TEST_NOW,
               kind: "device-sync.wake",
               occurredAt: TEST_NOW,
-              provider: "whoop",
+              provider: "junction",
               reason: "reconcile_due",
               userId: TEST_USER_ID,
               hint: { nextReconcileAt: TEST_NOW },
@@ -1500,7 +1502,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     const retryAt = "2026-04-28T00:00:00.000Z";
     const futureJobs = [{ availableAt: retryAt, dedupeKey: "synthetic-future-resource",
       kind: "resource" as const, maxAttempts: 1, priority: 30,
-      payload: { resourceType: "sleep", resourceId: "synthetic-future-sleep" } }];
+      payload: { resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop_v2", objectId: "synthetic-future-sleep" } }];
     const owner = createMailboxItem({
       dedupeKey: "device-sync.wake:completion-tail-owner", id: "mailbox_completion_tail_owner",
       kind: "device-sync.wake", lane: "system", laneSeq: "1",
@@ -1541,9 +1543,12 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         })) };
       },
     };
-    const providerFetch = vi.fn(async () => {
+    const providerFetch = vi.fn(async (request: string | URL | Request) => {
+      const pathname = new URL(request instanceof Request ? request.url : String(request)).pathname;
       if (!lateArrived && scenario !== "during_checkpoint" && scenario !== "during_publication") { remoteItems.push(lateItem); lateArrived = true; }
-      return new Response(JSON.stringify({ records: [] }), {
+      return new Response(JSON.stringify(pathname.includes("/user/providers/")
+        ? { providers: [{ slug: "whoop_v2", name: "WHOOP", status: "connected", resource_availability: { sleep: true, activity: true, workouts: true } }] }
+        : { sleep: [], activity: [], workouts: [] }), {
         headers: { "content-type": "application/json" }, status: 200,
       });
     });
@@ -1556,7 +1561,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         item: createResolvedDeviceSyncSystemMailboxItem(owner), vaultRoot,
         wake: { connectionId, eventId: owner.dedupeKey, expectedConnectedAt: TEST_NOW,
           hint: { jobs: futureJobs, nextReconcileAt: TEST_NOW }, kind: "device-sync.wake",
-          occurredAt: TEST_NOW, provider: "whoop", reason: "reconcile_due", userId: TEST_USER_ID },
+          occurredAt: TEST_NOW, provider: "junction", reason: "reconcile_due", userId: TEST_USER_ID },
       });
       await updateHostedSystemMailboxState(vaultRoot, (state) => ({ pending: state.pending.map((item) => ({
         ...item, attemptCount: 1, deviceSyncContinuationOwner: true, lastAttemptAt: TEST_NOW, nextAttemptAt: TEST_NOW,
@@ -1601,7 +1606,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
                 expectedConnectedAt: scenario === "new_epoch" ? "2026-04-26T00:00:00.000Z" : TEST_NOW,
                 hint: scenario === "manual" ? { reason: "manual_reconcile", occurredAt: TEST_NOW }
                   : { nextReconcileAt: scheduledAt, occurredAt: TEST_NOW },
-                kind: "device-sync.wake", occurredAt: TEST_NOW, provider: "whoop", reason: "reconcile_due", userId: TEST_USER_ID },
+                kind: "device-sync.wake", occurredAt: TEST_NOW, provider: "junction", reason: "reconcile_due", userId: TEST_USER_ID },
             });
             return { status: "imported", reasonCode: "device_sync.queued", afterCheckpoint: async () => {
               assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemImportedSeq, "2");
@@ -1660,7 +1665,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         assert.deepEqual(recoveredOwner?.wake.kind === "device-sync.wake" ? recoveredOwner.wake.hint?.jobs : null, futureJobs);
         assert.equal(currentWorkspace.redactedStatus?.hostedMailboxSystemImportedSeq, "2");
         if (scenario === "followup_failure") {
-          assert.equal(providerFetch.mock.calls.length, 3, "restored recording must not rerun admitted device work");
+          assert.equal(providerFetch.mock.calls.length, 4, "restored recording must not rerun admitted device work");
           assert.equal(effectsFinished, 1, "restored import progress must not repeat effects");
           assert.equal(recovered.length, 1, "recovered recording compacts the checkpointed late request");
         }
@@ -1675,7 +1680,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         return;
       }
       assert.equal(lateArrived, true);
-      assert.equal(providerFetch.mock.calls.length, 3, "only the admitted current cadence runs");
+      assert.equal(providerFetch.mock.calls.length, 4, "one Junction summary pass plus source authority and historical status reads");
       assert.equal(canonicalNextReconcileAt, cadenceAt);
       assert.equal(effectsFinished, 1, "each imported prefix finishes effects once after checkpoint");
       assert.equal(result.redactedStatus?.hostedMailboxSystemImportedSeq, "2");
@@ -1696,7 +1701,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         await rm(vaultRoot, { recursive: true, force: true });
         await mkdir(vaultRoot, { recursive: true });
         const restored = await runPass();
-        assert.equal(providerFetch.mock.calls.length, 3);
+        assert.equal(providerFetch.mock.calls.length, 4);
         assert.equal(effectsFinished, 1);
         assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, pending);
         assert.equal(restored.redactedStatus?.hostedMailboxSystemImportedSeq, "2");
@@ -1721,7 +1726,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     let canonicalNextReconcileAt = TEST_NOW;
     const futureJobs = [{ availableAt: retryAt, dedupeKey: "synthetic-future-resource",
       kind: "resource" as const, maxAttempts: 1, priority: 30,
-      payload: { resourceType: "sleep", resourceId: "synthetic-retained-sleep" } }];
+      payload: { resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop_v2", objectId: "synthetic-retained-sleep", windowStart: retryAt, windowEnd: new Date(Date.parse(retryAt) + 86_400_000).toISOString() } }];
     const deviceItem = createMailboxItem({
       dedupeKey: "device-sync.wake:webhook-dirty",
       id: "mailbox_item_system_mailbox_device_webhook_dirty",
@@ -1770,13 +1775,14 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     };
     const providerPaths: string[] = [];
     const providerFetch = vi.fn(async (request: string | URL | Request) => {
-      const pathname = new URL(request instanceof Request ? request.url : String(request)).pathname;
-      providerPaths.push(pathname);
-      const body = pathname.endsWith("/synthetic-retained-sleep") || pathname.endsWith("/synthetic-new-sleep")
-        ? { id: pathname.split("/").at(-1), nap: false,
-            start: "2026-04-26T00:30:00.000Z", end: "2026-04-26T07:30:00.000Z",
-            updated_at: "2026-04-26T08:00:00.000Z" }
-        : { records: [] };
+      const url = new URL(request instanceof Request ? request.url : String(request));
+      const pathname = url.pathname;
+      providerPaths.push(url.href);
+      const body = buildJunctionSleepFixtureResponse(pathname,
+        url.searchParams.get("start_date") === "2026-04-26T00:30:00.000Z" ? {
+          id: "synthetic-new-sleep", start: "2026-04-26T00:30:00.000Z", end: "2026-04-26T07:30:00.000Z",
+          updated_at: "2026-04-26T08:00:00.000Z",
+        } : undefined);
       return new Response(JSON.stringify(body), {
         headers: { "content-type": "application/json" }, status: 200,
       });
@@ -1801,7 +1807,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           },
           kind: "device-sync.wake",
           occurredAt: TEST_NOW,
-          provider: "whoop",
+          provider: "junction",
           reason: "webhook_hint",
           userId: TEST_USER_ID,
         },
@@ -1828,9 +1834,9 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
                 ? { hint: { reason: "manual_reconcile", occurredAt: TEST_NOW } } : {}),
               ...(reason === "connected" ? { hint: { scopes: ["read:sleep"], jobs: [{
                 dedupeKey: "synthetic-new-source-job", kind: "resource" as const,
-                payload: { resourceType: "sleep", resourceId: "synthetic-new-sleep" },
+                payload: { resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop_v2", objectId: "synthetic-new-sleep", windowStart: "2026-04-26T00:30:00.000Z", windowEnd: "2026-04-26T07:30:00.000Z" },
               }] } } : {}),
-              provider: "whoop", reason, userId: TEST_USER_ID },
+              provider: "junction", reason, userId: TEST_USER_ID },
           });
         }
       }
@@ -1933,21 +1939,21 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, waiting);
         vi.setSystemTime(new Date(retryAt));
         await runPass();
-        assert.equal(providerPaths.filter((entry) => entry.endsWith("/synthetic-retained-sleep")).length, 1);
+        assert.equal(providerPaths.filter((entry) => new URL(entry).searchParams.get("start_date")?.startsWith(retryAt.slice(0, 10))).length, 1);
         assert.ok(fetchDirtyStatesCalls > 0);
         assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
         assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "3");
         return;
       }
-      assert.equal(baseDeviceSyncPort.fetchSnapshotCalls, retainedRetry ? 2 : 1);
+      assert.equal(baseDeviceSyncPort.fetchSnapshotCalls, schedule === "connected" ? 6 : retainedRetry ? 5 : 1);
       assert.equal(fetchDirtyStatesCalls, 1);
-      assert.equal(providerFetch.mock.calls.length, schedule === "connected" ? 4 : retainedRetry ? 3 : 0);
+      assert.equal(providerFetch.mock.calls.length, schedule === "connected" ? 6 : retainedRetry ? 4 : 0);
       assert.equal(result.status, retainedRetry ? "scheduled" : "idle");
       if (retainedRetry) {
         assert.ok(result.nextWakeAt);
         assert.ok(Date.parse(result.nextWakeAt) > Date.parse(TEST_NOW));
         assert.ok(Date.parse(result.nextWakeAt) < Date.parse(retryAt));
-        assert.equal(providerPaths.filter((entry) => entry.endsWith("/synthetic-retained-sleep")).length, 0);
+        assert.equal(providerPaths.filter((entry) => new URL(entry).searchParams.get("start_date")?.startsWith(retryAt.slice(0, 10))).length, 0);
       } else {
         assert.equal(result.nextWakeAt, null);
       }
@@ -1983,23 +1989,24 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, pending);
         vi.setSystemTime(new Date(retryAt));
         await runPass();
-        assert.equal(providerPaths.filter((entry) => entry.endsWith("/synthetic-retained-sleep")).length, 1);
+        assert.equal(providerPaths.filter((entry) => new URL(entry).searchParams.get("start_date")?.startsWith(retryAt.slice(0, 10))).length, 1);
         assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
         assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "3");
       }
       if (schedule === "connected") {
-        const newSleep = await findEventByExternalRef({
-          resourceId: "synthetic-new-sleep", resourceType: "sleep", system: "whoop", vaultRoot,
-        });
-        assert.equal(newSleep?.kind, "sleep_session");
+        const sleepRows = (await listCanonicalEntities(vaultRoot, { family: "event" }))
+          .filter((row) => row.kind === "sleep_session");
+        assert.equal(sleepRows.length, 1);
+        assert.equal(sleepRows[0]?.occurredAt, "2026-04-26T07:30:00.000Z");
+        assert.equal(sleepRows[0]?.attributes.durationMinutes, 420);
         const fetchCount = providerPaths.length;
         await runPass();
         assert.equal(providerPaths.length, fetchCount);
         assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, pending);
         vi.setSystemTime(new Date(retryAt));
         await runPass();
-        assert.equal(providerPaths.filter((entry) => entry.endsWith("/synthetic-retained-sleep")).length, 1);
-        assert.equal(providerPaths.filter((entry) => entry.endsWith("/synthetic-new-sleep")).length, 1);
+        assert.equal(providerPaths.filter((entry) => new URL(entry).searchParams.get("start_date")?.startsWith(retryAt.slice(0, 10))).length, 1);
+        assert.equal(providerPaths.filter((entry) => new URL(entry).searchParams.get("start_date") === "2026-04-26T00:30:00.000Z").length, 1);
         assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
         assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "3");
       }
@@ -2019,7 +2026,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         assert.equal(continued.length, 1);
         assert.equal(continued[0]?.itemId, deviceItem.id);
         assert.deepEqual(continued[0]?.wake.kind === "device-sync.wake" ? continued[0].wake.hint?.jobs : null, futureJobs);
-        assert.equal(providerPaths.filter((entry) => entry.endsWith("/synthetic-retained-sleep")).length, 0);
+        assert.equal(providerPaths.filter((entry) => new URL(entry).searchParams.get("start_date")?.startsWith(retryAt.slice(0, 10))).length, 0);
         assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "3");
         assert.equal(canonicalNextReconcileAt, continued[0]?.wake.kind === "device-sync.wake"
           ? continued[0].wake.hint?.nextReconcileAt : null);
@@ -2031,7 +2038,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, continued);
         vi.setSystemTime(new Date(retryAt));
         await runPass();
-        assert.equal(providerPaths.filter((entry) => entry.endsWith("/synthetic-retained-sleep")).length, 1);
+        assert.equal(providerPaths.filter((entry) => new URL(entry).searchParams.get("start_date")?.startsWith(retryAt.slice(0, 10))).length, 1);
         assert.ok(Date.parse(canonicalNextReconcileAt) > Date.parse(retryAt));
         assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
         const completedFetchCount = providerPaths.length;
@@ -6060,11 +6067,13 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     const scheduleEventId =
       `device-sync:scheduled-reconcile:v3:${connectionId}:${connectedAt}:${dueAt}`;
     const mailboxItemId = "mailbox_item_system_mailbox_device_closed_loop";
-    const expectedWhoopRequestClasses = [
-      "GET /developer/v2/activity/sleep",
-      "GET /developer/v2/recovery",
-      "GET /developer/v2/cycle",
-      "GET /developer/v2/activity/workout",
+    const expectedJunctionRequestClasses = [
+      "GET /v2/user/providers/synthetic-whoop-account-closed-loop",
+      "GET /v2/summary/sleep/synthetic-whoop-account-closed-loop",
+      "GET /v2/user/providers/synthetic-whoop-account-closed-loop",
+      "GET /v2/user/providers/synthetic-whoop-account-closed-loop",
+      "GET /v2/summary/sleep/synthetic-whoop-account-closed-loop",
+      "GET /v2/introspect/historical_pull",
     ] as const;
     const machineLocalDeviceSyncStateSuffix =
       ".runtime/operations/device-sync/state.sqlite";
@@ -6153,28 +6162,23 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
               displayName: "Synthetic WHOOP",
               externalAccountId: "synthetic-whoop-account-closed-loop",
               id: connectionId,
-              metadata: {},
-              provider: "whoop",
-              scopes: [
-                "offline",
-                "read:cycles",
-                "read:recovery",
-                "read:sleep",
-                "read:workout",
-              ],
+              metadata: {
+                junctionHistoricalBackfillStatus: "coverage_v3_complete",
+                junctionHistoricalBackfillWindowStart: "2026-04-26T00:00:00.000Z",
+                junctionHistoricalBackfillWindowEnd: "2026-04-27T00:00:00.000Z",
+              },
+              provider: "junction",
+              scopes: [],
               status: "active",
               updatedAt: canonicalUpdatedAt,
             },
-            credential: {
-              kind: "oauth_tokens",
-              tokenBundle: {
-                accessToken: "synthetic-access-token",
-                accessTokenExpiresAt: "2099-01-01T00:00:00.000Z",
-                keyVersion: "synthetic-key-version",
-                refreshToken: "synthetic-refresh-token",
-                tokenVersion: 1,
-              },
-            },
+            credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
+            sources: [{
+              sourceProviderSlug: "whoop_v2", displayName: "WHOOP", status: "connected",
+              firstSeenAt: connectedAt, lastSeenAt: connectedAt, lastDataAt: null,
+              resourceCount: 1, resourceAvailabilitySummary: { sleep: true },
+              lastErrorCode: null, lastErrorMessage: null,
+            }],
             localState: {
               lastErrorCode: null,
               lastErrorMessage: null,
@@ -6458,16 +6462,11 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       const requestClass = `${method} ${new URL(url).pathname}`;
       providerRequestClasses.push(requestClass);
       events.push(`provider.request:${requestClass}`);
-      const records = requestClass === "GET /developer/v2/activity/sleep"
-        ? [{
-            end: "2026-04-26T07:30:00.000Z",
-            id: "sleep-device-sync-closed-loop",
-            nap: false,
-            start: "2026-04-26T00:30:00.000Z",
-            updated_at: "2026-04-26T08:00:00.000Z",
-          }]
-        : [];
-      return new Response(JSON.stringify({ records }), {
+      const body = buildJunctionSleepFixtureResponse(new URL(url).pathname, {
+        end: "2026-04-26T07:30:00.000Z", id: "sleep-device-sync-closed-loop",
+        start: "2026-04-26T00:30:00.000Z", updated_at: "2026-04-26T08:00:00.000Z",
+      });
+      return new Response(JSON.stringify(body), {
         headers: { "content-type": "application/json" },
         status: 200,
       });
@@ -6497,7 +6496,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           },
           kind: "device-sync.wake",
           occurredAt: dueAt,
-          provider: "whoop",
+          provider: "junction",
           reason: "reconcile_due",
           userId: TEST_USER_ID,
         },
@@ -6640,7 +6639,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(currentWorkspace.version, "3");
       assert.equal(currentWorkspace.systemMailboxProgressGeneration, "1");
       const initialProviderRequestClasses = providerRequestClasses.slice();
-      assert.deepEqual(initialProviderRequestClasses, expectedWhoopRequestClasses);
+      assert.deepEqual(initialProviderRequestClasses, expectedJunctionRequestClasses);
       assert.deepEqual(cadencePublications, []);
       assert.equal(canonicalNextReconcileAt, dueAt);
       const firstCheckpointAttemptIndex = events.indexOf(
@@ -6722,7 +6721,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         deviceSyncStatePresentAtRestoreByAttempt.get(recoveryAttemptId),
         false,
       );
-      assert.equal(providerRequestClasses.length, 8);
+      assert.equal(providerRequestClasses.length, 2 * expectedJunctionRequestClasses.length);
       assert.equal(reconciliationConflicts, 1);
       const heartbeatCommitIndex = events.indexOf(
         "heartbeat.commit:2026-04-27T00:04:00.000Z",
@@ -6732,9 +6731,9 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         events.slice(0, heartbeatCommitIndex).filter((event) =>
           event.startsWith("provider.request:")
         ).length,
-        8,
+        2 * expectedJunctionRequestClasses.length,
       );
-      const replayedProviderRequestClasses = providerRequestClasses.slice(4);
+      const replayedProviderRequestClasses = providerRequestClasses.slice(expectedJunctionRequestClasses.length);
       assert.deepEqual(
         [...replayedProviderRequestClasses].sort(),
         [...initialProviderRequestClasses].sort(),
@@ -6787,7 +6786,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         1,
       );
       const providerRequestClassesAfterSettlement = providerRequestClasses.length;
-      assert.equal(providerRequestClassesAfterSettlement, 8);
+      assert.equal(providerRequestClassesAfterSettlement, 2 * expectedJunctionRequestClasses.length);
       const convergenceBucketAt = "2026-04-27T00:10:00.000Z";
       const convergenceAttemptId =
         `attempt_device_sync_closed_loop_quiescent_${convergenceBucketAt}`;

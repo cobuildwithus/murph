@@ -132,8 +132,8 @@ describe("mergeRequiredEnvProfile", () => {
 
   it("keeps the assistant profile when local dev supplies non-assistant defaults", () => {
     expect(
-      mergeRequiredEnvProfile("device-sync,exa,hosted-email,linq,mapbox,telegram", "linq"),
-    ).toBe("assistant,device-sync,exa,hosted-email,linq,mapbox,telegram");
+      mergeRequiredEnvProfile("device-sync,hosted-email,linq,mapbox,telegram", "linq"),
+    ).toBe("assistant,device-sync,hosted-email,linq,mapbox,telegram");
   });
 });
 
@@ -1158,7 +1158,7 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
     const env = buildHostedLocalDeviceSyncProviderEnvClearances();
 
     expect(HOSTED_LOCAL_DEVICE_SYNC_PROVIDER_CLEARED_ENV_KEYS).toEqual(
-      expect.arrayContaining(["JUNCTION_API_KEY", "JUNCTION_ENV", "WHOOP_CLIENT_SECRET"]),
+      expect.arrayContaining(["JUNCTION_API_KEY", "JUNCTION_ENV", "JUNCTION_WEBHOOK_SECRET"]),
     );
     for (const key of HOSTED_LOCAL_DEVICE_SYNC_PROVIDER_CLEARED_ENV_KEYS) {
       expect(env[key]).toBe("");

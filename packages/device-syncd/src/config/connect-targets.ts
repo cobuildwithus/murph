@@ -1,11 +1,8 @@
-import { formatDeviceSyncProviderLabel } from "../provider-label.ts";
 import {
   normalizeDeviceConnectSourceId,
   normalizeJunctionLinkProviderFilter,
-  resolveDirectDeviceConnectRouteByProvider,
   resolveJunctionLinkDeviceConnectRouteByProviderSlug,
 } from "./connect-routes.ts";
-import { listConfiguredDeviceSyncProviderNames } from "./provider-keys.ts";
 
 import type {
   ConfiguredDeviceSyncProviderKey,
@@ -24,7 +21,6 @@ type DeviceSyncConnectTargetProviderConfigs = ConfiguredDeviceSyncProviderPresen
   junction?: { providerFilter?: string[] };
 };
 
-const JUNCTION_PREFERRED_CONNECT_SOURCE_IDS = new Set(["whoop"]);
 // Keep provider ingestion configured for existing accounts while this product
 // gate controls whether a fresh user-facing connection can be started.
 const DISABLED_DEVICE_CONNECT_SOURCE_IDS = new Set(["strava", "dexcom", "google-fit"]);
@@ -49,68 +45,11 @@ export function isDeviceConnectSourceAvailableForConnection(
 export function listConfiguredDeviceSyncConnectTargets(
   providerConfigs: DeviceSyncConnectTargetProviderConfigs,
 ): DeviceSyncConnectTarget[] {
-  return collectConfiguredDeviceSyncConnectTargets(providerConfigs, {
-    dedupeBySourceId: true,
-  });
-}
-
-export function listConfiguredDeviceSyncReconnectTargets(
-  providerConfigs: DeviceSyncConnectTargetProviderConfigs,
-): DeviceSyncConnectTarget[] {
-  return collectConfiguredDeviceSyncConnectTargets(providerConfigs, {
-    dedupeBySourceId: false,
-  });
-}
-
-function collectConfiguredDeviceSyncConnectTargets(
-  providerConfigs: DeviceSyncConnectTargetProviderConfigs,
-  options: { dedupeBySourceId: boolean },
-): DeviceSyncConnectTarget[] {
-  const targetsBySourceId = new Map<string, DeviceSyncConnectTarget>();
   const targets: DeviceSyncConnectTarget[] = [];
   const junctionConfig = providerConfigs.junction;
   const junctionSourceProviderSlugs = junctionConfig
     ? normalizeJunctionLinkProviderFilter(junctionConfig.providerFilter)
     : [];
-  const junctionPreferredConnectSourceIds = new Set<string>();
-
-  if (options.dedupeBySourceId) {
-    for (const sourceProviderSlug of junctionSourceProviderSlugs) {
-      const junctionRoute = resolveJunctionLinkDeviceConnectRouteByProviderSlug(sourceProviderSlug);
-      const connectSourceId = junctionRoute
-        ? normalizeDeviceConnectSourceId(junctionRoute.source.connectSourceId)
-        : null;
-
-      if (connectSourceId && JUNCTION_PREFERRED_CONNECT_SOURCE_IDS.has(connectSourceId)) {
-        junctionPreferredConnectSourceIds.add(connectSourceId);
-      }
-    }
-  }
-
-  for (const provider of listConfiguredDeviceSyncProviderNames(providerConfigs)) {
-    if (provider === "junction") {
-      continue;
-    }
-
-    const directRoute = resolveDirectDeviceConnectRouteByProvider(provider);
-    const directConnectSourceId = directRoute?.source.connectSourceId ?? provider;
-    const normalizedDirectConnectSourceId =
-      normalizeDeviceConnectSourceId(directConnectSourceId);
-    if (
-      normalizedDirectConnectSourceId
-      && junctionPreferredConnectSourceIds.has(normalizedDirectConnectSourceId)
-    ) {
-      continue;
-    }
-
-    addDeviceSyncConnectTarget(targets, targetsBySourceId, {
-      connectSourceId: directConnectSourceId,
-      connectTarget: directRoute?.route.connectTarget ?? provider,
-      label: directRoute?.source.label ?? formatDeviceSyncProviderLabel(provider),
-      provider,
-    }, options);
-  }
-
   if (junctionConfig) {
     for (const sourceProviderSlug of junctionSourceProviderSlugs) {
       const junctionRoute = resolveJunctionLinkDeviceConnectRouteByProviderSlug(sourceProviderSlug);
@@ -118,13 +57,13 @@ function collectConfiguredDeviceSyncConnectTargets(
         continue;
       }
 
-      addDeviceSyncConnectTarget(targets, targetsBySourceId, {
+      addDeviceSyncConnectTarget(targets, {
         connectSourceId: junctionRoute.source.connectSourceId,
         connectTarget: junctionRoute.route.connectTarget,
         label: junctionRoute.source.label,
         provider: "junction",
         sourceProviderSlug: junctionRoute.route.sourceProviderSlug,
-      }, options);
+      });
     }
   }
 
@@ -161,17 +100,11 @@ export function resolveConfiguredDeviceSyncConnectTargetBySourceId(
 
 function addDeviceSyncConnectTarget(
   targets: DeviceSyncConnectTarget[],
-  targetsBySourceId: Map<string, DeviceSyncConnectTarget>,
   target: DeviceSyncConnectTarget,
-  options: { dedupeBySourceId: boolean },
 ): void {
   const connectSourceId = normalizeDeviceConnectSourceId(target.connectSourceId);
   const connectTarget = normalizeDeviceSyncConnectTargetKey(target.connectTarget);
-  if (
-    !connectSourceId
-    || !connectTarget
-    || (options.dedupeBySourceId && targetsBySourceId.has(connectSourceId))
-  ) {
+  if (!connectSourceId || !connectTarget) {
     return;
   }
 
@@ -188,5 +121,4 @@ function addDeviceSyncConnectTarget(
   };
 
   targets.push(normalizedTarget);
-  targetsBySourceId.set(connectSourceId, normalizedTarget);
 }

@@ -60,8 +60,7 @@
     "worker:dev:prepared": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/dev-worker.ts",
     "worker:deployment:status": "pnpm exec wrangler deployments status",
     "worker:dev": "pnpm runner:docker:base && pnpm exec wrangler dev",
-    "worker:secret:bulk": "pnpm exec wrangler secret bulk",
-    "prepack": "pnpm build"
+    "worker:secret:bulk": "pnpm exec wrangler secret bulk"
   },
   "dependencies": {
     "@cloudflare/containers": "0.3.7",

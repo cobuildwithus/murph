@@ -1369,15 +1369,6 @@ run_repo_vitest --no-coverage
     );
   });
 
-  it("keeps the release workflow free of a process-wide Node heap", () => {
-    const releaseWorkflow = readFileSync(
-      path.join(repoRoot, ".github", "workflows", "release.yml"),
-      "utf8",
-    );
-
-    expect(releaseWorkflow).not.toContain("NODE_OPTIONS");
-  });
-
   it("runs ordinary package coverage on the caller's Node heap", () => {
     const runWorkspacePackageCoverage = extractWorkspaceVerifyFunction(
       "run_workspace_package_coverage",
@@ -1677,22 +1668,6 @@ run_test_diff_package_tests ${selectedPackageDirs}
     );
     expect(result.stdout.match(/artifacts:prepared/gu)).toHaveLength(1);
 
-    const releaseCoverageAudit = readFileSync(
-      path.join(
-        repoRoot,
-        "packages",
-        "cli",
-        "test",
-        "release-script-coverage-audit.test.ts",
-      ),
-      "utf8",
-    );
-    expect(releaseCoverageAudit).toContain(
-      "it.skipIf(process.env.MURPH_CLI_RELEASE_TARBALL_TEST !== '1')",
-    );
-    expect(releaseCoverageAudit).not.toContain(
-      "it.skipIf(process.env.MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS !== '1')",
-    );
   });
 
   it("batches affected Assistant Engine tests with ordinary package owners", () => {

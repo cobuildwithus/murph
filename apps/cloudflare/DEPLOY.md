@@ -1867,7 +1867,7 @@ Core execution tuning:
   that same start until this container-owned window expires.
 - `CF_ALLOWED_RUNNER_SECRET_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` in the rendered worker config
 - `HOSTED_EXECUTION_CONTAINER_ROLLOUT` selects native `gradual` (default), explicit `immediate`, or `worker-only`. Follow the Production rollout policy above for compatibility evidence and first-writer transitions.
-- `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `exa,hosted-email,linq,mapbox,telegram`. Hosted device-sync runtime config is resolved from worker env directly rather than a runtime-env profile.
+- `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `hosted-email,linq,mapbox,telegram`. Hosted device-sync runtime config is resolved from worker env directly rather than a runtime-env profile.
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `600000` and bounds
   conversation warmth from the latest accepted inbound user's original server
   receipt. `HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS` defaults to
@@ -2209,31 +2209,6 @@ paused main Queue instead of being deleted. Keep both Queues at the configured
 
 Native parser binaries are owned by the runner image and passed to the hosted runtime through explicit parser toolchain config, not deploy-time env overrides. Hosted audio transcription has no in-image model: the parser toolchain points at the Worker-mediated `murph-transcribe.worker` host and the Worker calls the Workers AI `AI` binding (`@cf/openai/whisper-large-v3-turbo`).
 
-Device-sync provider runtime overrides:
-
-- `OURA_API_BASE_URL`
-- `OURA_AUTH_BASE_URL`
-- `OURA_BACKFILL_DAYS`
-- `OURA_RECONCILE_DAYS`
-- `OURA_RECONCILE_INTERVAL_MS`
-- `OURA_REQUEST_TIMEOUT_MS`
-- `OURA_SCOPES`
-- `OURA_WEBHOOK_TIMESTAMP_TOLERANCE_MS`
-- `STRAVA_API_BASE_URL`
-- `STRAVA_AUTH_BASE_URL`
-- `STRAVA_BACKFILL_DAYS`
-- `STRAVA_RECONCILE_DAYS`
-- `STRAVA_RECONCILE_INTERVAL_MS`
-- `STRAVA_REQUEST_TIMEOUT_MS`
-- `STRAVA_SCOPES`
-- `WHOOP_BACKFILL_DAYS`
-- `WHOOP_BASE_URL`
-- `WHOOP_RECONCILE_DAYS`
-- `WHOOP_RECONCILE_INTERVAL_MS`
-- `WHOOP_REQUEST_TIMEOUT_MS`
-- `WHOOP_SCOPES`
-- `WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS`
-
 If the selected GitHub environment already defines container sizing overrides, update these existing vars there as well:
 
 - `CF_CONTAINER_INSTANCE_TYPE={"vcpu":2,"memory_mib":6144,"disk_mb":6000}`
@@ -2248,11 +2223,10 @@ When hosted email sender identity is configured, deploy automation renders one n
 
 Hosted assistant provider and channel secrets:
 
-- `EXA_API_KEY`, `MAPBOX_ACCESS_TOKEN`, and `TELEGRAM_BOT_TOKEN` when those
+- `MAPBOX_ACCESS_TOKEN`, and `TELEGRAM_BOT_TOKEN` when those
   hosted runtime integrations are enabled. `LINQ_API_TOKEN` is no longer
   optional because the independent database-health page owner uses it. These
-  are Worker-owned credentials, not raw child-container env. Exa egress is
-  limited to `POST /search`.
+  are Worker-owned credentials, not raw child-container env.
 
 Hosted usage-reporting secrets:
 
@@ -2279,19 +2253,12 @@ Opt-in execution integrations:
 
 - `HOSTED_EMAIL_SIGNING_SECRET`
 - `DEVICE_SYNC_SECRET`
-- `EXA_API_KEY`
 - `JUNCTION_API_KEY`
 - `JUNCTION_CLIENT_USER_ID_SECRET`
 - `JUNCTION_WEBHOOK_SECRET`
 - `LINQ_WEBHOOK_SECRET`
 - `MAPBOX_ACCESS_TOKEN`
-- `OURA_CLIENT_ID`
-- `OURA_CLIENT_SECRET`
-- `STRAVA_CLIENT_ID`
-- `STRAVA_CLIENT_SECRET`
 - `TELEGRAM_BOT_TOKEN`
-- `WHOOP_CLIENT_ID`
-- `WHOOP_CLIENT_SECRET`
 The documented deploy surface is intentionally limited to the vars and secrets above for the narrowed execution plane and its opt-in runtime integrations.
 
 ### Inbound message-content retention rollout
@@ -2994,7 +2961,6 @@ artifact cleanup, canonical write receipt recovery, and the omitted
 pointer drain does not prove those independent stores empty. After rollout,
 confirm normal managed-container smoke and supported v2 cold restore/checkpoint
 behavior; an unsupported-ref rejection means the pointer/writer gate failed.
-
 
 ## Private weekly game images
 

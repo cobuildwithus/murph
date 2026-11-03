@@ -374,7 +374,7 @@ These are internet-facing and provider-facing only. `:provider` is resolved thro
 - `POST /device/connect/:claim`
 - `GET /device-sync/connect/complete`
 
-These are the only browser-facing wearable connection start and completion routes. The settings start route resolves direct provider manifests and the connect-target catalog assembled by `@murphai/device-syncd/config`, so `/connect` can expose direct WHOOP/Oura/Strava targets plus Junction-backed Garmin/Fitbit-style sources when those providers are configured. The first-party `/device/connect/:claim` route is the hosted assistant confirmation path: GET renders login/confirmation state without mutating provider OAuth state, and POST starts provider OAuth only for the authenticated member that owns the claim. Every hosted browser start compares the resolved callback base with the authenticated request hostname before creating shared ingress; `DEVICE_SYNC_PUBLIC_BASE_URL` may change the path, but a split hostname is an operator error because both callback credentials are host-only. Provider callback GET requires the callback proof and active session, passes the member as `expectedOwnerId`, and redirects only after shared ingress verifies the OAuth-state owner; a missing or invalid proof burns the OAuth state and redirects to Connect without mutating.
+These are the only browser-facing wearable connection start and completion routes. The settings start route resolves the Junction manifest and the connect-target catalog assembled by `@murphai/device-syncd/config`, so `/connect` can expose direct WHOOP/Oura/Strava targets plus Junction-backed Garmin/Fitbit-style sources when those providers are configured. The first-party `/device/connect/:claim` route is the hosted assistant confirmation path: GET renders login/confirmation state without mutating provider OAuth state, and POST starts provider OAuth only for the authenticated member that owns the claim. Every hosted browser start compares the resolved callback base with the authenticated request hostname before creating shared ingress; `DEVICE_SYNC_PUBLIC_BASE_URL` may change the path, but a split hostname is an operator error because both callback credentials are host-only. Provider callback GET requires the callback proof and active session, passes the member as `expectedOwnerId`, and redirects only after shared ingress verifies the OAuth-state owner; a missing or invalid proof burns the OAuth state and redirects to Connect without mutating.
 
 Junction accounts created for their first Link start remain `pending_link` and
 inert. They cannot admit webhook dirty work, runtime wakes, scheduled or manual
@@ -617,54 +617,11 @@ For accepted webhooks, provider trace completion means durable audit and dirty a
 
 ## Provider and connect-target split
 
-Provider configuration is registry-owned by `@murphai/device-syncd/config`. Hosted routes resolve provider manifests for direct providers and resolve connect targets for user-facing source choices. This keeps direct WHOOP, direct Oura and Strava, and Junction-backed source providers such as Garmin/Oura/Strava on one control-plane shape instead of branching hosted persistence by provider.
-
-### WHOOP direct provider
-
-Hosted responsibilities:
-
-- OAuth callback
-- webhook verification and dedupe
-- blind-index account mapping
-- hosted web token refresh and agent export flows
-- execution-time runtime snapshot/apply access when a hosted job needs it
-
-Local responsibilities:
-
-- fetch WHOOP collections and resources directly
-- import delete and resource changes into the vault from hosted hints
-
-### Oura direct or Junction-backed target
-
-Hosted responsibilities:
-
-- OAuth callback
-- hosted web token refresh and agent export flows
-- webhook subscription management when Oura webhooks are enabled
-- Junction connect-target link generation when Oura is routed through Junction
-- execution-time runtime snapshot/apply access when a hosted job needs it
-
-Local responsibilities:
-
-- polling-first reconcile against recent windows
-- optional use of hosted webhook signals
-- local imports into the vault
-
-### Strava direct or Junction-backed target
-
-Hosted responsibilities:
-
-- OAuth callback
-- hosted web token refresh and agent export flows
-- app-global webhook preflight and dedupe when direct Strava webhooks are enabled
-- Junction connect-target link generation when Strava is routed through Junction
-- execution-time runtime snapshot/apply access when a hosted job needs it
-
-Local responsibilities:
-
-- polling-first reconcile against recent activity windows
-- optional use of hosted webhook signals
-- local imports into the vault
+Provider configuration is registry-owned by `@murphai/device-syncd/config`.
+Junction is the sole configured transport. Connect targets select source labels
+such as WHOOP, Oura, Garmin, and Fitbit through Junction. Historical provider
+labels and source filters remain readable; they do not enable direct OAuth or
+webhook endpoints. Generic routes reject providers absent from the registry.
 
 ### Garmin via Junction
 
@@ -679,30 +636,17 @@ Local responsibilities:
 - Junction-backed reconcile of Garmin summaries, timeseries, sleep, activity, and other configured resources
 - local imports into the vault
 
-## Local-only daemon contract
-
-`device-syncd` still requires its own local daemon env contract:
-
-- `DEVICE_SYNC_SECRET` is the daemon's local bootstrap and service secret
-- `DEVICE_SYNC_CONTROL_TOKEN` is the daemon's loopback control-plane bearer token
-
-Those are local-daemon concerns. They are not part of the hosted browser or hosted execution auth contract. Local and tunneled daemon callback URLs remain explicitly configured on the daemon boundary and are not subject to the hosted browser app-session hostname check.
-
-Hosted execution continues to use signed internal web callbacks and hosted agent/session credentials instead of the daemon's `DEVICE_SYNC_CONTROL_TOKEN`.
-
 ## Fitbit migration continuation
 
 The browser owns presentation and explicit Google authorization only. Its persisted Google source `firstSeenAt` is also the authorization epoch used by both exact Google and Fitbit proof jobs. That existing epoch participates in their current job identity; stale queued, leased, retry, timeseries, or workout lineages cannot certify a later authorization. The wake-local hosted device-sync pass drains scheduled and webhook work, publishes source state, and then asks Web to attempt cutover. Web re-enters the existing connection mutation lock, rejects pending dirty state, evaluates importer-owned canonical evidence, and calls targeted provider revoke outside the transaction. A crash is recovered by probing that exact Fitbit provider source; only provider-confirmed inactivity is finalized locally. No migration table, queue, or second state owner exists.
 
 Deploy importer, Device Sync, and hosted-runtime consumers before the Web bundle so every cutover caller understands source-scoped evidence, per-resource fences, retry identity, and Google Health admission. Then deploy Web and smoke one explicit Google authorization. Temporary version skew leaves legacy Fitbit active rather than cutting over without complete evidence.
 
-
 ## Retired member-owned provider applications
 
-Hosted Strava uses the ordinary configured-provider registry. The dormant
+Strava source data arrives through Junction. The dormant
 member-owned application store, OAuth/connection bindings, and runtime snapshot
-credential overlays are retired. Ordinary Strava OAuth, refresh, polling, and
-revocation remain owned by the shared device-sync implementation.
+credential overlays are retired. Direct Strava OAuth, refresh, polling, and revocation are retired.
 
 Before deploying this retirement, confirm that no application rows or non-null
 application binding columns remain. The provisioning writer had no production

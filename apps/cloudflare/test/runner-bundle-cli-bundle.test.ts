@@ -394,7 +394,6 @@ describe("runner bundle vault-cli esbuild step", () => {
     );
   });
 
-
   it("inlines Health Commons while keeping asset and generated SDK packages external", () => {
     expect(RUNNER_BUNDLE_SHARED_EXTERNALS).toContain(TIMING_OWNER_SPECIFIER);
     expect(RUNNER_BUNDLE_SHARED_EXTERNALS).not.toContain("@murphai/runtime-state");
@@ -415,7 +414,6 @@ describe("runner bundle vault-cli esbuild step", () => {
       "@elevenlabs/elevenlabs-js",
       "@junction-api/sdk",
       "@linqapp/sdk",
-      "exa-js",
       "openai",
     ]) {
       expect(RUNNER_BUNDLE_SHARED_EXTERNALS).toContain(packageName);

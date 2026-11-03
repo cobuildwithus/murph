@@ -38,7 +38,7 @@ import { deviceSyncError, isDeviceSyncError } from "../errors.ts";
 import { normalizeString } from "../shared.ts";
 import { readSafeJunctionRequestTimeoutDiagnostics } from "../junction-request-timeout-diagnostics.ts";
 import type { JunctionRequestStage } from "../types.ts";
-import { buildProviderApiError as buildProviderApiErrorBase } from "./shared-oauth.ts";
+import { buildProviderApiError as buildProviderApiErrorBase } from "./provider-api-error.ts";
 import {
   createProviderRequestAbortSignal,
   isProviderParentAbortError,

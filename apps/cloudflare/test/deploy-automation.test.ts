@@ -903,7 +903,7 @@ describe("hosted deploy automation helpers", () => {
 
     expect(environment.workerVars).toEqual({
       ...expectedRequiredHostedCryptoWorkerVars(),
-      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,telegram",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email,linq,mapbox,telegram",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "600000",
       HOSTED_EXECUTION_STANDBY_MODE: "off",
       HOSTED_EXECUTION_STANDBY_TARGET: "2",
@@ -963,7 +963,7 @@ describe("hosted deploy automation helpers", () => {
     });
 
     expect(environment.workerVars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES).toBe(
-      "exa,hosted-email,linq,mapbox,telegram",
+      "hosted-email,linq,mapbox,telegram",
     );
     expect(environment.runnerReadyTimeoutMs).toBe("20000");
   });
@@ -1093,8 +1093,6 @@ describe("hosted deploy automation helpers", () => {
       JUNCTION_WEBHOOK_SECRET: "junction-webhook-secret",
       MAPBOX_ACCESS_TOKEN: "mapbox-token",
       MURPH_DATA_API_KEY: "data-api-key",
-      STRAVA_CLIENT_ID: "strava-client-id",
-      STRAVA_CLIENT_SECRET: "strava-client-secret",
       TELEGRAM_BOT_TOKEN: "bot-token",
       OPENAI_API_KEY: "openai-key",
     });

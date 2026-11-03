@@ -71,7 +71,7 @@ import {
 import {
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
 } from '../src/assistant/onboarding-followup-automation.ts'
-import { applyMurphManagedAutomations, MURPH_RETIRED_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID } from '../src/assistant/managed-automations.ts'
+import { applyMurphManagedAutomations, MURPH_RETIRED_RESEARCH_SCOUT_AUTOMATION_ID, MURPH_RETIRED_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID } from '../src/assistant/managed-automations.ts'
 import { readAssistantDiagnosticsSnapshot } from '../src/assistant/diagnostics.ts'
 import { runAssistantAutomationPass } from '../src/assistant/automation/run-loop.ts'
 import {
@@ -5864,6 +5864,7 @@ describe('assistant outbox runtime', () => {
   it.each([
     { retiredAutomationId: 'automation_01K55N7S9X4Q2M6P8R3T0V1WYZ', slug: 'group-sunday-superlatives', threadIsDirect: false },
     { retiredAutomationId: MURPH_RETIRED_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID, slug: 'personal-patterns-update', threadIsDirect: true },
+    { retiredAutomationId: MURPH_RETIRED_RESEARCH_SCOUT_AUTOMATION_ID, slug: 'weekly-health-research-scout', threadIsDirect: true },
   ])('fails an active revision-matching retired $slug intent before provider entry', async ({ retiredAutomationId, slug, threadIsDirect }) => {
     const { vaultRoot } = await createInitializedAssistantVault(
       'assistant-outbox-retired-managed-',
@@ -5927,7 +5928,7 @@ describe('assistant outbox runtime', () => {
       vault: vaultRoot,
     })
 
-    expect(dispatched.intent.status).toBe('failed')
+    expect(dispatched.intent).toMatchObject({ status: 'failed', nextAttemptAt: null })
     expect(dispatched.deliveryError).toMatchObject({
       code: 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE',
     })

@@ -1,4 +1,5 @@
 import {
+  buildJunctionSleepFixtureResponse,
   TEST_NOW, TEST_USER_ID, createDeferred, createDeviceSyncResolvedConfig,
   createMailboxItem, createMailboxPort, createPlatform, createSnapshotDeviceSyncPort,
   createWorkspacePort, createWorkspaceRuntimeJobInput, createWorkspaceState,
@@ -76,8 +77,8 @@ test.each([
         async importDeviceProviderSnapshot(input, options) {
           importCalls += 1;
           assert.ok(options?.signal);
-          const snapshot = input.snapshot as { sleeps: { id: string }[] };
-          const resourceId = snapshot.sleeps[0]!.id;
+          const snapshot = input.snapshot as { summaries: { sleep: { id: string }[] } };
+          const resourceId = snapshot.summaries.sleep[0]!.id;
           imports.push(resourceId);
           const isEarlierJob = resourceId === "synthetic-admission-earlier";
           if (isEarlierJob) return { addedCount: 1, eventShardPaths: [] };
@@ -110,7 +111,7 @@ test.each([
       const enqueueJob = store.enqueueJob.bind(store);
       // Both rows have the same synthetic clock; explicitly order A before B.
       store.enqueueJob = (job) => enqueueJob({
-        ...job, priority: job.payload?.resourceId === "synthetic-admission-earlier" ? 61 : job.priority,
+        ...job, priority: job.payload?.objectId === "synthetic-admission-earlier" ? 61 : job.priority,
       });
     }
     return service;
@@ -132,9 +133,13 @@ test.each([
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date(TEST_NOW));
   vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request) => {
-    const id = String(url).split("/").at(-1)!;
-    downloads.push(id);
-    return new Response(JSON.stringify({ id }), {
+    const requestUrl = new URL(url instanceof Request ? url.url : String(url));
+    const id = requestUrl.searchParams.get("start_date")?.startsWith("2026-04-25")
+      ? "synthetic-admission-earlier" : "synthetic-admission-sleep";
+    if (requestUrl.pathname.includes("/summary/sleep/")) downloads.push(id);
+    return new Response(JSON.stringify(buildJunctionSleepFixtureResponse(requestUrl.pathname, {
+      id, start: "2026-04-26T00:30:00.000Z", end: "2026-04-26T07:30:00.000Z", updated_at: TEST_NOW,
+    })), {
       headers: { "content-type": "application/json" },
     });
   }));
@@ -158,7 +163,7 @@ test.each([
             wake: {
               connectionId: "synthetic-admission-connection", eventId: item.dedupeKey,
               expectedConnectedAt: TEST_NOW, kind: "device-sync.wake", occurredAt: TEST_NOW,
-              provider: "whoop", reason: "webhook_hint", userId: TEST_USER_ID,
+              provider: "junction", reason: "webhook_hint", userId: TEST_USER_ID,
             },
           });
           return { status: "imported" };
@@ -226,11 +231,14 @@ test.each([
                   .filter((id) => !acknowledgedPayloads.includes(`synthetic-admission-${id}`))
                   .map((id) => ({
                   count: 1, dirtyPayloadId: `synthetic-admission-${id}`, jobKind: "resource" as const,
-                  payload: { resourceType: "sleep", resourceId: `synthetic-admission-${id}` },
+                  payload: { resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop_v2",
+                    objectId: `synthetic-admission-${id}`,
+                    windowStart: id === "earlier" ? "2026-04-25T00:00:00.000Z" : "2026-04-26T00:00:00.000Z",
+                    windowEnd: id === "earlier" ? "2026-04-26T00:00:00.000Z" : TEST_NOW },
                   resource: "sleep", resourceCategory: "summary" as const, sourceProviderSlug: "whoop",
                   windowEnd: null, windowStart: null,
                 })),
-                eventCount: "1", latestDirtyAt: TEST_NOW, provider: "whoop" as const,
+                eventCount: "1", latestDirtyAt: TEST_NOW, provider: "junction" as const,
                 resourceCategoryCounts: { summary: 1 }, sourceProviderCounts: { whoop: 1 },
                 userId: TEST_USER_ID, windowEnd: null, windowStart: null,
               }],

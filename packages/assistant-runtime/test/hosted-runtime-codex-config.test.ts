@@ -617,7 +617,6 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /\[shell_environment_policy\]/u);
   assert.match(config, /inherit = "all"/u);
   assert.match(config, /include_only = \[/u);
-  assert.match(config, /"EXA_API_KEY"/u);
   assert.match(config, /"MURPH_ASSISTANT_SKILLS_ROOT"/u);
   assert.match(config, /"MURPH_CLI_TIMING_ENDPOINT"/u);
   assert.doesNotMatch(config, /"MURPH_ASSISTANT_PREFERENCE_CAUSAL_SEQ_PATH"/u);
@@ -647,7 +646,6 @@ test("hosted Codex shell policy excludes ElevenLabs runtime env without writing 
     operatorHomeRoot,
     runtimeEnv: {
       ELEVENLABS_API_KEY: "fixture-elevenlabs-env-value",
-      EXA_API_KEY: "fixture-exa-env-value",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
       MURPH_ELEVENLABS_VOICE_ID: "voice_murph",
@@ -656,11 +654,9 @@ test("hosted Codex shell policy excludes ElevenLabs runtime env without writing 
   });
 
   assert.equal(result.runtimeEnv.ELEVENLABS_API_KEY, "fixture-elevenlabs-env-value");
-  assert.equal(result.runtimeEnv.EXA_API_KEY, "fixture-exa-env-value");
   assert.equal(result.runtimeEnv.MURPH_ELEVENLABS_MODEL_ID, "eleven_multilingual_v2");
   assert.equal(result.runtimeEnv.MURPH_ELEVENLABS_VOICE_ID, "voice_murph");
   const config = await readFile(result.codexConfigPath, "utf8");
-  assert.match(config, /"EXA_API_KEY"/u);
   assert.doesNotMatch(config, /"ELEVENLABS_API_KEY"/u);
   assert.doesNotMatch(config, /"MURPH_ELEVENLABS_MODEL_ID"/u);
   assert.doesNotMatch(config, /"MURPH_ELEVENLABS_VOICE_ID"/u);
@@ -2401,7 +2397,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "[shell_environment_policy]",
       'inherit = "all"',
       "ignore_default_excludes = true",
-      'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_RUNTIME_PROCESS", "MURPH_CLI_TIMING_ENDPOINT", "MURPH_ASSISTANT_SKILLS_ROOT", "MURPH_HEALTH_COMMONS_PACKAGE_ROOT", "LANG", "LC_ALL", "LC_CTYPE", "EXA_API_KEY", "MAPBOX_ACCESS_TOKEN", "MURPH_DATA_API_KEY", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
+      'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_RUNTIME_PROCESS", "MURPH_CLI_TIMING_ENDPOINT", "MURPH_ASSISTANT_SKILLS_ROOT", "MURPH_HEALTH_COMMONS_PACKAGE_ROOT", "LANG", "LC_ALL", "LC_CTYPE", "MAPBOX_ACCESS_TOKEN", "MURPH_DATA_API_KEY", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
       "",
       "[shell_environment_policy.set]",
       `PATH = "${HOSTED_RUNNER_EXECUTABLE_PATH}"`,
