@@ -5546,33 +5546,36 @@ async function runSystemMailboxMaintenancePhase(
         result: mergeMemberPreferencesPrePlanningResult(null),
       };
     }
-    // Idle context/receipt maintenance may checkpoint, but cannot end a pass
-    // with ready delivery work. Re-derive this from the durable outbox, rather
-    // than the workspace's potentially older default wake projection.
-    const outboxWake = createHostedRuntimeWakeCandidate(
-      await resolveHostedAssistantOutboxNextWakeAt({
-        now: new Date(resolveHostedAssistantPhaseNowMs(phaseInput)),
-        vaultRoot: phaseInput.restored.vaultRoot,
+    const idleMaintenanceResult = mergeMemberPreferencesPrePlanningResult(
+      await runIdleSystemMailboxMaintenance({
+        backgroundMaintenanceYielded,
+        pendingAssistantInputWakeAt,
+        phaseInput,
+        readAssistantCronWakeState,
+        staleDefaultProjectionDisproved,
       }),
-      HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
     );
+    // A maintenance result (context refresh, receipts) would otherwise end the
+    // pass before delivery; a null result already continues into the lane.
+    // Re-derive readiness from the durable outbox, not the workspace's
+    // potentially older default wake projection.
+    const continueToDueDelivery = idleMaintenanceResult !== null
+      && hostedRuntimeWakeCandidateIsDue(
+        createHostedRuntimeWakeCandidate(
+          await resolveHostedAssistantOutboxNextWakeAt({
+            now: new Date(resolveHostedAssistantPhaseNowMs(phaseInput)),
+            vaultRoot: phaseInput.restored.vaultRoot,
+          }),
+          HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+        ),
+        resolveHostedAssistantPhaseNowMs(phaseInput),
+      );
     return {
       backgroundMaintenanceYielded,
-      continueAssistantLane: hostedRuntimeWakeCandidateIsDue(
-        outboxWake,
-        resolveHostedAssistantPhaseNowMs(phaseInput),
-      ),
+      continueAssistantLane: continueToDueDelivery,
       initialProviderCleanupCheckpoint,
       pendingAssistantInputWakeAt,
-      result: mergeMemberPreferencesPrePlanningResult(
-        await runIdleSystemMailboxMaintenance({
-          backgroundMaintenanceYielded,
-          pendingAssistantInputWakeAt,
-          phaseInput,
-          readAssistantCronWakeState,
-          staleDefaultProjectionDisproved,
-        }),
-      ),
+      result: idleMaintenanceResult,
     };
   }
   const {
