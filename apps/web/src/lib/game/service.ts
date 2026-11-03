@@ -2,6 +2,7 @@ import "server-only";
 
 import { parseGameRecapEventId, hostedGameRecapSchema, type GameNoticeRoom, type HostedGameChatState, type HostedGameUpdate, type HostedGameRecap } from "@murphai/hosted-execution/runtime-control";
 import { gameChatProgress } from "./chat-progress";
+import { buildGameChallengeInstructions } from "./challenge";
 import { randomBytes } from "node:crypto";
 
 import { Prisma, type Game, type GameEntry, type GameInvitee, type GamePlayer, type GameReport } from "@prisma/client";
@@ -37,6 +38,7 @@ import { labelTarget, openGameTexts, sealGameText, type GameSealTarget } from ".
 import { gameMediaDelivery, isGameMediaStorageAvailable, servesSignedGameMedia, statGameMedia } from "./media";
 import {
   currentTerms,
+  termsForDay,
   eligibleFromDay,
   canRedeemGroupTicket,
   gameDayOne,
@@ -56,6 +58,10 @@ import {
   decideNewTerms,
   groupTaskOverrideSeats,
   decidePost,
+  decideChallenge,
+  gameChallengeKey,
+  gameChallengeStatus,
+  type RuleChallenge,
   decideSettle,
   decideStartNow,
   decideWithdraw,
@@ -85,7 +91,7 @@ import { agreedDayOne, gameChangeCancellationNeedsNotice, decideApprovedGameChan
 import { prepareGameChangeWords, readPendingGameChanges, type PreparedGameChangeWords } from "./change-words";
 import { deliverGameChangeProposal } from "./chat-delivery";
 import { prepareGameChat, readGameChatAudience, readGroupGameChatAuthority, type GameChatAudience, hasGameChatRestriction, hasGameChatBlock, gameChatNames, gamePairWhere, gameChatPlayerIds, readGameChatCandidateIds, sameGamePlayers } from "./chat-membership";
-import { reserveGameChatLifecycleTx, reserveGameChatProposalTx, skipGameChatLifecycleTx } from "./chat-lifecycle-receipt";
+import { reserveGameChatLifecycleTx, reserveGameChatProposalTx, reserveGameChallengeTx, skipGameChatLifecycleTx } from "./chat-lifecycle-receipt";
 import { reserveGameMissedDayTx } from "./chat-lifecycle-receipt";
 import { gameMissedCheckInRuns, isMissedCheckInDueNow, visitGameMissedCheckInPages } from "./missed-check-in";
 import { claimGamePostNotification, sendGamePostNotificationAfterResponse } from "./post-notification";
@@ -355,6 +361,7 @@ interface CommandContext {
 /** Applies one command; returns the game to show back, if any. */
 async function runCommand(context: CommandContext, command: Exclude<GameCommand, { type: "setProfile" }>): Promise<string | null | { gameId: string; dayOutcome?: GameDayOutcome; composer?: { murphPhoneNumber: string } }> {
   switch (command.type) {
+    case "challenge": return challenge(context, command);
     case "leave": return leave(context, command.gameId);
     case "editTerms": return editTerms(context, command);
     case "setDayCompletion":
@@ -407,9 +414,10 @@ interface LockedStep {
   clock: Date;
 }
 
-type GameEventType = "left" | "terms_edited" | "day_marked_incomplete" | "day_restored" | "cancelled" | "blocked" | "removed" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
+type GameEventType = "challenged" | "left" | "terms_edited" | "day_marked_incomplete" | "day_restored" | "cancelled" | "blocked" | "removed" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
 /** What changed, for the history: ids and numbers only, never words. */
 interface GameEventDraft {
+  createdAt?: Date;
   commandKey?: string;
   type: GameEventType;
   payload: Prisma.InputJsonObject;
@@ -418,7 +426,7 @@ interface GameEventDraft {
 async function writeEvents(tx: Tx, gameId: string, actor: string, events: readonly GameEventDraft[], chatOrigin = false): Promise<void> {
   if (events.length === 0) return;
   await tx.gameEvent.createMany({
-    data: events.map((event) => ({ actor, gameId, commandKey: event.commandKey, payload: { v: 1, ...event.payload }, type: event.type })),
+    data: events.map((event) => ({ actor, gameId, createdAt: event.createdAt, commandKey: event.commandKey, payload: { v: 1, ...event.payload }, type: event.type })),
   });
   if (events.some((event) => event.type === "started")) {
     await reserveGameChatLifecycleTx({ gameId, kind: "started", now: new Date(), tx });
@@ -1095,6 +1103,33 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
   });
   sendGamePostNotificationAfterResponse(notification);
   return gameId;
+}
+
+async function challenge(context: CommandContext, command: Extract<GameCommand, { type: "challenge" }>): Promise<string> {
+  await runLocked(command.gameId, context, async ({ loaded, now, tx }) => {
+    const player = playerFor(loaded.state, context.actor);
+    if (!player || player.leftAt) reject("NOT_A_PLAYER", "You're not in this game.");
+    const blocks = await readGameBlocks(tx, context.actor, gameMemberIds(loaded.row.players));
+    if (blocks.blocked.size || blocks.blockedBy.size) reject("PLAYER_UNAVAILABLE", "This player isn't available.");
+    const commandKey = gameChallengeKey(command.gameId, command.entryId);
+    const existing = await tx.gameEvent.findUnique({ where: { commandKey }, select: { actor: true } });
+    if (existing) {
+      if (existing.actor !== context.actor) reject("INVALID_REQUEST", "That post already has a case.");
+      return [];
+    }
+    const [history, reports] = await Promise.all([
+      readGameChallenges(tx, [command.gameId]),
+      tx.gameReport.findMany({ where: { gameId: command.gameId, reporterMemberId: context.actor, entryId: { not: null } }, select: { entryId: true } }),
+    ]);
+    const hidden = new Set(reports.flatMap(report => report.entryId ? [report.entryId] : []));
+    const draft = { type: "challenged" as const, createdAt: now, ...decideChallenge(loaded.state, history.get(command.gameId) ?? [], {
+      memberId: context.actor, entryId: command.entryId, now, createdAt: now, visibleEntryIds: visibleEntryIds(loaded.state, context.actor, hidden),
+    }) };
+    await reserveGameChallengeTx({ gameId: command.gameId, entryId: draft.payload.entryId,
+      containerMemberId: loaded.row.chatContainerMemberId!, now, tx });
+    return [draft];
+  });
+  return command.gameId;
 }
 
 async function setDayCompletion(context: CommandContext, command: Extract<GameCommand, { type: "setDayCompletion" }>): Promise<{ gameId: string; dayOutcome: GameDayOutcome }> {
@@ -1967,6 +2002,68 @@ export async function readGamePhotoPostingStateTx(tx: Prisma.TransactionClient, 
 
 // -------------------------------------------------------------------- reads
 
+/**
+ * One batch for all requested games. Unique entry identity bounds challenges by
+ * two players x two attempts x game length. Only the latest accused/day
+ * concession id leaves Postgres, regardless of the number of score restores.
+ */
+async function readGameChallenges(db: Db, gameIds: readonly string[]): Promise<Map<string, RuleChallenge[]>> {
+  const result = new Map<string, RuleChallenge[]>();
+  if (gameIds.length === 0) return result;
+  const rows = await db.$queryRaw<Array<{ id: bigint; gameId: string; actor: string; commandKey: string; payload: Prisma.JsonValue; concessionEventId: bigint | null }>>(Prisma.sql`
+    SELECT challenge.id, challenge.game_id AS "gameId", challenge.actor,
+      challenge.command_key AS "commandKey", challenge.payload,
+      (SELECT concession.id FROM game_event concession
+        JOIN game_entry target ON target.id = challenge.payload->>'entryId' AND target.game_id = challenge.game_id
+        WHERE concession.game_id = challenge.game_id AND concession.type = 'day_marked_incomplete'
+          AND concession.actor = target.member_id AND concession.payload->>'dayIndex' = target.day_index::text
+        ORDER BY concession.id DESC LIMIT 1) AS "concessionEventId"
+    FROM game_event challenge WHERE challenge.game_id IN (${Prisma.join(gameIds)}) AND challenge.type = 'challenged'
+    ORDER BY challenge.id
+  `);
+  for (const row of rows) {
+    const payload = row.payload;
+    if (!isRecord(payload) || payload.v !== 1 || typeof payload.entryId !== "string" || typeof payload.deadlineAt !== "string"
+      || row.commandKey !== gameChallengeKey(row.gameId, payload.entryId) || !Number.isFinite(Date.parse(payload.deadlineAt))) {
+      throw new Error("Stored game challenge is malformed.");
+    }
+    const challenges = result.get(row.gameId) ?? [];
+    challenges.push({ id: row.id, actor: row.actor, entryId: payload.entryId, deadlineAt: new Date(payload.deadlineAt), concessionEventId: row.concessionEventId });
+    result.set(row.gameId, challenges);
+  }
+  return result;
+}
+
+/** Database-only projection shared by drain recovery and final provider claim. */
+export async function readGameChallengeCase(db: Db, gameId: string, entryId: string, clock: Date) {
+  const [loaded] = await loadGames(db, [gameId]);
+  if (!loaded || loaded.row.maxPlayers !== 2) return null;
+  const challenges = await readGameChallenges(db, [gameId]);
+  const challenge = challenges.get(gameId)?.find(candidate => candidate.entryId === entryId);
+  if (!challenge) return null;
+  return { ...loaded, challenge, status: gameChallengeStatus(loaded.state, challenge, gameNow(clock, loaded.row)) };
+}
+
+/** Decrypt only shared task words and profile names, outside the game transaction. */
+export async function readGameChallengeInstructions(current: NonNullable<Awaited<ReturnType<typeof readGameChallengeCase>>>): Promise<string | null> {
+  const entry = current.state.entries.find(entry => entry.id === current.challenge.entryId);
+  const accused = entry && playerFor(current.state, entry.memberId);
+  if (!entry || !accused) return null;
+  const [profiles, [plain]] = await Promise.all([
+    readGameChatProfiles(gameMemberIds(current.row.players)),
+    openGameTexts([{ ...gameTarget(current.row, "terms_words"), value: current.row.termsWordsEncrypted }]),
+  ]);
+  const challengerName = profiles.find(profile => profile.memberId === current.challenge.actor)?.firstName;
+  const accusedName = profiles.find(profile => profile.memberId === accused.memberId)?.firstName;
+  if (!challengerName || !accusedName) return null;
+  const version = termsForDay(current.state.game.terms, entry.dayIndex);
+  const words = parseTermWords(plain ?? "").versions.find(words => words.n === version.n);
+  const task = words?.tasks.find(task => task.seat === accused.seat)?.text;
+  if (!task) return null;
+  return buildGameChallengeInstructions({ challengerName, accusedName, task, dayNumber: entry.dayIndex + 1,
+    postedAt: entry.receivedAt, deadlineAt: current.challenge.deadlineAt, timeZone: accused.timeZone });
+}
+
 async function loadGames(db: Db, gameIds: readonly string[], multiplayer = true): Promise<LoadedGame[]> {
   if (gameIds.length === 0) return [];
   const [rows, entries] = await Promise.all([
@@ -2071,6 +2168,7 @@ function toRuleState(row: GameRow, entries: readonly GameEntry[]): RuleState {
 
 function toRuleStateGame(row: Game & Pick<GameRow, "invitees">, terms: RuleState["game"]["terms"]): RuleState["game"] {
   return {
+    chatContainerMemberId: row.chatContainerMemberId,
     createdBy: row.createdBy,
     id: row.id,
     inviteExpiresAt: row.inviteExpiresAt,
@@ -2641,7 +2739,7 @@ async function buildViewInputs(
   const memberIds = [...new Set([viewerId, ...games.flatMap((game) => gameMemberIds(game.row.players))])];
   // An addressed rematch's invitee isn't a player yet, but the challenger's label for them still applies.
   const labelSubjects = [...memberIds, ...games.flatMap(game => gameMemberIds(game.row.invitees))];
-  const [profiles, labels, tickets, pendingViews, blocks, reported] = await Promise.all([
+  const [profiles, labels, tickets, pendingViews, blocks, reported, challenges] = await Promise.all([
     prisma.gameProfile.findMany({ where: { memberId: { in: labelSubjects } } }),
     prisma.gameContactLabel.findMany({ where: { ownerMemberId: viewerId, subjectMemberId: { in: labelSubjects } } }),
     history ? [] : prisma.gameTicket.findMany({
@@ -2650,6 +2748,7 @@ async function buildViewInputs(
     history ? new Map() : readPendingChangeViews(games.map((game) => game.row)),
     knownBlocks ?? readGameBlocks(prisma, viewerId, labelSubjects),
     readReportedBy(viewerId, { gameIds: games.map((game) => game.row.id), players: labelSubjects }),
+    readGameChallenges(prisma, games.filter(game => !history && game.row.maxPlayers === 2).map(game => game.row.id)),
   ]);
   const hiddenEntryIds = reported.entries;
   const hiddenMemberIds = new Set([...blocks.blocked, ...blocks.blockedBy]);
@@ -2754,6 +2853,7 @@ async function buildViewInputs(
     const result: StoredResult | null = game.row.result ? parseStoredResult(game.row.result) : null;
     return {
       multiplayer, home, groupsEnabled: areGameGroupsEnabled(), audienceKey: game.row.audienceKey,
+      challenges: challenges.get(game.row.id) ?? [],
       pendingChange: pendingViews.get(game.row.id) ?? null,
       avatarKeys,
       profileAvatarKeys,

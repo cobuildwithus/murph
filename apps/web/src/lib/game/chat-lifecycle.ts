@@ -17,7 +17,7 @@ import { isGameOn } from "./access";
 import { parsePendingGameChange } from "./changes";
 import { deliverGameChangeProposal } from "./chat-delivery";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
-import { isGameInviteExpired } from "./rules";
+import { gameChallengeKey, isGameInviteExpired } from "./rules";
 import { firstDatesOfMissRuns } from "./missed-check-in";
 import { gamePairLoreFingerprint } from "./audience";
 
@@ -31,7 +31,7 @@ const LIFECYCLE_BATCH = 1;
  * process (for example one written by a newer build before a rollback) must
  * never become the oldest due row that every sweep picks and skips.
  */
-const LIFECYCLE_TEMPLATES = ["game_started", "game_rematch", "game_proposal", "game_change_cancelled", "game_change_expired", "game_cancelled", "game_recap", "game_missed"];
+const LIFECYCLE_TEMPLATES = ["game_started", "game_rematch", "game_proposal", "game_change_cancelled", "game_change_expired", "game_cancelled", "game_recap", "game_missed", "game_challenge"];
 
 /** The existing minute sweep recovers accepted intent even if the app never returns. */
 export async function drainGameChatLifecycle(input: { prisma?: PrismaClient; now?: Date; signal?: AbortSignal } = {}): Promise<{ attempted: number; queued: number; deferred: number }> {
@@ -94,6 +94,7 @@ export async function drainGameChatLifecycle(input: { prisma?: PrismaClient; now
 type GameChatIntent = Pick<HostedLinqDelivery, "id" | "sourceRef" | "template" | "status" | "idempotencyKey">;
 
 async function processGameChatIntent(receipt: GameChatIntent, now: Date, prisma: PrismaClient): Promise<boolean> {
+  if (receipt.template === "game_challenge") return processGameChallengeIntent(receipt, now, prisma);
   if (receipt.template === "game_missed") {
     const parts = /^([^:]+):([^:]+):(\d{4}-\d{2}-\d{2})$/u.exec(receipt.sourceRef ?? "");
     if (!parts) return false;
@@ -121,6 +122,26 @@ async function processGameChatIntent(receipt: GameChatIntent, now: Date, prisma:
   return receipt.status === "generation_queued"
     ? recoverGameNotificationWake(receipt.id, gameId, gameChatLifecycleEventId(gameId, kind), now)
     : deliverGameChatLifecycle(gameId, kind, undefined, now);
+}
+
+async function processGameChallengeIntent(receipt: GameChatIntent, now: Date, prisma: PrismaClient): Promise<boolean> {
+  const parts = /^([^:]+):([^:]+)$/u.exec(receipt.sourceRef ?? "");
+  const eventId = parts ? gameChallengeKey(parts[1], parts[2]) : null;
+  const { readGameChallengeCase, readGameChallengeInstructions } = await import("./service");
+  const current = parts && eventId && receipt.idempotencyKey === createHostedLinqDeliveryIdempotencyLookupKey(eventId)
+    ? await readGameChallengeCase(prisma, parts[1], parts[2], now) : null;
+  const players = current?.state.players.filter(player => !player.leftAt).map(player => player.memberId) ?? [];
+  if (!current || current.status !== "open" || !current.row.chatContainerMemberId || !isPairRoster(players) || !players.includes(current.challenge.actor)) {
+    await prisma.hostedLinqDelivery.updateMany({ where: { id: receipt.id, status: receipt.status },
+      data: { status: "skipped", skippedAt: now, skipReason: "game_lifecycle_superseded", retryAfterAt: null } });
+    return false;
+  }
+  if (!isGameOn(current.row)) return false;
+  if (receipt.status === "generation_queued") return recoverGameNotificationWake(receipt.id, current.row.id, eventId!, now);
+  const instructions = await readGameChallengeInstructions(current);
+  if (!instructions) return false;
+  return deliverCurrentGameChatLifecycle({ boundOnly: true, eventId: eventId!, game: current.row, gameId: current.row.id,
+    instructions, kind: "challenge", players, prisma, statuses: lifecycleStatuses("challenge") });
 }
 
 async function processGameRecapIntent(receipt: GameChatIntent, now: Date): Promise<boolean> {
@@ -151,7 +172,7 @@ async function processGameProposalIntent(receipt: GameChatIntent, gameId: string
 async function recoverGameNotificationWake(receiptId: string, gameId: string, eventId: string, now: Date): Promise<boolean> {
   const prisma = getPrisma();
   const game = await prisma.game.findUnique({ where: { id: gameId }, select: { chatContainerMemberId: true, inviteExpiresAt: true, status: true } });
-  const kind = eventId.startsWith("game-cancelled:") ? "cancelled" : eventId.startsWith("game-started:") ? "started" : eventId.startsWith("game-rematch:") ? "rematch" : eventId.startsWith("game-recap:") ? "recap" : eventId.startsWith("game-missed:") ? "missed" : eventId.startsWith("game-change-expired:") ? "change_expired" : "change_cancelled";
+  const kind = eventId.startsWith("game-challenge:") ? "challenge" : eventId.startsWith("game-cancelled:") ? "cancelled" : eventId.startsWith("game-started:") ? "started" : eventId.startsWith("game-rematch:") ? "rematch" : eventId.startsWith("game-recap:") ? "recap" : eventId.startsWith("game-missed:") ? "missed" : eventId.startsWith("game-change-expired:") ? "change_expired" : "change_cancelled";
   const pendingInviteNotice = eventId.startsWith("game-rematch:") || eventId.startsWith("game-change:");
   if (!game || !lifecycleStatuses(kind).includes(game.status) || (pendingInviteNotice && isGameInviteExpired(game, now))) {
     await prisma.hostedLinqDelivery.updateMany({ where: { id: receiptId, status: "generation_queued" }, data: { status: "skipped", skippedAt: now, skipReason: "game_lifecycle_superseded", retryAfterAt: null } });
@@ -171,6 +192,7 @@ async function recoverGameNotificationWake(receiptId: string, gameId: string, ev
 }
 
 function lifecycleStatuses(kind: GameChatLifecycleKind): string[] {
+  if (kind === "challenge") return ["live"];
   return kind === "rematch" ? ["invited"] : kind === "recap" ? ["settled"] : kind === "missed" ? ["live"] : kind === "change_expired" ? ["live", "negotiating", "settled", "void"] : kind === "cancelled" ? ["void"] : kind === "started" ? ["live"] : ["live", "negotiating"];
 }
 
@@ -196,6 +218,7 @@ function isCurrentGameChatLifecycle(
 }
 
 export async function deliverGameChatLifecycle(gameId: string, kind: GameChatLifecycleKind, proposalId?: string, now = new Date(), regenerationId?: string): Promise<boolean> {
+  if (kind === "challenge") throw new Error("Challenge delivery requires its reserved lifecycle receipt.");
   const prisma = getPrisma();
   const eventId = gameChatLifecycleEventId(gameId, kind, proposalId, regenerationId);
   const game = await prisma.game.findUnique({ where: { id: gameId }, include: { invitees: true, players: { select: { memberId: true, leftAt: true, seat: true }, take: 11 } } });

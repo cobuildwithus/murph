@@ -59,6 +59,7 @@ vi.mock("@/src/lib/hosted-execution/control", () => ({
 }));
 
 type Routes = {
+  challenges: typeof import("../app/api/game/v1/games/[id]/challenges/route");
   block: typeof import("../app/api/game/v1/blocks/[memberId]/route");
   inviteBlock: typeof import("../app/api/game/v1/invites/[token]/block/route");
   inviteReports: typeof import("../app/api/game/v1/invites/[token]/reports/route");
@@ -118,6 +119,7 @@ let signedInAs = LEO;
 describe("weekly game routes", () => {
   beforeAll(async () => {
     routes = {
+      challenges: await import("../app/api/game/v1/games/[id]/challenges/route"),
       block: await import("../app/api/game/v1/blocks/[memberId]/route"),
       inviteBlock: await import("../app/api/game/v1/invites/[token]/block/route"),
       inviteReports: await import("../app/api/game/v1/invites/[token]/reports/route"),
@@ -162,6 +164,15 @@ describe("weekly game routes", () => {
   afterEach(async () => {
     vi.unstubAllEnvs();
     await rm(mediaDir, { force: true, recursive: true });
+  });
+
+  it("opens Prove it through the signed-in actor and returns the ordinary game envelope", async () => {
+    const response = await routes.challenges.POST(writeRequest("POST", `/games/${GAME_ID}/challenges`,
+      { entryId: "entry_prove_it", gameId: "another_game", memberId: AVA, type: "post" }), params({ id: GAME_ID }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, game: VIEW });
+    expect(mocks.runGameCommand).toHaveBeenCalledWith({ actorMemberId: LEO, multiplayer: false,
+      command: { type: "challenge", gameId: GAME_ID, entryId: "entry_prove_it" } });
   });
 
   it("returns the real off-day rule as 409 DAY_CLOSED", async () => {
@@ -392,6 +403,8 @@ describe("weekly game routes", () => {
     let grants: ReturnType<typeof termsGrant>[];
     const findMany = vi.fn(async () => grants);
     const gated = {
+      "POST /games/:id/challenges": () => routes.challenges.POST(
+        writeRequest("POST", `/games/${GAME_ID}/challenges`, { entryId: "entry_prove_it" }), params({ id: GAME_ID })),
       "POST /games": () => routes.create.POST(writeRequest("POST", "/games", { gameId: GAME_ID })),
       "POST /invites/:token/accept": () => routes.accept.POST(
         writeRequest("POST", "/invites/tok_1/accept", { termsVersion: 1, timeZone: "UTC" }), params({ token: "tok_1" })),
@@ -503,6 +516,7 @@ describe("weekly game routes", () => {
       const after = await (await routes.game.GET(new Request(`${BASE}/games/${GAME_ID}`), params({ id: GAME_ID }))).json();
 
       expect(after.game.days[0].others[0]).toEqual({
+        postedAt: "2030-03-05T12:00:00.000Z",
         entry: {
           entryId: "entry_leo",
           kind: "photo",

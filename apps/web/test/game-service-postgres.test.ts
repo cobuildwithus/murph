@@ -58,6 +58,8 @@ import {
   authorizeMediaRead,
   authorizeMediaReads,
   readGame,
+  readGameChallengeCase,
+  readGameChallengeInstructions,
   readGameRematchNotice,
   readHistory,
   readHome,
@@ -69,7 +71,7 @@ import {
   runGameCommand,
 } from "@/src/lib/game/service";
 import { buildGameRematchInstructions } from "@murphai/hosted-execution/runtime-control";
-import { decideNewTerms, parseStoredTerms } from "@/src/lib/game/rules";
+import { decideNewTerms, gameChallengeKey, parseStoredTerms } from "@/src/lib/game/rules";
 import { toPrismaJsonObject } from "@/src/lib/device-sync/prisma-store/prisma-json";
 import { addDays, dayStartInstant, gameLocalDate, weekdayOf } from "@/src/lib/game/time";
 import { getPrisma } from "@/src/lib/prisma";
@@ -255,6 +257,85 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await rm(mediaDir, { force: true, recursive: true });
   });
 
+  it("accepts Prove it atomically, collapses concurrent retries, and returns budget permanently after concession", async () => {
+    const a = await member("Maya", "America/New_York"), b = await member("Sam", "America/New_York");
+    const db = getPrisma();
+    const { gameId } = await startGame(a, b);
+    await devStartNow(gameId, a);
+    const target = await photo(b, gameId, "challenge-target");
+    await ok(b, target);
+    const command = { type: "challenge" as const, gameId, entryId: target.entryId };
+    expect(await errorCode(a, command)).toBe("CHAT_UNAVAILABLE");
+    const room = `game_room_${randomUUID()}`;
+    memberIds.push(room);
+    await db.hostedMember.create({ data: { id: room, billingStatus: "active" } });
+    await db.game.update({ where: { id: gameId }, data: { chatContainerMemberId: room } });
+    expect(await errorCode(a, command)).toBe("INVALID_REQUEST");
+    await ok(a, await photo(a, gameId, "challenge-unlock"));
+    const key = gameChallengeKey(gameId, target.entryId);
+    // Force the event insert to fail after receipt reservation, in this isolated database.
+    await db.$executeRaw`ALTER TABLE game_event ADD CONSTRAINT prove_it_test_failure CHECK (type <> 'challenged') NOT VALID`;
+    try { await expect(run(a, command)).rejects.toThrow(); }
+    finally { await db.$executeRaw`ALTER TABLE game_event DROP CONSTRAINT prove_it_test_failure`; }
+    expect(await db.gameEvent.count({ where: { commandKey: key } })).toBe(0);
+    expect(await db.hostedLinqDelivery.count({ where: { sourceRef: `${gameId}:${target.entryId}`, template: "game_challenge" } })).toBe(0);
+    const results = await Promise.all([run(a, command), run(a, command)]);
+    expect(results.every(result => result.ok)).toBe(true);
+    const accepted = await db.gameEvent.findUniqueOrThrow({ where: { commandKey: key } });
+    expect(accepted).toMatchObject({ actor: a, type: "challenged", payload: { v: 1, entryId: target.entryId,
+      deadlineAt: new Date(accepted.createdAt.getTime() + 12 * 3_600_000).toISOString() } });
+    expect(await db.gameEvent.count({ where: { commandKey: key } })).toBe(1);
+    expect(await db.hostedLinqDelivery.findMany({ where: { template: "game_challenge", sourceRef: `${gameId}:${target.entryId}` } }))
+      .toEqual([expect.objectContaining({ status: "awaiting_generation", payloadOwnerMemberId: room })]);
+    const currentCase = await readGameChallengeCase(db, gameId, target.entryId, new Date());
+    const instructions = await readGameChallengeInstructions(currentCase!);
+    const facts = JSON.parse(instructions!.split("\n").at(-1)!);
+    expect(facts).toMatchObject({ challengerName: "Maya", accusedName: "Sam", task: "10 min abs", timeZone: "America/New_York" });
+    expect(instructions).not.toMatch(/Friend|https?:|mediaKey|captureAge/u);
+    expect((await readGame(gameId, a))?.canChallenge).toBe(false);
+    expect(await errorCode(b, command)).toBe("INVALID_REQUEST");
+    const targetDay = (await readGame(gameId, b))!.days.find(day => day.mine?.entryId === target.entryId)!;
+    const correct = (incomplete: boolean) => runAndRespond({ actorMemberId: b, chatContainerMemberId: room, chatPlayerMemberIds: [a, b],
+      command: { type: "setDayCompletion", gameId, date: targetDay.localDate, incomplete } });
+    expect((await correct(true)).ok).toBe(true);
+    expect((await correct(false)).ok).toBe(true);
+    expect((await readGameChallengeCase(db, gameId, target.entryId, new Date()))?.status).toBe("conceded");
+    expect((await readGame(gameId, a))?.canChallenge).toBe(true);
+    await ok(a, command);
+    expect((await readGame(gameId, a))?.canChallenge).toBe(true);
+    const replacement = await photo(b, gameId, "challenge-retake");
+    await ok(b, replacement);
+    await ok(a, { ...command, entryId: replacement.entryId });
+    expect((await readGameChallengeCase(db, gameId, replacement.entryId, new Date()))?.status).toBe("open");
+    expect((await readGame(gameId, a))?.canChallenge).toBe(false);
+    await devAdvanceDays(gameId, a, 1);
+    await ok(a, await photo(a, gameId, "challenge-next-unlock"));
+    const next = await photo(b, gameId, "challenge-next-target");
+    await ok(b, next);
+    expect(await errorCode(a, { ...command, entryId: next.entryId })).toBe("CHALLENGE_USED");
+    await devSettleNow(gameId, a);
+    expect(await errorCode(a, command)).toBe("OK");
+    expect(await db.gameEvent.count({ where: { gameId, type: "challenged" } })).toBe(2);
+  });
+
+  it("returns Prove it after withdrawal and keeps the original retry a no-op", async () => {
+    const a = await member("Alex", "America/New_York"), b = await member("Robin", "America/New_York"), db = getPrisma();
+    const { gameId } = await startGame(a, b);
+    await devStartNow(gameId, a);
+    const room = `game_room_${randomUUID()}`; memberIds.push(room);
+    await db.hostedMember.create({ data: { id: room, billingStatus: "active" } });
+    await db.game.update({ where: { id: gameId }, data: { chatContainerMemberId: room } });
+    await ok(a, await photo(a, gameId, "withdraw-unlock"));
+    const posted = await photo(b, gameId, "withdraw-target"); await ok(b, posted);
+    const command = { type: "challenge" as const, gameId, entryId: posted.entryId };
+    await ok(a, command);
+    await ok(b, { type: "withdraw", gameId, entryId: posted.entryId });
+    expect((await readGameChallengeCase(db, gameId, posted.entryId, new Date()))?.status).toBe("void");
+    expect((await readGame(gameId, a))?.canChallenge).toBe(true);
+    await ok(a, command);
+    expect(await db.gameEvent.count({ where: { commandKey: gameChallengeKey(gameId, posted.entryId) } })).toBe(1);
+  });
+
   it("freezes admission at the effective command clock and creates only pair storage", async () => {
     const starter = await member("Starter", "UTC"), peer = await member("Peer", "UTC");
     const gameId = randomUUID(), createdAt = new Date(), joinedAt = new Date(createdAt.getTime() + 60_000);
@@ -311,7 +392,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(recap.days[0].others[0].entry?.data).toEqual(data);
     // Open now: its blur stays, for while the picture loads.
     expect(recap.days[0].others[0]).toMatchObject({ status: "posted", blurHash: "synthetic-blur" });
-    expect(recap.days[0].others[0]).not.toHaveProperty("postedAt");
+    expect(recap.days[0].others[0].postedAt).toBe(stored.receivedAt.toISOString());
     expect(await authorizeMediaRead(viewer, command.mediaKeys[0])).toBe(true);
   });
   it("seals an authorized recap on the settled game and exposes it to both players", async () => {

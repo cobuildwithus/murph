@@ -262,6 +262,8 @@ export interface GameChangeControls {
 export type GameDayOutcome = { date: string; status: "marked_incomplete" | "restored" | "already_incomplete" | "already_complete" | "no_artifact" };
 
 export type GameCommand =
+  /** POST /games/:id/challenges { entryId: string }. Actor comes from authentication. */
+  | { type: "challenge"; gameId: string; entryId: string }
   | { type: "leave"; gameId: string }
   | ({ type: "editTerms"; gameId: string } & EditGameTermsBody)
   | { type: "setDayCompletion"; gameId: string; date: string; incomplete: boolean }
@@ -333,6 +335,7 @@ export interface GamePlayerView {
 export type GameDayOtherStatus = "posted" | "locked" | "missed" | "none" | "off";
 
 export interface GameEntryView {
+  challenge?: { status: "open" | "stood"; deadlineAt: string; byYou: boolean };
   /** Self-reported incomplete day; omitted after restore. Does not hide the artifact. */
   incomplete?: true;
   entryId: string;
@@ -359,7 +362,7 @@ export interface GameDayView {
   mine: GameEntryView | null;
   /** Per other player, in seat order. */
   others: { seat: number; status: GameDayOtherStatus; entry: GameEntryView | null;
-    /** `postedAt` only while it's still locked to this viewer; `blurHash` while it's locked and after, for while it loads. */
+    /** Server receipt time for locked or visible posts; omitted for hidden/absent posts. */
     postedAt?: string; blurHash?: string | null;
     /**
      * Locked, on the viewer's today, with a picture: what it will be once the
@@ -407,6 +410,8 @@ export interface GameTicketPartyView {
  * Shared native shape for app and chat creation: negotiating + no pendingChange
  * waits for seat 1 to Shake on it; seat 0 has already agreed. */
 export interface GameView {
+  /** Live bound pair and an unspent Prove it. Entry eligibility is checked separately. */
+  canChallenge?: boolean;
   maxPlayers?: 2 | 10;
   group?: GameGroupView;
   invitedCount?: number;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { GameSchedule } from "@/src/lib/game/contract";
-import { decideJoin, type RuleEntry, type RuleState, type TermWords } from "@/src/lib/game/rules";
+import { decideJoin, gameChallengeDeadline, type RuleChallenge, type RuleEntry, type RuleState, type TermWords } from "@/src/lib/game/rules";
 import { addDays, dayStartInstant } from "@/src/lib/game/time";
 import { buildGameView, gameMediaUrl, termsView, ticketView, visibleEntryIds, type GameViewInput } from "@/src/lib/game/views";
 
@@ -99,6 +99,42 @@ describe("weekly game views: tickets", () => {
     );
   });
 
+  it("projects case state for both players while preserving hidden-post omissions", () => {
+    const state = liveState();
+    state.game.chatContainerMemberId = "room";
+    const now = noonOnDay(state, LEO, 0);
+    const posted = entry(AVA, 0, 1);
+    state.entries.push(entry(LEO, 0, 1), posted);
+    const challenge: RuleChallenge = { id: 1n, actor: LEO, entryId: posted.id, deadlineAt: gameChallengeDeadline(now), concessionEventId: null };
+    const overrides = { challenges: [challenge] };
+    expect(view(state, LEO, now).canChallenge).toBe(true);
+    const opened = view(state, LEO, now, overrides);
+    expect(opened.canChallenge).toBe(false);
+    expect(opened.days[0].others[0].entry?.challenge).toEqual({ status: "open", deadlineAt: challenge.deadlineAt.toISOString(), byYou: true });
+    expect(view(state, AVA, now, overrides).days[0].mine?.challenge?.byYou).toBe(false);
+    expect(view(state, LEO, challenge.deadlineAt, overrides).days[0].others[0].entry?.challenge?.status).toBe("stood");
+    for (const hidden of [{ hiddenEntryIds: new Set([posted.id]) }, { hiddenMemberIds: new Set([AVA]) }]) {
+      const other = view(state, LEO, now, { ...overrides, ...hidden }).days[0].others[0];
+      expect(other?.entry).toBeFalsy();
+      expect(other ?? {}).not.toHaveProperty("postedAt");
+    }
+    challenge.concessionEventId = 2n;
+    expect(view(state, LEO, now, overrides).canChallenge).toBe(true);
+    expect(view(state, LEO, now, overrides).days[0].others[0].entry).not.toHaveProperty("challenge");
+    challenge.concessionEventId = null;
+    posted.withdrawnAt = now;
+    expect(view(state, LEO, now, overrides).canChallenge).toBe(true);
+    expect(view(state, LEO, now, overrides).days[0].others[0]).not.toHaveProperty("postedAt");
+  });
+
+  it("keeps old inputs valid and omits per-entry case state when history is absent", () => {
+    const state = liveState();
+    state.entries.push(entry(LEO, 0, 1), entry(AVA, 0, 1));
+    const oldShape = view(state, LEO, noonOnDay(state, LEO, 0));
+    expect(oldShape.canChallenge).toBe(false);
+    expect(oldShape.days[0].others[0].entry).not.toHaveProperty("challenge");
+    expect(oldShape.days[0].others[0].postedAt).toBe(state.entries[1].receivedAt.toISOString());
+  });
   it("projects a pending day as accepted now for both time zones without changing stored metadata", () => {
     const state = liveState();
     const pending = { id:"proposal", proposedByMemberId:LEO, expectedTermsVersion:1, change:{kind:"edit" as const,lengthDays:14},
@@ -125,7 +161,7 @@ describe("weekly game views: tickets", () => {
     state.entries.push(own);
     const unlocked = view(state, LEO, now, overrides).days[0].others[0];
     expect(unlocked.entry).toMatchObject({ data, text: "private caption" });
-    expect(unlocked).not.toHaveProperty("postedAt");
+    expect(unlocked.postedAt).toBe(posted.receivedAt.toISOString());
     // Its blur stays for the app to show while the picture loads.
     expect(unlocked.blurHash).toBe("synthetic-blur");
     own.withdrawnAt = now;
