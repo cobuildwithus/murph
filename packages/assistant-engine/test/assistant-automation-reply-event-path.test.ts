@@ -48,6 +48,14 @@ import {
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
 import {
+  listAssistantOutboxIntentsLocal as listAssistantOutboxIntents,
+  listAssistantOutboxIntentsForAutoReplyRoute,
+} from '../src/assistant/outbox/store.ts'
+import {
+  applyAssistantVaultFileSendApprovalResult,
+  requestAssistantVaultFileSend,
+} from '../src/assistant/vault-file-send.ts'
+import {
   sendLinqMessage,
   sendLinqVoiceMemoMessage,
 } from '../src/assistant/channels/runtime.ts'
@@ -3357,6 +3365,154 @@ describe('assistant auto-reply event-first path', () => {
       'Use only the available sender, recipient, subject, and thread metadata.',
     )
     expect(sendInput.prompt).toContain('Do not assume missing body content.')
+  })
+
+  it.each(['same-session', 'cross-session'])('projects an approved vault-file attachment through indexed %s reply history', async (scope) => {
+    const vault = await createTempVault()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-01-01T12:00:00.000Z'))
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
+      created: false,
+      session: { sessionId: 'session-chat', lastTurnAt: '2026-01-01T12:01:00.000Z' },
+    })
+    await mkdir(path.join(vault, 'documents'), { recursive: true })
+    await writeFile(path.join(vault, 'documents/export-2026-01-01.zip'), Buffer.alloc(2048))
+    await requestAssistantVaultFileSend({
+      actionApprovalPort: {
+        read: vi.fn(),
+        request: async () => ({
+          status: 'pending', approvalId: `haa_${'a'.repeat(32)}`,
+          approvalUrl: 'https://murph.test/approve/synthetic-export',
+          expiresAt: '2026-01-01T12:15:00.000Z',
+        }),
+      },
+      channel: 'linq', explicitTarget: 'thread-1', threadId: 'thread-1',
+      threadIsDirect: true, sessionId: scope === 'same-session' ? 'session-chat' : 'session-export',
+      turnId: 'turn-export', ref: 'documents/export-2026-01-01.zip', vault,
+    })
+    const [parked] = await listAssistantOutboxIntents(vault)
+    if (!parked) throw new Error('Expected parked file intent')
+    expect(parked.status).toBe('awaiting_approval')
+    const ordinary = await createAssistantOutboxIntent({
+      channel: 'linq', explicitTarget: 'thread-1', threadId: 'thread-1',
+      threadIsDirect: true, sessionId: 'session-chat', turnId: 'turn-approval-reply',
+      message: 'Synthetic ordinary same-session text', vault,
+    })
+    const sendLinq = vi.fn(async () => ({
+      providerMessageId: 'synthetic-provider-message', providerThreadId: null, target: 'thread-1',
+    })).mockResolvedValueOnce({
+      providerMessageId: 'synthetic-text-message', providerThreadId: null, target: 'thread-1',
+    })
+    const textDelivery = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq }, force: true, intentId: ordinary.intentId,
+      now: new Date('2026-01-01T12:01:00.000Z'), vault,
+    })
+    // An earlier reply may have consumed prior history before approval arrives.
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([textDelivery.intent])
+    replyEventPathMocks.listAssistantTurnReceipts.mockResolvedValue([
+      createConsumedCrossSessionReceipt({ intentId: ordinary.intentId, updatedAt: '2026-01-01T12:02:00.000Z' }),
+    ])
+    await completeAutoReplyRouteMigration(vault)
+    replyEventPathMocks.listAssistantOutboxIntents.mockImplementation((query) =>
+      listAssistantOutboxIntentsForAutoReplyRoute(query),
+    )
+    let replyNumber = 0
+    const runReply = async (occurredAt: string, replyToMessageId?: string) => {
+      replyNumber += 1
+      replyEventPathMocks.sendAssistantMessage.mockClear()
+      const result = await processAssistantAutoReplyGroup({
+        allowSelfAuthored: false,
+        context: createReplyContext(createLinqGroupCandidate({
+          inputId: `ain_${String(replyNumber).padStart(32, '0')}`, messageId: `synthetic-followup-${replyNumber}`,
+          occurredAt, text: 'Did my archive send?', replyToMessageId,
+          threadIsDirect: replyToMessageId === undefined,
+        })),
+        enabledChannels: ['linq'], inboxServices: createInboxServices(),
+        requestId: null, sessionMaxAgeMs: null, vault,
+      })
+      expect(result.failed).toBe(0)
+      return readSentInput().turnContext ?? ''
+    }
+    expect(await runReply('2026-01-01T12:03:00.000Z')).not.toContain('attachment:')
+    await saveAssistantOutboxIntent(vault, applyAssistantVaultFileSendApprovalResult({
+      approval: { status: 'approved', approvalId: `haa_${'a'.repeat(32)}`, approvalGeneration: 'b'.repeat(64) },
+      intent: parked, now: new Date('2026-01-01T12:05:00.000Z'),
+    }))
+    vi.setSystemTime(new Date('2026-01-01T12:05:00.000Z'))
+    const sent = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq }, force: true, intentId: parked.intentId,
+      now: new Date(), vault,
+    })
+    expect(sent.intent.status).toBe('sent')
+    expect(sendLinq).toHaveBeenCalledTimes(2)
+    const conversation = createLinqGroupCandidate({ inputId: 'synthetic', messageId: 'synthetic',
+      occurredAt: '2026-01-01T13:00:00.000Z', text: 'Archive?', threadIsDirect: true }).event.conversation
+    if (!conversation) throw new Error('Expected a direct conversation')
+    const inputRoute = resolveAssistantAutoReplyInputExactRoute({
+      conversation,
+      deliveryTarget: 'thread-1',
+    })
+    expect(resolveAssistantAutoReplyOutboxExactRoute(sent.intent)).toEqual(inputRoute)
+    if (!inputRoute) throw new Error('Expected exact route')
+    expect(await readAssistantAutoReplyRouteState({ routeDigest: inputRoute.digest, vault })).toEqual({
+      kind: 'ready', settledThrough: { intentId: ordinary.intentId, sentAt: textDelivery.intent.delivery?.sentAt },
+    })
+    expect(await runReply('2026-01-01T12:03:00.000Z')).not.toContain('attachment:')
+    const context = await runReply('2026-01-01T13:00:00.000Z')
+    expect(context).toContain('- attachment: "export-2026-01-01.zip" (application/zip, 2.0 KB), delivered after the member approved it')
+    expect(context).not.toContain('Text:')
+    expect(context).not.toContain('Synthetic ordinary same-session text')
+    // An exact native reply must not reintroduce the filename as quoted text.
+    const nativeContext = await runReply('2026-01-01T13:01:00.000Z', 'synthetic-provider-message')
+    expect(nativeContext).toContain('- attachment: "export-2026-01-01.zip"')
+    expect(nativeContext).not.toContain('Text:')
+    expect(readSentInput().prompt).not.toContain('explicitly replied to this exact prior assistant message:')
+  })
+
+  it.each([false, true])('charges media-only attachment facts against the prior-message budget (consumed: %s)', async (consumed) => {
+    const vault = await createTempVault()
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
+      created: false, session: { sessionId: 'session-chat' },
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue(
+      Array.from({ length: 60 }, (_, index) => createOutboxMessage({
+        automationContextReferences: null, channel: 'linq',
+        intentId: `synthetic-file-${index}`, sessionId: 'session-chat',
+        message: `export-${index}.zip`, sentAt: new Date(Date.UTC(2026, 0, 1, 12, index)).toISOString(),
+        media: [{ kind: 'vault_file', filename: `export-${index}.zip`,
+          contentType: 'application/zip', sizeBytes: 2048,
+          ref: `documents/export-${index}.zip`, sha256: 'a'.repeat(64) }],
+      })),
+    )
+    if (consumed) {
+      replyEventPathMocks.listAssistantTurnReceipts.mockResolvedValue([
+        createConsumedCrossSessionReceipt({ intentId: 'synthetic-file-59', updatedAt: '2026-01-01T13:00:00.000Z' }),
+      ])
+    }
+    await completeAutoReplyRouteMigration(vault)
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(createAssistantInputCandidate({
+        occurredAt: '2026-01-01T14:00:00.000Z', optionalInboxCaptureId: null,
+        source: 'linq', text: 'Did the files send?', threadIsDirect: true,
+      })),
+      enabledChannels: ['linq'], inboxServices: createInboxServices(),
+      requestId: null, sessionMaxAgeMs: null, vault,
+    })
+    const context: string = readSentInput().turnContext
+    const attachments = context.split('\n').filter(line => line.startsWith('- attachment:'))
+    expect(attachments.length).toBeGreaterThan(1)
+    expect(attachments.length).toBeLessThan(60)
+    expect(attachments.every(line => line.endsWith('delivered after the member approved it'))).toBe(true)
+    expect(attachments.reduce((length, line) => length + line.length, 0)).toBeLessThanOrEqual(4000)
+    expect(context).toContain('"export-59.zip" (application/zip, 2.0 KB)')
+    expect(context).not.toContain('Text:')
+    expect(context).not.toContain('documents/')
+    if (consumed) {
+      expect(readSentInput().receiptMetadata).not.toHaveProperty(
+        AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY,
+      )
+    }
   })
 
   it('injects ordered eligible prior deliveries without replacing the chat session', async () => {
