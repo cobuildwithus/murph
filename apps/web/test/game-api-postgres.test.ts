@@ -278,8 +278,10 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
       const posted = await game(post(request(poster, { ...artifact, entryId: randomUUID(), mediaKeys, blurHash: "synthetic-blur" }), context));
       expect(posted.days[day].mine).toMatchObject({ kind: artifact.kind, data: artifact.data ?? null });
       const locked = await game(read(request(viewer, undefined, "GET"), context));
+      // Today's picture is named for the app to fetch ahead; words have none.
       expect(locked.days[day].others[0]).toEqual({ seat: 0, status: "locked", entry: null,
-        postedAt: expect.any(String), blurHash: "synthetic-blur" });
+        postedAt: expect.any(String), blurHash: "synthetic-blur",
+        ...(mediaKeys.length ? { preview: { kind: artifact.kind, mediaUrl: `/api/game/v1/media/${encodeURIComponent(mediaKeys[0])}` } } : {}) });
     }
     await game(advance(request(poster, { days: 1 }), context));
     await game(post(request(poster, { entryId: randomUUID(), kind: "words", text: "First" }), context));

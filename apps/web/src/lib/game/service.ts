@@ -2112,6 +2112,22 @@ export async function authorizeMediaRead(memberId: string, mediaKey: string): Pr
 
 /** The same live authority check for a bounded delivery batch, in one round trip. */
 export async function authorizeMediaReads(memberId: string, mediaKeys: readonly string[]): Promise<Set<string>> {
+  return authorizeReads(memberId, mediaKeys, { unlocked: true });
+}
+
+/**
+ * Another player's entry picture in a live game this member plays, before
+ * this member has posted that day: for a signed delivery the app keeps hidden
+ * until its own post is in. Every other rule of `authorizeMediaReads` holds
+ * (no block either way, not reported, not withdrawn, the game still on, and
+ * now live); only post-to-unlock moves to the app. It doesn't check the
+ * day: its one caller signs only the previews views name, on the viewer's today.
+ */
+export async function authorizeLockedPreviewReads(memberId: string, mediaKeys: readonly string[]): Promise<Set<string>> {
+  return authorizeReads(memberId, mediaKeys, { unlocked: false });
+}
+
+async function authorizeReads(memberId: string, mediaKeys: readonly string[], mode: { unlocked: boolean }): Promise<Set<string>> {
   const allowed = new Set<string>();
   const others: Array<{ key: string; owner: string }> = [];
   for (const key of new Set(mediaKeys)) {
@@ -2155,10 +2171,10 @@ export async function authorizeMediaReads(memberId: string, mediaKeys: readonly 
           AND ${gameOnSql("game")}
           AND NOT EXISTS (SELECT 1 FROM game_report report
             WHERE report.entry_id = entry.id AND report.reporter_member_id = ${memberId})
-          AND (game.status = 'settled' OR EXISTS (
+          AND (${mode.unlocked ? Prisma.sql`(game.status = 'settled' OR EXISTS (
             SELECT 1 FROM game_entry own WHERE own.game_id = game.id
               AND own.member_id = ${memberId} AND own.day_index = entry.day_index AND own.attempt > 0
-          ))
+          ))` : Prisma.sql`game.status = 'live'`})
       )
     )
   `);

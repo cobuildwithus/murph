@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { GameSchedule } from "@/src/lib/game/contract";
 import { decideJoin, type RuleEntry, type RuleState, type TermWords } from "@/src/lib/game/rules";
 import { addDays, dayStartInstant } from "@/src/lib/game/time";
-import { buildGameView, ticketView, visibleEntryIds, type GameViewInput } from "@/src/lib/game/views";
+import { buildGameView, gameMediaUrl, ticketView, visibleEntryIds, type GameViewInput } from "@/src/lib/game/views";
 
 const LEO = "hbm_leo";
 const AVA = "hbm_ava";
@@ -113,6 +113,7 @@ describe("weekly game views: tickets", () => {
     const overrides = { entryWords: new Map([[posted.id, { text: "private caption", data }]]) };
     expect(view(state, LEO, now, overrides).days[0].others[0]).toEqual({
       seat: 1, status: "locked", entry: null, postedAt: posted.receivedAt.toISOString(), blurHash: "synthetic-blur",
+      preview: { kind: "route", mediaUrl: gameMediaUrl(posted.mediaKeys[0]) },
     });
     const own = entry(LEO, 0, 1, { kind: "words", mediaKeys: [] });
     state.entries.push(own);
@@ -196,13 +197,28 @@ describe("weekly game views: post to unlock", () => {
     expect(avaView.days[1].others[0].status).toBe("off");
   });
 
-  it("hides another player's post, words and media until you post that day", () => {
+  it("names a locked picture only on the viewer's today, never a past day's or words", () => {
+    const state = { ...liveState(), entries: [entry(LEO, 0, 1), entry(LEO, 1, 1, { kind: "words", mediaKeys: [] }), entry(LEO, 3, 1)] };
+    const others = (day: number) => view(state, AVA, noonOnDay(state, AVA, 3)).days[day].others[0];
+    expect(others(0).status).toBe("locked");
+    expect(others(0)).not.toHaveProperty("preview");
+    expect(others(1).status).toBe("locked");
+    expect(others(1)).not.toHaveProperty("preview");
+    expect(others(3).preview).toEqual({ kind: "photo", mediaUrl: "/api/game/v1/media/game%2Fhbm_leo%2Fd3-a1.jpg" });
+    // Settled, nothing is locked and nothing is previewed.
+    const settled = view({ ...state, game: { ...state.game, status: "settled" } }, AVA, noonOnDay(state, AVA, 3));
+    expect(JSON.stringify(settled)).not.toContain("preview");
+  });
+
+  it("hides another player's post and words until you post that day, naming only today's picture", () => {
     const state = { ...liveState(), entries: [entry(LEO, 0, 1)] };
     const avaNow = noonOnDay(state, AVA, 0);
     const avaView = view(state, AVA, avaNow);
-    expect(avaView.days[0].others).toEqual([{ entry: null, seat: 0, status: "locked", postedAt: "2030-03-05T12:00:00.000Z", blurHash: null }]);
+    // The picture's link, for the app to fetch ahead; the media route keeps it locked.
+    expect(avaView.days[0].others).toEqual([{ entry: null, seat: 0, status: "locked", postedAt: "2030-03-05T12:00:00.000Z", blurHash: null,
+      preview: { kind: "photo", mediaUrl: "/api/game/v1/media/game%2Fhbm_leo%2Fd0-a1.jpg" } }]);
     expect(JSON.stringify(avaView)).not.toContain("caption");
-    expect(JSON.stringify(avaView)).not.toContain("game/hbm_leo/");
+    expect(JSON.stringify(avaView).split("game%2Fhbm_leo%2F").length - 1).toBe(1);
     expect(visibleEntryIds(state, AVA).size).toBe(0);
 
     const both = { ...state, entries: [...state.entries, entry(AVA, 0, 1)] };

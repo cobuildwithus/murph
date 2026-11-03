@@ -1,4 +1,4 @@
-import type { GameHistoryView, GameView } from "../contract";
+import type { GameHistoryView, GameHomeView, GameView } from "../contract";
 import {
   GAME_MEDIA_MAX_BYTES,
   gameMediaDelivery,
@@ -10,7 +10,7 @@ import {
   readGameMedia,
   servesSignedGameMedia,
 } from "../media";
-import { authorizeMediaRead, authorizeMediaReads, mediaKeyPrefixFor } from "../service";
+import { authorizeLockedPreviewReads, authorizeMediaRead, authorizeMediaReads, mediaKeyPrefixFor } from "../service";
 import { gameMediaKeyOf } from "../views";
 import { readRawBodyBuffer } from "../../http";
 import { gameHttpError, invalidGameRequest } from "./errors";
@@ -78,6 +78,41 @@ export async function withUnlockedPhotoDeliveries(game: GameView, input: { entry
     return delivery ? { ...other, entry: { ...other.entry, delivery } } : other;
   }));
   return { ...game, days: game.days.map((candidate) => (candidate === day ? { ...candidate, others } : candidate)) };
+}
+
+/**
+ * Home with today's locked pictures signed in (`preview.delivery`), so the app
+ * keeps each one ready, hidden, and develops it the moment its own post is in.
+ * Authorized by `authorizeLockedPreviewReads`; one that can't be signed keeps
+ * its preview without a delivery, and the app waits for the post's answer as
+ * before. Bounded: a preview is only on each live game's today, signed six at
+ * a time.
+ */
+export async function withLockedPreviewDeliveries(home: GameHomeView, memberId: string): Promise<GameHomeView> {
+  if (!servesSignedGameMedia()) return home;
+  const keyOf = (preview: { mediaUrl: string } | undefined) => {
+    const key = preview ? gameMediaKeyOf(preview.mediaUrl) : null;
+    return key && isGameMediaKey(key) ? key : null;
+  };
+  const keys = [...new Set(home.games.flatMap((game) => game.days.flatMap((day) =>
+    day.others.flatMap((other) => keyOf(other.preview) ?? []))))];
+  if (keys.length === 0) return home;
+  const allowed = await authorizeLockedPreviewReads(memberId, keys).catch(() => new Set<string>());
+  const deliveries = new Map<string, { url: string; expiresAt: string }>();
+  const signable = keys.filter((key) => allowed.has(key));
+  for (let offset = 0; offset < signable.length; offset += 6) {
+    await Promise.all(signable.slice(offset, offset + 6).map(async (key) => {
+      const delivery = await gameMediaDelivery(key, "photo").catch(() => null);
+      if (delivery) deliveries.set(key, delivery);
+    }));
+  }
+  if (deliveries.size === 0) return home;
+  return { ...home, games: home.games.map((game) => ({ ...game, days: game.days.map((day) => ({ ...day,
+    others: day.others.map((other) => {
+      const delivery = deliveries.get(keyOf(other.preview) ?? "");
+      return delivery && other.preview ? { ...other, preview: { ...other.preview, delivery } } : other;
+    }),
+  })) })) };
 }
 
 /** Sign the card's latest game per person, after the normal history filters.
