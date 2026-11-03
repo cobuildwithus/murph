@@ -529,8 +529,8 @@ the current user explicitly asks for it.
    against the same pushed head. An authorized head change before any valid
    initial review uses the round-one baseline recovery above.
 
-   Require at least 3 minutes (180 seconds) for a marked concrete-model final
-   response. The repository wrapper passes `--minimum-marked-response-time 180s`
+   Require at least 80 seconds for a marked concrete-model final
+   response. The repository wrapper passes `--minimum-marked-response-time 80s`
    to align the tool's attestation fallback with this final-gate minimum. Below
    that minimum, the response does not count. At or above it, inspect the exact
    turn, attachment, requested model selection, completion marker, and a
