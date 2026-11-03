@@ -3,6 +3,7 @@ import {
   type CodexWarmThreadCompactionOutcome,
 } from "@murphai/assistant-engine/assistant-codex";
 import {
+  runAssistantCodexResumeRetention,
   runAssistantTranscriptContentRetention,
 } from "@murphai/assistant-engine/assistant-store";
 import {
@@ -76,7 +77,7 @@ export const HOSTED_INBOX_RETENTION_FAILURE_RETRY_DELAY_MS = 60 * 60 * 1000;
 const HOSTED_INBOX_RETENTION_BLOCKED_RECHECK_MS = 24 * 60 * 60 * 1000;
 
 export interface HostedInboxRetentionIssue {
-  stage: "pending_inputs" | "transcripts" | "media" | "generated_images" | "meal_photos" | "envelope_migration" | "text";
+  stage: "codex_resumes" | "pending_inputs" | "transcripts" | "media" | "generated_images" | "meal_photos" | "envelope_migration" | "text";
   outcome: "failed" | "blocked";
   errorCode?: string;
   legacyCapturesSkipped?: number;
@@ -264,6 +265,11 @@ export async function runHostedIdleCheckpointMaintenance(input: {
           report: input.reportRetentionIssue,
           legacyCapturesSkipped: textRetentionResult.legacyCapturesSkipped,
           migrationBlockerCount: envelopeMigration.blockerCount,
+        });
+        retentionStage = "codex_resumes";
+        await runAssistantCodexResumeRetention({
+          signal: abortController.signal,
+          vault: input.vaultRoot,
         });
       } catch (error) {
         if (isInboxRetentionAbortError(error, abortController.signal)) {

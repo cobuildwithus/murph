@@ -28,6 +28,7 @@ import {
   resolveTimestamp,
 } from './shared.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
+import { withAssistantTurnLock } from './turn-lock.js'
 import {
   ensureAssistantState,
   appendTranscriptEntries,
@@ -87,6 +88,36 @@ import type {
 } from './store/types.js'
 
 const ASSISTANT_STATE_SCHEMA = 'murph.assistant-conversation.v2'
+const ASSISTANT_CODEX_RESUME_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
+
+// Retire the authoritative reference first; snapshot selection already follows
+// saved sessions. A crash before checkpoint simply repeats this idempotent pass.
+export async function runAssistantCodexResumeRetention(input: {
+  now?: Date
+  signal?: AbortSignal | null
+  vault: string
+}): Promise<void> {
+  await withAssistantTurnLock({
+    abortSignal: input.signal ?? undefined,
+    vault: input.vault,
+    run: () => withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+      input.signal?.throwIfAborted()
+      await ensureAssistantState(paths)
+      const cutoff = (input.now ?? new Date()).getTime() - ASSISTANT_CODEX_RESUME_RETENTION_MS
+      for (const sessionId of await listAssistantSessionFileIds(paths)) {
+        input.signal?.throwIfAborted()
+        const session = await readAssistantSession({ paths, sessionId, treatCorruptedAsMissing: true })
+        if (!session?.codexResume || !(Date.parse(session.lastTurnAt ?? session.updatedAt) < cutoff)) {
+          continue
+        }
+        input.signal?.throwIfAborted()
+        // Clear the in-memory compatibility alias too, so serialization cannot
+        // recover an intentionally retired reference through its null fallback.
+        await writeAssistantSession(paths, { ...session, codexResume: null, resumeState: null })
+      }
+    }, input.signal),
+  })
+}
 
 export function isAssistantSessionNotFoundError(error: unknown): boolean {
   return Boolean(
