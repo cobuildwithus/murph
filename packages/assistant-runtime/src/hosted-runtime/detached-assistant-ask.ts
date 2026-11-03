@@ -1,5 +1,5 @@
 import { resolveHostedOperatorModelProvider } from "./codex-runtime-env.ts";
-import { HOSTED_ASSISTANT_SOL_MODEL } from "@murphai/hosted-execution/assistant-model";
+import { HOSTED_ASSISTANT_GPT_61_SOL_MODEL } from "@murphai/hosted-execution/assistant-model";
 import {
   executeConsentedReadOnlyAssistantAsk,
   executeOperatorDiagnostic,
@@ -438,7 +438,7 @@ async function runOneHostedDetachedAssistantAsk(input: {
     if (claimed.wake.ask.target.kind === "operator_task") {
       answer = await input.executeOperatorDiagnostic({
         ...executionInput,
-        model: HOSTED_ASSISTANT_SOL_MODEL,
+        model: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
         modelProvider: resolveHostedOperatorModelProvider(input.modelProvider),
         beforeProviderEntry: undefined,
         feedbackDiagnostic: prepared.feedbackDiagnostic,

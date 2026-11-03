@@ -9,7 +9,7 @@ import {
 } from "@murphai/hosted-execution/orchestration-control";
 import {
   HOSTED_ASSISTANT_LUNA_MODEL,
-  HOSTED_ASSISTANT_SOL_MODEL,
+  HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
   HOSTED_ASSISTANT_DEFAULT_MODEL,
   type HostedAssistantModelOverride,
   type HostedAssistantReasoningEffortOverride,
@@ -258,15 +258,15 @@ describe("hosted runner container identity", () => {
       name: "applies the saved Luna choice",
     },
     {
-      expectedModel: HOSTED_ASSISTANT_SOL_MODEL,
+      expectedModel: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
       fleetModel: HOSTED_ASSISTANT_DEFAULT_MODEL,
-      hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
+      hostedAssistantModelOverride: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
       name: "applies the saved Sol choice",
     },
     {
-      expectedModel: HOSTED_ASSISTANT_SOL_MODEL,
+      expectedModel: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
       fleetModel: "gpt-5.6-luna",
-      hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
+      hostedAssistantModelOverride: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
       name: "applies the saved Sol choice independently of the platform default",
     },
     {

@@ -29,6 +29,8 @@ test("Premium model choice shows Astra on phone and desktop", async ({ browser }
       await page.goto("/screenshots/settings#settings-model-save-controls", { waitUntil: "load" });
       const study = page.locator("#settings-model-save-controls");
       await expect(study).toBeVisible();
+      await expect(study.locator('[id="assistant-model-gpt-5.6-sol"]')).toHaveCount(0);
+      await expect(study.locator('[id="assistant-model-gpt-6.1-sol"]')).toHaveCount(1);
       await expect(study.getByText("Astra", { exact: true })).toBeVisible();
       await expect(study.getByText("Highest usage", { exact: true })).toBeVisible();
       await expect(study.locator('[id="assistant-model-gpt-6-astra"]')).toBeEnabled();

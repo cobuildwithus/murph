@@ -66,6 +66,19 @@ export COBUILD_AUDIT_CONTEXT_INCLUDE_TESTS_DEFAULT='0'
 export COBUILD_AUDIT_CONTEXT_INCLUDE_DOCS_DEFAULT='0'
 export COBUILD_AUDIT_CONTEXT_INCLUDE_CI_DEFAULT='0'
 audit_context_binary_exclude_globs=(
+  # Review packets are text-only, including vector artwork and nested assets.
+  "**/*.svg"
+  "**/*.png"
+  "**/*.jpg"
+  "**/*.jpeg"
+  "**/*.gif"
+  "**/*.webp"
+  "**/*.avif"
+  "**/*.ico"
+  "**/*.bmp"
+  "**/*.tif"
+  "**/*.tiff"
+  "**/*.heic"
   "apps/*/public/design-assets/**"
   "apps/*/public/audio/**"
   "apps/*/public/legal/*.pdf"

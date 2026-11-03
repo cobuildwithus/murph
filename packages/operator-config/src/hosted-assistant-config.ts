@@ -137,6 +137,7 @@ export {
 export function parseHostedAssistantConfig(value: unknown): HostedAssistantConfig {
   const parsed = normalizeHostedAssistantConfig(
     value as HostedAssistantConfig | null | undefined,
+    true,
   )
 
   if (!parsed) {

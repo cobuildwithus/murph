@@ -41,7 +41,7 @@ describe('assistant provider config', () => {
     })
     const switched = continuityFingerprint({
       approvalPolicy: 'never',
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6.1-sol',
       modelProvider: 'openai',
       provider: 'codex-cli',
       reasoningEffort: 'high',
@@ -49,7 +49,7 @@ describe('assistant provider config', () => {
     })
     const incompatible = continuityFingerprint({
       approvalPolicy: 'never',
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6.1-sol',
       modelProvider: 'hosted-openai',
       provider: 'codex-cli',
       reasoningEffort: 'high',
@@ -152,4 +152,9 @@ describe('assistant provider config', () => {
       message,
     )
   })
+})
+
+
+it('rejects retired Sol before provider execution', () => {
+  expect(() => normalizeAssistantProviderConfig({ model: 'gpt-5.6-sol' })).toThrow('retired')
 })

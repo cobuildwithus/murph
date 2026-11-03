@@ -857,7 +857,7 @@ test("hosted Codex runtime config uses ChatGPT subscription auth in local dev", 
   const result = await prepareHostedCodexRuntimeEnvironment({
     operatorHomeRoot,
     runtimeEnv: {
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-sol",
+      HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: encodeChatGptCodexAuthEnvValue(chatGptAuthJson),
       NODE_ENV: "development",
@@ -1283,7 +1283,7 @@ testHostedCodexAuthE2e("operator diagnostic authenticates through hosted OpenAI 
     const result = await executeOperatorDiagnostic({
       codexHome: prepared.codexHome,
       env: prepared.runtimeEnv,
-      model: "gpt-5.6-sol",
+      model: "gpt-6.1-sol",
       modelProvider: resolveHostedOperatorModelProvider(
         prepared.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
       ),
@@ -1298,7 +1298,7 @@ testHostedCodexAuthE2e("operator diagnostic authenticates through hosted OpenAI 
     assert.ok(authorizationHeaders.every((header) => header === "Bearer synthetic-operator-credential"));
     const modelRequests = requests.filter((body) => body.length > 0);
     assert.equal(modelRequests.length, 1);
-    assert.equal(JSON.parse(modelRequests[0]!).model, "gpt-5.6-sol");
+    assert.equal(JSON.parse(modelRequests[0]!).model, "gpt-6.1-sol");
   } finally {
     await closeHttpServer(server);
   }

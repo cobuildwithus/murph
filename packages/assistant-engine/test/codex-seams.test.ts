@@ -200,7 +200,7 @@ describe('assistant Codex seam helpers', () => {
     )
     const switchedRoute = buildCodexThreadIdentity(
       normalizeAssistantProviderConfig({
-        model: 'gpt-5.6-sol',
+        model: 'gpt-6.1-sol',
         modelProvider: 'openai',
         reasoningEffort: 'high',
       }),
@@ -243,7 +243,7 @@ describe('assistant Codex seam helpers', () => {
     )
     const managedSecond = buildCodexThreadIdentity(
       normalizeAssistantProviderConfig({
-        model: 'gpt-5.6-sol',
+        model: 'gpt-6.1-sol',
         modelProvider: 'hosted-openai',
       }),
     )

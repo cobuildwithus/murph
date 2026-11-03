@@ -160,13 +160,13 @@ describe("hosted runtime assistant configuration tool", () => {
   });
 
   it.each([
-    ["gpt-5.6-sol", "ASSISTANT_MODEL_SOL_REQUIRES_SUBSCRIPTION"],
+    ["gpt-6.1-sol", "ASSISTANT_MODEL_SOL_REQUIRES_SUBSCRIPTION"],
     ["gpt-6-astra", "ASSISTANT_MODEL_ASTRA_REQUIRES_EDGE"],
   ] as const)("returns the appropriate subscription requirement for %s without changing the saved target", async (model, code) => {
     mocks.updateConfiguration.mockRejectedValue(hostedOnboardingError({
       code,
       httpStatus: 403,
-      message: "GPT-5.6 Sol requires an active paid Edge plan.",
+      message: "GPT-6.1 Sol requires an active paid Edge plan.",
     }));
 
     await expect(handleHostedRuntimeAssistantConfigurationTool({
@@ -191,7 +191,7 @@ describe("hosted runtime assistant configuration tool", () => {
 
 function buildSnapshot(overrides: {
   dormantSolPreference?: boolean;
-  model?: "gpt-5.6-luna" | "gpt-6.1-sol" | "gpt-5.6-sol";
+  model?: "gpt-5.6-luna" | "gpt-6.1-sol" | "gpt-6.1-sol";
   reasoningEffort?: "low" | "medium" | "high" | "xhigh";
 } = {}) {
   return {

@@ -2,7 +2,7 @@ import { parseGameRecapEventId } from "@murphai/hosted-execution/runtime-control
 import { buildHostedGameChatBootstrapPolicy, isHostedGameBootstrapUnavailable } from "./game-chat-bootstrap.ts";
 import type { HostedRuntimeGroupToolPort } from "../platform.ts";
 import { resolveHostedOperatorModelProvider } from "../codex-runtime-env.ts";
-import { HOSTED_ASSISTANT_SOL_MODEL } from "@murphai/hosted-execution/assistant-model";
+import { HOSTED_ASSISTANT_GPT_61_SOL_MODEL } from "@murphai/hosted-execution/assistant-model";
 import { createHash } from "node:crypto";
 
 import { buildHostedNotificationAutomationRoute } from "../current-delivery-route.ts";
@@ -939,7 +939,7 @@ function withOperatorTaskExecution(
 ): AssistantNotificationInput {
   if (operatorTask) {
     input.assistantTargetOverride = {
-      model: HOSTED_ASSISTANT_SOL_MODEL,
+      model: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
       modelProvider: resolveHostedOperatorModelProvider(
         executionContext.hosted?.defaultTarget?.modelProvider,
       ),

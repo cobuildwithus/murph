@@ -12,7 +12,6 @@ const hostedRunnerProductModelSlugs = [
   "gpt-6-sol",
   "gpt-6-luna",
   "gpt-6-astra",
-  "gpt-5.6-sol",
   "gpt-5.6-luna",
 ] as const;
 
@@ -117,7 +116,7 @@ describe("hosted runner container image contract", () => {
 
     const standardCatalog = parseCodexModelCatalogJson(runJqFilter(standardFilter, patchedCatalog));
     expect(readCodexModelSlugs(standardCatalog)).toEqual([
-      "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-6.1-terra",
+      "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-luna", "gpt-6.1-terra",
     ]);
     expect(standardCatalog.models).toEqual(patchedCatalog.models.filter((model) => model.slug !== "gpt-6-astra"));
     expect(finalDockerfile).toContain('"${MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON}.astra"');
@@ -127,10 +126,7 @@ describe("hosted runner container image contract", () => {
       expect(readCodexModelServiceTierIds(patchedCatalog, slug)).toEqual(["priority", "flex"]);
       expect(readCodexModel(patchedCatalog, slug).tool_mode).toBe("code_mode");
     }
-    expect(readCodexModel(patchedCatalog, "gpt-5.6-sol")).toMatchObject({
-      description: "Flagship agentic coding model for complex professional work.",
-      display_name: "GPT-5.6-Sol",
-    });
+    expect(readCodexModelSlugs(patchedCatalog)).not.toContain("gpt-5.6-sol");
     expect(readCodexModelSlugs(patchedCatalog)).not.toContain("gpt-5.6-terra");
     expect(readCodexModel(patchedCatalog, "gpt-5.6-luna")).toMatchObject({
       description: "Fast, cost-efficient agentic coding model.",
@@ -213,7 +209,7 @@ describe("hosted runner container image contract", () => {
       });
     }
     expect(readCodexModelSlugs(parseCodexModelCatalogJson(runJqFilter(standardFilter, productCatalog))).sort())
-      .toEqual(["gpt-5.6-luna", "gpt-5.6-sol", "gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-6.1-terra"]);
+      .toEqual(["gpt-5.6-luna", "gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-6.1-terra"]);
   });
 
   it("keeps rendered container builds app-local with SSH disabled", () => {

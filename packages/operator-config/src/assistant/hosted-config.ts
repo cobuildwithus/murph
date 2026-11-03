@@ -1,3 +1,4 @@
+import { normalizeStoredAssistantModel } from '@murphai/contracts'
 import * as z from '@murphai/contracts/zod-runtime'
 import { assistantModelTargetSchema } from '../assistant-cli-contracts.js'
 import {
@@ -100,6 +101,7 @@ export function createHostedAssistantProfile(input: {
 
 export function normalizeHostedAssistantConfig(
   config: HostedAssistantConfig | null | undefined,
+  stored = false,
 ): HostedAssistantConfig | null {
   if (!config) {
     return null
@@ -109,7 +111,9 @@ export function normalizeHostedAssistantConfig(
   if (currentParsed.success) {
     return createHostedAssistantConfig({
       activeProfileId: currentParsed.data.activeProfileId,
-      profiles: currentParsed.data.profiles,
+      profiles: stored ? currentParsed.data.profiles.map(profile => ({
+        ...profile, target: { ...profile.target, model: normalizeStoredAssistantModel(profile.target.model) },
+      })) : currentParsed.data.profiles,
       updatedAt: currentParsed.data.updatedAt,
     })
   }

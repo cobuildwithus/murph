@@ -1001,7 +1001,7 @@ describe("hosted detached assistant ask controller", () => {
       const operatorInput = executeOperatorDiagnostic.mock.calls[0]?.[0];
       assert.ok(operatorInput);
       assert.equal(operatorInput.feedbackDiagnostic, true);
-      assert.equal(operatorInput.model, "gpt-5.6-sol");
+      assert.equal(operatorInput.model, "gpt-6.1-sol");
       assert.equal(operatorInput.modelProvider, operatorProvider);
       assert.equal(operatorInput.codexHome, "/hosted/codex-home");
       assert.equal(operatorInput.question, "What is the synthetic status?");

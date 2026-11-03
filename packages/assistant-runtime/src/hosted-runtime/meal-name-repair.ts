@@ -6,7 +6,7 @@ import { readEvent, upsertEvent } from "@murphai/core";
 import { readCanonicalEntityFamilySource } from "@murphai/query";
 import { readVersionedJsonStateFile, writeVersionedJsonStateFile } from "@murphai/runtime-state/node";
 import { proposeLegacyMealName, type ReadOnlyAssistantAskProviderUsageEvent } from "@murphai/assistant-engine/assistant-ask";
-import { HOSTED_ASSISTANT_SOL_MODEL } from "@murphai/hosted-execution/assistant-model";
+import { HOSTED_ASSISTANT_GPT_61_SOL_MODEL } from "@murphai/hosted-execution/assistant-model";
 import { ASSISTANT_USAGE_SCHEMA, createAssistantUsageId, parseAssistantUsageRecord, resolveAssistantUsageCredentialSource } from "@murphai/hosted-execution/assistant-usage";
 import { resolveHostedOperatorModelProvider } from "./codex-runtime-env.ts";
 import type { HostedRuntimeUsageRecordPort } from "./platform.ts";
@@ -131,7 +131,7 @@ async function proposeName(input: MealNameRepairInput, name: string, note: strin
   try {
     return await (input.propose ?? proposeLegacyMealName)({
       name, note, env: { ...input.env }, codexHome: input.env.CODEX_HOME,
-      model: HOSTED_ASSISTANT_SOL_MODEL,
+      model: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
       modelProvider: resolveHostedOperatorModelProvider(input.modelProvider),
       reasoningEffort: "low", abortSignal: input.signal,
       onProviderUsage: event => { usages.push(event); },
