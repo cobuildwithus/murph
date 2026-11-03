@@ -6,7 +6,7 @@ export function GET() {
     applinks: {
       details: [{
         appIDs: ["G9DJH2XUMK.ai.withmurph.app"],
-        components: [{ "/": "/recap/*" }],
+        components: [{ "/": "/recap/*" }, { "/": "/g/*" }],
       }],
     },
   }, {

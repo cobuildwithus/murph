@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { GET } from "../app/.well-known/apple-app-site-association/route";
 
 describe("Apple App Site Association", () => {
-  it("serves only production recap universal links as public JSON without a session or redirect", async () => {
+  it("serves only production recap and game invite universal links as public JSON without a session or redirect", async () => {
     const response = GET();
 
     expect(response.status).toBe(200);
@@ -16,7 +16,7 @@ describe("Apple App Site Association", () => {
       applinks: {
         details: [{
           appIDs: ["G9DJH2XUMK.ai.withmurph.app"],
-          components: [{ "/": "/recap/*" }],
+          components: [{ "/": "/recap/*" }, { "/": "/g/*" }],
         }],
       },
     });

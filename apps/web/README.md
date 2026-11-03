@@ -1010,13 +1010,16 @@ conservative conflicts; earlier bypasses do not suppress them. Platform DDoS
 mitigation outside the project configuration is not observable by this check.
 
 The Apple association route serves public JSON with a one-hour cache and no
-session or redirect. Only `G9DJH2XUMK.ai.withmurph.app` claims `/recap/*` through
-`applinks.details[].appIDs` and `components`; invites, referrals and all other
+session or redirect. Only `G9DJH2XUMK.ai.withmurph.app` claims `/recap/*` and `/g/*`
+through `applinks.details[].appIDs` and `components`; referrals and all other
 paths remain Web links. The proxy matcher excludes the route; Next's global
 security headers do not change its content type or cache policy. No i18n,
 redirect or trailing-slash override applies to its canonical URL.
-The existing `/recap/[gameId]` page remains the fallback. The iOS entitlement
-and recap routing ship separately.
+The existing `/recap/[gameId]` and `/g/[token]` pages remain the fallbacks when
+the app is not installed; the invite page previews both group and pair invites.
+Merge the `/g/*` claim only after a TestFlight build containing the murph-ios
+"Open game invite links in the app" fix is available. Earlier installed builds
+drop universal-link invites. The iOS entitlement and link routing ship separately.
 
 After deploy, check the origin without following redirects and Apple's cached
 copy:

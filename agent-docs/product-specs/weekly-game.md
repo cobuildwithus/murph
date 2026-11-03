@@ -137,7 +137,12 @@ run 3–365 days, defaulting to seven. Legacy one- and two-day games and their
 winner/per-miss stakes remain readable and retain their settlement.
 
 The MVP is private 1v1. The challenger creates a game and texts a single-use
-link (`/g/<token>`, valid 7 days) from their own phone. The page's Open in Murph
+link (`/g/<token>`, valid 7 days) from their own phone. The Apple association
+route claims only `/recap/*` and `/g/*` for `G9DJH2XUMK.ai.withmurph.app`.
+The `/g/[token]` page remains the group and pair invite fallback without the app.
+Merge the invite claim only after a TestFlight build containing the murph-ios
+"Open game invite links in the app" fix is available; earlier builds drop these
+universal links. The page's Open in Murph
 button opens `ai.withmurph.app://invite/<token>`; `MURPH_GAME_APP_URL_SCHEME`
 overrides the scheme (local stacks use the Debug app's `ai.withmurph.app.dev`).
 Its link preview (`/g/<token>/opengraph-image`) shows an open invite as a ticket
