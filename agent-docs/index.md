@@ -1,3 +1,7 @@
+Dark group lifecycle, audience identity and settlement are owned by
+[Weekly Game](product-specs/weekly-game.md) and `../ARCHITECTURE.md` § Weekly Game;
+[PR 3 execution plan](exec-plans/completed/2026-11-02-group-games-lifecycle-pr3.md).
+
 Canonical cron wake parity with claim selection is owned by
 `../packages/assistant-engine/README.md`; regression proof is tracked in
 [the wake plan](exec-plans/completed/2026-11-02-cron-missed-wakes.md).

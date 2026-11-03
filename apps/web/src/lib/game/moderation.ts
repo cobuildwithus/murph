@@ -1,4 +1,5 @@
-import type { GameCommand, GameStakeKind } from "./contract";
+import type { GameStakeKind } from "./contract";
+import type { GameCommand } from "./command";
 import { reject } from "./rules";
 
 /**
@@ -38,6 +39,12 @@ export function gameCommandTexts(command: GameCommand): GameText[] {
       if (command.firstName !== undefined) texts.push({ kind: "name", text: command.firstName });
       break;
     case "createGame":
+      if (command.groupWord) texts.push({ kind: "name", text: command.groupWord });
+      if (command.terms.defaultTask) texts.push({ kind: "task", text: command.terms.defaultTask });
+      terms(command.terms.tasks, command.terms.stakes);
+      break;
+    case "editTerms":
+      if (command.terms.defaultTask) texts.push({ kind: "task", text: command.terms.defaultTask });
       terms(command.terms.tasks, command.terms.stakes);
       break;
     case "proposeChange":

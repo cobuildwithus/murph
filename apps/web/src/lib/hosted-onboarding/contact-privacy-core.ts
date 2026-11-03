@@ -26,6 +26,7 @@ export type HostedBlindIndexKind =
   | "external-thread"
   | "external-thread-identity"
   | "group-disclosure-permission"
+  | "game-audience"
   | "linq-chat"
   | "linq-message"
   | "phone"
@@ -84,6 +85,11 @@ export function createHostedGroupDisclosurePermissionLookupKeyReadCandidates(
 
 export function createHostedPhoneLookupKey(value: string | null | undefined): string | null {
   return createHostedLookupKey("phone", normalizePhoneNumber(value));
+}
+
+/** Exact normalized handle set, serialized by the game audience owner. */
+export function createHostedGameAudienceLookupKeys(value: string): { current: string; candidates: string[] } {
+  return { current: createHostedLookupKey("game-audience", value)!, candidates: createHostedLookupKeyReadCandidates("game-audience", value) };
 }
 
 export function createHostedPhoneLookupKeyReadCandidates(
