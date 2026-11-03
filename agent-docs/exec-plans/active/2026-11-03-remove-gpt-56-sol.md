@@ -93,3 +93,11 @@ worktree authorization. No guard was bypassed.
 Additional persisted read locations: operator default targets, hosted profiles,
 and saved conversation codex targets; no production rows/content were inspected.
 Queued automation envelopes share the same normalization helper as vault reads.
+
+## Review packaging correction
+
+The first review attempt used a packet containing SVG assets and was stopped;
+it does not count as a substantive review. Shared package exclusions now remove
+image extensions across nested paths. Both lean/full archive tests pass with
+zero image entries. Restart round one on the updated pushed head and inspect
+the exact replacement archive before staging.

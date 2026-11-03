@@ -4466,6 +4466,9 @@ printf 'ZIP: %s (%s bytes)\n' \
     try {
       const leanEntries = listZipEntries(leanBundle.zipPath)
       const fullEntries = listZipEntries(fullBundle.zipPath)
+      for (const entries of [leanEntries, fullEntries]) {
+        expect(entries.filter(entry => /\.(svg|png|jpe?g|gif|webp|avif|ico|bmp|tiff?|heic)$/iu.test(entry))).toEqual([])
+      }
 
       const containersPatch = 'patches/@cloudflare__containers@0.3.7.patch'
       expect(fullEntries).toContain('apps/cloudflare/test/containers-helper-readiness.test.ts')
