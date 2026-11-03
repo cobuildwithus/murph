@@ -84,9 +84,7 @@ import {
   validateVaultMetadata,
 } from "../src/vault-metadata.ts";
 import {
-  appendVaultTextFile,
   copyImmutableFileIntoVaultRaw,
-  writeImmutableJsonFileIntoVaultRaw,
   writeVaultTextFile,
 } from "../src/fs.ts";
 import {
@@ -3178,11 +3176,6 @@ test("direct and batched writes reject the same invalid vault targets", async ()
     (error: unknown) => error instanceof VaultError && error.code === "VAULT_APPEND_ONLY_PATH",
   );
 
-  await assert.rejects(
-    () => appendVaultTextFile(vaultRoot, notePath, '{"ok":true}\n'),
-    (error: unknown) => error instanceof VaultError && error.code === "VAULT_APPEND_ONLY_PATH",
-  );
-
   const jsonlBatch = await WriteBatch.create({
     vaultRoot,
     operationType: "test_policy_reject_jsonl_append",
@@ -3229,7 +3222,7 @@ test("direct and batched writes reject the same invalid vault targets", async ()
   );
 });
 
-test("direct and batched immutable raw writes reuse identical content and reject divergent content", async () => {
+test("batched immutable raw writes reuse identical content and reject divergent content", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
@@ -3241,19 +3234,8 @@ test("direct and batched immutable raw writes reuse identical content and reject
     },
   };
   const stableContent = `${JSON.stringify(stableValue, null, 2)}\n`;
-
-  assert.equal(
-    await writeImmutableJsonFileIntoVaultRaw(vaultRoot, rawPath, stableValue, {
-      allowExistingMatch: true,
-    }),
-    rawPath,
-  );
-  assert.equal(
-    await writeImmutableJsonFileIntoVaultRaw(vaultRoot, rawPath, stableValue, {
-      allowExistingMatch: true,
-    }),
-    rawPath,
-  );
+  await fs.mkdir(path.dirname(path.join(vaultRoot, rawPath)), { recursive: true });
+  await fs.writeFile(path.join(vaultRoot, rawPath), stableContent);
 
   const reuseBatch = await WriteBatch.create({
     vaultRoot,
@@ -3273,19 +3255,6 @@ test("direct and batched immutable raw writes reuse identical content and reject
   assert.equal(reusedOperation.status, "committed");
   assert.equal(reusedOperation.actions[0]?.state, "reused");
   assert.equal(reusedOperation.actions[0]?.effect, "reuse");
-
-  await assert.rejects(
-    () =>
-      writeImmutableJsonFileIntoVaultRaw(
-        vaultRoot,
-        rawPath,
-        {
-          ok: false,
-        },
-        { allowExistingMatch: true },
-      ),
-    (error: unknown) => error instanceof VaultError && error.code === "VAULT_RAW_IMMUTABLE",
-  );
 
   const failingBatch = await WriteBatch.create({
     vaultRoot,
@@ -3694,7 +3663,8 @@ test("direct and batched text writes keep no-overwrite and append semantics alig
     (error: unknown) => error instanceof VaultError && error.code === "VAULT_FILE_EXISTS",
   );
 
-  await appendVaultTextFile(vaultRoot, jsonlPath, '{"source":"direct"}\n');
+  await fs.mkdir(path.dirname(path.join(vaultRoot, jsonlPath)), { recursive: true });
+  await fs.writeFile(path.join(vaultRoot, jsonlPath), '{"source":"direct"}\n');
 
   const appendBatch = await WriteBatch.create({
     vaultRoot,

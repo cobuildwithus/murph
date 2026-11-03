@@ -831,12 +831,6 @@ function isExplicitActivitySummaryResource(candidate: WearableMetricCandidate): 
     || resourceType.includes("activity");
 }
 
-export const DAILY_CUMULATIVE_METRIC_KEYS: ReadonlySet<WearableMetricKey> = new Set(
-  ACTIVITY_SESSION_WORKOUT_METRIC_SPECS
-    .filter(({ dailyReducer }) => dailyReducer === "lower-bound")
-    .map(({ metric }) => metric),
-);
-
 // Daily cumulative totals and maximum heart rate contain overlapping summary
 // and session branches. Workout strain intentionally remains cross-branch
 // conflict evidence even though its selected value also uses a maximum reducer.

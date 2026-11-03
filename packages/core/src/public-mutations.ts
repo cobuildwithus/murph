@@ -279,15 +279,6 @@ export async function appendMetricSample(input: {
   });
 }
 
-export async function appendMetricSamples(input: {
-  vaultRoot: string;
-  records: readonly MetricSampleRecord[];
-}): Promise<MetricSampleRecord[]> {
-  const output: MetricSampleRecord[] = [];
-  for (const record of input.records) output.push(await appendMetricSample({ vaultRoot: input.vaultRoot, record }));
-  return output;
-}
-
 export async function applyCanonicalWriteBatch(
   input: ApplyCanonicalWriteBatchInput,
 ): Promise<ApplyCanonicalWriteBatchResult> {

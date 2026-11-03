@@ -1494,17 +1494,6 @@ function isJunctionDisabledEndpointError(error: unknown): boolean {
   return status === 403 || status === 404;
 }
 
-export function resolveJunctionTimeseriesApiResource(resource: string): string {
-  switch (resource) {
-    case "fat":
-      return "body_fat";
-    case "weight":
-      return "body_weight";
-    default:
-      return resource;
-  }
-}
-
 function resolveJunctionSummaryDateQueryFormat(input: JunctionWindowInput): JunctionDateQueryFormat {
   return JUNCTION_DATE_ONLY_SUMMARY_RESOURCES.has(input.resource)
     ? "date"

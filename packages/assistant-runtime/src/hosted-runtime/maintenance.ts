@@ -23,7 +23,6 @@ import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-ser
 
 import type {
   HostedAssistantAutomationLaneMetrics,
-  HostedMaintenanceMetrics,
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
 import {
@@ -1243,17 +1242,6 @@ function shouldAlwaysPersistHostedAssistantAutomationEvent(
     || event.type === "input.reply-failed"
     || event.type === "onboarding.followup.completed";
 }
-
-export function runHostedNoopSystemWakeLane(): HostedMaintenanceMetrics {
-  return {
-    deviceSyncProcessed: 0,
-    deviceSyncSkipped: true,
-    nextWakeAt: null,
-    parserProcessed: 0,
-    postCheckpointRecord: null,
-  };
-}
-
 
 function earliestHostedMaintenanceWakeAt(left: string | null, right: string | null): string | null {
   if (!left) {

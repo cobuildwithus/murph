@@ -17,7 +17,6 @@ import type {
 } from "@murphai/importers/device-providers/provider-descriptors";
 import type {
   CompleteDeviceProviderSourceDay,
-  DeviceBatchImportExecutionOptions,
 } from "@murphai/importers";
 
 export type { DeviceSyncAccountStatus } from "./client.ts";
@@ -1221,17 +1220,6 @@ export interface DeviceJobExecutor {
   batch?: DeviceJobBatchExecutor;
 }
 
-export interface DeviceSyncOAuthAdapter {
-  buildConnectUrl(input: {
-    state: string;
-    callbackUrl: string;
-    scopes: string[];
-    now: string;
-  }): string;
-  exchangeAuthorizationCode(context: ProviderCallbackContext, code: string): Promise<ProviderConnectionResult>;
-  refreshTokens(account: DeviceSyncAccount, options?: { signal?: AbortSignal | null }): Promise<ProviderAuthTokens>;
-}
-
 export interface DeviceSyncProvider {
   provider: string;
   descriptor: DeviceProviderDescriptor;
@@ -1242,14 +1230,6 @@ export interface DeviceSyncProvider {
   webhookHandler?: DeviceWebhookHandler;
   jobExecutor?: DeviceJobExecutor;
   webhookAdmin?: ProviderWebhookAdminCapability;
-}
-
-export interface DeviceSyncOAuthProvider extends DeviceSyncProvider {
-  connectionHandler: DeviceConnectionHandler & {
-    refreshTokens: NonNullable<DeviceConnectionHandler["refreshTokens"]>;
-  };
-  jobExecutor: DeviceJobExecutor;
-  oauthAdapter: DeviceSyncOAuthAdapter;
 }
 
 export interface DeviceSyncRegistry extends NamedDeviceProviderRegistry<DeviceSyncProvider> {

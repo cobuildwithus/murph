@@ -27,7 +27,6 @@ export {
   createConfiguredDeviceSyncRegistryFromConfigs,
   createConfiguredDeviceSyncProviders,
   createConfiguredDeviceSyncProvidersFromConfigs,
-  createConsoleDeviceSyncLogger,
   configuredDeviceSyncProviderKeys,
   DEVICE_CONNECT_SOURCE_BY_ID,
   DEVICE_CONNECT_SOURCES,

@@ -45,7 +45,6 @@ import {
   formatMetricValue,
   formatProviderName,
   inferDefaultMetricFamily,
-  isPreferredWearableProvider,
   resolveMetricTolerance,
   resolveWearableProviderPriority,
   resourceTypeScore,
@@ -83,7 +82,6 @@ import type {
   WearableConfidenceLevel,
   WearableExternalRef,
   WearableMetricCandidate,
-  WearableMetricConfidence,
   WearableMetricSelection,
   WearableResolvedMetric,
   WearableSleepWindowCandidate,
@@ -283,8 +281,6 @@ test("shared and provider-policy helpers normalize and rank wearable evidence de
   assert.equal(resolveWearableProviderPriority("steps", "unknown-provider"), 0);
   assert.equal(resolveWearableProviderPriority("steps", "oura") > 0, true);
   assert.equal(compareWearableProviders("steps", "beta", "alpha") > 0, true);
-  assert.equal(isPreferredWearableProvider("steps", "alpha", ["beta", "alpha"]), true);
-  assert.equal(isPreferredWearableProvider("steps", " ", ["beta", "alpha"]), false);
 
   assert.equal(inferDefaultMetricFamily("sleepScore"), "sleep");
   assert.equal(inferDefaultMetricFamily("recoveryScore"), "recovery");

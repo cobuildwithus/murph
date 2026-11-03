@@ -11,11 +11,9 @@ import { normalizeHostedTelegramMessage } from "../src/connectors/telegram/norma
 
 import type {
   InboundAttachment,
-  InboundCapture,
   ParsedEmailMessage,
 } from "../src/index.ts";
 import {
-  compareInboundCaptures,
   createInboundCaptureFromChatMessage,
   normalizeLinqWebhookEvent,
   normalizeParsedEmailMessage,
@@ -25,36 +23,7 @@ import {
 } from "../src/index.ts";
 import { buildV2026LinqWebhookEvent } from "./linq-test-helpers.ts";
 
-function buildCapture(input: {
-  externalId: string;
-  occurredAt: string;
-  text?: string | null;
-}): InboundCapture {
-  return {
-    source: "chat",
-    externalId: input.externalId,
-    accountId: "acct-1",
-    thread: {
-      id: "thread-1",
-      title: "General",
-      isDirect: false,
-    },
-    actor: {
-      id: "actor-1",
-      displayName: "Alice",
-      isSelf: false,
-    },
-    occurredAt: input.occurredAt,
-    receivedAt: input.occurredAt,
-    text: input.text ?? input.externalId,
-    attachments: [],
-    raw: {
-      externalId: input.externalId,
-    },
-  };
-}
-
-test("createInboundCaptureFromChatMessage preserves nullable chat fields and compareInboundCaptures breaks ties by externalId", () => {
+test("createInboundCaptureFromChatMessage preserves nullable chat fields", () => {
   const attachments: InboundAttachment[] = [
     {
       byteSize: 4,
@@ -107,31 +76,6 @@ test("createInboundCaptureFromChatMessage preserves nullable chat fields and com
       schema: "test",
     },
   });
-
-  assert.ok(
-    compareInboundCaptures(
-      buildCapture({
-        externalId: "msg-2",
-        occurredAt: "2026-04-08T10:00:00.000Z",
-      }),
-      buildCapture({
-        externalId: "msg-3",
-        occurredAt: "2026-04-08T10:00:00.000Z",
-      }),
-    ) < 0,
-  );
-  assert.ok(
-    compareInboundCaptures(
-      buildCapture({
-        externalId: "msg-9",
-        occurredAt: "2026-04-08T09:59:59.000Z",
-      }),
-      buildCapture({
-        externalId: "msg-1",
-        occurredAt: "2026-04-08T10:00:00.000Z",
-      }),
-    ) < 0,
-  );
 });
 
 test("splitEmailAddressList preserves quoted commas and readRawEmailHeaderValue rejects repeated headers", () => {

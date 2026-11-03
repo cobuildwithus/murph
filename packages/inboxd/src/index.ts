@@ -49,7 +49,6 @@ export {
   type RunInboxTextRetentionInput,
 } from "./indexing/text-retention.ts";
 export {
-  compareInboundCaptures,
   createInboundCaptureFromChatMessage,
 } from "./connectors/chat/message.ts";
 export {

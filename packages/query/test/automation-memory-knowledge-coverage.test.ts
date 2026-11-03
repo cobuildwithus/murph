@@ -29,7 +29,6 @@ import {
   extractKnowledgeRelatedSlugs,
   renderKnowledgePageBody,
   renderDerivedKnowledgeIndex,
-  sameKnowledgeStringSet,
   searchDerivedKnowledgeGraph,
   searchDerivedKnowledgeVault,
   stripGeneratedKnowledgeSections,
@@ -699,8 +698,6 @@ describe("knowledge formatting and model helpers", () => {
       ),
     ).toEqual(["alpha"]);
     expect(extractKnowledgeRelatedSlugs("No wiki links here.", "alpha")).toEqual([]);
-    expect(sameKnowledgeStringSet(["alpha", "beta"], ["beta", "alpha"])).toBe(true);
-    expect(sameKnowledgeStringSet(["alpha", "beta"], ["alpha", "gamma"])).toBe(false);
 
     const rendered = renderKnowledgePageBody({
       title: " Sleep quality ",

@@ -159,7 +159,6 @@ vi.mock("@murphai/hosted-execution", async () => {
 import {
   runHostedAssistantAutomation,
   runHostedAssistantAutomationLane,
-  runHostedNoopSystemWakeLane,
 } from "../src/hosted-runtime/maintenance.ts";
 import {
   buildHostedDeviceSyncFailureJobLineage,
@@ -8544,17 +8543,5 @@ describe("createHostedBackgroundMaintenanceCancellation", () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-});
-
-describe("runHostedNoopSystemWakeLane", () => {
-  it("returns an empty follow-up result for explicit no-op system wakes", () => {
-    assert.deepEqual(runHostedNoopSystemWakeLane(), {
-      deviceSyncProcessed: 0,
-      deviceSyncSkipped: true,
-      nextWakeAt: null,
-      parserProcessed: 0,
-      postCheckpointRecord: null,
-    });
   });
 });
