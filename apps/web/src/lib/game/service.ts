@@ -4,7 +4,7 @@ import { parseGameRecapEventId, hostedGameRecapSchema, type GameNoticeRoom, type
 import { gameChatProgress } from "./chat-progress";
 import { randomBytes } from "node:crypto";
 
-import { Prisma, type Game, type GameEntry, type GamePlayer, type GameReport } from "@prisma/client";
+import { Prisma, type Game, type GameEntry, type GameInvitee, type GamePlayer, type GameReport } from "@prisma/client";
 
 import { toPrismaJsonObject } from "../device-sync/prisma-store/prisma-json";
 import { isUniqueViolation } from "../device-sync/prisma-store/prisma-errors";
@@ -93,7 +93,7 @@ import {
   type GameTicketRow,
   type GameViewInput,
 } from "./views";
-import { departedLabels, departedInvitee } from "./account-deletion";
+import { departedLabels } from "./account-deletion";
 import { gameMemberIds, hasGameIdentity } from "./roster";
 import { areGamePlayersBlocked, GAME_BLOCK_LIMIT, isHiddenBy, lockGamePair, readGameBlocks, type GameBlocks } from "./blocks";
 import { GAME_REPORT_ALERTS_PER_REPORTER_DAY, sendGameReportAlert } from "./report-alert";
@@ -102,7 +102,7 @@ export { mediaKeyPrefixFor } from "./access";
 
 type Tx = Prisma.TransactionClient;
 type Db = Tx | ReturnType<typeof getPrisma>;
-type GameRow = Game & { players: GamePlayer[]; invitees: import("@prisma/client").GameInvitee[] };
+type GameRow = Game & { players: GamePlayer[]; invitees: GameInvitee[] };
 interface LoadedGame {
   row: GameRow;
   entries: GameEntry[];
@@ -1887,8 +1887,7 @@ function homeGames(games: readonly LoadedGame[], now: Date, blocks: GameBlocks):
   // A game called off because a player left counts from when they left; one
   // a block called off, from that last change (nothing changes a void game).
   const endedAt = (game: LoadedGame) => {
-    const departed = game.row.players.find(player => player.leftAt !== null)?.leftAt
-      ?? game.row.invitees.map(invitee => departedInvitee(invitee.pendingLabel)).find(Boolean)?.at;
+    const departed = game.row.players.find(player => player.leftAt !== null)?.leftAt;
     if (departed) return new Date(departed);
     return game.row.players.some((player) => player.memberId !== null && isHiddenBy(blocks, player.memberId)) ? game.row.updatedAt : game.row.inviteExpiresAt;
   };
@@ -2263,15 +2262,10 @@ async function buildViewInputs(
     ? ask(gameTarget(game.row, "recap"), game.row.recapEncrypted)
     : null);
   // Deleted seats expose only the current viewer's own sealed name.
-  const departedAt = games.map((game) => {
-    const seats = game.row.players.filter(player => player.memberId === null).map(player => ({ seat: player.seat, labels: departedLabels(player.departedLabel) }));
-    const invitations = game.row.invitees.flatMap(invitee => {
-      const departed = departedInvitee(invitee.pendingLabel);
-      return departed ? [{ seat: invitee.seat, labels: departed.labels }] : [];
-    });
-    return [...seats, ...invitations].map(departed => ({ seat: departed.seat,
-      name: ask(labelTarget(viewerId, "name"), departed.labels.find(label => label.ownerMemberId === viewerId)?.nameEncrypted ?? null) }));
-  });
+  const departedAt = games.map(game => game.row.players.filter(player => player.memberId === null).map(player => ({
+    seat: player.seat,
+    name: ask(labelTarget(viewerId, "name"), departedLabels(player.departedLabel).find(label => label.ownerMemberId === viewerId)?.nameEncrypted ?? null),
+  })));
   const profileNameAt = new Map(profiles.map((profile) => [
     profile.memberId,
     ask({ field: "first_name", memberId: profile.memberId, rowId: profile.memberId, table: "game_profile" },
@@ -2298,7 +2292,7 @@ async function buildViewInputs(
     // An addressed rematch whose challenger left still shows its invitee in their seat.
     if (row.status !== "invited" && !(row.players.some(player => player.leftAt !== null) && row.invitees.some(invitee => invitee.memberId === viewerId))) return null;
     const invitation = row.invitees.find(invitee => !row.players.some(player => player.seat === invitee.seat));
-    if (!invitation || departedInvitee(invitation.pendingLabel)) return null;
+    if (!invitation) return null;
     if (row.createdBy === viewerId) {
       const pending = parsePendingLabel(invitation.pendingLabel);
       return {

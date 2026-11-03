@@ -23,12 +23,6 @@ export function departedLabels(value: Prisma.JsonValue | null): DepartedLabel[] 
   });
 }
 
-/** Only the old pair projection uses a deleted, never-joined invitation. */
-export function departedInvitee(value: Prisma.JsonValue | null): { at: string; labels: DepartedLabel[] } | null {
-  if (!isRecord(value) || typeof value.leftAt !== "string") return null;
-  return { at: value.leftAt, labels: departedLabels(value.departedLabels ?? null) };
-}
-
 interface PreparedGame {
   id: string;
   fingerprint: string;
@@ -165,15 +159,12 @@ async function retainDeparturesTx(tx: Prisma.TransactionClient, row: GameRow, pl
       ...(departure ? { memberId: null, leftAt: player.leftAt ?? now } : {}),
     } });
   }
-  for (const invitee of row.invitees) {
-    const departure = plan.departures.find(item => !item.joined && item.seat === invitee.seat);
-    const old = departedInvitee(invitee.pendingLabel);
-    const pendingLabel = departure ? { leftAt: now.toISOString(), departedLabels: departure.labels }
-      : old ? { leftAt: old.at, departedLabels: old.labels.filter(label => !leaving.includes(label.ownerMemberId)) }
-      : row.createdBy && leaving.includes(row.createdBy) ? Prisma.DbNull : undefined;
-    await tx.gameInvitee.update({ where: { gameId_seat: { gameId: row.id, seat: invitee.seat } }, data: {
-      pendingLabel, ...(invitee.memberId && leaving.includes(invitee.memberId) ? { memberId: null, recipientLookupKey: null } : {}),
-    } });
+  for (const departure of plan.departures.filter(item => !item.joined)) {
+    await tx.gamePlayer.create({ data: { gameId: row.id, seat: departure.seat,
+      memberId: null, joinedAt: null, timeZone: null, leftAt: now, departedLabel: departure.labels } });
+  }
+  if (row.createdBy && leaving.includes(row.createdBy)) {
+    await tx.gameInvitee.updateMany({ where: { gameId: row.id }, data: { pendingLabel: Prisma.DbNull } });
   }
 }
 

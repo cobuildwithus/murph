@@ -160,6 +160,29 @@ describe.skipIf(!runPostgresProof)("weekly game when a player deletes their acco
     expect(JSON.stringify(stored.result)).not.toContain(gone);
   });
 
+  it("uses an anonymous seat for a never-joined invitee and clears the invitation", async () => {
+    const creator = await member("Alex"), invitee = await member("Sam");
+    const { gameId } = await invite(creator);
+    const db = getPrisma();
+    await db.gameInvitee.update({ where: { gameId_seat: { gameId, seat: 1 } },
+      data: { memberId: invitee, recipientLookupKey: "synthetic_lookup" } });
+    expect(await db.gamePlayer.count({ where: { gameId } })).toBe(1);
+    expect(await deleteAccount(invitee)).toEqual({ calledOff: 1, deleted: 0, kept: 1 });
+    const view = (await readGame(gameId, creator))!;
+    expect(view.status).toBe("void");
+    expect(view.players).toHaveLength(2);
+    expect(view.players[1]).toEqual({ avatarUrl: null, dayIndex: null, firstName: "Bestie",
+      isMe: false, left: true, memberId: null, profileAvatarUrl: null,
+      relationship: null, score: 0, seat: 1, streak: 0 });
+    expect((await readHome(creator)).games.find(game => game.id === gameId)).toEqual(view);
+    expect(await db.gamePlayer.findUniqueOrThrow({ where: { gameId_seat: { gameId, seat: 1 } } }))
+      .toMatchObject({ memberId: null, joinedAt: null, timeZone: null, leftAt: expect.any(Date),
+        departedLabel: [{ ownerMemberId: creator, nameEncrypted: expect.any(String) }] });
+    expect(await db.gameInvitee.findMany({ where: { gameId } })).toEqual([
+      { gameId, seat: 1, memberId: null, recipientLookupKey: null, pendingLabel: null },
+    ]);
+  });
+
   it("deletes a finished game once both players have left", async () => {
     const leo = await member("Leo");
     const ava = await member("Ava");

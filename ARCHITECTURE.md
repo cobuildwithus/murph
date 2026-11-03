@@ -5529,8 +5529,10 @@ games in id order and compares the complete roster/invitation/ciphertext snapsho
 before applying. It transfers shared words to the lowest-seat surviving profile,
 deletes the leaver's entries before nulling the member FK, clears pending changes
 and recap, and retains only each survivor's own encrypted name on the tombstone.
-No viewer inherits another viewer's private label. A never-joined pair invitee
-stays in `game_invitee`; its deletion display is kept there, not as a player.
+No viewer inherits another viewer's private label. A deleted, never-joined pair
+invitee also becomes a seat tombstone, with null joined time and zone. Its
+invitation loses its member, lookup and private label; `pending_label` only ever
+means the inviter's private invitation label.
 Open pairs become `void`; storage-level groups stay live with at least two joined
 survivors. Settled scores and ticket seats stay frozen. Nobody remaining means
 explicit game deletion. The bounded preparation reads at most 1,001 games and

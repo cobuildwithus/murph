@@ -1746,3 +1746,6 @@ in [the storage plan](exec-plans/completed/2026-11-02-group-games-storage-pr2.md
 Current owners: `../ARCHITECTURE.md` § Weekly Game and `../apps/web/README.md`
 § Direct game storage cutover; released pair behavior remains in
 `product-specs/weekly-game.md`.
+
+Game storage parent-review corrections and PR completion are tracked in
+[the follow-up plan](exec-plans/active/2026-11-02-group-games-storage-pr-review.md).
