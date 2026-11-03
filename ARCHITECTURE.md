@@ -5516,6 +5516,19 @@ policy (2 or 10). `MURPH_GAME_GROUPS_ENABLED` in `access.ts` gates group creatio
 and joining only: off unless `true` in production, on by default elsewhere.
 Persisted groups remain readable, settle and support deletion with admission off.
 
+Pair Prove it cases append a `challenged` event and reserve a lifecycle receipt
+under the existing game write lock. `game-challenge:<gameId>:<entryId>` owns
+replay, mailbox and delivery identity. The pure case projection in `rules.ts`
+is shared by budget, views, drain recovery and the final provider claim; the
+claim locks the game before rechecking an open case and its bound exact pair.
+An accused/day incomplete event with a greater event id permanently concedes
+the case, including after score restoration. Reads batch challenge rows across
+selected pair games; unique entry identities bound them by two players times
+two attempts times game length, and SQL returns only the latest concession id
+per case. Shared profile/task decryption and notice generation happen outside
+the transaction. The weekly game spec owns eligibility, wire fields, deadline
+semantics and the lifecycle-template-filter rollback floor.
+
 `http/capability.ts` reads `X-Murph-Game-Multiplayer: 1`; the command boundary,
 reads, public invite preview and media reads pass it to the existing service.
 The Web `/g/[token]` page, metadata and OG image are capable server renderers:

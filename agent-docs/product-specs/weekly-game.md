@@ -22,7 +22,7 @@ client is the Murph app.
 
 With `MURPH_GAME_REQUIRE_CURRENT_TERMS=true` (unset or anything else is off, and
 off changes nothing), the HTTP door also refuses creating, accepting,
-negotiating, posting, proposing a change and marking a prize done until the
+negotiating, posting, challenging a post, proposing a change and marking a prize done until the
 member's `launch.legal` grant recorded the published document versions, not
 just the minimum the rest of Murph accepts (`requireCurrentTermsFor` in
 `http/auth.ts`, `hasHostedConsentAtPublishedVersions` in `legal/consent.ts`). The refusal is `403 TERMS_REQUIRED`
@@ -513,6 +513,101 @@ this default without deleting other people's private contact choices.
   ended.
 - **What can't be posted.** Money stakes, clearly dangerous tasks or dares,
   slurs and explicit sexual words are refused with "This can't be posted."
+
+## Prove it
+
+In a live two-player game, a player can challenge the opponent's visible photo
+post. Both players must remain in the game, the game must have its bound shared
+chat, and canonical settlement must not yet be due. The target must be a current,
+non-withdrawn photo attempt on a game day that counts, not a self-reported
+incomplete day. The ordinary `visibleEntryIds` projection owns eligibility:
+locked, reported and blocked content cannot be challenged. Group games and
+non-photo artifacts are outside this feature.
+
+Each player has one Prove it per game. An open case or a case that stood spends
+it. Withdrawal or replacement voids the case and returns it. A later
+`day_marked_incomplete` event by the accused for the target day concedes the case
+and returns it permanently. The concession event's id must be greater than the
+challenge event's id; restoring the day changes score only, never the case or
+the returned budget. A restored day can have a new case on a new entry, while a
+retry against the original entry remains a no-op.
+
+The stored `deadlineAt` is the accepted event's `createdAt` plus twelve hours.
+It is the maximum answer window. A settled, void or canonically due game closes
+an unconceded case early as `stood`. Explaining a post in chat does not mutate
+the case or score. Only the accused can mark the day as not counting through
+the existing self-reported incomplete-day command. Murph never judges a photo.
+
+### App API
+
+`POST /api/game/v1/games/:id/challenges` accepts JSON `{ "entryId": string }`.
+The game id comes from the path and the challenger from authentication; client
+actor, deadline and command-key fields have no authority. It uses the same game
+access and optional current-terms gates as other writes. Success is HTTP 200
+with `{ "ok": true, "game": GameView | null }`, the ordinary command envelope.
+The game is the challenger's refreshed view; the nullable envelope also covers
+a game removed before the response read. No separate challenge object is returned.
+
+Errors use `{ "error": { "code": string, "message": string,
+"retryable": boolean } }` and the existing HTTP statuses. A spent budget returns
+HTTP 409 with code `CHALLENGE_USED`, message
+`You've used your Prove it for this game.`, and `retryable: false`.
+The current-terms refusal retains its existing `details` object.
+After access checks, replay of the same game/entry by the same actor succeeds
+before mutable eligibility or budget checks. Another actor cannot claim that
+identity. A retry never reserves a second notice or re-spends returned budget.
+
+The additive view fields are:
+
+- `GameView.canChallenge?: boolean`: current servers emit whether this viewer
+  has an unspent challenge in a live, bound, not-due pair. Entry eligibility is
+  checked separately; clients must also require the opponent's unlocked photo,
+  no `incomplete`, and no `challenge`.
+- `GameEntryView.challenge?: { status: "open" | "stood"; deadlineAt: string;
+  byYou: boolean }`: an ISO-8601 deadline and whether this viewer opened the
+  case. It appears on the visible entry for either player, including the
+  accused's `mine`. Void and conceded cases omit it. The existing incomplete
+  tag remains the concession display until score is restored.
+- `GameDayView.others[].postedAt?: string`: the server's `receivedAt` as an
+  ISO-8601 timestamp, now present on unlocked visible posts as well as locked
+  posts. Reported, hidden, absent and withdrawn posts still omit it.
+
+Older clients ignore the additive fields, and older responses may omit them.
+The separate iOS release owns the tap reveal, confirmation and case labels.
+Report and Block keep their existing access and presentation rules.
+
+### Chat notice and rollout
+
+Acceptance appends one `challenged` event and reserves one `game_challenge`
+lifecycle receipt in the same short database transaction. The event payload is
+`{ v: 1, entryId: string, deadlineAt: string }`, with the challenger in `actor`.
+`game-challenge:<gameId>:<entryId>` is the command key, lifecycle event identity,
+mailbox dedupe key and delivery idempotency key. The receipt stores the existing
+hashed lookup key and `sourceRef: <gameId>:<entryId>`. Event ids are used only for
+concession ordering, never notice identity. No migration is needed.
+
+The drain uses `require_send` and only the game's already-bound chat. It never
+discovers or creates a room for a case. One shared projection governs budget,
+view state, drain eligibility and final provider claim. A concession, retake,
+withdrawal, expiry or game end supersedes pending work; a changed binding or
+audience blocks dispatch. The claim locks the game before checking that the
+case remains open. Quiet rooms retain the existing game-notice exemption and
+repeated dispatch claims the same delivery only once.
+
+Instructions contain shared profile names, the target day's task, day number,
+server receipt time, deadline and the accused's time zone. They contain no media
+URLs or keys, private contact labels, or capture-to-post gap. The notice is brief
+and deadpan, uses names rather than pronouns, asks one short question, and names
+the option to mark the day as not counting. The situation can be funny; the
+person is never the joke. No shame, insults, laughing emoji, em dashes, invented
+evidence, verdicts, feature advertising or reminders.
+
+The lifecycle-template-filter release must land first and remains the rollback
+floor. It selects supported templates and non-null source refs before the drain
+batch limit, so an older compatible drain ignores new challenge receipts.
+Deploy this Web backend before the iOS build that calls it. Hosted-runtime
+schemas and tools are unchanged. This backend foundation does not yet expose a
+member-facing control; the complete app release owns its public changelog entry.
 
 ## Deferred
 
