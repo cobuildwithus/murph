@@ -182,8 +182,8 @@ async function authorizeRuntimeTx(input: ControlInput, tx: Prisma.TransactionCli
 function readBootstrapGame(gameId: string) { return getPrisma().game.findUnique({ where: { id: gameId }, include: { players: { select: { memberId: true, seat: true }, orderBy: { seat: "asc" }, take: 3 } } }); }
 function samePlayers(a: readonly { memberId: string | null }[], b: readonly { memberId: string | null }[]) { return isPairRoster(a) && isPairRoster(b) && a.every((player) => b.some((other) => other.memberId === player.memberId)); }
 function samePhones(a: readonly string[], b: readonly string[]) { return isPairRoster(a) && isPairRoster(b) && new Set(b).size === b.length && a.every((phone) => b.includes(phone)); }
-function bootstrapEventCurrent(game: { id: string; status: string; pendingChange: unknown; players: readonly { memberId: string | null }[] }, eventId: string): boolean {
-  if (!isPairRoster(game.players) || game.players.some(player => player.memberId === null) || !isGameOn(game)) return false;
+function bootstrapEventCurrent(game: { maxPlayers?: number; id: string; status: string; pendingChange: unknown; players: readonly { memberId: string | null }[] }, eventId: string): boolean {
+  if (game.maxPlayers === 10 || !isPairRoster(game.players) || game.players.some(player => player.memberId === null) || !isGameOn(game)) return false;
   if (eventId.startsWith(`game-change-cancelled:${game.id}:`)) return ["live", "negotiating"].includes(game.status);
   if (eventId === `game-started:${game.id}`) return game.status === "live";
   const proposal = parsePendingGameChange(game.pendingChange);

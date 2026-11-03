@@ -1,4 +1,4 @@
-import { isPairRoster } from "./roster";
+import { isPairRoster, isGameMemberSet } from "./roster";
 import type { HostedGameRecap } from "@murphai/hosted-execution/runtime-control";
 
 export type GameRecapEntry = { entryId: string; kind: string; playerName: string; text: string | null; visibleToBoth: boolean };
@@ -64,7 +64,7 @@ function validateQuoteBlock(where: string, block: RecapBlock, players: readonly 
   const text = quote?.text ?? "";
   const normalized = normalizeQuote(text);
   const said = chatMessages.some((message) => message.playerName === quote?.who && normalizeQuote(message.text).includes(normalized));
-  const wrote = [...entries.values()].some((entry) => entry.playerName === quote?.who && entry.text && normalizeQuote(entry.text).includes(normalized));
+  const wrote = [...entries.values()].some((entry) => entry.visibleToBoth && entry.playerName === quote?.who && entry.text && normalizeQuote(entry.text).includes(normalized));
   if (!text || (!said && !wrote)) errors.push(`${where}: quote isn't something ${quote?.who} said in the chat or posted. Copy it exactly.`);
   if (text.length > 140) errors.push(`${where}: quote over 140 characters; pick a shorter piece of what they said.`);
 }
@@ -152,10 +152,17 @@ function validateScoreLine(
   }
 }
 
-export function validateGameRecap(input: { recap: HostedGameRecap; players: readonly string[]; entries: readonly GameRecapEntry[]; chatMessages?: readonly GameRecapChatMessage[]; priorChatLines?: readonly string[]; result?: readonly GameRecapCanonicalScore[] }): string[] {
+export function validateGameRecap(input: { recap: HostedGameRecap; players: readonly string[]; entries: readonly GameRecapEntry[]; chatMessages?: readonly GameRecapChatMessage[]; priorChatLines?: readonly string[]; result?: readonly GameRecapCanonicalScore[]; group?: boolean }): string[] {
   const errors: string[] = [];
   const entries = new Map(input.entries.map((entry) => [entry.entryId, entry]));
   const pages = input.recap.pages;
+  if (input.group) {
+    const expected = input.result?.map(player => player.memberId) ?? [];
+    if (!input.recap.superlatives || !withValidGameSuperlatives(input.recap, expected).superlatives) errors.push("superlatives: include exactly one kind superlative per eligible player.");
+    const copy = JSON.stringify(input.recap);
+    if (/\b(missed|missing|slacker|lazy|failed|failure|no.show|didn.t post|did not post|behind everyone)\b/iu.test(copy)) errors.push("Group recaps must not shame or single out missing people.");
+    if (input.recap.scoreLine) errors.push("scoreLine: omit for groups; the result card owns standings and prize parties.");
+  }
   if (pages.length < 3 || pages.length > 7) errors.push(`pages: ${pages.length}; write 3 to 7.`);
   pages.forEach((page, pageIndex) => {
     const number = pageIndex + 1;
@@ -186,7 +193,8 @@ export function gameRecapToolResult(errors: readonly string[]): string {
 /** Optional copy must never prevent the story from being saved or read. */
 export function withValidGameSuperlatives(recap: HostedGameRecap, memberIds: readonly string[]): HostedGameRecap {
   const { superlatives, ...story } = recap;
-  return superlatives?.length === memberIds.length && isPairRoster(memberIds)
+  return superlatives?.length === memberIds.length && isGameMemberSet(memberIds)
+    && new Set(superlatives.map(item => item.memberId)).size === memberIds.length
     && superlatives.every((item) => memberIds.includes(item.memberId))
     ? { ...story, superlatives } : story;
 }

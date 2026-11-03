@@ -208,3 +208,20 @@ it("composes shared-evidence superlatives guidance without requiring legacy writ
   const instructions = buildGameRecapInstructions([]);
   for (const phrase of ["tool supports superlatives", "both memberIds", "exactly one {memberId, title, line} per player", "2–6 words", "no trailing period", "differs from the other title", "text both players can see", "bodies or weight"]) expect(instructions).toContain(phrase);
 });
+
+
+it("keeps group kickoff and recap distinct from pair consent, reminders and lore", () => {
+  const game = hostedGameChatStateSchema.parse({ games: [{ id: "game_group", maxPlayers: 10, status: "live", lengthDays: 7, startsOn: null,
+    players: [0, 1].map(seat => ({ memberId: `player_${seat}`, seat, firstName: `Alex (${seat + 1})`, timeZone: "UTC", dayOne: "2030-03-06" })),
+    terms: { n: 1, fromDay: 0, defaultTask: "Walk", tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Walk" }], schedule: { count: 5 }, stakes: [] },
+    pendingChange: null, changeControls: { canStartNow: false, canEdit: false, canEditSchedule: false, canEditStartDate: false, editableFromDay: null },
+  }] }).games[0];
+  const kickoff = buildGameKickoffInstructions({ kind: "started", game });
+  expect(kickoff).toContain("Only seated players have accepted");
+  expect(kickoff).not.toContain("Both players have agreed");
+  expect(kickoff).not.toContain("Briefly offer reminders");
+  expect(gameLiveLoreGuidanceForState({ games: [game] })).toBeUndefined();
+  const recap = buildGameRecapInstructions([], undefined, true);
+  expect(recap).toContain("one kind superlative");
+  expect(recap).toContain("Never shame");
+});

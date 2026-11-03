@@ -648,3 +648,12 @@ the saved reminder model override, actual queued delivery, and one archive patch
 optimistic concurrency, and cancellation without a model or delivery provider.
 
 Research scout and Personal Patterns are retired managed automations. Their immutable IDs remain in the retirement set so maintenance archives existing active or paused records and stale claimed occurrences skip before provider work. Member-authored jobs with matching slugs remain member-owned. Historical wiki pages and usage rows are not deleted. Deployments must drain old in-flight scout attempts and pending outbound deliveries before removing the old runner/Exa boundary; new runners suppress stale canonical occurrences even with an older Web.
+
+Group game tools consume the capable hosted-execution contract and choose group
+instructions from immutable `maxPlayers: 10`, including a two-person turnout.
+Only the starter edits terms before Day 1; group instructions prohibit change
+requests, Start now, person-to-person nudges and missed-person shaming. Stable
+numbered first names disambiguate people. Shared recaps require one kind
+superlative per eligible person and exclude private lore. The focused real-Codex
+journey `group game addressed acceptance with duplicate first names` exercises
+production prompt builders, read_game and canonical approve arguments.

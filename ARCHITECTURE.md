@@ -5860,9 +5860,44 @@ experience. The postdeploy contract migration drops `live_roster_key` after the
 function drain; this derived-pair Web code is then the rollback floor. No data
 backfill or new state owner is needed.
 
+### Exact audience group chat
+
+Group chat reuses the pair membership, access, tool, lifecycle, delivery and recap
+owners. Creation prepares an exact provider roster using transient handles before
+locks, then commits the proven existing room and existing invite receipt, or
+returns an explicit response-only `composer: { murphPhoneNumber }`. Composer
+retries repeat the handoff without starting discovery or bootstrap. Group games
+never produce automatic bootstrap work. Pair bootstrap and #4458 rematches remain.
+
+Ordinary Linq inbound preparation recognizes a single canonical invite URL and
+proves complete provider handles against rotating keyed audience candidates.
+Verified inbound admission associates that proof before room access is evaluated;
+it rechecks sender, local membership, verified contact ownership, blocks and
+consent under the game lock. Replays retain the first room. Association does not
+join anyone. Group approval uses ordinary join with current terms, GameProfile
+and current-room authority; bearer invitations remain app-only.
+
+Shared reads, recap material and final lifecycle egress fail closed for changed
+rosters, departures, outsiders, blocks or revoked consent. Egress verifies the
+provider roster and exact delivery target again; a stored binding is insufficient.
+Group recaps exclude private labels and lore and are withheld if any report makes
+shared content unsafe. Duplicate first names receive stable numbered labels.
+Every eligible person gets one kind superlative; missed-person shaming and group
+scoreLine copy are rejected. The existing recap-message link renderer is already
+independent of roster size.
+
+New runners opt into group responses through the signed `gameMultiplayer=1`
+query parameter on the existing tool route. Unmarked runners retain pair-only
+responses and writes, including two-person games whose immutable maxPlayers is
+10. New runners accept old pair responses; old Web ignores the query parameter.
+Deploy Web first, then the Cloudflare runner bundle; old warm runners remain
+pair-only. Keep group admission off. The engine selects group guidance from
+maxPlayers, permits only starter edit_terms before Day 1, and never offers Start
+now, change requests or person-to-person nudging for groups.
+
 ### Weekly game chat changes
 
-Chat setup extends the existing `update_game` operation union with `create`.
+For pairs, chat setup extends the existing `update_game` operation union with `create`.
 `runGameChatUpdate` maps stable member-keyed tasks onto creator/invitee seats,
 requires both existing GameProfiles, then calls the ordinary `createGame`
 command with trusted exact-pair context. It creates both seats in `negotiating`,
@@ -5877,7 +5912,8 @@ retries do not consume another slot. No new stored state or native wire field.
 Signed message authority and exact provider membership are checked before and
 inside the write. Exact-pair reads may return no games; create is the only write
 allowed before a game exists. Task/stake moderation and app rule validation remain
-shared. Chat continues to bypass the HTTP current-terms gate. A native poll can
+shared. Pair chat retains its existing legal behavior; group chat applies the
+same current-terms check as the app. A native poll can
 settle a shared choice, never consent; the game tool owns the short setup/poll
 guidance and the generic challenge fallback explicitly defers to these tools.
 Only brief setup/poll triggers enter the initial tool catalog. The engine appends
@@ -5885,12 +5921,13 @@ the full setup guidance to each successful accepted-input read_game result,
 alongside GAME_SELECTION_GUIDANCE when several games are active. Recap reads
 remain isolated and retain their own memberId-keyed superlatives contract.
 
-New reads request `includePlayers: true` and receive two profile references plus
-isSender for task ownership. Existing membership model results strip identifiers
+Reads request `includePlayers: true` and receive two profile references for pairs
+or up to ten for capable groups, plus isSender for task ownership. Existing membership model results strip identifiers
 and room memory is not an identity roster. Unmarked game responses retain their
 old strict-reader shape. Deploy Web first; remove this transport marker only
 after old readers/warm runtimes drain, as specified in weekly-game deployment
-notes. Old runners never send create. The iOS GameView remains unchanged.
+notes. Unmarked runners stay pair-only; group readers use the capability boundary
+above. Pair GameView remains unchanged.
 
 Exact-pair discovery also includes unexpired addressed app rematches, with the
 creator seated and the known invitee unseated. Authority compares their combined

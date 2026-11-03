@@ -32,7 +32,8 @@ id, title, link and current version, which is what the companion consent route
 the profile, and withdrawing your own post, invite or change stay open. The app
 shows Murph's Terms step, records the grant, and sends the write again. Clients
 that predate the code see an ordinary refusal, so turn it on only once a build
-that handles it is out. Game moves made in Murph's chat don't pass this door.
+that handles it is out. Pair moves made in Murph's chat retain that behavior. Group chat mutations
+apply the same current-terms check before calling the canonical command.
 
 ## Group lifecycle staging
 
@@ -44,7 +45,16 @@ is unchanged. Upgraded HTTP clients send `X-Murph-Game-Multiplayer: 1`.
 Without it, groups are excluded before Home, wallet and history limits, and
 individual group reads, mutations and invite previews return not found.
 The capability changes rendering, never legal, profile or member authorization.
-Exact-group chat, composer handoff, group recaps and hosted tools remain deferred.
+Exact-group chat, composer handoff, group recaps and hosted tools are implemented
+behind the same dark admission switch. See `ARCHITECTURE.md` § Exact audience
+group chat for the preparation/binding/egress boundary. The create response
+returns `composer: { murphPhoneNumber }` only when preparation selects that path;
+the app supplies the selected people and invite link to Messages.
+
+Runner compatibility is consumer-first: deploy Web, then the Cloudflare runner.
+The new runner opts in with signed `gameMultiplayer=1`; old runners remain
+pair-only against new Web, and new runners retain pair behavior against old Web.
+Do not enable production group admission as part of this deployment.
 
 A group addresses one to nine recipients and admits its starter immediately.
 A second acceptance activates it; until then it waits without expiry. Addressed

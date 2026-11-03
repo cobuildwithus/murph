@@ -205,3 +205,21 @@ it.skipIf(process.env.MURPH_VERIFY_GAME_SETUP_SKEW !== "1")("fences the setup ro
     expect(() => parseHostedRuntimeGroupToolRequest({ action: "update_game", origin, update: { operation: "approve", gameId: "game_setup", proposalId: "proposal_synthetic", expectedTermsVersion: 1 } })).toThrow();
   } finally { await rm(target, { force: true }); }
 });
+
+// Historical objects are an explicit local proof; shallow routine CI skips this lane.
+it.skipIf(process.env.MURPH_VERIFY_GAME_GROUP_SKEW !== "1")("accepts old Web pair responses and keeps group responses away from the released strict runner", async () => {
+  const root = fileURLToPath(new URL("../../../", import.meta.url));
+  const target = new URL(`../src/.game-pr5-legacy-${randomUUID()}.ts`, import.meta.url);
+  await writeFile(target, execFileSync("git", ["show", "3049da7b47522b748834c896b24f66b1bfeef77c:packages/hosted-execution/src/game-tools.ts"], { cwd: root, encoding: "utf8" }), { flag: "wx" });
+  try {
+    const legacy = await import(target.href) as typeof import("../src/game-tools.ts");
+    const pair = response(game);
+    expect(legacy.hostedGameToolResponseSchema.parse(pair)).toEqual(pair);
+    expect(hostedGameToolResponseSchema.parse(pair)).toEqual(pair);
+    const read = { action: "read_game", origin, includePlayers: true };
+    expect(legacy.hostedGameToolRequestSchema.parse(read)).toEqual(read);
+    const group = response({ ...game, maxPlayers: 10, players: Array.from({ length: 10 }, (_, seat) => ({ ...game.players[0], memberId: `person_${seat}`, seat })) });
+    expect(legacy.hostedGameToolResponseSchema.safeParse(group).success).toBe(false);
+    expect(hostedGameToolResponseSchema.parse(group)).toEqual(group);
+  } finally { await rm(target, { force: true }); }
+});

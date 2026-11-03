@@ -68,7 +68,7 @@ describe("game chat tool authority", () => {
     const next = await handleGameChatTool({ ...read, request: { ...read.request, includePlayers: true } });
     expect(next.result).toHaveProperty("state.players", players.map(p => ({ ...p, isSender: p.memberId === actor })));
     expect(m.profiles).toHaveBeenCalledExactlyOnceWith([actor, "other_synthetic"]);
-    expect(m.read).toHaveBeenLastCalledWith(group, [actor, "other_synthetic"], actor);
+    expect(m.read).toHaveBeenLastCalledWith(group, [actor, "other_synthetic"], actor, false);
   });
   it("reads a scheduled exact pair neutrally without sender or photo authority", async () => {
     const players = [{ memberId: actor, firstName: "Ava", timeZone: "UTC" }, { memberId: "other_synthetic", firstName: "Sam", timeZone: "UTC" }];
@@ -76,7 +76,7 @@ describe("game chat tool authority", () => {
     const result = await handleGameChatTool({ ...read, request: { action: "read_game", origin: { kind: "automation_occurrence", automationId: "automation_game_read", occurrenceAt: "2030-04-01T20:00:00Z" }, includePlayers: true } });
     expect(result).toEqual({ action: "read_game", result: { status: "ok", state: { games: [], players: players.map(p => ({ ...p, isSender: false })) } } });
     expect(result.result).not.toHaveProperty("state.photoCheckIn");
-    expect(m.read).toHaveBeenCalledExactlyOnceWith(group, [actor, "other_synthetic"], undefined);
+    expect(m.read).toHaveBeenCalledExactlyOnceWith(group, [actor, "other_synthetic"], undefined, false);
     expect(m.runtime).toHaveBeenCalledExactlyOnceWith(expect.anything(), group, null);
     expect(m.access).toHaveBeenCalledExactlyOnceWith(group, expect.anything());
     expect(m.wake).not.toHaveBeenCalled(); expect(m.sender).not.toHaveBeenCalled(); expect(m.run).not.toHaveBeenCalled(); expect(m.photo).not.toHaveBeenCalled();
@@ -189,7 +189,7 @@ describe("game chat tool authority", () => {
   });
   it("passes the provider-proven pair to the shared projection", async () => {
     await handleGameChatTool(read);
-    expect(m.read).toHaveBeenCalledExactlyOnceWith(group, [actor, "other_synthetic"], actor);
+    expect(m.read).toHaveBeenCalledExactlyOnceWith(group, [actor, "other_synthetic"], actor, false);
   });
   it("returns lore guidance only when this room's shared game is live", async () => {
     const game = { id: "game_synthetic", status: "live" as const, startsOn: null, lengthDays: 7,

@@ -135,3 +135,16 @@ Browser-vault replica contracts use the `browser-vault` entrypoint. Retired
 
 Retired member ChatGPT-linking requests remain only in retired mailbox-kind
 metadata. They have no executable wake, callback, or callback validator.
+
+## Group game deploy compatibility
+
+The game consumer accepts 2–10 players, optional `maxPlayers: 10`, group ticket
+seat sets and `edit_terms`. New runners request these through signed
+`gameMultiplayer=1` on the existing groups/tool URL, leaving request JSON unchanged.
+Web hides groups from unmarked readers before collection limits and rejects their
+group writes; existing strict pair readers keep working. Old Web ignores the
+query marker and returns pair responses that new consumers still accept.
+Deploy Web first, then deploy the Cloudflare runner bundle. Warm old runners stay
+pair-only; group admission remains off until separately enabled. Pair bootstrap
+control remains for existing receipts only; group creation uses an existing exact
+room or an explicit composer handoff.

@@ -63,6 +63,7 @@ export const POST = withJsonError(async (request: Request) => {
   );
   const executeTool = async () => filterHostedRuntimeGroupToolResponseProjectionScopes(
     await handleHostedRuntimeConversationTool({
+      gameMultiplayer: new URL(request.url).searchParams.get("gameMultiplayer") === "1",
       includeMembershipAvailability:
         membershipInventoryProtocol
           === HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE,

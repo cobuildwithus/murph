@@ -2,7 +2,8 @@ import * as z from "@murphai/contracts/zod-runtime";
 
 const identity = z.string().min(1).max(256);
 const source = { action: z.literal("game_chat_bootstrap"), gameId: identity, eventId: identity };
-/** Host-only effect control; never a model tool or a caller-selected audience. */
+/** Legacy pair bootstrap only; groups use an explicit composer handoff.
+ * Host-only effect control; never a model tool or a caller-selected audience. */
 export const hostedGameChatBootstrapRequestSchema = z.discriminatedUnion("operation", [
   z.object({ ...source, operation: z.literal("recover") }).strict(),
   z.object({ ...source, operation: z.literal("send"), text: z.string().trim().min(1).max(10_000) }).strict(),

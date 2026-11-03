@@ -27,16 +27,26 @@ export async function readGameChatFundingRooms(input: {
       FROM (
         SELECT participant_member_id, last_seen_at FROM hosted_thread_container_participant
         WHERE container_member_id = room.id AND removed_at IS NULL
-        ORDER BY participant_member_id LIMIT 3
+        ORDER BY participant_member_id LIMIT 11
       ) roster
-      HAVING count(*) = 2 AND bool_and(last_seen_at >= ${cutoff})
+      HAVING count(*) BETWEEN 2 AND 10 AND bool_and(last_seen_at >= ${cutoff})
     ) pair ON TRUE
     JOIN LATERAL (
       SELECT COALESCE(
+        (SELECT game.id FROM game WHERE game.max_players = 10
+          AND game.chat_container_member_id = room.id
+          AND (game.status IN ('invited', 'live') OR (game.status = 'settled' AND game.settled_at > ${settledCutoff} AND game.settled_at <= ${input.now}))
+          AND game.created_by = ANY(pair.player_ids)
+              AND (SELECT count(*) FROM game_invitee invited WHERE invited.game_id = game.id) = cardinality(pair.player_ids) - 1
+              AND NOT EXISTS (SELECT 1 FROM game_invitee invited WHERE invited.game_id = game.id
+                AND (invited.member_id IS NULL OR NOT (invited.member_id = ANY(pair.player_ids))))
+              AND NOT EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = game.id
+                AND (p.left_at IS NOT NULL OR p.member_id IS NULL OR NOT (p.member_id = ANY(pair.player_ids))))
+          ORDER BY game.created_at DESC, game.id LIMIT 1),
         -- An addressed rematch temporarily funds only its inherited primary
         -- room while the one bound-room notice is still waiting.
         (SELECT rematch.id FROM game rematch
-          WHERE rematch.chat_container_member_id = room.id AND rematch.status = 'invited'
+          WHERE rematch.max_players = 2 AND rematch.chat_container_member_id = room.id AND rematch.status = 'invited'
             AND (rematch.invite_expires_at IS NULL OR rematch.invite_expires_at > ${input.now})
             AND rematch.created_by = ANY(pair.player_ids)
             AND EXISTS (SELECT 1 FROM game_invitee invited WHERE invited.game_id = rematch.id AND invited.member_id = ANY(pair.player_ids) AND invited.member_id <> rematch.created_by)
@@ -50,7 +60,7 @@ export async function readGameChatFundingRooms(input: {
         -- primary room even when several games are live or still unbound.
         (SELECT active.id FROM game_player first_player
           JOIN game active ON active.id = first_player.game_id
-          WHERE first_player.member_id = pair.player_ids[1]
+          WHERE active.max_players = 2 AND first_player.member_id = pair.player_ids[1]
             AND active.chat_container_member_id IS NOT NULL
             AND (active.status = 'live' OR (active.status = 'negotiating'
               AND (active.invite_expires_at IS NULL OR active.invite_expires_at > ${input.now})))
@@ -59,7 +69,7 @@ export async function readGameChatFundingRooms(input: {
           ORDER BY active.created_at, active.id LIMIT 1),
         (SELECT recent.id FROM game_player first_player
           JOIN game recent ON recent.id = first_player.game_id
-          WHERE first_player.member_id = pair.player_ids[1]
+          WHERE recent.max_players = 2 AND first_player.member_id = pair.player_ids[1]
             AND recent.status = 'settled' AND recent.settled_at > ${settledCutoff} AND recent.settled_at <= ${input.now}
             AND EXISTS (SELECT 1 FROM game_player second_player
               WHERE second_player.game_id = recent.id AND second_player.member_id = pair.player_ids[2])
@@ -121,7 +131,12 @@ export async function readGameChatFundingRooms(input: {
             AND (game.invite_expires_at IS NULL OR game.invite_expires_at > ${input.now})) OR
           (game.status = 'settled' AND game.settled_at > ${settledCutoff} AND game.settled_at <= ${input.now}) OR
           (game.status = 'void' AND game.chat_container_member_id = room.id))
-        AND ((game.status = 'invited'
+        AND ((game.max_players = 10 AND game.created_by = ANY(pair.player_ids)
+              AND (SELECT count(*) FROM game_invitee invited WHERE invited.game_id = game.id) = cardinality(pair.player_ids) - 1
+              AND NOT EXISTS (SELECT 1 FROM game_invitee invited WHERE invited.game_id = game.id
+                AND (invited.member_id IS NULL OR NOT (invited.member_id = ANY(pair.player_ids))))
+              AND NOT EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = game.id
+                AND (p.left_at IS NOT NULL OR p.member_id IS NULL OR NOT (p.member_id = ANY(pair.player_ids))))) OR (game.max_players = 2 AND cardinality(pair.player_ids) = 2 AND ((game.status = 'invited'
               AND game.created_by = ANY(pair.player_ids)
               AND EXISTS (SELECT 1 FROM game_invitee invited WHERE invited.game_id = game.id AND invited.member_id = ANY(pair.player_ids) AND invited.member_id <> game.created_by))
           OR (game.status <> 'invited'
@@ -129,6 +144,9 @@ export async function readGameChatFundingRooms(input: {
               AND EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = game.id AND p.seat = 1)
               AND NOT EXISTS (SELECT 1 FROM game_player p
                 WHERE p.game_id = game.id AND (p.seat NOT IN (0, 1) OR NOT (p.member_id = ANY(pair.player_ids))))))
+        ))
+        AND NOT EXISTS (SELECT 1 FROM game_block blocked
+          WHERE blocked.blocker_member_id = ANY(pair.player_ids) AND blocked.blocked_member_id = ANY(pair.player_ids))
         AND ${gameOnSql("game")}
         AND NOT EXISTS (
           SELECT 1 FROM hosted_member person

@@ -1839,6 +1839,18 @@ existing accounting and provider access checks.
 
 ## Weekly game chat authority
 
+Group rooms require complete provider handles matching the original keyed
+addressed audience (2–10 people), plus local membership and current route
+ownership. Composer association accepts only a canonical invite URL from ordinary
+verified inbound admission and revalidates verified contact ownership in the
+transaction. It does not join invitees or accept bearer-only room members.
+Groups have no automatic bootstrap producer and cannot silently change rooms.
+Before generated shared material and lifecycle egress, check departures, outsiders,
+blocks and revoked consent; final egress also compares the provider thread target.
+Any group report withholds the shared recap, including media and quotes. Private
+labels and prior private/lore context never enter group recap instructions.
+
+
 Game proposals are structural metadata under the canonical game lock. The
 initiating signed-in player agrees by proposing; only the other identified player
 may approve or decline, and only the proposer may cancel. Chat tools resolve

@@ -7,13 +7,31 @@ import { buildHostedMemberPhoneIdentityFields } from "@/src/lib/hosted-onboardin
 import { createHostedEmailLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { areGameGroupsEnabled } from "@/src/lib/game/access";
 import { gameAudienceKeys } from "@/src/lib/game/audience";
-import { runGameCommand, readGame, readHome, authorizeMediaRead } from "@/src/lib/game/service";
+import { runGameCommand, readGame, readHome, readGameChatState, runGameChatUpdate, readGameRecapMaterial, authorizeMediaRead } from "@/src/lib/game/service";
 import { openGameTexts } from "@/src/lib/game/crypto";
 import { parseStoredResult, canRedeemGroupTicket } from "@/src/lib/game/rules";
 import { dayStartInstant, GAME_GRACE_MS } from "@/src/lib/game/time";
 import { prepareGameAccountDeletion, applyGameAccountDeletionTx } from "@/src/lib/game/account-deletion";
 import type { GameCommand, GameTerms } from "@/src/lib/game/command";
 
+const chatProof = vi.hoisted(() => ({ rooms: new Map<string, string[]>(), sender: "", wake: null as unknown }));
+vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", async importOriginal => ({
+  ...await importOriginal<object>(),
+  readHostedThreadContainerLinqRouteAuthorities: async ({ containerMemberIds }: { containerMemberIds: string[] }) => ({ authorities: new Map(containerMemberIds.filter(id => chatProof.rooms.has(id)).map(id => [id, { channel: "linq", threadId: id, containerMemberId: id, accountLookupKey: "synthetic-line" }])) }),
+}));
+vi.mock("@/src/lib/hosted-onboarding/linq-client", async importOriginal => ({
+  ...await importOriginal<object>(), getHostedLinqChatSummary: async ({ chatId }: { chatId: string }) => ({ isGroup: true, handlesComplete: true,
+    handles: [{ handle: "+15555550100", isMe: true, status: "active" }, ...(chatProof.rooms.get(chatId) ?? []).map(handle => ({ handle, isMe: false, status: "active" }))] }),
+}));
+vi.mock("@/src/lib/game/chat-lifecycle", () => ({ deliverGameChatLifecycle: vi.fn() }));
+vi.mock("@/src/lib/hosted-execution/runtime-owner", () => ({ requireHostedRuntimeCallbackTx: async () => {} }));
+vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({ requireHostedRuntimeActiveAccessForUpdateTx: async () => {} }));
+vi.mock("@/src/lib/hosted-routing/thread-route-store", async importOriginal => ({ ...await importOriginal<object>(), assertHostedThreadRouteEgressAuthority: async () => {} }));
+vi.mock("@/src/lib/hosted-groups/group-message-sender", () => ({ resolveHostedGroupMessageSenderMemberId: async () => chatProof.sender }));
+vi.mock("@/src/lib/hosted-mailbox/store", async importOriginal => ({ ...await importOriginal<object>(), readHostedMailboxConversationWakeByAssistantInputId: async () => chatProof.wake }));
+vi.mock("@/src/lib/hosted-onboarding/linq-line-store", async importOriginal => ({
+  ...await importOriginal<object>(), readHostedLinqIncomingLineState: async () => ({ kind: "assignable" }), listHostedLinqHealthyProactiveLines: async () => [{ phoneNumber: "+15555550100" }],
+}));
 // Real roots and sealing for the crypto case; only KMS is the local provider.
 vi.mock("@/src/lib/hosted-crypto/env", async () => {
   const { generateKeyPairSync } = await import("node:crypto");
@@ -87,6 +105,7 @@ afterAll(async () => {
   // Delete the large synthetic entry fixture in one set before roster cascades.
   await db.gameEntry.deleteMany({ where: { memberId: { in: ids } } });
   await db.game.deleteMany({ where: { wordsOwnerMemberId: { in: ids } } });
+  await db.hostedThreadContainer.deleteMany({ where: { memberId: { in: ids } } });
   await db.hostedMember.deleteMany({ where: { id: { in: ids } } });
 });
 
@@ -800,5 +819,142 @@ describe.skipIf(!enabled)("maximum-cardinality group projections", () => {
     await measure("history", async () => withHistoryPhotoDeliveries(await readHistory(viewer.id, true), viewer.id));
     const { writeFile } = await import("node:fs/promises");
     await writeFile(".tmp-pr4-load.json", JSON.stringify(metrics, null, 2));
+  });
+});
+
+
+async function exactRoom(people: Person[]) {
+  const room = `room_${randomUUID()}`;
+  ids.push(room);
+  await db.hostedMember.create({ data: { id: room } });
+  await db.hostedThreadContainer.create({ data: { memberId: room, ownerMemberId: people[0].id,
+    participants: { create: people.map(person => ({ participantMemberId: person.id, handleLookupKey: createHostedEmailLookupKey(person.email)!, firstSeenAt: new Date(), lastSeenAt: new Date() })) } } });
+  await db.hostedThreadRoute.create({ data: { channel: "linq", containerMemberId: room, threadLookupKey: `thread_${room}`, threadIdentityLookupKey: `thread_${room}` } });
+  chatProof.rooms.set(room, people.map(person => person.email));
+  return room;
+}
+
+describe.skipIf(!enabled)("exact group chat and composer persistence", () => {
+  it("selects an exact room before create, keeps several games there, and disambiguates names", async () => {
+    const people = await Promise.all([person(), person(), person()]);
+    const room = await exactRoom(people);
+    const first = await create(people[0], people.slice(1));
+    const second = await create(people[0], people.slice(1));
+    expect((await gameRow(first.id)).chatContainerMemberId).toBe(room);
+    expect(await db.hostedLinqDelivery.count({ where: { sourceRef: { in: [first.id, second.id] }, template: "game_rematch" } })).toBe(2);
+    const state = await readGameChatState(room, people.map(p => p.id), people[0].id);
+    const { hostedGameChatStateSchema } = await import("@murphai/hosted-execution/runtime-control");
+    expect(hostedGameChatStateSchema.parse(state)).toEqual(state);
+    expect(state.games[0].terms.tasks).toHaveLength(3);
+    expect(state.games[0].invitees).toHaveLength(2);
+    expect(state.games[0].terms.defaultTask).toBe("Take a walk");
+    expect(state.games.map(g => g.id).sort()).toEqual([first.id, second.id].sort());
+    expect((await readGameChatState(room, people.map(p => p.id), people[0].id, false)).games).toEqual([]);
+    const { readGameChatProfiles } = await import("@/src/lib/game/service");
+    expect(new Set((await readGameChatProfiles(people.map(p => p.id))).map(p => p.firstName)).size).toBe(3);
+    const { readGameChatFundingRooms } = await import("@/src/lib/game/chat-access");
+    expect((await readGameChatFundingRooms({ memberIds: [room], now: new Date(), prisma: db })).get(room)).toBe(room);
+    const joinInput = { actorMemberId: people[1].id, multiplayer: true, chatContainerMemberId: room, chatPlayerMemberIds: people.map(p => p.id), now: createdAt,
+      update: { operation: "approve" as const, gameId: first.id, expectedTermsVersion: 1 } };
+    vi.stubEnv("MURPH_GAME_REQUIRE_CURRENT_TERMS", "true");
+    expect(await runGameChatUpdate(joinInput)).toMatchObject({ ok: false, error: { code: "TERMS_REQUIRED" } });
+    vi.stubEnv("MURPH_GAME_REQUIRE_CURRENT_TERMS", "false");
+    await db.gameProfile.delete({ where: { memberId: people[1].id } });
+    expect(await runGameChatUpdate(joinInput)).toMatchObject({ ok: false, error: { code: "PROFILE_REQUIRED" } });
+    await ok(people[1].id, { type: "setProfile", firstName: "Player", timeZone: "UTC" });
+    expect(await runGameChatUpdate({ actorMemberId: people[1].id, multiplayer: true, chatContainerMemberId: room, chatPlayerMemberIds: people.map(p => p.id), now: createdAt,
+      update: { operation: "approve", gameId: first.id, expectedTermsVersion: 1 } })).toMatchObject({ ok: true });
+    expect((await gameRow(first.id)).status).toBe("live");
+    await db.gameBlock.create({ data: { blockerMemberId: people[1].id, blockedMemberId: people[2].id } });
+    expect((await readGameChatState(room, people.map(p => p.id))).games).toEqual([]);
+    expect((await readGameChatFundingRooms({ memberIds: [room], now: new Date(), prisma: db })).size).toBe(0);
+  });
+
+  it("maps starter edits to original invitee seats and preserves the default task", async () => {
+    const people = await Promise.all([person(), person(), person()]);
+    const room = await exactRoom(people);
+    const game = { id: randomUUID() };
+    expect(await runGameChatUpdate({ actorMemberId: people[0].id, multiplayer: true, chatContainerMemberId: room, chatPlayerMemberIds: people.map(p => p.id), now: createdAt,
+      update: { operation: "create", gameId: game.id, terms: { lengthDays: 3, tasks: people.map(p => ({ memberId: p.id, text: "Take a walk" })), schedule: { count: 3 }, stakes: [{ kind: "prize", item: "Choose lunch" }] } } })).toMatchObject({ ok: true });
+    expect((await gameRow(game.id)).players).toHaveLength(1);
+    const input = { actorMemberId: people[1].id, multiplayer: true, chatContainerMemberId: room, chatPlayerMemberIds: people.map(p => p.id), now: createdAt,
+      update: { operation: "edit_terms" as const, gameId: game.id, expectedTermsVersion: 1,
+        terms: { defaultTask: "Take a walk", tasks: people.map((p, index) => ({ memberId: p.id, text: index === 2 ? "Stretch" : "Take a walk" })), schedule: { count: 2 }, stakes: [{ kind: "prize" as const, item: "Choose lunch" }] } } };
+    expect(await runGameChatUpdate(input)).toMatchObject({ ok: false });
+    expect(await runGameChatUpdate({ ...input, actorMemberId: people[0].id })).toMatchObject({ ok: true });
+    const shared = await readGameChatState(room, people.map(p => p.id));
+    expect(shared.games[0].lengthDays).toBe(3);
+    expect(shared.games[0].terms).toMatchObject({ n: 2, defaultTask: "Take a walk", tasks: [{ seat: 0, text: "Take a walk" }, { seat: 1, text: "Take a walk" }, { seat: 2, text: "Stretch" }] });
+  });
+
+  it("keeps a two-person group rematch on group policy in chat", async () => {
+    const people = await Promise.all([person(), person()]);
+    const room = await exactRoom(people);
+    const previous = await create(people[0], people.slice(1));
+    await ok(people[1].id, join(previous.token)); await settle(previous.id, people[0].id);
+    const gameId = randomUUID();
+    expect(await runGameChatUpdate({ actorMemberId: people[0].id, multiplayer: true, chatContainerMemberId: room, chatPlayerMemberIds: people.map(p => p.id), now: createdAt,
+      update: { operation: "create", gameId, previousGameId: previous.id, terms: { tasks: people.map(p => ({ memberId: p.id, text: "Take a walk" })), schedule: { count: 3 }, stakes: [{ kind: "prize", item: "Choose lunch" }] } } })).toMatchObject({ ok: true });
+    expect(await gameRow(gameId)).toMatchObject({ maxPlayers: 10, previousGameId: previous.id, chatContainerMemberId: room });
+  });
+
+  it("withholds all shared recap material after a report or block", async () => {
+    const people = await Promise.all([person(), person(), person()]);
+    const room = await exactRoom(people);
+    const game = await create(people[0], people.slice(1));
+    await ok(people[1].id, join(game.token)); await ok(people[2].id, join(game.token));
+    const post = await entry(game.id, people[1].id, 0);
+    await settle(game.id, people[0].id);
+    const members = people.map(p => p.id);
+    const { hostedGameChatStateSchema } = await import("@murphai/hosted-execution/runtime-control");
+    const settled = await readGameChatState(room, members);
+    expect(hostedGameChatStateSchema.parse(settled)).toEqual(settled);
+    const shared = await readGameRecapMaterial(game.id, room, members);
+    expect(shared?.validation.result).toHaveLength(3);
+    expect(new Set(shared?.players).size).toBe(3);
+    expect(JSON.stringify(shared?.game)).not.toContain('"missed"');
+    await ok(people[0].id, { type: "report", gameId: game.id, reportId: randomUUID(), about: "post", reason: "other", entryId: post.id });
+    expect(await readGameRecapMaterial(game.id, room, members)).toBeNull();
+    await db.gameReport.deleteMany({ where: { gameId: game.id } });
+    await db.gameBlock.create({ data: { blockerMemberId: people[0].id, blockedMemberId: people[1].id } });
+    expect(await readGameRecapMaterial(game.id, room, members)).toBeNull();
+  });
+
+  it("returns an explicit composer on replay, binds the accepted invite once, and never retargets", async () => {
+    const people = await Promise.all([person(), person(), person()]);
+    const command: Extract<GameCommand, { type: "createGame" }> = { type: "createGame", gameId: randomUUID(), maxPlayers: 10, groupWord: "Crew", terms,
+      invitees: people.slice(1).map((p, i) => ({ seat: i + 1, recipient: { kind: "email", value: p.email }, firstName: "Private label" })) };
+    const [first, concurrent] = await Promise.all([ok(people[0].id, command), ok(people[0].id, command)]);
+    expect(concurrent).toMatchObject({ composer: first!.composer, inviteToken: first!.inviteToken });
+    expect(first).toMatchObject({ composer: { murphPhoneNumber: "+15555550100" } });
+    expect(await ok(people[0].id, command)).toMatchObject({ composer: first!.composer, inviteToken: first!.inviteToken });
+    expect(await db.hostedLinqDelivery.count({ where: { sourceRef: command.gameId } })).toBe(0);
+    const room = await exactRoom(people);
+    // Ordinary inbound association precedes runtime admission, including readable key rotation.
+    vi.stubEnv("HOSTED_CONTACT_PRIVACY_KEYS", `v1:${Buffer.alloc(32, 7).toString("base64url")},v2:${Buffer.alloc(32, 8).toString("base64url")}`);
+    vi.stubEnv("HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION", "v2");
+    const { prepareGameChatInvite, associateGameChatInviteTx } = await import("@/src/lib/game/chat-membership");
+    const prepared = await prepareGameChatInvite(`https://www.withmurph.ai/g/${first!.inviteToken}`, room);
+    expect(prepared).not.toBeNull();
+    await db.$transaction(tx => associateGameChatInviteTx({ prepared, containerMemberId: room, senderMemberId: people[0].id, threadId: room, tx }));
+    expect((await gameRow(command.gameId)).chatContainerMemberId).toBe(room);
+    expect((await gameRow(command.gameId)).players).toHaveLength(1);
+    const { handleGameChatTool } = await import("@/src/lib/game/chat-tool");
+    chatProof.sender = people[0].id;
+    const input = { memberId: room, multiplayer: true, runtimeIdentity: null, request: { action: "read_game" as const, includePlayers: true as const, origin: { kind: "accepted_input" as const, assistantInputId: "ain_synthetic_composer" } } };
+    const setWake = (room: string) => { chatProof.wake = { kind: "conversation.message", userId: room, message: { channel: "linq", linqMessage: { isFromMe: false, threadIsDirect: false, chatId: room,
+      parts: [{ type: "text", value: `https://www.withmurph.ai/g/${first!.inviteToken}` }] }, routeAuthority: { channel: "linq", containerMemberId: room, threadId: room } } }; };
+    setWake(room);
+    expect((await handleGameChatTool(input)).result.status).toBe("ok");
+    expect((await gameRow(command.gameId)).chatContainerMemberId).toBe(room);
+    await db.$transaction(tx => associateGameChatInviteTx({ prepared, containerMemberId: room, senderMemberId: people[0].id, threadId: room, tx }));
+    await handleGameChatTool(input);
+    expect((await gameRow(command.gameId)).players).toHaveLength(1);
+    const otherRoom = await exactRoom(people); setWake(otherRoom);
+    const otherPrepared = await prepareGameChatInvite(`https://www.withmurph.ai/g/${first!.inviteToken}`, otherRoom);
+    await db.$transaction(tx => associateGameChatInviteTx({ prepared: otherPrepared, containerMemberId: otherRoom, senderMemberId: people[0].id, threadId: otherRoom, tx }));
+    await handleGameChatTool({ ...input, memberId: otherRoom });
+    expect((await gameRow(command.gameId)).chatContainerMemberId).toBe(room);
+    expect(await db.hostedLinqDelivery.count({ where: { sourceRef: command.gameId } })).toBe(0);
   });
 });

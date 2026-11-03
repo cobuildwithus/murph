@@ -1772,3 +1772,7 @@ Current owners: `../ARCHITECTURE.md` § Weekly Game and `../apps/web/README.md`
 
 Game storage parent-review corrections and PR completion are tracked in
 [the follow-up plan](exec-plans/active/2026-11-02-group-games-storage-pr-review.md).
+
+Exact audience game chat, explicit composer handoff, consumer-first runner
+compatibility and shared recap privacy are tracked in
+[the PR 5 plan](exec-plans/completed/2026-11-03-group-games-pr5.md).

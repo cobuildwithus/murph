@@ -78,7 +78,7 @@ describe("game proposal chat delivery", () => {
       member: { select: expect.objectContaining({ hostedMailboxItems: {
         where: { kind: "conversation.message" }, orderBy: { createdAt: "desc" }, select: { createdAt: true }, take: 1,
       } }) },
-      participants: { where: { removedAt: null }, select: { participantMemberId: true }, take: 3 },
+      participants: { where: { removedAt: null }, select: { participantMemberId: true }, take: 11 },
     }) }));
   });
   it.each([null, "2030-03-04T12:00:00Z"])("prefers a named room when conversation activity ties (%s)", async (activity) => {

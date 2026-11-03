@@ -1988,6 +1988,48 @@ describe("hosted Linq egress authority", () => {
     },
   );
 
+  it.each(["exact", "extra", "missing", "blocked", "departed", "provider-stale"])("rechecks group game authority through real Linq egress: %s", async scenario => {
+    const prisma = Object.assign(createPrismaStub({ threadRouteContainerMemberId: "member-1", activeMemberAccess: true }), {
+      gameBlock: { findFirst: vi.fn().mockResolvedValue(scenario === "blocked" ? { blockerMemberId: "person-b" } : null) },
+      gameReport: { findFirst: vi.fn().mockResolvedValue(null) },
+    });
+    prisma.$transaction.mockImplementation(async operation => operation(prisma));
+    Object.assign(prisma.hostedMember, { findFirst: vi.fn().mockResolvedValue(null) });
+    const people = ["person-a", "person-b", "person-c"];
+    prisma.hostedLinqDailyState.findFirst.mockResolvedValue(null);
+    prisma.hostedMailboxItem.findFirst.mockResolvedValue(null);
+    prisma.game.findFirst.mockResolvedValue({ id: "game", maxPlayers: 10, createdBy: people[0], status: "live", previousGameId: null,
+      chatContainerMemberId: "member-1", invitees: people.slice(1).map(memberId => ({ memberId })),
+      players: people.map((memberId, seat) => ({ memberId, seat, leftAt: scenario === "departed" && seat === 1 ? new Date() : null })) });
+    mocks.getPrisma.mockReturnValue(prisma);
+    const handles = people.map(id => `${id}@example.test`);
+    const { gameAudienceKeys } = await import("@/src/lib/game/audience");
+    const key = gameAudienceKeys(handles.map(value => ({ kind: "email" as const, value }))).current;
+    Object.assign(prisma.game, { findUnique: vi.fn().mockResolvedValue({ maxPlayers: 10, audienceKey: key, chatContainerMemberId: "member-1" }) });
+    Object.assign(prisma, { hostedThreadContainer: { findUnique: vi.fn().mockResolvedValue({ participants: people.map(participantMemberId => ({ participantMemberId })) }) } });
+    const roster = scenario === "extra" ? [...handles, "outsider@example.test"] : scenario === "missing" ? handles.slice(0, 2) : handles;
+    vi.spyOn(await import("@/src/lib/hosted-routing/assistant-notification-destination"), "readHostedThreadContainerLinqRouteAuthorities").mockImplementation(vi.fn().mockResolvedValue({ authorities: new Map([["member-1", { threadId: "chat-authorized-group", containerMemberId: "member-1", channel: "linq" }]]) }));
+    vi.spyOn(await import("@/src/lib/hosted-onboarding/linq-client"), "getHostedLinqChatSummary").mockImplementation(vi.fn().mockResolvedValue({ isGroup: true, handlesComplete: scenario !== "provider-stale", handles: [
+      { handle: "+15555550100", isMe: true, status: "active" }, ...roster.map(handle => ({ handle, isMe: false, status: "active" })),
+    ] }));
+    vi.spyOn(await import("@/src/lib/hosted-onboarding/linq-line-store"), "readHostedLinqIncomingLineState").mockImplementation(vi.fn().mockResolvedValue({ kind: "assignable" }));
+    vi.spyOn(await import("@/src/lib/hosted-groups/participant-member"), "lookupHostedGroupParticipantMemberIdsByHandles").mockResolvedValue(new Map([...handles.map((handle, index) => [handle, people[index]] as const), ["outsider@example.test", "outsider"]]));
+    const delivery = await vi.importActual<typeof import("@/src/lib/game/chat-delivery")>("@/src/lib/game/chat-delivery");
+    mocks.readGameProposalDeliveryPlayers.mockImplementation(delivery.readGameProposalDeliveryPlayers);
+    const response = await postHostedLinqEgressEngagement(new Request("https://internal.example.test/engagement", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ authorityCheckOnly: false, answeredMailboxItemIds: [], idempotencyKey: "game-started:game", target: "chat-authorized-group", targetKind: "thread" }),
+    }));
+    if (scenario === "exact") {
+      expect(response.status).toBe(200);
+      expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledOnce();
+    } else {
+      expect(response.status).toBeGreaterThanOrEqual(400);
+      expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+    }
+    expect(mocks.readGameProposalDeliveryPlayers).toHaveBeenCalledWith("game-started:game", "member-1", "chat-authorized-group");
+  });
+
   it.each(["current", "recap", "regenerated-recap", "refusal", "cancelled", "replaced", "expired", "other-audience", "unrelated", "line-blocked", "inactive-runtime"])(
     "requires canonical game proposal authority before exempting an inactive group: %s",
     async (scenario) => {

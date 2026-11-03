@@ -83,7 +83,7 @@ export const POST = withJsonError(async (request: Request) => {
   const targetKind = readOptionalBodyString(body.targetKind);
   const prisma = getPrisma();
 
-  const gameChatPlayers = await readGameProposalDeliveryPlayers(idempotencyKey, userId);
+  const gameChatPlayers = await readGameProposalDeliveryPlayers(idempotencyKey, userId, expectedResolvedRoute?.target ?? target);
 
   const assertion = await prisma.$transaction(async (tx) => {
     const chatLockTarget = targetKind === "participant"

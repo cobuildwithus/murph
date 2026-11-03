@@ -46927,3 +46927,63 @@ describeRealCodex('real Codex optional scheduled ledger recovery e2e', () => {
     }
   }, 600_000)
 })
+
+
+describeRealCodex('real Codex exact group games', () => {
+  it('group game addressed acceptance with duplicate first names', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-group-game-e2e-'))
+    const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    const { hostedGameToolResponseSchema } = await import('@murphai/hosted-execution/runtime-control')
+    const inputId = 'ain_' + 'a'.repeat(32)
+    const origin = { kind: 'accepted_input' as const, assistantInputId: inputId }
+    const calls: import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest[] = []
+    const players = ['Alex (1)', 'Alex (2)', 'River'].map((firstName, index) => ({ memberId: `player_${index}`, firstName, timeZone: 'UTC', isSender: index === 1 }))
+    let accepted = false
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: true, groupConversation: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantHostedGroupToolSurface: 'families',
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
+          currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T12:00:00.000Z', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+        }),
+        dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL, ...resolveMurphDynamicTools({}).filter(tool => tool.name === 'finish_without_reply')],
+        hostedToolContext: {
+          computerToolsAvailable: false, vaultFileSendAvailable: false,
+          groupTool: { request: async request => {
+            calls.push(request)
+            if (request.action !== 'read_game' && request.action !== 'update_game') throw new Error('Unexpected game effect')
+            if (request.action === 'update_game') {
+              expect(request.update).toEqual({ operation: 'approve', gameId: 'game_group_fixture', expectedTermsVersion: 1 })
+              expect(accepted).toBe(false)
+              accepted = true
+            }
+            return hostedGameToolResponseSchema.parse({ action: request.action, result: { status: 'ok', state: {
+              players, games: [{ id: 'game_group_fixture', maxPlayers: 10, invitees: players.slice(1).map((player, index) => ({ memberId: player.memberId, firstName: player.firstName, seat: index + 1 })), status: accepted ? 'live' : 'invited', lengthDays: 7, startsOn: null,
+                terms: { n: 1, fromDay: 0, tasks: players.map((_, seat) => ({ seat, text: 'Walk outside' })), defaultTask: 'Walk outside', schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: 'prize', item: 'Choose lunch' }] },
+                players: players.slice(0, accepted ? 2 : 1).map((player, seat) => ({ memberId: player.memberId, firstName: player.firstName, timeZone: player.timeZone, seat, dayOne: accepted ? '2030-03-06' : null })),
+                pendingChange: null, changeControls: { canStartNow: false, canEdit: false, canEditSchedule: false, canEditStartDate: false, canEditTasks: false, canEditStakes: false, editableFromDay: null },
+              }],
+            } } })
+          } },
+          currentUserActionScope: () => ({ conversationId: 'synthetic-room', inboundMailboxItemIds: [], recipientKey: 'synthetic-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-session', conversationScope: 'group' }),
+          currentInvocationScope: () => ({ origin: { ...origin, sessionId: 'synthetic-session' }, conversationScope: 'group' }),
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send authorized') },
+        },
+        prompt: `Group participants: Alex (1), Alex (2), River, and Murph. Alex (1) invited this exact group to walk outside daily for seven days, with choosing lunch as the prize. Current accepted message from Alex (2) (Message ref: ${inputId}, Occurred at: 2030-03-06T12:00:00.000Z): Murph, I'm in for the walking challenge.`,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const reply = result.finalMessage.trim()
+      process.stdout.write(`[group game addressed acceptance] ${JSON.stringify({ reply, calls: calls.map(call => call.action === 'update_game' ? call.update : call.action) })}\n`)
+      expect(calls.map(call => call.action)).toEqual(['read_game', 'update_game'])
+      expect(accepted).toBe(true)
+      expect(reply).toMatch(/in|joined|accepted|started|live/iu)
+      expect(reply).not.toMatch(/everyone.*(?:agreed|accepted)|both players|Start now|remind|nudge|River.*(?:missing|behind)|player_|game_group|proposal/iu)
+      expect(reply.length).toBeLessThan(350)
+    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
+  }, 360_000)
+})
