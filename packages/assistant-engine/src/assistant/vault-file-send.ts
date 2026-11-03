@@ -1036,7 +1036,7 @@ function detectAssistantVaultImageContentType(
   return null
 }
 
-function formatByteCount(value: number): string {
+export function formatByteCount(value: number): string {
   if (value < 1024) {
     return `${value} B`
   }
