@@ -1,5 +1,7 @@
 import "server-only";
 
+import { isPairRoster } from "./roster";
+
 import type { Game, GamePlayer } from "@prisma/client";
 import { buildHostedExecutionAssistantNotificationRequestedWake } from "@murphai/hosted-execution";
 import { appendPreparedHostedMailboxEnvelopeTx, prepareHostedMailboxEnvelopeAppend, readHostedMailboxItemByDedupeKey } from "../hosted-mailbox/store";
@@ -26,7 +28,7 @@ export async function deliverGameChangeProposal(gameId: string, proposalId: stri
   const game = await prisma.game.findUnique({ where: { id: gameId }, include: { players: { orderBy: { seat: "asc" }, take: 3 } } });
   const proposal = game ? await readPendingGameChange(game) : null;
   if (!game || !["live", "negotiating"].includes(game.status) || isGameInviteExpired(game, now)
-    || !proposal || proposal.id !== proposalId || game.players.length !== 2) return false;
+    || !proposal || proposal.id !== proposalId || !isPairRoster(game.players)) return false;
   if (!isGameOn(game)) return false;
   if (proposal.deliveryStatus === "sent") return true;
   if (proposal.origin === "chat") return false;
@@ -47,7 +49,7 @@ async function prepareGameChatPlayers(game: Game & { players: GamePlayer[] }, pr
   if (allowedPlayers !== 2) throw new Error("Game chat players are unavailable.");
   const identities = await Promise.all(players.map((player) => readHostedMemberIdentity({ memberId: player.memberId, prisma })));
   const phones = identities.flatMap((identity) => identity?.phoneNumberVerifiedAt && identity.phoneNumber ? [identity.phoneNumber] : []);
-  if (phones.length !== 2 || new Set(phones).size !== 2) throw new Error("Game chat requires both players' verified phone numbers.");
+  if (!isPairRoster(phones) || new Set(phones).size !== phones.length) throw new Error("Game chat requires both players' verified phone numbers.");
   const profiles = await prisma.gameProfile.findMany({ where: { memberId: { in: players.map((player) => player.memberId) } }, select: { memberId: true, firstNameEncrypted: true }, take: 2 });
   const names = await openGameTexts(profiles.map((profile) => ({ table: "game_profile" as const, field: "first_name", rowId: profile.memberId, memberId: profile.memberId, value: profile.firstNameEncrypted })));
   const nameFor = (memberId: string) => names[profiles.findIndex((profile) => profile.memberId === memberId)] ?? "Your opponent";

@@ -1,7 +1,8 @@
 import { GAME_STAKE_KINDS, type GameChange, type GameChangeControls, type GamePendingChange, type GameSchedule } from "./contract";
 import { parseGameChange } from "./command";
 import { isRecord } from "../primitives";
-import { currentTerms, dayIndexAt, decideStartNow, firstScheduledDate, GameRuleError, GAME_MIN_LENGTH_DAYS, GAME_MAX_LENGTH_DAYS, GAME_MAX_START_DAYS_OUT, isGameDue, playerFor, reject, validSchedule, validNewStakes, type StoredStake, type RuleState } from "./rules";
+import { currentTerms, gameDayOne, dayIndexAt, decideStartNow, firstScheduledDate, GameRuleError, GAME_MIN_LENGTH_DAYS, GAME_MAX_LENGTH_DAYS, GAME_MAX_START_DAYS_OUT, isGameDue, playerFor, reject, validSchedule, validNewStakes, type StoredStake, type RuleState } from "./rules";
+import { isPairRoster } from "./roster";
 import { acceptanceStartDate, addDays, gameLocalDate, weekdayOf } from "./time";
 
 /** First day that neither player has begun. The previous days retain their terms. */
@@ -11,7 +12,8 @@ export function firstUnstartedGameDay(state: RuleState, now: Date): number {
 
 export function gameChangeControls(state: RuleState, now: Date, pending: GamePendingChange | null): GameChangeControls {
   const day = firstUnstartedGameDay(state, now);
-  const live = ["live", "negotiating"].includes(state.game.status) && state.players.length === 2;
+  // Negotiation is still a two-person agreement policy.
+  const live = ["live", "negotiating"].includes(state.game.status) && isPairRoster(state.players);
   // Once either player's last day is over, the game is done for changes.
   const editable = live && !pending && !isGameDue(state, now) && day <= state.game.lengthDays;
   const enabled = editable && day < GAME_MAX_LENGTH_DAYS;
@@ -65,8 +67,8 @@ function readPendingDeliveryState(value: Record<string, unknown>): Pick<GamePend
 
 /** Start now must move Day 1 earlier; Day 1 never lands on an unscheduled day. */
 function startNowMovesDayOne(state: RuleState, now: Date): boolean {
-  const dayOne = state.players[0]?.dayOne;
-  return state.game.status !== "live" || !dayOne || decideStartNow(state, now).players[0].dayOne < dayOne;
+  const dayOne = gameDayOne(state.players);
+  return state.game.status !== "live" || !dayOne || gameDayOne(decideStartNow(state, now).players)! < dayOne;
 }
 
 /** The game ended or its terms moved on since the proposal. */
@@ -100,7 +102,7 @@ export function decideGameChange(state: RuleState, actor: string, change: GameCh
   if (change.kind === "start_now") {
     if (!controls.canStartNow) reject("DAY_CLOSED", effectiveFromDay === 0 ? "The game already starts on its next scheduled day." : "This game has already started.");
     const start = decideStartNow(state.game.status === "negotiating" ? { ...state, game: { ...state.game, status: "live" } } : state, now);
-    return { change, effectiveFromDay: 0, startsOn: start.players[0].dayOne };
+    return { change, effectiveFromDay: 0, startsOn: gameDayOne(start.players) };
   }
   assertEditableWords(state, change, controls, sealedWords);
   const lengthDays = change.lengthDays ?? state.game.lengthDays;
@@ -152,7 +154,7 @@ export function decideApprovedGameChange(state: RuleState, actor: string, pendin
  * start, or a new schedule before play, lands on a scheduled day.
  */
 export function agreedDayOne(state: RuleState, pending: StoredGamePendingChange, fromDay: number, schedule: GameSchedule, startsOn: string | null): string | null {
-  const dayOne = state.players[0]?.dayOne ?? null;
+  const dayOne = gameDayOne(state.players);
   const rescheduled = fromDay === 0 && pending.change.kind === "edit" && pending.change.schedule !== undefined;
   const from = startsOn ?? (rescheduled ? dayOne : null);
   const next = from && firstScheduledDate(from, schedule);
@@ -166,7 +168,7 @@ export function pendingGameChangeView(state: RuleState, pending: GamePendingChan
 
 /** Before play, Day 1 moves to a scheduled day; once play starts, the rest of the game must keep one. */
 function assertScheduledDayLeft(state: RuleState, fromDay: number, lengthDays: number, schedule: ReturnType<typeof validSchedule>): void {
-  const dayOne = state.players[0]?.dayOne;
+  const dayOne = gameDayOne(state.players);
   if (fromDay === 0 || !dayOne || "count" in schedule) return;
   for (let day = fromDay; day < lengthDays; day += 1) {
     if (schedule.days.includes(weekdayOf(addDays(dayOne, day)))) return;

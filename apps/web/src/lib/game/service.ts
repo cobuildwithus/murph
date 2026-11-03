@@ -35,6 +35,7 @@ import { labelTarget, openGameTexts, sealGameText, type GameSealTarget } from ".
 import { isGameMediaStorageAvailable, statGameMedia } from "./media";
 import {
   currentTerms,
+  gameDayOne,
   dayIndexAt,
   liveEntry,
   attemptsUsed,
@@ -1437,7 +1438,7 @@ export async function readGameNoticeRoom(gameId: string, playerMemberIds: readon
 
 /** Shared-chat projection intentionally never calls the viewer-private app view. */
 export async function readGameChatState(containerMemberId: string, playerMemberIds: readonly string[], actorMemberId?: string): Promise<GameChatState> {
-  if (playerMemberIds.length !== 2 || new Set(playerMemberIds).size !== 2) return { games: [] };
+  if (!sameGamePlayers(playerMemberIds, playerMemberIds)) return { games: [] };
   const prisma = getPrisma();
   // A block ends the pair's game chat: Murph has no game to talk about there.
   if (await areGamePlayersBlocked(prisma, playerMemberIds[0], playerMemberIds[1])) return { games: [] };
@@ -1481,7 +1482,7 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
     return { id: row.id, status: state.game.status, terms: { ...terms, ...(checkInKind === "any" ? {} : { checkInKind }) },
       progress: gameChatProgress(state, gameNow(clock, row)),
       result: result ? { scores: result.scores, tickets: [...ticketGroups.values()] } : null,
-      startsOn: fromDbDate(row.players[0]?.dayOne ?? row.startsOn), lengthDays: row.lengthDays,
+      startsOn: gameDayOne(state.players) ?? fromDbDate(row.startsOn), lengthDays: row.lengthDays,
       players: row.players.map((player) => ({ memberId: player.memberId, seat: player.seat, firstName: names.get(player.memberId) ?? "", dayOne: fromDbDate(player.dayOne), timeZone: player.timeZone })),
       pendingChange, changeControls: gameChangeControls(state, gameNow(clock, row), pendingChange),
     };
@@ -1542,7 +1543,7 @@ export type GameRecapMaterial = {
 export async function readGameRecapMaterial(gameId: string, containerMemberId: string, expectedPlayers: readonly string[]): Promise<GameRecapMaterial | null> {
   const prisma = getPrisma();
   const row = await prisma.game.findFirst({ where: { id: gameId, chatContainerMemberId: containerMemberId, status: "settled", departedPlayer: { equals: Prisma.DbNull } }, include: { players: { orderBy: { seat: "asc" } }, tickets: true } });
-  if (!row || row.players.length !== 2 || !row.result || !sameGamePlayers(row.players.map((player) => player.memberId), expectedPlayers)) return null;
+  if (!row || !row.result || !sameGamePlayers(row.players.map((player) => player.memberId), expectedPlayers)) return null;
   const rowEntries = await prisma.gameEntry.findMany({ where: { gameId }, orderBy: { receivedAt: "asc" } });
   const profiles = await prisma.gameProfile.findMany({ where: { memberId: { in: row.players.map((player) => player.memberId) } }, select: { memberId: true, firstNameEncrypted: true } });
   const reports = await prisma.gameReport.findMany({ where: { gameId, entryId: { not: null } }, select: { entryId: true } });
@@ -1948,8 +1949,9 @@ export async function readHome(memberId: string): Promise<GameHomeView> {
   const [firstName] = await openGameTexts(profile
     ? [{ field: "first_name", memberId, rowId: memberId, table: "game_profile", value: profile.firstNameEncrypted }]
     : []);
-  const wallet = kept.map((ticket) => ticketView(withoutHidden(toTicketRow(ticket), blocks), words.get(ticket.gameId) ?? null,
-    memberId, gameNow(current.clock, ticket.game), parseStoredTerms(ticket.game.terms)));
+  const hiddenMemberIds = new Set([...blocks.blocked, ...blocks.blockedBy]);
+  const wallet = kept.map((ticket) => ticketView(toTicketRow(ticket), words.get(ticket.gameId) ?? null,
+    memberId, gameNow(current.clock, ticket.game), parseStoredTerms(ticket.game.terms), hiddenMemberIds));
   return {
     blocked,
     games: views,
@@ -2034,11 +2036,6 @@ export async function readHistory(memberId: string): Promise<GameHistoryView> {
 /** The members in a game: its players and an addressed rematch's invitee. */
 function participantsOf(game: LoadedGame): string[] {
   return [...game.row.players.map((player) => player.memberId), ...(game.row.inviteeMemberId ? [game.row.inviteeMemberId] : [])];
-}
-
-/** A ticket with someone blocked either way shows them as having left. */
-function withoutHidden(ticket: GameTicketRow, blocks: GameBlocks): GameTicketRow {
-  return { ...ticket, owedBy: isHiddenBy(blocks, ticket.owedBy) ? null : ticket.owedBy, owedTo: isHiddenBy(blocks, ticket.owedTo) ? null : ticket.owedTo };
 }
 
 /** Everyone the member blocked, newest first, by the member's own name for them. */
@@ -2184,11 +2181,6 @@ async function readReportedBy(memberId: string, among: { entryIds?: string[]; ga
   };
 }
 
-/** This viewer's game without a player blocked either way: to them, that player left. */
-function withoutPlayer(state: RuleState, memberId: string): RuleState {
-  return { ...state, entries: state.entries.filter((entry) => entry.memberId !== memberId), players: state.players.filter((player) => player.memberId !== memberId) };
-}
-
 function toTicketRow(ticket: {
   id: string;
   gameId: string;
@@ -2247,14 +2239,10 @@ async function buildViewInputs(
     readReportedBy(viewerId, { gameIds: games.map((game) => game.row.id), players: labelSubjects }),
   ]);
   const hiddenEntryIds = reported.entries;
-  const hiddenPlayers = games.map((game) => game.state.players.find((player) => player.memberId !== viewerId && isHiddenBy(blocks, player.memberId)) ?? null);
-  const recapSuppressed = games.map((game, index) => hiddenPlayers[index] !== null
+  const hiddenMemberIds = new Set([...blocks.blocked, ...blocks.blockedBy]);
+  const recapSuppressed = games.map((game) => game.state.players.some((player) => hiddenMemberIds.has(player.memberId))
     || game.entries.some((entry) => hiddenEntryIds.has(entry.id))
     || game.state.players.some((player) => player.memberId !== viewerId && reported.players.has(player.memberId)));
-  const states = games.map((game, index) => {
-    const hidden = hiddenPlayers[index];
-    return hidden ? withoutPlayer(game.state, hidden.memberId) : game.state;
-  });
 
   // One decrypt batch: words, names, labels, invite bits, visible entries.
   const requests: Array<GameSealTarget & { value: string | null }> = [];
@@ -2310,8 +2298,8 @@ async function buildViewInputs(
     return null;
   });
   const entryAt = new Map<string, { text: number; payload: number; kind: GameEntryKind }>();
-  for (const [index, game] of games.entries()) {
-    const visible = visibleEntryIds(states[index], viewerId, hiddenEntryIds);
+  for (const game of games) {
+    const visible = visibleEntryIds(game.state, viewerId, hiddenEntryIds, hiddenMemberIds);
     for (const entry of game.entries) {
       if (!visible.has(entry.id)) continue;
       const target = { memberId: entry.memberId, rowId: entry.id, table: "game_entry" as const };
@@ -2363,17 +2351,17 @@ async function buildViewInputs(
         : null,
       names,
       relationships,
-      departed: departedAt[index] ? { seat: departedAt[index].seat, name: plain[departedAt[index].name] ?? "" }
-        : hiddenPlayers[index] && { seat: hiddenPlayers[index].seat, name: names.get(hiddenPlayers[index].memberId) ?? "" },
+      departed: departedAt[index] ? { seat: departedAt[index].seat, name: plain[departedAt[index].name] ?? "" } : null,
       hiddenEntryIds,
+      hiddenMemberIds,
       now: gameNow(clock, game.row),
       result,
       recap: recapAt[index] === null ? null : hostedGameRecapSchema.parse(JSON.parse(plain[recapAt[index]!] ?? "null")),
       round: game.row.round,
       previousGameId: game.row.previousGameId,
       startedAt: game.row.startedAt,
-      state: states[index],
-      tickets: tickets.filter((ticket) => ticket.gameId === game.row.id).map((ticket) => withoutHidden(toTicketRow(ticket), blocks)),
+      state: game.state,
+      tickets: tickets.filter((ticket) => ticket.gameId === game.row.id).map(toTicketRow),
       viewerId,
       words: parseTermWords(plain[wordsAt[index]] ?? ""),
     };

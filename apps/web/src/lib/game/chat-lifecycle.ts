@@ -1,4 +1,6 @@
 import "server-only";
+
+import { isPairRoster } from "./roster";
 import type { Game, HostedLinqDelivery, Prisma, PrismaClient } from "@prisma/client";
 import { buildHostedExecutionAssistantNotificationRequestedWake } from "@murphai/hosted-execution";
 import { parseGameRecapEventId, buildGameKickoffInstructions, buildGameRematchInstructions, buildGameChangeCancelledInstructions, buildGameChangeExpiredInstructions, buildGameInviteCancelledInstructions, buildGameMissedDayInstructions, buildGameRecapInstructions } from "@murphai/hosted-execution/runtime-control";
@@ -182,7 +184,7 @@ function isCurrentGameChatLifecycle(
 ): game is GameChatLifecycleRecord {
   return Boolean(game && statuses.includes(game.status)
     && (kind !== "rematch" || !isGameInviteExpired(game, now))
-    && players.length === 2 && new Set(players).size === 2);
+    && isPairRoster(players) && new Set(players).size === players.length);
 }
 
 export async function deliverGameChatLifecycle(gameId: string, kind: GameChatLifecycleKind, proposalId?: string, now = new Date(), regenerationId?: string): Promise<boolean> {
@@ -210,7 +212,7 @@ async function deliverGameMissedDayLifecycle(gameId: string, memberId: string, f
   const game = await prisma.game.findUnique({ where: { id: gameId }, include: { players: { select: { memberId: true }, take: 3 } } });
   const players = game?.players.map((player) => player.memberId) ?? [];
   const statuses = lifecycleStatuses("missed");
-  if (!game || !game.chatContainerMemberId || !statuses.includes(game.status) || players.length !== 2 || !players.includes(memberId)) return false;
+  if (!game || !game.chatContainerMemberId || !statuses.includes(game.status) || !isPairRoster(players) || !players.includes(memberId)) return false;
   const { readGameChatState, readGameMissedCheckInBatch } = await import("./service");
   const state = await readGameChatState(game.chatContainerMemberId, players);
   const shared = state.games.find((candidate) => candidate.id === gameId);
@@ -254,7 +256,7 @@ async function deliverCurrentGameChatLifecycle(input: {
   const { boundOnly, eventId, game, gameId, instructions, kind, players, prisma } = input;
   const identities = await Promise.all(players.map((memberId) => readHostedMemberIdentity({ memberId, prisma })));
   const phones = identities.flatMap((identity) => identity?.phoneNumberVerifiedAt && identity.phoneNumber ? [identity.phoneNumber] : []);
-  if (phones.length !== 2 || new Set(phones).size !== 2) throw new Error("Game chat requires verified players.");
+  if (!isPairRoster(phones) || new Set(phones).size !== phones.length) throw new Error("Game chat requires verified players.");
   let containerMemberId = game.chatContainerMemberId;
   if (!containerMemberId) {
     containerMemberId = await bindPairGameChat(gameId, players, await findExistingGameChat(players, phones));

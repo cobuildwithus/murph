@@ -22,6 +22,8 @@ import type {
 import {
   currentTerms,
   dayIndexAt,
+  entriesForDay,
+  indexGameEntries,
   hasFinishedGame,
   hasUnlockedDay,
   isScheduledDay,
@@ -36,6 +38,7 @@ import {
   settleDueAt,
   ticketUseBy,
   type RuleEntry,
+  type GameEntryIndex,
   type RulePlayer,
   type RuleState,
   type StoredTerms,
@@ -44,6 +47,7 @@ import {
 } from "./rules";
 import { addDays } from "./time";
 import { pendingGameChangeView, gameChangeControls } from "./changes";
+import { firstOpenSeat, isPairRoster } from "./roster";
 
 const GAME_MEDIA_PATH = "/api/game/v1/media/";
 export const GAME_HISTORY_PREVIEW_LIMIT = 6;
@@ -104,19 +108,17 @@ export interface GameViewInput {
   entryWords: ReadonlyMap<string, { text: string | null; data?: GameEntryData | null }>;
   /** Posts the viewer reported. */
   hiddenEntryIds?: ReadonlySet<string>;
+  /** Blocks affect projection only; canonical players and entries remain intact. */
+  hiddenMemberIds?: ReadonlySet<string>;
   result: StoredResult | null;
   recap: GameView["recap"];
   tickets: readonly GameTicketRow[];
 }
 
-function unlocked(state: RuleState, viewerId: string, dayIndex: number): boolean {
-  return state.game.status === "settled" || hasUnlockedDay(state.entries, viewerId, dayIndex);
-}
-
-const NO_ENTRIES: ReadonlySet<string> = new Set();
+const NO_HIDDEN: ReadonlySet<string> = new Set();
 
 /** Every entry this viewer may see, less the ones they reported. Callers decrypt only these. */
-export function visibleEntryIds(state: RuleState, viewerId: string, hidden: ReadonlySet<string> = NO_ENTRIES): Set<string> {
+export function visibleEntryIds(state: RuleState, viewerId: string, hidden: ReadonlySet<string> = NO_HIDDEN, hiddenMembers: ReadonlySet<string> = NO_HIDDEN, entries = indexGameEntries(state.entries)): Set<string> {
   const visible = new Set<string>();
   if (!playerFor(state, viewerId)) return visible;
   for (const entry of state.entries) {
@@ -126,7 +128,8 @@ export function visibleEntryIds(state: RuleState, viewerId: string, hidden: Read
       entry.attempt > 0
       && entry.withdrawnAt === null
       && !hidden.has(entry.id)
-      && unlocked(state, viewerId, entry.dayIndex)
+      && !hiddenMembers.has(entry.memberId)
+      && (state.game.status === "settled" || hasUnlockedDay(entries, viewerId, entry.dayIndex))
     ) {
       visible.add(entry.id);
     }
@@ -142,6 +145,7 @@ export function stakeItem(words: TermWords, key: string): string {
   return "";
 }
 
+/** Released task/stake fields are projected here from versioned canonical terms. */
 export function termsView(state: RuleState, words: TermWords): GameTermsVersion {
   const version = currentTerms(state.game.terms);
   const versionWords = [...words.versions].reverse().find((candidate) => candidate.n <= version.n) ?? words.versions[0];
@@ -156,19 +160,22 @@ export function termsView(state: RuleState, words: TermWords): GameTermsVersion 
 }
 
 /** `now` is the ticket's game clock: it decides whether an open ticket has expired. */
-export function ticketView(row: GameTicketRow, words: TermWords | null, viewerId: string, now: Date, terms?: StoredTerms): GameTicketView {
+export function ticketView(row: GameTicketRow, words: TermWords | null, viewerId: string, now: Date, terms?: StoredTerms, hiddenMembers: ReadonlySet<string> = NO_HIDDEN): GameTicketView {
+  // Legacy scalar parties, including the pair block/departure presentation.
+  const owedBy = row.owedBy !== null && !hiddenMembers.has(row.owedBy) ? row.owedBy : null;
+  const owedTo = row.owedTo !== null && !hiddenMembers.has(row.owedTo) ? row.owedTo : null;
   return {
     createdAt: row.createdAt.toISOString(),
     id: row.id,
     kind: terms?.versions.flatMap((version) => version.stakes).find((stake) => stake.key === row.stakeKey)?.kind,
-    ...(row.owedBy === null || row.owedTo === null ? { left: true as const } : {}),
-    owedByMemberId: row.owedBy ?? "",
-    owedToMemberId: row.owedTo ?? "",
+    ...(owedBy === null || owedTo === null ? { left: true as const } : {}),
+    owedByMemberId: owedBy ?? "",
+    owedToMemberId: owedTo ?? "",
     redeemedAt: row.redeemedAt?.toISOString() ?? null,
     status: isTicketExpired(row, now) ? "expired" : row.status,
     useBy: ticketUseBy(row.createdAt).toISOString(),
     what: words ? stakeItem(words, row.stakeKey) : "",
-    youHold: row.owedTo === viewerId,
+    youHold: owedTo === viewerId,
   };
 }
 
@@ -194,14 +201,16 @@ export function buildGameHistoryView(input: GameViewInput): BuiltGameHistoryView
   if (input.state.game.status !== "settled" || !input.result) return null;
   const viewer = playerFor(input.state, input.viewerId);
   const other = input.state.players.find((player) => player.memberId !== input.viewerId);
-  if (!viewer?.dayOne || !other || input.state.players.length !== 2) return null;
+  // The released history contract groups games by one opponent.
+  if (!viewer?.dayOne || !other || !isPairRoster(input.state.players) || input.hiddenMemberIds?.has(other.memberId)) return null;
 
-  const mine = playerView(input, viewer);
-  const theirs = playerView(input, other);
+  const entries = indexGameEntries(input.state.entries);
+  const mine = playerView(input, viewer, entries);
+  const theirs = playerView(input, other, entries);
   const outcome = outcomeFor(input.result, input.viewerId);
   const terms = termsView(input.state, input.words);
   const stake = terms.stakes[0];
-  const visible = visibleEntryIds(input.state, input.viewerId, input.hiddenEntryIds);
+  const visible = visibleEntryIds(input.state, input.viewerId, input.hiddenEntryIds, input.hiddenMemberIds, entries);
   const seats = new Map(input.state.players.map((player) => [player.memberId, player.seat]));
   const previews = input.state.entries
     .filter((entry) => visible.has(entry.id))
@@ -240,29 +249,27 @@ export function buildGameHistoryView(input: GameViewInput): BuiltGameHistoryView
 export function buildGameView(input: GameViewInput): GameView {
   const { state, viewerId } = input;
   const { game } = state;
+  const entries = indexGameEntries(state.entries);
   const players = [...state.players].sort((a, b) => a.seat - b.seat);
-  const playerViews = players.map((player) => playerView(input, player));
+  const playerViews = players.map((player) => input.hiddenMemberIds?.has(player.memberId)
+    ? departedView(input, { seat: player.seat, name: input.names.get(player.memberId) ?? "" })
+    : playerView(input, player, entries));
   if (input.departed) playerViews.push(departedView(input, input.departed));
   if (input.invitee && playerViews.length < game.seats) playerViews.push(inviteeView(input, input.invitee, firstOpenSeat(playerViews), viewerId));
   playerViews.sort((a, b) => a.seat - b.seat);
   return {
     changeControls: gameChangeControls(state, input.now, input.pendingChange ?? null),
     pendingChange: pendingGameChangeView(state, input.pendingChange ?? null, input.now),
-    days: game.status === "negotiating" ? [] : dayViews(input, players),
+    days: game.status === "negotiating" ? [] : dayViews(input, players, entries),
     id: game.id,
     inviteExpiresAt: game.status === "invited" ? input.inviteExpiresAt?.toISOString() ?? null : null,
     // The service hands over the token only to the people it belongs to.
     inviteToken: input.inviteToken,
     lengthDays: game.lengthDays,
     players: playerViews,
-    result: input.result
-      ? {
-          outcome: outcomeFor(input.result, viewerId),
-          scores: input.result.scores.map(({ score, seat }) => ({ score, seat })),
-        }
-      : null,
+    result: resultView(input.result, viewerId),
     recap: input.recap,
-    retakeAvailable: retakeAvailable(state, viewerId, input.now),
+    retakeAvailable: retakeAvailable(state, viewerId, input.now, entries),
     round: input.round,
     previousGameId: input.previousGameId,
     settlesAt: settlesAt(state, viewerId, input.now),
@@ -272,11 +279,16 @@ export function buildGameView(input: GameViewInput): GameView {
     terms: termsView(state, input.words),
     tickets: input.tickets
       .filter((ticket) => ticket.owedBy === viewerId || ticket.owedTo === viewerId)
-      .map((ticket) => ticketView(ticket, input.words, viewerId, input.now, state.game.terms)),
+      .map((ticket) => ticketView(ticket, input.words, viewerId, input.now, state.game.terms, input.hiddenMemberIds)),
   };
 }
 
-function playerView(input: GameViewInput, player: RulePlayer): GamePlayerView {
+/** Legacy outcome alias; canonical scores remain member- and seat-addressed. */
+function resultView(result: StoredResult | null, viewerId: string): GameView["result"] {
+  return result ? { outcome: outcomeFor(result, viewerId), scores: result.scores.map(({ score, seat }) => ({ score, seat })) } : null;
+}
+
+function playerView(input: GameViewInput, player: RulePlayer, entries: GameEntryIndex): GamePlayerView {
   const { game } = input.state;
   const today = game.status === "live" ? dayIndexAt(player, input.now) : null;
   const started = today !== null && today >= 0;
@@ -292,16 +304,10 @@ function playerView(input: GameViewInput, player: RulePlayer): GamePlayerView {
     isMe,
     memberId: player.memberId,
     relationship: isMe ? null : input.relationships.get(player.memberId) ?? null,
-    score: resultScore ?? (started ? scorePlayer(input.state, player, today).score : 0),
+    score: resultScore ?? (started ? scorePlayer(input.state, player, today, entries).score : 0),
     seat: player.seat,
     streak: playerStreak(input.state, player, input.now),
   };
-}
-
-function firstOpenSeat(views: readonly GamePlayerView[]): number {
-  let seat = 0;
-  while (views.some((view) => view.seat === seat)) seat += 1;
-  return seat;
 }
 
 /** A player who deleted their account: only their seat, final score and the viewer's name for them remain. */
@@ -339,32 +345,27 @@ function inviteeView(input: GameViewInput, invitee: NonNullable<GameViewInput["i
   };
 }
 
-function dayViews(input: GameViewInput, players: readonly RulePlayer[]): GameDayView[] {
+function dayViews(input: GameViewInput, players: readonly RulePlayer[], entries: GameEntryIndex): GameDayView[] {
   const { state, viewerId } = input;
   const viewer = playerFor(state, viewerId);
   if (!viewer?.dayOne) return [];
-  const visible = visibleEntryIds(state, viewerId, input.hiddenEntryIds);
-  const others = players.filter((player) => player.memberId !== viewerId);
+  const visible = visibleEntryIds(state, viewerId, input.hiddenEntryIds, input.hiddenMemberIds, entries);
+  const others = players.filter((player) => player.memberId !== viewerId && !input.hiddenMemberIds?.has(player.memberId));
   return Array.from({ length: state.game.lengthDays }, (_, index) => {
-    const mine = liveEntry(state.entries, viewerId, index) ?? ownExcuse(state, viewerId, index);
+    const mine = liveEntry(entries, viewerId, index) ?? entriesForDay(entries, viewerId, index).find((entry) => entry.attempt === 0 && entry.withdrawnAt === null);
     return {
       index,
       localDate: addDays(viewer.dayOne!, index),
       mine: mine && visible.has(mine.id) ? entryView(mine, input) : null,
       off: !isScheduledDay(state, index),
-      others: others.map((other) => otherDayView(input, visible, other, index)),
+      others: others.map((other) => otherDayView(input, visible, other, index, entries)),
     };
   });
 }
 
-function ownExcuse(state: RuleState, viewerId: string, index: number): RuleEntry | null {
-  return state.entries.find((entry) =>
-    entry.memberId === viewerId && entry.dayIndex === index && entry.attempt === 0 && entry.withdrawnAt === null) ?? null;
-}
-
 /** Another player's day as this viewer may see it: locked until the viewer posts that day. */
-function otherDayView(input: GameViewInput, visible: ReadonlySet<string>, other: RulePlayer, index: number): GameDayView["others"][number] {
-  const posted = liveEntry(input.state.entries, other.memberId, index);
+function otherDayView(input: GameViewInput, visible: ReadonlySet<string>, other: RulePlayer, index: number, entries: GameEntryIndex): GameDayView["others"][number] {
+  const posted = liveEntry(entries, other.memberId, index);
   // Reported: still their post for the day, with nothing of it to show.
   if (posted && input.hiddenEntryIds?.has(posted.id)) return { entry: null, hidden: true, seat: other.seat, status: "posted" };
   if (posted) {
@@ -392,10 +393,10 @@ function settlesAt(state: RuleState, viewerId: string, now: Date): string | null
 }
 
 /** A retake is open once today's post is up and the day's two posts aren't used. */
-function retakeAvailable(state: RuleState, viewerId: string, now: Date): boolean {
+function retakeAvailable(state: RuleState, viewerId: string, now: Date, entries: GameEntryIndex): boolean {
   const viewer = playerFor(state, viewerId);
   const today = viewer && state.game.status === "live" ? dayIndexAt(viewer, now) : null;
   if (today === null || today < 0 || today >= state.game.lengthDays) return false;
-  return liveEntry(state.entries, viewerId, today) !== null
-    && attemptsUsed(state.entries, viewerId, today) < GAME_POSTS_PER_DAY;
+  return liveEntry(entries, viewerId, today) !== null
+    && attemptsUsed(entries, viewerId, today) < GAME_POSTS_PER_DAY;
 }

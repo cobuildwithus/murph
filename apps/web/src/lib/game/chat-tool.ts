@@ -1,4 +1,6 @@
 import "server-only";
+
+import { isPairRoster } from "./roster";
 import { handleGameChatPhoto } from "./chat-photo";
 import type { Prisma } from "@prisma/client";
 import { isHostedLinqConversationMessageWake, isHostedTelegramConversationMessageWake } from "@murphai/hosted-execution";
@@ -98,7 +100,7 @@ export async function authorizeGameChatActorTx(input: Input, tx: Prisma.Transact
   if (!players.includes(actor) || (input.playerMemberIds && !sameGamePlayers(players, input.playerMemberIds))) return null;
   // A read exposes only this exact pair's games. Creation alone
   // may write before the pair has a game; all other mutations require one.
-  if (players.length !== 2) return null;
+  if (!isPairRoster(players)) return null;
   if (input.request.action === "read_game" || (input.request.action === "update_game" && input.request.update.operation === "create")) return actor;
   const game = await tx.game.findFirst({
     where: { OR: [{ ...gamePairWhere(players), status: { in: ["negotiating", "live", "settled"] } }, addressedGameRematchWhere(players)], ...(input.request.action === "update_game" ? { id: input.request.update.gameId } : input.request.action === "game_photo" ? { id: input.request.photo.gameId } : {}) },
@@ -117,7 +119,7 @@ async function handleGameRecapTool(input: Input & { request: Extract<HostedGameT
     await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
   });
   const players = await requireExactGameChat(input.memberId);
-  if (players.length !== 2) return { action: input.request.action, result: { status: "unavailable", error: "recap_authority_unavailable" } };
+  if (!isPairRoster(players)) return { action: input.request.action, result: { status: "unavailable", error: "recap_authority_unavailable" } };
   const material = await readGameRecapMaterial(gameId, input.memberId, players);
   if (!material) return { action: input.request.action, result: { status: "unavailable", error: "recap_authority_unavailable" } };
   if (input.request.action === "read_game") return { action: "read_game", result: { status: "ok", recapGame: material.game } };
@@ -227,6 +229,6 @@ function readGameIncomingRoute(wake: HostedExecutionConversationMessageWake, con
 
 function areGamePlayersAllowed(game: Parameters<typeof gameChatPlayerIds>[0], expected: readonly string[]): boolean {
   const players = gameChatPlayerIds(game);
-  if (players.length !== 2 || !isGameOn(game)) return false;
+  if (!isPairRoster(players) || !isGameOn(game)) return false;
   return sameGamePlayers(players, expected);
 }

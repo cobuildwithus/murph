@@ -5483,6 +5483,12 @@ under the pair and game locks. No alternate story store or queue exists. The Ops
 command and rollout/rollback contract live in the weekly game spec.
 
 `apps/web` owns the weekly game (product: `agent-docs/product-specs/weekly-game.md`).
+The pure roster helpers separate bounded member-set operations (up to ten) from
+released pair-only admission. Rule state retains the complete roster and entries;
+viewer projections receive hidden-member and hidden-entry sets, including before
+entry decryption. Task, result and scalar-ticket compatibility stays in `views.ts`.
+Views, shared progress and settlement reuse invocation-local entry indexes without
+persisted counts or caches. Production admission and pair policy remain unchanged.
 Postgres state tables are the truth: `game_profile`, `game_contact_label`,
 `game`, `game_player`, `game_entry`, `game_ticket`, plus `game_event`, an append-only history (one row per accepted change, ids and
 numbers and fixed server-authored refusal reasons only). Change proposal identities use its nullable unique `command_key`

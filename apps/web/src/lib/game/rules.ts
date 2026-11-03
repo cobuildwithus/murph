@@ -19,6 +19,7 @@ import {
   type GameTermsInput,
 } from "./contract";
 import { isRecord } from "../primitives";
+import { firstOpenSeat, isPairRoster } from "./roster";
 import {
   acceptanceStartDate,
   addDays,
@@ -99,6 +100,32 @@ export interface RuleState {
   game: RuleGame;
   players: RulePlayer[];
   entries: RuleEntry[];
+}
+
+/** Invocation-local lookup; preserves source order and withdrawn attempts. */
+export function indexGameEntries(entries: readonly RuleEntry[]): GameEntryIndex {
+  const index: GameEntryIndex = new Map();
+  for (const entry of entries) {
+    let days = index.get(entry.memberId);
+    if (!days) index.set(entry.memberId, days = new Map());
+    const bucket = days.get(entry.dayIndex);
+    if (bucket) bucket.push(entry);
+    else days.set(entry.dayIndex, [entry]);
+  }
+  return index;
+}
+
+export type GameEntryIndex = Map<string, Map<number, RuleEntry[]>>;
+type RuleEntries = readonly RuleEntry[] | GameEntryIndex;
+
+export function entriesForDay(entries: RuleEntries, memberId: string, dayIndex: number): readonly RuleEntry[] {
+  return entries instanceof Map ? entries.get(memberId)?.get(dayIndex) ?? []
+    : entries.filter((entry) => entry.memberId === memberId && entry.dayIndex === dayIndex);
+}
+
+/** Every admitted player shares the same calendar origin. */
+export function gameDayOne(players: readonly Pick<RulePlayer, "dayOne">[]): string | null {
+  return players.find((player) => player.dayOne)?.dayOne ?? null;
 }
 
 export const GAME_SEATS_1V1 = 2;
@@ -195,21 +222,19 @@ export function dayIndexAt(player: RulePlayer, now: Date): number | null {
 export function isScheduledDay(state: RuleState, dayIndex: number): boolean {
   const schedule = termsForDay(state.game.terms, dayIndex).schedule;
   if ("count" in schedule) return true;
-  const dayOne = state.players.find((player) => player.dayOne)?.dayOne;
+  const dayOne = gameDayOne(state.players);
   if (!dayOne) return false;
   return schedule.days.includes(weekdayOf(addDays(dayOne, dayIndex)));
 }
 
-export function liveEntry(entries: readonly RuleEntry[], memberId: string, dayIndex: number): RuleEntry | null {
-  return entries.find((entry) =>
-    entry.memberId === memberId
-    && entry.dayIndex === dayIndex
-    && entry.attempt > 0
+export function liveEntry(entries: RuleEntries, memberId: string, dayIndex: number): RuleEntry | null {
+  return entriesForDay(entries, memberId, dayIndex).find((entry) =>
+    entry.attempt > 0
     && entry.withdrawnAt === null) ?? null;
 }
 
 /** Credit is separate from artifact existence and permanent post-to-unlock. */
-export function completedEntry(entries: readonly RuleEntry[], memberId: string, dayIndex: number): RuleEntry | null {
+export function completedEntry(entries: RuleEntries, memberId: string, dayIndex: number): RuleEntry | null {
   const entry = liveEntry(entries, memberId, dayIndex);
   return entry && !entry.incomplete ? entry : null;
 }
@@ -228,13 +253,12 @@ export function decideDayCompletion(state: RuleState, input: { memberId: string;
 }
 
 /** Posts made for a day, withdrawn ones included. Excuses don't count. */
-export function attemptsUsed(entries: readonly RuleEntry[], memberId: string, dayIndex: number): number {
-  return entries.filter((entry) =>
-    entry.memberId === memberId && entry.dayIndex === dayIndex && entry.attempt > 0).length;
+export function attemptsUsed(entries: RuleEntries, memberId: string, dayIndex: number): number {
+  return entriesForDay(entries, memberId, dayIndex).filter((entry) => entry.attempt > 0).length;
 }
 
 /** Posting unlocks a day for good: a withdrawn photo can't be unseen. */
-export function hasUnlockedDay(entries: readonly RuleEntry[], memberId: string, dayIndex: number): boolean {
+export function hasUnlockedDay(entries: RuleEntries, memberId: string, dayIndex: number): boolean {
   return attemptsUsed(entries, memberId, dayIndex) > 0;
 }
 
@@ -430,7 +454,7 @@ export function decideJoin(
   const joiner: RulePlayer = {
     dayOne: null,
     memberId: input.memberId,
-    seat: claimed?.seat ?? state.players.length,
+    seat: claimed?.seat ?? firstOpenSeat(state.players),
     timeZone: input.timeZone,
   };
   // The accepter's cutoff and both local dates determine the shared Day 1.
@@ -454,7 +478,7 @@ function assertAddressee(game: RuleGame, memberId: string): void {
 
 /** Agreement starts a negotiation at approval time, never at the invitee's arrival. */
 export function decideNegotiationStart(state: RuleState, actor: string, now: Date, startsOn: string | null): Schedule {
-  if (state.game.status !== "negotiating" || state.players.length !== GAME_SEATS_1V1) reject("GAME_NOT_LIVE", "Both players must join before agreeing.");
+  if (state.game.status !== "negotiating" || !isPairRoster(state.players)) reject("GAME_NOT_LIVE", "Both players must join before agreeing.");
   if (startsOn !== null) {
     return scheduleFor(state, state.players, () => startsOn);
   }
@@ -638,13 +662,13 @@ export interface PlayerScore {
  * Misses = scheduled days without one; in count mode, the shortfall from N.
  * `throughDay` limits scoring to days already over (for live games).
  */
-export function scorePlayer(state: RuleState, player: RulePlayer, throughDay = state.game.lengthDays - 1): PlayerScore {
+export function scorePlayer(state: RuleState, player: RulePlayer, throughDay = state.game.lengthDays - 1, entries = indexGameEntries(state.entries)): PlayerScore {
   const { terms } = state.game;
   let credited = 0;
   let scheduledMissed = 0;
   for (let day = 0; day <= Math.min(throughDay, state.game.lengthDays - 1); day += 1) {
     const scheduled = isScheduledDay(state, day);
-    const posted = completedEntry(state.entries, player.memberId, day) !== null;
+    const posted = completedEntry(entries, player.memberId, day) !== null;
     if (scheduled && posted) credited += 1;
     if (scheduled && !posted) scheduledMissed += 1;
   }
@@ -677,14 +701,20 @@ export interface SettleDecision {
 
 export function decideSettle(state: RuleState): SettleDecision {
   const players = [...state.players].sort((a, b) => a.seat - b.seat);
-  const scores = players.map((player) => scorePlayer(state, player));
+  const entries = indexGameEntries(state.entries);
+  const scores = players.map((player) => scorePlayer(state, player, undefined, entries));
   const version = currentTerms(state.game.terms);
+  return { result: { scores, termsVersion: version.n, v: 1 }, tickets: legacyPairStakeTickets(scores, version.stakes) };
+}
+
+/** Released pair stakes retain unique-winner, perfect-game and per-miss semantics. */
+function legacyPairStakeTickets(scores: readonly PlayerScore[], stakes: readonly StoredStake[]): SettleDecision["tickets"] {
   const tickets: SettleDecision["tickets"] = [];
   const top = Math.max(...scores.map((score) => score.score));
   const winners = scores.filter((score) => score.score === top);
   // Same test as outcomeFor: when nobody missed a day, the outcome is perfect.
   const perfect = scores.every((score) => score.misses === 0);
-  for (const stake of version.stakes) {
+  for (const stake of stakes) {
     if (stake.kind !== "per_miss") {
       // A tie or a perfect game means nobody owes anything.
       if (perfect || winners.length !== 1) continue;
@@ -703,7 +733,7 @@ export function decideSettle(state: RuleState): SettleDecision {
       }
     }
   }
-  return { result: { scores, termsVersion: version.n, v: 1 }, tickets };
+  return tickets;
 }
 
 export function outcomeFor(result: StoredResult, memberId: string): "won" | "lost" | "tie" | "perfect" {

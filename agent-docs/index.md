@@ -1,3 +1,7 @@
+Pair-preserving game collection preparation and visibility proof are recorded in
+[the PR 1 plan](exec-plans/completed/2026-11-02-game-roster-pr1.md).
+The weekly game architecture remains the behavior owner.
+
 Finished runtime migration and Stripe meter export removal, deploy-skew proof,
 per-case test audit and local verification are tracked in
 [the removal plan](exec-plans/completed/2026-11-02-remove-finished-migrations.md).

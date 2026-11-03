@@ -2,6 +2,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import { getPrisma } from "../prisma";
 import { lockGamePair } from "./blocks";
+import { isPairRoster, sameGameMembers } from "./roster";
 import { GAME_MAX_OPEN_PER_PAIR } from "./rules";
 import { isGameOn } from "./access";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
@@ -11,9 +12,9 @@ import { getHostedLinqChatSummary, type HostedLinqChatSummary } from "../hosted-
 import { readHostedLinqIncomingLineState } from "../hosted-onboarding/linq-line-store";
 import { readHostedThreadContainerLinqRouteAuthorities } from "../hosted-routing/assistant-notification-destination";
 
+/** Released chat admission and binding remain pair-only. */
 export function sameGamePlayers(actual: readonly string[], expected: readonly string[]): boolean {
-  return actual.length === 2 && expected.length === 2 && new Set(actual).size === 2
-    && new Set(expected).size === 2 && actual.every((memberId) => expected.includes(memberId));
+  return isPairRoster(actual) && sameGameMembers(actual, expected);
 }
 
 /** Local roster narrows discovery; the provider roster independently proves sharing. */
@@ -23,7 +24,7 @@ export async function readGameChatPlayerIds(containerMemberId: string, prisma: P
     select: { participants: { where: { removedAt: null }, select: { participantMemberId: true }, take: 3 } },
   });
   const players = container?.participants.map((participant) => participant.participantMemberId) ?? [];
-  return players.length === 2 && new Set(players).size === 2 && isGamePairOn(players) ? players : [];
+  return sameGamePlayers(players, players) && isGamePairOn(players) ? players : [];
 }
 
 /** Every game of a pair has exactly these people, so the pair decides whether its games are on. */
@@ -32,7 +33,7 @@ function isGamePairOn(playerMemberIds: readonly string[]): boolean {
 }
 
 export function gamePairWhere(playerMemberIds: readonly string[]): Prisma.GameWhereInput {
-  if (playerMemberIds.length !== 2 || new Set(playerMemberIds).size !== 2) return { id: { in: [] } };
+  if (!sameGamePlayers(playerMemberIds, playerMemberIds)) return { id: { in: [] } };
   return {
     AND: playerMemberIds.map((memberId) => ({ players: { some: { memberId } } })),
     players: { none: { memberId: { notIn: [...playerMemberIds] } } },
@@ -44,7 +45,7 @@ export function addressedGameRematchWhere(players: readonly string[], now = new 
   if (!sameGamePlayers(players, players)) return { id: { in: [] } };
   return { status: "invited", previousGameId: { not: null },
     AND: [{ OR: [{ inviteExpiresAt: null }, { inviteExpiresAt: { gt: now } }] }],
-    OR: players.map((createdBy, index) => ({ createdBy, inviteeMemberId: players[1 - index],
+    OR: players.map((createdBy) => ({ createdBy, inviteeMemberId: players.find((id) => id !== createdBy),
       players: { some: { memberId: createdBy, seat: 0 }, every: { memberId: createdBy } } })),
   };
 }
@@ -95,10 +96,10 @@ export async function bindPairGameChat(gameId: string, players: readonly string[
 /** Game reads and writes require this room's current exact pair, never a chat binding. */
 export async function requireExactGameChat(containerMemberId: string): Promise<readonly string[]> {
   const playerMemberIds = await readGameChatPlayerIds(containerMemberId);
-  if (playerMemberIds.length !== 2) throw new Error("Game chat requires exactly two available players.");
+  if (!isPairRoster(playerMemberIds)) throw new Error("Game chat requires exactly two available players.");
   const identities = await Promise.all(playerMemberIds.map((memberId) => readHostedMemberIdentity({ memberId, prisma: getPrisma() })));
   const phones = identities.flatMap((identity) => identity?.phoneNumberVerifiedAt && identity.phoneNumber ? [identity.phoneNumber] : []);
-  if (phones.length !== 2 || new Set(phones).size !== 2) throw new Error("Game chat requires verified players.");
+  if (!sameGamePlayers(phones, phones)) throw new Error("Game chat requires verified players.");
   await requireExactChat(containerMemberId, phones);
   return playerMemberIds;
 }
@@ -111,12 +112,11 @@ export async function requireExactChat(containerMemberId: string, phones: readon
 
 /** Current complete provider membership, not the best-effort database roster, proves the audience. */
 export function isExactGameChat(chat: HostedLinqChatSummary, phones: readonly string[]): boolean {
-  if (chat.isGroup !== true || chat.handlesComplete !== true || phones.length !== 2 || new Set(phones).size !== 2) return false;
+  if (chat.isGroup !== true || chat.handlesComplete !== true || !sameGamePlayers(phones, phones)) return false;
   const active = chat.handles.filter((handle) => handle.status === null || handle.status.toLowerCase() === "active");
   const people = active.filter((handle) => !handle.isMe).map((handle) => normalizePhoneNumber(handle.handle));
   return active.filter((handle) => handle.isMe).length === 1
-    && people.length === 2 && new Set(people).size === 2
-    && phones.every((phone) => people.includes(phone));
+    && people.every((phone): phone is string => phone !== null) && sameGameMembers(people, phones);
 }
 
 export async function exactChat(containerMemberId: string, phones: readonly string[]) {
@@ -161,7 +161,7 @@ export async function findExistingGameChat(playerMemberIds: readonly string[], p
         || b.createdAt.getTime() - a.createdAt.getTime() || a.memberId.localeCompare(b.memberId);
     });
     for (const candidate of candidates) {
-      if (candidate.participants.length !== 2 || !playerMemberIds.every((memberId) => candidate.participants.some((participant) => participant.participantMemberId === memberId))) continue;
+      if (!sameGamePlayers(candidate.participants.map((participant) => participant.participantMemberId), playerMemberIds)) continue;
       if (await exactChat(candidate.memberId, phones)) return candidate.memberId;
     }
   return null;
