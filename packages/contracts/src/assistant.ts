@@ -473,3 +473,8 @@ function isValidLocalCalendarDate(value: string): boolean {
 function isLeapYear(year: number): boolean {
   return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
 }
+
+/** Legacy persisted selections are read through; execution and writes stay strict. */
+export function normalizeStoredAssistantModel(model: string | null): string | null {
+  return model === "gpt-5.6-sol" ? "gpt-6.1-sol" : model;
+}

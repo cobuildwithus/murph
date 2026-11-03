@@ -1354,7 +1354,7 @@ image recipe; no manual binary installation or separate release service is neede
 
 ### Astra model catalog
 
-The native runner image has a default GPT-6.1 Sol, GPT-6 Sol/Luna, and GPT-5.6 Sol/Luna catalog and an expanded
+The native runner image has a default GPT-6.1 Sol, GPT-6 Sol/Luna, and GPT-5.6 Luna catalog and an expanded
 `.astra` catalog with `gpt-6-astra` and OpenAI Flex support. The runtime chooses
 the latter only from Web's explicit Max/OpenAI workspace authorization. Missing
 authority, Edge, and group runtimes retain the default catalog and its

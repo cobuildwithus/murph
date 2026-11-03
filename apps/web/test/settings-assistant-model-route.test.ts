@@ -70,7 +70,7 @@ describe("assistant model settings route", () => {
     });
     mocks.updateHostedMemberAssistantConfigurationTx.mockResolvedValue({
       dormantSolPreference: false,
-      model: "gpt-5.6-sol",
+      model: "gpt-6.1-sol",
       solAvailable: true,
       updated: true,
     });
@@ -81,7 +81,7 @@ describe("assistant model settings route", () => {
     expect(mocks.signalHostedRuntimeWakeRuntime).not.toHaveBeenCalled();
   });
 
-  it.each(["gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-6-astra"])("persists validated %s without a mailbox wake", async (model) => {
+  it.each(["gpt-6-sol", "gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"])("persists validated %s without a mailbox wake", async (model) => {
     mocks.updateHostedMemberAssistantConfigurationTx.mockResolvedValueOnce({
       dormantSolPreference: false,
       hostedAssistantModelOverride: model,
@@ -118,19 +118,19 @@ describe("assistant model settings route", () => {
   it("returns the canonical idempotent result", async () => {
     mocks.updateHostedMemberAssistantConfigurationTx.mockResolvedValue({
       dormantSolPreference: false,
-      model: "gpt-5.6-sol",
+      model: "gpt-6.1-sol",
       solAvailable: true,
       updated: false,
     });
 
     const response = await route.POST(jsonRequest({
-      model: "gpt-5.6-sol",
+      model: "gpt-6.1-sol",
     }));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       dormantSolPreference: false,
-      model: "gpt-5.6-sol",
+      model: "gpt-6.1-sol",
       ok: true,
       solAvailable: true,
       updated: false,
@@ -144,19 +144,19 @@ describe("assistant model settings route", () => {
       hostedOnboardingError({
         code: "ASSISTANT_MODEL_SOL_REQUIRES_EDGE",
         httpStatus: 403,
-        message: "GPT-5.6 Sol requires an active paid Edge plan.",
+        message: "GPT-6.1 Sol requires an active paid Edge plan.",
       }),
     );
 
     const response = await route.POST(jsonRequest({
-      model: "gpt-5.6-sol",
+      model: "gpt-6.1-sol",
     }));
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "ASSISTANT_MODEL_SOL_REQUIRES_EDGE",
-        message: "GPT-5.6 Sol requires an active paid Edge plan.",
+        message: "GPT-6.1 Sol requires an active paid Edge plan.",
         retryable: false,
       },
     });
@@ -182,7 +182,7 @@ describe("assistant model settings route", () => {
     });
 
     const extraFieldResponse = await route.POST(jsonRequest({
-      model: "gpt-5.6-sol",
+      model: "gpt-6.1-sol",
       unexpected: true,
     }));
     expect(extraFieldResponse.status).toBe(400);
@@ -193,7 +193,7 @@ describe("assistant model settings route", () => {
     });
 
     const invalidProviderResponse = await route.POST(jsonRequest({
-      model: "gpt-5.6-sol",
+      model: "gpt-6.1-sol",
       provider: "unknown",
     }));
     expect(invalidProviderResponse.status).toBe(400);
@@ -208,7 +208,7 @@ describe("assistant model settings route", () => {
 
   it("rejects oversized bodies before persistence", async () => {
     const response = await route.POST(jsonRequest({
-      model: "gpt-5.6-sol",
+      model: "gpt-6.1-sol",
       padding: "x".repeat(1_100),
     }));
 
@@ -231,7 +231,7 @@ describe("assistant model settings route", () => {
     });
 
     const response = await route.POST(jsonRequest({
-      model: "gpt-5.6-sol",
+      model: "gpt-6.1-sol",
     }));
 
     expect(response.status).toBe(403);
@@ -249,7 +249,7 @@ describe("assistant model settings route", () => {
     );
 
     const response = await route.POST(jsonRequest({
-      model: "gpt-5.6-sol",
+      model: "gpt-6.1-sol",
     }));
 
     expect(response.status).toBe(401);

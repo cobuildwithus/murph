@@ -968,6 +968,9 @@ function buildCodexFinalResponsePresentation(input: {
 export async function executeCodexAppServerTurn(
   input: CodexAppServerTurnInput,
 ): Promise<CodexAppServerTurnResult> {
+  if (input.model?.trim().toLowerCase() === 'gpt-5.6-sol') {
+    throw new TypeError('GPT-5.6 Sol is retired; use gpt-6.1-sol.')
+  }
   const providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
     input.providerStartCriticalPath,
     'codexAppServerTurnStartedAtMonotonicMs',

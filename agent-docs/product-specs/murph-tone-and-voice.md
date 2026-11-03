@@ -49,15 +49,17 @@ preference, clear current conversational language, and the remembered default
 when the current message is ambiguous. The selected voice stays unchanged, and
 language alone does not opt the member into audio replies.
 
-Murph proactively saves a clear conversational language as an observed default
-for future voice memos in canonical freeform memory, including on text-only
-turns. It updates an existing language note instead of adding duplicates and
-skips unchanged writes. Explicit ongoing changes replace that note; quotations,
-translation exercises, isolated foreign words, and one-off overrides do not.
-Memory opt-outs and explicit saved preferences take priority. This introduces
-no new settings field and no personal-memory authority in group or unverified
-conversations. Routine saves need no acknowledgement; a failed write cannot
-justify a claim that the preference was saved.
+Murph proactively saves a clear non-English conversational language as an
+observed default for future voice memos in canonical freeform memory,
+including on text-only turns. English needs no new observed-language note. It
+updates an existing observed note when the language changes, including a
+switch to English, instead of adding duplicates, and skips unchanged writes.
+Explicit ongoing changes replace that note; quotations, translation exercises,
+isolated foreign words, and one-off overrides do not. Memory opt-outs and
+explicit saved preferences take priority. This introduces no new settings
+field and no personal-memory authority in group or unverified conversations.
+Routine saves need no acknowledgement; a failed write cannot justify a claim
+that the preference was saved.
 
 ## Canonical Preferences
 

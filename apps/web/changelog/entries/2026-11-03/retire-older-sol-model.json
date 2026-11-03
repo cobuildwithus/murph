@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-11-03",
+  "order": 100,
+  "item": {
+    "id": "retire-older-sol-model",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Sol choices move forward",
+    "summary": "GPT-5.6 Sol is no longer available in Murph. Existing reminders saved with it continue on GPT-6.1 Sol.",
+    "details": "Schedules and explicit reasoning settings stay the same. GPT-5.6 Luna remains available, and past usage records remain intact.",
+    "relevanceTags": [
+      "settings",
+      "automations"
+    ],
+    "sourcePullRequests": [4503]
+  }
+}

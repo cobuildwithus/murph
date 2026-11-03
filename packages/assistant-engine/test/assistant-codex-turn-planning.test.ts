@@ -450,11 +450,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "87271b749c52649c6fd8e939cfaf92cc0391ce127905bcbd92478e5dc6423f4a",
+        "direct": "740068d5a629ec79aa2805ff611341731e8299551abd412dd4260026196d4918",
         "group": "3f10d23569735e17bbdf717cbf8beff93468a7b093fd76954244bee57a21370b",
         "maintenance": "52f122f38125b96ccf960ea62ada87ef983f3e1060cdafef33eae3309b970038",
         "outputOnly": "b87c76c464b664e3d9dcbf947b1cd7a3c823dad67b72a8597c8a462e1bd3dd54",
-        "scheduledEmail": "698453cf67c23c6c31a8362c64fb9c2908e219081c09e7012b829d3f7e2fca59",
+        "scheduledEmail": "bd08875e24f7d7a728bcff1930a08724f1666dc8cac2f22dc0245b8948803035",
       }
     `)
   })
@@ -7648,7 +7648,7 @@ describe('assistant Codex turn planning', () => {
       executionContext: null,
       input: {
         ...createMessageInput(),
-        model: 'gpt-5.6-sol',
+        model: 'gpt-6.1-sol',
         reasoningEffort: 'high',
       },
       profile: {

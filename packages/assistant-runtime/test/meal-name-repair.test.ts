@@ -92,6 +92,8 @@ it("records model usage with member notice delivery explicitly disabled", async 
   const input = await fixture(["Estimated bean plate"]);
   const recordUsage = vi.fn(async () => ({ recorded: true, usageId: "synthetic", platformAiUsageAllowedAfter: true }));
   await repairLegacyMealNames({ ...input, usageRecordPort: { recordUsage }, propose: async proposal => {
+    expect(proposal.model).toBe("gpt-6.1-sol");
+    expect(proposal.reasoningEffort).toBe("low");
     proposal.onProviderUsage?.({ stage: "answer", usage: {
       occurredAt: new Date().toISOString(), provider: "codex-cli", providerRequestOrdinal: 0, providerRequestOutcome: "succeeded",
       usage: { apiKeyEnv: null, baseUrl: null, cacheWriteTokens: null, cachedInputTokens: null, inputTokens: 20, outputTokens: 5,

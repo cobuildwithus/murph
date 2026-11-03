@@ -16,6 +16,11 @@ Current responsibilities:
 - import each manual app meal photo once, then queue its existing mailbox item
   for a private estimation or clarification turn through ordinary model
   admission and delivery idempotency; automatic photos remain import-only
+- prepare due manual meal notifications before cron preflight or a model-free
+  owner handoff can end the default pass; recording device-sync continuations
+  still finish through their independent checkpoint owner
+- continue to due outbox delivery after idle context or receipt maintenance,
+  deriving readiness from the outbox rather than an older workspace wake
 
 - run bounded hosted workspace invocations for assistant, inbox, and device-sync work behind an explicit runtime context object
 - yield system-mailbox completion during container shutdown, drain owned projection

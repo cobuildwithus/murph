@@ -150,7 +150,7 @@ describe("hosted assistant personalization contract", () => {
     })).toThrow();
     expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
       action: "update",
-      model: "gpt-5.6-sol",
+      model: "gpt-6.1-sol",
     })).toThrow();
     expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
       action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,

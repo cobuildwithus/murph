@@ -435,10 +435,10 @@ describe('Codex assistant registry helpers', () => {
   it.each([
     {
       requestedModel: 'gpt-5.6-luna',
-      servedModel: 'gpt-5.6-sol',
+      servedModel: 'gpt-6.1-sol',
     },
     {
-      requestedModel: 'gpt-5.6-sol',
+      requestedModel: 'gpt-6.1-sol',
       servedModel: 'gpt-5.6-luna',
     },
   ])(
@@ -522,7 +522,7 @@ describe('Codex assistant registry helpers', () => {
       rawEvents: [
         {
           method: 'model/rerouted',
-          params: { toModel: 'gpt-5.6-sol' },
+          params: { toModel: 'gpt-6.1-sol' },
         },
         {
           method: 'turn/started',
@@ -554,11 +554,11 @@ describe('Codex assistant registry helpers', () => {
     {
       expectedPricingBasis: 'openai-flex' as const,
       requestedModel: 'gpt-5.4-mini',
-      servedModel: 'gpt-5.6-sol',
+      servedModel: 'gpt-6.1-sol',
     },
     {
       expectedPricingBasis: 'standard' as const,
-      requestedModel: 'gpt-5.6-sol',
+      requestedModel: 'gpt-6.1-sol',
       servedModel: 'gpt-5.4-mini',
     },
   ])(

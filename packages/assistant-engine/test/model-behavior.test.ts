@@ -1234,8 +1234,8 @@ describe('assistant system prompt cache stability', () => {
       }),
     )
 
-    // Private language selection and canonical memory policy add 1412 characters.
-    expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(9_827)
+    // The non-English save policy preserves updates back to English; 146 added characters.
+    expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(9_910)
     // This layer is resident on every turn for every member. Its ceiling is the
     // prior 66,780-character ratchet plus the reviewed 890-character wearable
     // freshness addition, for cross-route guidance that cannot live in an owning
@@ -1610,7 +1610,7 @@ describe('assistant system prompt cache stability', () => {
     expect(dynamicSuffix).toContain(
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
-    expect(promptA.cacheMetadata.staticPromptHash).toMatchInlineSnapshot(`"76af77f6c1d1efb2f1a0b4e344ed0d8408ca87a4dc236a01c0ebd9b8621feb30"`)
+    expect(promptA.cacheMetadata.staticPromptHash).toMatchInlineSnapshot(`"68a1d5108af16ff8649843be4ab7aa231321228a52be79e80f0f3010cfea7c67"`)
     expect(promptA.cacheMetadata.stableRouteCapabilityPromptHash).toMatchInlineSnapshot(`"d088960821d4ec4b6d91cf9a9bb8d4f05ca840dc65983fc06bca8a48f427049f"`)
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',

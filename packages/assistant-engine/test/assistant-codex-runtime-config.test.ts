@@ -45,7 +45,7 @@ import {
 import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
-  HOSTED_ASSISTANT_SOL_MODEL,
+  HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
   HOSTED_ASSISTANT_DEFAULT_MODEL,
   type HostedAssistantProductModel,
   type HostedAssistantReasoningEffort,
@@ -94,6 +94,14 @@ import {
 } from '../src/assistant/generated-delivery-files.ts'
 
 describe('assistant codex runtime', () => {
+  it('rejects retired Sol before starting a provider process', async () => {
+    await expect(executeCodexAppServerTurn({
+      model: 'gpt-5.6-sol', prompt: 'Synthetic retirement check',
+      workingDirectory: '/synthetic',
+    })).rejects.toThrow('retired')
+    expect(codexMocks.spawn).not.toHaveBeenCalled()
+  })
+
   it('runs RPC timeout cleanup only when the timeout wins', async () => {
     vi.useFakeTimers()
     try {
@@ -535,7 +543,7 @@ describe('assistant codex runtime', () => {
     },
     {
       expectedImageDetail: 'original',
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6.1-sol',
       modelProvider: 'openai',
       providerRequestOrdinal: 2,
     },
@@ -1620,7 +1628,7 @@ describe('assistant codex runtime', () => {
             params: {
               arguments: {
                 action: 'update',
-                model: HOSTED_ASSISTANT_SOL_MODEL,
+                model: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
               },
               namespace: 'murph',
               tool: 'assistant_configuration',
@@ -1642,7 +1650,7 @@ describe('assistant codex runtime', () => {
           await firstUpdateStarted.promise
           try {
             expect(configurationCalls).toEqual([
-              `update:${HOSTED_ASSISTANT_SOL_MODEL}`,
+              `update:${HOSTED_ASSISTANT_GPT_61_SOL_MODEL}`,
             ])
           } finally {
             releaseFirstUpdate.resolve()
@@ -1658,7 +1666,7 @@ describe('assistant codex runtime', () => {
             result: { success: true },
           })
           expect(configurationCalls).toEqual([
-            `update:${HOSTED_ASSISTANT_SOL_MODEL}`,
+            `update:${HOSTED_ASSISTANT_GPT_61_SOL_MODEL}`,
             `update:${HOSTED_ASSISTANT_DEFAULT_MODEL}`,
           ])
 

@@ -96,7 +96,7 @@ describe("hosted operator task notification", () => {
     });
 
     expect(mocks.sendAssistantNotification.mock.calls[0]?.[0].assistantTargetOverride)
-      .toEqual({ model: "gpt-5.6-sol", modelProvider: operatorProvider });
+      .toEqual({ model: "gpt-6.1-sol", modelProvider: operatorProvider });
     expect(recordUsage).toHaveBeenCalledWith({ ...usageRecord, operatorTaskId: TASK_ID }, undefined);
     expect(usageRecord).not.toHaveProperty("operatorTaskId");
     expect(outcome.deliveryIntentIds).toEqual(["intent_operator_synthetic"]);

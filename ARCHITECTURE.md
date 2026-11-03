@@ -1669,12 +1669,12 @@ Web exposes the native field only when its existing assistant-configuration
 resolution confirms that the current managed runtime is authorized for the
 full product-model catalog; missing authority fails closed.
 The production image defaults to a catalog containing GPT-6.1 Terra, GPT-6.1 Sol and GPT-6 Luna plus
-GPT-5.6 Luna and Sol, retaining GPT-6 Sol for saved conversation preferences. CLI 0.166.0 supplies the existing entries from its native catalog; the pinned
+GPT-5.6 Luna, retaining GPT-6 Sol for saved conversation preferences. CLI 0.166.0 supplies the existing entries from its native catalog; the pinned
 `apps/cloudflare/codex-model-catalog.terra.json` adds the official refreshed
 Codex Terra launch entry. Terra retains its native 500K context window; existing
 GPT-6 and GPT-6.1 Sol entries retain their native 272K limit. The image fails validation for missing entries. Web separately derives Astra authority from the canonical available models
 and managed OpenAI provider; only an explicitly authorized workspace selects the
-expanded image-owned Astra catalog. Missing authority retains the six-model
+expanded image-owned Astra catalog. Missing authority retains the five-model
 catalog, preserving Edge and group delegation while Codex's native validation
 rejects Astra before a provider request. Catalog selection changes the native
 launch key, so a warm process cannot retain an earlier catalog after access changes.
@@ -1940,8 +1940,10 @@ Only four packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   Morning Journal uses its managed Luna pin. Web opening replies
   also use GPT-6 Luna. At scheduled execution,
   automation pins use a reviewed OpenAI replacement map: GPT-5.6 Luna becomes
-  GPT-6 Luna, and GPT-6 Sol, GPT-5.6 Sol, or GPT-5.6 Terra becomes GPT-6.1 Sol. Provider-neutral
-  envelopes and canonical records retain the authored pin; resolution happens
+  GPT-6 Luna, and GPT-6 Sol or GPT-5.6 Terra becomes GPT-6.1 Sol. Retired GPT-5.6 Sol
+  is normalized to GPT-6.1 Sol when reading canonical automation overrides, retained
+  cron targets, saved conversations and operator profiles; new writes reject it.
+  Other provider-neutral envelopes and canonical records retain the authored pin; resolution happens
   after the executing provider is known and before default reasoning is derived.
   Scheduled turns that inherit an explicitly saved GPT-6 Sol conversation target
   also use GPT-6.1 Sol, preserving inherited reasoning and the conversation target.

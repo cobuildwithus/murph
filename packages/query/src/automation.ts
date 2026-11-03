@@ -14,6 +14,7 @@ import {
   automationStatusValues,
   automationSupportKindValues,
   normalizeIanaTimeZone,
+  normalizeStoredAssistantModel,
   parseAutomationSupportSeriesTag,
   VAULT_LAYOUT,
   type AutomationAssistantTargetOverride,
@@ -384,7 +385,7 @@ function normalizeAutomationAssistantTargetOverride(
   }
 
   const object = value as Record<string, unknown>;
-  const model = normalizeAutomationAssistantTargetOverrideString(object.model);
+  const model = normalizeStoredAssistantModel(normalizeAutomationAssistantTargetOverrideString(object.model));
   const modelProvider = normalizeAutomationAssistantTargetOverrideString(object.modelProvider);
   const reasoningEffort = normalizeAutomationAssistantTargetOverrideReasoningEffort(
     object.reasoningEffort,

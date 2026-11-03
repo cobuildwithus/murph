@@ -130,7 +130,7 @@ describe('assistant codex image helpers', () => {
   it.each([
     ['gpt-5.6-luna', 'openai'],
     ['gpt-6-sol', 'hosted-openai'],
-    ['gpt-5.6-sol', 'hosted-chatgpt-openai'],
+    ['gpt-6.1-sol', 'hosted-chatgpt-openai'],
     ['gpt-6-astra', 'hosted-openai'],
   ] as const)(
     'keeps original detail for %s on the %s route',

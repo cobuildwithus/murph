@@ -26,11 +26,11 @@ import {
   normalizeHostedAiUsageAllowanceElevenLabsMusicModelId,
   normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
   normalizeHostedAiUsageAllowanceOpenAiImageModelId,
-  normalizeHostedAiUsageAllowancePricedModelId,
+  normalizeHostedAiUsageLedgerModelId,
   type HostedAiUsageAllowanceElevenLabsMusicPricedModel,
   type HostedAiUsageAllowanceElevenLabsTtsPricedModel,
   type HostedAiUsageAllowanceOpenAiImagePricedModel,
-  type HostedAiUsageAllowancePricedModel,
+  type HostedAiUsageLedgerModel,
   type HostedAiUsageOpenAiFlexTokenPricingModel,
 } from "@murphai/hosted-execution/runtime-control";
 
@@ -202,7 +202,7 @@ type HostedAiUsageAllowancePricingModelSource =
   | "served";
 
 interface HostedAiUsageAllowancePricingModelResolution {
-  model: HostedAiUsageAllowancePricedModel | null;
+  model: HostedAiUsageLedgerModel | null;
   requestedModel: string | null;
   servedModel: string | null;
   source: HostedAiUsageAllowancePricingModelSource | null;
@@ -223,7 +223,7 @@ interface HostedAiUsageAllowanceTokenPricingBasisConfig {
 }
 
 type HostedAiUsageAllowanceTokenPricingBasesByModel = Record<
-  HostedAiUsageAllowancePricedModel,
+  HostedAiUsageLedgerModel,
   Partial<Record<AssistantUsageTokenPricingBasis, HostedAiUsageAllowanceTokenPricingBasisConfig>>
   & {
     standard: HostedAiUsageAllowanceTokenPricingBasisConfig;
@@ -594,6 +594,7 @@ const hostedGeminiVideoAnalysisRolloutModels = new Set<string>(
   HOSTED_GEMINI_VIDEO_ANALYSIS_ROLLOUT_MODELS,
 );
 
+// Historical ledger pricing only: old runners and retries can report after rollout.
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_SOL_MODEL_PRICE = {
   cachedInputUsdMicrosPerMillionTokens: 400_000n,
   cacheWriteUsdMicrosPerMillionTokens: 5_000_000n,
@@ -609,7 +610,7 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_LUNA_MODEL_PRICE = {
 } as const;
 
 const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES: Record<
-  HostedAiUsageAllowancePricedModel,
+  HostedAiUsageLedgerModel,
   HostedAiUsageAllowanceModelPrice
 > = {
   "gpt-6.1-terra": {
@@ -2775,7 +2776,7 @@ function applyTokenPricingAdjustmentUsdMicros(
 }
 
 function resolveHostedAiUsageAllowanceTokenPricingBasis(input: {
-  model: HostedAiUsageAllowancePricedModel | null;
+  model: HostedAiUsageLedgerModel | null;
   record: AssistantUsageRecord;
 }): HostedAiUsageAllowanceTokenPricingBasisResolution {
   const basis = normalizeAssistantUsageTokenPricingBasis(
@@ -3800,12 +3801,12 @@ function normalizeAssistantUsageCredentialSource(
 
 function normalizeHostedAiUsageAllowanceModel(
   value: string | null,
-): HostedAiUsageAllowancePricedModel | null {
+): HostedAiUsageLedgerModel | null {
   if (typeof value !== "string") {
     return null;
   }
 
-  return normalizeHostedAiUsageAllowancePricedModelId(value);
+  return normalizeHostedAiUsageLedgerModelId(value);
 }
 
 function resolveHostedAiUsageAllowancePricingModel(
@@ -3853,7 +3854,7 @@ function buildHostedAiUsageAllowanceModelSnapshot(
 }
 
 function resolveHostedAiUsageAllowanceModelPrices(input: {
-  model: HostedAiUsageAllowancePricedModel;
+  model: HostedAiUsageLedgerModel;
   record: AssistantUsageRecord;
 }): HostedAiUsageAllowanceModelPrice {
   const prices = HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES[input.model];

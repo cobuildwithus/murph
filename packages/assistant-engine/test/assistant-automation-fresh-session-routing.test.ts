@@ -59,7 +59,7 @@ describe('fresh automation model routing', () => {
     const backend = createAssistantModelTarget({
       approvalPolicy: 'never',
       codexCommand: '/opt/murph-codex',
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6.1-sol',
       modelProvider: 'hosted-openai',
       profile: 'scheduled-policy',
       provider: 'codex-cli',

@@ -258,7 +258,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     });
     const recorded: AssistantUsageRecord[] = [];
     await runHostedIdleCheckpointMaintenance({
-      credentialSource: "platform", memberId: "member_1", model: "gpt-5.6-sol",
+      credentialSource: "platform", memberId: "member_1", model: "gpt-6.1-sol",
       providerName: "hosted-openai", pendingWork: false,
       recordUsage: async (record) => {
         recorded.push(record);
@@ -300,7 +300,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "member",
       memberId: "member_1",
-      model: "gpt-5.6-sol",
+      model: "gpt-6.1-sol",
       providerName: "openai-local-test",
       pendingWork: false,
       recordUsage: async (record) => {
@@ -354,7 +354,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-5.6-sol",
+      model: "gpt-6.1-sol",
       pendingWork: false,
       providerName: "hosted-openai",
       recordUsage,

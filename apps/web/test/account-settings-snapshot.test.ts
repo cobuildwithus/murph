@@ -492,8 +492,8 @@ describe("hosted account settings snapshot", () => {
     mocks.resolveHostedMemberAssistantModel.mockReturnValue({
       configurationAvailable: true,
       dormantSolPreference: false,
-      hostedAssistantModelOverride: "gpt-5.6-sol",
-      model: "gpt-5.6-sol",
+      hostedAssistantModelOverride: "gpt-6.1-sol",
+      model: "gpt-6.1-sol",
       solAvailable: true,
     });
 
@@ -503,7 +503,7 @@ describe("hosted account settings snapshot", () => {
       assistant: {
         configurationAvailable: true,
         dormantSolPreference: false,
-        model: "gpt-5.6-sol",
+        model: "gpt-6.1-sol",
         solAvailable: true,
       },
     });

@@ -655,7 +655,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
           }))
           child.stdout.write(jsonLine({
             method: 'model/rerouted',
-            params: { toModel: 'gpt-6.1-sol' },
+            params: { toModel: 'gpt-6-sol' },
           }))
           child.stdout.write(jsonLine({
             method: 'turn/started',
@@ -666,7 +666,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
           }))
           child.stdout.write(jsonLine({
             method: 'model/rerouted',
-            params: { toModel: 'gpt-5.6-sol' },
+            params: { toModel: 'gpt-6.1-sol' },
           }))
           child.stdout.write(jsonLine({
             method: 'thread/tokenUsage/updated',
@@ -737,25 +737,25 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     )).toEqual([
       {
         method: 'model/rerouted',
-        params: { toModel: 'gpt-5.6-sol' },
+        params: { toModel: 'gpt-6.1-sol' },
       },
     ])
     expect(onTraceEvent).toHaveBeenCalledWith(expect.objectContaining({
       rawEvent: {
         method: 'model/rerouted',
-        params: { toModel: 'gpt-5.6-sol' },
+        params: { toModel: 'gpt-6.1-sol' },
       },
       updates: [{
         kind: 'status',
         mode: 'replace',
         streamKey: 'status:model-reroute',
-        text: 'Switched to gpt-5.6-sol.',
+        text: 'Switched to gpt-6.1-sol.',
       }],
     }))
     expect(onTraceEvent).not.toHaveBeenCalledWith(expect.objectContaining({
       rawEvent: {
         method: 'model/rerouted',
-        params: { toModel: 'gpt-6.1-sol' },
+        params: { toModel: 'gpt-6-sol' },
       },
     }))
     expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
