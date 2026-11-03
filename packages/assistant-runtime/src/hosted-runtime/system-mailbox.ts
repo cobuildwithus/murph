@@ -1020,14 +1020,17 @@ function upsertHostedSystemMailboxPendingItem(
 export function resolveHostedDeviceSyncCompletionRecordInput(input: {
   item: HostedSystemMailboxPendingItem;
   preparation: HostedSystemMailboxCheckpointPreparation | null;
-}): { deviceSyncCompletionAcceptedInCurrentAdmission?: true } {
+}): { deviceSyncCompletionAcceptedInCurrentAdmission?: true; deviceSyncCompletionReplayed?: true } {
   const checkpointedWake = resolveHostedDeviceSyncCheckpointedWake(input.item);
   // A restored completion-only fence already proves all imported work durable.
   // Publishing it rechecks the connection epoch/version and advances cadence
   // monotonically; replay must not create another identical recording journal.
-  if (input.preparation?.status === "recording" && checkpointedWake
-    && isHostedDeviceSyncCompletionFenceWake(checkpointedWake)) {
-    return { deviceSyncCompletionAcceptedInCurrentAdmission: true };
+  if (input.preparation?.status === "recording") {
+    return {
+      deviceSyncCompletionReplayed: true,
+      ...(checkpointedWake && isHostedDeviceSyncCompletionFenceWake(checkpointedWake)
+        ? { deviceSyncCompletionAcceptedInCurrentAdmission: true as const } : {}),
+    };
   }
   if (
     input.preparation?.status !== "processed"
@@ -1042,6 +1045,7 @@ export function resolveHostedDeviceSyncCompletionRecordInput(input: {
 
 export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
   deviceSyncCompletionAcceptedInCurrentAdmission?: boolean;
+  deviceSyncCompletionReplayed?: boolean;
   item: HostedSystemMailboxPendingItem;
   operatorHomeRoot?: string | null;
   runtime: HostedSystemMailboxRuntime;
@@ -1101,6 +1105,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       && hostedDeviceSyncRetainedWakeHasCapacity(input.item);
     if (retainUntil) {
       await retainHostedDeviceSyncSystemMailboxItem({
+        acceptedInCurrentAdmission: input.deviceSyncCompletionReplayed !== true,
         dirtyRemainderDiscovered,
         immediateDirtyContinuationCanProgress,
         item: input.item,
@@ -1341,6 +1346,7 @@ function hostedDeviceSyncRetainedWakeHasCapacity(
 }
 
 async function retainHostedDeviceSyncSystemMailboxItem(input: {
+  acceptedInCurrentAdmission: boolean;
   dirtyRemainderDiscovered: boolean;
   dirtyWakeAt: string | null;
   immediateDirtyContinuationCanProgress: boolean;
@@ -1359,7 +1365,9 @@ async function retainHostedDeviceSyncSystemMailboxItem(input: {
       return state;
     }
 
-    const admittedAt = input.item.lastAttemptAt;
+    // Restored recording predates newly imported hints. Replay may restore its
+    // retry owner, but only a fresh pass can transfer those hints to that owner.
+    const admittedAt = input.acceptedInCurrentAdmission ? input.item.lastAttemptAt : null;
     const connectionId = input.item.wake.kind === "device-sync.wake"
       ? input.item.wake.connectionId ?? null
       : null;
