@@ -188,8 +188,9 @@ failure exits, exactly-once release, and awaited cleanup. Text inspection may
 supplement that proof, but it cannot establish runtime cleanup behavior.
 
 Native iOS and Android hosted E2E are production canaries, not pull-request
-statuses. The trusted default-branch controllers run on staggered twelve-hour
-schedules: iOS at minute 17 and Android at minute 47. An authenticated manual
+statuses. The trusted default-branch controllers run on staggered schedules:
+iOS at minute 17 (paused to manual dispatch since 2026-11-03; see
+`live-provider-canaries.md`) and Android at minute 47. An authenticated manual
 dispatch is the scheduler-drop recovery path, but its event ref must be
 `refs/heads/main` and its exact event SHA must still equal current `main` when
 the selection job runs. Every scheduled admission executes the actual native

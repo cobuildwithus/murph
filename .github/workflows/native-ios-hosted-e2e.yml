@@ -1,10 +1,10 @@
 name: Native iOS Hosted E2E
 
 on:
-  schedule:
-    # UTC: five weekly slots, 36-hour gaps except the 24-hour week boundary.
-    - cron: "17 0 * * 0,3,6"
-    - cron: "17 12 * * 1,4"
+  # Paused 2026-11-03: every run since 2026-09-29 failed at the first email
+  # login, and each bills about 20 minutes of a GitHub Mac. It runs only when
+  # dispatched by hand until the journey passes again; then restore the
+  # schedule in agent-docs/operations/live-provider-canaries.md.
   workflow_dispatch:
 
 # Every scheduled admission executes the provider journey, including unchanged

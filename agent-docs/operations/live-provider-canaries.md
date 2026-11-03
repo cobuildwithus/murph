@@ -18,7 +18,7 @@ source pins, and non-canceling concurrency retain their existing behavior.
 | Journey | UTC slots | Weekly admissions | Gap between nominal slots |
 | --- | --- | ---: | --- |
 | Linq | Sun/Wed/Sat 00:17; Sun/Wed 18:17; Mon/Thu 12:17; Tue/Fri 06:17 | 9 (was 28) | Eight 18-hour gaps and one 24-hour gap |
-| iOS | Sun/Wed/Sat 00:17; Mon/Thu 12:17 | 5 (was 14) | Four 36-hour gaps and one 24-hour gap |
+| iOS | Paused, manual dispatch only (was Sun/Wed/Sat 00:17; Mon/Thu 12:17) | 0 (was 5) | None |
 | Android | Same native days/hours at minute 47 | 5 (was 14) | Four 36-hour gaps and one 24-hour gap |
 
 This retains about one-third of the preceding admission frequency (32.1% for
@@ -26,6 +26,14 @@ Linq and 35.7% for each native platform), using calendar entries alone. No
 skip job, elapsed-time state, or new scheduler is needed. Native platforms stay
 30 minutes apart. The increased observation gaps do not relax reply budgets or
 release-required proof. Actual billed savings depend on executed job duration.
+
+The iOS schedule has been paused since 2026-11-03. Every run from 2026-09-29
+on failed at the first email login (`initial_privy_otp_failed`), and each bills
+about 20 minutes of a GitHub-hosted Mac in murph-ios, so it cost about $70 in
+October without a pass. Dispatch it by hand to check a fix. Once a run passes,
+restore its cron entries (`17 0 * * 0,3,6` and `17 12 * * 1,4`) in
+`native-ios-hosted-e2e.yml` and their assertion in
+`scripts/native-ios-hosted-e2e.test.mjs`.
 
 ## Existing journeys
 
