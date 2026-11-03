@@ -1,4 +1,6 @@
 import "server-only";
+
+import { isPairRoster } from "./roster";
 import { parseGameRecapEventId } from "@murphai/hosted-execution/runtime-control";
 import { Prisma } from "@prisma/client";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
@@ -67,7 +69,7 @@ async function assertGameChangeProposalDeliveryCurrentTx(
   });
   const pending = parsePendingGameChange(game?.pendingChange);
   if (!game || isGameInviteExpired(game, input.now ?? new Date())
-    || !pending || pending.id !== match[2] || game.players.length !== 2) return stale();
+    || !pending || pending.id !== match[2] || !isPairRoster(game.players)) return stale();
   if (!sameGamePlayers(game.players.map((player) => player.memberId), input.playerMemberIds ?? [])) return stale();
   const expired = game.status === "live" && isGameChangeExpired({
     entries: [],

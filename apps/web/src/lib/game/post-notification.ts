@@ -6,6 +6,7 @@ import { sendApplePush, type ApplePushRequest } from "../apple-push/send";
 import { companionPushRouteRegistrationSchema, forgetCompanionPushRoute } from "../companion/push-route";
 import { sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
+import { isPairRoster } from "./roster";
 import { isGameOn } from "./access";
 import { hasUnlockedDay, type RuleEntry } from "./rules";
 import { addDays, dayStartInstant, gameLocalDate } from "./time";
@@ -34,7 +35,7 @@ export async function claimGamePostNotification(
     entries: readonly RuleEntry[]; dayIndex: number;
   },
 ): Promise<ClaimedPostNotification | null> {
-  if (input.players.length !== 2 || !isGameOn(input)) return null;
+  if (!isPairRoster(input.players) || !isGameOn(input)) return null;
   const recipient = input.players.find((player) => player.memberId !== input.actor);
   if (!recipient) return null;
   const route = await tx.companionPushRoute.findFirst({

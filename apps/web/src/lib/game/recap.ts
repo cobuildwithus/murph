@@ -1,3 +1,4 @@
+import { isPairRoster } from "./roster";
 import type { HostedGameRecap } from "@murphai/hosted-execution/runtime-control";
 
 export type GameRecapEntry = { entryId: string; kind: string; playerName: string; text: string | null; visibleToBoth: boolean };
@@ -109,7 +110,7 @@ function validateChatLine(input: { chatLine: string; players: readonly string[];
   if (/made the recap|recap'?s (?:ready|up|in)\b|recap is (?:ready|up|in)\b|your week is ready/iu.test(input.chatLine)) {
     errors.push("chatLine: skip stock recap phrases and invitations; the next line already supplies the link.");
   }
-  if (input.result?.length === 2) {
+  if (input.result && isPairRoster(input.result)) {
     const scores = input.result.map((player) => player.score).sort((a, b) => a - b);
     for (const match of input.chatLine.matchAll(CHAT_SCORE)) {
       const stated = [Number(match[1]), Number(match[2])].sort((a, b) => a - b);
@@ -131,7 +132,7 @@ function validateScoreLine(
   result: readonly GameRecapCanonicalScore[],
   errors: string[],
 ): void {
-  if (result.length !== 2) return;
+  if (!isPairRoster(result)) return;
   const [a, b] = result;
   if (a.score === b.score) {
     if (/\b(?:owe|owes|owed|owing)\b/iu.test(scoreLine)) {
@@ -185,7 +186,7 @@ export function gameRecapToolResult(errors: readonly string[]): string {
 /** Optional copy must never prevent the story from being saved or read. */
 export function withValidGameSuperlatives(recap: HostedGameRecap, memberIds: readonly string[]): HostedGameRecap {
   const { superlatives, ...story } = recap;
-  return superlatives?.length === memberIds.length && memberIds.length === 2
+  return superlatives?.length === memberIds.length && isPairRoster(memberIds)
     && superlatives.every((item) => memberIds.includes(item.memberId))
     ? { ...story, superlatives } : story;
 }

@@ -1,3 +1,4 @@
+import { isPairRoster } from "./roster";
 import { lockGamePair } from "./blocks";
 import { gamePairWhere } from "./chat-membership";
 import { GAME_MAX_OPEN_PER_PAIR } from "./rules";
@@ -49,7 +50,7 @@ export async function reserveGameMissedDayTx(input: {
   gameId: string; memberId: string; playerMemberIds: readonly string[]; firstMissedDate: string; dueAt: Date; tx: Prisma.TransactionClient;
 }): Promise<boolean> {
   const { tx, playerMemberIds: players } = input;
-  if (players.length !== 2) return false;
+  if (!isPairRoster(players)) return false;
   await lockGamePair(tx, players[0]!, players[1]!);
   const active = await tx.game.findMany({ where: { ...gamePairWhere(players), status: "live" }, select: { id: true }, take: GAME_MAX_OPEN_PER_PAIR });
   const current = await tx.game.findFirst({ where: { id: input.gameId, status: "live", chatContainerMemberId: { not: null } }, select: { chatContainerMemberId: true } });
