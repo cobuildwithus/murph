@@ -249,6 +249,8 @@ import {
   appendAssistantTranscriptEntries,
   getAssistantSession,
   listAssistantTranscriptEntries,
+  resolveAssistantSession,
+  runAssistantCodexResumeRetention,
   saveAssistantSession,
 } from '../src/assistant/store.ts'
 import { normalizeAssistantExecutionContext } from '../src/assistant/execution-context.ts'
@@ -2436,11 +2438,26 @@ it('assembles corrected availability context for the focused real Codex journey'
 })
 
 describeRealCodex('real Codex canonical availability e2e', () => {
-  it('reports corrected canonical availability without reviving a superseded body measurement', async () => {
+  it.each(['new session', 'retired idle session'])('reports corrected canonical availability without reviving a superseded body measurement: %s', async (variant) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-availability-e2e-'))
     try {
       const context = await prepareCorrectedAvailabilityContext(workingDirectory)
+      let resumeSessionId: string | undefined
+      if (variant === 'retired idle session') {
+        const resolved = await resolveAssistantSession({
+          vault: workingDirectory,
+          target: createAssistantModelTarget({ provider: 'codex-cli', model: config.model }),
+        })
+        await saveAssistantSession(workingDirectory, {
+          ...resolved.session, lastTurnAt: '2026-07-01T12:00:00.000Z', turnCount: 1,
+          codexResume: { routeFingerprint: 'synthetic-route', threadId: 'retired-synthetic-thread' },
+        })
+        await runAssistantCodexResumeRetention({ vault: workingDirectory, now: new Date('2026-09-01T12:00:00.000Z') })
+        const retired = await getAssistantSession(workingDirectory, resolved.session.sessionId)
+        expect(retired.codexResume).toBeNull()
+        resumeSessionId = retired.codexResume?.threadId
+      }
       const before = await snapshotRealCodexCanonicalVault(workingDirectory)
       const writesBefore = await listCanonicalWriteEvidence(workingDirectory)
       const result = await executeRealCodexAppServerTurn({
@@ -2449,6 +2466,7 @@ describeRealCodex('real Codex canonical availability e2e', () => {
         codexHome: config.codexHome,
         developerInstructions: buildDirectConversationDeveloperInstructions(false, context, [], '2026-09-01T12:00:00.000Z'),
         dynamicTools: [], env: config.env,
+        resumeSessionId,
         model: config.model, modelProvider: config.modelProvider,
         prompt: 'From your saved-context summary alone, which records are confirmed present: blood tests and body measurements? If a category is not listed, say it is not confirmed by the summary. Do not fetch or change anything.',
         reasoningEffort: 'low', sandbox: 'read-only', workingDirectory,
@@ -2463,6 +2481,7 @@ describeRealCodex('real Codex canonical availability e2e', () => {
       expect(result.responseMedia).toEqual([])
       expect(result.responseCard).toBeNull()
       expect(result.runtimeIssueInputs).toEqual([])
+      expect(JSON.stringify(result.jsonEvents)).not.toContain('resume_failure')
       expect(await snapshotRealCodexCanonicalVault(workingDirectory)).toEqual(before)
       expect(await listCanonicalWriteEvidence(workingDirectory)).toEqual(writesBefore)
     } finally {

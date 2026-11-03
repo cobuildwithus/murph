@@ -158,6 +158,20 @@ applies to every registered dynamic tool, including the private
 `murph.assistant_style` surface; no tool-specific stale-resume fallback is
 needed.
 
+Idle checkpoint maintenance retires native resume state for every session whose
+`lastTurnAt` (or `updatedAt` when no turn timestamp exists) is strictly older than
+30 days. The assistant store owns this single fixed window and clears both resume
+aliases through the atomic session writer, holding the vault turn lock before the
+runtime write lock. It preserves session timestamps, routing, transcripts and
+canonical memory; active turns finish before eligibility is checked again.
+Snapshot selection already follows persisted resume references, so retired
+rollouts are omitted without changing the snapshot format or deleting live files.
+The next turn starts a fresh native thread with the ordinary vault/context path.
+An interrupted pass or lost checkpoint is safe to repeat. Old snapshots restore
+with their references intact and converge at the next idle maintenance pass;
+old runners can read the existing nullable resume shape in new snapshots, but
+will not retire newly idle sessions until upgraded.
+
 Scheduled automation occurrences use this same ordinary turn path. The saved
 automation instructions become the turn request; schedule occurrence and
 delivery facts are trusted dynamic context, while the structured send-or-skip

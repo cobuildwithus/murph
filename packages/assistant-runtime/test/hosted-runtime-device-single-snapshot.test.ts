@@ -5,7 +5,7 @@ import path from "node:path";
 import { test, vi } from "vitest";
 import { initializeVault } from "@murphai/core";
 import { listCanonicalEntities } from "@murphai/query";
-import type { HostedWorkspaceCheckpointRequest } from "@murphai/hosted-execution/runtime-control";
+import type { HostedRuntimeLogRequest, HostedWorkspaceCheckpointRequest } from "@murphai/hosted-execution/runtime-control";
 import type { HostedRuntimeDeviceSyncPort } from "../src/hosted-runtime-contracts.ts";
 import { createEmptyHostedMailboxImportState } from "../src/hosted-runtime/mailbox-state.ts";
 import { enqueueHostedSystemMailboxItem } from "../src/hosted-runtime/system-mailbox.ts";
@@ -24,12 +24,17 @@ test.each([
   ["system_mailbox", "crash-before-ack"], ["system_mailbox", "crash-after-ack"],
   ["system_mailbox", "empty-crash-before-ack"], ["system_mailbox", "empty-crash-after-ack"],
   ["system_mailbox", "continuation"],
+  ["system_mailbox", "new-wake-empty"], ["system_mailbox", "new-wake-staged"],
+  ["default", "new-wake-empty"], ["default", "new-wake-staged"],
+  ["system_mailbox", "new-wake-staged-retained"], ["default", "new-wake-staged-retained"],
+  ["system_mailbox", "new-wake-empty-retained"], ["default", "new-wake-empty-retained"],
 ] as const)("device idle shutdown publishes one snapshot: %s / %s", async (processingMode, scenario) => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-device-single-snapshot-"));
   const connectionId = "synthetic-single-snapshot-connection";
   const futureAt = "2026-04-28T00:00:00.000Z";
   const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
   const events: string[] = [];
+  const logRequests: HostedRuntimeLogRequest[] = [];
   const artifacts = new Map<string, Uint8Array>();
   const snapshots: Awaited<ReturnType<typeof createVaultSnapshotBundle>>[] = [];
   let acknowledged = false;
@@ -38,15 +43,18 @@ test.each([
   let providerCalls = 0;
   let sleepResourceCalls = 0;
   let replay = false;
-  const hasPayload = !scenario.startsWith("empty");
+  const newWake = scenario.startsWith("new-wake-");
+  const hasPayload = !scenario.includes("empty");
+  const followUpItem = createMailboxItem({ id: "synthetic-new-device-item", dedupeKey: "device-sync.wake:new",
+    kind: "device-sync.wake", lane: "system", laneSeq: "2" });
   const basePort = createSnapshotDeviceSyncPort({ connectionId, nextReconcileAt: hasPayload ? futureAt : TEST_NOW });
   const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
     ...basePort,
     async fetchDirtyStates() {
-      const followUp = scenario === "continuation" && acknowledged;
+      const followUp = (scenario === "continuation" && acknowledged) || (newWake && replay);
       return {
         hasMore: false, nextWakeAt: null, userId: TEST_USER_ID,
-        items: !hasPayload || (acknowledged && (!followUp || followUpAcknowledged)) ? [] : [{
+        items: (!hasPayload && !followUp) || (followUp ? followUpAcknowledged : acknowledged) ? [] : [{
           connectionId, dirtyRevision: followUp ? "8" : "7", processedRevision: followUp ? "7" : "0",
           dirtyResources: [{
             count: 1, dirtyPayloadId: followUp ? "synthetic-followup-payload" : "synthetic-sleep-payload", jobKind: "resource",
@@ -64,12 +72,15 @@ test.each([
     async ackDirtyStateProcessed(request) {
       assert.ok(checkpointRequests.some((entry) => entry.reason === "idle_shutdown"), "ack follows publication");
       const followUp = request.processedRevision === "8";
+      if (newWake && followUp) assert.equal(
+        checkpointRequests.filter((entry) => entry.reason === "idle_shutdown").length,
+        2, "new payload ack follows its own durable snapshot publication");
       assert.deepEqual(request.processedDirtyPayloadIds,
         [followUp ? "synthetic-followup-payload" : "synthetic-sleep-payload"]);
       ackCalls++;
       acknowledged = true;
       followUpAcknowledged ||= followUp;
-      const stillDirty = scenario === "continuation" && !followUpAcknowledged;
+      const stillDirty = (scenario === "continuation" || (newWake && replay)) && !followUpAcknowledged;
       return { connectionId, dirtyRevision: stillDirty || followUp ? "8" : "7",
         processedRevision: request.processedRevision,
         recorded: true, stillDirty, nextWakeAt: stillDirty ? TEST_NOW : futureAt, userId: TEST_USER_ID };
@@ -79,10 +90,14 @@ test.each([
     const url = new URL(request instanceof Request ? request.url : String(request));
     assert.equal(url.origin, "https://junction.example.test");
     providerCalls++;
-    if (url.pathname.includes("/summary/sleep/")) sleepResourceCalls++;
+    if (url.pathname.includes("/summary/sleep/")) {
+      sleepResourceCalls++;
+      // The new pass must outlive the 1ms idle floor while provider I/O yields.
+      if (newWake && replay) await new Promise((resolve) => setTimeout(resolve, 20));
+    }
     // Junction returns the sleep summary for the dirty day; the restored
     // continuation pass sees only the follow-up sleep from that same day.
-    return Response.json(buildJunctionSleepFixtureResponse(url.pathname, replay && scenario === "continuation" ? {
+    return Response.json(buildJunctionSleepFixtureResponse(url.pathname, replay && (scenario === "continuation" || newWake) ? {
       id: "synthetic-followup-sleep",
       start: "2026-04-26T13:00:00.000Z", end: "2026-04-26T15:00:00.000Z",
       updated_at: "2026-04-26T16:00:00.000Z",
@@ -102,7 +117,13 @@ test.each([
     await enqueueHostedSystemMailboxItem({
       item: createResolvedDeviceSyncSystemMailboxItem(item), vaultRoot,
       wake: { connectionId, eventId: item.dedupeKey, expectedConnectedAt: TEST_NOW,
-        hint: { occurredAt: TEST_NOW, reason: "webhook_dirty_transition" },
+        hint: { occurredAt: TEST_NOW, reason: "webhook_dirty_transition",
+          ...(scenario.endsWith("retained") ? { jobs: [{
+            availableAt: futureAt, dedupeKey: "synthetic-future-job", kind: "resource" as const,
+            maxAttempts: 1, priority: 30,
+            payload: { resource: "sleep", resourceCategory: "summary", sourceProviderSlug: "whoop_v2" },
+          }] } : {}),
+        },
         kind: "device-sync.wake", occurredAt: TEST_NOW, provider: "junction",
         reason: hasPayload ? "webhook_hint" : "reconcile_due", userId: TEST_USER_ID },
     });
@@ -115,10 +136,15 @@ test.each([
       createWorkspaceRuntimeJobInput({ request: { processingMode, workspaceVersion: version, runnerIdleTtlMs: 1 },
         resolvedConfig: createDeviceSyncResolvedConfig() }), {
         vaultRoot,
-        platform: { ...createPlatform({ artifactBytesByHash: artifacts, deviceSyncPort,
-          mailboxPort: createMailboxPort({ events, items: [] }),
+        platform: { ...createPlatform({ artifactBytesByHash: artifacts, deviceSyncPort, logRequests,
+          mailboxPort: createMailboxPort({ events, items: newWake && replay ? [followUpItem] : [] }),
           workspacePort: createWorkspacePort({ events, checkpointRequests,
-            workspace: createWorkspaceState({ snapshotRef: snapshot.snapshotRef, version }) }),
+            workspace: createWorkspaceState({ ...(newWake && replay ? {
+              nextWakeAt: checkpointRequests.at(-1)?.nextWakeAt ?? null,
+              nextWakeReason: checkpointRequests.at(-1)?.nextWakeReason ?? null,
+              redactedStatus: checkpointRequests.at(-1)?.redactedStatus ?? null,
+              systemMailboxProgressGeneration: checkpointRequests.at(-1)?.systemMailboxProgressGeneration,
+            } : {}), snapshotRef: snapshot.snapshotRef, version }) }),
         }), providerFetch },
         async createCheckpointSnapshot() {
           if (!replay && snapshots.length === 0) {
@@ -132,7 +158,17 @@ test.each([
           artifacts.set(next.hash, next.bytes);
           return { snapshotRef: next.snapshotRef };
         },
-        async importItem() { return { status: "imported" }; },
+        async importItem(imported) {
+          assert.equal(imported.item.id, followUpItem.id);
+          await enqueueHostedSystemMailboxItem({
+            item: createResolvedDeviceSyncSystemMailboxItem(imported.item), vaultRoot,
+            wake: { connectionId, eventId: imported.item.dedupeKey, expectedConnectedAt: TEST_NOW,
+              hint: { occurredAt: new Date().toISOString(), reason: "webhook_dirty_transition" },
+              kind: "device-sync.wake", occurredAt: new Date().toISOString(), provider: "junction",
+              reason: "webhook_hint", userId: TEST_USER_ID },
+          });
+          return { status: "imported" };
+        },
       },
     );
     const result = await run(initial, "0");
@@ -160,18 +196,25 @@ test.each([
     });
     const firstSleep = junctionSleep("2026-04-26T00:30:00.000Z", "2026-04-26T07:30:00.000Z");
     if (hasPayload) assert.deepEqual(sleepRows(before), [firstSleep]);
-    if (scenario === "continuation") {
+    if (scenario === "continuation" || newWake) {
       replay = true;
+      if (newWake) vi.setSystemTime(new Date(Date.parse(TEST_NOW) + 60_000));
       const previousProviderCalls = providerCalls;
       const previousSleepResourceCalls = sleepResourceCalls;
+      const previousLogCount = logRequests.length;
       const continued = await run(snapshots[0]!, "1");
+      const deviceEvents = logRequests.slice(previousLogCount).flatMap((request) => request.entries)
+        .map((entry) => entry.eventCode).filter((code) =>
+          code === "device-sync.pass_started" || code === "device-sync.checkpoint_recorded");
+      assert.deepEqual(deviceEvents, ["device-sync.checkpoint_recorded", "device-sync.pass_started",
+        "device-sync.checkpoint_recorded"], "replay precedes one new pass and its durable acknowledgement");
       assert.equal(snapshots.length, 2, "restore cleanup and the second device pass share one snapshot");
       assert.ok(followUpAcknowledged, "the restored invocation must process the new dirty payload");
-      assert.equal(ackCalls, 3, "replay the durable ack, then acknowledge newly checkpointed work");
+      assert.equal(ackCalls, hasPayload ? 3 : 1, "replay the durable ack, then acknowledge newly checkpointed work");
       assert.equal(sleepResourceCalls, previousSleepResourceCalls + 1, "only the new resource is fetched");
       assert.equal(providerCalls, previousProviderCalls + 2, "plus one Junction source check for that import");
       assert.deepEqual(sleepRows(await listCanonicalEntities(vaultRoot, { family: "event" })),
-        [firstSleep, junctionSleep("2026-04-26T13:00:00.000Z", "2026-04-26T15:00:00.000Z")]);
+        [...sleepRows(before), junctionSleep("2026-04-26T13:00:00.000Z", "2026-04-26T15:00:00.000Z")]);
       assert.ok(!continued.nextWakeAt || Date.parse(continued.nextWakeAt) > Date.now());
     }
     if (scenario.includes("crash-")) {

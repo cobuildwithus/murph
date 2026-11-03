@@ -2,6 +2,11 @@ Pair-preserving game collection preparation and visibility proof are recorded in
 [the PR 1 plan](exec-plans/completed/2026-11-02-game-roster-pr1.md).
 The weekly game architecture remains the behavior owner.
 
+Idle Codex resume retention is owned by `../packages/assistant-engine/README.md`;
+implementation and recovery proof: [retention plan](exec-plans/completed/2026-11-02-rollout-retention.md).
+
+Device wake completion replay: [regression plan](exec-plans/completed/2026-11-02-device-wake-replay.md).
+
 Finished runtime migration and Stripe meter export removal, deploy-skew proof,
 per-case test audit and local verification are tracked in
 [the removal plan](exec-plans/completed/2026-11-02-remove-finished-migrations.md).
