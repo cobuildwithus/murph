@@ -1,3 +1,4 @@
+import { hasGameMultiplayer } from "@/src/lib/game/http/capability";
 import { assertGameDevRoutesAllowed, requireGameMember } from "@/src/lib/game/http/auth";
 import { invalidGameRequest, withGameRuleErrors } from "@/src/lib/game/http/errors";
 import { GAME_DEV_ADVANCE_MAX_DAYS } from "@/src/lib/game/rules";
@@ -16,6 +17,6 @@ export const POST = withJsonError(async (
     throw invalidGameRequest(`days must be a whole number from 1 to ${GAME_DEV_ADVANCE_MAX_DAYS}.`);
   }
   const gameId = await resolveDecodedRouteParam(context.params, "id");
-  const game = await withGameRuleErrors(() => devAdvanceDays(gameId, memberId, days));
+  const game = await withGameRuleErrors(() => devAdvanceDays(gameId, memberId, days, hasGameMultiplayer(request)));
   return jsonOk({ ok: true, game });
 });

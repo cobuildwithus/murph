@@ -42,7 +42,9 @@ describe("game history terms", () => {
     for (const sameTask of [false, true]) {
       it.each(["prize", "dare", null] as const)(`uses final live-view wording for seat ${seat}, same task ${sameTask}, stake %s`, kind => {
         const fixture = input(seat, sameTask, kind);
-        const history = buildGameHistoryView(fixture)!.game;
+        const built = buildGameHistoryView(fixture)!;
+        if (!("person" in built)) throw new Error("Expected pair history");
+        const history = built.game;
         const live = buildGameView(fixture);
         const expectedTasks = sameTask ? { mine: "30 lunges", theirs: "30 lunges" }
           : seat === 0 ? { mine: "30 lunges", theirs: "15 min walking" }
@@ -59,7 +61,9 @@ describe("game history terms", () => {
 
   it.each(["winner_gets", "per_miss"] as const)("projects legacy %s without changing its words", kind => {
     const fixture = input(1, false, kind);
-    expect(buildGameHistoryView(fixture)!.game.stake).toEqual({
+    const built = buildGameHistoryView(fixture)!;
+    if (!("person" in built)) throw new Error("Expected pair history");
+    expect(built.game.stake).toEqual({
       kind: kind === "winner_gets" ? "prize" : "dare", item: "  Lunch of your choice  ",
     });
   });

@@ -1,3 +1,4 @@
+import { hasGameMultiplayer } from "@/src/lib/game/http/capability";
 import { respondToGameCommand } from "@/src/lib/game/http/command-route";
 import { requireGameMember } from "@/src/lib/game/http/auth";
 import { gameNotFound } from "@/src/lib/game/http/errors";
@@ -10,7 +11,7 @@ export const GET = withJsonError(async (
   context: { params: Promise<{ id: string }> },
 ) => {
   const memberId = await requireGameMember(request);
-  const game = await readGame(await resolveDecodedRouteParam(context.params, "id"), memberId);
+  const game = await readGame(await resolveDecodedRouteParam(context.params, "id"), memberId, hasGameMultiplayer(request));
   if (!game) throw gameNotFound();
   return jsonOk({ ok: true, game });
 });

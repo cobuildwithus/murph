@@ -421,14 +421,16 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(push).toHaveBeenCalledTimes(2);
     expect(push.mock.calls[1]?.[0].message.body).toBe("There's a new post in your game. Take a look.");
     const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(tomorrow);
     expect((await runAndRespond({
       actorMemberId: poster, command: await photo(poster, gameId, "notification-next-day"), now: tomorrow,
     })).ok).toBe(true);
     expect(push).toHaveBeenCalledTimes(3);
     expect(push.mock.calls[2]?.[0].message.body).toBe("Someone posted. Share yours to see it.");
+    vi.useRealTimers();
     const receipts = await getPrisma().gameEvent.findMany({ where: { gameId, type: "post_notification" } });
-    expect(receipts).toHaveLength(3);
-    expect(new Set(receipts.map((receipt) => receipt.commandKey)).size).toBe(3);
+    expect(receipts).toHaveLength(6);
+    expect(new Set(receipts.map((receipt) => receipt.commandKey)).size).toBe(6);
 
     const third = await member("Third", "America/New_York");
     const another = await startGame(third, recipient);
@@ -450,9 +452,11 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     push.mockRejectedValueOnce(new Error("synthetic uncertain push"));
     const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
     const next = await photo(poster, gameId, "notification-provider-failure");
+    vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(tomorrow);
     expect((await runAndRespond({ actorMemberId: poster, command: next, now: tomorrow })).ok).toBe(true);
     expect((await runAndRespond({ actorMemberId: poster, command: next, now: tomorrow })).ok).toBe(true);
     expect(push).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
     expect(await getPrisma().gameEntry.findUnique({ where: { id: next.entryId } })).not.toBeNull();
     expect(await getPrisma().gameEvent.findFirst({ where: { gameId, type: "post_notification" } })).toMatchObject({
       payload: { outcome: "failed" },

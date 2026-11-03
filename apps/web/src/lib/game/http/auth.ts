@@ -40,7 +40,7 @@ export async function requireGameMemberAuth(request: Request, inviteToken?: stri
  * post, invite or change never wait on them.
  */
 const NEEDS_CURRENT_TERMS: ReadonlySet<unknown> = new Set<GameCommand["type"]>([
-  "createGame", "join", "negotiate", "post", "proposeChange", "redeem",
+  "createGame", "join", "negotiate", "post", "proposeChange", "editTerms", "redeem",
 ]);
 
 /**

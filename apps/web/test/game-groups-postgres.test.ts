@@ -54,7 +54,7 @@ async function person(zone = "UTC"): Promise<Person> {
   return { id, email };
 }
 async function run(actor: string, command: GameCommand, now = createdAt) {
-  return runGameCommand({ actorMemberId: actor, command, now });
+  return runGameCommand({ actorMemberId: actor, command, now, multiplayer: true });
 }
 async function ok(actor: string, command: GameCommand, now = createdAt) {
   const result = await run(actor, command, now);
@@ -81,9 +81,11 @@ async function erase(memberId: string) {
   await db.$transaction(tx => applyGameAccountDeletionTx({ memberIds: [memberId], prepared, tx, now: createdAt }));
   await db.hostedMember.delete({ where: { id: memberId } });
 }
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 afterAll(async () => {
   if (!enabled) return;
+  // Delete the large synthetic entry fixture in one set before roster cascades.
+  await db.gameEntry.deleteMany({ where: { memberId: { in: ids } } });
   await db.game.deleteMany({ where: { wordsOwnerMemberId: { in: ids } } });
   await db.hostedMember.deleteMany({ where: { id: { in: ids } } });
 });
@@ -151,6 +153,8 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     await db.hostedMember.create({ data: { id: b.id } });
     await db.$transaction(tx => upsertHostedMemberEmailAuthorization({ memberId: b.id, prisma: tx, verifiedEmail: { address: b.email, verifiedAt: createdAt } }));
     await ok(b.id, { type: "setProfile", firstName: "Player", timeZone: "UTC" });
+    const { readInvitePreview } = await import("@/src/lib/game/service");
+    expect(await readInvitePreview(game.token, true, b.id)).toMatchObject({ yourTask: "Take a walk" });
     await ok(b.id, join(game.token));
     expect((await gameRow(game.id)).players[1].seat).toBe(1);
   });
@@ -158,7 +162,7 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
   it("serializes the ten-open-game audience limit and rejects duplicate handles or people", async () => {
     const a = await person(), b = await person();
     const attempts = await Promise.all(Array.from({ length: 11 }, () => run(a.id, { type: "createGame", gameId: randomUUID(), maxPlayers: 10,
-      groupWord: "Crew", terms, invitees: [{ seat: 1, recipient: { kind: "email", value: b.email } }] })));
+      groupWord: "Crew", terms, invitees: [{ seat: 1, firstName: "Player", recipient: { kind: "email", value: b.email } }] })));
     expect(attempts.filter(result => result.ok)).toHaveLength(10);
     expect(attempts.filter(result => !result.ok)).toMatchObject([{ error: { code: "TOO_MANY_GAMES" } }]);
     const rows = await db.game.findMany({ where: { createdBy: a.id }, select: { audienceKey: true } });
@@ -194,7 +198,7 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     const changed = await gameRow(game.id);
     expect(changed.players.map(player => player.dayOne?.toISOString().slice(0, 10))).toEqual(Array(3).fill("2030-03-13"));
     expect(changed.players[1]).toMatchObject({ leftAt: createdAt, joinedAt: createdAt });
-    expect(await readGame(game.id, b.id)).toBeNull();
+    expect(await readGame(game.id, b.id, true)).toBeNull();
     const post = (actor: string, now: Date) => run(actor, { type: "post", gameId: game.id, entryId: randomUUID(), kind: "words", mediaKeys: [], text: "Done" }, now);
     expect(await post(b.id, new Date("2030-03-13T12:00:00Z"))).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
     expect((await post(a.id, new Date("2030-03-13T12:00:00Z"))).ok).toBe(true);
@@ -219,7 +223,7 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     let editing!: ReturnType<typeof runGameCommand>;
     await db.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM game WHERE id = ${game.id} FOR UPDATE`;
-      editing = runGameCommand({ actorMemberId: a.id,
+      editing = runGameCommand({ actorMemberId: a.id, multiplayer: true,
         command: { type: "editTerms", gameId: game.id, expectedTermsVersion: 1, terms: { ...terms, startsOn: "2030-03-10" } },
         beforeMutationTx: async () => { prepared(); } });
       void editing.then(prepared, prepared);
@@ -303,8 +307,8 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     const game = await create(a, [b, c]); await ok(b.id, join(game.token)); await ok(c.id, join(game.token));
     await entry(game.id, b.id, 0);
     await ok(b.id, { type: "leave", gameId: game.id }, new Date("2030-03-10T12:00:00Z"));
-    expect(await readGame(game.id, b.id)).toBeNull();
-    expect((await readHome(b.id)).games.some(view => view.id === game.id)).toBe(false);
+    expect(await readGame(game.id, b.id, true)).toBeNull();
+    expect((await readHome(b.id, true)).games.some(view => view.id === game.id)).toBe(false);
     expect(await run(b.id, { type: "post", gameId: game.id, entryId: randomUUID(), kind: "words", mediaKeys: [], text: "Done" })).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
     await ok(c.id, { type: "leave", gameId: game.id });
     const row = await gameRow(game.id);
@@ -322,13 +326,13 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     expect(await run(a.id, { type: "report", gameId: game.id, reportId: randomUUID(), about: "player", reason: "other" })).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
     await ok(a.id, { type: "report", gameId: game.id, reportId: randomUUID(), about: "post", reason: "other", entryId: post.id, reportedMemberId: c.id });
     expect(await db.gameReport.findFirst({ where: { entryId: post.id }, select: { reportedMemberId: true } })).toEqual({ reportedMemberId: b.id });
-    expect((await readGame(game.id, a.id))?.days[0].others.find(other => other.seat === 1)).toEqual({ entry: null, hidden: true, seat: 1, status: "posted" });
-    expect((await readGame(game.id, c.id))?.days[0].others.find(other => other.seat === 1)?.entry?.entryId).toBe(post.id);
+    expect((await readGame(game.id, a.id, true))?.days[0].others.find(other => other.seat === 1)).toEqual({ entry: null, hidden: true, seat: 1, status: "posted" });
+    expect((await readGame(game.id, c.id, true))?.days[0].others.find(other => other.seat === 1)?.entry?.entryId).toBe(post.id);
     await ok(a.id, { type: "block", memberId: b.id });
     expect((await gameRow(game.id)).status).toBe("live");
-    expect((await readHome(a.id)).games.some(view => view.id === game.id)).toBe(true);
-    expect((await readGame(game.id, b.id))?.days[0].others.find(other => other.seat === 0)).toEqual({ entry: null, hidden: true, seat: 0, status: "posted" });
-    expect(await authorizeMediaRead(a.id, mediaKey)).toBe(false);
+    expect((await readHome(a.id, true)).games.some(view => view.id === game.id)).toBe(true);
+    expect((await readGame(game.id, b.id, true))?.days[0].others.find(other => other.seat === 0)).toEqual({ entry: null, hidden: true, seat: 0, status: "posted" });
+    expect(await authorizeMediaRead(a.id, mediaKey, true)).toBe(false);
     const result = parseStoredResult((await settle(game.id, a.id)).result);
     expect(result.scores.map(score => [score.score, score.eligible])).toEqual([[1, true], [1, true], [1, true]]);
   });
@@ -346,7 +350,7 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     const [words] = await openGameTexts([{ table: "game", field: "terms_words", rowId: row.id, memberId: b.id, value: row.termsWordsEncrypted }]);
     expect(JSON.parse(words!)).toMatchObject({ groupWord: "Crew", versions: [{ defaultTask: "Take a walk", tasks: [{ seat: 0, text: "Stretch" }] }] });
     await ok(b.id, { type: "editTerms", gameId: row.id, expectedTermsVersion: 1, terms: { ...terms, tasks: [{ seat: 0, text: "Stretch outside" }] } });
-    expect((await readGame(row.id, b.id))?.terms.tasks).toContainEqual({ seat: 0, text: "Stretch outside" });
+    expect((await readGame(row.id, b.id, true))?.terms.tasks).toContainEqual({ seat: 0, text: "Stretch outside" });
   });
 
   it("drops unclaimable invitation rows on Same again while retaining audience identity", async () => {
@@ -376,7 +380,7 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     expect(kept.status).toBe("settled");
     expect(kept.tickets[0].owedToSeats).toEqual(row.tickets[0].owedToSeats);
     expect(canRedeemGroupTicket(kept.tickets[0], kept.players, parseStoredResult(kept.result), b.id)).toBe(false);
-    expect(await readGame(game.id, b.id)).not.toBeNull();
+    expect(await readGame(game.id, b.id, true)).not.toBeNull();
   });
 
   it("rejects two different handles resolving to one person and reuses an audience through key rotation", async () => {
@@ -385,7 +389,7 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     await db.$transaction(tx => upsertHostedMemberIdentity({ ...buildHostedMemberPhoneIdentityFields(phone), memberId: b.id, prisma: tx,
       phoneNumberVerifiedAt: createdAt, signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null, signupPhoneCodeSentAt: null, signupPhoneNumber: null }));
     expect(await run(a.id, { type: "createGame", gameId: randomUUID(), maxPlayers: 10, groupWord: "Crew", terms,
-      invitees: [{ seat: 1, recipient: { kind: "email", value: b.email } }, { seat: 2, recipient: { kind: "phone", value: phone } }] }))
+      invitees: [{ seat: 1, firstName: "Player", recipient: { kind: "email", value: b.email } }, { seat: 2, firstName: "Player", recipient: { kind: "phone", value: phone } }] }))
       .toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
     const first = await create(a, [b, c]);
     vi.stubEnv("HOSTED_CONTACT_PRIVACY_KEYS", `v1:${Buffer.alloc(32, 7).toString("base64url")},v2:${Buffer.alloc(32, 8).toString("base64url")}`);
@@ -440,15 +444,15 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     await entry(game.id, a.id, 0);
     const past = await entry(game.id, b.id, 0);
     await ok(b.id, { type: "leave", gameId: game.id }, new Date("2030-03-10T12:00:00Z"));
-    const view = await readGame(game.id, a.id);
+    const view = await readGame(game.id, a.id, true);
     expect(view?.players.find(player => player.seat === 1)).toMatchObject({ left: true, memberId: b.id, score: 1 });
     expect(view?.days[0].others.find(player => player.seat === 1)?.entry?.entryId).toBe(past.id);
-    expect(await readGame(game.id, b.id)).toBeNull();
-    expect((await readHome(b.id)).wallet).toEqual({ held: [], owed: [], redeemed: [] });
+    expect(await readGame(game.id, b.id, true)).toBeNull();
+    expect((await readHome(b.id, true)).wallet).toEqual({ held: [], owed: [], redeemed: [] });
 
     const photo = `game/${c.id}/${"b".repeat(64)}.jpg`;
     await db.gameProfile.update({ where: { memberId: c.id }, data: { photoKey: photo } });
-    expect(await authorizeMediaRead(b.id, photo)).toBe(false);
+    expect(await authorizeMediaRead(b.id, photo, true)).toBe(false);
   });
 
   it("freezes departures as ineligible before a settlement/redemption race", async () => {
@@ -522,4 +526,279 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     expect(row.invitees[1]).toMatchObject({ memberId: null, recipientLookupKey: null, pendingLabel: null });
   });
 
+});
+
+vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
+  requireHostedMemberAuthFromBearerToken: async (request: Request) => ({ member: { id: request.headers.get("x-test-member") } }),
+}));
+
+async function httpGame(memberId: string | null, path: string, method = "GET", body?: unknown, capable = true) {
+  const headers = new Headers();
+  if (memberId) { headers.set("authorization", "Bearer synthetic"); headers.set("x-test-member", memberId); }
+  if (capable) headers.set("X-Murph-Game-Multiplayer", "1");
+  if (body !== undefined) headers.set("content-type", "application/json");
+  return new Request(`https://backend.test/api/game/v1${path}`, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+}
+
+describe.skipIf(!enabled)("multiplayer HTTP contract and privacy", () => {
+  it("hides every game/token/ticket mutation without capability, including dev routes", async () => {
+    const a = await person(), b = await person(); const game = await create(a, [b]);
+    const reads = await import("../app/api/game/v1/games/[id]/route");
+    const preview = await import("../app/api/game/v1/invites/[token]/route");
+    expect((await reads.GET(await httpGame(a.id, `/games/${game.id}`, "GET", undefined, false), { params: Promise.resolve({ id: game.id }) })).status).toBe(404);
+    expect((await preview.GET(await httpGame(null, `/invites/${game.token}`, "GET", undefined, false), { params: Promise.resolve({ token: game.token }) })).status).toBe(404);
+    const commands: GameCommand[] = [
+      { type: "createGame", gameId: randomUUID(), maxPlayers: 10, terms },
+      { type: "createGame", gameId: randomUUID(), previousGameId: game.id, inviteeFirstName: "Player", terms },
+      { type: "join", token: game.token, termsVersion: 1, timeZone: "UTC" },
+      { type: "negotiate", token: game.token, termsVersion: 1, timeZone: "UTC", proposalId: randomUUID(), change: { kind: "start_now" } },
+      { type: "leave", gameId: game.id }, { type: "cancelInvite", gameId: game.id },
+      { type: "editTerms", gameId: game.id, expectedTermsVersion: 1, terms },
+      { type: "proposeChange", gameId: game.id, expectedTermsVersion: 1, proposalId: randomUUID(), change: { kind: "start_now" } },
+      { type: "respondChange", gameId: game.id, proposalId: randomUUID(), decision: "approve" },
+      { type: "post", gameId: game.id, entryId: randomUUID(), kind: "words", text: "Done", mediaKeys: [] },
+      { type: "withdraw", gameId: game.id, entryId: randomUUID() },
+      { type: "report", gameId: game.id, reportId: randomUUID(), reason: "other", about: "player", reportedMemberId: b.id },
+      { type: "report", token: game.token, reportId: randomUUID(), reason: "other", about: "terms" },
+      { type: "block", token: game.token },
+    ];
+    const ticket = await db.gameTicket.create({ data: { id: randomUUID(), gameId: game.id, stakeKey: "prize", owedBySeats: [0], owedToSeats: [1] } });
+    commands.push({ type: "redeem", ticketId: ticket.id });
+    for (const command of commands) expect(await runGameCommand({ actorMemberId: a.id, command })).toMatchObject({ ok: false, status: 404, error: { code: "token" in command ? "INVITE_NOT_FOUND" : "GAME_NOT_FOUND" } });
+    const { devAdvanceDays, devSettleNow, devStartNow } = await import("@/src/lib/game/service");
+    for (const step of [() => devAdvanceDays(game.id, a.id, 1), () => devSettleNow(game.id, a.id), () => devStartNow(game.id, a.id)]) await expect(step()).rejects.toMatchObject({ error: { code: "GAME_NOT_FOUND" } });
+    expect((await gameRow(game.id)).status).toBe("invited");
+  });
+
+  it("creates, edits and leaves through HTTP, rejects stale versions and keeps admission dark", async () => {
+    const a = await person(), b = await person();
+    const createRoute = await import("../app/api/game/v1/games/route");
+    const edit = await import("../app/api/game/v1/games/[id]/terms/route");
+    const leaveRoute = await import("../app/api/game/v1/games/[id]/leave/route");
+    const accept = await import("../app/api/game/v1/invites/[token]/accept/route");
+    const body = { gameId: randomUUID(), maxPlayers: 10, groupWord: "Crew", terms: { ...terms, startsOn: undefined }, invitees: [{ seat: 4, firstName: "Private label", recipient: { kind: "email", value: b.email } }] };
+    vi.stubEnv("MURPH_GAME_GROUPS_ENABLED", "false");
+    expect((await createRoute.POST(await httpGame(a.id, "/games", "POST", body))).status).toBe(404);
+    vi.stubEnv("MURPH_GAME_GROUPS_ENABLED", "true");
+    const created = await createRoute.POST(await httpGame(a.id, "/games", "POST", body));
+    expect(created.status).toBe(200); const { game } = await created.json();
+    expect(game).toMatchObject({ maxPlayers: 10, invitedCount: 1, permissions: { canEditTerms: true, canCancel: true }, group: { word: "Crew" } });
+    expect(game.players).toHaveLength(1);
+    const context = { params: Promise.resolve({ id: game.id }) };
+    const editing = { expectedTermsVersion: 1, terms: { ...body.terms, defaultTask: "Walk outdoors" } };
+    expect((await edit.PUT(await httpGame(a.id, `/games/${game.id}/terms`, "PUT", editing), context)).status).toBe(200);
+    expect((await edit.PUT(await httpGame(a.id, `/games/${game.id}/terms`, "PUT", editing), context)).status).toBe(409);
+    vi.stubEnv("MURPH_GAME_GROUPS_ENABLED", "false");
+    const joining = await accept.POST(await httpGame(b.id, `/invites/${game.inviteToken}/accept`, "POST", { termsVersion: 2, timeZone: "UTC" }), { params: Promise.resolve({ token: game.inviteToken }) });
+    expect(joining.status).toBe(404);
+    expect((await leaveRoute.POST(await httpGame(a.id, `/games/${game.id}/leave`, "POST"), context)).status).toBe(200);
+    expect((await leaveRoute.POST(await httpGame(a.id, `/games/${game.id}/leave`, "POST"), context)).status).toBe(200);
+    expect((await gameRow(game.id)).players[0].leftAt).not.toBeNull();
+  });
+
+  it("closes the preview at the actual deadline when final posts consume offline grace", async () => {
+    const a = await person(), b = await person();
+    const game = await create(a, [b]); await ok(b.id, join(game.token));
+    const end = new Date("2030-03-19T03:00:00Z");
+    await db.game.update({ where: { id: game.id }, data: { devClockOffsetMs: BigInt(end.getTime() - Date.now()) } });
+    const { readInvitePreview } = await import("@/src/lib/game/service");
+    expect(await readInvitePreview(game.token, true)).toMatchObject({ status: "open" });
+    await entry(game.id, a.id, 9); await entry(game.id, b.id, 9);
+    expect(await readInvitePreview(game.token, true)).toEqual({ status: "used" });
+  });
+
+  it("projects authenticated own-profile preview names, addressed task, dayOne and the per-request Home switch", async () => {
+    const a = await person(), b = await person(), c = await person();
+    await ok(b.id, { type: "setProfile", firstName: "Bailey" });
+    const game = await create(a, [b, c], { terms: { ...terms, tasks: [{ seat: 2, text: "Walk in the park" }] } });
+    const { readInvitePreview } = await import("@/src/lib/game/service");
+    const previewRoute = await import("../app/api/game/v1/invites/[token]/route");
+    const context = { params: Promise.resolve({ token: game.token }) };
+    expect(await readInvitePreview(game.token, true)).toMatchObject({ status: "open", dayOne: null, expiresAt: null });
+    await ok(b.id, join(game.token));
+    const publicResult = await (await previewRoute.GET(await httpGame(null, `/invites/${game.token}`), context)).json();
+    expect(publicResult.preview).toMatchObject({ status: "open", dayOne: "2030-03-09" });
+    expect(publicResult.preview).not.toHaveProperty("alreadyIn"); expect(publicResult.preview).not.toHaveProperty("yourTask");
+    const authenticated = await (await previewRoute.GET(await httpGame(c.id, `/invites/${game.token}`), context)).json();
+    expect(authenticated.preview).toMatchObject({ alreadyIn: { count: 1, firstNames: ["Bailey"], avatarUrl: null }, yourTask: "Walk in the park" });
+    vi.stubEnv("MURPH_GAME_GROUPS_ENABLED", "false"); expect((await readHome(a.id, true)).canStartGroups).toBe(false);
+    vi.stubEnv("MURPH_GAME_GROUPS_ENABLED", "true"); expect((await readHome(a.id, true)).canStartGroups).toBe(true);
+    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", b.id); expect((await readHome(a.id, true)).canStartGroups).toBe(false);
+    expect(await readHome(a.id)).not.toHaveProperty("canStartGroups");
+  });
+});
+
+describe.skipIf(!enabled)("group daily claim concurrency", () => {
+  it("claims each recipient slot once across concurrent peers and retries", async () => {
+    const notifications = await import("@/src/lib/game/post-notification");
+    vi.spyOn(notifications, "sendGamePostNotificationAfterResponse").mockImplementation(() => {});
+    const [a, b, c] = await Promise.all([person(), person(), person()]);
+    const game = await create(a, [b, c]); await ok(b.id, join(game.token)); await ok(c.id, join(game.token));
+    for (const person of [a, b, c]) await db.companionPushRoute.create({ data: {
+      userId: person.id, installationId: randomUUID(), token: "ab".repeat(32), topic: "ai.withmurph.app.dev",
+      environment: "development", alertsAllowed: true, gameSessionId: randomUUID(), updatedAt: createdAt,
+    } });
+    const post = (): GameCommand => ({ type: "post", gameId: game.id, entryId: randomUUID(), kind: "words", mediaKeys: [], text: "Done" });
+    const first = post(), final = post(), now = new Date("2030-03-09T12:00:00Z");
+    const results = await Promise.all([run(a.id, first, now), run(b.id, final, now), run(a.id, first, now), run(b.id, final, now)]);
+    expect(results.every(result => result.ok)).toBe(true);
+    const receipts = await db.gameEvent.findMany({ where: { gameId: game.id, type: "post_notification" } });
+    expect(receipts).toHaveLength(4);
+    expect(new Set(receipts.map(receipt => receipt.commandKey)).size).toBe(4);
+    expect(receipts.filter(receipt => typeof receipt.payload === "object" && receipt.payload !== null && !Array.isArray(receipt.payload) && receipt.payload.recipientMemberId === c.id)
+      .map(receipt => receipt.commandKey?.split(":").at(-1)).sort()).toEqual(["completion", "first"]);
+  });
+});
+
+describe.skipIf(!enabled)("group privacy projections", () => {
+  it("masks posts before decryption and signing across detail, preview, history and ticket parties", async () => {
+    const crypto = await import("@/src/lib/game/crypto");
+    const media = await import("@/src/lib/game/media");
+    const { readHistory, readInvitePreview } = await import("@/src/lib/game/service");
+    const { withHistoryPhotoDeliveries } = await import("@/src/lib/game/http/media-routes");
+    const [a, b, c] = await Promise.all([person(), person(), person()]);
+    const game = await create(a, [b, c]); await ok(b.id, join(game.token)); await ok(c.id, join(game.token));
+    const photos = [b, c].map(person => `game/${person.id}/${"b".repeat(64)}.jpg`);
+    await ok(b.id, { type: "setProfile", firstName: "Bailey" });
+    await ok(c.id, { type: "setProfile", firstName: "Casey" });
+    await db.gameProfile.update({ where: { memberId: b.id }, data: { photoKey: photos[0] } });
+    await db.gameProfile.update({ where: { memberId: c.id }, data: { photoKey: photos[1] } });
+    await entry(game.id, a.id, 0); await entry(game.id, a.id, 1);
+    const peerEntries: Array<{ id: string; mediaKeys: string[] }> = [];
+    for (const person of [b, c]) {
+      const post = await entry(game.id, person.id, 0);
+      const text = await crypto.sealGameText({ table: "game_entry", field: "text", memberId: person.id, rowId: post.id }, "Private post words");
+      peerEntries.push(await db.gameEntry.update({ where: { id: post.id }, data: { textEncrypted: text, kind: "photo", mediaKeys: [`game/${person.id}/${"c".repeat(64)}.jpg`], blurHash: "private-blur" } }));
+    }
+    vi.spyOn(media, "servesSignedGameMedia").mockReturnValue(true);
+    const sign = vi.spyOn(media, "gameMediaDelivery").mockResolvedValue({ url: "https://images.example.test/signed", expiresAt: "2031-01-01T00:00:00Z" });
+    expect(await readInvitePreview(game.token, true, a.id)).toMatchObject({ alreadyIn: { count: 2, firstNames: ["Bailey", "Casey"], avatarUrl: "https://images.example.test/signed" } });
+    expect(sign).toHaveBeenCalledWith(photos[0], "avatar");
+    await ok(a.id, { type: "report", gameId: game.id, reportId: randomUUID(), about: "post", reason: "other", entryId: peerEntries[1].id });
+    await ok(a.id, { type: "report", gameId: game.id, reportId: randomUUID(), about: "player", reason: "other", reportedMemberId: c.id });
+    const termsReport = randomUUID();
+    await ok(b.id, { type: "report", gameId: game.id, reportId: termsReport, about: "terms", reason: "other", reportedMemberId: c.id });
+    expect(await db.gameReport.findUnique({ where: { id: termsReport }, select: { reportedMemberId: true } })).toEqual({ reportedMemberId: a.id });
+    await ok(a.id, { type: "block", memberId: b.id });
+    sign.mockClear();
+    const open = vi.spyOn(crypto, "openGameTexts");
+    const detail = await readGame(game.id, a.id, true);
+    expect(detail?.days[0].others.every(other => other.hidden && other.entry === null && !other.preview && !other.postedAt && !other.blurHash)).toBe(true);
+    expect(detail?.days[0].progress?.latestPosterSeats).not.toContain(1);
+    expect(await readInvitePreview(game.token, true, a.id)).toMatchObject({ alreadyIn: { count: 1, firstNames: ["Casey"], avatarUrl: null } });
+    for (const key of [...photos, ...peerEntries.flatMap(post => post.mediaKeys)]) expect(await authorizeMediaRead(a.id, key, true)).toBe(false);
+    await settle(game.id, a.id);
+    const home = await readHome(a.id, true);
+    const ticket = home.wallet.held.find(ticket => ticket.group);
+    expect(ticket?.parties?.owedBy).toEqual([
+      { seat: 1, memberId: null, firstName: "", avatarUrl: null },
+      { seat: 2, memberId: c.id, firstName: "Teammate", avatarUrl: null },
+    ]);
+    const history = await withHistoryPhotoDeliveries(await readHistory(a.id, true), a.id);
+    expect(history.groups?.[0].games[0].previews.every(preview => preview.seat === 0)).toBe(true);
+    expect(open.mock.calls.flatMap(([requests]) => requests).filter(request => request.table === "game_entry" && peerEntries.some(post => post.id === request.rowId))).toEqual([]);
+    expect(sign).not.toHaveBeenCalled();
+  });
+});
+
+describe.skipIf(!enabled)("maximum-cardinality group projections", () => {
+  it("measures Home, detail and history and filters legacy collections before their limits", async () => {
+    const { Prisma } = await import("@prisma/client");
+    const crypto = await import("@/src/lib/game/crypto");
+    const media = await import("@/src/lib/game/media");
+    const { readHistory } = await import("@/src/lib/game/service");
+    const { withHistoryPhotoDeliveries, withLockedPreviewDeliveries } = await import("@/src/lib/game/http/media-routes");
+    const { runWithPrismaOperationTimings } = await import("@/src/lib/prisma-operation-timing");
+    const people: Person[] = []; for (let seat = 0; seat < 10; seat++) people.push(await person());
+    const [viewer, other] = people;
+    const base = await create(viewer, [other]);
+    const original = await gameRow(base.id);
+    await db.game.delete({ where: { id: base.id } });
+    const { players: originalPlayers, invitees: originalInvitees, tickets: originalTickets, ...template } = original;
+    expect([originalPlayers.length, originalInvitees.length, originalTickets.length]).toEqual([1, 1, 0]);
+    const dayOne = new Date("2030-01-01T00:00:00Z");
+    const effectiveNow = new Date("2030-12-30T12:00:00Z");
+    const words = { v: 1, groupWord: "Crew", versions: [{ n: 1, defaultTask: "Walk outside", tasks: [], stakes: [{ key: "prize", item: "Choose an outing" }] }] };
+    const termWords = await crypto.sealGameText({ memberId: viewer.id, rowId: "load", table: "game", field: "terms_words" }, JSON.stringify(words));
+    const storedTerms = { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { count: 365 }, stakes: [{ key: "prize", kind: "prize" }] }] };
+    const liveIds = Array.from({ length: 50 }, () => randomUUID());
+    await db.game.createMany({ data: liveIds.map((id, group) => ({ ...template, id, maxPlayers: 10, status: "live", audienceKey: `load-group-${group}`,
+      inviteTokenHash: null, inviteTokenEncrypted: null, lengthDays: 365, terms: storedTerms, termsWordsEncrypted: termWords!, startedAt: dayOne,
+      pendingChange: Prisma.DbNull, result: Prisma.DbNull, devClockOffsetMs: BigInt(effectiveNow.getTime() - Date.now()) })) });
+    await db.gamePlayer.createMany({ data: liveIds.flatMap(gameId => people.map((person, seat) => ({ gameId, memberId: person.id, seat, timeZone: "UTC", dayOne, joinedAt: dayOne }))) });
+    // One live artifact for every player/day. Three-attempt scan bounds are proved in game-collections.
+    for (const [seat, person] of people.entries()) {
+      const text = await crypto.sealGameText({ memberId: person.id, rowId: "load", table: "game_entry", field: "text" }, "A".repeat(140));
+      await db.$executeRaw(Prisma.sql`INSERT INTO game_entry (id, game_id, member_id, day_index, attempt, kind, text_encrypted, media_keys, received_at)
+        SELECT game.id || '-' || ${seat}::text || '-' || day::text, game.id, ${person.id}, day, 1, 'photo', ${text}, ARRAY['game/' || ${person.id} || '/' || md5(game.id || '-' || ${seat}::text || '-' || day::text) || md5(game.id || '-' || ${seat}::text || '-' || day::text) || '.jpg']::text[], ${dayOne}
+        FROM game CROSS JOIN generate_series(0,364) day WHERE game.id IN (${Prisma.join(liveIds)})`);
+    }
+    await db.gameTicket.createMany({ data: Array.from({ length: 200 }, (_, index) => ({ id: randomUUID(), gameId: liveIds[index % 50], stakeKey: "prize", owedBySeats: [1,2,3,4,5,6,7,8,9], owedToSeats: [0] })) });
+    // Refresh planner statistics after bulk seeding, as a populated database would.
+    await db.$executeRaw`ANALYZE game, game_player, game_entry, game_ticket`;
+    const open = vi.spyOn(crypto, "openGameTexts");
+    let signing = 0, peakSigning = 0;
+    vi.spyOn(media, "servesSignedGameMedia").mockReturnValue(true);
+    const sign = vi.spyOn(media, "gameMediaDelivery").mockImplementation(async () => {
+      signing++; peakSigning = Math.max(peakSigning, signing); await Promise.resolve(); signing--;
+      return { url: "https://images.example.test/signed", expiresAt: "2031-01-01T00:00:00Z" };
+    });
+    const metrics: Record<string, unknown> = {};
+    async function measure<T extends object | null>(name: string, run: () => Promise<T>) {
+      const operations: import("@/src/lib/prisma-operation-timing").PrismaOperationTiming[] = [];
+      const queries: import("@/src/lib/prisma-operation-timing").PrismaQueryTiming[] = [];
+      open.mockClear(); sign.mockClear(); peakSigning = 0;
+      const started = performance.now();
+      const response = await runWithPrismaOperationTimings(operations, run, undefined, queries);
+      const events = queries.flatMap(query => [{ at: query.startMs, change: 1 }, { at: query.startMs + query.ms, change: -1 }]).sort((a,b) => a.at - b.at || a.change - b.change);
+      let active = 0, peakQueries = 0; for (const event of events) { active += event.change; peakQueries = Math.max(peakQueries, active); }
+      const { jsonOk } = await import("@/src/lib/hosted-onboarding/http");
+      const bytes = (await jsonOk(name === "detail" ? { ok: true, game: response } : { ok: true, ...response }).arrayBuffer()).byteLength;
+      metrics[name] = { operations: operations.length, queries: queries.length, peakQueries, decryptFields: open.mock.calls.flatMap(([requests]) => requests.filter(request => request.value)).length,
+        signatures: sign.mock.calls.length, peakSigning, bytes, ms: Math.round(performance.now() - started) };
+      if (name === "home") { expect(sign).toHaveBeenCalledTimes(450); }
+      if (name === "history") { expect(sign).toHaveBeenCalledTimes(120); expect(bytes).toBeLessThan(3_000_000); }
+      expect(operations.length).toBeLessThanOrEqual(60);
+      expect(peakQueries).toBeLessThanOrEqual(6); expect(peakSigning).toBeLessThanOrEqual(6);
+      return response;
+    }
+    await measure("detail", () => readGame(liveIds[0], viewer.id, true));
+    await measure("unlockedHome", async () => withLockedPreviewDeliveries(await readHome(viewer.id, true), viewer.id));
+    await db.gameEntry.deleteMany({ where: { gameId: { in: liveIds }, memberId: viewer.id, dayIndex: 363 } });
+    const home = await readHome(viewer.id, true); expect(home.games).toHaveLength(50); expect(home.wallet.held).toHaveLength(200);
+    expect(home.games.every(game => game.days.length === 365 && game.days.filter(day => day.mine?.text === "A".repeat(140)).length === 364)).toBe(true);
+    expect(home.games.every(game => game.days.filter(day => day.others.length > 0).map(day => day.index).join() === "363")).toBe(true);
+    await measure("home", async () => withLockedPreviewDeliveries(await readHome(viewer.id, true), viewer.id));
+    // Capture the full-calendar baseline with the same actual stored detail, before Home narrowing.
+    const full = await readGame(liveIds[0], viewer.id, true);
+    metrics.fullHomeBytes = Buffer.byteLength(JSON.stringify({ ...home, games: Array(50).fill(full) }));
+    // The older pair and its ticket survive hundreds of newer group candidates without the capability.
+    const pair = await ok(viewer.id, { type: "createGame", gameId: randomUUID(), inviteeFirstName: "Player", terms: { ...terms, defaultTask: undefined, tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Walk" }] } });
+    await ok(other.id, join(pair!.inviteToken!));
+    const pairRow = await gameRow(pair!.id);
+    await db.gameTicket.create({ data: { id: randomUUID(), gameId: pair!.id, stakeKey: "prize", owedBySeats: [1], owedToSeats: [0], createdAt: new Date("2020-01-01T00:00:00Z") } });
+    const legacy = await readHome(viewer.id); expect(legacy.games.map(game => game.id)).toEqual([pair!.id]); expect(legacy.wallet.held).toHaveLength(1);
+    // Over-limit fixture proves separate twenty-group/twenty-five-round selection before hydration.
+    const historyIds = Array.from({ length: 21 * 26 }, () => randomUUID());
+    const result = { v: 1, maxPlayers: 10, termsVersion: 1, scores: people.map((person, seat) => ({ seat, memberId: person.id, score: 365-seat, misses: seat, eligible: true })) };
+    for (let offset = 0; offset < historyIds.length; offset += 100) {
+      const batch = historyIds.slice(offset, offset + 100);
+      await db.game.createMany({ data: batch.map((id, index) => ({ ...template, id, maxPlayers: 10, status: "settled", audienceKey: `history-group-${Math.floor((offset + index) / 26)}`, round: (offset + index) % 26 + 1,
+        inviteTokenHash: null, inviteTokenEncrypted: null, lengthDays: 365, terms: storedTerms, termsWordsEncrypted: termWords!, startedAt: dayOne, settledAt: new Date(effectiveNow.getTime() + offset + index),
+        pendingChange: Prisma.DbNull, result })) });
+      await db.gamePlayer.createMany({ data: batch.flatMap(gameId => people.map((person, seat) => ({ gameId, memberId: person.id, seat, timeZone: "UTC", dayOne, joinedAt: dayOne }))) });
+      await db.gameEntry.createMany({ data: batch.flatMap(gameId => people.slice(0,6).map((person, seat) => ({ id: `${gameId}-${seat}`, gameId, memberId: person.id, dayIndex: 0, attempt: 1, kind: "photo", receivedAt: dayOne, mediaKeys: [`game/${person.id}/${String(offset + batch.indexOf(gameId)).padStart(64, "0")}.jpg`] }))) });
+    }
+    await db.game.update({ where: { id: pair!.id }, data: { status: "settled", settledAt: new Date("2020-01-01T00:00:00Z"), result: { v: 1, termsVersion: 1, scores: pairRow.players.map(player => ({ memberId: player.memberId!, seat: player.seat, score: 3, misses: 1 })) } } });
+    expect((await readHistory(viewer.id)).people[0].games[0].id).toBe(pair!.id);
+    await db.$executeRaw`ANALYZE game, game_player, game_entry`;
+    const history = await readHistory(viewer.id, true); expect(history.groups).toHaveLength(20); expect(history.groups?.every(group => group.games.length === 25)).toBe(true);
+    expect(history.groups?.map(group => group.id)).toEqual(Array.from({ length: 20 }, (_, i) => `history-group-${20-i}`));
+    expect(history.groups?.every(group => group.games.map(game => game.round).join() === Array.from({ length: 25 }, (_, i) => 26-i).join())).toBe(true);
+    expect(history.groups?.every(group => group.record.won === 25 && group.record.lost === 0 && group.record.tied === 0)).toBe(true);
+    expect(history.people[0].games[0].id).toBe(pair!.id);
+    await measure("history", async () => withHistoryPhotoDeliveries(await readHistory(viewer.id, true), viewer.id));
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(".tmp-pr4-load.json", JSON.stringify(metrics, null, 2));
+  });
 });

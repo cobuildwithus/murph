@@ -36,8 +36,8 @@ export async function uploadGameMedia(input: { memberId: string; request: Reques
  * upload, or another player's entry once the game view would show it).
  * Locked and missing media look the same.
  */
-export async function serveGameMedia(input: { key: string; memberId: string; delivery?: boolean; variant?: "avatar" | "photo" }): Promise<Response> {
-  if (!(await isViewable(input.memberId, input.key))) throw mediaNotFound();
+export async function serveGameMedia(input: { key: string; memberId: string; delivery?: boolean; variant?: "avatar" | "photo"; multiplayer?: boolean }): Promise<Response> {
+  if (!(await isViewable(input.memberId, input.key, input.multiplayer))) throw mediaNotFound();
   requireStorage();
   if (input.delivery && servesSignedGameMedia()) {
     // Missing from the hosted store is final: no second look through the byte proxy.
@@ -72,7 +72,7 @@ export async function withUnlockedPhotoDeliveries(game: GameView, input: { entry
   const others = await Promise.all(day.others.map(async (other) => {
     const key = other.entry?.mediaUrls[0] ? gameMediaKeyOf(other.entry.mediaUrls[0]) : null;
     if (!other.entry || !key) return other;
-    const delivery = await isViewable(input.memberId, key)
+    const delivery = await isViewable(input.memberId, key, game.maxPlayers !== undefined)
       .then((viewable) => (viewable ? gameMediaDelivery(key, "photo") : null))
       .catch(() => null);
     return delivery ? { ...other, entry: { ...other.entry, delivery } } : other;
@@ -97,7 +97,7 @@ export async function withLockedPreviewDeliveries(home: GameHomeView, memberId: 
   const keys = [...new Set(home.games.flatMap((game) => game.days.flatMap((day) =>
     day.others.flatMap((other) => keyOf(other.preview) ?? []))))];
   if (keys.length === 0) return home;
-  const allowed = await authorizeLockedPreviewReads(memberId, keys).catch(() => new Set<string>());
+  const allowed = await authorizeLockedPreviewReads(memberId, keys, home.canStartGroups !== undefined).catch(() => new Set<string>());
   const deliveries = new Map<string, { url: string; expiresAt: string }>();
   const signable = keys.filter((key) => allowed.has(key));
   for (let offset = 0; offset < signable.length; offset += 6) {
@@ -115,13 +115,13 @@ export async function withLockedPreviewDeliveries(home: GameHomeView, memberId: 
   })) })) };
 }
 
-/** Sign the card's latest game per person, after the normal history filters.
- * At most 50 people × 6 previews; deduplicate keys and authorize/sign six at
+/** Sign the latest game per person or group, after the normal history filters.
+ * At most (50 people + 20 groups) × 6 previews; deduplicate keys and authorize/sign six at
  * a time. Missing or unavailable delivery leaves the stable media URL intact.
  */
 export async function withHistoryPhotoDeliveries(history: GameHistoryView, memberId: string): Promise<GameHistoryView> {
   if (!servesSignedGameMedia()) return history;
-  const previews = history.people.flatMap((person) => person.games[0]?.previews ?? []);
+  const previews = [...history.people.flatMap(person => person.games[0]?.previews ?? []), ...(history.groups ?? []).flatMap(group => group.games[0]?.previews ?? [])];
   const keys = [...new Set(previews.flatMap((preview) => {
     const key = preview.mediaUrls[0] ? gameMediaKeyOf(preview.mediaUrls[0]) : null;
     return key ? [key] : [];
@@ -129,14 +129,21 @@ export async function withHistoryPhotoDeliveries(history: GameHistoryView, membe
   const deliveries = new Map<string, { url: string; expiresAt: string }>();
   for (let offset = 0; offset < keys.length; offset += 6) {
     const batch = keys.slice(offset, offset + 6).filter(isGameMediaKey);
-    const allowed = await authorizeMediaReads(memberId, batch)
+    const allowed = await authorizeMediaReads(memberId, batch, history.groups !== undefined)
       .catch(() => new Set(batch.filter((key) => key.startsWith(mediaKeyPrefixFor(memberId)))));
     await Promise.all(batch.map(async (key) => {
       const delivery = allowed.has(key) ? await gameMediaDelivery(key, "avatar").catch(() => null) : null;
       if (delivery) deliveries.set(key, delivery);
     }));
   }
-  return { ...history, people: history.people.map((person) => ({ ...person,
+  const signedGroups = history.groups?.map(group => ({ ...group, games: group.games.map((game, index) => index === 0 ? { ...game,
+    previews: game.previews.map(preview => {
+      const key = preview.mediaUrls[0] ? gameMediaKeyOf(preview.mediaUrls[0]) : null;
+      const delivery = key ? deliveries.get(key) : null;
+      return delivery ? { ...preview, delivery } : preview;
+    }),
+  } : game) }));
+  return { ...history, ...(signedGroups ? { groups: signedGroups } : {}), people: history.people.map((person) => ({ ...person,
     games: person.games.map((game, index) => index === 0 ? { ...game,
       previews: game.previews.map((preview) => {
         const key = preview.mediaUrls[0] ? gameMediaKeyOf(preview.mediaUrls[0]) : null;
@@ -147,8 +154,8 @@ export async function withHistoryPhotoDeliveries(history: GameHistoryView, membe
   })) };
 }
 
-async function isViewable(memberId: string, key: string): Promise<boolean> {
-  return isGameMediaKey(key) && authorizeMediaRead(memberId, key);
+async function isViewable(memberId: string, key: string, multiplayer = false): Promise<boolean> {
+  return isGameMediaKey(key) && authorizeMediaRead(memberId, key, multiplayer);
 }
 
 function requireStorage(): void {

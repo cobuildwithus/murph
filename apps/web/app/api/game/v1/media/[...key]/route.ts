@@ -1,3 +1,4 @@
+import { hasGameMultiplayer } from "@/src/lib/game/http/capability";
 import { invalidGameRequest } from "@/src/lib/game/http/errors";
 import { requireGameMember } from "@/src/lib/game/http/auth";
 import { serveGameMedia } from "@/src/lib/game/http/media-routes";
@@ -15,7 +16,7 @@ export const GET = withJsonError(async (
   const variant = query.get("variant") ?? "photo";
   if (variant !== "avatar" && variant !== "photo") throw invalidGameRequest("Unknown image variant.");
   return serveGameMedia({ key: key.map(decodeSegment).join("/"), memberId,
-    delivery: query.get("delivery") === "signed", variant });
+    multiplayer: hasGameMultiplayer(request), delivery: query.get("delivery") === "signed", variant });
 });
 
 function decodeSegment(segment: string): string {

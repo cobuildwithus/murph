@@ -14,6 +14,9 @@ describe("game missed-day check-ins", () => {
     const now = new Date("2030-03-05T09:00:00Z");
     expect(gameMissedCheckInRuns(state, now)).toEqual([{ memberId: "person-b", firstMissedDate: "2030-03-04",
       missedDates: ["2030-03-04"], dueAt: now }]);
+    state.game.seats = 10;
+    expect(gameMissedCheckInRuns(state, now)).toEqual([]);
+    state.game.seats = 2;
     state.game.terms.versions[0]!.schedule = { count: 3 };
     expect(gameMissedCheckInRuns(state, now)).toEqual([]);
   });

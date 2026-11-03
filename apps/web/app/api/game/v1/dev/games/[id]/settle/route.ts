@@ -1,3 +1,4 @@
+import { hasGameMultiplayer } from "@/src/lib/game/http/capability";
 import { assertGameDevRoutesAllowed, requireGameMember } from "@/src/lib/game/http/auth";
 import { withGameRuleErrors } from "@/src/lib/game/http/errors";
 import { devSettleNow } from "@/src/lib/game/service";
@@ -11,6 +12,6 @@ export const POST = withJsonError(async (
   assertGameDevRoutesAllowed();
   const memberId = await requireGameMember(request);
   const gameId = await resolveDecodedRouteParam(context.params, "id");
-  const game = await withGameRuleErrors(() => devSettleNow(gameId, memberId));
+  const game = await withGameRuleErrors(() => devSettleNow(gameId, memberId, hasGameMultiplayer(request)));
   return jsonOk({ ok: true, game });
 });

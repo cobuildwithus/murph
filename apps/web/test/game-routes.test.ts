@@ -193,7 +193,7 @@ describe("weekly game routes", () => {
     const response = await routes.profile.PUT(writeRequest("PUT", "/me/profile", { photoKey: null, memberId: AVA }));
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ ok: true, profile });
-    expect(mocks.runGameCommand).toHaveBeenCalledWith({ actorMemberId: LEO, command: { type: "setProfile", photoKey: null, memberId: AVA } });
+    expect(mocks.runGameCommand).toHaveBeenCalledWith({ actorMemberId: LEO, multiplayer: false, command: { type: "setProfile", photoKey: null, memberId: AVA } });
   });
 
   it("requires a signed-in session and never reaches the game", async () => {
@@ -342,7 +342,7 @@ describe("weekly game routes", () => {
       expect(response.status).toBe(200);
       expect(response.headers.get("cache-control")).toBe("no-store");
       expect(await response.json()).toEqual({ game: VIEW, ok: true });
-      expect(mocks.runGameCommand).toHaveBeenCalledWith({ actorMemberId: LEO, command });
+      expect(mocks.runGameCommand).toHaveBeenCalledWith({ actorMemberId: LEO, multiplayer: false, command });
     });
 
     it("lets the path's ids win over the body's", async () => {
@@ -473,9 +473,9 @@ describe("weekly game routes", () => {
       const history = await routes.history.GET(new Request(`${BASE}/history?memberId=${AVA}`, { headers: { "x-member-id": AVA } }));
       const game = await routes.game.GET(new Request(`${BASE}/games/${GAME_ID}?memberId=${AVA}`), params({ id: GAME_ID }));
 
-      expect(mocks.readHome).toHaveBeenCalledWith(LEO);
-      expect(mocks.readHistory).toHaveBeenCalledWith(LEO);
-      expect(mocks.readGame).toHaveBeenCalledWith(GAME_ID, LEO);
+      expect(mocks.readHome).toHaveBeenCalledWith(LEO, false);
+      expect(mocks.readHistory).toHaveBeenCalledWith(LEO, false);
+      expect(mocks.readGame).toHaveBeenCalledWith(GAME_ID, LEO, false);
       expect(await home.json()).toEqual({ games: [VIEW], me: { memberId: LEO }, ok: true, wallet: { held: [], owed: [], redeemed: [] } });
       expect(await history.json()).toEqual({ ok: true, people: [] });
       expect(await game.json()).toEqual({ game: VIEW, ok: true });
@@ -521,7 +521,7 @@ describe("weekly game routes", () => {
       mocks.readHistory.mockResolvedValue(history);
       const response = await routes.history.GET(new Request(`${BASE}/history?memberId=outsider`));
       expect(response.status).toBe(200);
-      expect(mocks.readHistory).toHaveBeenCalledWith(LEO);
+      expect(mocks.readHistory).toHaveBeenCalledWith(LEO, false);
       expect(await response.json()).toEqual({ ok: true, ...history });
     });
 
@@ -542,7 +542,7 @@ describe("weekly game routes", () => {
       expect(response.headers.get("cache-control")).toBe("private, no-store");
       expect(response.headers.get("referrer-policy")).toBe("no-referrer");
       expect(mocks.authorizeMediaReads).toHaveBeenCalledTimes(1);
-      expect(mocks.authorizeMediaReads).toHaveBeenCalledWith(LEO, expect.arrayContaining([`game/${LEO}/${"0".repeat(64)}.jpg`]));
+      expect(mocks.authorizeMediaReads).toHaveBeenCalledWith(LEO, expect.arrayContaining([`game/${LEO}/${"0".repeat(64)}.jpg`]), false);
       expect(mocks.control.gameImageDelivery).toHaveBeenCalledTimes(5);
       expect(mocks.control.gameImageDelivery).toHaveBeenCalledWith({ userId: LEO, mediaId: `${"0".repeat(64)}.jpg`, variant: "avatar" });
 
@@ -622,7 +622,7 @@ describe("weekly game routes", () => {
       const signed = (await post("?delivery=signed")).game as GameView;
       expect(signed.days[0].others[0].entry).toEqual({ ...posted.days[0].others[0].entry, delivery });
       expect(signed.days[0].mine).toEqual(posted.days[0].mine);
-      expect(mocks.authorizeMediaRead).toHaveBeenCalledExactlyOnceWith(AVA, leoKey);
+      expect(mocks.authorizeMediaRead).toHaveBeenCalledExactlyOnceWith(AVA, leoKey, false);
       expect(mocks.control.gameImageDelivery).toHaveBeenCalledExactlyOnceWith({
         mediaId: leoKey.slice(leoKey.lastIndexOf("/") + 1), userId: LEO, variant: "photo",
       });
@@ -656,7 +656,7 @@ describe("weekly game routes", () => {
       const signed = (await read("?delivery=signed")).games[0] as GameView;
       expect(signed.days[0].others[0].preview).toEqual({ ...game.days[0].others[0].preview, delivery });
       expect(signed.days[0].others[0].entry).toBeNull();
-      expect(mocks.authorizeLockedPreviewReads).toHaveBeenCalledExactlyOnceWith(AVA, [leoKey]);
+      expect(mocks.authorizeLockedPreviewReads).toHaveBeenCalledExactlyOnceWith(AVA, [leoKey], false);
       expect(mocks.authorizeMediaRead).not.toHaveBeenCalled();
       expect(mocks.control.gameImageDelivery).toHaveBeenCalledExactlyOnceWith({
         mediaId: leoKey.slice(leoKey.lastIndexOf("/") + 1), userId: LEO, variant: "photo",
@@ -748,7 +748,7 @@ describe("weekly game routes", () => {
 
       expect(locked.status).toBe(404);
       expect((await locked.json()).error.code).toBe("MEDIA_MISSING");
-      expect(mocks.authorizeMediaRead).toHaveBeenCalledWith(AVA, key);
+      expect(mocks.authorizeMediaRead).toHaveBeenCalledWith(AVA, key, false);
 
       mocks.authorizeMediaRead.mockResolvedValue(true);
       const unlocked = await routes.media.GET(mediaRequest(key), params({ key: [encodeURIComponent(key)] }));
@@ -793,7 +793,7 @@ describe("weekly game routes", () => {
       const invalid = await routes.advanceDay.POST(devRequest("advance-day", { days: 0 }), params({ id: GAME_ID }));
 
       expect(response.status).toBe(200);
-      expect(mocks.devAdvanceDays).toHaveBeenCalledWith(GAME_ID, LEO, 3);
+      expect(mocks.devAdvanceDays).toHaveBeenCalledWith(GAME_ID, LEO, 3, false);
       expect(invalid.status).toBe(400);
     });
   });
