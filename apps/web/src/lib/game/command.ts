@@ -33,6 +33,8 @@ export type GameInviteTarget = GameInviteTargetInput;
 export function parseGameCommand(value: unknown): GameCommand {
   const input = record(value, "command");
   switch (input.type) {
+    case "challenge":
+      return { type: "challenge", gameId: clientId(input.gameId, "gameId"), entryId: clientId(input.entryId, "entryId") };
     case "leave":
       return { type: "leave", gameId: clientId(input.gameId, "gameId") };
     case "editTerms":

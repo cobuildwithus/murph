@@ -1,15 +1,19 @@
 import { isPairRoster } from "./roster";
 import { lockGamePair } from "./blocks";
 import { gamePairWhere } from "./chat-membership";
-import { GAME_MAX_OPEN_PER_PAIR } from "./rules";
+import { GAME_MAX_OPEN_PER_PAIR, gameChallengeKey } from "./rules";
 import "server-only";
 import { Prisma } from "@prisma/client";
 import { buildHostedLinqDeliveryId } from "../hosted-onboarding/linq-delivery-store";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 
-export type GameChatLifecycleKind = "started" | "rematch" | "change_cancelled" | "change_expired" | "cancelled" | "recap" | "missed";
+export type GameChatLifecycleKind = "started" | "rematch" | "change_cancelled" | "change_expired" | "cancelled" | "recap" | "missed" | "challenge";
 
 export function gameChatLifecycleEventId(gameId: string, kind: GameChatLifecycleKind, proposalId?: string, regenerationId?: string): string {
+  if (kind === "challenge") {
+    if (!proposalId) throw new Error("A challenge lifecycle requires its entry identity.");
+    return gameChallengeKey(gameId, proposalId);
+  }
   if (kind === "recap" && regenerationId) return `game-recap:${gameId}:${regenerationId}`;
   if (kind === "missed") throw new Error("Missed-day lifecycle identity requires the player and first date.");
   if (kind === "change_cancelled" || kind === "change_expired") {
@@ -19,10 +23,22 @@ export function gameChatLifecycleEventId(gameId: string, kind: GameChatLifecycle
   return `game-${kind}:${gameId}`;
 }
 
+/** Reserved from the accepted event draft in the same game write transaction. */
+export async function reserveGameChallengeTx(input: {
+  gameId: string; entryId: string; containerMemberId: string; now: Date;
+  tx: Pick<Prisma.TransactionClient, "hostedLinqDelivery">;
+}): Promise<void> {
+  const key = createHostedLinqDeliveryIdempotencyLookupKey(gameChallengeKey(input.gameId, input.entryId));
+  if (!key) throw new Error("Game challenge delivery identity is unavailable.");
+  await input.tx.hostedLinqDelivery.createMany({ data: [{ id: buildHostedLinqDeliveryId(key), idempotencyKey: key,
+    source: "game_lifecycle", sourceRef: `${input.gameId}:${input.entryId}`, template: "game_challenge",
+    status: "awaiting_generation", targetKind: "thread", payloadOwnerMemberId: input.containerMemberId, attemptedAt: input.now }], skipDuplicates: true });
+}
+
 /** Durable acceptance intent, before any model, route discovery or provider work. */
 export async function reserveGameChatLifecycleTx(input: {
   gameId: string;
-  kind: GameChatLifecycleKind;
+  kind: Exclude<GameChatLifecycleKind, "challenge">;
   proposalId?: string;
   regenerationId?: string;
   now: Date;

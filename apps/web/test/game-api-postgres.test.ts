@@ -295,8 +295,8 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
     const recap = await game(settle(request(viewer), context));
     for (const [day, artifact] of artifacts.entries()) {
       expect(recap.days[day].others[0].entry).toMatchObject({ kind: artifact.kind, data: artifact.data ?? null });
-      // Open now: no posted time, and the blur stays for while the picture loads.
-      expect(recap.days[day].others[0]).not.toHaveProperty("postedAt");
+      // Open now: the posted time stays (Home shows it on tap), and so does the blur for while the picture loads.
+      expect(recap.days[day].others[0].postedAt).toEqual(expect.any(String));
       expect(recap.days[day].others[0].blurHash).toBe("synthetic-blur");
     }
   }, 30_000);
