@@ -1369,3 +1369,243 @@ scoped commit; local probe/check captures remain ignored under `.tmp`.
 Commit through `scripts/committer` with the requested subject and co-author
 trailer. No push, remote PR mutation or production action was performed; the
 parent owns exact-head CI and ReviewGPT after pushing.
+
+## Round 4 accepted Complexity Collapse: runner packing baseline blocker
+
+Owner-authorized append-only amendment, starting at `f6e5fa3969`. Work remains
+in the assigned deletion branch. The parent owns pushes and subsequent CI and
+ReviewGPT. No production access or other-checkout development was performed.
+
+The requested implementation is **on hold before any production or test edit**:
+the original head cannot complete the requested reduced-mode baseline. The
+existing assembly accepts `--skip-bundle-only-dependencies` and excludes the
+CLI package, but unconditionally calls `bundleInstalledVaultCliBinary`. Its
+`access` of `node_modules/@murphai/murph/dist/bin.js` fails with `ENOENT` before
+the entrypoint bundler and guard run. Full mode succeeds. No replacement
+assembly behavior or weakened proof requirement has been introduced. The parent
+must decide whether full-mode artifact equality plus reduced-mode closure,
+staging, and unchanged-failure evidence is sufficient, or assign a separate fix.
+
+### Original-head captures
+
+A task-local preload observes the staged manifest write and copies the packed
+CLI tarball immediately before normal staging cleanup; it does not change
+assembly inputs or prevent cleanup. The original contract functions separately
+capture ordered workspace/build sets. Captures and redacted command logs are
+ignored under `.tmp/runner-collapse/` in this checkout.
+
+| Recorded item | Full baseline | Reduced baseline | After |
+| --- | --- | --- | --- |
+| Workspace install/pack set | 22 packages | 20 packages | Not run; no implementation |
+| Workspace build set | 22 packages | Identical 22 packages | Not run |
+| Staged root dependency names/specifiers/order | 26 ordered entries | 16 ordered entries | Not run |
+| CLI tarball | 384 entries; 516,801 compressed bytes | Absent by reduced-mode contract | Not run |
+| Serialized packed CLI manifest | 4,794 bytes | No packed CLI | Not run |
+| Entrypoint size | 77,854 bytes | Not reached | Not run |
+| Static boot closure | 1,997,461 bytes | Not reached | Not run |
+| Static boot chunk count | 22 | Not reached | Not run |
+| Total entrypoint output | 12,215,475 bytes / 107 files | Not reached | Not run |
+| Total CLI output | 7,412,475 bytes / 174 files | Not reached | Not run |
+
+Full-mode CLI tarball SHA-256:
+`6ecbd9c76cd21a65a8e61948aaf92bfb0edd3810da34fae6505239bc30526ac8`.
+Serialized packed CLI manifest SHA-256:
+`925af8908a8c638b1a47467e9ae9b5572fb668c98012fc8d6fc177f87c28ad36`.
+The capture includes the ordered member list, file sizes/modes/content hashes,
+and exact serialized manifest. Full assembly passed eight CLI parity probes
+and the entrypoint/lazy-chunk boot probes. Reduced mode still built all 22
+workspace inputs, packed/installed 20 tarballs, and captured its 16 staged roots
+before the existing CLI access failure.
+
+Production deployment (`deploy:artifacts`), Host Support's production runner
+budget job, and the permission-sandbox workflow invoke full `runner:bundle`.
+No workflow uses the reduced flag. The contract and assembly entrypoint expose
+that flag, but the original-head run proves it is not a working end-to-end mode.
+
+### Baseline verification
+
+These checks validate the untouched implementation; they are not after-change
+proof. Commands were run through a task-local subprocess wrapper that redacts
+home/worktree paths before writing logs. The Frog shell pipeline uses pipefail.
+
+| Command | Result / counts |
+| --- | --- |
+| `pnpm --dir apps/cloudflare runner:bundle` | PASS; 22 workspace tarballs, eight CLI parity probes, entrypoint and lazy-chunk boot probes |
+| `pnpm --dir apps/cloudflare runner:bundle --skip-bundle-only-dependencies` | FAIL; 20 workspace tarballs installed, then missing CLI `dist/bin.js`; no entrypoint metrics |
+| `pnpm build` | PASS; 23 package builds plus CLI surface assembly |
+| `pnpm verify:workspace-boundaries` | PASS |
+| `pnpm deps:guard` | PASS; 26 manifests |
+| `pnpm no-js` | PASS |
+| `pnpm --dir apps/cloudflare typecheck` | PASS; zero errors |
+| `pnpm --dir apps/cloudflare test:node` | PASS; workspace 4,576 passed / zero failed / five skipped (213 passing / one skipped files); container helper 20 passed (one file) |
+| `pnpm exec vitest run --config scripts/vitest.config.ts --no-coverage` | 863 passed / 27 failed / zero skipped; 58 passing / two failing files |
+| `pnpm docs:drift` | PASS, including final amendment readback |
+| `pnpm complexity:diff` | PASS; 98 branch-changed source files, 45 existing hotspots |
+| `pnpm --dir apps/cloudflare runner:docker:smoke:prepare` | PASS; isolated smoke bundle synchronized |
+| `node scripts/check-runner-bundle-budget-ci.mjs` | PASS; CI budget workflow contract |
+
+The 27 repo-tools failures are exactly the known 20 dependency-context and seven
+native-context privacy-hook failures: synthetic fixture commit email is rejected
+before the test subject executes. Both test files and the corresponding
+`scripts/review-gpt-dependency-context.mjs` and
+`scripts/review-gpt-native-context.ts` are byte-identical to local `origin/main`
+at `3a75cbc859`. This is source-identity proof, not a test run in another checkout.
+No hook, fixture, assertion, or guard was weakened.
+
+The native AMD64 image confinement, native-cache proof, deployed Codex compatibility,
+and one-vCPU container latency lanes are not run on the available ARM64 Docker
+engine. The existing Frog issue #3862 documents why AMD64 emulation cannot prove
+Codex's Linux seccomp confinement. The exact-base two-checkout CI comparison is
+also outside the authorized checkout boundary; the full baseline output sizes
+are captured for a later same-checkout comparison. Smoke preparation is successful
+but does not claim an executed image smoke or native permission proof.
+
+No tests were added or deleted; net production LOC is zero and no implementation
+commit was created. The new public-safe Frog entry
+`.agents/friction-log/20261102184952-reduced-runner-assembly/friction.md` records
+the reproducible reduced-assembly blocker. Preserve it with this amendment for
+the eventual scoped commit; do not imply that the accepted deletion is complete.
+
+
+## Round 4 runner packing: accepted reduced-mode proof amendment
+
+The parent accepted the revised proof boundary: reduced assembly is pre-existing
+broken and unused, and deploy validation rejects reduced manifests. The base
+`origin/main` at `3a75cbc859` has the same unconditional CLI bundling call. This
+commit neither repairs nor deletes reduced mode. The earlier blocker record
+remains historical evidence; implementation resumes at `f6e5fa3969`.
+
+The acceptance gate is byte-identical full-mode installed/build sets, ordered
+staged dependencies, packed CLI entries and file hashes, serialized CLI manifest,
+entry bytes, static boot closure bytes and chunk count. Reduced installed/build
+sets and ordered staged dependencies must match through the same resolver and
+staging functions without assembly, and actual reduced assembly must fail at
+the same CLI access step with the same error. Any difference stops the task
+without a commit. The preserved `.tmp/runner-collapse/` captures are ignored
+according to `git check-ignore`; they remain local evidence, outside the commit.
+
+The implementation derives CLI workspace roots from the manifest, runs them
+through the existing dependency closure, and uses the ordinary workspace packer
+for the CLI. It removes the former publishing list, partitions, complement and
+specialized CLI helper. Health Commons generated-file preparation, CLI surface
+assembly, dependency rewriting, runtime-file guards, npm-pack error handling
+and cleanup remain with their existing owners. No product behavior, foreground
+work, provider input, deployment protocol or persisted state changes. No
+member-visible changelog is needed. The parent retains push, exact-head CI and
+ReviewGPT ownership; no other checkout or production mutation is authorized.
+
+
+### Preservation results after the collapse
+
+Every required comparison passed. The resolver probe calls the same exported
+workspace/build resolvers and `stageHostedRunnerRuntimeArtifact` before and
+after the change, without invoking assembly. Its baseline also exactly matches
+the previously captured assembly dependency map. No production check was
+weakened or bypassed.
+
+| Item | Before | After / comparison |
+| --- | --- | --- |
+| Full installed workspace set | 22 | Same 22, exact ordered JSON |
+| Full build set | 22 | Same 22, exact ordered JSON |
+| Full staged dependencies | 26 | Same names, specifiers and order |
+| Reduced installed workspace set | 20 | Same 20, exact ordered JSON |
+| Reduced build set | 22 | Same 22, exact ordered JSON |
+| Reduced staged dependencies | 16 | Same names, specifiers and order |
+| CLI compressed tarball | 516,801 bytes | Byte-identical, SHA-256 unchanged |
+| CLI tarball entries | 384 | Identical order, names, modes, sizes and file hashes |
+| Serialized CLI manifest | 4,794 bytes | Byte-identical, SHA-256 unchanged |
+| Runner entrypoint | 77,854 bytes | Identical size and file hash |
+| Static boot closure | 1,997,461 bytes / 22 chunks | Identical guard output |
+| Total entrypoint output | 12,215,475 bytes / 107 files | Identical paths, sizes and file hashes |
+| Total CLI output | 7,412,475 bytes / 174 files | Identical paths, sizes and file hashes |
+| CLI entry / static startup closure | 805 / 19,800 bytes | Identical guard output |
+| Reduced assembly | `ENOENT`, syscall `access`, errno -2 | Same missing CLI `dist/bin.js`, same step |
+
+All 281 emitted JavaScript file hashes match the preserved full output. The
+compressed CLI tarball and manifest SHA-256 values are the same as the original
+capture above. Full assembly passed all eight CLI parity probes and its boot
+probes. Reduced assembly built its inputs and packed the same 20 tarballs before
+failing inside `bundleInstalledVaultCliBinary` at `bundle-cli.ts:114`, called
+from `assemble-runner-bundle.ts:110`. The complete failure text and stack match
+after normalizing only the randomized temporary staging directory.
+
+### Files and test disposition
+
+- `runner-bundle-contract.ts`: derive CLI roots and use the existing closure;
+  remove all former publishing partitions and the complement helper.
+- `runner-bundle/workspace-artifacts.ts`: route CLI through the generic packer;
+  remove the specialized helper, dispatch branch, name constant and two unused
+  bundle-metadata fields. Common guards and cleanup are unchanged.
+- `runner-bundle-workspace-artifacts.test.ts`: update the synthetic staging
+  expectation for all manifest-derived roots; the real runtime already declares
+  the three additional roots, so its actual ordered map is unchanged. The CLI
+  fixture now reads private/bin/files from the real CLI manifest and uses
+  synthetic sibling manifests. It checks the private flag, exact vault binary
+  mapping, binary/config/README/license bytes, rewritten sibling `file:` specs,
+  missing-sibling rejection, and absence of embedded dependency payload.
+- `ARCHITECTURE.md` and `references/testing-ci-map.md`: replace the obsolete
+  explicit-list description with manifest-derived dependency ownership. Update
+  `agent-docs/index.md` to describe the same packing owner.
+- This append-only plan and the existing reduced-assembly Frog entry are
+  included in the implementation commit.
+
+No test declarations were added or deleted. The existing case
+`packs the runner CLI without its public bundled dependency payload` is renamed
+`packs the private runner CLI assets with sibling workspace tarball dependencies`
+and strengthened. Removed only the obsolete bundled-metadata fixture/assertion
+(the current private manifest has no publishing field), the retired `murph`
+binary alias, and the removed CHANGELOG packaging fixture. Existing runner CLI
+parity, prepared-artifact validation, Health Commons generation, generic
+transitive dependency, missing-tarball, npm failure and build-order cases remain.
+
+
+### Final verification and candidate review
+
+Full requested suites ran locally in the assigned checkout. Logs redact the
+checkout/home paths before writing; Vitest inherited only the two-worker
+resource cap. No test-name or file filters were used for the requested suites.
+
+| Command | Result / counts |
+| --- | --- |
+| `pnpm build` | PASS; 23 package builds plus CLI surface assembly |
+| `pnpm verify:workspace-boundaries` | PASS |
+| `pnpm deps:guard` | PASS; 26 manifests |
+| `pnpm no-js` | PASS |
+| `pnpm --dir apps/cloudflare typecheck` | PASS; zero errors, including final fixture changes |
+| `pnpm --dir apps/cloudflare test:node` | PASS; workspace 4,576 passed / zero failed / five skipped (213 passing / one skipped files); container helper 20 passed / zero failed / zero skipped (one file) |
+| `pnpm --dir apps/cloudflare runner:bundle` | PASS; 22 tarballs, eight CLI parity probes, entrypoint and lazy boot probes; exact full-mode equality above |
+| `pnpm --dir apps/cloudflare runner:bundle --skip-bundle-only-dependencies` | Expected existing FAIL; same 20 tarballs and identical normalized CLI access failure |
+| `pnpm --dir apps/cloudflare runner:docker:smoke:prepare` | PASS; isolated smoke bundle synchronized |
+| `node scripts/check-runner-bundle-budget-ci.mjs` | PASS; workflow contract |
+| `node --test scripts/check-runner-bundle-budget-ci.test.mjs scripts/check-container-latency-ci.test.mjs` | PASS; 21 passed / zero failed / zero skipped |
+| `pnpm exec vitest run --config scripts/vitest.config.ts --no-coverage` | Known baseline FAIL; 863 passed / 27 failed / zero skipped (58 passing / two failing files) |
+| `pnpm complexity:diff` | PASS; 98 branch-changed source files, 45 existing hotspots |
+| `pnpm complexity:diff --base f6e5fa3969` | PASS; two task-changed source files, zero hotspots or added complexity debt |
+| `pnpm docs:drift` | PASS on the final amendment; initial run required the corresponding index update |
+| `git diff --check` | PASS |
+
+The repo-tools run has exactly the same 27 failing subjects as the preserved
+baseline: 20 dependency-context and seven native-context failures. Synthetic
+fixture commit email is rejected by the privacy hook before the test subject.
+Both test files and both implementations remain byte-identical to `origin/main`
+`3a75cbc859`; no other-checkout run or guard bypass was used.
+
+Workflow inspection covered Host Support's production bundle budget and the
+runner permission sandbox gate. The full assembly, smoke preparation, budget
+workflow guard and 21 bundle/latency contract tests ran locally. Native AMD64
+base-image/cache proof, deployed Codex compatibility, permission confinement
+image smoke and one-vCPU container latency were skipped: Docker reports
+`aarch64`, and the existing Frog issue #3862 documents that emulation cannot
+prove native seccomp confinement. The two-checkout exact-base CI lane also
+exceeds this task's checkout boundary; the same-checkout before/after output
+comparison above passes. Smoke preparation is not an executed image smoke.
+The parent owns those exact-head CI lanes and ReviewGPT after pushing.
+
+Final candidate review: production TypeScript is four added / 98 deleted lines,
+**94 net lines removed** across two files. The diff contains no new dependency,
+unsafe cast, abstraction, persistence, runtime protocol or provider-visible behavior.
+All requested equality gates pass. The plan remains append-only and the
+public-safe reduced-assembly Frog entry is included. Added-content identifier
+and whitespace scans pass; normal GitHub noreply attribution is configured.
+Commit through `scripts/committer` with the requested subject and co-author.
+No push, PR mutation, deployment or production access was performed.

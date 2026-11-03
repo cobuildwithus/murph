@@ -7,7 +7,7 @@ Device-sync single-snapshot retirement and cold journal replay: [implementation 
 
 Research scout is retired through the existing managed-automation tombstone and archival path. Personal Patterns remains retired. `../packages/assistant-engine/README.md` owns reconciliation; the [deletion plan](exec-plans/completed/2026-11-02-remove-device-npm-jobs.md) records deployment skew and verification.
 
-Npm publication is retired; the protected CI coverage matrix and hosted runtime artifact checks remain owned by `operations/verification-and-runtime.md` and `references/testing-ci-map.md`. The [deletion plan](exec-plans/completed/2026-11-02-remove-device-npm-jobs.md) records the unchanged runner package closure.
+Npm publication is retired; hosted runner CLI dependencies are derived from the private CLI manifest and use the common workspace packer. The protected CI coverage matrix and hosted runtime artifact checks remain owned by `operations/verification-and-runtime.md` and `references/testing-ci-map.md`. The [deletion plan](exec-plans/completed/2026-11-02-remove-device-npm-jobs.md) records the unchanged runner package closure.
 
 Cold-history write and receipt-replay rollback floor: [completed plan](exec-plans/completed/2026-11-02-ingest-cold-write-floor.md).
 

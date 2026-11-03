@@ -175,11 +175,14 @@ describe("runner bundle runtime artifact staging", () => {
     expect(stagedPackageJson.dependencies).toEqual({
       "@murphai/assistant-engine": "workspace:*",
       "@murphai/clinical-records": "workspace:*",
+      "@murphai/contracts": "workspace:*",
       "@murphai/core": "workspace:*",
       "@murphai/device-syncd": "workspace:*",
       "@murphai/exercise-library": "workspace:*",
+      "@murphai/gateway-core": "workspace:*",
       "@murphai/health-commons": "workspace:*",
       "@murphai/health-metrics": "workspace:*",
+      "@murphai/hosted-execution": "workspace:*",
       "@murphai/importers": "workspace:*",
       "@murphai/inbox-services": "workspace:*",
       "@murphai/inboxd": "workspace:*",
@@ -546,12 +549,19 @@ describe("runner bundle runtime artifact staging", () => {
     });
   });
 
-  it("packs the runner CLI without its public bundled dependency payload", async () => {
+  it("packs the private runner CLI assets with sibling workspace tarball dependencies", async () => {
     const rootDir = await mkdtemp(path.join(tmpdir(), "murph-runner-cli-pack-"));
     const packageDir = path.join(rootDir, "packages", "cli");
     const assistantEngineDir = path.join(rootDir, "packages", "assistant-engine");
     const healthCommonsDir = path.join(rootDir, "packages", "health-commons");
     const tarballsDir = path.join(rootDir, "tarballs");
+    const cliManifest = JSON.parse(
+      await readFile(path.join(repoRoot, "packages", "cli", "package.json"), "utf8"),
+    ) as {
+      private: boolean;
+      bin: Record<string, string>;
+      files: string[];
+    };
 
     temporaryDirectories.push(rootDir);
     await mkdir(path.join(rootDir, "apps"), { recursive: true });
@@ -562,7 +572,6 @@ describe("runner bundle runtime artifact staging", () => {
     await mkdir(tarballsDir, { recursive: true });
     await writeFile(path.join(packageDir, "dist", "bin.js"), "#!/usr/bin/env node\n", "utf8");
     await writeFile(path.join(packageDir, "README.md"), "readme\n", "utf8");
-    await writeFile(path.join(packageDir, "CHANGELOG.md"), "changelog\n", "utf8");
     await writeFile(path.join(packageDir, "config.schema.json"), "{}\n", "utf8");
     await writeFile(path.join(packageDir, "LICENSE"), "license\n", "utf8");
     await writeFile(
@@ -571,26 +580,14 @@ describe("runner bundle runtime artifact staging", () => {
         {
           name: "@murphai/murph",
           version: "1.2.3",
+          private: cliManifest.private,
           type: "module",
-          bin: {
-            murph: "dist/bin.js",
-            "vault-cli": "dist/bin.js",
-          },
-          bundleDependencies: [
-            "@murphai/assistant-engine",
-            "@murphai/health-commons",
-          ],
+          bin: cliManifest.bin,
           dependencies: {
             "@murphai/assistant-engine": "workspace:*",
             "@murphai/health-commons": "workspace:*",
           },
-          files: [
-            "dist",
-            "README.md",
-            "CHANGELOG.md",
-            "config.schema.json",
-            "LICENSE",
-          ],
+          files: cliManifest.files,
         },
         null,
         2,
@@ -644,14 +641,36 @@ describe("runner bundle runtime artifact staging", () => {
       await readFile(path.join(extractDir, "package", "package.json"), "utf8"),
     ) as {
       bin?: Record<string, string>;
-      bundleDependencies?: string[];
+      private?: boolean;
+      dependencies?: Record<string, string>;
     };
 
     expect(packedPackageJson.bin).toEqual({
-      murph: "dist/bin.js",
       "vault-cli": "dist/bin.js",
     });
-    expect(packedPackageJson.bundleDependencies).toBeUndefined();
+    expect(packedPackageJson.private).toBe(true);
+    expect(packedPackageJson.dependencies).toEqual({
+      "@murphai/assistant-engine":
+        "file:02-_murphai_assistant-engine/murphai-assistant-engine-1.0.0.tgz",
+      "@murphai/health-commons":
+        "file:03-_murphai_health-commons/murphai-health-commons-1.0.0.tgz",
+    });
+    for (const [entry, contents] of [
+      ["dist/bin.js", "#!/usr/bin/env node\n"],
+      ["config.schema.json", "{}\n"],
+      ["README.md", "readme\n"],
+      ["LICENSE", "license\n"],
+    ]) {
+      expect(await readFile(path.join(extractDir, "package", entry), "utf8"))
+        .toBe(contents);
+    }
+    await expect(packWorkspacePackageArtifacts(
+      ["@murphai/murph"],
+      tarballsDir,
+      { repoRoot: rootDir, skipPreflights: true },
+    )).rejects.toThrow(
+      "@murphai/murph depends on workspace package @murphai/assistant-engine, but no sibling runner tarball was prepared for that dependency.",
+    );
     await expect(
       readFile(path.join(extractDir, "package", "node_modules", "@murphai", "health-commons", "package.json"), "utf8"),
     ).rejects.toMatchObject({ code: "ENOENT" });

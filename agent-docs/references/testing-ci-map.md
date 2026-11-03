@@ -1943,7 +1943,7 @@ keep the one-second presentation-only deadline and late-result rejection.
   preview deployment still depends on an isolated Vercel preview
   data/crypto/control plane plus environment-scoped Cloudflare credentials and
   R2 resources.
-- npm publication is retired. All workspace packages are private. Hosted runner assembly retains runtime file lists, an explicit CLI dependency closure, and artifact secret checks. Required Host Support check names and coverage matrices remain unchanged.
+- npm publication is retired. All workspace packages are private. Hosted runner assembly retains runtime file lists, a CLI workspace dependency closure derived from its manifest, and artifact secret checks. Required Host Support check names and coverage matrices remain unchanged.
 
 ## Temporal integration compiler cache
 
