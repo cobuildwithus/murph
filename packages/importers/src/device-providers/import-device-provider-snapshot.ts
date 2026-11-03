@@ -25,8 +25,6 @@ import type { DeviceProviderRegistry } from "./registry.ts";
 import type { CompleteDeviceProviderSourceDay } from "./types.ts";
 
 export interface DeviceProviderImporterExecutionOptions {
-  /** Synchronous cooperative cancellation check; preparation only. */
-  checkPreparation?: () => void;
   corePort?: unknown;
   defaultTimeZone?: string;
   importSession?: DeviceBatchImportExecutionOptions["session"];
@@ -360,7 +358,6 @@ export async function importDeviceProviderSnapshot<TResult = unknown>(
   {
     corePort,
     defaultTimeZone,
-    checkPreparation,
     importSession,
     signal,
     providerRegistry,
@@ -381,9 +378,7 @@ export async function importDeviceProviderSnapshot<TResult = unknown>(
   const coreTimingRef: {
     value?: Parameters<NonNullable<DeviceBatchImportExecutionOptions["onTiming"]>>[0];
   } = {};
-  checkPreparation?.();
   const result = await writer.importDeviceBatch(payload, {
-    checkPreparation,
     signal,
     ...(importSession ? { session: importSession } : {}),
     onTiming: (timing) => {

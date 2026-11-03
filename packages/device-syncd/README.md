@@ -317,8 +317,8 @@ snapshot in place without re-downloading or releasing the job. Hosted admission
 re-arms its 30-second window at provider return, protecting transcript/session
 finalization and reply dispatch even after a long provider phase. The existing
 accepted-input release callback owns re-arming; provider start and phase cleanup
-close the window. Identity visitation and reduction synchronously check the same
-service predicate, with the existing 100-ms polling fallback elsewhere.
+close the window. The existing 100-ms service poll aborts preparation; identity
+visitation and reduction check that signal and yield every 256 rows.
 
 Fairness is per retained snapshot: 30 seconds after its first deferral, preparation
 runs through even if newer foreground windows remain open. New messages and

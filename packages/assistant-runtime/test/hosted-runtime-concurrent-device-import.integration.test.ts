@@ -67,6 +67,7 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
   let replySent = false;
   let idleSnapshotCount = 0;
   let modelFinishedAt = 0;
+  let finalizationElapsedMs = 0;
   const indexing = createDeferred<void>();
   let identityRows = 0;
   let rowsAtProviderResult = 0;
@@ -124,9 +125,8 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
     const pathname = new URL(request instanceof Request ? request.url : String(request)).pathname;
     if (pathname.includes("/messages")) {
       if (finalization) {
-        assert.equal(identityRows, rowsAtProviderResult, "Identity rows visited after provider result and before dispatch");
-        assert.equal(preparationAborts, 1);
-        process.stdout.write(`synthetic finalization ${scenario}: ${Math.round(performance.now() - modelFinishedAt)} ms; identity rows during tail: ${identityRows - rowsAtProviderResult}\n`);
+        finalizationElapsedMs = performance.now() - modelFinishedAt;
+        process.stdout.write(`synthetic finalization ${scenario}: ${Math.round(finalizationElapsedMs)} ms; identity rows during tail: ${identityRows - rowsAtProviderResult}\n`);
       }
       events.push("reply.sent");
       replyDispatched.resolve();
@@ -218,14 +218,13 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
         }
       }
       if (finalization) {
-        assert.ok(identityRows >= 256 && identityRows < 8_000, "Provider must return during real indexing");
+        assert.ok(identityRows >= 256 && identityRows < 32_000, "Provider must return during real indexing");
         if (scenario === "long-finalization") vi.setSystemTime(Date.now() + 31_000);
         rowsAtProviderResult = identityRows;
         modelFinishedAt = performance.now();
         await release?.();
         await finalize?.();
         await withCanonicalWriteLock(vaultRoot, async () => {
-          assert.equal(identityRows, rowsAtProviderResult);
           events.push("foreground.lock.acquired");
         });
       }
@@ -348,14 +347,18 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
           if (item.item.lane === "conversation") {
             if (!inputId && !cold) {
               await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-              if (finalization) await importDeviceBatch({ vaultRoot, provider: "synthetic",
-                events: Array.from({ length: 8_000 }, (_, i) => ({
-                  kind: "observation" as const, occurredAt: "2026-01-01T00:00:00.000Z",
-                  recordedAt: TEST_NOW, title: "Synthetic identity history",
-                  externalRef: { system: "synthetic", resourceType: "metric", resourceId: `history-${i}` },
-                  fields: { metric: "synthetic", unit: "count", value: 1 },
-                })),
-              });
+              if (finalization) {
+                for (let batch = 0; batch < 4; batch += 1) {
+                  await importDeviceBatch({ vaultRoot, provider: "synthetic",
+                    events: Array.from({ length: 8_000 }, (_, i) => ({
+                      kind: "observation" as const, occurredAt: "2026-01-01T00:00:00.000Z",
+                      recordedAt: TEST_NOW, title: "Synthetic identity history",
+                      externalRef: { system: "synthetic", resourceType: "metric", resourceId: `history-${batch}-${i}` },
+                      fields: { metric: "synthetic", unit: "count", value: 1 },
+                    })),
+                  });
+                }
+              }
             }
             inputId = await stagePendingLinqAssistantInputForMailboxItem({ item: item.item, vaultRoot });
             return { assistantInputId: inputId, status: "imported" };
@@ -442,6 +445,9 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
       // Keep this invocation alive through the retry. A 1-ms idle fixture can
       // legitimately shut down between dispatch and resumed preparation.
       await withRealTimeout(replyDispatched.promise, 10_000, () => events.join(","));
+      assert.ok(finalizationElapsedMs <= 250, `Provider return to dispatch took ${Math.round(finalizationElapsedMs)} ms`);
+      assert.equal(preparationAborts, 1);
+      assert.ok(events.includes("foreground.lock.acquired"));
       await vi.waitFor(async () => {
         const item = (await readHostedSystemMailboxState(vaultRoot)).pending.find(item => item.itemId === deviceItem.id);
         assert.equal(item?.status, "recording");

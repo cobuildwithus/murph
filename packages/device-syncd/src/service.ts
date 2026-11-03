@@ -1305,15 +1305,8 @@ class DeviceSyncServiceController {
               }
               const importDeferral = new AbortController();
               const importSignal = AbortSignal.any([jobAbortController.signal, importDeferral.signal]);
-              const deferPreparation = () => importDeferral.abort(
-                new Error("Device import preparation deferred for foreground work."),
-              );
-              const checkPreparation = () => {
-                if (shouldDeferPreparation()) deferPreparation();
-                importSignal.throwIfAborted();
-              };
               const stopImportYieldPolling = startDeviceSyncJobYieldPolling({
-                abort: deferPreparation,
+                abort: () => importDeferral.abort(new Error("Device import preparation deferred for conversation admission.")),
                 shouldYield: shouldDeferPreparation,
                 signal: importSignal,
               });
@@ -1322,7 +1315,7 @@ class DeviceSyncServiceController {
               try {
                 const importResult = await this.importer.importDeviceProviderSnapshot(
                   { provider: provider.provider, snapshot, vaultRoot: this.vaultRoot, ...options },
-                  { checkPreparation, importSession: input.importSession, signal: importSignal },
+                  { importSession: input.importSession, signal: importSignal },
                 );
                 const applied = toPlainRecord(importResult)?.applied;
                 importOutcome = applied === true ? "applied" : applied === false ? "noop" : "unknown";

@@ -237,20 +237,21 @@ if existing hooks suffice; reject a second foreground scheduler.
 Outcome: keep reply finalization and dispatch responsive during identity rebuilds.
 Reaches: ordinary and over-30-second provider turns, repeated conversation input,
 pre-publication retries, and already-started atomic publication.
-Proof: first add a regression on `9361875e83` with 8,000 synthetic historical rows.
+Proof: first add a regression on `9361875e83` with 32,000 synthetic historical rows.
 Return the provider result while the real importer is indexing; run actual
 transcript, turn-event and session persistence and dispatch through the hosted
-outbox. Require zero identity rows between return and dispatch, record wall time,
-prove canonical-lock release, retained-snapshot retry, one publication, correct
+outbox. Require at most 250 ms wall time between return and dispatch, allowing
+bounded identity work before the existing abort poll. Prove canonical-lock
+release, retained-snapshot retry, one publication, correct
 acknowledgment, and an empty queue. Exercise sustained foreground traffic and
 preserve publication-after-abort behavior.
 
 Reuse the accepted-input release callback, which runs at provider return before
 finalization, to re-arm the existing 30-second runtime window. Keep provider-start
-and phase cleanup closure. Forward the service's existing preparation predicate
-as a synchronous execution check at identity-row/reduction boundaries; retain the
-100-ms polling fallback for other preparation. No polling delay can permit new
-identity rows after a protected provider result.
+and phase cleanup closure. Reuse the existing 100-ms service polling abort and
+per-row signal checks, with an event-loop yield every 256 rows. No synchronous
+preparation callback is needed across service, importers and core. Publication
+keeps its original signal check immediately after the final preparation yield.
 
 Fairness belongs to the existing retained-snapshot retry loop: at most 30 seconds
 from its first deferral, then allow that snapshot's preparation through despite
@@ -343,27 +344,38 @@ again after cold restores. Recovery regressions block rollout even if speed wins
 
 ## Local implementation progress
 
-Step 1 regression-first evidence: both ordinary and 31-second provider-result
-cases fail on `9361875e83`, advancing from 256 to 8,000 identity rows during the
-reply tail. Both sustained-deferral service cases also fail past 30 seconds.
-No cache ownership or cold-locator implementation is included in this step.
+Step 1 simplified regression evidence (E8b): both ordinary and 31-second
+provider-result cases fail with the production sources restored to `9361875e83`.
+The 32,000-row history, seeded through four bounded canonical imports, produces
+680 ms and 656 ms provider-return-to-dispatch tails against the 250 ms bound.
+The original E8 proof also showed both sustained-deferral service cases failing
+past 30 seconds. No cache ownership or cold-locator implementation is included.
 
-Step 1 local evidence:
+E8b removes the synchronous preparation callback throughout service, importers
+and core, restoring core's original signal check before atomic publication.
+The existing polling abort satisfies the measured latency requirement. Source
+changes are net -31 lines versus E8, leaving net +16 lines versus `9361875e83`:
+only provider-return re-arming and the retained-snapshot fairness deadline.
+
+Step 1 local evidence after simplification:
 - Runtime admission, concurrent import and single-snapshot suites: 49 passed.
 - Core preparation, preemption and session suites: 11 passed, including
   non-interruptible publication after cancellation.
 - Finalizer persistence timing: 2 passed; device-sync service: 202 passed.
 - Importer validation and device-provider suite: 81 passed. Total: 345 tests.
 - Core, importers, device-syncd, assistant-engine and assistant-runtime typechecks
-  pass. `pnpm complexity:diff --base origin/main` passes; source complexity debt
-  decreases by two, with no increase in runtime or service debt.
-- Five consecutive final overlap runs (ten cases) record 25–58 ms from provider
-  return to dispatch, with zero identity rows for both ordinary and 31-second
-  provider phases. Synthetic local measurements are not production percentiles.
-  The fixture keeps its invocation alive until the retried import reaches recording,
-  then advances its fake idle clock; the original 1-ms fixture could shut down
-  during the retry. Exact publication, acknowledgment and empty-queue assertions
-  remain unchanged.
+  pass. `pnpm complexity:diff --base origin/main` passes, with no increase in
+  runtime or service complexity debt. Existing hotspots need no new abstraction
+  for these two scheduling changes.
+- The focused overlap run and full runtime suites (four cases) record 121–171 ms
+  from provider return to dispatch for ordinary and 31-second provider phases.
+  This total tail also bounds the added import delay. The existing poll permits
+  6,400–8,192 identity rows before cancellation; zero-row preemption is unnecessary.
+  Timing assertions run outside the delivery stub so failures report directly.
+  These synthetic local measurements are not production percentiles.
+  The fixture keeps its invocation alive until the retained import reaches
+  recording, then advances its fake idle clock. Exact publication,
+  acknowledgment and empty-queue assertions remain unchanged.
 - Both cases abort preparation, observe an unlocked canonical lock, persist real
   transcripts/turn events/sessions, dispatch once, retry the identical snapshot,
   publish once, acknowledge revision 7 and its exact payload, and drain the queue.
@@ -374,7 +386,8 @@ Step 1 local evidence:
 - Product UX: Ready for the tested deterministic timing/recovery paths. No model,
   prompt, tools or reply-content changes; no stochastic journey is needed here.
 - Parent review covers the complete diff, publication boundary, deadline lifetime,
-  optional-hook compatibility and privacy. No new Frog-worthy friction arose.
+  removal of the optional callback, polling cancellation and privacy. No new
+  Frog-worthy friction arose.
 - Local-only candidate per brief: no push, PR, CI, external final review or deploy.
   The same implementation PR must add its member-facing changelog entry when
   prepared for shipping. This plan remains active for the sequenced work.

@@ -64,7 +64,6 @@ export function createImporters({
       input: unknown,
       options: {
         importSession?: ReturnType<typeof coreRuntime.createDeviceBatchImportSession>;
-        checkPreparation?: () => void;
         signal?: AbortSignal | null;
       } = {},
     ) {
