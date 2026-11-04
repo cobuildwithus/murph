@@ -440,7 +440,7 @@ as `unchanged`, with no model, meal mutation, usage record or member message.
 Remove these readers and the descriptor only after old producers and retained
 snapshots/rows have drained.
 
-Historical `meal_name_repair` entries remain in `HostedAiUsageRecord` and existing
+Historical `meal_name_repair` entries remain in `HostedAiUsage` (`hosted_ai_usage`) and existing
 allowance aggregates. The nullable text feature key and generic usage readers
 continue to account and display them. This retirement does not refund, reprice,
 exclude or delete historical usage; the sole repair usage producer is removed.
