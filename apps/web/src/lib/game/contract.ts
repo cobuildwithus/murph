@@ -151,11 +151,10 @@ export interface EditGameTermsBody {
   terms: GameTermsInput;
 }
 
-/** POST /invites/:token/accept */
-export interface NegotiateInviteBody extends AcceptInviteBody {
+/** POST /invites/:token/negotiate */
+export type NegotiateInviteBody = AcceptInviteBody & {
   proposalId: string;
-  change: GameChange;
-}
+} & ({ change: GameChange; note?: never } | { note: string; change?: never });
 
 export interface AcceptInviteBody {
   /** The terms version the invitee saw (`terms.n`). */
@@ -418,6 +417,7 @@ export interface GameView {
   permissions?: GamePermissions;
   changeControls: GameChangeControls;
   pendingChange: GamePendingChange | null;
+  talkDelivery?: "pending" | "sent" | "failed";
   id: string;
   status: GameStatus;
   /** 1 for a new game, then 2, 3… along its rematch chain. */
@@ -544,6 +544,7 @@ export type GameInvitePreview =
       alreadyIn?: { count: number; firstNames: string[]; avatarUrl: string | null };
       dayOne?: string | null;
       supportsNegotiation?: boolean;
+      supportsTalk?: boolean;
       lengthDays?: number;
       inviterFirstName: string;
       /**

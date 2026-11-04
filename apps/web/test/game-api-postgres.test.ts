@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { PUT as profile } from "../app/api/game/v1/me/profile/route";
 import { POST as create } from "../app/api/game/v1/games/route";
+import { POST as negotiate } from "../app/api/game/v1/invites/[token]/negotiate/route";
 import { POST as accept } from "../app/api/game/v1/invites/[token]/accept/route";
 import { POST as start } from "../app/api/game/v1/dev/games/[id]/start-now/route";
 import { POST as advance } from "../app/api/game/v1/dev/games/[id]/advance-day/route";
@@ -115,6 +116,23 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: memberIds } } });
     await rm(mediaDir, { recursive: true, force: true });
     vi.unstubAllEnvs();
+  });
+
+  it("accepts a talk note through the authenticated invite route and preserves route-owned identity", async () => {
+    const challenger = await member("Ava"), invitee = await member("Sam"), gameId = randomUUID();
+    const created = await game(create(request(challenger, { gameId, inviteeFirstName: "Sam", terms: {
+      tasks: [{ seat: 0, text: "Read" }, { seat: 1, text: "Walk" }], schedule: { count: 3 }, stakes: [{ kind: "prize", item: "Coffee" }],
+    } })));
+    const context = { params: Promise.resolve({ token: created.inviteToken! }) };
+    const body = { proposalId: randomUUID(), termsVersion: 1, timeZone: "UTC", note: "  Coffee costs $20. Can we choose another prize?  " };
+    const both = await negotiate(request(invitee, { ...body, change: { kind: "edit", lengthDays: 10 } }), context);
+    expect(both.status).toBe(400);
+    expect((await both.json()).error.code).toBe("INVALID_REQUEST");
+    const talked = await game(negotiate(request(invitee, { ...body, type: "join", token: "wrong-token", actorMemberId: tokenMember.get(challenger) }), context));
+    expect(talked).toMatchObject({ id: gameId, status: "negotiating", pendingChange: null, talkDelivery: "pending" });
+    expect(talked.players.find(player => player.isMe)).toMatchObject({ seat: 1, memberId: tokenMember.get(invitee) });
+    expect(await game(negotiate(request(invitee, body), context))).toMatchObject({ status: "negotiating" });
+    expect(await getPrisma().gameEvent.count({ where: { gameId, type: "talk_requested" } })).toBe(1);
   });
 
   it("creates a long dare, accepts, posts, advances and settles with the new app fields", async () => {

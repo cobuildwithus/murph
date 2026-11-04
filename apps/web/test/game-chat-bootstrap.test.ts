@@ -30,7 +30,7 @@ import { handleGameChatBootstrapControl, prepareGameChatBootstrap, reconcileFroz
 const gameId = "game_sample";
 const eventId = `game-started:${gameId}`;
 const phones = ["+15555550101", "+15555550102"];
-const game = (container: string | null = "room") => ({ id: gameId, status: "live", pendingChange: null, chatContainerMemberId: container, players: [{ memberId: "person_a", seat: 0 }, { memberId: "person_b", seat: 1 }] });
+const game = (container: string | null = "room") => ({ id: gameId, status: "live", maxPlayers: 2, inviteExpiresAt: null, events: [], pendingChange: null, chatContainerMemberId: container, players: [{ memberId: "person_a", seat: 0, leftAt: null }, { memberId: "person_b", seat: 1, leftAt: null }] });
 const call = (operation: "recover" | "send", text?: string) => handleGameChatBootstrapControl({ memberId: "room", runtimeIdentity: null, request: { action: "game_chat_bootstrap", gameId, eventId, operation, ...(text ? { text } : {}) } as HostedGameChatBootstrapRequest });
 
 describe("generated game chat bootstrap", () => {
@@ -182,6 +182,22 @@ describe("generated game chat bootstrap", () => {
     expect(values).toEqual([gameId, "room", "proposal_sample"]);
     expect(m.updateGame).not.toHaveBeenCalled();
     expect(sealed.termsWordsEncrypted).toBe("sealed-sentinel"); expect(sealed.v).toBe(2);
+  });
+  it.each(["accept", "cancel", "expire"])("reconciles a frozen talk with proposal policy after %s", async (transition) => {
+    const talkId = `game-talk:${gameId}:proposal_talk`;
+    const talk = { ...game(), status: "negotiating", events: [{ actor: "person_b", commandKey: `game-change:${gameId}:proposal_talk`,
+      payload: { v: 1, proposalId: "proposal_talk", noteEncrypted: "sealed" } }] };
+    m.game.mockResolvedValue(talk);
+    m.wake.mockResolvedValue({ kind: "assistant.notification.requested", notification: { gameChatBootstrap: { gameId, eventId: talkId }, route: { delivery: { kind: "bootstrap", target: "room" } } } });
+    const send = (operation: "send" | "recover") => handleGameChatBootstrapControl({ memberId: "room", runtimeIdentity: null,
+      request: operation === "send" ? { action: "game_chat_bootstrap", gameId, eventId: talkId, operation, text: "Frozen talk relay" }
+        : { action: "game_chat_bootstrap", gameId, eventId: talkId, operation } });
+    m.create.mockRejectedValueOnce(new Error("Response lost"));
+    await expect(send("send")).rejects.toThrow("Response lost");
+    m.game.mockResolvedValue({ ...talk, status: transition === "accept" ? "live" : "void" });
+    expect(await send("recover")).toMatchObject({ result: { status: transition === "accept" ? "sent" : "unavailable" } });
+    expect(m.create).toHaveBeenCalledTimes(transition === "accept" ? 2 : 1);
+    for (const [request] of m.create.mock.calls) expect(request).toEqual({ from: "+15555550100", to: phones, message: "Frozen talk relay", idempotencyKey: talkId });
   });
   it("replays only the frozen text and identity after an uncertain provider result", async () => {
     m.create.mockRejectedValueOnce(new Error("Response lost"));

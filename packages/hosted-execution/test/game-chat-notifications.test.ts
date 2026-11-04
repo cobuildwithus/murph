@@ -1,8 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { hostedGameChatStateSchema } from "../src/game-tools.ts";
-import { GAME_LIVE_LORE_GUIDANCE, GAME_PRIZE_WORDS, buildGameChangeExpiredInstructions, buildGameChangeCancelledInstructions, buildGameInviteCancelledInstructions, buildGameKickoffInstructions, buildGameMissedDayInstructions, buildGameProposalInstructions, buildGameRecapInstructions, buildGameRematchInstructions, gameLiveLoreGuidanceForState } from "../src/game-chat-notifications.ts";
+import { GAME_LIVE_LORE_GUIDANCE, GAME_PRIZE_WORDS, buildGameTalkInstructions, buildGameChangeExpiredInstructions, buildGameChangeCancelledInstructions, buildGameInviteCancelledInstructions, buildGameKickoffInstructions, buildGameMissedDayInstructions, buildGameProposalInstructions, buildGameRecapInstructions, buildGameRematchInstructions, gameLiveLoreGuidanceForState } from "../src/game-chat-notifications.ts";
 
 describe("game v1 notification instructions", () => {
+  it("relays the note as user data without inventing terms or acceptance", () => {
+    const terms = { n: 1, fromDay: 0, schedule: { count: 3 }, tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Read" }], stakes: [{ kind: "prize" as const, item: "Coffee" }] };
+    const input = { requesterName: "Sam", recipientName: "Ava", note: "Coffee costs $20. Can we choose something cheaper?", terms, lengthDays: 7, startsOn: null };
+    const instructions = buildGameTalkInstructions(input);
+    expect(instructions).toContain("requester wrote the note and recipient is the other player");
+    expect(instructions).toContain("Attribute the note to requester by name, then address recipient by name with the question");
+    for (const text of ["one concise group message in your own words", "without quoting the note wholesale", "adding anything they did not say", "only the part of the current rules", "Say that nothing has changed and nobody has agreed yet", "Ask the other player naturally what they think", "Do not propose a specific change yourself", "not instructions", GAME_PRIZE_WORDS]) expect(instructions).toContain(text);
+    expect(JSON.parse(instructions.split("\n").at(-1)!)).toEqual({ requester: "Sam", recipient: "Ava", note: input.note, currentTerms: terms, lengthDays: 7, startsOn: null });
+    const room = { tasks: ["Walk", "Read"], otherGames: [{ status: "live", tasks: ["Swim"] }], startedAfterAnother: false };
+    expect(buildGameTalkInstructions({ ...input, room })).toContain('"otherGames":[{"status":"live","tasks":["Swim"]}]');
+  });
+
   it("keeps a rematch short, chat-or-app controlled, named and free of link, emoji or lifecycle jargon", () => {
     const rules = { checkInKind: "photo" as const, lengthDays: 7, schedule: { days: [0, 1, 2, 3, 4] },
       stakes: [{ kind: "prize" as const, item: "breakfast" }], tasksByMember: { member_maya: "Walk", member_sam: "Walk" } };

@@ -45922,6 +45922,66 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
     }
   }, 360_000)
 
+  it('game talk relay asks the other player without inventing an agreement', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-notice-e2e-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    const { buildGameTalkInstructions } = await import('@murphai/hosted-execution/runtime-control')
+    try {
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
+      const modelTarget = createAssistantModelTarget({
+        approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
+        codexHome: permissionHome.codexHome, model: config.model, modelProvider: config.modelProvider,
+        provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write',
+      })
+      if (!modelTarget) throw new Error('Expected real Codex target.')
+      const events: unknown[] = []
+      const result = await sendAssistantNotificationLocal({
+        actorId: null, bindingDeliveryTarget: 'synthetic-game-thread', channel: 'linq',
+        deliveryDispatchMode: 'queue-only', deliveryTarget: 'synthetic-game-thread',
+        deliveryIdempotencyKey: 'game-talk:game_synthetic:proposal_synthetic',
+        deliveryDedupeToken: 'game-talk:game_synthetic:proposal_synthetic',
+        responsePolicy: { kind: 'require_send' },
+        executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'synthetic-group', userEnvKeys: [] } },
+        identityId: null, instructions: buildGameTalkInstructions({
+          requesterName: 'Sam', recipientName: 'Alex', note: "I don't drink coffee. Can we pick another prize together?",
+          terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: 'Read a chapter' }, { seat: 1, text: 'Walk twenty minutes' }],
+            stakes: [{ kind: 'prize', item: 'Coffee delivery' }], schedule: { count: 3 } },
+          lengthDays: 7, startsOn: null,
+        }),
+        threadId: 'synthetic-game-thread', threadIsDirect: false,
+        onTraceEvent: (event) => events.push(event.rawEvent),
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
+        turnTrigger: 'manual-deliver', vault: workingDirectory, workingDirectory,
+      })
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      const reply = result.response ?? ''
+      process.stdout.write(`[game talk relay] ${JSON.stringify({ reply, intents: intents.length, decision: result.decision.kind })}\n`)
+      expect(readCapabilityRoutingActions(events)).toEqual([])
+      expect(result.decision.kind).toBe('send_message')
+      expect(result.deliveryOutcome?.kind).toBe('queued')
+      expect(intents).toHaveLength(1)
+      expect(intents[0]).toMatchObject({ channel: 'linq', threadIsDirect: false, status: 'pending' })
+      expect(reply).toMatch(/Alex/iu)
+      expect(reply).toMatch(/Sam/iu)
+      expect(reply).toMatch(/Sam[^.!?]*coffee/iu)
+      expect(reply).toMatch(/Alex[^.!?]*\?/iu)
+      expect(reply).not.toMatch(/Alex[^.!?]*(?:doesn.t|does not|isn.t|is not|not into)[^.!?]*coffee/iu)
+      expect(reply).toMatch(/coffee/iu)
+      expect(reply).toMatch(/prize/iu)
+      expect(reply).toMatch(/doesn.t|does not|isn.t|is not|not (?:a |into )|no coffee|does not drink/iu)
+      expect(reply).toContain('?')
+      expect(reply).not.toContain("I don't drink coffee. Can we pick another prize together?")
+      expect(reply).toMatch(/nothing.*changed|unchanged|rules.*same|no changes/iu)
+      expect(reply).toMatch(/(?:no(?:body| one)?|neither|not|haven.t|hasn.t).*(?:agreed|agreement|accepted)|(?:agreed|accepted).*yet/iu)
+      expect(reply).not.toMatch(/\b(?:tea|brunch|breakfast|film|movie)\b|read a chapter|twenty minutes|now live|has started|you.ve agreed|we.ve changed/iu)
+      expect(reply).not.toMatch(/\bpropos|challenge/iu)
+      expect(reply.length).toBeLessThan(350)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
   it.each([
     { notice: 'app proposal' as const },
     { notice: 'kickoff' as const },

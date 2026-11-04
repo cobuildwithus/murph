@@ -1,5 +1,7 @@
 import "server-only";
 
+import { readCurrentGameTalk } from "./talk";
+
 import { isPairRoster, hasGameIdentity } from "./roster";
 import { parseGameRecapEventId } from "@murphai/hosted-execution/runtime-control";
 import { Prisma } from "@prisma/client";
@@ -18,6 +20,7 @@ export async function assertGameProposalDeliveryCurrentTx(input: {
   now?: Date;
 }): Promise<boolean> {
   const key = input.deliveryIdempotencyKey ?? "";
+  if (key.startsWith("game-talk:")) return assertGameTalkDeliveryCurrentTx(input, key);
   if (key.startsWith("game-challenge:")) return assertGameChallengeDeliveryCurrentTx(input, key);
   const recap = parseGameRecapEventId(key);
   if (recap) return assertGameRecapDeliveryCurrentTx(input, recap.gameId, recap.regenerationId);
@@ -32,6 +35,15 @@ export async function assertGameProposalDeliveryCurrentTx(input: {
   if (lifecycle) return assertGameStartedDeliveryCurrentTx(input, lifecycle[1]);
   if (!key.startsWith("game-change:")) return false;
   return assertGameChangeProposalDeliveryCurrentTx(input, key);
+}
+
+async function assertGameTalkDeliveryCurrentTx(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], key: string): Promise<true> {
+  const match = /^game-talk:([^:]+):([^:]+)$/u.exec(key);
+  if (!match) return stale();
+  const current = await readCurrentGameTalk(input.tx, match[1], match[2], input.now ?? new Date());
+  if (!current || current.game.chatContainerMemberId !== input.containerMemberId
+    || !sameGamePlayers(current.game.players.map(player => player.memberId), input.playerMemberIds ?? [])) return stale();
+  return true;
 }
 
 async function assertGameChallengeDeliveryCurrentTx(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], key: string): Promise<true> {

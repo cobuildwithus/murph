@@ -100,6 +100,7 @@ export interface GameViewInput {
   groupsEnabled?: boolean;
   audienceKey?: string | null;
   pendingChange?: GamePendingChange | null;
+  talkDelivery?: GameView["talkDelivery"];
   state: RuleState;
   viewerId: string;
   now: Date;
@@ -332,6 +333,7 @@ export function buildGameView(input: GameViewInput): GameView {
       permissions: permissions(input), ...(game.seats === 10 ? { group: groupView(input) } : {}) } : {}),
     changeControls: gameChangeControls(state, input.now, input.pendingChange ?? null),
     pendingChange: pendingGameChangeView(state, input.pendingChange ?? null, input.now),
+    ...(input.talkDelivery ? { talkDelivery: input.talkDelivery } : {}),
     days: game.status === "negotiating" ? [] : dayViews(input, players, entries),
     id: game.id,
     inviteExpiresAt: game.status === "invited" ? input.inviteExpiresAt?.toISOString() ?? null : null,

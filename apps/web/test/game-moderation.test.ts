@@ -380,6 +380,17 @@ const BUNDLED = [
 ];
 
 describe("weekly game content check", () => {
+  it("moderates talk as shared words without treating objections as proposed rules", () => {
+    const talk = (note: string): GameCommand => ({ type: "negotiate", token: "invite", proposalId: "proposal_talk", termsVersion: 1, timeZone: "UTC", note });
+    for (const note of ["Coffee costs $20, can we pick something cheaper?", "I won't jump off a roof."]) {
+      expect(gameCommandTexts(talk(note))).toEqual([{ kind: "words", text: note }]);
+      expect(refused(talk(note))).toBe(false);
+    }
+    expect(refused(talk("Go die"))).toBe(true);
+    expect(refused({ type: "negotiate", token: "invite", proposalId: "proposal_change", termsVersion: 1,
+      timeZone: "UTC", change: { kind: "edit", stakes: [{ kind: "prize", item: "$20" }] } })).toBe(true);
+  });
+
   it.each([
     ["$50", "prize"], ["Venmo me 20", "prize"], ["20 bucks", "dare"], ["Fifty dollars", "prize"], ["Pay me on Cash App", "dare"],
     ["A Zelle transfer", "prize"], ["£10 note", "prize"], ["5k usd", "prize"],

@@ -764,6 +764,19 @@ editable from the first unstarted day, with at least one future unstarted day.
 Start dates lock once either player checks in. These edits never
 rewrite check-ins or existing tickets.
 
+Pair invite previews advertise `supportsTalk: true`; older servers omit it.
+An invitee can choose Talk it over and send a cleaned note of 1–500 characters
+instead of a concrete change. This claims their seat without accepting or
+creating a pending change. Shared-word moderation checks abuse, so an objection
+may mention money or an unsafe rule without proposing it.
+
+Murph relays the note faithfully in its own words in one group message, asks the
+other player what they think, and makes clear nothing has changed or been agreed.
+It creates or reuses the pair's exact room. The author's game view derives
+`talkDelivery` from the receipt as pending, sent or failed; other players do not
+receive that field. The usual proposal, approval, cancellation and Shake on it
+paths handle the rest. The original invite deadline still applies.
+
 An invitee can choose Suggest changes and submit concrete alternative rules
 without accepting the original challenge. Both players see a negotiating game
 with no countdown, posting duties or scores until the other player approves the

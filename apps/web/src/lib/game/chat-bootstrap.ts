@@ -1,5 +1,7 @@
 import "server-only";
 
+import { currentGameTalkRequest, readCurrentGameTalk } from "./talk";
+
 import { isPairRoster, gameMemberIds } from "./roster";
 
 import { Prisma } from "@prisma/client";
@@ -42,7 +44,7 @@ export async function prepareGameChatBootstrap(gameId: string, eventId: string, 
   return runWithHostedDomainRootUnwrapCache(async () => {
     const prisma = getPrisma();
     const game = await readBootstrapGame(gameId);
-    if (!game || !bootstrapEventCurrent(game, eventId)) return null;
+    if (!game || !await bootstrapEventCurrent(game, eventId)) return null;
     if (game.chatContainerMemberId) return queueExistingBootstrap(gameId, eventId, instructions, game.chatContainerMemberId);
     const existingRoom = await bindPairGameChat(gameId, gameMemberIds(game.players), null);
     if (existingRoom) return queueExistingBootstrap(gameId, eventId, instructions, existingRoom);
@@ -53,7 +55,7 @@ export async function prepareGameChatBootstrap(gameId: string, eventId: string, 
       const pairRoom = await readPairGameChatTx(tx, gameMemberIds(game.players));
       await lockGame(tx, gameId);
       const current = await tx.game.findUnique({ where: { id: gameId }, include: { players: { select: { memberId: true, seat: true }, orderBy: { seat: "asc" }, take: 3 } } });
-      if (!current || !bootstrapEventCurrent(current, eventId) || !samePlayers(current.players, game.players)) return null;
+      if (!current || !await bootstrapEventCurrent(current, eventId, tx) || !samePlayers(current.players, game.players)) return null;
       if (current.chatContainerMemberId) return null;
       if (pairRoom) {
         await tx.game.update({ where: { id: gameId }, data: { chatContainerMemberId: pairRoom } });
@@ -96,10 +98,13 @@ function readOtherFrozenBootstrap(memberId: string, eventId: string, prisma: Pri
 }
 async function readOtherPendingBootstrap(memberId: string, eventId: string, prisma: Prisma.TransactionClient) {
   const games = await prisma.game.findMany({ where: { chatContainerMemberId: memberId, status: { in: ["live", "negotiating"] } },
-    select: { id: true, status: true, pendingChange: true }, take: GAME_MAX_OPEN_PER_PAIR });
+    select: { id: true, maxPlayers: true, status: true, inviteExpiresAt: true, pendingChange: true,
+      players: { select: { memberId: true, leftAt: true }, take: 3 },
+      events: { where: { type: "talk_requested" }, select: { actor: true, commandKey: true, payload: true }, take: 1 } }, take: GAME_MAX_OPEN_PER_PAIR });
   const keys = games.flatMap((game) => {
     const proposal = parsePendingGameChange(game.pendingChange);
-    return [...(game.status === "live" ? [`game-started:${game.id}`] : []), ...(proposal ? [`game-change:${game.id}:${proposal.id}`] : [])];
+    const talk = currentGameTalkRequest(game, new Date());
+    return [...(talk ? [`game-talk:${game.id}:${talk.proposalId}`] : []), ...(game.status === "live" ? [`game-started:${game.id}`] : []), ...(proposal ? [`game-change:${game.id}:${proposal.id}`] : [])];
   });
   return prisma.hostedMailboxItem.findFirst({ where: { userId: memberId, kind: "assistant.notification.requested", consumedAt: null,
     dedupeKey: { not: eventId }, OR: [{ dedupeKey: { in: keys } }, ...games.map((game) => ({ dedupeKey: { startsWith: `game-change-cancelled:${game.id}:` } }))],
@@ -120,7 +125,7 @@ async function queueExistingBootstrap(gameId: string, eventId: string, instructi
     await readPairGameChatTx(tx, players);
     await lockGame(tx, gameId);
     const game = await tx.game.findUnique({ where: { id: gameId }, include: { players: { select: { memberId: true }, take: 3 } } });
-    if (!game || game.chatContainerMemberId !== containerMemberId || !bootstrapEventCurrent(game, eventId) || await readOtherFrozenBootstrap(containerMemberId, eventId, tx) || await readOtherPendingBootstrap(containerMemberId, eventId, tx)) return null;
+    if (!game || game.chatContainerMemberId !== containerMemberId || !await bootstrapEventCurrent(game, eventId, tx) || await readOtherFrozenBootstrap(containerMemberId, eventId, tx) || await readOtherPendingBootstrap(containerMemberId, eventId, tx)) return null;
     const route = await tx.hostedThreadRoute.findFirst({ where: { containerMemberId }, select: { containerMemberId: true } });
     if (route) return null;
     const result = await appendPreparedHostedMailboxEnvelopeTx({ prepared, tx });
@@ -157,7 +162,7 @@ export async function handleGameChatBootstrapControl(input: ControlInput): Promi
     const receipt = await readFrozenBootstrap(input.request.eventId, input.memberId);
     if (receipt?.skipped) return unavailable();
     if (receipt && (receipt.payload.gameId !== input.request.gameId || receipt.payload.eventId !== input.request.eventId || !samePhones(phones, receipt.payload.to))) return unavailable();
-    if (!receipt && !bootstrapEventCurrent(game, input.request.eventId)) return unavailable();
+    if (!receipt && !await bootstrapEventCurrent(game, input.request.eventId)) return unavailable();
     if (!receipt && await readOtherFrozenBootstrap(input.memberId, input.request.eventId)) throw new Error("The initial game chat message is still being confirmed.");
     if (!receipt && input.request.operation === "recover") return { action: "game_chat_bootstrap", result: { status: "needs_message" } };
     const frozen = receipt ?? await freezeBootstrapMessage(input, phones);
@@ -182,8 +187,9 @@ async function authorizeRuntimeTx(input: ControlInput, tx: Prisma.TransactionCli
 function readBootstrapGame(gameId: string) { return getPrisma().game.findUnique({ where: { id: gameId }, include: { players: { select: { memberId: true, seat: true }, orderBy: { seat: "asc" }, take: 3 } } }); }
 function samePlayers(a: readonly { memberId: string | null }[], b: readonly { memberId: string | null }[]) { return isPairRoster(a) && isPairRoster(b) && a.every((player) => b.some((other) => other.memberId === player.memberId)); }
 function samePhones(a: readonly string[], b: readonly string[]) { return isPairRoster(a) && isPairRoster(b) && new Set(b).size === b.length && a.every((phone) => b.includes(phone)); }
-function bootstrapEventCurrent(game: { maxPlayers?: number; id: string; status: string; pendingChange: unknown; players: readonly { memberId: string | null }[] }, eventId: string): boolean {
+async function bootstrapEventCurrent(game: { maxPlayers?: number; id: string; status: string; pendingChange: unknown; players: readonly { memberId: string | null }[] }, eventId: string, db: Prisma.TransactionClient = getPrisma()): Promise<boolean> {
   if (game.maxPlayers === 10 || !isPairRoster(game.players) || game.players.some(player => player.memberId === null) || !isGameOn(game)) return false;
+  if (eventId.startsWith(`game-talk:${game.id}:`)) return Boolean(await readCurrentGameTalk(db, game.id, eventId.slice(`game-talk:${game.id}:`.length), new Date()));
   if (eventId.startsWith(`game-change-cancelled:${game.id}:`)) return ["live", "negotiating"].includes(game.status);
   if (eventId === `game-started:${game.id}`) return game.status === "live";
   const proposal = parsePendingGameChange(game.pendingChange);
@@ -222,7 +228,7 @@ function isSkippedBootstrapReservation(row: {
   acceptedAt: Date | null; lastReceiptAt: Date | null; messageLookupKey: string | null; phoneNumberLookupKey: string | null;
 }, memberId: string): boolean {
   return row.source === "game_lifecycle" && row.payloadOwnerMemberId === memberId
-    && ["game_started", "game_proposal", "game_change_cancelled"].includes(row.template ?? "")
+    && ["game_started", "game_proposal", "game_talk", "game_change_cancelled"].includes(row.template ?? "")
     && row.status === "skipped" && row.skippedAt !== null
     && [row.payloadSchema, row.payloadCiphertext, row.acceptedAt, row.lastReceiptAt, row.messageLookupKey, row.phoneNumberLookupKey].every((value) => value === null);
 }
@@ -246,7 +252,7 @@ async function freezeBootstrapMessage(input: ControlInput, phones: string[]): Pr
       await authorizeRuntimeTx(input, tx);
       await lockGame(tx, input.request.gameId);
       const game = await tx.game.findUnique({ where: { id: input.request.gameId }, include: { players: { select: { memberId: true }, take: 3 } } });
-      if (!game || game.chatContainerMemberId !== input.memberId || !bootstrapEventCurrent(game, input.request.eventId)) return "stale";
+      if (!game || game.chatContainerMemberId !== input.memberId || !await bootstrapEventCurrent(game, input.request.eventId, tx)) return "stale";
       if (await readOtherFrozenBootstrap(input.memberId, input.request.eventId, tx)) throw new Error("The initial game chat message is still being confirmed.");
       const route = await tx.hostedThreadRoute.findFirst({ where: { containerMemberId: input.memberId }, select: { containerMemberId: true } });
       if (route) return "stale";
