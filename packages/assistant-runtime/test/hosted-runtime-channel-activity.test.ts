@@ -1,3 +1,4 @@
+import { MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV } from "@murphai/operator-config/hosted-assistant-config-constants";
 import assert from "node:assert/strict";
 
 import { beforeEach, expect, test, vi } from "vitest";
@@ -112,6 +113,27 @@ function buildClaimedLinqEngagementResult(request: {
     },
   } as const;
 }
+
+test("hosted Linq env admits only the exact Worker sleep flag and ignores user overrides", () => {
+  for (const flag of [undefined, "", "0", "true", " 1 ", "1"]) {
+    for (const userToken of [undefined, "synthetic-user-token"]) {
+      const env = buildHostedLinqChannelEnv({
+        forwardedEnv: {
+          LINQ_API_TOKEN: "synthetic-platform-token",
+          ...(flag === undefined ? {} : { [MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV]: flag }),
+        },
+        userEnv: {
+          ...(userToken ? { LINQ_API_TOKEN: userToken } : {}),
+          [MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV]: flag === "1" ? "0" : "1",
+        },
+      });
+      assert.deepEqual(env, {
+        LINQ_API_TOKEN: userToken ?? "synthetic-platform-token",
+        ...(flag === "1" ? { [MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV]: "1" } : {}),
+      });
+    }
+  }
+});
 
 test("hosted Linq typing uses the hosted env after target context validation", async () => {
   const forwardedEnv = {

@@ -13,6 +13,7 @@ import {
 import {
   HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES,
 } from "@murphai/hosted-execution/assistant-capabilities";
+import { MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV } from "@murphai/operator-config/hosted-assistant-config-constants";
 import {
   type StringEnvSource,
 } from "./string-env.ts";
@@ -82,6 +83,8 @@ export const HOSTED_RUNNER_DEPRECATED_CODEX_APP_SERVER_PROXY_ENV_KEYS = [
 ] as const;
 
 const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
+  MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV,
+  "MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS",
   ...HOSTED_RUNNER_INTERCEPT_INJECTED_ENV_KEYS,
   ...OPERATOR_ONLY_RUNNER_BINARY_ENV_KEYS,
   ...RUNNER_SECRET_PROCESS_CONTROL_KEYS,

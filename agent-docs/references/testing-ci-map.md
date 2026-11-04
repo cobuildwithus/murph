@@ -817,7 +817,7 @@ Query wake-date, eligibility, recovery and SDNN coverage lives in
 tool admission and sleep skill routing live in
 `packages/assistant-engine/test/sleep-summary-card.test.ts`.
 Operator text, transcript, Telegram, exact Swift HTTPS fixtures and sleep-only
-static delivery are pinned in
+static-by-default delivery with an exact per-member native flag are pinned in
 `packages/operator-config/test/sleep-summary-card.test.ts`.
 `apps/web/test/imessage-sleep-summary-card-image.test.tsx` renders real PNGs and
 proves strict pre-font rejection; `og-assets:runtime-check` probes envelope 8.

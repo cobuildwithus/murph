@@ -1,8 +1,9 @@
 import { Buffer } from 'node:buffer'
+import { MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV } from '../src/hosted-assistant-config-constants.js'
 import { describe, expect, it } from 'vitest'
-import { sleepSummaryResponseCardV1Schema } from '@murphai/contracts'
+import { sleepSummaryResponseCardV1Schema, type AssistantResponseCard } from '@murphai/contracts'
 import { buildLinqIMessageAppCardImageUrl, buildLinqIMessageAppCardUrl, buildLinqIMessageAppFallbackText, buildLinqIMessageAppLayout, buildTelegramRichMessage, renderAssistantResponseCardText, renderAssistantResponseCardTranscriptText } from '../src/assistant-response-cards.js'
-import { LINQ_SLEEP_SUMMARY_CARD_INTERACTIVE, sendLinqIMessageAppCard, type LinqFetch } from '../src/linq-runtime.js'
+import { sendLinqIMessageAppCard, type LinqFetch } from '../src/linq-runtime.js'
 
 const complete = sleepSummaryResponseCardV1Schema.parse({
   kind: 'sleep_summary', version: 1, localDate: '2026-11-03', bedtime: '00:18', wakeTime: '08:02', totalSleepMinutes: 436,
@@ -45,17 +46,26 @@ describe('sleep summary delivery', () => {
     expect(html).toContain('<th>HRV</th><td>66 ms</td>')
     expect(buildTelegramRichMessage(totalOnly).html).not.toMatch(/<th>(?:Score|Deep|Awake|HRV)/u)
   })
-  it('sends sleep statically while preserving other cards as interactive', async () => {
+  it.each([undefined, '', '0', 'true', ' 1 ', '1'])('enables sleep interactivity only for the exact flag %s', async (flag) => {
     const bodies: unknown[] = []
     const fetchImplementation: LinqFetch = async (_url, init) => {
       bodies.push(JSON.parse(String(init.body)))
       return new Response(JSON.stringify({ message: { id: 'synthetic-message' } }), { headers: { 'Content-Type': 'application/json' } })
     }
-    await sendLinqIMessageAppCard({ card: complete, chatId: 'synthetic-chat', idempotencyKey: 'synthetic-sleep' }, { env: { LINQ_API_TOKEN: 'synthetic-token' }, fetchImplementation })
-    expect(LINQ_SLEEP_SUMMARY_CARD_INTERACTIVE).toBe(false)
+    const env = { LINQ_API_TOKEN: 'synthetic-token', [MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV]: flag }
+    await sendLinqIMessageAppCard({ card: complete, chatId: 'synthetic-chat', idempotencyKey: 'synthetic-sleep' }, { env, fetchImplementation })
     expect(bodies).toHaveLength(1)
-    expect(bodies[0]).toMatchObject({ message: { parts: [{ interactive: false, fallback_text: 'Your sleep summary.', url: COMPLETE_URL }] } })
-    await sendLinqIMessageAppCard({ card: { kind: 'compact_table', version: 1, title: 'Summary', subtitle: null, rowHeader: 'Item', columns: ['Value'], rows: [{ label: 'Example', values: ['Present'] }], tracking: null, footer: null }, chatId: 'synthetic-chat', idempotencyKey: 'synthetic-other' }, { env: { LINQ_API_TOKEN: 'synthetic-token' }, fetchImplementation })
-    expect(bodies[1]).toMatchObject({ message: { parts: [{ interactive: true }] } })
+    expect(bodies[0]).toMatchObject({ message: { parts: [{ interactive: flag === '1', fallback_text: 'Your sleep summary.', url: COMPLETE_URL }] } })
+    const otherCards: AssistantResponseCard[] = [
+      { kind: 'compact_table', version: 1, title: 'Summary', subtitle: null, rowHeader: 'Item', columns: ['Value'], rows: [{ label: 'Example', values: ['Present'] }], tracking: null, footer: null },
+      { kind: 'daily_nutrition', version: 2, localDate: '2026-11-03', mealCount: 1,
+        totals: { calories: { total: 600, mealCount: 1 }, proteinGrams: { total: 30, mealCount: 1 }, carbsGrams: { total: 60, mealCount: 1 }, fatGrams: { total: 20, mealCount: 1 }, fiberGrams: { total: 8, mealCount: 1 } },
+        goals: { calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null, fiberGrams: null } },
+    ]
+    for (const card of otherCards) {
+      await sendLinqIMessageAppCard({ card, chatId: 'synthetic-chat', idempotencyKey: `synthetic-${card.kind}` }, { env, fetchImplementation })
+      expect(bodies.at(-1)).toMatchObject({ message: { parts: [{ interactive: true }] } })
+    }
+    expect(bodies).toHaveLength(3)
   })
 })

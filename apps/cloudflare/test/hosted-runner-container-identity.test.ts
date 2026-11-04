@@ -1,3 +1,4 @@
+import { MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV } from "@murphai/operator-config/hosted-assistant-config-constants";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -354,6 +355,46 @@ describe("hosted runner container identity", () => {
         HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV
       ],
     ).toBe(expected);
+  });
+
+  it.each([
+    { list: " hbm_testOther0002, , hbm_testAllowlisted0001 ,", userId: "hbm_testAllowlisted0001", expected: "1" },
+    { list: "hbm_testOther0002,hbm_testAllowlisted0001", userId: "hbm_testNotListed0003", expected: undefined },
+    { list: "hbm_testAllowlisted0001suffix", userId: "hbm_testAllowlisted0001", expected: undefined },
+    { list: "hbm_testallowlisted0001", userId: "hbm_testAllowlisted0001", expected: undefined },
+    { list: undefined, userId: "hbm_testAllowlisted0001", expected: undefined },
+    { list: "", userId: "hbm_testAllowlisted0001", expected: undefined },
+    { list: " , , ", userId: "hbm_testAllowlisted0001", expected: undefined },
+  ])("derives the native sleep flag from exact Worker membership: $list / $userId", async ({ list, userId, expected }) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const stateStore = createPreparationOwnerFixture();
+    const service = createRuntimeInvocationPreparation({
+      invokedContainerNames: [],
+      runnerRuntimeEnvSource: {
+        CF_VERSION_METADATA: { id: "version_1" },
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        OPENAI_API_KEY: "test-openai-key",
+        MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS: list,
+        // An ambient flag must never enable members outside the Worker list.
+        [MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV]: "1",
+      },
+      stateStore,
+    });
+    const token = await stateStore.beginWriteFence({
+      runnerContainerName: `${userId}--v-version_1`,
+      userId,
+    });
+    const prepared = await service.prepareWithFence({
+      input: { orchestrationAttemptId: "orchestration_attempt_sleep_card", userId },
+      token,
+    });
+
+    expect(prepared.job.runtime?.forwardedEnv?.[MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV]).toBe(expected);
+    const payload = JSON.stringify(prepared.job);
+    expect(payload).not.toContain("MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS");
+    expect(payload).not.toContain("hbm_testOther0002");
+    if (list?.trim()) expect(payload).not.toContain(list);
   });
 
   it("forwards an OpenAI sentinel while keeping the Worker credential private", async () => {

@@ -1600,6 +1600,8 @@ Set these in the selected GitHub environment as vars:
 - `HOSTED_R2_PRESIGN_ACCOUNT_ID`
 - `HOSTED_R2_PRESIGN_BUCKET_NAME`
 
+`MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS` is an optional Worker-only comma-separated list of compatible native sleep-card member IDs (no default). Map `${{ vars.MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS }}` from the selected GitHub `production` Environment in the private deploy job's environment, like the other ordinary optional variables (the private contract check requires job-level mapping for any variable outside its step-scoped sets). Only the derived per-member boolean enters runner jobs.
+
 `MURPH_ANDROID_APP_ENABLED` is an optional, fail-closed rollout variable. Leave
 it unset until the public Android app and the compatible Web, Worker, and runner
 code are deployed. Private `cobuildwithus/murph-cloud` must map the raw value in

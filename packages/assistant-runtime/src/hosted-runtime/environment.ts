@@ -1,4 +1,5 @@
 import { cloneConfiguredDeviceSyncRuntimeConfig } from "@murphai/device-syncd/runtime-config";
+import { MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV } from "@murphai/operator-config/hosted-assistant-config-constants";
 import type {
   AssistantTurnEnvironment,
 } from "@murphai/assistant-engine";
@@ -189,6 +190,7 @@ const HOSTED_RUNTIME_FORWARDED_ENV_DENYLIST_PREFIXES = [
 ] as const;
 const HOSTED_RUNTIME_USER_ENV_DENYLIST = new Set<string>(
   [
+    MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV,
     ...HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
     ...HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
     ...HOSTED_SHARED_TRUSTED_PLATFORM_ENV_NAMES,

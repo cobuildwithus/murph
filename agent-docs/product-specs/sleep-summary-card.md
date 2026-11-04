@@ -59,10 +59,13 @@ the existing delivery owner.
 
 ## Presentation and release
 
-Linq uses the exported `LINQ_SLEEP_SUMMARY_CARD_INTERACTIVE = false` constant.
-Every recipient receives the static bitmap, including old installed extensions
-and macOS. Other card kinds retain their existing interactive delivery. The
-caption is a short wake date, such as `Tue, Nov 3`, with no subcaption; the
+Linq sends sleep interactively only when the per-invocation
+`MURPH_NATIVE_SLEEP_CARD_ENABLED` flag is exactly `1`. The Worker derives it
+from exact, trimmed membership in `MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS`; the
+comma-separated allowlist never enters a runner or job payload. Only members
+with a compatible TestFlight extension should be allowlisted. Everyone else
+receives the static bitmap, including old installed extensions and macOS. Other
+card kinds retain their existing interactive delivery. The caption is a short wake date, such as `Tue, Nov 3`, with no subcaption; the
 notification fallback is value-free: `Your sleep summary.` Telegram uses one
 rich message with date, image and a table containing only present values.
 
@@ -77,10 +80,13 @@ and responds with private no-store and noindex headers.
 Deploy Web before the runner. Once any sleep intent is persisted, the
 sleep-capable reader and text renderer are the runner rollback floor, including
 already-sent intents. Queue draining is insufficient. Disable production only
-with a forward fix that preserves those readers. Native delivery requires a
-separate explicit owner decision and a matrix check with old and new App Store
-extensions, no extension, and macOS. An App Store release alone does not prove
-recipient compatibility.
+with a forward fix that preserves those readers. The native allowlist changes
+no Web reader, persisted format, or protocol.
+Old Worker/new runner has no flag; new Worker/old runner ignores it. Both send
+static sleep cards. Reverting this gate returns to static delivery while retaining
+the existing sleep readers. Broad native delivery still requires an owner
+decision and old/new-extension, no-extension, and macOS compatibility checks.
+An App Store release alone does not prove recipient compatibility.
 
 ## Proof
 
@@ -88,7 +94,7 @@ recipient compatibility.
 - Query/builder: synthetic Oura, WHOOP, Apple Watch SDNN, phone totals, Garmin,
   zero stages, missing nights, Tokyo boundaries and reporting-zone fallback.
 - Operator: exact Swift fragment fixtures, value-free fallback, date-only
-  chrome, text/transcript/Telegram and sleep-only static Linq body.
+  chrome, text/transcript/Telegram and static-by-default Linq sleep delivery.
 - Web: real PNGs, sparse/narrow states, pre-font rejection and emitted runtime.
 - Assistant: selector schema, availability, audience/conflicts, current input,
   and four focused real-Codex summary, metric, compound and missing-night cases.

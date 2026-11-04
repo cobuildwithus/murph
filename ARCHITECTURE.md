@@ -5144,14 +5144,18 @@ followed by a new V6 native workout snapshot and V4 static fallback. Generic
 compact tables continue to use V3.
 
 Sleep envelope 8 uses the same bounded HTTPS fragment and queryless image path.
-Linq explicitly sends sleep with `interactive:false` through one exported
-operator-config constant. Web renders the native default state, Telegram uses
-an image and present-value table, and text recovery retains complete meaning.
+Linq sends sleep with `interactive:false` unless the per-invocation
+`MURPH_NATIVE_SLEEP_CARD_ENABLED` flag is exactly `1`. The Worker derives that
+boolean from `MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS` and keeps the member list
+out of runner containers and job payloads. Web renders the native default state,
+Telegram uses an image and present-value table, and text recovery retains complete meaning.
 The caption is only the wake date and notification fallback is value-free.
 Deploy the Web reader first, then the runner. Any persisted sleep intent makes
 the compatible reader/text renderer the rollback floor, including sent intents;
-a forward producer disable must retain readers. Native delivery stays off until
-a separately approved old/new/no-extension/macOS compatibility decision.
+a forward producer disable must retain readers. Native delivery is limited to
+the compatible-member allowlist until a separately approved old/new/no-extension/macOS compatibility decision.
+Worker/runner version skew defaults to static; reverting this gate restores
+static delivery without a Web, database, persisted-format, or protocol change.
 
 The optional tracking reference is one exact canonical event ULID plus a
 canonical UTC snapshot instant. That reference remains in semantic transcript

@@ -923,6 +923,26 @@ describe("hosted deploy automation helpers", () => {
     expect(environment.workerVars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES).toBe("telegram,mapbox");
   });
 
+  it.each([undefined, "", "   ", " hbm_testAllowlisted0001,hbm_testOther0002 "])(
+    "renders the optional Worker-only native sleep allowlist: %s",
+    (rawValue) => {
+      const environment = readHostedDeployAutomationEnvironment({
+        CF_BUNDLES_BUCKET: "hosted-bundles",
+        CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+        CF_WORKER_NAME: "hosted-worker",
+        ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+        ...(rawValue === undefined ? {} : { MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS: rawValue }),
+      });
+      const config = buildHostedWranglerDeployConfig(environment) as { vars: Record<string, string> };
+      const expected = rawValue?.trim() || undefined;
+      for (const vars of [environment.workerVars, config.vars]) {
+        if (expected) expect(vars.MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS).toBe(expected);
+        else expect(vars).not.toHaveProperty("MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS");
+      }
+      expect(buildHostedRunnerContainerPlatformEnv(config.vars)).not.toHaveProperty("MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS");
+    },
+  );
+
   it("preserves exact Android gate semantics through generated Worker config", () => {
     for (const [rawValue, expectedValue] of [
       [undefined, undefined],

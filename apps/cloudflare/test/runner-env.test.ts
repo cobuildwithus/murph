@@ -65,6 +65,31 @@ const DEFAULT_HOSTED_RUNNER_NATIVE_PARSER_TOOLCHAIN = {
 } as const;
 
 describe("buildHostedRunnerContainerEnv", () => {
+  it("keeps the sleep allowlist and ambient enable flag out of container and job env", () => {
+    const list = "hbm_testAllowlisted0001,hbm_testOther0002";
+    const source = {
+      ...REQUIRED_OPENAI_PROVIDER_ENV,
+      MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS: list,
+      MURPH_NATIVE_SLEEP_CARD_ENABLED: "1",
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS:
+        "MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS,MURPH_NATIVE_SLEEP_CARD_ENABLED",
+    };
+    const forwardedEnv = buildHostedRunnerContainerEnv(source);
+    const runtime = buildHostedRunnerJobRuntimeConfig({
+      configSource: source,
+      forwardedEnv,
+      runnerSecrets: {
+        MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS: list,
+        MURPH_NATIVE_SLEEP_CARD_ENABLED: "1",
+      },
+    });
+    for (const value of [forwardedEnv, runtime]) {
+      expect(JSON.stringify(value)).not.toContain("MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS");
+      expect(JSON.stringify(value)).not.toContain("MURPH_NATIVE_SLEEP_CARD_ENABLED");
+      expect(JSON.stringify(value)).not.toContain(list);
+    }
+  });
+
   it("forwards non-automation runner env without leaking unrelated worker vars or parser selectors", () => {
     expect(buildHostedRunnerContainerEnv({
       ...REQUIRED_OPENAI_PROVIDER_ENV,
