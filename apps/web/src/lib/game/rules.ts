@@ -397,6 +397,13 @@ export function firstScheduledDate(date: string, schedule: GameSchedule): string
 
 // ------------------------------------------------------------------- terms
 
+/** A new pick runs from tomorrow (or today, for a group edit) to 60 days out. */
+function assertPickedStartDate(startsOn: string, today: string, allowToday: boolean): void {
+  if (startsOn < (allowToday ? today : addDays(today, 1)) || startsOn > addDays(today, GAME_MAX_START_DAYS_OUT)) {
+    reject("INVALID_REQUEST", `Pick a start date from ${allowToday ? "today" : "tomorrow"} to ${GAME_MAX_START_DAYS_OUT} days out.`);
+  }
+}
+
 export type GameTerms = GameTermsInput;
 
 export interface NewTerms {
@@ -412,11 +419,9 @@ export interface NewTerms {
  * picked start date must fall from tomorrow to 60 days out, where `today` is
  * the challenger's own game day.
  */
-export function decideNewTerms(input: GameTerms, options: { newKey: () => string; today: string; maxPlayers?: number; inviteeSeats?: readonly number[]; currentStartsOn?: string | null }): NewTerms {
+export function decideNewTerms(input: GameTerms, options: { newKey: () => string; today: string; maxPlayers?: number; inviteeSeats?: readonly number[]; currentStartsOn?: string | null; allowToday?: boolean }): NewTerms {
   const startsOn = input.startsOn ?? null;
-  if (startsOn && startsOn !== options.currentStartsOn && (startsOn <= options.today || startsOn > addDays(options.today, GAME_MAX_START_DAYS_OUT))) {
-    reject("INVALID_REQUEST", `Pick a start date from tomorrow to ${GAME_MAX_START_DAYS_OUT} days out.`);
-  }
+  if (startsOn && startsOn !== options.currentStartsOn) assertPickedStartDate(startsOn, options.today, options.allowToday === true);
   const lengthDays = input.lengthDays ?? GAME_DEFAULT_LENGTH_DAYS;
   if (!Number.isInteger(lengthDays) || lengthDays < GAME_MIN_LENGTH_DAYS || lengthDays > GAME_MAX_LENGTH_DAYS) {
     reject("INVALID_REQUEST", `A game runs ${GAME_MIN_LENGTH_DAYS} to ${GAME_MAX_LENGTH_DAYS} days.`);
@@ -568,9 +573,14 @@ function admissionSeat(state: RuleState, input: JoinInput, claimed: RulePlayer |
   return seat;
 }
 
+/** The starter can edit or call off a group until anyone checks in, even after Day 1 begins. */
+export function areGroupTermsOpen(state: RuleState, now: Date): boolean {
+  return ["invited", "live"].includes(state.game.status) && !(state.game.status === "live" && isGameDue(state, now)) && state.entries.length === 0;
+}
+
 export function assertGroupTermsOpen(state: RuleState, actor: string, now: Date, expectedVersion?: number): void {
   if (state.game.seats !== 10 || state.game.createdBy !== actor || playerFor(state, actor)?.leftAt) reject("NOT_A_PLAYER", "Only the starter can edit this game.");
-  if (!["invited", "live"].includes(state.game.status) || state.players.some(player => (dayIndexAt(player, now) ?? -1) >= 0)) reject("GAME_NOT_LIVE", "Terms lock when Day 1 begins.");
+  if (!areGroupTermsOpen(state, now)) reject("GAME_NOT_LIVE", "Terms lock once someone checks in.");
   if (expectedVersion !== undefined && expectedVersion !== currentTerms(state.game.terms).n) reject("TERMS_CHANGED", "The terms changed. Take another look.");
 }
 
@@ -740,7 +750,7 @@ export function decideWithdraw(
  * the player behind starts tomorrow. Only before anyone has started.
  */
 export function decideStartNow(state: RuleState, now: Date): Schedule {
-  if (state.game.seats !== 2) reject("INVALID_REQUEST", "The starter can edit group terms before Day 1.");
+  if (state.game.seats !== 2) reject("INVALID_REQUEST", "The starter can edit group terms until someone checks in.");
   if (state.game.status !== "live") reject("GAME_NOT_LIVE", "Both players have to shake on it first.");
   if (state.players.some((player) => (dayIndexAt(player, now) ?? -1) >= 0)) {
     reject("INVALID_REQUEST", "This game already started.");

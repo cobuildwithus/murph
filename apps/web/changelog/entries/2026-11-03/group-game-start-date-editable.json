@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-03",
+  "order": 90,
+  "item": {
+    "id": "group-game-start-date-editable",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Group games stay editable until someone checks in",
+    "summary": "The person who started a group game can still change its start date and terms after Day 1 begins, as long as nobody has checked in yet.",
+    "details": "The first post, words or excuse locks the terms for everyone. A moved start date applies to the whole group.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": [4538]
+  }
+}

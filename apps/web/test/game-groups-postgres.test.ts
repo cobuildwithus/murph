@@ -238,7 +238,7 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     await expect(create(a, [a])).rejects.toThrow("INVALID_REQUEST");
   });
 
-  it("locks pre-Day-1 edits against stale joins and rejects edits at the first local Day 1", async () => {
+  it("locks edits against stale joins and keeps terms open at the first local Day 1 until a check-in", async () => {
     const a = await person("Pacific/Kiritimati"), b = await person(), c = await person();
     const game = await create(a, [b, c]);
     await ok(b.id, join(game.token));
@@ -248,9 +248,8 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     expect(outcomes.filter(result => !result.ok)).toMatchObject([{ error: { code: "TERMS_CHANGED" } }]);
     expect(await run(c.id, join(game.token))).toMatchObject({ ok: false, error: { code: "TERMS_CHANGED" } });
     const boundary = dayStartInstant("2030-03-09", "Pacific/Kiritimati");
-    const race = await Promise.all([run(a.id, { ...edit, expectedTermsVersion: 2 }, boundary), run(c.id, join(game.token, "UTC", 2), boundary)]);
-    expect(race[0]).toMatchObject({ ok: false, error: { code: "GAME_NOT_LIVE" } });
-    expect(race[1].ok).toBe(true);
+    expect((await run(c.id, join(game.token, "UTC", 2), boundary)).ok).toBe(true);
+    expect((await run(a.id, { ...edit, expectedTermsVersion: 2 }, boundary)).ok).toBe(true);
     expect((await gameRow(game.id)).players.map(player => player.dayOne?.toISOString().slice(0, 10))).toEqual(["2030-03-09", "2030-03-09", "2030-03-09"]);
     expect(await run(b.id, { ...edit, expectedTermsVersion: 2 })).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
   });
@@ -280,25 +279,29 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     expect(settled.tickets).toEqual([]);
   });
 
-  it("rechecks Day 1 after an edit waits for the game lock", async () => {
+  it("keeps terms editable after Day 1 begins until a check-in, rechecked under the game lock", async () => {
     const a = await person(), b = await person();
     const game = await create(a, [b]); await ok(b.id, join(game.token));
     const boundary = dayStartInstant("2030-03-09", "UTC").getTime();
-    await db.game.update({ where: { id: game.id }, data: { devClockOffsetMs: BigInt(boundary - Date.now() - 60_000) } });
+    await db.game.update({ where: { id: game.id }, data: { devClockOffsetMs: BigInt(boundary - Date.now() + 60 * 60_000) } });
+    const edit = (startsOn: string, expectedTermsVersion: number, beforeMutationTx?: () => Promise<void>) => runGameCommand({ actorMemberId: a.id, multiplayer: true,
+      command: { type: "editTerms", gameId: game.id, expectedTermsVersion, terms: { ...terms, startsOn } }, ...(beforeMutationTx ? { beforeMutationTx } : {}) });
+    // Day 1 (March 9) has begun with no check-ins: the starter can still move it, to today at the earliest.
+    expect(await edit("2030-03-08", 1)).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
+    expect((await edit("2030-03-10", 1)).ok).toBe(true);
+    expect((await gameRow(game.id)).players.map(player => player.dayOne?.toISOString().slice(0, 10))).toEqual(["2030-03-10", "2030-03-10"]);
     let prepared!: () => void;
     const preparing = new Promise<void>(resolve => { prepared = resolve; });
     let editing!: ReturnType<typeof runGameCommand>;
     await db.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM game WHERE id = ${game.id} FOR UPDATE`;
-      editing = runGameCommand({ actorMemberId: a.id, multiplayer: true,
-        command: { type: "editTerms", gameId: game.id, expectedTermsVersion: 1, terms: { ...terms, startsOn: "2030-03-10" } },
-        beforeMutationTx: async () => { prepared(); } });
+      editing = edit("2030-03-11", 2, async () => { prepared(); });
       void editing.then(prepared, prepared);
       await preparing;
-      await tx.game.update({ where: { id: game.id }, data: { devClockOffsetMs: BigInt(boundary - Date.now() + 60_000) } });
+      await tx.gameEntry.create({ data: { id: randomUUID(), gameId: game.id, memberId: b.id, dayIndex: 0, attempt: 1, kind: "words", mediaKeys: [], receivedAt: createdAt } });
     });
     expect(await editing).toMatchObject({ ok: false, error: { code: "GAME_NOT_LIVE" } });
-    expect((await gameRow(game.id)).terms).toMatchObject({ versions: [{ n: 1 }] });
+    expect((await gameRow(game.id)).terms).toMatchObject({ versions: [{ n: 1 }, { n: 2 }] });
   });
 
   it("accepts a late day after 20:00 without resetting the calendar, including DST and zero-opportunity joins", async () => {

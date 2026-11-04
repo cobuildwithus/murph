@@ -47,6 +47,7 @@ import {
   attemptsUsed,
   isScheduledDay,
   decideCancelInvite,
+  areGroupTermsOpen,
   assertGroupTermsOpen,
   scheduleEditedTerms,
   decideLeave,
@@ -334,7 +335,7 @@ async function gameChatCreateCommand(input: Parameters<typeof runGameChatUpdate>
 async function gameChatTermsCommand(input: Parameters<typeof runGameChatUpdate>[0], update: Extract<HostedGameUpdate, { operation: "approve" | "propose" }>): Promise<unknown> {
   const row = await getPrisma().game.findUnique({ where: { id: update.gameId }, include: { invitees: true, players: true } });
   if (!row || !await gameChatContextCurrent(row, input) || !isGameOn(row)) reject("NOT_A_PLAYER", "This game belongs to its players.");
-  if (row.maxPlayers === 10 && update.operation === "propose") reject("INVALID_REQUEST", "Only the starter can edit group terms before Day 1.");
+  if (row.maxPlayers === 10 && update.operation === "propose") reject("INVALID_REQUEST", "Only the starter can edit group terms, until someone checks in.");
   if (update.operation === "propose" && row.status !== "invited") {
     return { type: "proposeChange", gameId: update.gameId, proposalId: update.proposalId, expectedTermsVersion: update.expectedTermsVersion, change: update.change };
   }
@@ -1026,7 +1027,7 @@ async function editTerms(context: CommandContext, command: Extract<GameCommand, 
   const words = parseTermWords(plain ?? "");
   const taskSeats = groupTaskOverrideSeats(before.state.game, words.versions.at(-1)?.tasks ?? []);
   const prepared = decideNewTerms(command.terms, { maxPlayers: 10, inviteeSeats: taskSeats,
-    today, currentStartsOn: before.state.game.startsOn, newKey: () => generateHostedRandomPrefixedId("gsk") });
+    today, allowToday: true, currentStartsOn: before.state.game.startsOn, newKey: () => generateHostedRandomPrefixedId("gsk") });
   const n = command.expectedTermsVersion + 1;
   words.versions.push({ ...prepared.words.versions[0], n });
   const encrypted = await seal(gameTarget(before.row, "terms_words"), JSON.stringify(words));
@@ -1874,7 +1875,7 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
       startsOn: gameDayOne(state.players) ?? fromDbDate(row.startsOn), lengthDays: row.lengthDays,
       players: row.players.filter(hasGameIdentity).map((player) => ({ memberId: player.memberId, seat: player.seat, firstName: names.get(player.memberId) ?? "", dayOne: fromDbDate(player.dayOne), timeZone: player.timeZone })),
       pendingChange, changeControls: row.maxPlayers === 10
-        ? { canStartNow: false, canEdit: actorMemberId === row.createdBy && !state.players.some(player => (dayIndexAt(player, gameNow(clock, row)) ?? -1) >= 0), canEditSchedule: false, canEditStartDate: false, editableFromDay: null }
+        ? { canStartNow: false, canEdit: actorMemberId === row.createdBy && areGroupTermsOpen(state, gameNow(clock, row)), canEditSchedule: false, canEditStartDate: false, editableFromDay: null }
         : gameChangeControls(state, gameNow(clock, row), pendingChange),
     };
   }) };

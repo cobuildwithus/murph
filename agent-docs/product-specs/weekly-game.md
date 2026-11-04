@@ -64,8 +64,11 @@ A second acceptance activates it; until then it waits without expiry. Addressed
 invitees keep their seats. Bearer joiners use separate seats, and ten total
 admissions includes departures. There is no rejoin. Late joiners share the
 existing calendar and can score only from their local joining day, capped by
-the common schedule. The starter can edit or cancel before Day 1 begins for
-any activated participant; stale joins must read the new terms before accepting.
+the common schedule. The starter can edit or cancel until anyone checks in
+(any post, words or excuse), even after Day 1 has begun, but not once the game
+is due. An edited start date runs from the latest player's today to 60 days
+out and moves Day 1 for everyone; stale joins must read the new terms before
+accepting.
 
 A pre-settlement leave is silent, preserves evidence and excludes the player
 from prizes, debts and new content. Leaving a waiting invitation voids it, as
