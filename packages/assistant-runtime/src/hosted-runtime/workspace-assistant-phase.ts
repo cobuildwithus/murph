@@ -4,7 +4,6 @@ import {
 } from "./turn-timing-diagnostics.js";
 
 import type { HostedMemberChannelBarrierTiming } from "./delivery-latency-trace.ts";
-import type { WearableHapticAction } from "@murphai/hosted-execution/wearable-haptics";
 import { HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS } from "./workspace-system-work.ts";
 import { isHostedManualMealPhotoWake } from "./meal-photo-import.ts";
 import { createHash } from "node:crypto";
@@ -8875,17 +8874,6 @@ function buildHostedAssistantCronStatusOptions(
   };
 }
 
-async function requestHostedWearableHaptic(
-  port: NonNullable<HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["deviceSyncPort"]>,
-  request: WearableHapticAction,
-  context: Parameters<NonNullable<NonNullable<AssistantExecutionContext["hosted"]>["deviceTool"]>["request"]>[1],
-) {
-  if (!port.haptic || !context?.hapticAuthority) {
-    throw new VaultCliError("device_haptic_unavailable", "Wrist reminders are unavailable for this turn.");
-  }
-  return port.haptic({ request, authority: context.hapticAuthority, signal: context.signal ?? null });
-}
-
 async function readHostedDeviceAccounts(
   deviceSyncPort: NonNullable<HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["deviceSyncPort"]>,
   request: { action: "list_accounts"; provider?: string | null; sourceProvider?: string | null },
@@ -8928,9 +8916,6 @@ function resolveHostedWorkspaceDeviceTool(input: {
     async request(request, context) {
       const signal = context?.signal ?? null;
       signal?.throwIfAborted();
-      if (request.action === "haptic") {
-        return requestHostedWearableHaptic(deviceSyncPort, request, context);
-      }
       if (request.action === "companion_status") {
         if (!deviceSyncPort.companionStatus) throw new VaultCliError("companion_status_unavailable", "App presence is unavailable right now.");
         return { action: "companion_status", ...await deviceSyncPort.companionStatus({ signal }) };

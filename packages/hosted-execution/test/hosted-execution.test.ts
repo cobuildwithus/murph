@@ -840,7 +840,6 @@ describe("hosted execution coverage gaps", () => {
       "./usage-diagnostics",
       "./vault-share",
       "./voice-control",
-      "./wearable-haptics",
       "./workspace-snapshot-store",
       "./workspace-snapshot-v2",
     ]);

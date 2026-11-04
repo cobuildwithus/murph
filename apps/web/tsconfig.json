@@ -396,9 +396,6 @@
       ],
       "@murphai/hosted-execution/companion-presence": [
         "../../packages/hosted-execution/src/companion-presence.ts"
-      ],
-      "@murphai/hosted-execution/wearable-haptics": [
-        "../../packages/hosted-execution/src/wearable-haptics.ts"
       ]
     },
     "sourceMap": false,

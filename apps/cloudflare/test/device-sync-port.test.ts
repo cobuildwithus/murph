@@ -25,21 +25,6 @@ describe("hosted device-sync runtime port", () => {
     fetchMock.mockResolvedValue(Response.json({ ...contact, deviceIdentifier: "unexpected" }));
     await expect(port.companionStatus?.({})).rejects.toThrow();
   });
-  it("sends one immediate haptic with host authority and preserves queued receipt semantics", async () => {
-    const body = {
-      request: { action: "haptic", wearable: "garmin", operation: "buzz" },
-      authority: { kind: "automation_occurrence", automationId: "synthetic-meditation", occurrenceAt: "2026-10-01T12:10:00.000Z" },
-    } as const;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const request = input instanceof Request ? input : new Request(input, init);
-      expect(new URL(request.url).pathname).toBe("/api/internal/companion/wearables");
-      expect(await request.json()).toEqual({ ...body, includeAvailability: true });
-      return Response.json({ ...body.request, status: "queued" });
-    });
-    const port = createHostedWebDeviceSyncPort({ boundUserId: "member-synthetic", fetchImpl: fetchMock as typeof fetch, timeoutMs: 5_000, transport: { mode: "proxy" } });
-    await expect(port.haptic?.(body)).resolves.toEqual({ ...body.request, status: "queued" });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
   it("sends the accepted-input-bound no-data preference through the signed control port", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);

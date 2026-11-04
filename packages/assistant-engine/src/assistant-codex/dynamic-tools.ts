@@ -3564,10 +3564,6 @@ async function executeDeviceRequestDynamicTool(
       ? { assistantInputId: invocationScope.origin.assistantInputId }
       : null
   return await executeDeviceDynamicTool({
-    hapticAuthority: invocationScope?.conversationScope !== 'direct' ? null
-      : invocationScope.origin.kind === 'accepted_input'
-        ? { kind: 'accepted_input', assistantInputId: invocationScope.origin.assistantInputId }
-        : { kind: 'automation_occurrence', automationId: invocationScope.origin.automationId, occurrenceAt: invocationScope.origin.occurrenceAt },
     acceptedInputAuthority,
     abortSignal: input.abortSignal ?? null,
     deviceTool,

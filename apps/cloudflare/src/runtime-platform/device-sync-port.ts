@@ -1,5 +1,4 @@
 import { companionPresenceSchema } from "@murphai/hosted-execution/companion-presence";
-import { wearableHapticResponseSchema } from "@murphai/hosted-execution/wearable-haptics";
 import type {
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimeDeviceSyncPort,
@@ -44,19 +43,6 @@ export function createHostedWebDeviceSyncPort(input: {
         signal: runtimeInput.signal ?? null, timeoutMs: input.timeoutMs, transport: input.transport,
       });
       return companionPresenceSchema.parse(payload);
-    },
-    async haptic(runtimeInput) {
-      const payload = await fetchHostedWebControlPlaneJson({
-        body: { request: runtimeInput.request, authority: runtimeInput.authority, includeAvailability: true },
-        boundUserId: input.boundUserId,
-        description: "Companion wrist command",
-        fetchImpl: input.fetchImpl,
-        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.wearableHaptics,
-        signal: runtimeInput.signal ?? null,
-        timeoutMs: input.timeoutMs,
-        transport: input.transport,
-      });
-      return wearableHapticResponseSchema.parse(payload);
     },
     async configureNoDataOutreach(runtimeInput) {
       const payload = await fetchHostedWebControlPlaneJson({

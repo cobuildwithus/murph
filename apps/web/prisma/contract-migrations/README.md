@@ -69,3 +69,11 @@ Web derives pairs from GamePlayer and serializes ten-slot admission under the
 pair advisory lock. Converge Web before enabling the multi-game native flow;
 then this runner drops the unused column after its ordinary drain. This Web
 version is the rollback floor after cleanup; use a compatible forward fix.
+
+The `20261104160000_drop_retired_band_commands` cleanup removes the three retired
+band-command tables after the Web deployment deleting their consumers is live
+and drained. Old runners receive an ordinary failed tool callback from the
+removed route; they never access these tables directly. Deploy the new runner
+after Web to remove its obsolete tool offer. This Web version is the rollback
+floor after cleanup; restoring older Web requires re-expanding the tables first.
+Companion app presence, Apple push routes and game notifications remain live.

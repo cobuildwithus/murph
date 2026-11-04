@@ -209,10 +209,6 @@ export const HOSTED_RUNNER_WEB_CONTROL_ROUTES = {
     "companion_presence",
     "/api/internal/companion/presence",
   ),
-  wearableHaptics: defineHostedRunnerWebControlPostRoute(
-    "wearable_haptics",
-    "/api/internal/companion/wearables",
-  ),
   deviceSyncReconcile: defineHostedRunnerWebControlPostRoute(
     "device_sync_reconcile",
     HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH,

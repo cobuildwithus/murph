@@ -1,5 +1,4 @@
 import type { CompanionPresence } from "@murphai/hosted-execution/companion-presence";
-import type { WearableHapticAction, WearableHapticAuthority, WearableHapticResponse } from "@murphai/hosted-execution/wearable-haptics";
 import type { AssistantCurrentDeliveryRoute } from '@murphai/operator-config/assistant/current-delivery-route'
 import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
 import type { AssistantAutomationExecutionInspection } from './cron/inspection.js'
@@ -127,7 +126,6 @@ export interface AssistantHostedDeviceConnectProvider {
 
 export type AssistantHostedDeviceToolRequest =
   | { action: 'companion_status' }
-  | WearableHapticAction
   | {
       action: 'list_accounts'
       provider?: string | null
@@ -169,7 +167,6 @@ export interface AssistantHostedDeviceAccountSummary {
 
 export type AssistantHostedDeviceToolResponse =
   | ({ action: 'companion_status' } & CompanionPresence)
-  | WearableHapticResponse
   | {
       accounts: readonly AssistantHostedDeviceAccountSummary[]
       action: 'list_accounts'
@@ -198,7 +195,6 @@ export interface AssistantHostedDeviceTool {
   request(
     request: AssistantHostedDeviceToolRequest,
     context?: {
-      hapticAuthority?: WearableHapticAuthority
       acceptedInputAuthority?: { assistantInputId: string }
       signal?: AbortSignal | null
     },
