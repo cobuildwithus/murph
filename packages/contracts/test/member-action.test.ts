@@ -4,6 +4,7 @@ import {
   memberActionOutcomeV1Schema,
   memberActionRequestV1Schema,
   parseMemberActionRequestV1,
+  parseMemberActionOutcomeV1,
 } from "../src/member-action.ts";
 
 function validRequest() {
@@ -54,6 +55,20 @@ function validPresentation() {
 }
 
 describe("member action contract", () => {
+  it("reads retained repair requests and old-runner receipts during retirement", () => {
+    const request = { ...validRequest(), action: { kind: "meal.names.repair", version: 1, batch: 0 } };
+    expect(parseMemberActionRequestV1(request)).toEqual(request);
+    const outcome = {
+      actionId: request.actionId, completedAt: request.requestedAt,
+      schemaVersion: 1, status: "applied", reason: null,
+      result: { kind: "meal.names.repair", version: 1, batch: 0, done: true,
+        scanned: 5, renamed: 3, skipped: 2, invalid: 1, changed: 1 },
+    };
+    expect(parseMemberActionOutcomeV1(outcome)).toEqual(outcome);
+    const drained = { ...outcome, status: "unchanged", result: undefined };
+    expect(parseMemberActionOutcomeV1(drained)).toEqual(drained);
+  });
+
   it("admits only the closed meal deletion payload", () => {
     const request = { ...validRequest(), action: { kind: "meal.delete", version: 1, mealId: "meal_fixture" } };
     expect(parseMemberActionRequestV1(request)).toEqual(request);

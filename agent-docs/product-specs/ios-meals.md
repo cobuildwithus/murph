@@ -423,31 +423,25 @@ Error messages are display text, not enums.
 Unexpected server failures remain errors, never an empty successful meal list.
 
 
-## One-time legacy naming repair
+## Retired legacy naming repair
 
-The Ops-only `/api/ops/meal-name-repair` action uses the existing encrypted member
-mailbox, hosted Sol route, canonical event revision writer and checkpoint/projection
-publication. It is deliberately separate from reads and sends no member messages.
-Each invocation scans at most 100 eligible records and makes at most five tool-free
-name proposals. Each proposal receives only that meal's name and note; invalid or
-oversized evidence is skipped. Original name wording absent from the note is
-appended mechanically. Nutrition, source, times, IDs and attachments are preserved.
+The operator meal-name repair endpoint, CLI, model proposal and executor are
+removed. Remaining legacy names are left unchanged; normal meal naming policy
+and meal features retain their existing owners.
 
-Portable versioned progress under `.runtime/operations/meal-name-repair/v1.json`
-records the fixed scan boundary, cursor, pending revision-checked write and numeric
-batch receipts. Replaying a batch returns its original cumulative counts. A pending
-write is reconciled against the exact resulting revision before counting it; a
-concurrent edit is skipped. Foreground input preempts model work and the mailbox
-retains the accepted request with its existing retry deadline. Usage accounting
-explicitly disables member notice delivery. The operator client checks projection
-freshness against the recorded completion time so reruns need no new snapshot.
-Canonical reads
-reuse the existing vault event reader; provider/write work is bounded per batch.
+Persisted repair data needs no migration. The portable tombstone descriptor for
+`.runtime/operations/meal-name-repair/v1.json` preserves old encrypted snapshots;
+its scan boundary, cursor, pending write and count receipts are never read or
+resumed. Shared encrypted Postgres mailbox rows can retain requests and outcomes,
+and `.runtime/operations/assistant/hosted-system-mailbox.json` can retain pending
+requests or post-checkpoint receipts. Their legacy wire readers remain so old
+snapshots and old-runner callbacks validate. New runners complete legacy requests
+as `unchanged`, with no model, meal mutation, usage record or member message.
+Remove these readers and the descriptor only after old producers and retained
+snapshots/rows have drained.
 
-Deploy Web's compatible action/result readers first, converge the runtime consumer,
-then execute for the signed-in Ops owner and verify the companion Meals API before
-running paginated active member workspaces. `skipped` includes already-valid names;
-`invalid` and `changed` are its unresolved subsets. Inactive members and workspaces
-without a snapshot are outside existing runtime admission. Remove the temporary
-Ops action/job after the eligible population has terminal counts and verified
-projection publication; retain the shared naming policy.
+Historical `meal_name_repair` entries remain in `HostedAiUsageRecord` and existing
+allowance aggregates. The nullable text feature key and generic usage readers
+continue to account and display them. This retirement does not refund, reprice,
+exclude or delete historical usage; the sole repair usage producer is removed.
+See the Cloudflare deployment runbook for the Web-first retirement order.

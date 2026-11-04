@@ -9,6 +9,21 @@ afterEach(() => {
 });
 
 describe("hosted workspace snapshot enumeration races", () => {
+  it("includes retired repair progress without parsing it", async () => {
+    const durableRoot = await mkdtemp(path.join(tmpdir(), "retired-progress-snapshot-"));
+    const vaultRoot = path.join(durableRoot, "vault");
+    const relativePath = ".runtime/operations/meal-name-repair/v1.json";
+    try {
+      await mkdir(path.dirname(path.join(vaultRoot, relativePath)), { recursive: true });
+      await writeFile(path.join(vaultRoot, relativePath), "opaque legacy progress");
+      const { collectHostedWorkspaceSnapshotArchivePlan } = await import("../src/hosted-bundles.ts");
+      const plan = await collectHostedWorkspaceSnapshotArchivePlan({ durableRoot, vaultRoot });
+      expect(plan.entries).toContainEqual(expect.objectContaining({ root: "vault", relativePath, kind: "file" }));
+    } finally {
+      await rm(durableRoot, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     ["vault", "file"],
     ["vault", "directory"],
