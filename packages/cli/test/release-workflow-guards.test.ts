@@ -18,7 +18,7 @@ describe('host-support coverage matrix guards', () => {
 
     expect(validation.discoveredWorkspacePackageDirs).toEqual(plannedDirs)
     expect(validation.discoveredPackageCoverageDirs).toEqual(plannedDirs)
-    expect(validation.packageCoverageShardNames).toHaveLength(6)
+    expect(validation.packageCoverageShardNames).toHaveLength(7)
     expect(validation.hostedWebTestFileCount).toBeGreaterThanOrEqual(
       HOSTED_WEB_TEST_SHARD_COUNT,
     )
