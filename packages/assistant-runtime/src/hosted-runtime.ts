@@ -7971,7 +7971,9 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
           mealMedia: createHostedMealMediaMaintenance({
             disabled: input.canonicalWriteReceiptRecoveryFailed,
             mediaStore: input.canonicalWriteRunnerInput.platform.mediaStore, budget: input.mealMediaBudget,
-            projectedWakeAt: workspace.nextWakeAt,
+            // nextWakeAt is usually the retention wake this pass is servicing,
+            // already due; only the assistant/default wake may preempt delivery.
+            projectedWakeAt: workspace.nextDefaultProcessingWakeAt,
             persistRetry: async (retryAt, signal) => {
               const next = mergeHostedMealMediaRetry(workspace, retryAt);
               signal.throwIfAborted();
