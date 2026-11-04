@@ -1,3 +1,7 @@
+Restored device completion replay preserves serviced assistant wake projections;
+the behavior owner is `../packages/assistant-runtime/README.md` and the proof is
+in [the wake cleanup plan](exec-plans/completed/2026-11-04-empty-followup-churn.md).
+
 Fresh and restored manual-meal selection proof is recorded in
 [the selection verification plan](exec-plans/completed/2026-11-03-meal-photo-selection-proof.md).
 The behavior owner remains `../packages/assistant-runtime/README.md`.
