@@ -207,13 +207,13 @@ describe.skipIf(!enabled)("pair board PostgreSQL authority and routes", () => {
       if (metric.state === "available") expect(metric.daily).toHaveLength(90);
     }
   });
-  it("uses the latest actual binding without falling back to an older board", async () => {
+  it("uses the latest chat-bound pair game; an unbound newer game doesn't hide the board", async () => {
     const f = await fixture(true);
     const newer = randomUUID(); games.push(newer);
     await db.game.create({ data: { id: newer, createdBy: f.a, wordsOwnerMemberId: f.a, maxPlayers: 2, status: "live", lengthDays: 7,
       terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { count: 3 }, stakes: [] }] }, termsWordsEncrypted: "synthetic",
       createdAt: new Date(Date.now() + 1000), players: { create: [f.a, f.b].map((memberId, seat) => ({ memberId, seat, timeZone: "UTC", joinedAt: new Date(), dayOne: new Date(`${today()}T00:00:00Z`) })) } } });
-    expect(await f.read()).toBeNull();
+    expect(await f.read()).toMatchObject({ groupId: f.groupId });
     await db.game.update({ where: { id: newer }, data: { chatContainerMemberId: f.a } }); // no HostedGroup at this binding
     expect(await f.read()).toBeNull();
     await expect(savePairBoardSharing(f.a, f.b, { expectedMembershipId: null, numbers: [] })).rejects.toMatchObject({ httpStatus: 404 });

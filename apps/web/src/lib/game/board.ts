@@ -33,12 +33,15 @@ function pairWhere(viewerId: string, otherId: string): Prisma.GameWhereInput {
 
 async function resolvePairBoard(db: Db, viewerId: string, otherId: string) {
   if (viewerId === otherId || await areGamePlayersBlocked(db, viewerId, otherId)) throw gameNotFound();
-  const game = await db.game.findFirst({ where: pairWhere(viewerId, otherId),
+  // The most recent pair game played in a chat decides the board; an unbound newer game doesn't hide it.
+  const game = await db.game.findFirst({ where: { AND: [pairWhere(viewerId, otherId), { chatContainerMemberId: { not: null } }] },
     orderBy: [{ createdAt: "desc" }, { id: "asc" }],
     select: { id: true, chatContainerMemberId: true, players: {
       where: { memberId: viewerId }, take: 1, select: { timeZone: true } } } });
-  if (!game) throw gameNotFound();
-  if (!game.chatContainerMemberId) return null;
+  if (!game?.chatContainerMemberId) {
+    if (!await db.game.findFirst({ where: pairWhere(viewerId, otherId), select: { id: true } })) throw gameNotFound();
+    return null;
+  }
   const group = await db.hostedGroup.findUnique({ where: { runtimeMemberId: game.chatContainerMemberId }, select: { id: true } });
   return group ? { gameId: game.id, groupId: group.id, runtimeMemberId: game.chatContainerMemberId,
     timeZone: game.players[0]?.timeZone ?? "UTC" } : null;
