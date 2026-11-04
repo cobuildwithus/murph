@@ -1824,4 +1824,4 @@ report evidence and the Web rollback floor are owned by
 [`Weekly Game · Replies`](product-specs/weekly-game.md#replies) and
 [`Architecture · Private post replies`](../ARCHITECTURE.md#private-post-replies).
 The reviewed implementation scope is recorded in
-[the post-replies plan](exec-plans/active/2026-11-04-game-post-replies.md).
+[the post-replies plan](exec-plans/completed/2026-11-04-game-post-replies.md).
