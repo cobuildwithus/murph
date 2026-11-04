@@ -5591,8 +5591,13 @@ Late joining keeps Day 1 and duration, freezing the effective `joined_at` and
 zone. Eligibility is `clamp(daysBetween(dayOne, localDate(joinedAt)), 0, length)`.
 The initial 20:00 cutoff does not discard a late joiner's current day. Join and
 leave settle due state first under the game lock. A starter's direct `editTerms`
-requires the expected version and rechecks that no activated participant has
-begun Day 1 under that same lock. Groups have no negotiated changes.
+requires the expected version and rechecks that the game is still invited.
+Live groups normalize full chat terms into the existing edit delta and sealed
+words, then use the same pending-change and approval writer as pairs. Remaining
+seated players vote once per ask; a strict majority, including the proposer,
+applies it. Pending JSON owns the votes; `change_voted` events own per-member
+replay receipts. Group writes take the game lock without the pair lock. A leave
+clears the ask. The weekly game spec owns timing, projection and rollout rules.
 
 Leaving before settlement retains evidence, excludes access and competition,
 and voids a waiting invitation or an activated group below two remaining players. Group settlement waits

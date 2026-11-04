@@ -1862,8 +1862,11 @@ enters group recap instructions.
 
 
 Game proposals are structural metadata under the canonical game lock. The
-initiating signed-in player agrees by proposing; only the other identified player
-may approve or decline, and only the proposer may cancel. Chat tools resolve
+initiating signed-in player agrees by proposing. In pairs, the other identified
+player may approve or decline; in live groups, each remaining seated player
+answers only for themselves once per proposal and a strict majority applies it.
+Only the proposer may cancel. Live group edits require bound chat authority;
+the app permits direct group edits only while the starter is alone. Chat tools resolve
 identity from a current accepted group message and revalidate the runtime fence,
 route and exact game binding inside the mutation transaction. Fresh provider
 rosters guard shared reads; private contact labels, entries, excuses, photos and

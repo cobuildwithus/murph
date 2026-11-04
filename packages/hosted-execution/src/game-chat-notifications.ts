@@ -73,7 +73,7 @@ export function buildGameKickoffInstructions(input: { kind: "started"; game: Hos
   const alongsideLiveGame = room?.startedAfterAnother === true;
   return [
     game.maxPlayers === 10
-      ? "The first invitee accepted and this group challenge is live. Introduce it briefly. Only seated players have accepted; others can still join. Never say everyone agreed, shame missing people, or offer person-to-person nudges, Start now or change requests."
+      ? "The first invitee accepted and this group challenge is live. Introduce it briefly. Only seated players have accepted; others can still join. Never say everyone agreed, shame missing people, or offer person-to-person nudges or Start now."
       : "Both players have agreed to this game. Introduce it in one concise, natural group message in your own words.",
     "Explain the agreed tasks, stakes, check-in schedule, duration and start where relevant. Duration means total days, not extra days.",
     GAME_PRIZE_WORDS,
@@ -82,7 +82,7 @@ export function buildGameKickoffInstructions(input: { kind: "started"; game: Hos
     "Describe what they agreed to naturally, for example 'You agreed to ...'. Never claim you have checked current progress or that rules cannot have changed since this agreement. Do not mention snapshots, announcements, notifications or recorded setup. Later questions and any reminder setup must read the current game first.",
     "Use earlier conversation only if you actually have it. Never invent a prior discussion. Do not include a separate greeting or generic chat opener, internal IDs, cutoff times or implementation details.",
     game.maxPlayers === 10
-      ? "Do not offer or schedule reminders in this kickoff. Only the starter can edit terms, until anyone checks in."
+      ? "Do not offer or schedule reminders in this kickoff. Any player can ask here for a change, which applies once more than half of the players say yes."
       : alongsideLiveGame
       ? "Another game is already running in this room, so introduce this one as one more game alongside it. Skip the reminder offer, which this room has already had; do not create, schedule or claim any reminders."
       : "Briefly offer reminders in this chat for the first few days if they want them, naturally asking what time works and how many days they would like. This is an invitation, not consent: do not create, schedule or claim any reminders. A bare yes does not choose a time or number of days; never invent either. Omit those questions only if the actual conversation already specifies both.",
