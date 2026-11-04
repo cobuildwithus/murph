@@ -40,7 +40,7 @@ const WINDOW = 10 * 60 * 1000;
 
 async function createRetentionFixture(
   groups: Array<{ offset: number; count: number }>,
-  { defaultWakeOffset = 24 * 60 * 60 * 1000, generatedImages = 0, receiptCount = 0, pendingMeal = false } = {},
+  { defaultWakeOffset = 24 * 60 * 60 * 1000, generatedImages = 0, receiptCount = 0, pendingMeal = false, retentionDue = false } = {},
 ) {
   const root = await mkdtemp(path.join(tmpdir(), "murph-retention-wakes-"));
   const source = path.join(root, "source");
@@ -108,7 +108,12 @@ async function createRetentionFixture(
   let workspace = createWorkspaceState({
     version: "0", snapshotRef: await snapshot(source),
     inboxMediaRetentionWakeAt: new Date(START).toISOString(),
-    nextWakeAt: new Date(START + defaultWakeOffset).toISOString(), nextWakeReason: "assistant",
+    // Production publishes the earlier due retention wake as nextWakeAt and keeps
+    // the assistant wake separately.
+    ...(retentionDue
+      ? { nextWakeAt: new Date(START).toISOString(), nextWakeReason: "inbox_media_retention" }
+      : { nextWakeAt: new Date(START + defaultWakeOffset).toISOString(), nextWakeReason: "assistant" }),
+    nextDefaultProcessingWakeAt: new Date(START + defaultWakeOffset).toISOString(), nextDefaultProcessingWakeReason: "assistant",
     redactedStatus: receiptCount > 0 ? {
       hostedCanonicalWriteReceiptLogByteSize: receipts.receiptLogBytes.byteLength,
       hostedCanonicalWriteReceiptLogSha256: receipts.receiptLogHash,
@@ -128,6 +133,10 @@ async function createRetentionFixture(
           redactedStatus: request.redactedStatus ?? null,
           inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
           nextWakeAt: request.nextWakeAt ?? null, nextWakeReason: request.nextWakeReason ?? null,
+          ...(request.nextDefaultProcessingWakeAt === undefined ? {} : {
+            nextDefaultProcessingWakeAt: request.nextDefaultProcessingWakeAt,
+            nextDefaultProcessingWakeReason: request.nextDefaultProcessingWakeReason ?? null,
+          }),
           version: String(BigInt(request.expectedWorkspaceVersion) + 1n) };
         return workspace;
       },
@@ -382,6 +391,19 @@ test.each([false, true])("pending-only delivery persists retry and yields at an 
     expect(fixture.mealMedia.calls.map(call => call.operation)).toEqual(["record"]);
     expect((await readHostedMediaReferenceCatalogue({ vaultRoot: fixture.live })).entries[0]?.pendingUpload).toBe(true);
     expect(fixture.checkpoints.at(-1)?.inboxMediaRetentionWakeAt).toBe(new Date(START + (earlierExpiry ? 1000 : 250 + 60 * 60_000)).toISOString());
+  } finally { vi.useRealTimers(); await removeTempRoot(fixture.root); }
+});
+
+test("delivers a pending thumbnail while the serviced retention wake is already due", async () => {
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] }); vi.setSystemTime(START + 8_000);
+  const fixture = await createRetentionFixture([], { pendingMeal: true, retentionDue: true });
+  try {
+    // Frozen timers: real I/O must not run into the delivery deadline.
+    await withRealTimeout(fixture.invoke(), 10_000, () => "Retention pass did not settle.");
+    expect(fixture.mealMedia.calls.map(call => call.operation)).toEqual(["record", "put"]);
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot: fixture.live })).entries[0]?.pendingUpload).toBe(false);
+    // No hourly delivery retry remains; only the full photo's own expiry.
+    expect(Date.parse(fixture.checkpoints.at(-1)!.inboxMediaRetentionWakeAt!)).toBeGreaterThan(START + 8_000 + 60 * 60_000);
   } finally { vi.useRealTimers(); await removeTempRoot(fixture.root); }
 });
 
