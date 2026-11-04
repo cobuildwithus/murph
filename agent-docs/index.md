@@ -1,3 +1,7 @@
+Restored device completion replay preserves serviced assistant wake projections;
+the behavior owner is `../packages/assistant-runtime/README.md` and the proof is
+in [the wake cleanup plan](exec-plans/completed/2026-11-04-empty-followup-churn.md).
+
 Fresh and restored manual-meal selection proof is recorded in
 [the selection verification plan](exec-plans/completed/2026-11-03-meal-photo-selection-proof.md).
 The behavior owner remains `../packages/assistant-runtime/README.md`.
@@ -1815,6 +1819,16 @@ Meal-name repair removal and compatibility proof are tracked in
 Usage-blocked system readiness and restoration wake proof is recorded in
 [the scheduling correction plan](exec-plans/completed/2026-11-03-blocked-system-poll.md).
 The current contract remains in [Hosted Temporal orchestration](references/hosted-temporal-orchestration.md).
+
+Fresh scheduled-reminder language regression evidence and unseeded onboarding
+proof are recorded in [the language verification plan](exec-plans/completed/2026-11-04-automation-language.md).
+
+Private two-player post replies, app-only visibility, inline encrypted audio,
+report evidence and the Web rollback floor are owned by
+[`Weekly Game · Replies`](product-specs/weekly-game.md#replies) and
+[`Architecture · Private post replies`](../ARCHITECTURE.md#private-post-replies).
+The reviewed implementation scope is recorded in
+[the post-replies plan](exec-plans/completed/2026-11-04-game-post-replies.md).
 
 Meal thumbnail retry after failed canonical publication and terminal media cleanup
 is verified in [the retention recovery plan](exec-plans/completed/2026-11-04-meal-photo-retention-retry.md).

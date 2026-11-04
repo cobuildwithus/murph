@@ -31,7 +31,7 @@ export const CANARY_REPLY_WAIT_MS = 90_000;
 export const CANARY_RESET_TIMEOUT_MS = 300_000;
 export const CANARY_DIAGNOSTIC_WAIT_MS = 3_000;
 // Observe the normal quiet window plus bounded checkpoint/publication time.
-// This budget is independent of the twenty-second reply latency requirement.
+// This budget is independent of each turn's reply latency requirement.
 export const CANARY_OUTCOME_WAIT_MS = HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS + 120_000;
 export const CANARY_OUTCOME_POLL_MS = 5_000;
 
@@ -112,7 +112,7 @@ export async function runLinqProductionCanary(
     const canonicalOutcome = { baselineGoalCount: 0, savedGoalCount: 0, proposalGoalCount: 0 };
     let previousReplyAt: number | null = null;
 
-    for (const [index, { prompt, stage }] of CANARY_TURNS.entries()) {
+    for (const [index, { prompt, stage, replyBudgetMs = CANARY_REPLY_BUDGET_MS }] of CANARY_TURNS.entries()) {
       const turn = index + 1;
       const sentAt = performance.now();
       const sentAtEpochMs = Date.now();
@@ -139,10 +139,10 @@ export async function runLinqProductionCanary(
       const latencyMs = Math.round(replyAt - sentAt);
       const turnResult = { latencyMs, senderSendMs, stage, turn };
       reportTurn?.(turnResult);
-      if (latencyMs >= CANARY_REPLY_BUDGET_MS) {
+      if (latencyMs >= replyBudgetMs) {
         await reportCanaryFailureDiagnostics(config, { stage, turn }, reportDiagnostic);
         throwCanaryFailure(
-          `reply-latency-budget-exceeded; turn=${turn}; metric=send_to_reply; elapsed_ms=${Math.min(CANARY_REPLY_WAIT_MS, latencyMs)}; budget_ms=${CANARY_REPLY_BUDGET_MS}`,
+          `reply-latency-budget-exceeded; turn=${turn}; metric=send_to_reply; elapsed_ms=${Math.min(CANARY_REPLY_WAIT_MS, latencyMs)}; budget_ms=${replyBudgetMs}`,
         );
       }
       const interReplyGapMs = previousReplyAt === null
@@ -150,11 +150,11 @@ export async function runLinqProductionCanary(
         : replyAt - previousReplyAt;
       if (
         interReplyGapMs !== null
-        && interReplyGapMs >= CANARY_REPLY_BUDGET_MS
+        && interReplyGapMs >= replyBudgetMs
       ) {
         await reportCanaryFailureDiagnostics(config, { stage, turn }, reportDiagnostic);
         throwCanaryFailure(
-          `reply-latency-budget-exceeded; turn=${turn}; metric=inter_reply_gap; elapsed_ms=${Math.min(CANARY_REPLY_WAIT_MS, Math.round(interReplyGapMs))}; budget_ms=${CANARY_REPLY_BUDGET_MS}`,
+          `reply-latency-budget-exceeded; turn=${turn}; metric=inter_reply_gap; elapsed_ms=${Math.min(CANARY_REPLY_WAIT_MS, Math.round(interReplyGapMs))}; budget_ms=${replyBudgetMs}`,
         );
       }
       assertLinqProductionCanaryReply({ reply, turn });

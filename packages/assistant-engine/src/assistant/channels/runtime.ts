@@ -61,6 +61,7 @@ import type {
   AssistantResponseCard,
   TelegramRichMessage,
 } from '@murphai/operator-config/assistant-response-cards'
+import { readSleepSummaryNote } from '@murphai/operator-config/assistant-response-cards'
 import { normalizeOptionalText } from './helpers.js'
 
 const TELEGRAM_MAX_TEXT_LENGTH = 4096
@@ -693,6 +694,21 @@ function canSendNativeLinqCard(
     && !(card.kind === 'compact_table' && 'workout' in card && card.editor === undefined)
 }
 
+function buildLinqAppCardDeliveryResult(
+  delivered: Awaited<ReturnType<typeof sendLinqIMessageAppCard>>,
+  target: string,
+) {
+  return {
+    providerMessageId: normalizeOptionalText(delivered.message?.id ?? null),
+    ...(delivered.providerMessageIds
+      ? { providerMessageIds: delivered.providerMessageIds } : {}),
+    ...(delivered.providerMessageEffects
+      ? { providerMessageEffects: delivered.providerMessageEffects } : {}),
+    providerThreadId: null,
+    target,
+  }
+}
+
 export async function sendLinqMessage(
   input: {
     card?: AssistantResponseCard | null
@@ -809,6 +825,7 @@ export async function sendLinqMessage(
         if (
           dependencies.signal?.aborted
           || providerRequestWasSkipped(error)
+          || readSleepSummaryNote(card, input.message) !== null
         ) {
           throw error
         }
@@ -833,22 +850,7 @@ export async function sendLinqMessage(
             ...(dependencies.signal ? { signal: dependencies.signal } : {}),
           },
         )
-        const providerMessageId = normalizeOptionalText(
-          delivered.message?.id ?? null,
-        )
-        return {
-          providerMessageId,
-          ...(providerMessageId
-            ? {
-                providerMessageEffects: [{
-                  message: null,
-                  providerMessageId,
-                }],
-              }
-            : {}),
-          providerThreadId: null,
-          target,
-        }
+        return buildLinqAppCardDeliveryResult(delivered, target)
       } catch (error) {
         if (
           dependencies.signal?.aborted ||

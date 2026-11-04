@@ -14,7 +14,7 @@ const BASE = {
   reporterMemberId: "hbm_demo_reporter",
 };
 
-/** The Ops review queue: a words post with a note, and a terms report from an invite. */
+/** The Ops review queue: a words post with a note, a terms report from an invite, and a voice reply on the reporter's post. */
 export function OpsGameReportsStudy() {
   return (
     <div className="flex flex-col gap-6" data-design-section="game-reports" inert>
@@ -27,6 +27,11 @@ export function OpsGameReportsStudy() {
         actions={<GameReportActions canEndGames canRemovePost={false} canSuspend={false} reportId="report_demo_terms" />}
         report={{ ...BASE, content: "the task and prize or dare they wrote", entryId: null, reason: "Money or a scam",
           reportedSuspended: true, reportId: "report_demo_terms", snapshotText: "Task: 100 pushups\nPrize: Breakfast in bed" }}
+      />
+      <GameReportCard
+        actions={<GameReportActions canEndGames canRemovePost canSuspend removeLabel="Remove the reply" reportId="report_demo_reply" />}
+        report={{ ...BASE, audioUrl: "#game-reports", content: "reply", entryId: null, reason: "Harassment or bullying",
+          replyId: "reply_demo", reportId: "report_demo_reply", snapshotText: null }}
       />
     </div>
   );

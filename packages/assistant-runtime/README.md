@@ -282,7 +282,12 @@ responses and system notifications also emit none. A replay returns the
 original persisted input receipt rather than the replay's mailbox timestamp.
 The child reduces valid observations to one process-local maximum; the host
 owns the separate ten-minute retention deadline. A restored due wake in a clean
-workspace runs ordinarily. If the container dies before that checkpoint, local
+workspace runs ordinarily. Discovering an already-durable device completion
+journal does not make the workspace dirty before that initial pass. Replaying
+the journal still saves its cleanup, while preserving the pass's current wake;
+it must not restore a serviced deadline from the older workspace checkpoint.
+Fresh device preparation keeps its checkpoint-before-acknowledgment barrier.
+If the container dies before that checkpoint, local
 runtime residue since the last accepted checkpoint can be lost. Inbox capture,
 audio/video transcript work,
 attachment materialization, and display/search indexes are recovery context;

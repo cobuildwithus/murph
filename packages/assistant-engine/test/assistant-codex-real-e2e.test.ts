@@ -1,7 +1,8 @@
+import { REMINDER_LANGUAGE_CASES, runReminderLanguageJourney } from './support/reminder-language-journey.js'
 import { listCanonicalWriteEvidence, readCanonicalAuditRecords } from './canonical-audit-test-helpers.js'
 import { GAME_CHAT_SETUP_SCENARIOS, SETUP_PLAYERS, SETUP_TERMS } from './support/game-chat-setup-scenarios.js'
 import { buildBluetoothHelpInstructions } from './support/bluetooth-help.js'
-import { SYNTHETIC_SLEEP_NIGHT_VALUES, seedSyntheticSleepNight } from './support/sleep-card-fixture.js'
+import { SYNTHETIC_PRIOR_SLEEP_NIGHTS, SYNTHETIC_SLEEP_NIGHT_VALUES, seedSyntheticSleepNight } from './support/sleep-card-fixture.js'
 import { readHostedDelegationHintOverrides } from './support/hosted-delegation-hints.js'
 import { materializeRegimenLabelFixture, REGIMEN_FUZZY_FOOD_NAMES, REGIMEN_LABEL_SCENARIOS, REGIMEN_SHAKE_TOTALS } from './support/supplement-regimen-label-fixture.js'
 import { seedImportedRecallMeal, seedImportedRecallPhoto, SYNTHETIC_IMPORTED_MEAL } from './support/imported-record-recall-fixture.js'
@@ -146,7 +147,7 @@ import {
   refreshAssistantContextSnapshot,
 } from '../src/assistant/context-snapshot.ts'
 import { applyAssistantVaultFileSendApprovalResult, requestAssistantVaultFileSend } from '../src/assistant/vault-file-send.ts'
-import { dispatchAssistantOutboxIntent, listAssistantOutboxIntents } from '../src/assistant/outbox.ts'
+import { deliverAssistantOutboxMessage, dispatchAssistantOutboxIntent, listAssistantOutboxIntents } from '../src/assistant/outbox.ts'
 import { upsertAssistantInputEvent, updateAssistantInputAttachmentEvidence } from '../src/assistant/input-store.js'
 import { readAnalyzeVideoConversationEvents, snapshotConversationAttachmentAuthorities } from '../src/assistant-codex/analyze-video-tool.js'
 import { assertNoSongAttachmentFailure } from './support/song-receipt-proof.ts'
@@ -395,6 +396,8 @@ import {
 } from '../src/assistant/outbox.ts'
 import { listAutomations as listFollowUpAutomations } from '@murphai/query'
 
+import { assertProductionHostedCapabilityParity } from './support/production-hosted-capabilities.js'
+
 const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
 const execFileAsync = promisify(execFile)
 const REAL_CODEX_E2E_TAG = 'real-codex-live'
@@ -414,9 +417,117 @@ function describeRealCodex(name: string, factory: () => void): void {
 }
 
 describeRealCodex('real natural goal canary journey', () => {
-  it('natural canary proposes a walking plan and persists it only after acceptance', async () => {
+  it.each([
+    { name: 'onboarding canary goal proposal sends one early update from a fresh thread', capabilities: undefined },
+    { name: 'production hosted onboarding canary goal proposal sends one early update', capabilities: 'production-hosted' as const },
+  ])('$name', async ({ capabilities }) => {
     const config = await resolveRealCodexE2eConfig()
-    const fixture = await createCanonicalLiveFixture(config, 'linq')
+    const fixture = await createCanonicalLiveFixture(config, 'linq', { capabilities })
+    const nativeExecute = clinicalExtractionCodex.executeCodexAppServerTurn
+    const observer = vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn').mockImplementation(async (input) => {
+      expect(input.developerInstructions).toContain('Routine onboarding/setup')
+      expect(input.developerInstructions).toContain('Direct first-run Murph onboarding is open.')
+      expect(input.developerInstructions).toContain('first tool round, alongside exactly one brief')
+      expect(input.resumeSessionId).toBeFalsy()
+      if (capabilities) assertProductionHostedCapabilityParity(input)
+      process.stdout.write(`[onboarding-goal-input] ${JSON.stringify({
+        developerBytes: Buffer.byteLength(input.developerInstructions ?? ''),
+        dynamicTools: input.dynamicTools.length, toolNames: input.dynamicTools.map((tool) => `${tool.namespace}.${tool.name}`), freshThread: !input.resumeSessionId,
+      })}\n`)
+      return nativeExecute(input)
+    })
+    try {
+      const raw: unknown = JSON.parse(await readFile(new URL(
+        '../../../apps/web/scripts/fixtures/linq-production-conversation.json', import.meta.url,
+      ), 'utf8'))
+      if (!Array.isArray(raw)) throw new Error('Expected canary conversation fixture.')
+      const promptFor = (stage: string) => {
+        const prompt = readString(raw.map(readRecord).find((item) => item?.stage === stage)?.prompt)
+        if (!prompt) throw new Error(`Missing canary stage: ${stage}`)
+        return prompt
+      }
+      const sessionId = 'synthetic-onboarding-goal-session'
+      const now = new Date().toISOString()
+      await saveAssistantSession(fixture.vault, parseAssistantSessionRecord({
+        alias: null, schema: 'murph.assistant-session.v1', sessionId,
+        binding: { actorId: null, channel: 'linq', conversationKey: 'linq:direct:canonical-live-synthetic-thread',
+          delivery: null, identityId: null, threadId: 'canonical-live-synthetic-thread', threadIsDirect: true },
+        createdAt: now, updatedAt: now, lastTurnAt: null, resumeState: null, turnCount: 0,
+        target: { adapter: 'codex-cli', approvalPolicy: 'never', codexCommand: fixture.codexCommand,
+          codexHome: fixture.codexHome, model: config.model, modelProvider: config.modelProvider,
+          oss: false, profile: null, reasoningEffort: 'low', sandbox: 'workspace-write' },
+      }))
+      await appendAssistantTranscriptEntries(fixture.vault, sessionId, [
+        { kind: 'user', text: promptFor('welcome') },
+        { kind: 'assistant', text: ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE },
+        { kind: 'user', text: promptFor('identity-question') },
+        { kind: 'assistant', text: MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal },
+        { kind: 'user', text: promptFor('runtime-identity') },
+        { kind: 'assistant', text: 'Good to meet you, Robin. What would you most like from your health—something you want to improve, understand, handle, or be able to do?' },
+      ])
+      const progress: { elapsedMs: number; text: string }[] = []
+      const trace: { elapsedMs: number; method: string; type: string | null; tool: string | null; totalTokens: unknown }[] = []
+      const startedAt = performance.now()
+      const result = await fixture.message(promptFor('goal-proposal'), {
+        sessionId, includeEarlySessionOnboarding: true,
+        deliverResponse: true, deliveryDispatchMode: 'queue-only',
+        deliveryIdempotencyKey: 'synthetic-onboarding-goal-proposal', turnTrigger: 'automation-auto-reply',
+        onTraceEvent(event) {
+          const raw = readRecord(event.rawEvent)
+          const method = readString(raw?.method)
+          if (!method || !['item/started', 'item/completed', 'item/tool/call', 'thread/tokenUsage/updated'].includes(method)) return
+          const params = readRecord(raw?.params)
+          const item = readRecord(params?.item)
+          trace.push({ elapsedMs: Math.round(performance.now() - startedAt), method,
+            type: readString(item?.type), tool: readString(item?.tool, params?.tool),
+            totalTokens: readRecord(readRecord(params?.tokenUsage)?.total)?.totalTokens })
+        },
+        executionContext: { hosted: { memberId: 'synthetic-onboarding-goal-member', userEnvKeys: [],
+          progressDeliveryDependencies: { async sendLinq(input) {
+            progress.push({ elapsedMs: Math.round(performance.now() - startedAt), text: input.message })
+            return { providerMessageId: `synthetic-progress-${progress.length}`,
+              providerThreadId: 'canonical-live-synthetic-thread', target: 'canonical-live-synthetic-thread', targetKind: 'thread' }
+          } },
+        } },
+      })
+      const elapsedMs = Math.round(performance.now() - startedAt)
+      process.stdout.write(`[onboarding-goal-latency] ${JSON.stringify({
+        firstVisibleMs: progress[0]?.elapsedMs ?? elapsedMs, elapsedMs, progress,
+        cliInvocations: await fixture.commandCount(),
+        commandCount: trace.filter((item) => item.method === 'item/started' && item.type === 'commandExecution').length,
+        trace, reply: result.response,
+        commands: (await readFile(path.join(fixture.root, 'commands.jsonl'), 'utf8')).split('\n').filter(Boolean).map((line) => JSON.parse(line)),
+      })}\n`)
+      expect(progress).toHaveLength(1)
+      // Delivery latency is the member-visible invariant; no extra timing tools
+      // are added to the model's turn. This matches the canary's 20-second budget.
+      expect(progress[0]?.elapsedMs).toBeLessThan(20_000)
+      expect(result.response).toMatch(/walk/iu)
+      expect(result.response).toMatch(/lunch/iu)
+      expect(result.response).toMatch(/twenty|20/iu)
+      expect(await listGoals(fixture.vault)).toHaveLength(0)
+      expect((await readVaultRawTolerant(fixture.vault)).regimens).toHaveLength(0)
+      expect(await listFollowUpAutomations(fixture.vault)).toHaveLength(0)
+    } finally {
+      observer.mockRestore()
+      await fixture.close()
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 300_000)
+
+  it.each([
+    { name: 'natural canary proposes a walking plan and persists it only after acceptance', capabilities: undefined },
+    { name: 'production hosted five-stage canary persists the accepted goal', capabilities: 'production-hosted' as const },
+  ])('$name', async ({ capabilities }) => {
+    const config = await resolveRealCodexE2eConfig()
+    const fixture = await createCanonicalLiveFixture(config, 'linq', { capabilities })
+    const nativeExecute = clinicalExtractionCodex.executeCodexAppServerTurn
+    const observer = capabilities ? vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn').mockImplementation(async (input) => {
+      assertProductionHostedCapabilityParity(input)
+      const result = await nativeExecute(input)
+      process.stdout.write(`[hosted-canary-provider] ${JSON.stringify({ developerBytes: Buffer.byteLength(input.developerInstructions ?? ''), dynamicTools: input.dynamicTools.length, resumed: !!input.resumeSessionId, toolActions: result.providerActionCount })}\n`)
+      return result
+    }) : null
     try {
       // Read the same synthetic messages sent by the production canary.
       const raw: unknown = JSON.parse(await readFile(new URL(
@@ -429,11 +540,42 @@ describeRealCodex('real natural goal canary journey', () => {
         if (!prompt) throw new Error(`Missing canary stage: ${stage}`)
         return prompt
       }
+      const sessionId = capabilities ? 'synthetic-hosted-five-stage' : undefined
+      if (sessionId) {
+        const now = new Date().toISOString()
+        await saveAssistantSession(fixture.vault, parseAssistantSessionRecord({
+          alias: null, schema: 'murph.assistant-session.v1', sessionId,
+          binding: { actorId: null, channel: 'linq', conversationKey: 'linq:direct:canonical-live-synthetic-thread',
+            delivery: null, identityId: null, threadId: 'canonical-live-synthetic-thread', threadIsDirect: true },
+          createdAt: now, updatedAt: now, lastTurnAt: null, resumeState: null, turnCount: 0,
+          target: { adapter: 'codex-cli', approvalPolicy: 'never', codexCommand: fixture.codexCommand,
+            codexHome: fixture.codexHome, model: config.model, modelProvider: config.modelProvider,
+            oss: false, profile: null, reasoningEffort: 'low', sandbox: 'workspace-write' },
+        }))
+        const replay = [
+          { stage: 'welcome', reply: ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE },
+          { stage: 'identity-question', reply: MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal },
+          { stage: 'runtime-identity', reply: 'Good to meet you, Robin. What would you most like from your health—something you want to improve, understand, handle, or be able to do?' },
+        ]
+        await appendAssistantTranscriptEntries(fixture.vault, sessionId, replay.flatMap(({ stage, reply }) => [
+          { kind: 'user' as const, text: promptFor(stage) }, { kind: 'assistant' as const, text: reply },
+        ]))
+        process.stdout.write(`[hosted-canary-replay] ${JSON.stringify(replay)}\n`)
+      }
       const timedMessage = async (stage: string) => {
         const before = await fixture.commandCount()
         const progressUpdates: { elapsedMs: number; text: string }[] = []
         const startedAt = performance.now()
+        const trace: { elapsedMs: number; method: string; type: string | null; tool: string | null }[] = []
         const result = await fixture.message(promptFor(stage), {
+          sessionId, includeEarlySessionOnboarding: !!capabilities,
+          onTraceEvent(event) {
+            const raw = readRecord(event.rawEvent)
+            const method = readString(raw?.method)
+            if (!method || !['item/started', 'item/completed', 'item/tool/call', 'thread/tokenUsage/updated'].includes(method)) return
+            const params = readRecord(raw?.params), item = readRecord(params?.item)
+            trace.push({ elapsedMs: Math.round(performance.now() - startedAt), method, type: readString(item?.type), tool: readString(item?.tool, params?.tool) })
+          },
           deliverResponse: true,
           deliveryDispatchMode: 'queue-only',
           deliveryIdempotencyKey: `synthetic-goal-canary-${stage}`,
@@ -466,12 +608,14 @@ describeRealCodex('real natural goal canary journey', () => {
           stage, elapsedMs, firstVisibleMs: progressUpdates[0]?.elapsedMs ?? elapsedMs,
           progressUpdates: progressUpdates.length, progressMessages: progressUpdates,
           cliInvocations: invocations.length,
-          commands: commands.map((command) => command.split(' ').slice(0, command.startsWith('commons ') ? 3 : 2).join(' ')),
+          commands, trace, reply: result.response,
+          goals: (await listGoals(fixture.vault)).length, regimens: (await readVaultRawTolerant(fixture.vault)).regimens.length,
         })}\n`)
         return { result, commands, progressUpdates }
       }
       const { result: preview, commands: previewCommands, progressUpdates: previewProgress } = await timedMessage('goal-proposal')
       expect(previewProgress).toHaveLength(1)
+      expect(previewProgress[0]?.elapsedMs).toBeLessThan(20_000)
       expect(previewCommands.filter((command) => /^commons goal list(?: |$)/u.test(command) && !isRecordedVaultHelpCommand(command))).toHaveLength(1)
       expect(previewCommands.filter((command) => /^commons goal show(?: |$)/u.test(command) && !isRecordedVaultHelpCommand(command))).toEqual([])
       expect(preview.response).toMatch(/walk/iu)
@@ -503,6 +647,7 @@ describeRealCodex('real natural goal canary journey', () => {
       expect(accepted.response).toMatch(/walk|plan/iu)
       expect(accepted.response).not.toMatch(/goal_[A-Z0-9]+|reg_[A-Z0-9]+|subagent|vault-cli/iu)
     } finally {
+      observer?.mockRestore()
       await fixture.close()
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
     }
@@ -1717,6 +1862,7 @@ function readFocusedSleepPatternProjectionCommand(command: string): string {
 describeRealCodex('real Codex sleep summary cards', () => {
   it.each([
     ['sleep card: general sleep question attaches the host-built card', 'How did I sleep last night?', 'general'],
+    ['sleep card: explicitly requested short note survives attachment', 'Send me my sleep card for last night with a short note about how I am trending.', 'note'],
     ['sleep card: nightly recap discovers the deferred host-built card', 'Give me a recap of my last night of sleep.', 'general'],
     ['sleep card: specific deep sleep question answers in text', 'What was my deep sleep last night?', 'specific'],
     ['sleep card: compound sleep and training question stays text', 'How did I sleep and should I train today?', 'compound'],
@@ -1732,7 +1878,7 @@ describeRealCodex('real Codex sleep summary cards', () => {
       if (scenario === 'missing') {
         await initializeVault({ vaultRoot, timezone: 'UTC', createdAt: '2026-01-01T00:00:00Z' })
       } else {
-        await seedSyntheticSleepNight(vaultRoot, 'oura', { ...SYNTHETIC_SLEEP_NIGHT_VALUES }, { timeZone: 'UTC' })
+        await seedSyntheticSleepNight(vaultRoot, 'oura', { ...SYNTHETIC_SLEEP_NIGHT_VALUES }, { timeZone: 'UTC', ...(scenario === 'note' ? { priorNights: SYNTHETIC_PRIOR_SLEEP_NIGHTS } : {}) })
       }
       await cp(resolveAssistantSkillsRoot(), skillsRoot, { recursive: true })
       await materializeFocusedActivityProjectionCli({ binDirectory, commandLogPath, vaultRoot })
@@ -1770,11 +1916,19 @@ describeRealCodex('real Codex sleep summary cards', () => {
         Object.entries(snapshot).filter(([file]) => file.startsWith('ledger/') || file === 'vault.json'))
       expect(healthRecords(await snapshotRealCodexCanonicalVault(vaultRoot))).toEqual(healthRecords(before))
       expect(result.responseMedia ?? []).toEqual([])
-      if (scenario === 'general') {
+      if (scenario === 'general' || scenario === 'note') {
         expect(attachments).toHaveLength(1)
         expect(attachments[0]).toMatchObject({ tool: 'attach_sleep_card', argumentsValue: { date: '2026-11-03' } })
         expect(result.responseCard).toMatchObject({ kind: 'sleep_summary', localDate: '2026-11-03', totalSleepMinutes: 436, stages: { deepMinutes: 141, remMinutes: 118, lightMinutes: 177 } })
-        expect(authoredReply).toBe('')
+        if (scenario === 'general') expect(authoredReply).toBe('')
+        else {
+          expect(authoredReply).not.toBe('')
+          expect(authoredReply).not.toMatch(/—| - |can't combine|cannot combine|unable to combine/iu)
+          // The note adds what the card cannot show: the trend across the earlier nights.
+          expect(authoredReply).toMatch(/nights?|recent|earlier|previous|than|trend/iu)
+          expect(result.finalMessage).toBe(renderAssistantResponseCardText(result.responseCard!, authoredReply))
+          expect(result.transcriptMessage).toBe(result.finalMessage)
+        }
       } else {
         expect(result.responseCard).toBeNull()
         expect(authoredReply).not.toBe('')
@@ -1788,6 +1942,108 @@ describeRealCodex('real Codex sleep summary cards', () => {
       }
     } finally { await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths]) }
   })
+})
+
+describeRealCodex('real Codex sleep card scheduled notes', () => {
+  it('sleep card: edits existing morning instructions then queues its scheduled note', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const root = await mkdtemp(path.join(tmpdir(), 'synthetic-sleep-note-scheduled-'))
+    const requests: AssistantHostedAutomationToolRequest[] = []
+    try {
+      const vaultRoot = path.join(root, 'vault')
+      const binDirectory = path.join(root, 'bin')
+      await seedSyntheticSleepNight(vaultRoot, 'oura', { ...SYNTHETIC_SLEEP_NIGHT_VALUES }, { timeZone: 'UTC', priorNights: SYNTHETIC_PRIOR_SLEEP_NIGHTS })
+      await materializeFocusedActivityProjectionCli({ binDirectory, commandLogPath: path.join(root, 'commands.log'), vaultRoot })
+      const original = (await upsertAutomation({
+        vaultRoot, slug: 'synthetic-morning-sleep', title: 'Morning sleep recap', status: 'active', continuityPolicy: 'fresh',
+        now: new Date('2026-11-03T08:00:00.000Z'), schedule: { kind: 'dailyLocal', localTime: '09:00' },
+        route: { channel: 'linq', deliveryTarget: 'synthetic-sleep-chat', threadId: 'synthetic-sleep-chat', threadIsDirect: true, identityId: null, participantId: null },
+        instructions: 'Send a brief morning sleep recap in text.',
+      })).record
+      let inspectedVersion: string | null = null
+      const automationTool: NonNullable<CodexAppServerTurnInput['hostedToolContext']>['automationTool'] = {
+        async request(request) {
+          requests.push(request)
+          if (request.action !== 'inspect' && request.action !== 'patch') throw new Error('Only the existing morning automation may be edited.')
+          expect(request.lookup).toBe(original.automationId)
+          const before = await showAutomation({ vaultRoot, automationId: request.lookup })
+          if (!before) throw new Error('Expected synthetic automation.')
+          if (request.action === 'inspect') inspectedVersion = before.updatedAt
+          else {
+            expect(request.expectedUpdatedAt).toBe(inspectedVersion)
+            expect(Object.keys(request).sort()).toEqual(['action', 'expectedUpdatedAt', 'instructions', 'lookup'])
+            expect(request.instructions).toMatch(/sleep.*card/iu)
+            expect(request.instructions).toMatch(/short|brief|sentence/iu)
+            expect(request.instructions).not.toMatch(/—| - /u)
+            await patchAutomation({ vaultRoot, lookup: request.lookup, expectedUpdatedAt: request.expectedUpdatedAt, instructions: request.instructions, now: new Date('2026-11-03T08:30:00.000Z') })
+          }
+          const record = await showAutomation({ vaultRoot, automationId: request.lookup })
+          if (!record) throw new Error('Expected canonical automation readback.')
+          return { action: request.action, automationId: record.automationId, lookupId: record.automationId, created: false,
+            routeBinding: 'preserved', title: record.title, instructions: record.instructions, schedule: record.schedule,
+            status: record.status, updatedAt: record.updatedAt, effectiveTimeZone: 'UTC',
+            occurrenceProjection: { status: 'resolved', nextOccurrenceAt: '2026-11-03T09:00:00.000Z' } }
+        },
+      }
+      const common = {
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, groupConversation: false, vaultRoot,
+        env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot() }, fixtureBinDirectory: binDirectory,
+        model: config.model, modelProvider: config.modelProvider, reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory: root,
+      } as const
+      const developerOptions = {
+        assistantCliContract: null, assistantHostedAutomationAvailable: true, channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
+        conversationScope: 'direct', currentLocalDate: '2026-11-03', currentInstant: '2026-11-03T08:30:00.000Z', currentTimeZone: 'UTC',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+      } as const
+      const correction = await executeRealCodexAppServerTurn({
+        ...common, dynamicTools: [MURPH_AUTOMATION_TOOL],
+        developerInstructions: buildAssistantSystemPrompt({ ...developerOptions, ordinaryInboundTurn: true, turnTrigger: 'automation-auto-reply' }),
+        hostedToolContext: { ...createRealCodexSupportHostedToolContext('direct'), automationTool },
+        prompt: `My existing morning sleep recap is automation ${original.automationId}. Going forward, send my sleep card in its place along with a short note about how I'm trending and anything else interesting. Keep its schedule and destination.`,
+      })
+      expect(requests.slice(0, 2).map(request => request.action)).toEqual(['inspect', 'patch'])
+      expect(requests.filter(request => request.action === 'patch')).toHaveLength(1)
+      expect(requests.every(request => request.action === 'inspect' || request.action === 'patch')).toBe(true)
+      expect(correction.finalMessage).not.toMatch(/can't combine|cannot combine|unable to combine|—| - /iu)
+      const saved = await showAutomation({ vaultRoot, automationId: original.automationId })
+      expect(saved?.schedule).toEqual(original.schedule)
+      expect(saved?.route).toEqual(original.route)
+      expect((await listAutomations({ vaultRoot })).items).toHaveLength(1)
+      const source = findCanonicalAssistantCronRecordInList(await listCanonicalAssistantCronRecords(vaultRoot), original.automationId)
+      if (!source || source.kind !== 'automation') throw new Error('Expected canonical sleep automation.')
+      const occurrenceAt = '2026-11-03T09:00:00.000Z'
+      const runtimeState = createAssistantCronCanonicalRuntimeRecord({ jobId: resolveCanonicalAssistantCronJobId(source), now: occurrenceAt })
+      const instructions = buildAssistantCronExecutionInstructions({ source, runtimeState, kind: 'canonical', job: projectCanonicalAssistantCronJob({ source, runtimeState }) }, { automationId: null, contextReferences: [] })
+      const prepared = await prepareAssistantCronNotificationInput({
+        instructions, vault: vaultRoot, workingDirectory: root, turnTrigger: 'automation-cron', scheduledAutomationScheduleKind: source.schedule.kind,
+        scheduledInvocationAuthority: { automationId: source.automationId, occurrenceAt },
+        outboxAutomationAuthority: { automationId: source.automationId, expectedUpdatedAt: source.updatedAt },
+      }, { sessionId: 'synthetic-scheduled-sleep-session' })
+      const result = await executeRealCodexAppServerTurn({
+        ...common, dynamicTools: [MURPH_ATTACH_SLEEP_CARD_TOOL], prompt: prepared.instructions,
+        developerInstructions: buildAssistantSystemPrompt({ ...developerOptions, currentInstant: occurrenceAt, ordinaryInboundTurn: false, scheduledOccurrenceAt: occurrenceAt, turnTrigger: 'automation-cron' }),
+      })
+      const attachments = readCapabilityRoutingActions(result.jsonEvents).filter(action => action.kind === 'dynamic' && action.tool.startsWith('attach_'))
+      expect(attachments).toHaveLength(1)
+      expect(attachments[0]).toMatchObject({ tool: 'attach_sleep_card', argumentsValue: { date: '2026-11-03' } })
+      expect(result.responseCard?.kind).toBe('sleep_summary')
+      expect(result.responseMedia).toEqual([])
+      const decision = parseAssistantNotificationDecision(result.providerAuthoredFinalMessage ?? '')
+      expect(decision.kind).toBe('send_message')
+      if (decision.kind !== 'send_message' || !result.responseCard) throw new Error('Expected a scheduled sleep note.')
+      expect(decision.text.trim()).not.toBe('')
+      expect(decision.text).not.toMatch(/—| - |privateSummary|can't combine|cannot combine/iu)
+      process.stdout.write('[sleep-card-scheduled-note-text] ' + JSON.stringify({ savedInstructions: saved?.instructions ?? null, confirmation: correction.finalMessage, scheduledNote: decision.text }) + '\n')
+      const message = renderAssistantResponseCardText(result.responseCard, decision.text)
+      const queued = await deliverAssistantOutboxMessage({ card: result.responseCard, channel: 'linq', threadId: 'synthetic-sleep-chat', threadIsDirect: true, dispatchMode: 'queue-only', message, sessionId: 'synthetic-scheduled-sleep-session', turnId: 'synthetic-scheduled-sleep-turn', vault: vaultRoot })
+      expect(queued.intent).toMatchObject({ message, card: result.responseCard, status: 'pending' })
+      expect(message).not.toContain('privateSummary')
+      expect(await showAutomation({ vaultRoot, automationId: original.automationId })).toEqual(saved)
+      process.stdout.write(JSON.stringify({ scenario: 'sleep-note-edit-and-scheduled', patchCount: 1, attachmentCount: attachments.length, queued: true }) + '\n')
+    } finally { await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths]) }
+  }, 900_000)
 })
 
 describeRealCodex('real Codex focused sleep-pattern projection e2e', () => {
@@ -3645,11 +3901,11 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
       const workingDirectory = await prepareRealCodexOnboardingDirectory()
       const childUsages: AssistantProviderUsageDraft[] = []
       const automationRequests: AssistantHostedAutomationToolRequest[] = []
+      const progressUpdates: string[] = []
       const actionTimings: Array<{ elapsedMs: number; phase: string; type: string; tool: string | null }> = []
       const commandLogPath = path.join(workingDirectory, 'identity-commands.log')
       try {
         await initializeVault({ vaultRoot: workingDirectory, timezone: 'America/New_York' })
-        await upsertMemory(workingDirectory, { section: 'Preferences', text: 'Observed conversational language: English.' })
         // The executable and loader remain environment values, never copied
         // machine-specific paths in a generated fixture.
         await writeFile(path.join(workingDirectory, 'vault-cli'), [
@@ -3665,7 +3921,6 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           ...turnInput,
           configOverrides: [...CHILD_MODEL_SELECTION_CONFIG_OVERRIDES, ...await readHostedDelegationHintOverrides()],
           developerInstructions: buildDirectConversationDeveloperInstructions(true, [
-            'Canonical memory preference: Observed conversational language: English.',
             'Visible direct conversation imported from confirmed Web replies:',
             `Murph: ${ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE}`,
             'Member: Yes, ready.',
@@ -3675,7 +3930,11 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
               'Murph: Good to meet you, Robin. I can help with following through. What would you most like from your health—something you want to improve, understand, handle, or be able to do?',
             ] : []),
           ].join('\n\n'), [], new Date(startedAt).toISOString(), true),
-          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
+          progressDelivery: { async send(text) {
+            progressUpdates.push(text)
+            return { kind: 'sent', source: 'model' }
+          } },
           env: {
             ...turnInput.env,
             MURPH_ONBOARDING_TEST_COMMAND_LOG: commandLogPath,
@@ -3716,7 +3975,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         const actions = readCapabilityRoutingActions(result.jsonEvents)
         process.stdout.write(`[onboarding-opening-e2e] ${JSON.stringify({
           replyMs, providerActionCount: result.providerActionCount, reply: result.finalMessage.trim(),
-          actionTimings,
+          actionTimings, progressUpdates,
         })}\n`)
         if (opening === 'Web aspiration reply') {
           expect(result.finalMessage).not.toMatch(/what would you most like from your health/iu)
@@ -3729,6 +3988,8 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         if (opening === 'identity answer') expect(await readOnboardingPolicyFiles(actions, path.join(workingDirectory, 'skills'))).toEqual([])
         expect(actions.filter((action) => action.kind === 'command' && !isRecordedVaultHelpCommand(action.command) && /memory (?:set-name|upsert|update)/u.test(action.command))).toEqual([])
         expect(automationRequests).toHaveLength(0)
+        expect(progressUpdates).toEqual([])
+        expect(readDynamicToolAttempts(result.jsonEvents).filter((action) => action.tool === 'send_progress_update')).toEqual([])
         // Exercise the production deterministic owner after the visible reply.
         await startAssistantOnboarding({ vault: workingDirectory, startedAt: new Date(startedAt).toISOString() })
         const seeded = await seedMurphOnboardingEarlyStallAutomation({
@@ -3744,6 +4005,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         await waitForWarmCodexBackgroundWork()
         const memory = await readMemoryDocument(workingDirectory)
         const identity = memory.records.map((record) => record.text).join('\n')
+        expect(identity).not.toMatch(/observed conversational language.*English/iu)
         expect(childUsages).toHaveLength(1)
         expect(identity).toMatch(/Robin/u)
         expect(identity).toMatch(/34/u)
@@ -47555,4 +47817,92 @@ describeRealCodex('real Codex exact group games', () => {
       expect(reply.length).toBeLessThan(350)
     } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
   }, 360_000)
+})
+
+describeRealCodex('real Codex group majority changes', () => {
+  it.each(['ask', 'waiting vote', 'deciding vote'] as const)('group majority change %s', async phase => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-group-majority-e2e-'))
+    const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    const { hostedGameToolResponseSchema } = await import('@murphai/hosted-execution/runtime-control')
+    const inputId = 'ain_' + 'c'.repeat(32)
+    const origin = { kind: 'accepted_input' as const, assistantInputId: inputId }
+    const calls: import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest[] = []
+    const actorSeat = phase === 'ask' ? 1 : phase === 'waiting vote' ? 0 : 2
+    const players = ['Alex', 'Sam', 'River', 'Taylor'].map((firstName, seat) => ({ memberId: `player_${seat}`, firstName, timeZone: 'UTC', isSender: seat === actorSeat }))
+    let written = false
+    let proposalId = 'proposal_group_fixture'
+    const tasks = players.map(player => ({ memberId: player.memberId, text: 'Walk outside' }))
+    const schedule = { days: [0, 1, 2, 3, 4, 5, 6] }
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: true, groupConversation: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantHostedGroupToolSurface: 'families',
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
+          currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T12:00:00.000Z', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+        }),
+        dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL, ...resolveMurphDynamicTools({}).filter(tool => tool.name === 'finish_without_reply')],
+        hostedToolContext: {
+          computerToolsAvailable: false, vaultFileSendAvailable: false,
+          groupTool: { request: async request => {
+            calls.push(request)
+            if (request.action !== 'read_game' && request.action !== 'update_game') throw new Error('Unexpected game effect')
+            if (request.action === 'update_game') {
+              expect(written).toBe(false)
+              if (phase === 'ask') {
+                expect(request.update).toMatchObject({ operation: 'edit_terms', gameId: 'game_group_fixture', expectedTermsVersion: 1,
+                  proposalId: expect.any(String), terms: { defaultTask: 'Walk outside', tasks, schedule, stakes: [{ kind: 'prize', item: 'Choose a movie' }] } })
+                if (request.update.operation !== 'edit_terms' || !request.update.proposalId) throw new Error('Missing group ask')
+                proposalId = request.update.proposalId
+              } else expect(request.update).toEqual({ operation: 'approve', gameId: 'game_group_fixture', proposalId })
+              written = true
+            }
+            const applied = written && phase === 'deciding vote'
+            const votes = [{ memberId: 'player_1', vote: 'yes' },
+              ...(phase === 'deciding vote' || written && phase === 'waiting vote' ? [{ memberId: 'player_0', vote: 'yes' }] : [])]
+            return hostedGameToolResponseSchema.parse({ action: request.action, result: { status: 'ok', state: {
+              players, games: [{ id: 'game_group_fixture', maxPlayers: 10, pendingInviteeCount: 0, status: 'live', lengthDays: 7, startsOn: '2030-03-07',
+                terms: { n: applied ? 2 : 1, fromDay: 0, tasks: players.map((_, seat) => ({ seat, text: 'Walk outside' })), defaultTask: 'Walk outside', schedule,
+                  stakes: [{ kind: 'prize', item: applied ? 'Choose a movie' : 'Choose lunch' }] },
+                players: players.map((player, seat) => ({ memberId: player.memberId, firstName: player.firstName, timeZone: player.timeZone, seat, dayOne: '2030-03-07' })),
+                pendingChange: applied || phase === 'ask' && !written ? null : { id: proposalId, proposedByMemberId: 'player_1', expectedTermsVersion: 1,
+                  change: { kind: 'edit', stakes: [{ kind: 'prize', item: 'Choose a movie' }] }, effectiveFromDay: 0, startsOn: null, origin: 'chat', deliveryStatus: 'conversation', votes, yesNeeded: 3 - votes.length },
+                changeControls: { canStartNow: false, canEdit: phase === 'ask' && !written, canEditSchedule: true, canEditStartDate: true, canEditTasks: true, canEditStakes: true, editableFromDay: 0 },
+              }],
+            } } })
+          } },
+          currentUserActionScope: () => ({ conversationId: 'synthetic-room', inboundMailboxItemIds: [], recipientKey: 'synthetic-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-session', conversationScope: 'group' }),
+          currentInvocationScope: () => ({ origin: { ...origin, sessionId: 'synthetic-session' }, conversationScope: 'group' }),
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send authorized') },
+        },
+        prompt: `Alex, Sam, River and Taylor are seated in Alex's walking challenge with Murph. ${phase === 'ask' ? '' : 'Sam asked to change the prize from choosing lunch to choosing a movie. That ask is waiting for yeses.'}\nCurrent accepted message from ${players[actorSeat].firstName} (Message ref: ${inputId}, Occurred at: 2030-03-06T12:00:00.000Z): ${phase === 'ask' ? 'Murph, can we change the prize to choosing a movie? Keep everything else the same.' : 'Murph, yes, I agree to Sam’s movie prize.'}`,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const reply = result.finalMessage.trim()
+      process.stdout.write(`[group majority change ${phase}] ${JSON.stringify({ reply, actions: calls.map(call => call.action === 'update_game' ? call.update.operation : call.action) })}\n`)
+      expect(calls.map(call => call.action)).toEqual(['read_game', 'update_game'])
+      expect(written).toBe(true)
+      expect(reply).not.toMatch(/player_|game_group|proposal|poll|only.*starter|everyone.*agreed/iu)
+      if (phase === 'deciding vote') {
+        expect(reply).toMatch(/movie/iu)
+        expect(reply).not.toMatch(/need.*yes|waiting|does that work|agree\?/iu)
+      } else {
+        expect(reply).toMatch(phase === 'ask' ? /(?:2|two).*?(?:yes|agree)|(?:yes|agree).*?(?:2|two)/iu : /(?:1|one).*?(?:yes|agree)|(?:yes|agree).*?(?:1|one)/iu)
+        expect(reply).not.toMatch(/prize (?:is|has) (?:now|changed)|all set|done[.!]/iu)
+      }
+      expect(reply.length).toBeLessThan(350)
+    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
+  }, 360_000)
+})
+
+describeRealCodex('fresh next-day reminder language', () => {
+  it.each(REMINDER_LANGUAGE_CASES)('$id keeps the current language through Sol authoring and Luna delivery', async scenario => {
+    const config = await resolveRealCodexE2eConfig({ productionTransport: true })
+    try { await runReminderLanguageJourney(config, scenario) }
+    finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
+  }, 600_000)
 })

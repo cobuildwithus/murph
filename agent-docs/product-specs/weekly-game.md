@@ -64,11 +64,32 @@ A second acceptance activates it; until then it waits without expiry. Addressed
 invitees keep their seats. Bearer joiners use separate seats, and ten total
 admissions includes departures. There is no rejoin. Late joiners share the
 existing calendar and can score only from their local joining day, capped by
-the common schedule. The starter can edit or cancel until anyone checks in
-(any post, words or excuse), even after Day 1 has begun, but not once the game
-is due. An edited start date runs from the latest player's today to 60 days
-out and moves Day 1 for everyone; stale joins must read the new terms before
-accepting.
+the common schedule. While invited, the starter alone can edit full terms
+directly. Once live, any remaining seated player can ask for a change in the
+bound group chat with `edit_terms`, full terms, the current terms version and a
+new proposal ID. More than half of the remaining players must say yes, including
+the proposer. Each person can answer only for themselves; their yes or no is
+final for that ask. Repeating the same answer is a no-op, even after resolution.
+One ask waits at a time, and only its proposer can cancel it. Unjoined invitees
+and departed players do not count. A late join adds an undecided voter; a
+departure clears the ask because it detaches chat access.
+
+Group changes use the pair edit delta, pending JSON and approved terms writer.
+Tasks lock once Day 1 begins, the start date at the first check-in, and the prize
+when the game is due. Length and weekday schedule edits start at the next
+unstarted day; an any-days target locks once play starts. Start now is unavailable.
+An agreed start date runs from the latest player's today to 60 days out and moves
+Day 1 for everyone; stale joins must read the new terms before accepting.
+Chat reads expose seated votes and yeses still needed. The app permits direct
+edits only while invited and has no group voting or pending-change projection.
+Cancelling the game stays starter-only until the first check-in, while not due.
+Terms reports target the latest applied change's proposer, falling back to the
+starter for initial terms, for both pairs and groups.
+
+Deploy this change to Web before the runner. Old runners omit the required
+live-group proposal ID and receive a refusal; old Web rejects the new field.
+Brief refusals during either version window are accepted. No migration or
+additional capability flag is needed; production group admission stays dark.
 
 A pre-settlement leave is silent, preserves evidence and excludes the player
 from prizes, debts and new content. Leaving a waiting invitation voids it, as
@@ -540,6 +561,70 @@ resulting avatar. No private photo is shared with the subject or other players.
   ended.
 - **What can't be posted.** Money stakes, clearly dangerous tasks or dares,
   slurs and explicit sexual words are refused with "This can't be posted."
+
+## Replies
+
+In a live, not-yet-due two-player game (`maxPlayers === 2`), a player can
+leave one note on the other player's current visible post from any game day.
+Photo, words, reps, heart rate and route posts qualify; excuses do not.
+Groups have no Reply action. Replies give no points or completion credit.
+
+A typed note uses the words-post validator and local content filter: trim,
+one line, 1–140 UTF-16 units. A voice note is AAC in M4A, at most 400,000 raw
+bytes, with one sound track and 32 integer waveform levels from 0 to 100.
+Both the movie and media duration must be 1–30,500 ms; the stored duration
+comes from the media header. The extra half second accommodates AAC padding.
+Voice is never transcribed. Neither kind enters model input, Murph's chat,
+`read_game`, assistant tools, recaps, share data, logs or telemetry.
+
+The app's entry view carries an optional `reply` with its id, kind, creation
+time and `mine`. Text replies include text; voice replies include duration
+and waveform levels. Audio bytes come only from the authenticated playback
+route. Opponent entries carry `canReply`; groups omit it. Reads require the
+parent post to be live and visible and both players to remain present.
+A block or any report between the pair, in either direction and in any game,
+hides replies from both. This report rule applies only to replies; existing
+post, player-photo and recap report behavior stays unchanged. Reading,
+playing, deleting and reporting remain available after the game ends.
+
+The author can delete a reply even after a block or report. Deletion is silent
+and frees the post for a new reply with a new UUID. A retry using a deleted
+reply's UUID never recreates it. Withdrawing, retaking or removing the parent
+post deletes the reply. Deleting the game or either account also removes it.
+
+The post gets at most one push ever: “New voice note on your post.” or
+“New note on your post.” No name, duration or content enters the push. The
+server rechecks visibility before its single best-effort send, with a 24-hour
+expiry and no retry or reminder. A delete followed by another reply sends no
+second push. Old apps ignore the new view fields; a reply push opens the app
+without selecting a game until the native client supports `game_reply`.
+
+The receiver can report an incoming reply through the existing report route.
+The report targets the reply's author, leaves `entryId` null, and keeps a
+reporter-owned encrypted evidence copy. Evidence survives deletion of the
+reply or its author for human review. Ops removes only the reply; the post,
+score and recap remain intact. The existing report alert and review commitment
+apply. The reporter's account deletion removes their evidence.
+
+App routes:
+
+- `POST /api/game/v1/games/:id/entries/:entryId/replies`: `{replyId, kind:
+  "text", text}` or `{replyId, kind: "voice", audio, levels}`. `audio` is
+  base64. Mixed and unknown fields are refused; duration comes from the file.
+  This route alone permits a 600 KiB JSON body and requires current Terms.
+- `DELETE /api/game/v1/games/:id/replies/:replyId`: no body, author only,
+  idempotent, no current-Terms gate.
+- `GET /api/game/v1/games/:id/replies/:replyId/audio`: object-authorized game
+  bearer access, `audio/mp4`, private/no-store, nosniff; no signed URL.
+- `POST /api/game/v1/games/:id/reports`: `about: "reply"` and `replyId` with
+  the existing report fields. Stored report identity is recovered before
+  requiring live content, so alert retries work after hiding or deletion.
+- `GET /api/ops/game-reports/:reportId/audio`: Ops-authenticated evidence.
+
+Deploy the additive migration, then the complete Web backend, then the native
+client. Once a reply or reply report exists, this Web release is the rollback
+floor. Disable new replies with a forward fix that preserves reads, playback,
+delete and report review. Privacy Policy/version changes ship separately.
 
 ## Prove it
 

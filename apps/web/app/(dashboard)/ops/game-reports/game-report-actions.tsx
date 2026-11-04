@@ -9,6 +9,7 @@ import { Button } from "@/src/components/ui/button";
 interface GameReportActionsProps {
   reportId: string;
   canRemovePost: boolean;
+  removeLabel?: string;
   canEndGames: boolean;
   canSuspend: boolean;
 }
@@ -42,7 +43,7 @@ export function GameReportActions(props: GameReportActionsProps) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap gap-2">
-        {props.canRemovePost ? <Button disabled={pending !== null} onClick={() => review("removePost")} type="button" variant="outline">Remove the post</Button> : null}
+        {props.canRemovePost ? <Button disabled={pending !== null} onClick={() => review("removePost")} type="button" variant="outline">{props.removeLabel ?? "Remove the post"}</Button> : null}
         {props.canEndGames ? <Button disabled={pending !== null} onClick={() => review("endGames")} type="button" variant="outline">End their games</Button> : null}
         {props.canSuspend ? <Button disabled={pending !== null} onClick={() => review("suspendMember")} type="button" variant="destructive">Suspend the member</Button> : null}
         <Button disabled={pending !== null} onClick={() => review("dismiss")} type="button" variant="ghost">No action</Button>

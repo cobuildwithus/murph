@@ -61,6 +61,7 @@ import {
   buildLinqIMessageAppFallbackText,
   buildLinqIMessageAppCardUrl,
   buildLinqIMessageAppLayout,
+  readSleepSummaryNote,
   type AssistantResponseCard,
   type LinqIMessageAppLayout,
 } from './assistant-response-cards.js'
@@ -709,7 +710,19 @@ export async function checkLinqIMessageCapability(
     signal: dependencies.signal,
     singleAttemptTimeoutMs: LINQ_IMESSAGE_CAPABILITY_TIMEOUT_MS,
   })
-  return response?.available === true
+  if (typeof response?.available !== 'boolean') {
+    throw new VaultCliError(
+      'LINQ_API_REQUEST_FAILED',
+      'Linq capability response was missing a boolean availability.',
+      {
+        failureStage: 'http',
+        operation: 'check_imessage_capability',
+        provider: 'linq',
+        retryable: true,
+      },
+    )
+  }
+  return response.available
 }
 
 export async function sendLinqIMessageAppCard(
@@ -724,12 +737,22 @@ export async function sendLinqIMessageAppCard(
     fetchImplementation?: LinqFetch
     signal?: AbortSignal
   } = {},
-): Promise<MessageSendResponse> {
+): Promise<LinqMessageSendResponse> {
   const chatId = normalizeRequiredString(input.chatId, 'chat id')
   const idempotencyKey = normalizeRequiredString(
     input.idempotencyKey,
     'iMessage app card idempotency key',
   )
+  const note = readSleepSummaryNote(input.card, input.companionMessage)
+  if (note) {
+    assertLinqMessagePartsWithinLimits({
+      message: note,
+      operation: 'send_message',
+      requestAttachmentMediaPartCount: 0,
+      requestMediaPartCount: 0,
+      requestPublicUrlMediaPartCount: 0,
+    })
+  }
   const body: MessageSendParams = {
     message: {
       preferred_service: 'iMessage',
@@ -751,13 +774,50 @@ export async function sendLinqIMessageAppCard(
     },
   }
 
-  return sendLinqChatMessageBody({
+  const cardResponse = await sendLinqChatMessageBody({
     body,
     chatId,
     idempotencyKey,
     operation: 'send_imessage_app_card',
     replyToMessageId: null,
   }, dependencies)
+  const providerMessageEffects = buildLinqProviderMessageEffects({
+    body,
+    providerMessageId: cardResponse.message.id,
+  })
+  if (!note) return { ...cardResponse, providerMessageEffects }
+
+  const cardMessageIds = collectLinqProviderMessageIds(cardResponse.message.id)
+  try {
+    const noteResponse = await sendLinqChatMessageParts({
+      chatId,
+      idempotencyKey: `${idempotencyKey}:note`,
+      message: note,
+    }, dependencies)
+    const providerMessageIds = collectLinqProviderMessageIds(
+      cardResponse.message.id,
+      noteResponse.message.id,
+    )
+    if (providerMessageIds.length !== 2) {
+      throw new Error('Linq did not return distinct identities for the card and note.')
+    }
+    return {
+      ...noteResponse,
+      providerMessageIds,
+      providerMessageEffects: [
+        ...providerMessageEffects,
+        ...(noteResponse.providerMessageEffects ?? []),
+      ],
+    }
+  } catch (error) {
+    throw createLinqRichLinkPartialDeliveryFailure(
+      error,
+      idempotencyKey,
+      providerMessageEffects,
+      cardMessageIds,
+      chatId,
+    )
+  }
 }
 
 async function createLinqAttachmentUpload(

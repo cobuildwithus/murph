@@ -79,6 +79,7 @@ export async function sendGameReportAlert(alert: GameReportAlert, input: {
 }
 
 export function gameReportContentLabel(alert: Pick<GameReportAlert, "about" | "entryKind" | "fromInvite">): string {
+  if (alert.about === "reply") return "reply";
   if (alert.about === "post") return alert.entryKind ? KINDS[alert.entryKind] : "post";
   const what = alert.about === "player" ? "their name and photo" : "the task and prize or dare they wrote";
   return alert.fromInvite ? `${what}, on an invite` : what;

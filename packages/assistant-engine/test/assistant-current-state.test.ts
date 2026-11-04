@@ -9,8 +9,10 @@ import {
   type MemoryDocument,
   upsertMemoryRecord,
 } from '@murphai/contracts'
-import { upsertMemory } from '@murphai/core'
+import { initializeVault, upsertMemory } from '@murphai/core'
 import { afterEach, describe, expect, it } from 'vitest'
+
+import { buildAssistantSystemPromptLayers } from '../src/assistant/system-prompt.js'
 
 import { readAssistantContextSnapshotPrompt } from '../src/assistant/context-snapshot.js'
 import {
@@ -30,6 +32,31 @@ afterEach(async () => {
 })
 
 describe('assistant current state', () => {
+  it.each([null, 'Spanish', 'Japanese'])('supplies canonical language memory to next-day direct reminders: %s', async language => {
+    const root = await mkdtemp(path.join(tmpdir(), 'assistant-reminder-language-'))
+    tempRoots.push(root)
+    await initializeVault({ vaultRoot: root, timezone: 'Europe/Warsaw' })
+    if (language) await upsertMemory(root, { section: 'Preferences', text: `Observed conversational language: ${language}.` })
+    const snapshot = await readAssistantCurrentStatePrompt({ vaultRoot: root })
+    const layers = buildAssistantSystemPromptLayers({
+      assistantCliContract: null, assistantContextSnapshotPrompt: snapshot,
+      channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'direct',
+      currentLocalDate: '2030-04-02', currentTimeZone: 'Europe/Warsaw',
+      currentInstant: '2030-04-02T06:00:00.000Z', scheduledOccurrenceAt: '2030-04-02T06:00:00.000Z',
+      hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+      turnTrigger: 'automation-cron',
+    })
+    expect(layers.staticCacheableCorePrompt).toContain("Match replies, including voice memo text, to the user's conversational language")
+    expect(layers.staticCacheableCorePrompt).toContain('An explicit language request wins; otherwise honor an explicit saved language preference, then clear current conversational language, then the remembered default')
+    expect(layers.staticCacheableCorePrompt).toContain('English needs no new observed-language note')
+    expect(layers.dynamicTurnContextPrompt).toContain('triggered by an existing scheduled automation run')
+    expect(layers.dynamicTurnContextPrompt).toContain('execution instructions for this scheduled run')
+    expect(layers.dynamicTurnContextPrompt).toContain('Europe/Warsaw')
+    if (language) expect(layers.dynamicTurnContextPrompt).toContain(`Observed conversational language: ${language}.`)
+    else expect(layers.dynamicTurnContextPrompt).not.toContain('Observed conversational language:')
+    expect(layers.prompt).not.toContain('This is not an attended user turn or a scheduled automation occurrence')
+  })
+
   it('retains older durable preferences beyond three recent records with stable bounds', () => {
     let document = createEmptyMemoryDocument(
       new Date('2026-08-30T12:00:00.000Z'),

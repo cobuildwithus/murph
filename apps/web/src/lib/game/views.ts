@@ -7,6 +7,7 @@
  */
 
 import type {
+  GameChangeControls,
   GameDayOtherStatus,
   GameDayView,
   GameEntryView,
@@ -65,6 +66,7 @@ import { pendingGameChangeView, gameChangeControls } from "./changes";
 import { firstOpenSeat, isPairRoster } from "./roster";
 
 const GAME_MEDIA_PATH = "/api/game/v1/media/";
+const CLOSED_CHANGE_CONTROLS: GameChangeControls = { canStartNow: false, canEdit: false, canEditSchedule: false, canEditStartDate: false, canEditTasks: false, canEditStakes: false, editableFromDay: null };
 export const GAME_HISTORY_PREVIEW_LIMIT = 6;
 
 export function gameMediaUrl(key: string): string {
@@ -94,6 +96,8 @@ export interface GameTicketRow {
 }
 
 export interface GameViewInput {
+  entryReplies?: ReadonlyMap<string, import("./contract").GameReplyView>;
+  replyEligibleEntryIds?: ReadonlySet<string>;
   challenges?: readonly RuleChallenge[];
   multiplayer?: boolean;
   home?: boolean;
@@ -237,6 +241,10 @@ function entryView(entry: RuleEntry, input: GameViewInput): GameEntryView {
   const challenge = input.challenges?.find(challenge => challenge.entryId === entry.id);
   const status = challenge && gameChallengeStatus(input.state, challenge, input.now);
   return {
+    ...(input.state.game.seats === 2 ? {
+      ...(input.entryReplies?.has(entry.id) ? { reply: input.entryReplies.get(entry.id) } : {}),
+      ...(entry.memberId !== input.viewerId && input.replyEligibleEntryIds !== undefined ? { canReply: input.replyEligibleEntryIds?.has(entry.id) ?? false } : {}),
+    } : {}),
     ...(challenge && (status === "open" || status === "stood") ? { challenge: { status, deadlineAt: challenge.deadlineAt.toISOString(), byYou: challenge.actor === input.viewerId } } : {}),
     ...(entry.incomplete ? { incomplete: true as const } : {}),
     entryId: entry.id,
@@ -332,8 +340,9 @@ export function buildGameView(input: GameViewInput): GameView {
   return {
     ...(input.multiplayer ? { maxPlayers: game.seats === 10 ? 10 as const : 2 as const, invitedCount: game.invitees?.length ?? 1,
       permissions: permissions(input), ...(game.seats === 10 ? { group: groupView(input) } : {}) } : {}),
-    changeControls: gameChangeControls(state, input.now, input.pendingChange ?? null),
-    pendingChange: pendingGameChangeView(state, input.pendingChange ?? null, input.now),
+    // Group changes are voted on in the group chat; the app has no group change controls.
+    changeControls: game.seats === 10 ? CLOSED_CHANGE_CONTROLS : gameChangeControls(state, input.now, input.pendingChange ?? null),
+    pendingChange: game.seats === 10 ? null : pendingGameChangeView(state, input.pendingChange ?? null, input.now),
     ...(input.talkDelivery ? { talkDelivery: input.talkDelivery } : {}),
     days: game.status === "negotiating" ? [] : dayViews(input, players, entries),
     id: game.id,
@@ -401,7 +410,7 @@ function permissions(input: GameViewInput): GamePermissions {
     canJoin: canJoinView(input),
     canLeave: state.game.seats === 10 && !!player && !player.leftAt && open,
     canCancel: open && permits(() => decideCancelInvite(state, viewerId, now)),
-    canEditTerms: permits(() => assertGroupTermsOpen(state, viewerId, now)),
+    canEditTerms: state.game.status === "invited" && permits(() => assertGroupTermsOpen(state, viewerId, now)),
   };
 }
 

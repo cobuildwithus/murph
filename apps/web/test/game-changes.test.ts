@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { gameChangeCancellationNeedsNotice, decideApprovedGameChange, decideGameChange, firstUnstartedGameDay, gameChangeControls, isGameChangeExpired, parsePendingGameChange, pendingGameChangeView } from "@/src/lib/game/changes";
+import { gameChangeMajority, normalizeGroupGameChange, gameChangeCancellationNeedsNotice, decideApprovedGameChange, decideGameChange, firstUnstartedGameDay, gameChangeControls, isGameChangeExpired, parsePendingGameChange, pendingGameChangeView } from "@/src/lib/game/changes";
 import { parseGameCommand } from "@/src/lib/game/command";
-import { scorePlayer, type RuleState } from "@/src/lib/game/rules";
+import { decideNewTerms, scorePlayer, type RuleState, type TermWords } from "@/src/lib/game/rules";
 import { dayStartInstant } from "@/src/lib/game/time";
-import type { GamePendingChange } from "@/src/lib/game/contract";
+import type { GamePendingChange, GameTermsInput } from "@/src/lib/game/contract";
 
 const BEFORE = new Date("2026-11-02T17:00:00Z");
 const DURING = new Date("2026-11-04T17:00:00Z");
@@ -12,7 +12,7 @@ function state(): RuleState {
     terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: [0,1,2,3,4] }, stakes: [] }] } },
   players: ["player_a", "player_b"].map((memberId, seat) => ({ memberId, seat, dayOne: "2026-11-03", timeZone: "America/New_York" })), entries: [] };
 }
-function pending(s = state(), now = BEFORE): GamePendingChange {
+function pending(s = state(), now = BEFORE): Omit<GamePendingChange, "votes"> {
   return { id: "proposal_a", proposedByMemberId: "player_a", expectedTermsVersion: 1, deliveryStatus: "pending",
     ...decideGameChange(s, "player_a", { kind: "edit", schedule: { days: [5,6] } }, now) };
 }
@@ -256,5 +256,72 @@ describe("weekly game mutually agreed changes", () => {
       expect(isGameChangeExpired(unstarted, startNow, tuesday)).toBe(false);
       expect(isGameChangeExpired(unstarted, startNow, noon("2026-11-12", "Pacific/Auckland"))).toBe(true);
     });
+  });
+});
+
+describe("group change rules", () => {
+  function group(count = 4): RuleState {
+    const s = state(); s.game.seats = 10;
+    s.players = Array.from({ length: count }, (_, seat) => ({ ...s.players[0], memberId: `member_${seat}`, seat }));
+    return s;
+  }
+
+  it.each([2, 3, 4, 10])("requires a strict majority of %i remaining players", count => {
+    const s = group(count);
+    for (let yes = 1; yes <= count; yes++) {
+      for (let no = 0; no <= count - yes; no++) {
+        const votes: Record<string, "yes" | "no"> = Object.fromEntries(s.players.slice(0, yes + no).map((p, i) => [p.memberId, i < yes ? "yes" : "no"]));
+        expect(gameChangeMajority(s, votes)).toEqual({ approved: yes > count / 2, declined: count - no <= count / 2,
+          yesNeeded: Math.max(0, Math.floor(count / 2) + 1 - yes) });
+      }
+    }
+  });
+
+  it("ignores unjoined and departed votes, and parses final votes from pending JSON", () => {
+    const s = group(4); s.players[3].leftAt = BEFORE;
+    const votes = { member_0: "yes" as const, member_1: "yes" as const, member_3: "no" as const, unjoined: "no" as const };
+    expect(gameChangeMajority(s, votes)).toEqual({ approved: true, declined: false, yesNeeded: 0 });
+    expect(parsePendingGameChange({ v: 1, ...pending(), votes })?.votes).toEqual(votes);
+    expect(() => parsePendingGameChange({ v: 1, ...pending(), votes: { member_0: "maybe" } })).toThrow("malformed");
+  });
+
+  it("uses pair locks and due cutoffs for groups, with no Start now", () => {
+    const s = group();
+    for (const now of [BEFORE, DURING, new Date("2026-11-09T08:00:00Z"), new Date("2026-11-10T08:00:00Z")]) {
+      const pair = { ...s, game: { ...s.game, seats: 2 }, players: s.players.slice(0, 2) };
+      expect(gameChangeControls(s, now, null)).toEqual({ ...gameChangeControls(pair, now, null), canStartNow: false });
+    }
+    expect(() => decideGameChange(s, "member_0", { kind: "start_now" }, BEFORE)).toThrow();
+    expect(gameChangeControls(s, BEFORE, pending()).canEdit).toBe(false);
+    expect(decideGameChange(s, "member_1", { kind: "edit", startsOn: "2026-11-06" }, DURING)).toMatchObject({ effectiveFromDay: 0 });
+    expect(() => decideGameChange(s, "member_1", { kind: "edit", tasks: [] }, DURING)).toThrow("Tasks lock");
+    expect(decideGameChange(s, "member_1", { kind: "edit", lengthDays: 10, schedule: { days: [0, 1, 2, 3, 4, 5, 6] } }, DURING).effectiveFromDay).toBe(2);
+    s.game.terms.versions[0].schedule = { count: 4 };
+    expect(() => decideGameChange(s, "member_1", { kind: "edit", schedule: { count: 5 } }, DURING)).toThrow("any-days target unchanged");
+    s.entries.push({ id: "entry_first", memberId: "member_0", dayIndex: 0, kind: "words", attempt: 1, mediaKeys: [], receivedAt: DURING, blurHash: null, withdrawnAt: null });
+    expect(gameChangeControls(s, DURING, null).canEditStartDate).toBe(false);
+    expect(() => decideGameChange(s, "member_1", { kind: "edit", startsOn: "2026-11-06" }, DURING)).toThrow("start date locks");
+  });
+
+  it("normalizes full terms into only the changed fields and rejects semantic no-ops", () => {
+    const s = group(2);
+    const words: TermWords = { v: 1, groupWord: "Crew", versions: [{ n: 1, defaultTask: "Walk", tasks: [{ seat: 4, text: "Private task" }], stakes: [{ key: "prize", item: "Lunch" }] }] };
+    s.game.terms.versions[0].stakes = [{ key: "prize", kind: "prize" }];
+    const input: GameTermsInput = { lengthDays: 7, schedule: { days: [4, 3, 2, 1, 0] }, defaultTask: "Walk", tasks: words.versions[0].tasks, stakes: [{ kind: "prize" as const, item: "Lunch" }] };
+    const prepare = (overrides: Partial<typeof input>) => decideNewTerms({ ...input, ...overrides }, { newKey: () => "new_prize", today: "2026-11-02", maxPlayers: 10, inviteeSeats: [0, 1, 4], allowToday: true });
+    expect(() => normalizeGroupGameChange(s, words, prepare({}))).toThrow("Nothing changed.");
+    expect(() => normalizeGroupGameChange(s, words, prepare({ tasks: [...input.tasks, { seat: 0, text: "Walk" }] }))).toThrow("Nothing changed.");
+    expect(normalizeGroupGameChange(s, words, prepare({ lengthDays: 10 }))).toEqual({ kind: "edit", lengthDays: 10 });
+    expect(normalizeGroupGameChange(s, words, prepare({ stakes: [{ kind: "prize", item: "Dinner" }] }))).toEqual({ kind: "edit", stakes: [{ kind: "prize", item: "Dinner" }] });
+    expect(normalizeGroupGameChange(s, words, prepare({ defaultTask: "Run" }))).toEqual({ kind: "edit", defaultTask: "Run", tasks: input.tasks });
+    expect(normalizeGroupGameChange(s, words, prepare({ tasks: [...input.tasks, { seat: 0, text: "Read" }] }))).toMatchObject({ kind: "edit", defaultTask: "Walk", tasks: [{ seat: 0, text: "Read" }, { seat: 4, text: "Private task" }] });
+    expect(words.groupWord).toBe("Crew");
+  });
+
+  it("validates optional group proposal IDs like pair proposal IDs", () => {
+    const command = { type: "editTerms", gameId: "game_group", expectedTermsVersion: 1,
+      terms: { defaultTask: "Walk", tasks: [], schedule: { count: 3 }, stakes: [{ kind: "prize", item: "Lunch" }] } };
+    expect(parseGameCommand({ ...command, proposalId: "proposal_group" })).toMatchObject({ proposalId: "proposal_group" });
+    expect(() => parseGameCommand({ ...command, proposalId: "short" })).toThrow();
   });
 });

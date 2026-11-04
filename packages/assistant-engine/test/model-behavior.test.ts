@@ -8,6 +8,7 @@ import {
 import {
   MURPH_CODEX_BASE_INSTRUCTIONS,
 } from '../src/assistant/codex-base-instructions.js'
+import { MURPH_ATTACH_SLEEP_CARD_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.js'
 import {
   buildAssistantSystemPrompt,
   buildAssistantMaintenanceSystemPromptWithCacheMetadata,
@@ -1306,7 +1307,24 @@ describe('assistant system prompt cache stability', () => {
     // to 5/5. Retain the prior 128-character margin.
     // Sleep-card discovery replaces the generic nightly-summary read direction,
     // adding 557 characters. Preserve the existing 128-character margin.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(80_294)
+    // The explicit sleep-note exception adds 682 rendered characters while
+    // retaining the existing margin. It covers ordinary and exact scheduled turns.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(80_976)
+  })
+
+  it('keeps the sleep-note exception explicit in the composed production policy', () => {
+    const layers = buildAssistantSystemPromptLayers(createCommonCodexPromptInput({ assistantCliContract: null }))
+    const prompt = layers.stableRouteCapabilityPrompt
+    // The always-loaded lines name the exception; the deferred tool description carries its detail once.
+    expect(prompt).toContain('send no final text unless the member or the saved instructions for that scheduled occurrence ask for a short note, which the tool description covers')
+    expect(prompt).toContain('Complete cards replace text; the one exception is a short note requested with a sleep card')
+    expect(prompt).not.toContain('one or two evidence-based sentences')
+    expect(prompt).not.toContain('Complete cards replace text. After attachment,')
+    const tool = MURPH_ATTACH_SLEEP_CARD_TOOL.description
+    expect(tool).toContain('The card alone is the default: after successful attachment, send no final text.')
+    expect(tool).toContain('saved instructions for that exact scheduled occurrence also ask for a short note')
+    expect(tool).toContain('one or two evidence-based sentences after successful attachment about what the card does not show')
+    expect(tool).toContain('ordinary final text in attended turns or send_message.text in scheduled turns')
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -1613,7 +1631,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toMatchInlineSnapshot(`"68a1d5108af16ff8649843be4ab7aa231321228a52be79e80f0f3010cfea7c67"`)
-    expect(promptA.cacheMetadata.stableRouteCapabilityPromptHash).toMatchInlineSnapshot(`"e2c858c68a87be1554bd7d72f15bc6b994c2b480afadaaead0957c6180fbabdb"`)
+    expect(promptA.cacheMetadata.stableRouteCapabilityPromptHash).toMatchInlineSnapshot(`"b6e56e3882fe7e3232b70f14c25fd3633f4a523463d1a083524d55d4928d64a8"`)
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
     )

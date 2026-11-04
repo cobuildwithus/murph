@@ -2997,8 +2997,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           systemMailboxProgressedSinceCheckpoint ||= completion.systemProgressed === true;
         }
         clinicalEnrichmentController?.kick();
-        runtimeStateDirty = true;
-        ensureIdleCheckpointTimerAfterDirtyWork();
+        // A restored recording journal is already durable. Its replay will
+        // dirty cleanup state; merely recovering it must not hide a due
+        // assistant wake from the initial pass.
+        if (!completion.alreadyCheckpointed) {
+          runtimeStateDirty = true;
+          ensureIdleCheckpointTimerAfterDirtyWork();
+        }
         if (completion.afterDurableCheckpoint) {
           const effects = completion.alreadyCheckpointed
             ? readyDurableCheckpointEffects : pendingDurableCheckpointEffects;
@@ -5235,7 +5240,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       if (!durableCheckpointEffects.requiresFollowUpCheckpoint) {
         return false;
       }
-      stageDurableCheckpointFollowUp(committedWorkspace, durableCheckpointEffects.wake);
+      // These effects did not publish a new workspace. Preserve the wake
+      // computed by the current pass instead of rebasing to the old checkpoint.
+      stageDurableCheckpointFollowUp(null, durableCheckpointEffects.wake);
       return true;
     };
     type HostedVaultShareOfferWake = {

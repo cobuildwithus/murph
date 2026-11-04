@@ -553,20 +553,20 @@ test('linq app-card 2xx without provider identity remains ambiguous after one re
   })
 })
 
-test('linq iMessage capability requires a literal available true response', async () => {
-  const env = { LINQ_API_TOKEN: 'linq-token' } satisfies NodeJS.ProcessEnv
-  for (const payload of [
-    { available: false },
-    { available: 'true' },
-    { supported: true },
-    null,
-  ]) {
-    await expect(checkLinqIMessageCapability({
-      address: '+15550001',
-    }, {
-      env,
-      fetchImplementation: async () => createJsonResponse(payload),
-    })).resolves.toBe(false)
+test('linq iMessage capability accepts only literal booleans', async () => {
+  const env = { LINQ_API_TOKEN: 'synthetic-token' } satisfies NodeJS.ProcessEnv
+  for (const available of [true, false]) {
+    await expect(checkLinqIMessageCapability({ address: 'synthetic@example.test' }, {
+      env, fetchImplementation: async () => createJsonResponse({ available }),
+    })).resolves.toBe(available)
+  }
+  for (const payload of [{ available: 'true' }, { available: 'false' }, { available: 0 }, { available: 1 }, { available: null }, { supported: true }, null, [], true, 'true']) {
+    await expect(checkLinqIMessageCapability({ address: 'synthetic@example.test' }, {
+      env, fetchImplementation: async () => createJsonResponse(payload),
+    })).rejects.toMatchObject({
+      code: 'LINQ_API_REQUEST_FAILED',
+      context: { operation: 'check_imessage_capability', retryable: true },
+    })
   }
 })
 

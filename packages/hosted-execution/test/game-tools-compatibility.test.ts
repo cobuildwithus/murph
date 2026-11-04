@@ -223,3 +223,26 @@ it.skipIf(process.env.MURPH_VERIFY_GAME_GROUP_SKEW !== "1")("accepts old Web pai
     expect(hostedGameToolResponseSchema.parse(group)).toEqual(group);
   } finally { await rm(target, { force: true }); }
 });
+
+it("accepts group edit IDs and bounded majority responses without widening pair requests", () => {
+  const tasks = Array.from({ length: 10 }, (_, seat) => ({ seat, text: "Walk" }));
+  const update = { operation: "edit_terms", gameId: game.id, expectedTermsVersion: 1, proposalId: "proposal_group",
+    terms: { defaultTask: "Walk", tasks: tasks.map(({ seat, text }) => ({ memberId: `member_${seat}`, text })), schedule: { count: 5 }, stakes: [{ kind: "prize", item: "Lunch" }] } };
+  const request = { action: "update_game", origin, update };
+  expect(hostedGameToolRequestSchema.parse(request)).toEqual(request);
+  const { proposalId: _proposalId, ...oldUpdate } = update;
+  expect(hostedGameToolRequestSchema.safeParse({ ...request, update: oldUpdate }).success).toBe(true);
+  expect(hostedGameToolRequestSchema.safeParse({ ...request, update: { ...update, proposalId: "bad" } }).success).toBe(false);
+  const pendingChange = { id: update.proposalId, proposedByMemberId: "member_0", expectedTermsVersion: 1, origin: "chat", deliveryStatus: "conversation", startsOn: null,
+    effectiveFromDay: 0, change: { kind: "edit", defaultTask: "Walk", tasks }, yesNeeded: 5,
+    votes: tasks.map(({ seat }) => ({ memberId: `member_${seat}`, vote: seat === 0 ? "yes" : "no" })) };
+  const payload = response({ ...game, maxPlayers: 10, pendingChange });
+  expect(hostedGameToolResponseSchema.parse(payload)).toEqual(payload);
+  for (const invalid of [{ votes: [...pendingChange.votes, { memberId: "extra", vote: "yes" }] }, { votes: [{ memberId: "member_0", vote: "maybe" }] }, { yesNeeded: -1 },
+    { change: { ...pendingChange.change, tasks: [{ seat: 10, text: "Walk" }] } }, { change: { ...pendingChange.change, tasks: [] } }]) {
+    expect(hostedGameToolResponseSchema.safeParse(response({ ...game, pendingChange: { ...pendingChange, ...invalid } })).success).toBe(false);
+  }
+  const pair = { action: "update_game", origin, update: { operation: "propose", gameId: game.id, expectedTermsVersion: 1, proposalId: "proposal_pair", change: pendingChange.change } };
+  expect(hostedGameToolRequestSchema.safeParse(pair).success).toBe(false);
+  expect(hostedGameToolRequestSchema.safeParse({ ...pair, update: { ...pair.update, change: { kind: "edit", tasks: tasks.slice(0, 3) } } }).success).toBe(false);
+});

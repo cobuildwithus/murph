@@ -437,3 +437,11 @@ describe("weekly game content check", () => {
       reportId: "report_moderation", type: "report" })).toBe(false);
   });
 });
+
+
+it("checks typed replies exactly as words posts and never treats audio as text", () => {
+  const base = { type: "replyToPost" as const, gameId: "game_reply", entryId: "entry_reply", replyId: "reply_0001" };
+  expect(() => moderateGameCommand({ ...base, kind: "text", text: "Nice work" })).not.toThrow();
+  expect(() => moderateGameCommand({ ...base, kind: "text", text: "kill yourself" })).toThrow();
+  expect(gameCommandTexts({ ...base, kind: "voice", audio: "private-audio", levels: Array(32).fill(0) })).toEqual([]);
+});

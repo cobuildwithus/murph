@@ -1,12 +1,21 @@
+import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 interface SentEmail { idempotencyKey: string; subject: string; text: string; to: string[] }
-const mocks = vi.hoisted(() => ({ sendEmail: vi.fn<(email: SentEmail) => Promise<{ providerMessageId: string }>>(async () => ({ providerMessageId: "email_1" })) }));
+const mocks = vi.hoisted(() => ({ opsMember: "synthetic-operator", sendEmail: vi.fn<(email: SentEmail) => Promise<{ providerMessageId: string }>>(async () => ({ providerMessageId: "email_1" })) }));
 vi.mock("@/src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: vi.fn(async () => {}) }));
 vi.mock("@/src/lib/hosted-onboarding/resend-plain-text-email", () => ({ sendHostedResendPlainTextEmail: mocks.sendEmail }));
 
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  unwrapHostedDomainRootForWeb: async () => ({ rootKey: Buffer.alloc(32, 7), envelope: { rootKeyId: "synthetic-reply-root" } }),
+  unwrapHostedDomainRootForWebByRootKeyId: async () => ({ rootKey: Buffer.alloc(32, 7) }),
+}));
+vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
+  requireActiveHostedAppSessionFromRequest: async () => ({ member: { id: mocks.opsMember } }),
+}));
+import { GET as reportAudioRoute } from "../app/api/ops/game-reports/[reportId]/audio/route";
 import type { GameCommand, GameTermsInput } from "@/src/lib/game/contract";
 import { applyGameAccountDeletionTx, prepareGameAccountDeletion } from "@/src/lib/game/account-deletion";
 import { reserveGameChatLifecycleTx } from "@/src/lib/game/chat-lifecycle-receipt";
@@ -79,6 +88,64 @@ describe.skipIf(!runPostgresProof)("weekly game report and block", () => {
     vi.unstubAllEnvs();
     await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: memberIds } } });
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: memberIds } } });
+  });
+
+  it("reports an incoming reply on your own post; Ops removes only the reply and leaves score and recap entries intact", async () => {
+    const a = await member("Ava"), b = await member("Sam"), gameId = await live(a, b);
+    const entryId = await words(a, gameId, "My post"); await words(b, gameId, "Other post");
+    const replyId = randomUUID(), reportId = randomUUID();
+    await ok(b, { type: "replyToPost", gameId, entryId, replyId, kind: "text", text: "Reported reply" });
+    await devSettleNow(gameId, a);
+    const postBefore = await getPrisma().gameEntry.findUniqueOrThrow({ where: { id: entryId } });
+    const viewBefore = (await readGame(gameId, a))!;
+    const command = report(gameId, { about: "reply", replyId, reportId });
+    await ok(a, command);
+    await ok(a, { ...command, reportId: randomUUID() });
+    expect(await getPrisma().gameReport.count({ where: { reporterMemberId: a, replyId } })).toBe(1);
+    expect(await getPrisma().gameReport.findUniqueOrThrow({ where: { id: reportId } })).toMatchObject({ entryId: null, replyId, reportedMemberId: b, reporterMemberId: a });
+    const queueQuery = vi.spyOn(getPrisma().gameReport, "findMany");
+    expect((await readGameReportQueue()).find(row => row.reportId === reportId)).toMatchObject({ content: "reply", snapshotText: "Reported reply", entryId: null, replyId, postRemoved: false });
+    expect(queueQuery.mock.calls[0][0]?.select).toBeDefined();
+    expect(queueQuery.mock.calls[0][0]?.select).not.toHaveProperty("snapshotAudioEncrypted");
+    await reviewGameReport({ reportId, removePost: true });
+    expect(await getPrisma().gameReply.findUnique({ where: { id: replyId } })).toBeNull();
+    expect(await getPrisma().gameEntry.findUnique({ where: { id: entryId } })).toEqual(postBefore);
+    const viewAfter = (await readGame(gameId, a))!;
+    expect(viewAfter.result).toEqual(viewBefore.result); expect(viewAfter.recap).toEqual(viewBefore.recap);
+    expect(viewAfter.days[0].mine?.text).toBe("My post");
+    expect(viewAfter.days[0].mine).not.toHaveProperty("reply");
+  });
+
+  it("recovers a reply report after alert failure and author deletion, retaining reporter-owned Ops audio", async () => {
+    const a = await member("Ava"), b = await member("Sam"), gameId = await live(a, b);
+    const entryId = await words(a, gameId, "My post"); await words(b, gameId, "Other post");
+    const replyId = randomUUID(), reportId = randomUUID();
+    const audio = readFileSync(new URL("./fixtures/game-reply-audio/apple-aac-1s.m4a", import.meta.url));
+    await ok(b, { type: "replyToPost", gameId, entryId, replyId, kind: "voice", audio: audio.toString("base64"), levels: Array(32).fill(50) });
+    const command = report(gameId, { about: "reply", replyId, reportId });
+    mocks.sendEmail.mockRejectedValueOnce(new Error("synthetic email failure"));
+    await expect(ok(a, command)).rejects.toMatchObject({ code: "GAME_REPORT_ALERT_FAILED" });
+    await ok(b, { type: "deleteReply", gameId, replyId });
+    const prepared = await prepareGameAccountDeletion({ memberIds: [b], prisma: getPrisma() });
+    await getPrisma().$transaction(async tx => {
+      await applyGameAccountDeletionTx({ memberIds: [b], now: new Date(), prepared, tx });
+      await tx.hostedMember.delete({ where: { id: b } });
+    });
+    await ok(a, command);
+    expect(mocks.sendEmail.mock.calls[0][0].idempotencyKey).toBe(mocks.sendEmail.mock.calls[1][0].idempotencyKey);
+    expect(await getPrisma().gameReport.count({ where: { id: reportId } })).toBe(1);
+    const row = await getPrisma().gameReport.findUniqueOrThrow({ where: { id: reportId } });
+    expect(row).toMatchObject({ replyId: null, entryId: null, reportedMemberId: null, reporterMemberId: a });
+    expect(row.snapshotAudioEncrypted).not.toContain(audio.toString("base64"));
+    vi.stubEnv("HOSTED_OPS_MEMBER_IDS", "synthetic-operator");
+    const request = new Request("https://www.withmurph.ai/api/ops/game-reports/report/audio");
+    const params = { params: Promise.resolve({ reportId }) };
+    mocks.opsMember = "synthetic-operator";
+    const response = await reportAudioRoute(request, params);
+    expect(response.status).toBe(200); expect(Buffer.from(await response.arrayBuffer())).toEqual(audio);
+    mocks.opsMember = a;
+    expect((await reportAudioRoute(request, params)).status).toBe(404);
+    mocks.opsMember = "synthetic-operator";
   });
 
   it("calls off a game mid-way the way a player leaving does, and hides each from the other", async () => {
@@ -271,6 +338,21 @@ describe.skipIf(!runPostgresProof)("weekly game report and block", () => {
     expect(await getPrisma().gameReport.count({ where: { id: command.reportId } })).toBe(1);
     await ok(leo, command);
     expect(mocks.sendEmail).toHaveBeenCalledTimes(2);
+  });
+
+  it("targets pair terms at the most recent applied proposal's author", async () => {
+    const starter = await member("Alex");
+    const proposer = await member("Sam");
+    const gameId = await live(starter, proposer);
+    const proposalId = randomUUID();
+    await ok(proposer, { type: "proposeChange", gameId, proposalId, expectedTermsVersion: 1,
+      change: { kind: "edit", stakes: [{ kind: "prize", item: "Pick a movie" }] } });
+    expect(await runGameCommand({ actorMemberId: starter, chatContainerMemberId: "synthetic-pair-room",
+      chatPlayerMemberIds: [starter, proposer], beforeMutationTx: async () => {},
+      command: { type: "respondChange", gameId, proposalId, decision: "approve" } })).toMatchObject({ ok: true });
+    const command = report(gameId, { about: "terms" });
+    await ok(starter, command);
+    expect(await getPrisma().gameReport.findUnique({ where: { id: command.reportId } })).toMatchObject({ reportedMemberId: proposer });
   });
 
   it("reports a player or their terms, from a game or an invite before accepting, and can block in the same step", async () => {

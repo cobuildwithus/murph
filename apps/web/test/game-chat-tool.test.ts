@@ -37,7 +37,15 @@ describe("game chat tool authority", () => {
   afterEach(() => vi.unstubAllEnvs());
   beforeEach(() => {
     vi.resetAllMocks(); vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://recaps.murph.test"); m.players.mockResolvedValue([actor, "other_synthetic"]); m.exact.mockResolvedValue([actor, "other_synthetic"]); m.wake.mockResolvedValue(wake()); m.sender.mockResolvedValue(actor); m.game.mockResolvedValue({ id: "game_synthetic", invitees: [], players: [{ memberId: actor }, { memberId: "other_synthetic" }] }); m.read.mockResolvedValue({ games: [] }); m.mailbox.mockResolvedValue([]); m.decodeMailbox.mockResolvedValue([]);
-    m.run.mockResolvedValue({ ok: true, game: { privateRelationship: "synthetic-private", entries: ["private-image"] } });
+    m.run.mockResolvedValue({ ok: true, game: { privateRelationship: "synthetic-private", entries: ["private-image"], reply: { text: "synthetic-private-reply", audio: "private-reply-audio" } } });
+  });
+  it("keeps app replies out of tool responses and read_game", async () => {
+    for (const request of [read, update]) {
+      const result = await handleGameChatTool(request);
+      expect(JSON.stringify(result)).not.toContain("synthetic-private-reply");
+      expect(JSON.stringify(result)).not.toContain("private-reply-audio");
+      expect(JSON.stringify(result)).not.toContain('"reply":');
+    }
   });
   it("disables paid-group reads and mutations when the game flag is off", async () => {
     vi.stubEnv("MURPH_GAME_ENABLED", "false");
