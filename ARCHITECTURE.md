@@ -5646,7 +5646,8 @@ decryption. New writes require 3–365 days (default seven) and one prize
 or dare; legacy lengths and stakes keep their read/settlement semantics. Both
 new pair stake kinds issue one loser-to-winner ticket, none for a tie or perfect game.
 Ticket views derive kind from the existing stake key; no duplicate kind is stored.
-Pair tasks and stakes lock at `live`. Acceptance/approval uses the actor's local
+Pair tasks lock when either player's Day 1 begins; the prize or dare stays
+changeable by mutual agreement until settlement is due. Acceptance/approval uses the actor's local
 03:00–20:00 same-day window and the other player's current game date, preserving
 any selected later start. Streak derives from scheduled live entries; usual kind
 uses one bounded latest-entry read on the member index alongside Home's existing
@@ -6054,8 +6055,9 @@ lock. Pending JSON retains structural stake keys and task-change metadata, never
 plaintext task or stake words. Agreement atomically publishes both structural
 terms and their prepared encrypted words. Public projections decrypt in one
 bounded batch and never expose the stored envelope. Task changes take effect on
-future days; a new stake replaces the wager for the whole game, including earlier
-misses, after explicit `stakesApplyToWholeGame` consent once play has begun.
+future days; a new prize or dare replaces the old one for the whole game and
+needs no future unstarted day. The other player's approval is the consent;
+`stakesApplyToWholeGame` stays accepted on the wire but is not required.
 Settlement intentionally retains its existing latest-stake whole-game semantics.
 
 The negotiation migration widens the game status and pair-reservation CHECKs.

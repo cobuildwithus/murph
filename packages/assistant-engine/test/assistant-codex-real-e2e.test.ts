@@ -45530,9 +45530,10 @@ describeRealCodex('production reaction routing turn journey', () => {
 
 describeRealCodex('real Codex game v1 rules e2e', () => {
   it.each([
-    { name: 'game v1 refuses live stake changes without proposing', request: 'Change the prize to breakfast in bed.', refusal: true },
-    { name: 'game v1 reads a 75 day challenge without truncation or restart', request: 'How long is our challenge and what is the prize?', refusal: false },
-  ])('$name', async ({ request: message, refusal }) => {
+    { name: 'game v1 refuses live task changes without proposing', request: 'Change my task to 20 pushups.', kind: 'refusal' },
+    { name: 'game v1 asks the other player about a live prize change', request: 'Change the prize to breakfast in bed.', kind: 'prize' },
+    { name: 'game v1 reads a 75 day challenge without truncation or restart', request: 'How long is our challenge and what is the prize?', kind: 'read' },
+  ] as const)('$name', async ({ request: message, kind }) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-v1-e2e-'))
     const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
@@ -45543,7 +45544,7 @@ describeRealCodex('real Codex game v1 rules e2e', () => {
       terms: { n: 1, fromDay: 0, checkInKind: 'any' as const, tasks: [{ seat: 0, text: 'Read a chapter' }, { seat: 1, text: 'Walk' }], schedule: { count: 60 }, stakes: [{ kind: 'prize' as const, item: 'Pick movie night' }] },
       players: [{ memberId: 'player_maya', seat: 0, firstName: 'Maya', dayOne: '2030-03-04', timeZone: 'America/New_York' }, { memberId: 'player_sam', seat: 1, firstName: 'Sam', dayOne: '2030-03-04', timeZone: 'America/New_York' }],
       pendingChange: null,
-      changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, canEditTasks: false, canEditStakes: false, editableFromDay: 3 },
+      changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, canEditTasks: false, canEditStakes: true, editableFromDay: 3 },
     }
     try {
       const result = await executeRealCodexAppServerTurn({
@@ -45560,8 +45561,12 @@ describeRealCodex('real Codex game v1 rules e2e', () => {
           computerToolsAvailable: false, vaultFileSendAvailable: false,
           groupTool: { request: async (request) => {
             calls.push(request)
-            if (request.action !== 'read_game') throw new Error('This journey authorizes no mutation.')
-            return { action: 'read_game', result: { status: 'ok', state: { games: [game] } } }
+            if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', state: { games: [game] } } }
+            if (kind !== 'prize' || request.action !== 'update_game' || request.update.operation !== 'propose') throw new Error('Only the prize ask is authorized.')
+            return { action: 'update_game', result: { status: 'ok', state: { games: [{ ...game, pendingChange: {
+              id: request.update.proposalId, proposedByMemberId: 'player_maya', expectedTermsVersion: 1,
+              change: request.update.change, effectiveFromDay: 3, startsOn: null, origin: 'chat', deliveryStatus: 'conversation', deliveryRetryable: false,
+            } }] } } }
           } },
           currentUserActionScope: () => ({ conversationId: 'synthetic-game-chat', inboundMailboxItemIds: [], recipientKey: 'synthetic-game-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-game-session', conversationScope: 'group' }),
           currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send authorized.') },
@@ -45570,12 +45575,24 @@ describeRealCodex('real Codex game v1 rules e2e', () => {
         prompt: `Current accepted message from Maya (Message ref: ${inputId}): ${message}`,
         reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
       })
-      process.stdout.write(`[game-v1 rules] ${JSON.stringify({ refusal, reply: result.finalMessage, actions: calls.map((call) => call.action) })}\n`)
-      expect(calls.map((call) => call.action)).toEqual(['read_game'])
-      if (refusal) {
+      process.stdout.write(`[game-v1 rules] ${JSON.stringify({ kind, reply: result.finalMessage, actions: calls.map((call) => call.action) })}\n`)
+      expect(calls.map((call) => call.action)).toEqual(kind === 'prize' ? ['read_game', 'update_game'] : ['read_game'])
+      if (kind === 'refusal') {
         expect(result.finalMessage).toMatch(/locked|can[’']?t|cannot|can no longer|stay|fixed/iu)
-        expect(result.finalMessage).toMatch(/start|live|underway|begun/iu)
-        expect(result.finalMessage).not.toMatch(/proposed|(?:I|we)(?: have|[’']ve)? changed.*breakfast|ask Sam|Sam.*agree/iu)
+        expect(result.finalMessage).toMatch(/start|live|underway|begun|day 1/iu)
+        // The prize is one of the things that can still change.
+        expect(result.finalMessage).toMatch(/prize/iu)
+        expect(result.finalMessage).not.toMatch(/proposed|(?:I|we)(?: have|[’']ve)? changed.*pushups|ask Sam|Sam.*agree/iu)
+      } else if (kind === 'prize') {
+        const update = calls[1]?.action === 'update_game' ? calls[1].update : null
+        expect(update).toMatchObject({ operation: 'propose', gameId: game.id, expectedTermsVersion: 1 })
+        const change = update?.operation === 'propose' ? update.change : null
+        expect(change).toMatchObject({ kind: 'edit', stakes: [{ kind: 'prize', item: expect.stringMatching(/^breakfast in bed$/iu) }] })
+        expect(change && Object.keys(change).filter((key) => key !== 'stakesApplyToWholeGame').sort()).toEqual(['kind', 'stakes'])
+        // An ask to Sam, never a claim that the prize already changed.
+        expect(result.finalMessage).toMatch(/Sam/u)
+        expect(result.finalMessage).toMatch(/breakfast/iu)
+        expect(result.finalMessage).not.toMatch(/(?:is|now)(?: now)? breakfast in bed|changed (?:it|the prize)|locked|can[’']?t|cannot|propos/iu)
       } else {
         expect(result.finalMessage).toMatch(/75|seventy.five/iu)
         expect(result.finalMessage).toMatch(/movie/iu)
@@ -45677,7 +45694,7 @@ describeRealCodex('real Codex game chat adjustment e2e', () => {
       pendingChange: scenario === 'counter' ? pendingWeekdays as typeof pendingWeekdays | null : null,
       ...(scenario === 'only_current' ? {} : { progress: { checkedAt: '2030-03-06T21:00:00.000Z', players: ['player_leo', 'player_ava'].map((memberId) => ({ memberId, score: 2, target: 7, currentDayIndex: 2, attemptsRemaining: 2, currentEntryId: null,
         days: [{ dayIndex: 0, date: '2030-03-04', status: 'posted' as const }, { dayIndex: 1, date: '2030-03-05', status: 'posted' as const }, { dayIndex: 2, date: '2030-03-06', status: 'due' as const }] })) } }),
-      changeControls: { canStartNow: false, canEdit: scenario !== 'counter', canEditSchedule: scenario !== 'counter', canEditStartDate: false, canEditTasks: false, canEditStakes: false, editableFromDay: scenario === 'counter' ? null : 3 },
+      changeControls: { canStartNow: false, canEdit: scenario !== 'counter', canEditSchedule: scenario !== 'counter', canEditStartDate: false, canEditTasks: false, canEditStakes: scenario !== 'counter', editableFromDay: scenario === 'counter' ? null : 3 },
     }
     const speaker = scenario === 'only_current' ? 'Leo' : 'Ava'
     const history = scenario === 'counter'
@@ -46639,7 +46656,7 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
     { name: 'game chat four games not done with one posted game acts on it', kind: 'one-post' },
     { name: 'game chat four games not done with two posted games asks between them', kind: 'two-posts' },
     { name: 'game chat four games restore picks the one day marked not done', kind: 'restore' },
-    { name: 'game chat locked prize change says so once and offers what can change', kind: 'locked' },
+    { name: 'game chat locked task change says so once and offers what can change', kind: 'locked' },
   ] as const)('$name', async ({ kind }) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-four-games-e2e-'))
@@ -46654,7 +46671,7 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
       id, status: 'live', lengthDays, startsOn: '2030-03-04',
       terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: maya }, { seat: 1, text: sam }], schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: 'prize', item }] },
       players, pendingChange: null,
-      changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, canEditTasks: false, canEditStakes: false, editableFromDay: 2 },
+      changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, canEditTasks: false, canEditStakes: true, editableFromDay: 2 },
       progress: { checkedAt: '2030-03-05T15:00:00Z', players: players.map(({ memberId }) => ({ memberId, score: 1, target: lengthDays, currentDayIndex: 1,
         currentEntryId: memberId === 'player_maya' && mayaPostedToday.includes(id) ? `entry_${id}` : null, attemptsRemaining: 2,
         // A day the player marked not done reads as unposted, here only in the steps game.
@@ -46673,7 +46690,7 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
       'one-post': 'ugh mark mine as not done today, I fudged it',
       'two-posts': 'ugh mark mine as not done today, I fudged it',
       restore: 'wait I did finish yesterday after all, undo my not done',
-      locked: 'can we change the prize to the loser buys dinner? movie night is boring',
+      locked: 'can we change my task to 20 pushups? the water thing is boring',
     }[kind]
     // The room last talked about the plank game, which must not decide an unnamed change.
     const recent = kind === 'length'
@@ -46739,11 +46756,11 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
         expect(reply).not.toMatch(/journal|phone|\bread/iu)
       }
       if (kind === 'locked') {
-        // One plain refusal of the prize change plus a lever that can still change.
-        expect(reply).toMatch(/prize/iu)
-        expect(reply).toMatch(/stays|locked|fixed|set|can['’]?t|cannot|already started/iu)
-        expect(reply).toMatch(/length|longer|shorter|schedule|days|next game|rematch|new game/iu)
-        expect(reply).not.toMatch(/\bcannot\b.*\bcannot\b|loser buys dinner\?/isu)
+        // One plain refusal of the task change plus a lever that can still change.
+        expect(reply).toMatch(/task|water|pushups/iu)
+        expect(reply).toMatch(/\bstays?\b|locked|fixed|set|can['’]?t|cannot|already started/iu)
+        expect(reply).toMatch(/prize|length|longer|shorter|schedule|days|next game|rematch|new game/iu)
+        expect(reply).not.toMatch(/\bcannot\b.*\bcannot\b|20 pushups\?/isu)
       }
       expect(reply).not.toMatch(/challenge|game_(?:plank|steps|journal|reading)|entry_|[^\s]\s[-–—]\s/iu)
       expect(reply.length).toBeLessThan(320)
@@ -46889,7 +46906,7 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
       players: [{ memberId: 'player_maya', seat: 0, firstName: 'Maya', dayOne: '2030-03-04', timeZone: 'America/New_York' }, { memberId: 'player_sam', seat: 1, firstName: 'Sam', dayOne: '2030-03-04', timeZone: 'America/New_York' }],
       progress: { checkedAt: processingAt, players: [{ memberId: 'player_maya', score: 1, target: 7, currentDayIndex: 2, currentEntryId: null, attemptsRemaining: 2, days: [{ dayIndex: 1, date: '2030-03-05', status: outcome === 'no_artifact' ? 'missed' as const : 'posted' as const }] }] },
       pendingChange: null,
-      changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, canEditTasks: false, canEditStakes: false, editableFromDay: 3 },
+      changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, canEditTasks: false, canEditStakes: true, editableFromDay: 3 },
     }
     const promptResult = buildAssistantAutoReplyPrompt([{
       actorIsSelf: false, attachmentDescriptors: [],

@@ -34,8 +34,10 @@ export function gameChangeControls(state: RuleState, now: Date, pending: GamePen
     canEditSchedule: enabled && day < state.game.lengthDays && (day === 0 || "days" in currentTerms(state.game.terms).schedule),
     // Until anyone posts, Day 1 can still move, even after it has begun.
     canEditStartDate: enabled && (day === 0 || state.entries.length === 0),
-    canEditTasks: editable && state.game.status === "negotiating",
-    canEditStakes: editable && state.game.status === "negotiating",
+    // Tasks lock once either player's Day 1 begins; the prize or dare stays
+    // open, with the other player's yes, until the game is due.
+    canEditTasks: editable && day === 0,
+    canEditStakes: editable,
     editableFromDay: editable ? Math.min(day, state.game.lengthDays) : null,
   };
 }
@@ -124,6 +126,8 @@ function decideChange(state: RuleState, actor: string, change: GameChange, now: 
     return { change, effectiveFromDay: 0, startsOn: gameDayOne(start.players) };
   }
   assertEditableWords(state, change, controls, sealedWords);
+  // A new prize or dare replaces the whole game's, so it needs no future day.
+  if (isStakesOnlyChange(change, sealedWords)) return { change, effectiveFromDay: Math.min(effectiveFromDay, state.game.lengthDays), startsOn: null };
   const lengthDays = change.lengthDays ?? state.game.lengthDays;
   if ((change.lengthDays !== undefined && lengthDays < GAME_MIN_LENGTH_DAYS) || lengthDays <= effectiveFromDay || lengthDays > GAME_MAX_LENGTH_DAYS) reject("INVALID_REQUEST", "Keep the days already started and at least one future day, up to 365 days.");
   const oldSchedule = currentTerms(state.game.terms).schedule;
@@ -194,9 +198,15 @@ function assertScheduledDayLeft(state: RuleState, fromDay: number, lengthDays: n
 
 function assertEditableWords(state: RuleState, change: Extract<GameChange, { kind: "edit" }>, controls: GameChangeControls, sealedWords?: SealedWordChanges): void {
   const stakes = change.stakes ?? sealedWords?.stakes;
-  if ((change.tasks || sealedWords?.tasksChanged) && !controls.canEditTasks) reject("INVALID_REQUEST", "Tasks lock when the game starts.");
-  if (stakes && !controls.canEditStakes) reject("INVALID_REQUEST", "Stakes lock when the game starts.");
+  if ((change.tasks || sealedWords?.tasksChanged) && !controls.canEditTasks) reject("INVALID_REQUEST", "Tasks lock once Day 1 begins.");
+  if (stakes && !controls.canEditStakes) reject("INVALID_REQUEST", "This game is no longer open for changes.");
   if (stakes && currentTerms(state.game.terms).stakes.some((stake) => ["prize", "dare"].includes(stake.kind))) validNewStakes(stakes);
+}
+
+/** Only the prize or dare changes: no tasks, schedule, length or start. */
+function isStakesOnlyChange(change: Extract<GameChange, { kind: "edit" }>, sealedWords?: SealedWordChanges): boolean {
+  return Boolean(change.stakes ?? sealedWords?.stakes) && !change.tasks && !sealedWords?.tasksChanged
+    && change.schedule === undefined && change.lengthDays === undefined && change.startsOn === undefined;
 }
 
 /**

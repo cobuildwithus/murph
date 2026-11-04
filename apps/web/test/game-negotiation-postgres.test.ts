@@ -226,21 +226,27 @@ describe.skipIf(!enabled)("game negotiation persistence", () => {
       ? firstScheduledDate(acceptanceStartDate(later,"America/New_York"), parseStoredTerms(row.terms).versions[0].schedule)
       : firstScheduledDate(selected, {days:[0,4]}));
   });
-  it.each([1, 3, 10])("refuses live task/stake edits without changing agreed terms on day %s", async (day) => {
+  it.each([1, 3, 10])("locks tasks but agrees a new prize, sealed, on day %s of a live game", async (day) => {
     const {a,b,room,gameId,token} = await setup();
     expect(await run(b,{type:"join",token,termsVersion:1,timeZone:"America/New_York"})).toMatchObject({ok:true});
     const dayOne = addDays(gameLocalDate(new Date(),"America/New_York"),1-day);
     await getPrisma().gamePlayer.updateMany({where:{gameId},data:{dayOne:new Date(`${dayOne}T00:00:00Z`)}});
     const before = await getPrisma().game.findUniqueOrThrow({where:{id:gameId}});
-    for (const change of [
-      {kind:"edit" as const, tasks:[{seat:0,text:"Read poetry"},tasks[1]]},
-      {kind:"edit" as const, stakes:[{kind:"prize" as const,item:"Breakfast"}],stakesApplyToWholeGame:true as const},
-    ]) {
-      expect(await run(a,{type:"proposeChange",gameId,proposalId:randomUUID(),expectedTermsVersion:1,change},room)).toMatchObject({ok:false,error:{code:"INVALID_REQUEST"}});
-    }
+    const taskChange = {kind:"edit" as const, tasks:[{seat:0,text:"Read poetry"},tasks[1]]};
+    expect(await run(a,{type:"proposeChange",gameId,proposalId:randomUUID(),expectedTermsVersion:1,change:taskChange},room)).toMatchObject({ok:false,error:{code:"INVALID_REQUEST"}});
+    expect((await getPrisma().game.findUniqueOrThrow({where:{id:gameId}})).pendingChange).toBeNull();
+    // Day 10 is the last day: a prize alone still changes, with no future day left.
+    const proposalId = randomUUID();
+    const prize = {kind:"edit" as const, stakes:[{kind:"prize" as const,item:"A smoothie"}]};
+    expect(await run(b,{type:"proposeChange",gameId,proposalId,expectedTermsVersion:1,change:prize},room)).toMatchObject({ok:true});
+    const waiting = await getPrisma().game.findUniqueOrThrow({where:{id:gameId}});
+    expect(JSON.stringify(waiting.pendingChange)).not.toContain("A smoothie");
+    expect(waiting.terms).toEqual(before.terms);
+    expect(await run(a,{type:"respondChange",gameId,proposalId,decision:"approve"},room)).toMatchObject({ok:true});
     const after = await getPrisma().game.findUniqueOrThrow({where:{id:gameId}});
-    expect(after.terms).toEqual(before.terms);
-    expect(after.termsWordsEncrypted).toBe(before.termsWordsEncrypted);
     expect(after.pendingChange).toBeNull();
+    expect(after.termsWordsEncrypted).not.toBe(before.termsWordsEncrypted);
+    expect(parseStoredTerms(after.terms).versions.at(-1)).toMatchObject({n:2,fromDay:day,stakes:[{kind:"prize"}]});
+    expect((await readGame(gameId,a))?.terms.stakes).toMatchObject([{kind:"prize",item:"A smoothie"}]);
   });
 });

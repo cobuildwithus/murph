@@ -25,7 +25,7 @@ describe("weekly game mutually agreed changes", () => {
     expect(gameChangeCancellationNeedsNotice({...proposal,deliveryStatus:"pending"},"cancel")).toBe(false);
   });
   it("exposes pre-start controls and fixes start-now to a shared calendar date", () => {
-    expect(gameChangeControls(state(), BEFORE, null)).toEqual({ canStartNow: true, canEdit: true, canEditSchedule: true, canEditStartDate: true, canEditTasks: false, canEditStakes: false, editableFromDay: 0 });
+    expect(gameChangeControls(state(), BEFORE, null)).toEqual({ canStartNow: true, canEdit: true, canEditSchedule: true, canEditStartDate: true, canEditTasks: true, canEditStakes: true, editableFromDay: 0 });
     expect(decideGameChange(state(), "player_a", { kind: "start_now" }, BEFORE).startsOn).toBe("2026-11-02");
     expect(gameChangeControls(state(), BEFORE, pending()).canEdit).toBe(false);
   });
@@ -127,16 +127,36 @@ describe("weekly game mutually agreed changes", () => {
     expect(() => decideGameChange(s, "player_a", { kind: "edit", schedule: { days: [5,6] } }, lastDay)).toThrow();
     expect(gameChangeControls(s, new Date("2026-11-10T17:00:00Z"), null).canEdit).toBe(false);
   });
-  it.each([BEFORE, DURING])("locks task and stake changes at kickoff, including sealed approval at %s", (now) => {
-    const s = state();
-    expect(gameChangeControls(s, now, null)).toMatchObject({ canEditTasks: false, canEditStakes: false });
-    expect(() => decideGameChange(s, "player_a", {kind:"edit",stakes:[{kind:"dare",item:"Sing"}],stakesApplyToWholeGame:true}, now)).toThrow("Stakes lock");
-    expect(() => decideGameChange(s, "player_a", {kind:"edit",tasks:[{seat:0,text:"Read"},{seat:1,text:"Walk"}]}, now)).toThrow("Tasks lock");
-    expect(() => decideGameChange(s, "player_a", {kind:"edit"}, now, {stakes:[{kind:"prize",key:"stake_2"}]})).toThrow("Stakes lock");
-    expect(() => decideGameChange(s, "player_a", {kind:"edit"}, now, {tasksChanged:true})).toThrow("Tasks lock");
+  it("opens tasks until Day 1 begins and the prize or dare until the game is due, including sealed approval", () => {
+    const s = state(); s.game.terms.versions[0].stakes = [{ kind: "prize", key: "stake_1" }];
+    const prize = { kind: "edit" as const, stakes: [{ kind: "prize" as const, item: "A smoothie" }] };
+    const tasks = { kind: "edit" as const, tasks: [{ seat: 0, text: "Read" }, { seat: 1, text: "Walk" }] };
+    // Live before Day 1: both open, from day 0.
+    expect(gameChangeControls(s, BEFORE, null)).toMatchObject({ canEditTasks: true, canEditStakes: true });
+    expect(decideGameChange(s, "player_a", tasks, BEFORE).effectiveFromDay).toBe(0);
+    expect(decideGameChange(s, "player_a", prize, BEFORE)).toEqual({ change: prize, effectiveFromDay: 0, startsOn: null });
+    // Mid-game: tasks locked, the prize still open with the other player's yes.
+    expect(gameChangeControls(s, DURING, null)).toMatchObject({ canEditTasks: false, canEditStakes: true });
+    expect(() => decideGameChange(s, "player_a", tasks, DURING)).toThrow("Tasks lock");
+    expect(() => decideGameChange(s, "player_a", {kind:"edit"}, DURING, {tasksChanged:true})).toThrow("Tasks lock");
+    expect(decideGameChange(s, "player_a", prize, DURING).effectiveFromDay).toBe(2);
+    const sealed = { ...pending(s, DURING), change: { kind: "edit" as const }, stakes: [{ kind: "dare" as const, key: "stake_2" }] };
+    expect(decideApprovedGameChange(s, "player_b", sealed, DURING).effectiveFromDay).toBe(2);
+    expect(isGameChangeExpired(s, sealed, DURING)).toBe(false);
+    expect(() => decideGameChange(s, "player_a", {kind:"edit",stakes:[{kind:"winner_gets",item:"Lunch"}]}, DURING)).toThrow();
+    // Last day, every day begun: a prize alone still changes; anything else needs a future day.
+    const lastDay = new Date("2026-11-09T17:00:00Z");
+    expect(decideGameChange(s, "player_b", prize, lastDay).effectiveFromDay).toBe(7);
+    expect(isGameChangeExpired(s, sealed, lastDay)).toBe(false);
+    expect(() => decideGameChange(s, "player_b", { ...prize, schedule: { days: [5,6] } }, lastDay)).toThrow();
+    // Once the game is due, nothing changes and a waiting prize expires.
+    const due = new Date("2026-11-10T17:00:00Z");
+    expect(gameChangeControls(s, due, null)).toMatchObject({ canEdit: false, canEditStakes: false });
+    expect(() => decideGameChange(s, "player_b", prize, due)).toThrow("no longer open for changes");
+    expect(isGameChangeExpired(s, sealed, due)).toBe(true);
     s.game.status = "negotiating"; s.players.forEach((player) => { player.dayOne = null; });
-    expect(gameChangeControls(s, now, null)).toMatchObject({ canEditTasks: true, canEditStakes: true });
-    expect(decideGameChange(s, "player_a", {kind:"edit",stakes:[{kind:"dare",item:"Sing"}]}, now).effectiveFromDay).toBe(0);
+    expect(gameChangeControls(s, DURING, null)).toMatchObject({ canEditTasks: true, canEditStakes: true });
+    expect(decideGameChange(s, "player_a", {kind:"edit",stakes:[{kind:"dare",item:"Sing"}]}, DURING).effectiveFromDay).toBe(0);
   });
   it("validates app and runtime commands at the same boundary", () => {
     expect(parseGameCommand({ type: "proposeChange", gameId: "game_change", proposalId: "proposal_1", expectedTermsVersion: 1, change: { kind: "edit", lengthDays: 14, actor: "ignored" } })).toMatchObject({ change: { kind: "edit", lengthDays: 14 } });

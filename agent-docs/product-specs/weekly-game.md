@@ -209,7 +209,7 @@ omit previews without pictures.
 Each game also includes `tasks: { mine: string; theirs: string }`, oriented by
 player seat, and `stake: { kind: "prize" | "dare"; item: string } | null`.
 These use the final agreed terms and exactly the task and stake wording in
-`GameView.terms`; tasks lock at kickoff. Equal tasks remain two equal strings
+`GameView.terms`; tasks lock when Day 1 begins. Equal tasks remain two equal strings
 so native clients can title the card as one shared task. No stake is `null`.
 For legacy terms, the first stake is used: `winner_gets` maps to `prize` and
 `per_miss` maps to `dare`, without changing its wording or settlement.
@@ -708,9 +708,9 @@ cancel a negotiating game; the lifecycle cancellation notice is then the one
 announcement (Murph does not also reply), because that reserved notice is what
 keeps a game-funded room deliverable once the game is void. A live game cannot
 be called off, so Murph
-says its stakes are locked and offers shortening, rescheduling or marking days
-incomplete. A request to change a live game's tasks or prize gets the same
-answer once: they stay for this game, and Murph names what can still change. Chat refusals carry the server's plain rule (for example the 60-day
+says it settles on schedule and offers shortening, rescheduling, a new prize or
+dare, or marking days incomplete. A request to change tasks once Day 1 has begun
+gets one answer: they stay for this game, and Murph names what can still change. Chat refusals carry the server's plain rule (for example the 60-day
 start limit) so Murph can give the reason and the nearest valid option.
 
 When several games share a chat, Murph reads their IDs and task words and names
@@ -755,8 +755,11 @@ photos, check-in photos, excuses or invite tokens. A live two-player game grants
 its eligible groups the normal included group usage allowance without granting
 the players personal AI access. Duplicate rooms share the primary game allowance;
 they do not create more included credit. Suspension, withdrawn health-data consent, the game
-feature flag and member allowlist still apply. Tasks and stakes can be negotiated only while the game is negotiating. Both
-lock at kickoff (`live`), even before Day 1. Schedule and duration remain
+feature flag and member allowlist still apply. Tasks can change, with the other player's yes, until either player's Day 1
+begins, including on a live game that has not reached Day 1. The prize or dare
+can change the same way until the game is due: the new one counts for the whole
+game, and a stake-only change needs no future unstarted day, so it works on the
+last day too. Schedule and duration remain
 editable from the first unstarted day, with at least one future unstarted day.
 Start dates lock once either player checks in. These edits never
 rewrite check-ins or existing tickets.
