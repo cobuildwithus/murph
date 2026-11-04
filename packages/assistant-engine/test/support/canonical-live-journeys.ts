@@ -18,6 +18,9 @@ import { stopWarmCodexAppServer, waitForWarmCodexBackgroundWork } from '../../sr
 
 import type { RealCodexProviderConfig } from './real-codex-provider.js'
 import { canonicalCodexLauncher } from './canonical-codex-launcher.js'
+import { createProductionHostedCapabilities } from './production-hosted-capabilities.js'
+import { ASSISTANT_INPUT_EVENT_SCHEMA, upsertAssistantInputEvent } from '../../src/assistant/input-store.js'
+import { readAssistantCliSurfaceBootstrapContext } from '../../src/assistant/cli-surface-bootstrap.js'
 
 const execFileAsync = promisify(execFile)
 const CLI_ENTRYPOINT = fileURLToPath(new URL('../../../cli/dist/bin.js', import.meta.url))
@@ -32,6 +35,7 @@ export interface CanonicalLiveConfig {
   model: string
   modelProvider: string
   onProviderRequestStarted?: () => void
+  timezone?: string
 }
 
 export interface CanonicalLiveFixture {
@@ -42,7 +46,7 @@ export interface CanonicalLiveFixture {
   codexCommand: string
   commandCount(): Promise<number>
   cli(args: readonly string[], vault?: string): Promise<string>
-  message(prompt: string, input?: Partial<Pick<AssistantMessageInput, 'vault' | 'sessionId' | 'threadId' | 'threadIsDirect' | 'executionContext' | 'beforeProviderAcceptedInputs' | 'deliverResponse' | 'deliveryDispatchMode' | 'deliveryIdempotencyKey' | 'turnTrigger'>>): ReturnType<typeof sendAssistantMessageLocal>
+  message(prompt: string, input?: Partial<Pick<AssistantMessageInput, 'vault' | 'sessionId' | 'threadId' | 'threadIsDirect' | 'executionContext' | 'beforeProviderAcceptedInputs' | 'deliverResponse' | 'deliveryDispatchMode' | 'deliveryIdempotencyKey' | 'turnTrigger' | 'includeEarlySessionOnboarding' | 'onTraceEvent'>>): ReturnType<typeof sendAssistantMessageLocal>
   close(): Promise<void>
 }
 
@@ -58,7 +62,7 @@ const CLI_WRAPPER = [
   '',
 ].join('\n')
 
-export async function createCanonicalLiveFixture(config: CanonicalLiveConfig, channel: 'telegram' | 'linq' = 'telegram'): Promise<CanonicalLiveFixture> {
+export async function createCanonicalLiveFixture(config: CanonicalLiveConfig, channel: 'telegram' | 'linq' = 'telegram', options: { capabilities?: 'production-hosted' } = {}): Promise<CanonicalLiveFixture> {
   try {
     await access(CLI_ENTRYPOINT)
   } catch (error) {
@@ -67,13 +71,20 @@ export async function createCanonicalLiveFixture(config: CanonicalLiveConfig, ch
     }
     throw error
   }
+  if (options.capabilities === 'production-hosted' && !await readAssistantCliSurfaceBootstrapContext()) {
+    throw new Error('Production hosted capabilities require the generated CLI contract. Run node scripts/assemble-assistant-cli-surface.mjs after pnpm build:test-runtime:prepared.')
+  }
   const root = await mkdtemp(path.join(tmpdir(), 'murph-canonical-live-'))
   const vault = path.join(root, 'vault')
   const bin = path.join(root, '.local', 'bin')
   await mkdir(bin, { recursive: true })
-  await initializeVault({ vaultRoot: vault, timezone: 'UTC' })
+  await initializeVault({ vaultRoot: vault, timezone: config.timezone ?? 'UTC' })
+  const capabilities = options.capabilities === 'production-hosted'
+    ? createProductionHostedCapabilities()
+    : null
   const env: NodeJS.ProcessEnv = {
     ...config.env,
+    ...capabilities?.env,
     HOME: root,
     MURPH_CANONICAL_JOURNEY_CLI: CLI_ENTRYPOINT,
     MURPH_CANONICAL_JOURNEY_CODEX: process.env.MURPH_REAL_CODEX_COMMAND ?? PINNED_CODEX,
@@ -100,6 +111,17 @@ export async function createCanonicalLiveFixture(config: CanonicalLiveConfig, ch
     },
     async message(prompt, input = {}) {
       const selectedVault = input.vault ?? vault
+      const now = new Date().toISOString()
+      const eventId = `synthetic-hosted-${crypto.randomUUID()}`
+      const acceptedEvent = capabilities ? await upsertAssistantInputEvent({ vault: selectedVault, event: {
+        content: { text: prompt },
+        conversation: { accountId: 'synthetic-account', actorId: 'synthetic-member', actorIsSelf: false,
+          source: channel, threadId: input.threadId ?? THREAD_ID, threadIsDirect: input.threadIsDirect ?? true },
+        occurredAt: now, receivedAt: now,
+        sourceRef: { kind: 'hosted-mailbox', source: 'hosted-mailbox', eventId, itemId: eventId,
+          dedupeKey: eventId, lane: 'conversation', laneSeq: String(Date.now()), payloadSchema: 'murph.hosted-payload.v1',
+          payloadSource: 'sidecar', wakeSchema: 'murph.hosted-wake.v1' },
+      } }) : null
       let providerRequests = 0
       const result = await sendAssistantMessageLocal({
         approvalPolicy: 'never', channel,
@@ -115,7 +137,15 @@ export async function createCanonicalLiveFixture(config: CanonicalLiveConfig, ch
           env: { ...env, VAULT: selectedVault },
         },
         vault: selectedVault, workingDirectory: selectedVault,
+        ...(acceptedEvent ? { acceptedTurnInput: { initialInputs: [{ id: acceptedEvent.inputId, source: 'assistant-input' as const,
+          acceptedAt: now, contentRef: { kind: 'assistant-input-event' as const, refId: acceptedEvent.inputId, version: ASSISTANT_INPUT_EVENT_SCHEMA },
+        }] } } : {}),
         ...input,
+        ...(capabilities ? { executionContext: { hosted: {
+          ...capabilities.hosted,
+          automationTool: createCanonicalReminderAutomationPort(selectedVault, []),
+          ...input.executionContext?.hosted,
+        } } } : {}),
         onProviderRequestStarted: () => { providerRequests += 1; config.onProviderRequestStarted?.() },
       })
       await waitForWarmCodexBackgroundWork()

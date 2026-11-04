@@ -23,13 +23,18 @@ type Segment = {
   width: number;
 };
 
+// Matches the native bar: every stage shows the same text, from name and time
+// down to time alone and then none, and no block ever drops what the others show.
+type StageText = "labeled" | "valueOnly" | "none";
+const STAGE_TEXT_LADDER: readonly StageText[] = ["labeled", "valueOnly", "none"];
+
 export function getSleepSummaryCardImageSize(card: SleepSummaryResponseCardV1) {
   const clockHeight = card.bedtime !== null ? 20 : 0;
   const metricsHeight = metrics(card).length > 0 ? 38 : 0;
   return { width: 1200, height: Math.ceil(px(150 + clockHeight + metricsHeight)) };
 }
 
-function segments(card: SleepSummaryResponseCardV1): Segment[] {
+function segments(card: SleepSummaryResponseCardV1): { bar: Segment[]; text: StageText } {
   const values = card.stages ? [
     { label: "DEEP", minutes: card.stages.deepMinutes, background: "#2A2522", color: CREAM, labelColor: "rgba(255,245,229,0.70)" },
     { label: "REM", minutes: card.stages.remMinutes, background: "#7A706A", color: CREAM, labelColor: "rgba(255,245,229,0.75)" },
@@ -37,15 +42,48 @@ function segments(card: SleepSummaryResponseCardV1): Segment[] {
   ].filter((segment) => segment.minutes > 0) : [{ label: "ASLEEP", minutes: card.totalSleepMinutes, background: "#7A706A", color: CREAM, labelColor: "rgba(255,245,229,0.75)" }];
   if (card.awakeMinutes !== null) values.push({ label: "AWAKE", minutes: card.awakeMinutes, background: "#EBDDC8", color: primary, labelColor: secondary });
   const width = 292 - 2 * (values.length - 1);
-  const total = values.reduce((sum, segment) => sum + segment.minutes, 0);
-  const result = values.map((segment) => ({
-    ...segment,
-    width: Math.max(segment.label === "AWAKE" ? 10 : 6, width * segment.minutes / total),
-  }));
-  const excess = result.reduce((sum, segment) => sum + segment.width, 0) - width;
-  const widest = result.reduce((best, segment) => segment.width > best.width ? segment : best);
-  widest.width -= excess;
-  return result;
+  for (const text of STAGE_TEXT_LADDER) {
+    const minimums = values.map((segment) => stageMinimumWidth(segment.label, segment.minutes, text));
+    if (text !== "none" && minimums.reduce((sum, minimum) => sum + minimum, 0) > width) continue;
+    const widths = sleepStageWidths(values.map((segment) => segment.minutes), minimums, width);
+    return { bar: values.map((segment, index) => ({ ...segment, width: widths[index] ?? 0 })), text };
+  }
+  throw new Error("unreachable: the last stage text level always fits");
+}
+
+function stageMinimumWidth(label: string, minutes: number, text: StageText): number {
+  if (label === "AWAKE") return 10;
+  if (label === "ASLEEP") return 18 + label.length * 7;
+  const duration = formatSleepCardDuration(minutes).length;
+  if (text === "labeled") return Math.max(18 + label.length * 7, 24 + duration * 7);
+  if (text === "valueOnly") return 16 + duration * 7;
+  return 6;
+}
+
+/**
+ * Widths in proportion to minutes, except that a block below its minimum is
+ * held at it and the rest is shared by the others in proportion. When the
+ * minimums alone overfill the bar, the widest block absorbs the difference.
+ */
+export function sleepStageWidths(minutes: readonly number[], minimums: readonly number[], width: number): number[] {
+  const held = new Set<number>();
+  for (;;) {
+    const free = width - [...held].reduce((sum, index) => sum + (minimums[index] ?? 0), 0);
+    const freeMinutes = minutes.reduce((sum, value, index) => held.has(index) ? sum : sum + value, 0);
+    const widths = minutes.map((value, index) =>
+      held.has(index) ? minimums[index] ?? 0 : freeMinutes > 0 ? free * value / freeMinutes : 0);
+    const newlyHeld = widths.flatMap((value, index) => !held.has(index) && value < (minimums[index] ?? 0) ? [index] : []);
+    if (newlyHeld.length === 0 || held.size + newlyHeld.length === minutes.length) {
+      for (const index of newlyHeld) widths[index] = minimums[index] ?? 0;
+      const excess = widths.reduce((sum, value) => sum + value, 0) - width;
+      if (excess > 0) {
+        const widest = widths.indexOf(Math.max(...widths));
+        widths[widest] = (widths[widest] ?? 0) - excess;
+      }
+      return widths;
+    }
+    for (const index of newlyHeld) held.add(index);
+  }
 }
 
 type Metric = { icon: "eye" | "bed" | "pulse" | "heart"; value: string; unit: string; label: string };
@@ -61,7 +99,7 @@ function metrics(card: SleepSummaryResponseCardV1): Metric[] {
 /** Immutable static default state. Messages owns the outer mask and badge. */
 export function SleepSummaryCardImage({ card }: { card: SleepSummaryResponseCardV1 }) {
   const groups = metrics(card);
-  const bar = segments(card);
+  const { bar, text: stageText } = segments(card);
   const hours = Math.floor(card.totalSleepMinutes / 60);
   const minutes = card.totalSleepMinutes % 60;
   return (
@@ -89,10 +127,8 @@ export function SleepSummaryCardImage({ card }: { card: SleepSummaryResponseCard
           // The heading already shows the total, so the one block without
           // stages carries only its name, matching the native card.
           const isAsleep = segment.label === "ASLEEP";
-          const showValue = !isAsleep && segment.label !== "AWAKE" && segment.width >= 16 + duration.length * 7;
-          const showLabel = isAsleep || (showValue && segment.width >= Math.max(
-            18 + segment.label.length * 7, 24 + duration.length * 7,
-          ));
+          const showValue = !isAsleep && segment.label !== "AWAKE" && stageText !== "none";
+          const showLabel = isAsleep || (showValue && stageText === "labeled");
           const leftRadius = px(index === 0 ? 10 : 3);
           const rightRadius = px(index === bar.length - 1 ? 10 : 3);
           return (

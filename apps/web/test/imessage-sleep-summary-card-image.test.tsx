@@ -4,7 +4,7 @@ import path from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { sleepSummaryResponseCardV1Schema } from "@murphai/contracts";
-import { SleepSummaryCardImage, getSleepSummaryCardImageSize } from "../src/components/imessage/sleep-summary-card-image";
+import { SleepSummaryCardImage, getSleepSummaryCardImageSize, sleepStageWidths } from "../src/components/imessage/sleep-summary-card-image";
 
 const mocks = vi.hoisted(() => ({ reads: vi.fn() }));
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -22,7 +22,11 @@ const variants = [
   { name: "apple-watch", card: { ...complete, score: null, hrv: { milliseconds: 66, method: "sdnn" as const }, wakeUps: null } },
   { name: "total-only", card: totalOnly },
   { name: "tiny-stages", card: { ...complete, stages: { deepMinutes: 1, remMinutes: 1, lightMinutes: 434 }, awakeMinutes: 1 } },
+  // A long night whose shortest stage once lost its name while the others kept theirs.
+  { name: "long-night", card: { ...complete, totalSleepMinutes: 517, stages: { deepMinutes: 113, remMinutes: 129, lightMinutes: 275 }, awakeMinutes: 34 } },
 ];
+const stageText = (markup: string, label: string) =>
+  markup.match(new RegExp(`data-sleep-segment="${label}"[^>]*>(.*?)</div></div>`, "u"))?.[1] ?? null;
 const encode = (value: unknown) => `${Buffer.from(JSON.stringify(value)).toString("base64url")}.png`;
 beforeEach(() => mocks.reads.mockClear());
 
@@ -73,5 +77,25 @@ describe("sleep card image route", () => {
     expect(noRem).not.toContain('data-sleep-segment="REM"');
     expect(sparse).not.toMatch(/Sleep score|sleep-metrics|AM|PM|DEEP|AWAKE/u);
     expect(getSleepSummaryCardImageSize(totalOnly).height).toBeLessThan(getSleepSummaryCardImageSize(complete).height);
+  });
+  it.each(variants.filter(({ card }) => card.stages !== null))("names and times every stage in $name, or none", ({ card }) => {
+    const markup = renderToStaticMarkup(<SleepSummaryCardImage card={card} />);
+    const labels = ["DEEP", "REM", "LIGHT"].filter((label) => markup.includes(`data-sleep-segment="${label}"`));
+    const named = labels.filter((label) => stageText(markup, label)?.includes(`>${label}<`));
+    expect(named.length === 0 || named.length === labels.length).toBe(true);
+    if (card.stages?.deepMinutes === 113) expect(named).toEqual(["DEEP", "REM", "LIGHT"]);
+  });
+});
+
+describe("sleep stage widths", () => {
+  it("shares the bar in proportion when every block has room", () => {
+    expect(sleepStageWidths([100, 100, 200], [10, 10, 10], 400)).toEqual([100, 100, 200]);
+  });
+  it("holds a short block at its minimum and shares the rest in proportion", () => {
+    expect(sleepStageWidths([10, 100, 300], [60, 10, 10], 460)).toEqual([60, 100, 300]);
+  });
+  it("lets the widest block absorb minimums that overfill the bar", () => {
+    const widths = sleepStageWidths([1, 1, 1], [50, 50, 60], 150);
+    expect(widths).toEqual([50, 50, 50]);
   });
 });

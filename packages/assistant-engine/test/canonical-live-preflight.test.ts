@@ -16,6 +16,7 @@ import { listAutomations, showAutomation } from '@murphai/core'
 import { getAssistantCronJob, getAssistantCronStatus } from '../src/assistant/cron.js'
 import type { AssistantHostedAutomationToolRequest } from '../src/assistant/execution-context.js'
 import { sendAssistantMessageLocal } from '../src/assistant/service.js'
+import * as bootstrap from '../src/assistant/cli-surface-bootstrap.js'
 import { createCanonicalLiveFixture, createCanonicalReminderAutomationPort, runCanonicalReminderJourney } from './support/canonical-live-journeys.js'
 
 const cli = fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url))
@@ -51,6 +52,17 @@ it('creates the canonical fixture after the CLI preflight succeeds', async () =>
   } finally {
     await fixture.close()
   }
+})
+
+it('rejects the production capability option when the hosted CLI contract is missing', async () => {
+  vi.mocked(access).mockResolvedValueOnce(undefined)
+  const contract = vi.spyOn(bootstrap, 'readAssistantCliSurfaceBootstrapContext').mockResolvedValueOnce(null)
+  try {
+    await expect(createCanonicalLiveFixture(config, 'linq', { capabilities: 'production-hosted' }))
+      .rejects.toThrow('node scripts/assemble-assistant-cli-surface.mjs')
+    expect(mkdtemp).not.toHaveBeenCalled()
+    expect(sendAssistantMessageLocal).not.toHaveBeenCalled()
+  } finally { contract.mockRestore() }
 })
 
 
