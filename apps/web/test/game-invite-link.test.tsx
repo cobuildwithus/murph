@@ -57,42 +57,68 @@ describe("weekly game invite link", () => {
     expect(gameInviteAppUrl("a/b c", {})).toBe("ai.withmurph.app://invite/a%2Fb%20c");
   });
 
-  it("discloses the required check-in before acceptance, including legacy photos", () => {
+  it("discloses a required check-in before acceptance, including legacy photos", () => {
     if (OPEN.status !== "open") throw new Error("Expected open fixture");
     const render = (preview: GameInvitePreview) => renderToStaticMarkup(createElement(GameInviteView, { appUrl: "ai.withmurph.app://invite/synthetic", preview }));
-    expect(render(OPEN)).toContain("Photo");
-    expect(render(OPEN)).toContain("Weekdays");
+    expect(render(OPEN)).toContain("Prove it with a photo.");
+    expect(render(OPEN)).toContain("Weekdays for a week. Starts once you say yes.");
     expect(render(OPEN)).not.toContain("paste it in Murph");
-    expect(render({ ...OPEN, terms: { ...OPEN.terms, checkInKind: "any" } })).toContain("Choose each day");
-    expect(render({ ...OPEN, terms: { ...OPEN.terms, checkInKind: "heart_rate" } })).toContain("Heart-rate graph · wearable required");
+    // Free choice requires nothing, so the card says nothing about it.
+    expect(render({ ...OPEN, terms: { ...OPEN.terms, checkInKind: "any" } })).not.toContain("Prove it");
+    expect(render({ ...OPEN, terms: { ...OPEN.terms, checkInKind: "heart_rate" } })).toContain("Prove it with heart rate from a wearable.");
   });
 
-  it("puts that link on the page's Open in Murph button", () => {
+  it("shows the invitee's task first, as You, and never a private name", () => {
+    const html = renderToStaticMarkup(createElement(GameInviteView, { appUrl: "ai.withmurph.app://invite/synthetic", preview: OPEN }));
+    expect(html).toContain("Leo challenged you.");
+    expect(html.indexOf("10 min abs")).toBeLessThan(html.indexOf("100 pushups"));
+    expect(html.indexOf(">You<")).toBeLessThan(html.indexOf("10 min abs"));
+    expect(html).toContain("For the winner");
+    expect(html).toContain("Breakfast in bed");
+  });
+
+  it("puts that link on the page's Open it link", () => {
     const appUrl = gameInviteAppUrl("tok_1", { MURPH_GAME_APP_URL_SCHEME: "ai.withmurph.app.dev" });
     const html = renderToStaticMarkup(createElement(GameInviteView, { appUrl, preview: OPEN }));
     expect(html).toContain('href="ai.withmurph.app.dev://invite/tok_1"');
-    expect(html).toContain("Open in Murph");
+    expect(html).toContain("Already have Murph?");
     expect(html).not.toContain("murphv2://");
+    expect(html).not.toContain("Copy link");
     // A closed invite offers no app link.
     expect(renderToStaticMarkup(createElement(GameInviteView, { appUrl, preview: { status: "used" } }))).not.toContain(appUrl);
   });
 
-  it("offers the App Store under Open in Murph for a phone without the app", () => {
+  it("leads with Get the app, the App Store, for a phone without the app", () => {
     const appStore = 'href="https://apps.apple.com/us/app/murph-ai/id6786145859"';
     const html = renderToStaticMarkup(createElement(GameInviteView, { appUrl: "ai.withmurph.app://invite/synthetic", preview: OPEN }));
     expect(html).toContain(appStore);
-    expect(html).toContain("Get it on the App Store");
-    expect(html.indexOf(appStore)).toBeGreaterThan(html.indexOf("Open in Murph"));
+    expect(html).toContain("Get the app");
+    expect(html.indexOf(appStore)).toBeLessThan(html.indexOf("Already have Murph?"));
     expect(renderToStaticMarkup(createElement(GameInviteView, { appUrl: "ai.withmurph.app://invite/synthetic", preview: { status: "used" } }))).not.toContain(appStore);
+  });
+
+  it("puts a dare on the loser's pink slip", () => {
+    if (OPEN.status !== "open") throw new Error("Expected open fixture");
+    const html = renderToStaticMarkup(createElement(GameInviteView, {
+      appUrl: "ai.withmurph.app://invite/synthetic",
+      preview: { ...OPEN, terms: { ...OPEN.terms, stakes: [{ item: "sing at karaoke", key: "gsk_dare", kind: "dare" }] } },
+    }));
+    expect(html).toContain("The loser has to");
+    expect(html).toContain("sing at karaoke");
+    expect(html).not.toContain("For the winner");
   });
 });
 
 it.each([
-  [{ status: "expired", reason: "cancelled", inviterFirstName: "Player" }, "Player called this one off. Ask for a new link."],
-  [{ status: "expired", reason: "cancelled" }, "This invite was called off. Ask for a new link."],
-  [{ status: "expired" }, "This invite expired. Ask for a new link."],
-] satisfies Array<[GameInvitePreview, string]>)("explains the closed invite cause", (preview, copy) => {
+  [{ status: "used" }, "This link is used up.", "Someone already shook on it. Ask for a new one."],
+  [{ status: "expired", reason: "cancelled", inviterFirstName: "Player" }, "Player called this one off.", "Ask for a new one."],
+  [{ status: "expired", reason: "cancelled" }, "This invite was called off.", "Ask for a new one."],
+  [{ status: "expired" }, "This invite ran out.", "It wasn&#x27;t shaken on in time. Ask for a new one."],
+  [null, "This link isn&#x27;t available.", "Check the link, or ask for a new one."],
+] satisfies Array<[GameInvitePreview | null, string, string]>)("explains the closed invite cause in the app's words", (preview, title, detail) => {
   const html = renderToStaticMarkup(createElement(GameInviteView, { appUrl: "ai.withmurph.app://invite/synthetic", preview }));
-  expect(html).toContain(copy);
-  expect(html).not.toContain("Open in Murph");
+  expect(html).toContain(title);
+  expect(html).toContain(detail);
+  expect(html).not.toContain("Get the app");
+  expect(html).not.toContain("Already have Murph?");
 });

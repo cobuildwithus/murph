@@ -58,6 +58,8 @@ export function parseGameCommand(value: unknown): GameCommand {
       };
     case "setProfile":
       return profile(input);
+    case "setPlayerPhoto":
+      return { type: "setPlayerPhoto", memberId: opaque(input.memberId, "memberId"), photoKey: nullable(input.photoKey, mediaKey) };
     case "createGame":
       return create(input);
     case "negotiate":

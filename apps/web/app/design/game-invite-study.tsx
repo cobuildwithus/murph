@@ -91,8 +91,9 @@ export function GameInviteStudy() {
         <GameRecapView recapUrl="https://www.withmurph.ai/recap/game_synthetic" />
       </div>
       <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-        The production <code>/g/[token]</code> page a texted weekly-game challenge opens. It shows both
-        tasks, the days, and the stake, then hands off to the app. Preview only; the buttons are inert here.
+        The production <code>/g/[token]</code> page a texted weekly-game challenge opens: the app&rsquo;s own
+        invite card on its night ground, with both tasks, the days, and the stake, then Get the app. Preview only;
+        the buttons are inert here.
       </p>
       <div className="grid items-start gap-6 md:grid-cols-2">
         {STATES.map((state) => (
@@ -101,7 +102,7 @@ export function GameInviteStudy() {
               {state.label}
             </figcaption>
             <div
-              className="overflow-hidden rounded-3xl border border-border bg-background px-6 py-7 text-foreground sm:px-10 sm:py-9"
+              className="flex min-h-[760px] flex-col overflow-hidden rounded-3xl"
               data-design-state={state.id}
               id={`game-invite-${state.id}`}
               inert

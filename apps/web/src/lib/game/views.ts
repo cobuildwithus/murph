@@ -447,7 +447,7 @@ function participationView(input: GameViewInput, player: RulePlayer): NonNullabl
 function playerAvatars(input: GameViewInput, memberId: string): Pick<GamePlayerView, "avatarUrl" | "profileAvatarUrl"> {
   if (input.hiddenMemberIds?.has(memberId)) return { avatarUrl: null, profileAvatarUrl: null };
   const profileKey = input.profileAvatarKeys?.get(memberId) ?? null;
-  const avatarKey = input.avatarKeys.get(memberId) ?? profileKey;
+  const avatarKey = profileKey ?? input.avatarKeys.get(memberId);
   return { avatarUrl: avatarKey ? gameMediaUrl(avatarKey) : null, profileAvatarUrl: profileKey ? gameMediaUrl(profileKey) : null };
 }
 
@@ -473,7 +473,7 @@ function departedView(input: GameViewInput, departed: NonNullable<GameViewInput[
 /** The challenger's own name for whoever they invited, until that person joins. */
 function inviteeView(input: GameViewInput, invitee: NonNullable<GameViewInput["invitee"]>, seat: number, viewerId: string): GamePlayerView {
   const profileKey = invitee.memberId ? input.profileAvatarKeys?.get(invitee.memberId) ?? null : null;
-  const avatarKey = invitee.photoKey ?? (invitee.memberId ? input.avatarKeys.get(invitee.memberId) : null) ?? profileKey;
+  const avatarKey = profileKey ?? invitee.photoKey ?? (invitee.memberId ? input.avatarKeys.get(invitee.memberId) : null);
   return {
     avatarUrl: avatarKey ? gameMediaUrl(avatarKey) : null,
     profileAvatarUrl: profileKey ? gameMediaUrl(profileKey) : null,

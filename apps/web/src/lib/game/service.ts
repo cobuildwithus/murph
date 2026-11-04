@@ -403,6 +403,8 @@ async function runCommand(context: CommandContext, command: Exclude<GameCommand,
       return report(context, command);
     case "block":
       return block(context, command);
+    case "setPlayerPhoto":
+      return setPlayerPhoto(context, command);
     case "unblock":
       return unblock(context, command.memberId);
   }
@@ -410,7 +412,7 @@ async function runCommand(context: CommandContext, command: Exclude<GameCommand,
 
 /** Every media key a command names must be the actor's own finished upload. */
 async function requireUploadedMedia(actor: string, command: GameCommand): Promise<void> {
-  const labelPhoto = command.type === "setProfile" ? command.photoKey
+  const labelPhoto = command.type === "setProfile" || command.type === "setPlayerPhoto" ? command.photoKey
     : command.type === "createGame" ? command.inviteeLabel?.photoKey : null;
   const keys = command.type === "post" ? command.mediaKeys : [labelPhoto, ...(command.type === "createGame" ? command.invitees?.map(target => target.label?.photoKey) ?? [] : [])].filter((key): key is string => Boolean(key));
   if (keys.length === 0) return;
@@ -1198,6 +1200,38 @@ async function redeem(context: CommandContext, command: Extract<GameCommand, { t
     return changed.count === 1 ? [{ payload: { ticketId }, type: "redeemed" }] : [];
   });
   return ticket.gameId;
+}
+
+/** Changes only the viewer's photo, preserving their private name and relationship. */
+async function setPlayerPhoto(context: CommandContext, command: Extract<GameCommand, { type: "setPlayerPhoto" }>): Promise<null> {
+  const { actor } = context;
+  const { memberId, photoKey } = command;
+  if (memberId === actor) reject("INVALID_REQUEST", "Use your profile to change your own photo.");
+  await getPrisma().$transaction(async (tx) => {
+    await context.beforeMutationTx?.(tx);
+    await lockGamePair(tx, actor, memberId);
+    if (!await tx.game.findFirst({ select: { id: true }, where: gamesBetween(actor, memberId) })
+      || await areGamePlayersBlocked(tx, actor, memberId)) {
+      reject("NOT_A_PLAYER", "You can only change a private photo of someone you play with.");
+    }
+    if (photoKey === null) {
+      await tx.$executeRaw`UPDATE game_contact_label SET photo_key = NULL, updated_at = now()
+        WHERE owner_member_id = ${actor} AND subject_member_id = ${memberId}`;
+      return;
+    }
+    // Serialize with profile-photo updates, which take the same profile row lock.
+    const [profile] = await tx.$queryRaw<{ photoKey: string | null }[]>`
+      SELECT photo_key AS "photoKey" FROM game_profile WHERE member_id = ${memberId} FOR NO KEY UPDATE`;
+    if (!profile) reject("NOT_A_PLAYER", "This player is no longer available.");
+    if (profile.photoKey) reject("INVALID_REQUEST", "They have their own profile photo. You can only remove your private photo.");
+    if (!await tx.gameProfile.findUnique({ select: { memberId: true }, where: { memberId: actor } })) {
+      reject("PROFILE_REQUIRED", "Add your first name and time zone first.");
+    }
+    await tx.$executeRaw`INSERT INTO game_contact_label (owner_member_id, subject_member_id, photo_key, updated_at)
+      VALUES (${actor}, ${memberId}, ${photoKey}, now())
+      ON CONFLICT (owner_member_id, subject_member_id) DO UPDATE SET photo_key = EXCLUDED.photo_key, updated_at = now()`;
+  });
+  return null;
 }
 
 // ------------------------------------------------------------ report, block

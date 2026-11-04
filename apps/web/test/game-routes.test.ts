@@ -78,6 +78,7 @@ type Routes = {
   invite: typeof import("../app/api/game/v1/invites/[token]/route");
   media: typeof import("../app/api/game/v1/media/[...key]/route");
   profile: typeof import("../app/api/game/v1/me/profile/route");
+  playerPhoto: typeof import("../app/api/game/v1/players/[memberId]/photo/route");
   redeem: typeof import("../app/api/game/v1/tickets/[id]/redeem/route");
   settle: typeof import("../app/api/game/v1/dev/games/[id]/settle/route");
   startNow: typeof import("../app/api/game/v1/dev/games/[id]/start-now/route");
@@ -138,6 +139,7 @@ describe("weekly game routes", () => {
       invite: await import("../app/api/game/v1/invites/[token]/route"),
       media: await import("../app/api/game/v1/media/[...key]/route"),
       profile: await import("../app/api/game/v1/me/profile/route"),
+      playerPhoto: await import("../app/api/game/v1/players/[memberId]/photo/route"),
       redeem: await import("../app/api/game/v1/tickets/[id]/redeem/route"),
       settle: await import("../app/api/game/v1/dev/games/[id]/settle/route"),
       startNow: await import("../app/api/game/v1/dev/games/[id]/start-now/route"),
@@ -205,6 +207,16 @@ describe("weekly game routes", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ ok: true, profile });
     expect(mocks.runGameCommand).toHaveBeenCalledWith({ actorMemberId: LEO, multiplayer: false, command: { type: "setProfile", photoKey: null, memberId: AVA } });
+  });
+
+  it("decodes the player photo target and returns the ordinary empty write envelope", async () => {
+    mocks.runGameCommand.mockResolvedValue({ ok: true, game: null });
+    const photoKey = `game/${LEO}/${"a".repeat(64)}.jpg`;
+    const response = await routes.playerPhoto.PUT(writeRequest("PUT", "/players/hbm%5Fava/photo", { photoKey }), params({ memberId: "hbm%5Fava" }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, game: null });
+    expect(mocks.runGameCommand).toHaveBeenCalledWith({ actorMemberId: LEO, multiplayer: false,
+      command: { type: "setPlayerPhoto", memberId: "hbm_ava", photoKey } });
   });
 
   it("requires a signed-in session and never reaches the game", async () => {
@@ -337,6 +349,9 @@ describe("weekly game routes", () => {
         writeRequest("POST", `/games/${GAME_ID}/reports`, { gameId: "other_game", reportId: "report_1", entryId: "entry_1", reason: "harassment", block: true }),
         params({ id: GAME_ID }),
       ), { block: true, entryId: "entry_1", gameId: GAME_ID, reason: "harassment", reportId: "report_1", type: "report" }],
+      ["PUT /players/:memberId/photo", () => routes.playerPhoto.PUT(
+        writeRequest("PUT", `/players/${AVA}/photo`, { memberId: LEO, type: "setProfile", photoKey: null }), params({ memberId: AVA })),
+        { memberId: AVA, photoKey: null, type: "setPlayerPhoto" }],
       ["PUT /blocks/:memberId", () => routes.block.PUT(writeRequest("PUT", `/blocks/${AVA}`, { memberId: LEO }), params({ memberId: AVA })),
         { memberId: AVA, type: "block" }],
       ["DELETE /blocks/:memberId", () => routes.block.DELETE(writeRequest("DELETE", `/blocks/${AVA}`), params({ memberId: AVA })),
@@ -420,6 +435,8 @@ describe("weekly game routes", () => {
       "GET /home": () => routes.home.GET(new Request(`${BASE}/home`)),
       "GET /history": () => routes.history.GET(new Request(`${BASE}/history`)),
       "GET /games/:id": () => routes.game.GET(new Request(`${BASE}/games/${GAME_ID}`), params({ id: GAME_ID })),
+      "PUT /players/:memberId/photo": () => routes.playerPhoto.PUT(
+        writeRequest("PUT", `/players/${AVA}/photo`, { photoKey: null }), params({ memberId: AVA })),
       "PUT /me/profile": () => routes.profile.PUT(writeRequest("PUT", "/me/profile", { firstName: "Leo", timeZone: "UTC" })),
       "DELETE /games/:id": () => routes.game.DELETE(writeRequest("DELETE", `/games/${GAME_ID}`), params({ id: GAME_ID })),
       "DELETE /games/:id/changes/:proposalId": () => routes.cancelChange.DELETE(
