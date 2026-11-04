@@ -119,8 +119,6 @@ fields; use a concrete not-applicable reason instead of an empty checklist.
 | Product UX | Effort, affected journeys, exclusions, differences from plan, and `Ready`/`Hold`; or internal-only reason. |
 | Evidence | Focused commands/results and direct proof. Distinguish pending CI and unavailable external proof. |
 | Non-obvious affected surfaces | Necessary adjacent changes and their regression proof, or `None`. |
-| Architecture and reuse | Four bullets: `Existing systems reused`, `New logic`, `New abstractions`, `Complexity intentionally avoided`. Explain why existing owners suffice when nothing is added. |
-| Complexity impact | `Guard`, `Hotspots`, `Agent judgment`. Record the command/result, changed functions above 20 and disposition, and whether further simplification is justified. No authored JS/TS permits a concrete not-applicable reason. |
 | Hot reply path impact | Applicable call/latency evidence below, or a reason the foreground path is unaffected. |
 | Murph initial provider input impact | Applicable complete-input measurement below, or a reason for both individual and group runtimes. |
 | Deployment concerns | Exactly one section and disposition, using one of the examples below. |
