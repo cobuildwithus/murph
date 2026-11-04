@@ -165,8 +165,9 @@ describe("release verification executable lanes", () => {
         "cli",
         "assistant-engine",
         "assistant-runtime",
-        "platform-b",
+        "platform-b1",
         "platform-a",
+        "platform-b2",
         "hosted-local-harness",
       ]);
       expect(new Set(packageShards).size).toBe(packageShards.length);
@@ -201,13 +202,15 @@ describe("release verification executable lanes", () => {
           "packages/inbox-services",
           "packages/operator-config",
         ],
-        "platform-b": [
+        "platform-b1": [
           "packages/core",
           "packages/contracts",
-          "packages/clinical-records",
           "packages/device-syncd",
-          "packages/inboxd",
           "packages/messaging-ingress",
+        ],
+        "platform-b2": [
+          "packages/clinical-records",
+          "packages/inboxd",
           "packages/parsers",
           "packages/query",
           "packages/runtime-state",

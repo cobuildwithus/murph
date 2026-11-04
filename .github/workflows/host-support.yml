@@ -328,11 +328,10 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
-      # The validated release plan keeps the measured CLI and Assistant Engine
-      # floors isolated, splits the platform owners across two bounded runners,
-      # and retains dedicated Health Commons and Hosted Local Harness lanes.
-      # Package commands remain serial; the isolated Assistant Engine lane
-      # runs two test files at a time within its two-core runner.
+      # The validated release plan isolates CLI, Assistant Engine, Assistant
+      # Runtime, and Hosted Local Harness, with three platform groups.
+      # Package commands remain serial; Assistant Engine and Assistant Runtime
+      # each run two isolated test files at a time with serial in-file suites.
       matrix: ${{ fromJSON(needs.release-verification-plan-linux.outputs.package_matrix) }}
     steps:
       - name: Reject draft pull request proof
@@ -383,7 +382,7 @@ jobs:
             [[ -n "$package_dir" ]] || continue
             if [[ "$package_dir" == "packages/cli" ]]; then
               env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS=50% pnpm exec vitest run --config packages/cli/vitest.workspace.ts --coverage
-            elif [[ "$package_dir" == "packages/assistant-engine" ]]; then
+            elif [[ "$package_dir" == "packages/assistant-engine" || "$package_dir" == "packages/assistant-runtime" ]]; then
               env MURPH_VITEST_FILE_PARALLELISM=1 MURPH_VITEST_MAX_WORKERS=2 pnpm --dir "$package_dir" test:coverage
             else
               env MURPH_VITEST_MAX_WORKERS=50% pnpm --dir "$package_dir" test:coverage
