@@ -105,6 +105,7 @@ export interface GameViewInput {
   audienceKey?: string | null;
   pendingChange?: GamePendingChange | null;
   talkDelivery?: GameView["talkDelivery"];
+  recapWatched?: boolean;
   state: RuleState;
   viewerId: string;
   now: Date;
@@ -344,6 +345,7 @@ export function buildGameView(input: GameViewInput): GameView {
     changeControls: game.seats === 10 ? CLOSED_CHANGE_CONTROLS : gameChangeControls(state, input.now, input.pendingChange ?? null),
     pendingChange: game.seats === 10 ? null : pendingGameChangeView(state, input.pendingChange ?? null, input.now),
     ...(input.talkDelivery ? { talkDelivery: input.talkDelivery } : {}),
+    ...(input.recapWatched ? { recapWatched: true as const } : {}),
     days: game.status === "negotiating" ? [] : dayViews(input, players, entries),
     id: game.id,
     inviteExpiresAt: game.status === "invited" ? input.inviteExpiresAt?.toISOString() ?? null : null,

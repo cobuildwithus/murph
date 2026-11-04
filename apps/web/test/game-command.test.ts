@@ -14,6 +14,12 @@ it("parses Prove it client ids without accepting caller identity or deadline", (
   }
 });
 
+it("parses a recap receipt by game id alone, never a caller identity", () => {
+  expect(parseGameCommand({ type: "watchRecap", gameId: "game_recap", memberId: "other", seat: 1 }))
+    .toEqual({ type: "watchRecap", gameId: "game_recap" });
+  expect(() => parseGameCommand({ type: "watchRecap", gameId: "" })).toThrow(GameRuleError);
+});
+
 function codeOf(run: () => unknown): string {
   try {
     run();

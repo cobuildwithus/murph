@@ -286,6 +286,8 @@ export type GameCommand =
   /** POST /games/:id/challenges { entryId: string }. Actor comes from authentication. */
   | { type: "challenge"; gameId: string; entryId: string }
   | { type: "leave"; gameId: string }
+  /** POST /games/:id/recap-watched: you finished its recap. Settled games only; safe to repeat. */
+  | { type: "watchRecap"; gameId: string }
   | ({ type: "editTerms"; gameId: string } & EditGameTermsBody)
   | { type: "setDayCompletion"; gameId: string; date: string; incomplete: boolean }
   /** DELETE /games/:id cancels an unstarted invite. */
@@ -445,6 +447,11 @@ export interface GameView {
   changeControls: GameChangeControls;
   pendingChange: GamePendingChange | null;
   talkDelivery?: "pending" | "sent" | "failed";
+  /**
+   * Only to the viewer: they finished this settled game's recap, on any phone.
+   * Absent otherwise. Clients that predate it ignore it.
+   */
+  recapWatched?: true;
   id: string;
   status: GameStatus;
   /** 1 for a new game, then 2, 3… along its rematch chain. */

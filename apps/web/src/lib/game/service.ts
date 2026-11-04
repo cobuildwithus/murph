@@ -182,7 +182,9 @@ export async function runGameCommand(input: {
       return { game: null, ok: true, profile: await setProfile(actor, command) };
     }
     const chatAudience = input.chatAudience ?? (input.multiplayer && input.chatContainerMemberId ? await readGameChatAudience(input.chatContainerMemberId) : undefined);
-    const applied = await runCommand({ chatAudience, actor, now: input.now, chatContainerMemberId: input.chatContainerMemberId, chatPlayerMemberIds: input.chatPlayerMemberIds, beforeMutationTx: input.beforeMutationTx, postGuard: input.postGuard }, command);
+    // A recap receipt is the viewer's own; it touches no game state, so it skips the game write path.
+    const applied = command.type === "watchRecap" ? await watchRecap(actor, command.gameId)
+      : await runCommand({ chatAudience, actor, now: input.now, chatContainerMemberId: input.chatContainerMemberId, chatPlayerMemberIds: input.chatPlayerMemberIds, beforeMutationTx: input.beforeMutationTx, postGuard: input.postGuard }, command);
     const { gameId, dayOutcome, composer } = typeof applied === "object" && applied !== null ? applied : { gameId: applied };
     await deliverAppGameNegotiation(command, gameId, input.chatContainerMemberId);
     await deliverCreatedRematch(command, gameId, input.chatContainerMemberId);
@@ -371,7 +373,7 @@ interface CommandContext {
 }
 
 /** Applies one command; returns the game to show back, if any. */
-async function runCommand(context: CommandContext, command: Exclude<GameCommand, { type: "setProfile" }>): Promise<string | null | { gameId: string; dayOutcome?: GameDayOutcome; composer?: { murphPhoneNumber: string } }> {
+async function runCommand(context: CommandContext, command: Exclude<GameCommand, { type: "setProfile" | "watchRecap" }>): Promise<string | null | { gameId: string; dayOutcome?: GameDayOutcome; composer?: { murphPhoneNumber: string } }> {
   switch (command.type) {
     case "replyToPost": return replyToPost(context, command);
     case "deleteReply": return deleteReply(context, command);
@@ -430,7 +432,7 @@ interface LockedStep {
   clock: Date;
 }
 
-type GameEventType = "reply_accepted" | "talk_requested" | "challenged" | "left" | "terms_edited" | "day_marked_incomplete" | "day_restored" | "cancelled" | "blocked" | "removed" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_voted" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
+type GameEventType = "reply_accepted" | "talk_requested" | "recap_watched" | "challenged" | "left" | "terms_edited" | "day_marked_incomplete" | "day_restored" | "cancelled" | "blocked" | "removed" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_voted" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
 /** History holds metadata and sealed words, never plaintext. */
 interface GameEventDraft {
   createdAt?: Date;
@@ -997,6 +999,26 @@ async function cancelInvite(context: CommandContext, gameId: string): Promise<st
       await reserveGameChatLifecycleTx({ gameId, kind: "cancelled", now: clock, tx });
     }
     return [{ type: "cancelled", payload: {} }];
+  });
+  return gameId;
+}
+
+/**
+ * The viewer's own recap receipt, never shown to anyone else. One per seat, so
+ * a retry or another phone adds nothing; the seat (not the member id) keeps the
+ * key free of who it was once account deletion rewrites the actor.
+ */
+async function watchRecap(actor: string, gameId: string): Promise<string> {
+  await getPrisma().$transaction(async tx => {
+    // Account deletion scrubs event actors under this lock: a receipt lands
+    // before it (and is scrubbed) or finds the seat already gone.
+    await tx.$queryRaw`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
+    const player = await tx.gamePlayer.findUnique({ where: { gameId_memberId: { gameId, memberId: actor } },
+      select: { seat: true, game: { select: { status: true } } } });
+    if (!player) reject("GAME_NOT_FOUND", "Game not found.");
+    if (player.game.status !== "settled") reject("GAME_NOT_LIVE", "This game's recap isn't ready.");
+    await tx.gameEvent.createMany({ skipDuplicates: true, data: [{ gameId, actor, type: "recap_watched",
+      commandKey: `recap-watched:${gameId}:${player.seat}`, payload: { v: 1 } }] });
   });
   return gameId;
 }
@@ -3110,7 +3132,7 @@ async function buildViewInputs(
   const pairGames = history ? [] : games.filter(game => game.row.maxPlayers === 2);
   const pairEntryIds = pairGames.flatMap(game => game.entries.map(entry => entry.id));
   const pairPeers = pairEntryIds.length ? [...new Set(pairGames.flatMap(game => gameMemberIds(game.row.players)))].filter(id => id !== viewerId) : [];
-  const [profiles, labels, tickets, pendingViews, blocks, reported, challenges, talkViews, replies, replyReported] = await Promise.all([
+  const [profiles, labels, tickets, pendingViews, blocks, reported, challenges, talkViews, replies, replyReported, recapsWatched] = await Promise.all([
     prisma.gameProfile.findMany({ where: { memberId: { in: labelSubjects } } }),
     prisma.gameContactLabel.findMany({ where: { ownerMemberId: viewerId, subjectMemberId: { in: labelSubjects } } }),
     history ? [] : prisma.gameTicket.findMany({
@@ -3123,6 +3145,7 @@ async function buildViewInputs(
     readTalkDeliveryViews(games.filter(game => game.row.status === "negotiating").map(game => game.row.id), viewerId, history),
     pairEntryIds.length ? prisma.gameReply.findMany({ where: { entryId: { in: pairEntryIds } }, select: replyMetadataSelect }) : [],
     readReplyReportedMembers(prisma, viewerId, pairPeers),
+    readRecapsWatched(games.filter(game => game.row.status === "settled").map(game => game.row.id), viewerId, history),
   ]);
   const hiddenEntryIds = reported.entries;
   const hiddenMemberIds = new Set([...blocks.blocked, ...blocks.blockedBy]);
@@ -3220,6 +3243,7 @@ async function buildViewInputs(
       challenges: challenges.get(game.row.id) ?? [],
       pendingChange: pendingViews.get(game.row.id) ?? null,
       talkDelivery: talkViews.get(game.row.id),
+      recapWatched: recapsWatched.has(game.row.id),
       avatarKeys,
       profileAvatarKeys,
       entryWords, ...(history ? {} : { entryReplies, replyEligibleEntryIds }),
@@ -3291,6 +3315,14 @@ async function readPendingChangeViews(rows: readonly Pick<Game, "id" | "wordsOwn
       deliveryRetryable: !terminal,
     }];
   }));
+}
+
+/** The settled games whose recap the viewer finished, on any phone. */
+async function readRecapsWatched(gameIds: readonly string[], viewerId: string, history: boolean): Promise<Set<string>> {
+  if (history || !gameIds.length) return new Set();
+  const events = await getPrisma().gameEvent.findMany({ where: { gameId: { in: [...gameIds] }, actor: viewerId, type: "recap_watched" },
+    select: { gameId: true }, take: gameIds.length });
+  return new Set(events.map(event => event.gameId));
 }
 
 /** The note author's delivery view comes from the talk receipt, never a mutable game field. */
