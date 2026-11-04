@@ -1,3 +1,4 @@
+import { SYNTHETIC_SLEEP_CARD } from './support/sleep-card-fixture.js'
 import { MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION } from '../src/assistant/weekly-usage-optimizer.ts'
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import assert from 'node:assert/strict'
@@ -6662,3 +6663,30 @@ describe('game bootstrap notification delivery', () => {
     expect(harness.deliverMessage).not.toHaveBeenCalled()
   })
 })
+
+
+test.each(['note', 'blank', 'malformed', 'skip'] as const)(
+  'scheduled sleep presentation uses only parsed note or card-only recovery (%s)', async (kind) => {
+    const note = 'This synthetic night follows the recent pattern.'
+    const providerAuthoredResponse = kind === 'note'
+      ? JSON.stringify({ kind: 'send_message', text: note, privateSummary: 'Synthetic private reasoning.' })
+      : kind === 'skip' ? JSON.stringify({ kind: 'skip', privateSummary: 'Synthetic private reasoning.' })
+      : kind === 'blank' ? '' : '{malformed decision}'
+    const contaminated = renderAssistantResponseCardText(SYNTHETIC_SLEEP_CARD, providerAuthoredResponse)
+    const expected = renderAssistantResponseCardText(SYNTHETIC_SLEEP_CARD, kind === 'note' ? note : null)
+    const { deliverMessage, mocks, sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+      providerResult: createProviderResult({ providerAuthoredResponse, response: contaminated, transcriptResponse: contaminated, responseCard: SYNTHETIC_SLEEP_CARD }),
+      turnId: 'synthetic-sleep-turn',
+    })
+    const result = await sendAssistantNotificationLocal({
+      channel: 'linq', deferCommitUntilDeliveryAccepted: true, deliveryTarget: 'synthetic-sleep-chat',
+      instructions: 'Send a sleep card and a short note.',
+      scheduledInvocationAuthority: { automationId: 'synthetic-sleep-automation', occurrenceAt: '2026-11-04T09:00:00.000Z' },
+      threadIsDirect: true, vault: '/vaults/synthetic-sleep',
+    })
+    expect(result).toMatchObject({ response: expected, decision: { kind: 'send_message', text: expected } })
+    expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({ card: SYNTHETIC_SLEEP_CARD, message: expected }))
+    expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(expect.objectContaining({ assistantTranscriptText: expected }))
+    expect(expected).not.toMatch(/privateSummary|Synthetic private reasoning|malformed decision/u)
+  },
+)

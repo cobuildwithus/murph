@@ -3351,6 +3351,7 @@ async function maybeSendHostedLinqLinkDelayNotice(input:
   const delivery = intent.delivery;
   if (
     input.assistantDeliveryEffect.deliveryPhase !== "foreground_current_turn"
+    || intent.card !== null
     || intent.threadIsDirect !== true
     || intent.channel !== "linq"
     || intent.status !== "retryable"

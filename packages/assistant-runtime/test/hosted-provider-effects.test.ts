@@ -1,3 +1,4 @@
+import { renderAssistantResponseCardText } from "@murphai/operator-config/assistant-response-cards";
 import assert from "node:assert/strict";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -1441,4 +1442,56 @@ describe("hosted provider effects", () => {
     );
   });
 
+});
+
+const SYNTHETIC_SLEEP_CARD = {
+  kind: "sleep_summary", version: 1, localDate: "2026-11-03",
+  bedtime: null, wakeTime: null, totalSleepMinutes: 436, score: null,
+  stages: null, awakeMinutes: null, efficiencyPercent: null,
+  hrv: null, restingHeartRate: null, wakeUps: null,
+} as const;
+
+
+it.each(["native", "static", "unavailable", "rejected"] as const)(
+  "delivers a sleep note through the hosted provider boundary (%s)", async (mode) => {
+    const note = "Synthetic context. See https://example.test/context";
+    const message = renderAssistantResponseCardText(SYNTHETIC_SLEEP_CARD, note);
+    const bodies: Array<{ message: { idempotency_key: string; parts: Array<{ type: string; value?: string }> } }> = [];
+    const fetchImplementation = vi.fn<typeof fetch>(async (url, init) => {
+      if (String(url).endsWith("/capability/check_imessage")) return new Response(JSON.stringify({ available: mode !== "unavailable" }));
+      const body = JSON.parse(String(init?.body));
+      bodies.push(body);
+      if (mode === "rejected" && body.message.parts[0].type === "imessage_app") return new Response("{}", { status: 422 });
+      return new Response(JSON.stringify({ message: { id: `synthetic-message-${bodies.length}` } }));
+    });
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
+    const result = await sendHostedProviderLinqMessage({
+      card: SYNTHETIC_SLEEP_CARD, directRecipientPhoneNumber: "synthetic@example.test",
+      idempotencyKey: "synthetic-sleep-pair", message, target: "synthetic-chat", targetKind: "thread", threadIsDirect: true,
+    }, { env: { LINQ_API_TOKEN: "synthetic-token", MURPH_NATIVE_SLEEP_CARD_ENABLED: mode === "native" ? "1" : "0" }, fetchImplementation, persistAppCardTextFallback });
+    const fallback = mode === "unavailable" || mode === "rejected";
+    const accepted = mode === "rejected" ? bodies.slice(1) : bodies;
+    expect(accepted.map(body => body.message.parts[0]?.type)).toEqual(fallback ? ["text", "link"] : ["imessage_app", "text"]);
+    if (fallback) {
+      expect(accepted[0]?.message.parts[0]?.value).toBe(message.slice(0, message.lastIndexOf(" https://")));
+      expect(persistAppCardTextFallback).toHaveBeenCalledOnce();
+    } else {
+      expect(accepted[1]?.message.parts).toEqual([{ type: "text", value: note }]);
+      expect(persistAppCardTextFallback).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ providerMessageEffects: [{ message: null, providerMessageId: "synthetic-message-1" }, { message: note, providerMessageId: "synthetic-message-2" }] });
+    }
+    expect(result.providerMessageIds).toEqual(mode === "rejected" ? ["synthetic-message-2", "synthetic-message-3"] : ["synthetic-message-1", "synthetic-message-2"]);
+    expect(result.providerMessageId).toBe(result.providerMessageIds?.at(-1));
+  },
+);
+
+it.each([{}, { available: "false" }, null])("rejects malformed sleep-note capability body case %# without fallback", async (body) => {
+  const fetchImplementation = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(body)));
+  const persistAppCardTextFallback = vi.fn();
+  await expect(sendHostedProviderLinqMessage({
+    card: SYNTHETIC_SLEEP_CARD, directRecipientPhoneNumber: "synthetic@example.test", idempotencyKey: "synthetic-sleep-pair",
+    message: renderAssistantResponseCardText(SYNTHETIC_SLEEP_CARD, "Synthetic context."), target: "synthetic-chat", targetKind: "thread", threadIsDirect: true,
+  }, { env: { LINQ_API_TOKEN: "synthetic-token" }, fetchImplementation, persistAppCardTextFallback })).rejects.toMatchObject({ code: "LINQ_API_REQUEST_FAILED", context: { retryable: true } });
+  expect(fetchImplementation).toHaveBeenCalledOnce();
+  expect(persistAppCardTextFallback).not.toHaveBeenCalled();
 });

@@ -42,7 +42,8 @@ export function parseGameCommand(value: unknown): GameCommand {
     case "leave":
       return { type: "leave", gameId: clientId(input.gameId, "gameId") };
     case "editTerms":
-      return { type: "editTerms", gameId: clientId(input.gameId, "gameId"), expectedTermsVersion: integer(input.expectedTermsVersion, "expectedTermsVersion", 1), terms: terms(record(input.terms, "terms")) };
+      return { type: "editTerms", gameId: clientId(input.gameId, "gameId"), expectedTermsVersion: integer(input.expectedTermsVersion, "expectedTermsVersion", 1),
+        ...(input.proposalId === undefined ? {} : { proposalId: clientId(input.proposalId, "proposalId") }), terms: terms(record(input.terms, "terms")) };
     case "setDayCompletion":
       return dayCompletion(input);
     case "proposeChange":

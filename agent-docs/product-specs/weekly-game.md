@@ -64,11 +64,32 @@ A second acceptance activates it; until then it waits without expiry. Addressed
 invitees keep their seats. Bearer joiners use separate seats, and ten total
 admissions includes departures. There is no rejoin. Late joiners share the
 existing calendar and can score only from their local joining day, capped by
-the common schedule. The starter can edit or cancel until anyone checks in
-(any post, words or excuse), even after Day 1 has begun, but not once the game
-is due. An edited start date runs from the latest player's today to 60 days
-out and moves Day 1 for everyone; stale joins must read the new terms before
-accepting.
+the common schedule. While invited, the starter alone can edit full terms
+directly. Once live, any remaining seated player can ask for a change in the
+bound group chat with `edit_terms`, full terms, the current terms version and a
+new proposal ID. More than half of the remaining players must say yes, including
+the proposer. Each person can answer only for themselves; their yes or no is
+final for that ask. Repeating the same answer is a no-op, even after resolution.
+One ask waits at a time, and only its proposer can cancel it. Unjoined invitees
+and departed players do not count. A late join adds an undecided voter; a
+departure clears the ask because it detaches chat access.
+
+Group changes use the pair edit delta, pending JSON and approved terms writer.
+Tasks lock once Day 1 begins, the start date at the first check-in, and the prize
+when the game is due. Length and weekday schedule edits start at the next
+unstarted day; an any-days target locks once play starts. Start now is unavailable.
+An agreed start date runs from the latest player's today to 60 days out and moves
+Day 1 for everyone; stale joins must read the new terms before accepting.
+Chat reads expose seated votes and yeses still needed. The app permits direct
+edits only while invited and has no group voting or pending-change projection.
+Cancelling the game stays starter-only until the first check-in, while not due.
+Terms reports target the latest applied change's proposer, falling back to the
+starter for initial terms, for both pairs and groups.
+
+Deploy this change to Web before the runner. Old runners omit the required
+live-group proposal ID and receive a refusal; old Web rejects the new field.
+Brief refusals during either version window are accepted. No migration or
+additional capability flag is needed; production group admission stays dark.
 
 A pre-settlement leave is silent, preserves evidence and excludes the player
 from prizes, debts and new content. Leaving a waiting invitation voids it, as

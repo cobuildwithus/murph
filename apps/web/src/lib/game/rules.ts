@@ -574,7 +574,7 @@ function admissionSeat(state: RuleState, input: JoinInput, claimed: RulePlayer |
   return seat;
 }
 
-/** The starter can edit or call off a group until anyone checks in, even after Day 1 begins. */
+/** The starter can call off a group until anyone checks in; invited direct edits share this guard. */
 export function areGroupTermsOpen(state: RuleState, now: Date): boolean {
   return ["invited", "live"].includes(state.game.status) && !(state.game.status === "live" && isGameDue(state, now)) && state.entries.length === 0;
 }
@@ -583,13 +583,6 @@ export function assertGroupTermsOpen(state: RuleState, actor: string, now: Date,
   if (state.game.seats !== 10 || state.game.createdBy !== actor || playerFor(state, actor)?.leftAt) reject("NOT_A_PLAYER", "Only the starter can edit this game.");
   if (!areGroupTermsOpen(state, now)) reject("GAME_NOT_LIVE", "Terms lock once someone checks in.");
   if (expectedVersion !== undefined && expectedVersion !== currentTerms(state.game.terms).n) reject("TERMS_CHANGED", "The terms changed. Take another look.");
-}
-
-/** A changed schedule can move the unstarted calendar, but never renew acceptance. */
-export function scheduleEditedTerms(state: RuleState, changedStart: string | null): Schedule | null {
-  const dayOne = gameDayOne(state.players);
-  return state.game.status === "live" && dayOne
-    ? scheduleFor(state, state.players, () => changedStart ?? dayOne) : null;
 }
 
 export function decideLeave(state: RuleState, memberId: string): "left" | "void" | "already-left" {

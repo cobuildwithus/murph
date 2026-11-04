@@ -1,3 +1,4 @@
+import { SYNTHETIC_SLEEP_CARD } from './support/sleep-card-fixture.js'
 import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -2431,6 +2432,7 @@ describe('assistant channels runtime seam', () => {
     runtimeMocks.checkLinqIMessageCapability.mockResolvedValue(true)
     runtimeMocks.sendLinqIMessageAppCard.mockResolvedValue({
       message: { id: 'native-card-message-1' },
+      providerMessageEffects: [{ message: null, providerMessageId: 'native-card-message-1' }],
     })
 
     await expect(sendLinqMessage({
@@ -4433,3 +4435,40 @@ function readJsonBody(body: string | Blob | FormData | undefined): Record<string
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
+
+
+describe('sleep note native delivery guard', () => {
+  const note = 'This synthetic night follows the recent pattern.'
+  const input = {
+    card: SYNTHETIC_SLEEP_CARD, directRecipientPhoneNumber: 'synthetic@example.test',
+    idempotencyKey: 'synthetic-sleep-pair', message: renderAssistantResponseCardText(SYNTHETIC_SLEEP_CARD, note),
+    target: 'synthetic-sleep-chat', targetKind: 'thread' as const, threadIsDirect: true,
+  }
+  it('forwards the provider ordered identities and effects without reconstruction', async () => {
+    runtimeMocks.checkLinqIMessageCapability.mockResolvedValue(true)
+    const providerMessageEffects = [{ message: null, providerMessageId: 'synthetic-card' }, { message: note, providerMessageId: 'synthetic-note' }]
+    runtimeMocks.sendLinqIMessageAppCard.mockResolvedValue({ message: { id: 'synthetic-note' }, providerMessageIds: ['synthetic-card', 'synthetic-note'], providerMessageEffects })
+    await expect(sendLinqMessage(input, { env: { LINQ_API_TOKEN: 'synthetic-token' } })).resolves.toMatchObject({
+      providerMessageId: 'synthetic-note', providerMessageIds: ['synthetic-card', 'synthetic-note'], providerMessageEffects,
+    })
+    expect(runtimeMocks.sendLinqChatMessage).not.toHaveBeenCalled()
+  })
+  it.each([true, false])('rethrows capability errors only for a nonempty note (%s)', async (hasNote) => {
+    const error = new VaultCliError('LINQ_API_REQUEST_FAILED', 'Synthetic invalid capability.', { retryable: true })
+    runtimeMocks.checkLinqIMessageCapability.mockRejectedValue(error)
+    runtimeMocks.sendLinqChatMessage.mockResolvedValue({ message: { id: 'synthetic-text' } })
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined)
+    const delivery = sendLinqMessage({ ...input, message: hasNote ? input.message : renderAssistantResponseCardText(SYNTHETIC_SLEEP_CARD) }, {
+      env: { LINQ_API_TOKEN: 'synthetic-token' }, persistAppCardTextFallback,
+    })
+    if (hasNote) {
+      await expect(delivery).rejects.toBe(error)
+      expect(runtimeMocks.sendLinqChatMessage).not.toHaveBeenCalled()
+      expect(persistAppCardTextFallback).not.toHaveBeenCalled()
+    } else {
+      await expect(delivery).resolves.toMatchObject({ providerMessageId: 'synthetic-text' })
+      expect(persistAppCardTextFallback).toHaveBeenCalledOnce()
+    }
+    expect(runtimeMocks.sendLinqIMessageAppCard).not.toHaveBeenCalled()
+  })
+})

@@ -309,7 +309,7 @@ export const MURPH_ATTACH_SLEEP_CARD_TOOL = {
   deferLoading: true,
   namespace: 'murph',
   name: 'attach_sleep_card',
-  description: 'Attach a host-built sleep summary for a general nightly request such as how did I sleep or sleep recap. Pass the local wake date. Never use for a specific metric, compound question, or advice request, answer those in text. The card is the whole reply: after success, send no final text and attach no media. On no_sleep_for_date, answer truthfully in text.',
+  description: "Attach a host-built sleep summary for a general nightly request such as how did I sleep or sleep recap. Pass the local wake date. The card alone is the default: after successful attachment, send no final text. If the member's request or the saved instructions for that exact scheduled occurrence also ask for a short note, add one or two evidence-based sentences after successful attachment about what the card does not show, such as how the night compares with the past week or anything notable, without restating the card's numbers or adding generic caveats, using ordinary final text in attended turns or send_message.text in scheduled turns. Attach no media. Specific metric questions, other compound questions, and advice requests use verified text. On no_sleep_for_date, answer truthfully in text.",
   inputSchema: {
     type: 'object', additionalProperties: false,
     properties: { date: { type: 'string', format: 'date', description: 'Local wake date, YYYY-MM-DD.' } },

@@ -13,10 +13,12 @@
   },
   {
     "prompt": "I’d like more energy in the afternoon. I sit at a desk all day and mostly just walk to the bus. Could you help me set a walking goal and a simple plan for this week? I can do twenty minutes before lunch on weekdays. No reminders, please.",
-    "stage": "goal-proposal"
+    "stage": "goal-proposal",
+    "replyBudgetMs": 40000
   },
   {
     "prompt": "Yes, that sounds good. Let’s start on the next weekday.",
-    "stage": "accept-goal"
+    "stage": "accept-goal",
+    "replyBudgetMs": 40000
   }
 ]

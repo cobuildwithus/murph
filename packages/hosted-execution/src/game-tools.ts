@@ -25,7 +25,7 @@ export const hostedGameCreateTermsSchema = z.object({
 }).strict();
 export const hostedGameUpdateSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("create"), gameId, terms: hostedGameCreateTermsSchema, previousGameId: gameId.optional(), groupWord: z.string().trim().min(1).max(40).optional() }).strict(),
-  z.object({ operation: z.literal("edit_terms"), gameId, expectedTermsVersion: z.number().int().min(1), terms: hostedGameCreateTermsSchema.extend({ defaultTask: z.string().min(1).max(200), tasks: z.array(hostedGameCreateTermsSchema.shape.tasks.element).min(1).max(10) }) }).strict(),
+  z.object({ operation: z.literal("edit_terms"), gameId, proposalId: gameId.optional(), expectedTermsVersion: z.number().int().min(1), terms: hostedGameCreateTermsSchema.extend({ defaultTask: z.string().min(1).max(200), tasks: z.array(hostedGameCreateTermsSchema.shape.tasks.element).min(1).max(10) }) }).strict(),
   z.object({ operation: z.enum(["mark_incomplete", "restore_day"]), gameId, date }).strict(),
   z.object({ operation: z.literal("propose"), gameId, proposalId: gameId, expectedTermsVersion: z.number().int().min(1), change: hostedGameChangeSchema }).strict(),
   z.object({ operation: z.literal("approve"), gameId, proposalId: gameId.optional(), expectedTermsVersion: z.number().int().min(1).optional() }).strict().refine(value => (value.proposalId !== undefined) !== (value.expectedTermsVersion !== undefined), "Approval needs proposalId or expectedTermsVersion."),
@@ -90,7 +90,12 @@ const terms = z.object({
 const pending = z.object({
   id: ref, proposedByMemberId: ref, expectedTermsVersion: z.number().int().min(1),
   origin: z.enum(["app", "chat"]).optional(),
-  change: hostedGameChangeSchema, effectiveFromDay: z.number().int().min(0),
+  change: z.discriminatedUnion("kind", [hostedGameChangeSchema.options[0], hostedGameChangeSchema.options[1].extend({
+    defaultTask: z.string().min(1).max(200).optional(),
+    tasks: z.array(z.object({ seat: z.number().int().min(0).max(9), text: z.string().min(1).max(200) }).strict()).min(1).max(10).optional(),
+  })]), effectiveFromDay: z.number().int().min(0),
+  votes: z.array(z.object({ memberId: ref, vote: z.enum(["yes", "no"]) }).strict()).max(10).optional(),
+  yesNeeded: z.number().int().min(0).max(6).optional(),
   deliveryStatus: z.enum(["pending", "queued", "sent", "failed", "conversation"]), deliveryRetryable: z.boolean().optional(), startsOn: date.nullable(),
 }).strict();
 const progress = z.object({

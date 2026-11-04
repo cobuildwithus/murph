@@ -121,7 +121,8 @@ Current product admission, delivery and native runtime safety rules remain.
   the actual current Vercel alias passes exact deployment verification and
   protected-main ancestry. Manual dispatch remains available for recovery. One
   fixed Photon identity starts a five-turn private iMessage conversation, and
-  every Murph reply must arrive in under twenty seconds. The canary member's
+  Murph's goal-proposal and acceptance replies must arrive in under forty
+  seconds, and every other reply in under twenty seconds. The canary member's
   existing assistant-model
   preference selects GPT-5.6 Luna for its runtime turns without changing the
   model selected for ordinary members. That workflow remains the canary's
@@ -143,8 +144,9 @@ Current product admission, delivery and native runtime safety rules remain.
   Each observation allows the shared default runner quiet window plus two
   minutes for checkpoint publication (currently twelve minutes total).
   The workflow allows fifty-five minutes for reset, three observations, replies,
-  setup, and deployment checks. Observation never relaxes the twenty-second
-  reply limit or accepts stale/missing canonical evidence.
+  setup, and deployment checks. Observation never relaxes the per-turn reply
+  limit (forty seconds for goal-proposal and acceptance, twenty seconds for every
+  other turn) or accepts stale/missing canonical evidence.
   Initial and final authority reuse active member access followed by the ordinary
   iMessage runtime access decision. Missing or outdated browser launch grants do
   not invalidate a messaging-only canary, but lost access, suspension, deletion,

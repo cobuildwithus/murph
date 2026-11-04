@@ -340,6 +340,21 @@ describe.skipIf(!runPostgresProof)("weekly game report and block", () => {
     expect(mocks.sendEmail).toHaveBeenCalledTimes(2);
   });
 
+  it("targets pair terms at the most recent applied proposal's author", async () => {
+    const starter = await member("Alex");
+    const proposer = await member("Sam");
+    const gameId = await live(starter, proposer);
+    const proposalId = randomUUID();
+    await ok(proposer, { type: "proposeChange", gameId, proposalId, expectedTermsVersion: 1,
+      change: { kind: "edit", stakes: [{ kind: "prize", item: "Pick a movie" }] } });
+    expect(await runGameCommand({ actorMemberId: starter, chatContainerMemberId: "synthetic-pair-room",
+      chatPlayerMemberIds: [starter, proposer], beforeMutationTx: async () => {},
+      command: { type: "respondChange", gameId, proposalId, decision: "approve" } })).toMatchObject({ ok: true });
+    const command = report(gameId, { about: "terms" });
+    await ok(starter, command);
+    expect(await getPrisma().gameReport.findUnique({ where: { id: command.reportId } })).toMatchObject({ reportedMemberId: proposer });
+  });
+
   it("reports a player or their terms, from a game or an invite before accepting, and can block in the same step", async () => {
     const leo = await member("Leo");
     const ava = await member("Ava");
