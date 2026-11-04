@@ -705,7 +705,9 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await ok(joiner, change(replacement));
     await ok(joiner, change(replacement));
     await devSettleNow(gameId, challenger);
-    expect((await readHistory(joiner)).people.find(person => person.memberId === challenger)!.avatarUrl).toBe(gameMediaUrl(replacement));
+    const privateHistory = (await readHistory(joiner)).people.find(person => person.memberId === challenger)!;
+    expect(privateHistory.avatarUrl).toBe(gameMediaUrl(replacement));
+    expect(privateHistory).not.toHaveProperty("profileAvatarUrl");
     await ok(joiner, change(null));
     await ok(joiner, change(null));
     expect((await readGame(gameId, joiner))!.players[0]).toMatchObject({ avatarUrl: null, profileAvatarUrl: null });
@@ -770,7 +772,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect((await readGame(gameId, owner))!.players[1]).toMatchObject({ avatarUrl: ownUrl, profileAvatarUrl: ownUrl });
     expect((await readHome(owner)).games.find(game => game.id === gameId)!.players[1].avatarUrl).toBe(ownUrl);
     await devSettleNow(gameId, owner);
-    expect((await readHistory(owner)).people.find(person => person.memberId === subject)!.avatarUrl).toBe(ownUrl);
+    expect((await readHistory(owner)).people.find(person => person.memberId === subject)).toMatchObject({ avatarUrl: ownUrl, profileAvatarUrl: ownUrl });
     const pendingPhoto = await upload(owner, "pending-invite-label");
     const rematch = await ok(owner, { type: "createGame", gameId: randomUUID(), previousGameId: gameId,
       inviteeFirstName: "Friend", inviteeLabel: { photoKey: pendingPhoto }, terms: TERMS });
@@ -778,7 +780,9 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await ok(subject, { type: "setProfile", photoKey: null });
     expect((await readGame(rematch!.id, owner))!.players[1]).toMatchObject({ avatarUrl: gameMediaUrl(pendingPhoto), profileAvatarUrl: null });
     expect((await readGame(gameId, owner))!.players[1]).toMatchObject({ avatarUrl: privateUrl, profileAvatarUrl: null });
-    expect((await readHistory(owner)).people.find(person => person.memberId === subject)!.avatarUrl).toBe(privateUrl);
+    const hiddenAgain = (await readHistory(owner)).people.find(person => person.memberId === subject)!;
+    expect(hiddenAgain.avatarUrl).toBe(privateUrl);
+    expect(hiddenAgain).not.toHaveProperty("profileAvatarUrl");
     expect((await getPrisma().gameContactLabel.findUniqueOrThrow({ where: { ownerMemberId_subjectMemberId: { ownerMemberId: owner, subjectMemberId: subject } } })).photoKey).toBe(privatePhoto);
   });
 

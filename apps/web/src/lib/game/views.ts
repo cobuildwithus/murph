@@ -249,7 +249,7 @@ function entryView(entry: RuleEntry, input: GameViewInput): GameEntryView {
 
 export type BuiltGameHistoryView = {
   game: GameHistoryGameView;
-  person: Pick<GameHistoryPersonView, "memberId" | "firstName" | "avatarUrl">;
+  person: Pick<GameHistoryPersonView, "memberId" | "firstName" | "avatarUrl" | "profileAvatarUrl">;
 } | { game: GameHistoryGroupGameView; group: Pick<GameHistoryGroupView, "id" | "word" | "task" | "prize"> };
 
 /** The bounded history projection, built from the same viewer-scoped inputs as a recap. */
@@ -312,6 +312,7 @@ export function buildGameHistoryView(input: GameViewInput): BuiltGameHistoryView
     },
     person: {
       ...(theirs!.avatarUrl ? { avatarUrl: theirs!.avatarUrl } : {}),
+      ...(theirs!.profileAvatarUrl ? { profileAvatarUrl: theirs!.profileAvatarUrl } : {}),
       firstName: theirs!.firstName,
       memberId: other!.memberId,
     },
