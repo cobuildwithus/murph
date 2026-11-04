@@ -8955,9 +8955,6 @@ function createAbortGuardedDeviceSyncPort(
     ...(port.companionStatus ? {
       companionStatus: (statusInput) => guard(() => port.companionStatus!(statusInput)),
     } : {}),
-    ...(port.haptic ? {
-      haptic: (hapticInput) => guard(() => port.haptic!(hapticInput)),
-    } : {}),
     ackDirtyStateProcessed: (ackInput) =>
       guard(() => port.ackDirtyStateProcessed(ackInput)),
     applyUpdates: (applyInput) =>

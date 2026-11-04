@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { executeDeviceDynamicTool } from '../src/assistant-codex/dynamic-tools/device.js'
+import { executeDeviceDynamicTool, MURPH_DEVICE_TOOL, readDeviceDynamicToolRequest } from '../src/assistant-codex/dynamic-tools/device.js'
 
 function readToolError(result: Awaited<ReturnType<typeof executeDeviceDynamicTool>>) {
   const text = result.rpcResult.contentItems[0]?.text ?? ''
@@ -71,6 +71,17 @@ async function executeDeviceFailure(
 }
 
 describe('hosted device dynamic tool recovery', () => {
+  it('exposes only account management and companion contact operations', () => {
+    const schema = JSON.parse(JSON.stringify(MURPH_DEVICE_TOOL.inputSchema))
+    const actions = schema.anyOf.map((variant: { properties: { action: { const: string } } }) => variant.properties.action.const)
+    expect([...new Set(actions)].sort()).toEqual([
+      'companion_status', 'configure_no_data_outreach', 'connect', 'list_accounts', 'reconcile',
+    ])
+    expect(readDeviceDynamicToolRequest({ tool: 'device', arguments: { action: 'vibrate' } })?.kind)
+      .toBe('invalid-device-arguments')
+    expect(MURPH_DEVICE_TOOL.description).not.toMatch(/buzz|vibrat|wrist/iu)
+  })
+
   for (const testCase of [
     {
       action: 'list_accounts',

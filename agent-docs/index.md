@@ -1088,7 +1088,7 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/product-specs/consented-group-disclosure.md` | Hosted group disclosure. | Hosted group disclosure | High | 2026-08-26 |
 | `agent-docs/product-specs/hosted-group-join-confirmation.md` | Hosted group membership behavior. | Hosted group membership behavior | High | 2026-07-23 |
 | `agent-docs/product-specs/clinical-records-intake.md` | Bounded clinical import, stable undated-fact replay, optional daily checks, document enrichment, saved results and privacy controls. | Clinical Records intake behavior | High | 2026-09-15 |
-| `agent-docs/references/wearable-haptics.md` | Wrist command authority, message handoff, live legacy leases, delivery owners, best-effort push wake with visible fallback, and limits. | Companion wrist reminders | High | 2026-10-05 |
+| `agent-docs/references/companion-presence.md` | Companion contact observations, private diagnostics, and consented group timestamps. | Companion presence | High | 2026-11-04 |
 | `agent-docs/exec-plans/completed/2026-10-05-wearable-wake-delivery.md` | Completed plan for wake-driven wearable delivery across Web and the iOS companion; historical evidence only. | Historical implementation evidence | Low | 2026-10-05 |
 | `agent-docs/references/epic-automatic-distribution.md` | Epic automatic-distribution API matrix, hospital-approved imports, optional persistent credentials and privacy questionnaire guidance. | Epic import registration and rollout | High | 2026-09-15 |
 | `agent-docs/phone-calls/retell-phone-agent.md` | Retell hosted phone agent prompt, authority, transfer, and call-brief handling rules. | Hosted phone-call provider setup | Medium | 2026-06-25 |
@@ -1490,9 +1490,11 @@ Clinical raw validation repair plan: [`2026-09-29-frog-3895-clinical-validation.
 Mailbox startup dependency reduction and single-query ingress context proof are tracked in
 [mailbox startup simplification](exec-plans/completed/2026-09-30-mailbox-startup-simplification.md).
 
-Companion app contact and wrist failure feedback are owned by
-[`wearable haptics`](references/wearable-haptics.md); consented group timestamp
+Companion app contact observations are owned by
+[`companion presence`](references/companion-presence.md); consented group timestamp
 projection is owned by the group challenge data diagnostics spec.
+The [band command retirement](exec-plans/completed/2026-11-04-remove-band-buzz-delivery.md)
+records the deletion, postdeploy cleanup and retained diagnostic paths.
 
 Private scheduled phone-call guidance, authenticated Linq sender context, and
 live setup-to-due proof are recorded in

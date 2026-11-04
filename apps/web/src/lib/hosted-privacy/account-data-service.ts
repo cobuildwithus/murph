@@ -558,25 +558,7 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "prisma.companion_push_route",
     label: "Companion app push address",
     deletion: "live-delete",
-    note: "Deletes the Apple push token, installation id, environment, and alert preference used only to wake the member's companion app. Browser-vault export omits the route and token.",
-  },
-  {
-    slug: "prisma.companion_wearable_link",
-    label: "Companion wearable link reports",
-    deletion: "live-delete",
-    note: "Deletes which installation last reported a WHOOP or Garmin Bluetooth link and its opaque link id. No Bluetooth identifiers, device names, or health values are stored; browser-vault export omits these rows.",
-  },
-  {
-    slug: "prisma.companion_wearable_session",
-    label: "Companion wearable poll sessions",
-    deletion: "live-delete",
-    note: "Deletes short foreground poll leases for wrist reminders. Rows hold only a random session id and expiry; browser-vault export omits them.",
-  },
-  {
-    slug: "prisma.companion_wearable_command",
-    label: "Companion wrist command ledger",
-    deletion: "live-delete",
-    note: "Deletes buzz and stop command keys, statuses, and expiries. Rows hold no reminder text or payload and exist to prevent duplicate physical effects; browser-vault export omits them.",
+    note: "Deletes the Apple push token, installation id, environment, and alert preference used for the member's companion app and game notifications. Browser-vault export omits the route and token.",
   },
   {
     slug: "prisma.device_browser_assertion_nonce",
@@ -3137,21 +3119,6 @@ async function deleteHostedAccountPrismaRows(input: {
           DELETE FROM companion_push_route AS route
           WHERE route.user_id IN (SELECT id FROM target_members)
           RETURNING 1
-        ),
-        deleted_companion_wearable_links AS (
-          DELETE FROM companion_wearable_link AS link
-          WHERE link.user_id IN (SELECT id FROM target_members)
-          RETURNING 1
-        ),
-        deleted_companion_wearable_sessions AS (
-          DELETE FROM companion_wearable_session AS session
-          WHERE session.user_id IN (SELECT id FROM target_members)
-          RETURNING 1
-        ),
-        deleted_companion_wearable_commands AS (
-          DELETE FROM companion_wearable_command AS command
-          WHERE command.user_id IN (SELECT id FROM target_members)
-          RETURNING 1
         )
         SELECT
           (SELECT count(*) FROM deleted_mailbox_lane_counters)
@@ -3223,13 +3190,7 @@ async function deleteHostedAccountPrismaRows(input: {
           (SELECT count(*) FROM deleted_web_internal_nonces)
             AS "prisma.hosted_web_internal_request_nonce",
           (SELECT count(*) FROM deleted_companion_push_routes)
-            AS "prisma.companion_push_route",
-          (SELECT count(*) FROM deleted_companion_wearable_links)
-            AS "prisma.companion_wearable_link",
-          (SELECT count(*) FROM deleted_companion_wearable_sessions)
-            AS "prisma.companion_wearable_session",
-          (SELECT count(*) FROM deleted_companion_wearable_commands)
-            AS "prisma.companion_wearable_command"
+            AS "prisma.companion_push_route"
       `,
     ),
   );

@@ -45109,7 +45109,7 @@ describeRealCodex('real Codex proactive plan follow-through e2e', () => {
   )
 })
 
-describeRealCodex('wearable haptic reminder journey', () => {
+describeRealCodex('companion device capabilities', () => {
   it('reports consented group app contact without diagnosing missing steps as closure', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-group-app-contact-'))
@@ -45147,249 +45147,101 @@ describeRealCodex('wearable haptic reminder journey', () => {
     } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
   }, 360_000)
 
-  it.each(['whoop-delay', 'whoop-locked', 'short-wait', 'garmin-unknown', 'whoop-useful', 'app-unreachable', 'device-disconnected', 'health-active', 'health-stale', 'offer-whoop', 'offer-garmin', 'offer-none', 'offer-declined'] as const)('%s uses only the authorized wrist effect', async (scenario) => {
+  it.each(['recently_active', 'unreachable'] as const)('%s app contact remains available for Health diagnostics', async (status) => {
     const config = await resolveRealCodexE2eConfig()
-    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-wrist-reminder-'))
-    const binDirectory = path.join(workingDirectory, 'bin')
-    const commandLogPath = path.join(workingDirectory, 'commands.log')
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-app-contact-'))
     const calls: AssistantHostedDeviceToolRequest[] = []
-    const buzzes = new Map<string, number>()
-    const saves: AssistantHostedAutomationToolRequest[] = []
     const now = new Date()
-    now.setUTCSeconds(0, 0) // Match the existing scheduler’s minute-resolution contract.
-    const targetAt = new Date(now.getTime() + 600_000).toISOString()
-    // Older apps still need Murph open; only a keep-open demand on a current app is wrong.
-    const withoutOlderAppCaveat = (reply: string) => reply.replace(/[^.\n]*\bolder\b[^.\n]*[.\n]?/giu, '')
     try {
-      await initializeVault({ vaultRoot: workingDirectory })
-      let assistantCliContract: string | null = null
-      if (scenario === 'whoop-useful') {
-        await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
-        await upsertAutomation({
-          continuityPolicy: 'preserve', createOnly: true,
-          instructions: 'Remind me to take a five-minute afternoon stretch break.',
-          title: 'Afternoon stretch break', slug: 'afternoon-stretch',
-          schedule: { kind: 'dailyLocal', localTime: '15:00' }, status: 'active', vaultRoot: workingDirectory,
-          route: { channel: 'linq', deliveryTarget: 'synthetic-private-chat', threadIsDirect: true,
-            identityId: 'synthetic-identity', participantId: null, threadId: 'synthetic-private-chat' },
-        })
-        assistantCliContract = buildAssistantCliSurfaceContract(
-          await readAssistantCliLlmsFullManifestFromCliEntry({
-            cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
-            workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
-          }),
-        )
-      }
-      const remindersBefore = scenario === 'whoop-useful' ? await listAutomations({ vaultRoot: workingDirectory }) : null
-      const context: AssistantHostedToolContext = {
-        computerToolsAvailable: false, vaultFileSendAvailable: false,
-        currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
-        currentInvocationScope: () => ({ conversationScope: 'direct', origin: {
-          kind: 'accepted_input', assistantInputId: 'ain_' + 'a'.repeat(32), sessionId: 'synthetic-wrist-session',
-        } }),
-        sendVaultFile: async () => { throw new Error('No file send expected.') },
-        deviceTool: { async request(request, options) {
-          calls.push(request)
-          if (scenario === 'health-active' || scenario === 'health-stale') {
-            if (request.action === 'companion_status') return { action: request.action,
-              status: scenario === 'health-active' ? 'recently_active' : 'unreachable',
-              lastContactAt: new Date(now.getTime() - (scenario === 'health-active' ? 5_000 : 172_800_000)).toISOString(),
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantHostedDeviceConnectAvailable: true,
+          assistantHostedDeviceConnectProviders: [], channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
+          conversationScope: 'direct', currentLocalDate: now.toISOString().slice(0, 10),
+          currentInstant: now.toISOString(), currentTimeZone: 'UTC', hostedRuntime: true,
+          modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+        }),
+        dynamicTools: [MURPH_DEVICE_TOOL],
+        hostedToolContext: {
+          computerToolsAvailable: false, vaultFileSendAvailable: false,
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('No file send expected.') },
+          deviceTool: { async request(request) {
+            calls.push(request)
+            if (request.action === 'companion_status') return { action: request.action, status,
+              lastContactAt: new Date(now.getTime() - (status === 'recently_active' ? 5_000 : 172_800_000)).toISOString(),
               lastForegroundAt: new Date(now.getTime() - 172_800_000).toISOString() }
             if (request.action === 'list_accounts') return { action: request.action, provider: null, sourceProvider: null,
               accounts: [{ accountId: 'synthetic-health', provider: 'junction', displayName: 'Apple Health', status: 'active', lastErrorCode: null, lastSyncCompletedAt: new Date(now.getTime() - 172_800_000).toISOString() }] }
             throw new Error('Only read-only Health diagnostics expected.')
-          }
-          if (request.action !== 'haptic') throw new Error('Only wrist control expected.')
-          if (scenario === 'app-unreachable' || scenario === 'device-disconnected') return {
-            ...request, status: 'unavailable', unavailableReason: scenario === 'app-unreachable' ? 'app_unreachable' : 'device_disconnected',
-          }
-          expect(options?.hapticAuthority).toBeDefined()
-          // This also proves the host strips session metadata from strict wire authority.
-          const { wearableHapticRequestSchema } = await import('@murphai/hosted-execution/wearable-haptics')
-          expect(wearableHapticRequestSchema.safeParse({ request, authority: options?.hapticAuthority }).success).toBe(true)
-          if (scenario === 'short-wait' && request.operation === 'buzz') {
-            // Mirrors the Web command key: a repeat in the same turn reads the first command.
-            const seen = buzzes.get(request.wearable) ?? 0
-            buzzes.set(request.wearable, seen + 1)
-            return { ...request, status: seen === 0 ? 'queued' : 'acknowledged' }
-          }
-          return { ...request, status: request.operation === 'status' ? 'ready' : scenario === 'garmin-unknown' ? 'unknown' : 'queued' }
-        } },
-        automationTool: { async request(request) {
-          saves.push(request)
-          if (request.action !== 'save' || request.schedule.kind !== 'at') throw new Error('Only one timer save expected.')
-          const saved = await upsertAutomation({
-            continuityPolicy: 'preserve', createOnly: true, instructions: request.instructions, title: request.title,
-            schedule: request.schedule, status: 'active', vaultRoot: workingDirectory,
-            route: { channel: 'linq', deliveryTarget: 'synthetic-private-chat', threadIsDirect: true,
-              identityId: 'synthetic-identity', participantId: null, threadId: 'synthetic-private-chat' },
-          })
-          return { action: 'save', automationId: saved.record.automationId, created: true,
-            effectiveTimeZone: 'UTC', lookupId: saved.record.slug, occurrenceProjection: { status: 'resolved', nextOccurrenceAt: request.schedule.at },
-            routeBinding: 'current_conversation', schedule: saved.record.schedule, status: 'active', updatedAt: saved.record.updatedAt }
-        } },
+          } },
+        },
+        prompt: 'My Apple Health steps have not updated. Can you check when the app last contacted Murph and the sync status? Does that prove I closed it? Inspect only app contact and account sync metadata, not step records. Please just diagnose; do not change anything.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      process.stdout.write('[companion-contact-live] ' + JSON.stringify({ status, reply: result.finalMessage, calls }) + '\n')
+      expect(calls.filter(call => call.action === 'companion_status')).toHaveLength(1)
+      expect(calls.some(call => call.action === 'list_accounts')).toBe(true)
+      expect(calls.every(call => call.action === 'companion_status' || call.action === 'list_accounts')).toBe(true)
+      expect(result.finalMessage).toMatch(/doesn.t prove|does not prove|can.t tell|cannot tell|not proof|doesn.t (?:mean|confirm)|does not (?:mean|confirm)|not necessarily|can.t prove/iu)
+      expect(result.finalMessage).not.toMatch(/(?:because|since|proves? that|confirmed that) you (?:closed|quit)|permission (?:was|is) denied|steps (?:are|have) (?:now )?(?:synced|updated)/iu)
+    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
+  }, 360_000)
+
+  it.each(['direct', 'scheduled'] as const)('%s band control is unavailable without effects or a success claim', async (scenario) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-device-capability-'))
+    const calls: unknown[] = []
+    const now = new Date().toISOString()
+    try {
+      await initializeVault({ vaultRoot: workingDirectory })
+      let prompt = 'Please make my WHOOP vibrate once now.'
+      if (scenario === 'scheduled') {
+        await upsertAutomation({
+          continuityPolicy: 'preserve', createOnly: true, instructions: prompt,
+          title: 'End of meditation', slug: 'meditation-end',
+          schedule: { kind: 'at', at: now }, status: 'active', vaultRoot: workingDirectory,
+          route: { channel: 'linq', deliveryTarget: 'synthetic-private-chat', threadIsDirect: true,
+            identityId: 'synthetic-identity', participantId: null, threadId: 'synthetic-private-chat' },
+        })
+        const source = (await listCanonicalAssistantCronRecords(workingDirectory))[0]
+        if (!source || source.kind !== 'automation') throw new Error('Expected the saved reminder.')
+        const runtimeState = createAssistantCronCanonicalRuntimeRecord({ jobId: resolveCanonicalAssistantCronJobId(source), now })
+        const job = projectCanonicalAssistantCronJob({ source, runtimeState })
+        prompt = buildAssistantCronExecutionInstructions({ job, kind: 'canonical', runtimeState, source }, { automationId: null, contextReferences: [] })
       }
-      const execute = (prompt: string, scheduled: boolean, hostedToolContext = context) => executeRealCodexAppServerTurn({
+      const result = await executeRealCodexAppServerTurn({
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
-        codexHome: config.codexHome,
-        env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
-        model: config.model, modelProvider: config.modelProvider,
+        codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantContextSnapshotPrompt: scenario === 'offer-whoop'
-            ? 'Saved member context: The member previously reported wearing a WHOOP band.'
-            : scenario === 'offer-declined'
-              ? 'Saved member context: The member wears WHOOP. In an earlier conversation they declined wrist buzz offers and asked not to be offered them again.' : null,
-          assistantCliContract, assistantKnowledgeToolsAvailable: false, assistantHostedAutomationAvailable: true,
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantHostedAutomationAvailable: true,
           assistantHostedDeviceConnectAvailable: true, assistantHostedDeviceConnectProviders: [],
-          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
-          conversationScope: 'direct', currentLocalDate: now.toISOString().slice(0, 10),
-          currentInstant: scheduled ? targetAt : now.toISOString(), currentTimeZone: 'UTC',
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'direct',
+          currentLocalDate: now.slice(0, 10), currentInstant: now, currentTimeZone: 'UTC',
           hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
-          turnTrigger: scheduled ? 'automation-cron' : 'automation-auto-reply',
+          turnTrigger: scenario === 'scheduled' ? 'automation-cron' : 'automation-auto-reply',
         }),
-        dynamicTools: [MURPH_DEVICE_TOOL, MURPH_AUTOMATION_TOOL], hostedToolContext,
-        prompt, reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        dynamicTools: [MURPH_DEVICE_TOOL, MURPH_AUTOMATION_TOOL],
+        hostedToolContext: {
+          computerToolsAvailable: false, vaultFileSendAvailable: false,
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('No file send expected.') },
+          deviceTool: { async request(request) { calls.push(request); throw new Error('No device operation expected.') } },
+          automationTool: { async request(request) { calls.push(request); throw new Error('No reminder mutation expected.') } },
+        },
+        prompt, ephemeral: true, reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
       })
-      const offerPrompt = scenario === 'offer-whoop'
-        ? `Remind me at ${targetAt} to take a seven-minute breathing break. I will tell you when I actually start.`
-        : scenario === 'offer-garmin'
-          ? `I wear a Garmin. Remind me at ${targetAt} to take a brief personal break. I prefer to keep the reminder discreet around coworkers.`
-          : scenario === 'offer-none'
-            ? `Remind me at ${targetAt} to take a seven-minute breathing break.`
-            : scenario === 'offer-declined'
-              ? `Remind me at ${targetAt} to take a seven-minute breathing break.` : null
-      const result = await execute(offerPrompt ?? (scenario === 'health-active' || scenario === 'health-stale'
-        ? 'My Apple Health steps have not updated. Can you check when the app last contacted Murph and the sync status? Does that prove I closed it? Inspect only app contact and account sync metadata, not step records. Please just diagnose; do not change anything.'
-        : scenario === 'short-wait'
-        ? 'I am testing whether your buzzes reach my bands. Both are connected in Murph and the app is open. Wait 5 seconds, then buzz my WHOOP and my Garmin once each.'
-        : scenario === 'whoop-delay'
-        ? `Please buzz my WHOOP once when my ten-minute meditation ends at ${targetAt}. No buzz now. The band is connected in Murph and I will keep the app open until then.`
-        : scenario === 'whoop-locked'
-        ? `Please buzz my WHOOP once when my ten-minute meditation ends at ${targetAt}. No buzz now. The band is connected in Murph, but my phone will be locked in my pocket. Will the buzz still reach me?`
-        : scenario === 'whoop-useful'
-          ? 'My WHOOP is connected in Murph. Give it one test buzz and tell me when wrist reminders would be useful for me.'
-          : 'Please buzz my Garmin once now. I know its find-device alert may also sound. Do not retry if the result is unclear.'), false)
-      process.stdout.write('[wearable-haptic-live] ' + JSON.stringify({ scenario, reply: result.finalMessage, calls, saves: saves.length }) + '\n')
-      if (offerPrompt) {
-        expect(calls).toEqual([])
-        expect(saves).toHaveLength(1)
-        expect(saves[0]).toMatchObject({ action: 'save', schedule: { kind: 'at', at: targetAt } })
-        if (saves[0]?.action !== 'save') throw new Error('Expected one reminder save.')
-        const reminders = await listAutomations({ vaultRoot: workingDirectory })
-        expect(reminders.items).toHaveLength(1)
-        const saved = (await listCanonicalAssistantCronRecords(workingDirectory))[0]
-        if (!saved || saved.kind !== 'automation') throw new Error('Expected the requested break reminder.')
-        const runtimeState = createAssistantCronCanonicalRuntimeRecord({ jobId: resolveCanonicalAssistantCronJobId(saved), now: targetAt })
-        const job = projectCanonicalAssistantCronJob({ source: saved, runtimeState })
-        const instructions = buildAssistantCronExecutionInstructions({ job, kind: 'canonical', runtimeState, source: saved }, { automationId: null, contextReferences: [] })
-        const fired = await execute(instructions, true, { ...context, currentInvocationScope: () => ({
-          conversationScope: 'direct', origin: { kind: 'automation_occurrence', automationId: saved.automationId, occurrenceAt: targetAt },
-        }) })
-        process.stdout.write('[wearable-offer-due] ' + JSON.stringify({ scenario, reply: fired.finalMessage, calls, saves: saves.length }) + '\n')
-        expect(calls).toEqual([])
-        expect(saves).toHaveLength(1)
-        expect(fired.finalMessage).toMatch(/break/iu)
+      process.stdout.write('[device-capability-live] ' + JSON.stringify({ scenario, reply: result.finalMessage, calls }) + '\n')
+      expect(calls).toEqual([])
+      expect(result.finalMessage).toMatch(/can.t|cannot|unable|don.t have|not (?:available|supported)|no (?:way|access)/iu)
+      expect(result.finalMessage).not.toMatch(/(?:I(?:.ve| have)?|your WHOOP) (?:buzzed|vibrated)|(?:buzz|vibration) (?:sent|queued|scheduled)|Settings\s*>\s*Connect device/iu)
+    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
+  }, 360_000)
 
-        expect(result.finalMessage).toMatch(/remind|reminder|scheduled|set/iu)
-        if (scenario === 'offer-whoop' || scenario === 'offer-garmin') {
-          expect(result.finalMessage).toMatch(/buzz|wrist|vibrat/iu)
-          expect(result.finalMessage).toMatch(/if you|want|would you|can also|could also/iu)
-          expect(result.finalMessage).toMatch(/Connect device|connected in Murph|Settings|notification/iu)
-          expect(withoutOlderAppCaveat(result.finalMessage)).not.toMatch(/(?:keep|leave) (?:the )?(?:Murph )?(?:app )?open|needs? (?:the )?(?:Murph )?(?:app )?(?:to (?:be|stay) )?open/iu)
-          expect(result.finalMessage).not.toMatch(/I(?:['’]ll| will| have) (?:also )?(?:buzz|vibrate|connect)|(?:buzz|wrist cue) (?:is|has been) (?:set|scheduled)/iu)
-          if (scenario === 'offer-garmin') expect(result.finalMessage).toMatch(/sound|not (?:always )?silent/iu)
-          else expect(result.finalMessage).toMatch(/start|begin/iu)
-        } else {
-          expect(result.finalMessage).not.toMatch(/(?:want|could|can|offer).{0,70}(?:buzz|vibrat|wrist)/iu)
-        }
-        return
-      }
-      if (scenario === 'health-active' || scenario === 'health-stale') {
-        expect(calls.filter(call => call.action === 'companion_status')).toHaveLength(1)
-        expect(calls.some(call => call.action === 'list_accounts')).toBe(true)
-        expect(calls.every(call => call.action === 'companion_status' || call.action === 'list_accounts')).toBe(true)
-        expect(saves).toEqual([])
-        expect(result.finalMessage).toMatch(/doesn.t prove|does not prove|can.t tell|cannot tell|not proof|doesn.t (?:mean|confirm)|does not (?:mean|confirm)|not necessarily|can.t prove/iu)
-        expect(result.finalMessage).not.toMatch(/(?:because|since|proves? that|confirmed that) you (?:closed|quit)|permission (?:was|is) denied|steps (?:are|have) (?:now )?(?:synced|updated)/iu)
-        return
-      }
-      if (scenario === 'app-unreachable' || scenario === 'device-disconnected') {
-        expect(calls.filter(call => call.action === 'haptic' && call.operation === 'buzz').length).toBeLessThanOrEqual(1)
-        expect(saves).toEqual([])
-        expect(result.finalMessage).toMatch(scenario === 'app-unreachable' ? /open.*Murph|Murph.*open/iu : /connect|band.*ready/iu)
-        expect(result.finalMessage).not.toMatch(/your Garmin (?:buzzed|vibrated)|you (?:closed|quit)|has vibrated/iu)
-        return
-      }
-      if (scenario === 'whoop-useful') {
-        expect(calls.filter(call => call.action === 'haptic' && call.operation !== 'status')).toEqual([
-          { action: 'haptic', wearable: 'whoop', operation: 'buzz' },
-        ])
-        expect(saves).toEqual([])
-        const commands = await readFile(commandLogPath, 'utf8')
-        expect(commands).toMatch(/automation(?: list|","list)/u)
-        expect(commands).toMatch(/automation(?: show|","show)/u)
-        expect(await listAutomations({ vaultRoot: workingDirectory })).toEqual(remindersBefore)
-        expect(result.finalMessage).toMatch(/stretch/iu)
-        expect(result.finalMessage).toMatch(/five|5/iu)
-        expect(result.finalMessage).toMatch(/queued|sent|requested/iu)
-        expect(result.finalMessage).not.toMatch(/your WHOOP (?:buzzed|vibrated)|has vibrated|I(?:'ve| have) (?:set|created|scheduled)/iu)
-        return
-      }
-      if (scenario === 'short-wait') {
-        expect([...buzzes.keys()].sort()).toEqual(['garmin', 'whoop'])
-        expect([...buzzes.values()].every(count => count <= 2)).toBe(true)
-        expect(calls.every(call => call.action === 'haptic' && call.operation !== 'stop')).toBe(true)
-        expect(saves).toEqual([])
-        const actions = readCapabilityRoutingActions(result.jsonEvents)
-        const wait = actions.find(action => action.kind === 'command' && /\bsleep\s+5(?:\.0+)?s?\b|sleep\(\s*5(?:\.0+)?\s*\)/u.test(action.command))
-        const firstBuzz = actions.find(action => action.kind === 'dynamic' && action.tool === MURPH_DEVICE_TOOL.name && action.argumentsValue.operation === 'buzz')
-        expect(wait?.eventIndex).toBeLessThan(firstBuzz?.eventIndex ?? -1)
-        expect(result.finalMessage).toMatch(/WHOOP/u)
-        expect(result.finalMessage).toMatch(/Garmin/u)
-        expect(result.finalMessage).not.toMatch(/can.t|cannot|unable|scheduler|restriction|instead\?/iu)
-        expect(result.finalMessage).toMatch(/acknowledg|accepted/iu)
-        expect(result.finalMessage).not.toMatch(/(?:has|have) vibrated|(?:buzzed|vibrated) (?:on )?your wrist|you(?:'ll| will| should) feel/iu)
-        return
-      }
-      if (scenario === 'garmin-unknown') {
-        expect(calls.filter(call => call.action === 'haptic' && call.operation !== 'status')).toEqual([{ action: 'haptic', wearable: 'garmin', operation: 'buzz' }])
-        expect(saves).toEqual([])
-        expect(result.finalMessage).toMatch(/confirm|unclear|may have|couldn.t tell|cannot tell|not sure/iu)
-        expect(result.finalMessage).not.toMatch(/successfully|your Garmin (?:buzzed|vibrated)|has vibrated/iu)
-        return
-      }
-      expect(calls.every(call => call.action === 'haptic' && call.operation === 'status')).toBe(true)
-      expect(saves).toHaveLength(1)
-      expect(saves[0]).toMatchObject({ action: 'save', schedule: { kind: 'at', at: targetAt } })
-      // Confirming the scheduled clock time also ties the buzz to the meditation end.
-      const targetClock = `${Number(targetAt.slice(11, 13))}:${targetAt.slice(14, 16)}`
-      expect(result.finalMessage).toMatch(scenario === 'whoop-locked' ? new RegExp(`10|ten|meditation|timer|${targetClock}`, 'iu') : /10|ten|meditation|timer/iu)
-      if (scenario === 'whoop-locked') {
-        // A recent app delivers in the background, best effort: no keep-open demand, no guarantee.
-        expect(result.finalMessage).toMatch(/background|locked|lock/iu)
-        expect(result.finalMessage).toMatch(/best[- ]effort|usually|should|not guaranteed|can.t guarantee|cannot guarantee|notification/iu)
-        expect(withoutOlderAppCaveat(result.finalMessage)).not.toMatch(/(?:keep|leave) (?:the )?(?:Murph )?(?:app )?open|needs? (?:the )?(?:Murph )?(?:app )?(?:to (?:be|stay) )?open|won.t (?:reach|work|arrive)/iu)
-        expect(result.finalMessage).not.toMatch(/(?<!not |n[’']t be |never )guaranteed to|will definitely|(?<!not )always (?:reach|arrive|work)/iu)
-      }
-      const saved = (await listCanonicalAssistantCronRecords(workingDirectory))[0]
-      if (!saved || saved.kind !== 'automation') throw new Error('Expected saved meditation timer.')
-      const runtimeState = createAssistantCronCanonicalRuntimeRecord({ jobId: resolveCanonicalAssistantCronJobId(saved), now: targetAt })
-      const job = projectCanonicalAssistantCronJob({ source: saved, runtimeState })
-      const instructions = buildAssistantCronExecutionInstructions({ job, kind: 'canonical', runtimeState, source: saved }, { automationId: null, contextReferences: [] })
-      const before = calls.length
-      const fired = await execute(instructions, true, { ...context, currentInvocationScope: () => ({
-        conversationScope: 'direct', origin: { kind: 'automation_occurrence', automationId: saved.automationId, occurrenceAt: targetAt },
-      }) })
-      process.stdout.write('[wearable-haptic-live] ' + JSON.stringify({ scenario: 'whoop-due', reply: fired.finalMessage, calls: calls.slice(before) }) + '\n')
-      expect(calls.slice(before).filter(call => call.action === 'haptic' && call.operation !== 'status')).toEqual([{ action: 'haptic', wearable: 'whoop', operation: 'buzz' }])
-      expect(saves).toHaveLength(1)
-      expect(fired.finalMessage).toMatch(/queued|pending/iu)
-      expect(fired.finalMessage).not.toMatch(/(?:was|is|has been) acknowledged|your WHOOP (?:buzzed|vibrated)|has vibrated/iu)
-    } finally {
-      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
-    }
-  }, 720_000)
 })
 
 // Synthetic errand and contact details; exercise the same future-call intent.

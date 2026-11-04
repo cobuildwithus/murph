@@ -7,7 +7,7 @@ const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256
 const credentials = { keyId: "KEYID12345", privateKey, teamId: "TEAMID1234" };
 const request: ApplePushRequest = {
   collapseId: "c".repeat(80),
-  data: { wake: "wearable" },
+  data: { gameId: "synthetic-game" },
   expiresAt: new Date("2026-10-05T12:00:30.000Z"),
   message: { kind: "background" },
   target: { environment: "production", token: "ab".repeat(32), topic: "ai.withmurph.app" },
@@ -18,7 +18,7 @@ function transport(result: { reason: string | null; status: number } = { reason:
 }
 
 describe("Apple push sender", () => {
-  it("sends a low-priority background wake with a verifiable provider token and no reminder text", async () => {
+  it("sends a low-priority background push with a verifiable provider token", async () => {
     const send = transport();
     expect(await sendApplePush(request, { credentials, now: () => Date.parse("2026-10-05T12:00:00.000Z"), transport: send })).toBe("sent");
     const call = send.mock.calls[0]![0];
@@ -27,7 +27,7 @@ describe("Apple push sender", () => {
       "apns-collapse-id": "c".repeat(64), "apns-expiration": "1791201630",
       "apns-priority": "5", "apns-push-type": "background", "apns-topic": "ai.withmurph.app",
     });
-    expect(JSON.parse(call.body)).toEqual({ aps: { "content-available": 1 }, wake: "wearable" });
+    expect(JSON.parse(call.body)).toEqual({ aps: { "content-available": 1 }, gameId: "synthetic-game" });
     const [header, claims, signature] = call.headers.authorization!.replace("bearer ", "").split(".");
     expect(JSON.parse(Buffer.from(header!, "base64url").toString())).toEqual({ alg: "ES256", kid: "KEYID12345" });
     expect(JSON.parse(Buffer.from(claims!, "base64url").toString())).toEqual({ iat: 1791201600, iss: "TEAMID1234" });
@@ -38,14 +38,14 @@ describe("Apple push sender", () => {
     const send = transport();
     const alert: ApplePushRequest = {
       ...request,
-      message: { body: "Wrist reminder", kind: "alert", title: "Murph" },
+      message: { body: "Your game has an update", kind: "alert", title: "Murph" },
       target: { ...request.target, environment: "development", topic: "ai.withmurph.app.dev" },
     };
     expect(await sendApplePush(alert, { credentials, transport: send })).toBe("sent");
     const call = send.mock.calls[0]![0];
     expect(call.origin).toBe("https://api.sandbox.push.apple.com");
     expect(call.headers).toMatchObject({ "apns-priority": "10", "apns-push-type": "alert", "apns-topic": "ai.withmurph.app.dev" });
-    expect(JSON.parse(call.body).aps).toEqual({ alert: { body: "Wrist reminder", title: "Murph" }, "content-available": 1 });
+    expect(JSON.parse(call.body).aps).toEqual({ alert: { body: "Your game has an update", title: "Murph" }, "content-available": 1 });
   });
 
   it("reuses one provider token instead of re-signing every push", async () => {

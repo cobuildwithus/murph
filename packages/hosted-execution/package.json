@@ -196,10 +196,6 @@
       "types": "./dist/companion-presence.d.ts",
       "default": "./dist/companion-presence.js"
     },
-    "./wearable-haptics": {
-      "types": "./dist/wearable-haptics.d.ts",
-      "default": "./dist/wearable-haptics.js"
-    },
     "./usage-diagnostics": {
       "types": "./dist/usage-diagnostics.d.ts",
       "default": "./dist/usage-diagnostics.js"

@@ -5508,15 +5508,13 @@ Deploy the additive database migration and Web accounting before the runtime
 producer; mixed older runtimes do not carry the funding identity. This is a
 forward fix, not historical usage reclassification.
 
-### Companion wrist commands
+### Companion app presence
 
-The existing device tool carries a closed `haptic` operation for WHOOP and Garmin.
-Runtime-owned private/scheduled authority reaches a signed Web callback; bearer
-companion polling claims expiring commands before Bluetooth execution. The
-runtime scheduler owns delays. Session leases and durable duplicate-effect
-receipts stay in Web/Postgres; Bluetooth/vendor framing stays in the iOS app.
-See [wearable haptics](agent-docs/references/wearable-haptics.md) for the contract,
-query bounds, receipt semantics, foreground limit and rollout order.
+Bearer-authenticated companion heartbeats record last contact and last foreground
+contact on HostedMember. The private device tool and consented group diagnostics
+read these observations to help explain sync status; contact never proves Health
+permissions, successful ingestion, or continuous app execution.
+See [companion presence](agent-docs/references/companion-presence.md).
 
 ## Weekly Game
 
