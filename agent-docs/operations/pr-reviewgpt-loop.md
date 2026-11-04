@@ -9,8 +9,7 @@ finding disposition, retries, and base-update rules.
 Read the sections needed for the current round. Run on the stable pushed head
 after focused local proof and parent candidate review, concurrently with CI.
 Keep one completion owner. Completion requires the resolved review, zero
-unresolved accepted findings, and green required CI; a retrospective alone is
-not review approval.
+unresolved accepted findings, and green required CI.
 
 ## Outcome and Completion Bar
 
@@ -42,7 +41,7 @@ cutoffs send the remediation delta and its directly affected paths. An explicit
 completes when the exact patch has a resolved result, local triage has zero
 accepted findings, the finding-disposition boundary is complete, and CI is green
 on the final head. Missing or stale evidence, an invalid model/response,
-unresolved accepted findings, a required retrospective, or a merge conflict is
+unresolved accepted findings or a merge conflict is
 a stop condition rather than permission to infer the answer.
 
 ## Managed Target Lifecycle
@@ -243,40 +242,33 @@ merge target all refer to the same commit, except for a later short test-only
 commit as described below. Do not run it on unpushed local changes, a dirty
 worktree, or a checkout that is not at the pushed head.
 
-The PR body must carry the short intent, Product UX result, direct evidence,
-changelog decision, and any risk details required by
-`agent-docs/operations/completion-workflow.md` § PR Description. Complete that
-section's ordered launch preflight before firing a round; do not use a running
-ReviewGPT job to discover missing PR-body metadata.
+A review round needs the pushed head. PR-description content cannot block or
+invalidate a round. The PR description and its separate CI checks remain owned
+by `agent-docs/operations/completion-workflow.md` § PR Description.
 
-Before the final gate starts, the PR body must also contain exactly one
+The PR body may optionally contain one
 `ReviewGPT context sensitivity: routine` or
-`ReviewGPT context sensitivity: sensitive` line plus a short reason. Use
-`sensitive` whenever the final-gate eligibility exclusions or cross-cutting
-conditions in `agent-docs/operations/completion-workflow.md` apply, regardless
-of patch size. A small cosmetic change or narrow bug fix is `routine` only when
-none apply. Missing, malformed, or duplicate declarations are packaged as
-`undeclared` and default to the full snapshot.
+`ReviewGPT context sensitivity: sensitive` line. Use `sensitive` whenever the
+final-gate eligibility exclusions or cross-cutting conditions in
+`agent-docs/operations/completion-workflow.md` apply, regardless of patch size.
+A small cosmetic change or narrow bug fix is `routine` only when none apply.
+Missing, malformed, or duplicate declarations are packaged as `undeclared`
+and default to the full snapshot; they do not stop the round.
 
-At round 1, record the exact first-reviewed head in the PR body. Include the exact machine-readable line
-`ReviewGPT first-reviewed head: <full-sha>`. Once the first substantive review
-validates, keep that line and baseline immutable. The packager fails if its
-supplied first head differs from this persisted PR-body value. Later substantive rounds report the remediation delta
-from that baseline without asking the author to maintain a manual line-count
-table. Here `<full-sha>` means exactly the 40-character lowercase hexadecimal
-value returned by `git rev-parse HEAD`; a shortened SHA is invalid.
+Round 1 derives its first-reviewed head from the current pushed PR head.
+`REVIEW_GPT_FIRST_REVIEWED_HEAD` is optional for round 1 and, if set, must equal
+that head. Later rounds supply `REVIEW_GPT_FIRST_REVIEWED_HEAD` and
+`REVIEW_GPT_PREVIOUS_REVIEWED_HEAD` through the environment, preserving the
+original baseline and existing ancestry checks.
 
 If every initial attempt is invalid and an already-authorized candidate change
-produces a new pushed head, first preserve the old head, invalidity reason, and
-artifact references in a separate PR-body attempt-history entry. Confirm that
-no valid substantive review exists; an accepted prompt still awaiting capture
-is not an invalid result and must be recovered before this decision. Then
-replace the single machine-readable first-reviewed-head line with the new full
-head and retry round 1 with a fresh full snapshot. Leave previous-reviewed-head
-unset and use the new head as the context anchor. No extra commit is needed
-solely to restart review. Do not relabel a valid `PASS` or `FINDINGS` response as
-invalid, erase prior findings, reset a later round, or grant new edit authority
-through this recovery. Same-head tooling retries retain their existing baseline.
+produces a new pushed head, confirm that no valid substantive review exists;
+an accepted prompt still awaiting capture must be recovered first. Retry round
+1 with the new head and a fresh full snapshot, leaving previous-reviewed-head
+unset and using the new head as the context anchor. Do not relabel a valid
+`PASS` or `FINDINGS` response as invalid, erase prior findings, reset a later
+round, or grant new edit authority through this recovery. Same-head tooling
+retries retain their existing baseline.
 
 Fire each round as soon as the head it reviews is pushed. Do not wait for PR CI
 to go green first. Final round 1 runs in parallel with CI. Green CI on the final
@@ -374,7 +366,7 @@ the current user explicitly asks for it.
        --wait \
        --response-marker REVIEW_COMPLETE \
        --response-file audit-packages/pr-<number>-round-<k>.md \
-       --prompt "Review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). First-reviewed head: <round-1-full-sha>. Substantive round <k>; follow review-round.json for full-audit versus correction scope. Prior findings, dispositions, landed fixes, and mechanisms: <compact-summary>. Retrospective status: <not-required-or-current-decision>."
+       --prompt "Review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). First-reviewed head: <round-1-full-sha>. Substantive round <k>; follow review-round.json for full-audit versus correction scope. Changes since the last round: <brief-description>."
    ```
 
    When the existing conversation or its original lane cannot continue, retry
@@ -393,7 +385,7 @@ the current user explicitly asks for it.
        --wait \
        --response-marker REVIEW_COMPLETE \
        --response-file audit-packages/pr-<number>-round-<k>.md \
-       --prompt "Review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). First-reviewed head: <round-1-full-sha>. Fresh full audit for substantive round <k>. Prior findings, dispositions, landed fixes, and mechanisms: <compact-summary>. Retrospective status: <not-required-or-current-decision>."
+       --prompt "Review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). First-reviewed head: <round-1-full-sha>. Fresh full audit for substantive round <k>. Changes since the last round: <brief-description>."
    ```
 
    Choose a healthy lane for round 1 and keep that value with the conversation
@@ -404,16 +396,10 @@ the current user explicitly asks for it.
    absent or automatic. An explicit full-review reason starts a new conversation
    and may choose a fresh lane.
 
-   The later-round summary is required process metadata. Include each prior
-   finding's accepted/rejected/out-of-scope disposition, the landed correction,
-   and its underlying mechanism. Keep it compact and secret-safe; do not paste
-   repository contents. If a completed retrospective permits continuation, name
-   its decision and why the current delta stays inside it. An explicitly
-   requested full audit starts a new conversation, so a missing,
-   placeholder-only, or too-thin summary makes that run `INVALID`; that audit
-   cannot return `PASS` without enough ledger detail to identify and verify
-   every prior accepted finding. Ordinary later rounds retain the conversation
-   ledger, whether the packager selects a full snapshot or a correction packet.
+   A later-round prompt just says what changed since the last round. Keep it
+   compact and secret-safe. No separate finding ledger or retrospective is
+   required process metadata, and missing summary prose does not invalidate a
+   round.
 
    Round 1 opens a new conversation and attaches the full guarded snapshot. On
    later rounds, the packager reads the PR body's context-sensitivity declaration
@@ -478,8 +464,8 @@ the current user explicitly asks for it.
    rerun the full review with a different explicit `REVIEW_GPT_BROWSER_LANE`.
    For later rounds, use the fresh-full recovery command above with a different
    lane and `REVIEW_GPT_FULL_REVIEW_REASON="previous lane capability limit"`,
-   omitting `REVIEW_GPT_THREAD_URL` and preserving the findings/disposition
-   summary. Keep the substantive round number and first-reviewed head: a
+   omitting `REVIEW_GPT_THREAD_URL` and describing what changed since the last
+   round. Keep the substantive round number and first-reviewed head: a
    rejected rate-limited attempt is not a completed review round. Record the
    replacement lane and conversation for subsequent same-thread work.
 
@@ -693,14 +679,12 @@ or unresolved ownership or product decisions to finish a merge.
   accepted round-three finding may still be reproduced and fixed; do not leave a
   known bug in place merely because the review counter reached three. After that
   fix, pause the ReviewGPT loop and confirm parent final review, verification,
-  and PR CI are all complete. Record the cap
-  retrospective and have the parent justify any fourth round against the
-  existing task authority before starting it. Ask the user only if the decision
+  and PR CI are all complete. The parent justifies any fourth round against
+  the existing task authority before starting it. Ask the user only if the decision
   requires a change of scope or authority. A green non-ReviewGPT gate does not
   make the PR merge-ready without the required later resolved result.
-- Report a per-round summary at handoff: findings received, accepted, rejected
-  with reasons, origin/mechanism, what landed, source-shape movement, and any
-  retrospective decision. Report tooling retries separately.
+- Report the review result, what changed, and any unresolved findings at handoff.
+  Report tooling retries separately.
 
 ## Boundaries
 

@@ -123,7 +123,8 @@ test('preserves regular executable source files from the patched index', async (
   expect(await readFile(path.join(input.contextDir, 'dependencies/codex-1.2.3', target), 'utf8')).toContain('VALUE: u8 = 2')
 })
 
-test('the real PR packaging hook appends native postimages to its final ZIP', async () => {
+test.each(['', '## Why and outcome\nSynthetic native context change.\n'])(
+  'round 1 packages native postimages without ReviewGPT body metadata: %j', async (body) => {
   const input = await fixture()
   const bin = path.join(input.root, 'bin')
   await mkdir(bin)
@@ -148,7 +149,7 @@ cobuild_repo_tool_bin() { printf '%s\\n' "$TEST_BASE_PACKAGER"; }
       *baseRefName*) printf 'main\\n';;
       *baseRefOid*) printf '%s\\n' "$TEST_BASE";;
       *headRefOid*) printf '%s\\n' "$TEST_HEAD";;
-      *body*) printf 'ReviewGPT first-reviewed head: %s\\nReviewGPT context sensitivity: sensitive\\n' "$TEST_HEAD";;
+      *body*) printf '%s' "$TEST_PR_BODY";;
       *) exit 1;; esac`,
     pnpm: `if [[ "$1" == no-js ]]; then exit 0; fi
       [[ "$1" == exec && "$2" == tsx ]]
@@ -174,9 +175,9 @@ cobuild_repo_tool_bin() { printf '%s\\n' "$TEST_BASE_PACKAGER"; }
   execFileSync('bash', ['scripts/package-audit-context-full.sh', '--zip', '--out-dir', output, '--name', 'composed'], {
     cwd: input.repoRoot, timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, TEST_HEAD: input.head,
-      TEST_BASE: base, TEST_UPSTREAM: input.source, TEST_GIT: realGit, TEST_TSX: tsx,
+      TEST_PR_BODY: body, TEST_BASE: base, TEST_UPSTREAM: input.source, TEST_GIT: realGit, TEST_TSX: tsx,
       TEST_BASE_PACKAGER: path.join(bin, 'base-packager'), REVIEW_GPT_PR_REF: '123',
-      REVIEW_GPT_PR_URL: '', REVIEW_GPT_ROUND_NUMBER: '1', REVIEW_GPT_FIRST_REVIEWED_HEAD: input.head },
+      REVIEW_GPT_PR_URL: '', REVIEW_GPT_ROUND_NUMBER: '1', REVIEW_GPT_FIRST_REVIEWED_HEAD: '', REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '' },
   })
   const zip = path.join(output, 'composed.zip')
   const entries = execFileSync('unzip', ['-Z1', zip], { encoding: 'utf8' }).trim().split('\n')
@@ -186,5 +187,8 @@ cobuild_repo_tool_bin() { printf '%s\\n' "$TEST_BASE_PACKAGER"; }
   expect(bytes).toBe('// preserved source outside patch\npub const VALUE: u8 = 2;\n')
   const round = JSON.parse(execFileSync('unzip', ['-p', zip, 'review-gpt-pr-context/review-round.json'], { encoding: 'utf8' }))
   expect(round.currentReviewedHead).toBe(input.head)
-  expect(round.contextSensitivity).toBe('sensitive')
+  expect(round.firstReviewedHead).toBe(input.head)
+  expect(round.contextSensitivity).toBe('undeclared')
+  expect(round.contextMode).toBe('full_snapshot')
+  expect(round.reviewScope).toBe('full')
 })

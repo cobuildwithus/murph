@@ -237,14 +237,6 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
     echo "Error: PR head changed while ReviewGPT context was being packaged; rerun the same round." >&2
     exit 1
   fi
-  review_gpt_recorded_first_head="$(
-    printf '%s\n' "$review_gpt_pr_body" \
-      | sed -nE 's/^ReviewGPT first-reviewed head: ([0-9a-f]{40})$/\1/p'
-  )"
-  review_gpt_require_full_sha \
-    "PR body ReviewGPT first-reviewed head" \
-    "$review_gpt_recorded_first_head"
-
   if [[ "$review_gpt_round_number" == "1" ]]; then
     if [[ -n "$review_gpt_full_review_reason" ]]; then
       echo "Error: REVIEW_GPT_FULL_REVIEW_REASON is only valid for round 2 or later." >&2
@@ -264,11 +256,7 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
       echo "Error: round 1 first-reviewed head must equal the current PR head." >&2
       exit 1
     fi
-    if [[ "$review_gpt_recorded_first_head" != "$review_gpt_head_oid" ]]; then
-      echo "Error: round 1 PR body first-reviewed head must equal the current PR head." >&2
-      exit 1
-    fi
-    review_gpt_first_reviewed_head="$review_gpt_recorded_first_head"
+    review_gpt_first_reviewed_head="$review_gpt_head_oid"
     review_gpt_context_anchor_head="$review_gpt_head_oid"
   else
     if [[ -z "$review_gpt_first_reviewed_head" ]] \
@@ -279,10 +267,6 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
     review_gpt_require_full_sha "first-reviewed head" "$review_gpt_first_reviewed_head"
     if [[ "$review_gpt_first_reviewed_head" == "$review_gpt_head_oid" ]]; then
       echo "Error: later ReviewGPT rounds must preserve the original first-reviewed head." >&2
-      exit 1
-    fi
-    if [[ "$review_gpt_first_reviewed_head" != "$review_gpt_recorded_first_head" ]]; then
-      echo "Error: REVIEW_GPT_FIRST_REVIEWED_HEAD must match the immutable PR body baseline." >&2
       exit 1
     fi
     if [[ "$review_gpt_previous_reviewed_head" == "$review_gpt_head_oid" ]]; then

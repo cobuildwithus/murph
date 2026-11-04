@@ -74,7 +74,7 @@
 
 <!-- Delete this section when no special risk applies. Include only affected invariants, database fanout, or deliberately deferred work not already covered above. -->
 
-<!-- Add the next two lines only before a final ReviewGPT gate. Missing or invalid sensitivity defaults safely to a full review packet. -->
+<!-- Optional ReviewGPT context hint; missing or invalid sensitivity selects a full snapshot and never blocks a round. -->
 <!-- ReviewGPT context sensitivity: routine OR sensitive -->
 <!-- Classification reason: ... -->
 
