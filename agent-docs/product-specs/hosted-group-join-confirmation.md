@@ -207,3 +207,22 @@ that no current row depends on materialization, plus a migration or forward fix
 for any retained obligation. The hosted runtime already supports the generic
 assistant-notification mailbox contract, so Cloudflare does not require a
 tandem deployment.
+
+## App board sharing
+
+The pair board uses the existing self-service `web` join semantics, current
+launch consent, membership-generation fence, grant writer and post-commit
+projection/confirmation signals. It manages only resting heart rate, sleep
+duration, steps and VO2 max; unshown scopes survive. A first join must also
+have current game-owner authority for the bound pair chat. Membership alone
+never grants a health scope.
+
+Join disclosure names the audience and surface: the people in the group can
+see the selected numbers over the last 90 days and compare their changes, in
+the chat and in the Murph app. Unchecking a number and saving stops sharing it.
+The app read captures and revalidates both viewer membership and exact grants
+around decryption. It reads only two people and four scopes, at most eight
+snapshots in batches of four, using the existing 4 MiB decoded-record ceiling.
+It never loads contact names or private vault data. Missing/legacy snapshots
+remain pending, and revoked grants or changed membership cannot reuse captured
+values. The chat reader keeps its existing scope, window and wire limits.

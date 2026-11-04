@@ -55,3 +55,61 @@ Murph grounds these lines only in game entries and text both players can see:
 their posts, words, timing, streaks, shared excuses and tasks. Copy is warm and
 teasing, never mean, about bodies or weight, or based on private context.
 No client migration or recap backfill is required.
+
+## Pair health board
+
+`GET /api/game/v1/people/:memberId/board` uses the game bearer door. Both
+people must hold seats in a visible live or settled pair game, without a block.
+The latest game's actual chat binding selects one HostedGroup. Missing binding
+or group returns `{ "board": null }`. `MURPH_GAME_BOARD_ENABLED` is on unless
+exactly `false`; off returns that empty GET and 404 for sharing PUT.
+
+`PairBoard` and numeric wire types live in
+`apps/web/src/lib/game/board-numbers.ts`. The response is `{ board }`, with
+`groupId`, the viewer's nullable `membershipId`, canonical `firstGameOn`,
+viewer-local inclusive 90-day `window: { from, through }`, `myShares`, two
+`people` (viewer first), and `crowns`. No names or avatars are returned.
+Each person has `memberId`, `me`, sharing-group `member`, nullable `inARow`,
+and four `numbers`, always in this order:
+
+| Name | Scope | Unit | Improvement |
+| --- | --- | --- | --- |
+| `restingHeartRate` | `resting-heart-rate-days.v0` | bpm | decrease |
+| `sleep` | `sleep-duration-days.v0` | minutes | increase |
+| `steps` | `steps-days.v0` | steps | increase |
+| `vo2Max` | `vo2-max-days.v0` | ml/kg/min | increase |
+
+A number is `{ state: "not_shared" | "pending" | "hidden" }`, or
+`{ state: "available", unit, latest: { date, value }, stale, daily, comparison }`.
+Daily points are ascending, one per date, with gaps omitted. Daily values round
+to integers except VO2 (one decimal); window means retain their precision.
+`stale` means the latest date precedes `window.through` by more than seven days.
+Missing or legacy publications remain pending. A viewer outside the sharing
+group sees the other person's numbers as hidden and may intentionally enroll.
+Both people's numbers come only from the same authorized shared snapshots.
+
+Each metric selects one public source for both windows, preferring sufficient
+coverage, then more distinct dates across the windows, later latest date, and
+source id. Never fill gaps from another source. Unknown-source legacy values
+can display but cannot support comparison. Explicit naps do not count as sleep.
+Daily comparisons need four dates in each seven-day window: baseline starts at
+`max(firstGameOn, window.from)` and current ends at the source's latest date.
+Overlap gives null. VO2 uses its existing median/two-date policy with a 14-day
+current window and an up-to-90-day baseline clipped before that window and to
+retention. `comparison` contains `baseline` and `current`, each
+`{ from, through, value, days }`, plus raw `delta`, direction-adjusted
+`improvement`, and `sinceFirstGame`. The latter is false when Day 1 has aged
+out of retention. `firstGameOn` itself is never clipped or inferred from capped
+history. Crowns name the unique largest positive improvement (or positive
+streak); ties and all-nonpositive values give null. They are recomputed, not
+stored holders.
+
+`PUT /api/game/v1/people/:memberId/board/sharing` takes
+`{ expectedMembershipId: string | null, numbers: MetricName[] }` and returns a
+fresh `{ board }`. Null means an intentional first join, authorized by a current
+pair seat and prepared exact chat evidence revalidated at mutation. Existing
+members retain self-service sharing authority. Only these four scopes are
+replaced; other permissions survive. Stale membership gives
+`409 MEMBERSHIP_CHANGED`; missing current consent uses the existing
+`403 HOSTED_CONSENT_REQUIRED`; unavailable boards give 404. Saves may return
+pending values until the existing publisher runs. All responses are no-store.

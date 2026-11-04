@@ -1,3 +1,5 @@
+Pair health board API and scoped sharing are owned by [the iOS game contract](product-specs/ios-game.md#pair-health-board), [game rules](product-specs/weekly-game.md#pair-board-current-run), and [group sharing](product-specs/hosted-group-join-confirmation.md#app-board-sharing).
+
 Restored device completion replay preserves serviced assistant wake projections;
 the behavior owner is `../packages/assistant-runtime/README.md` and the proof is
 in [the wake cleanup plan](exec-plans/completed/2026-11-04-empty-followup-churn.md).

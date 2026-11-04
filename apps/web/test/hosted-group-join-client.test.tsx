@@ -403,7 +403,10 @@ test.each([false, true])(
     );
     expect(container.textContent).toContain("Shares 90 days of total sleep duration");
     expect(container.textContent).toContain("Shares 90 days of step counts");
-    expect(container.textContent).toContain("today and the previous 89 days");
+    expect(container.textContent).toContain("The people in Synthetic group");
+    expect(container.textContent).toContain("over the last 90 days");
+    expect(container.textContent).toContain("in the chat and in the Murph app");
+    expect(container.textContent).toContain("compare how they’ve changed");
     expect(container.textContent).not.toMatch(/seven days|7 days|expand history|history checkbox/i);
     const submit = [...container.querySelectorAll("button")].find((button) =>
       button.textContent === (alreadyActiveMember ? "Save changes" : "Join group")

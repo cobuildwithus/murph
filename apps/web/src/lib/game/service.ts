@@ -93,7 +93,7 @@ import { addDays, gameLocalDate } from "./time";
 import { agreedDayOne, gameChangeCancellationNeedsNotice, decideApprovedGameChange, pendingGameChangeView, decideGameChange, gameChangeControls, gameChangeMajority, normalizeGroupGameChange, gameChangeRefusal, isGameChangeExpired, isGameChangeOutdated, isSameGameChange, parsePendingGameChange, type StoredGamePendingChange } from "./changes";
 import { prepareGameChangeWords, readPendingGameChanges, type PreparedGameChangeWords } from "./change-words";
 import { deliverGameChangeProposal } from "./chat-delivery";
-import { prepareGameChat, readGameChatAudience, readGroupGameChatAuthority, type GameChatAudience, hasGameChatRestriction, hasGameChatBlock, gameChatNames, gamePairWhere, gameChatPlayerIds, readGameChatCandidateIds, sameGamePlayers } from "./chat-membership";
+import { gameChatContextCurrent, prepareGameChat, readGameChatAudience, readGroupGameChatAuthority, type GameChatAudience, hasGameChatBlock, gameChatNames, gamePairWhere, gameChatPlayerIds, readGameChatCandidateIds, sameGamePlayers } from "./chat-membership";
 import { reserveGameChatLifecycleTx, reserveGameChatProposalTx, reserveGameChallengeTx, skipGameChatLifecycleTx } from "./chat-lifecycle-receipt";
 import { reserveGameMissedDayTx } from "./chat-lifecycle-receipt";
 import { gameMissedCheckInRuns, isMissedCheckInDueNow, visitGameMissedCheckInPages } from "./missed-check-in";
@@ -284,15 +284,6 @@ async function gameChatEditCommand(input: Parameters<typeof runGameChatUpdate>[0
   return { type: "editTerms", gameId: update.gameId, expectedTermsVersion: update.expectedTermsVersion,
     ...(update.proposalId === undefined ? {} : { proposalId: update.proposalId }),
     terms: { ...update.terms, lengthDays: update.terms.lengthDays ?? row.lengthDays, checkInKind: "any", tasks } };
-}
-
-async function gameChatContextCurrent(row: Game & { players: GamePlayer[]; invitees: GameInvitee[] },
-  input: { chatContainerMemberId?: string; chatPlayerMemberIds?: readonly string[]; chatAudience?: GameChatAudience }, tx: Tx = getPrisma()): Promise<boolean> {
-  if (row.maxPlayers !== 10) return sameGamePlayers(gameChatPlayerIds(row), input.chatPlayerMemberIds ?? [])
-    && (!input.chatAudience || input.chatAudience.contacts.length === 2 && !await hasGameChatRestriction(tx, input.chatAudience.memberIds));
-  const room = input.chatContainerMemberId;
-  return Boolean(room && row.chatContainerMemberId === room && input.chatAudience
-    && await readGroupGameChatAuthority(row, room, input.chatAudience, tx));
 }
 
 async function requireGameChatTerms(input: Parameters<typeof runGameChatUpdate>[0], command: unknown) {
