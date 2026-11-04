@@ -10,6 +10,7 @@ const COMPLETE: SleepSummaryResponseCardV1 = {
 };
 const SPECIMENS: Array<{ label: string; card: SleepSummaryResponseCardV1 }> = [
   { label: "Complete summary", card: COMPLETE },
+  { label: "Long night, short deep stage", card: { ...COMPLETE, totalSleepMinutes: 517, stages: { deepMinutes: 113, remMinutes: 129, lightMinutes: 275 }, awakeMinutes: 34 } },
   { label: "Apple Watch, no score", card: { ...COMPLETE, score: null, wakeUps: null, hrv: { milliseconds: 66, method: "sdnn" } } },
   { label: "Total sleep only", card: { ...COMPLETE, bedtime: null, wakeTime: null, score: null, stages: null, awakeMinutes: null, efficiencyPercent: null, hrv: null, restingHeartRate: null, wakeUps: null } },
 ];
