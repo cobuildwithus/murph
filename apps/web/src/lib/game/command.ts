@@ -32,15 +32,13 @@ export type GameInviteTarget = GameInviteTargetInput;
  */
 export function parseGameCommand(value: unknown): GameCommand {
   const input = record(value, "command");
-  const removal = removalCommand(input);
-  if (removal) return removal;
+  const idOnly = idOnlyCommand(input);
+  if (idOnly) return idOnly;
   switch (input.type) {
     case "replyToPost":
       return replyToPost(input);
     case "challenge":
       return { type: "challenge", gameId: clientId(input.gameId, "gameId"), entryId: clientId(input.entryId, "entryId") };
-    case "leave":
-      return { type: "leave", gameId: clientId(input.gameId, "gameId") };
     case "editTerms":
       return { type: "editTerms", gameId: clientId(input.gameId, "gameId"), expectedTermsVersion: integer(input.expectedTermsVersion, "expectedTermsVersion", 1),
         ...(input.proposalId === undefined ? {} : { proposalId: clientId(input.proposalId, "proposalId") }), terms: terms(record(input.terms, "terms")) };
@@ -90,8 +88,13 @@ export function parseGameCommand(value: unknown): GameCommand {
 }
 
 /** No-body removal routes carry only their path identities. */
-function removalCommand(input: Record<string, unknown>): GameCommand | null {
+/** Commands that carry nothing but their ids. */
+function idOnlyCommand(input: Record<string, unknown>): GameCommand | null {
   switch (input.type) {
+    case "leave":
+      return { type: "leave", gameId: clientId(input.gameId, "gameId") };
+    case "watchRecap":
+      return { type: "watchRecap", gameId: clientId(input.gameId, "gameId") };
     case "deleteReply":
       return { type: "deleteReply", gameId: clientId(input.gameId, "gameId"), replyId: clientId(input.replyId, "replyId") };
     case "withdraw":

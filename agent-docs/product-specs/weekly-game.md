@@ -690,8 +690,17 @@ The additive view fields are:
   posts. Reported, hidden, absent and withdrawn posts still omit it.
 - `GameDayView.mine.postedAt?: string`: the server's `receivedAt` for your
   own post that day. The app skips the next-morning lead for a day you posted
-  second (theirs developed as your capture closed), so a reinstall or a new
-  phone doesn't replay a post you already watched develop.
+  second before that phone started keeping looks (theirs developed as your
+  capture closed on the old install), so a reinstall or a new phone doesn't
+  replay a post you already watched develop.
+- `GameView.recapWatched?: true`: you finished this settled game's recap, on
+  any phone. `POST /api/game/v1/games/:id/recap-watched` records it (players
+  of a settled game only; 409 before it settles, safe to repeat). It is stored
+  as one `recap_watched` game event per seat, keyed
+  `recap-watched:<gameId>:<seat>`, read back only for its own actor on home
+  and game reads (not history). Nobody else sees it. The app counts a recap
+  watched when its own list or the server says so, so a reinstall or a new
+  phone doesn't bring back a finished game's page.
 
 Older clients ignore the additive fields, and older responses may omit them.
 The separate iOS release owns the tap reveal, confirmation and case labels.

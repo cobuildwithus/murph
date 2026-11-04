@@ -15,6 +15,7 @@ import { POST as upload } from "../app/api/game/v1/media/route";
 import { POST as post } from "../app/api/game/v1/games/[id]/entries/route";
 import { GET as read } from "../app/api/game/v1/games/[id]/route";
 import { GET as home } from "../app/api/game/v1/home/route";
+import { POST as recapWatched } from "../app/api/game/v1/games/[id]/recap-watched/route";
 import { DELETE as unblockRoute, PUT as blockRoute } from "../app/api/game/v1/blocks/[memberId]/route";
 import { PUT as blockInviteRoute } from "../app/api/game/v1/invites/[token]/block/route";
 import { POST as reportRoute } from "../app/api/game/v1/games/[id]/reports/route";
@@ -171,6 +172,41 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
     expect(recap.tickets).toHaveLength(1);
     expect(recap.tickets[0]).toMatchObject({ kind: "dare", youHold: true, what: "Sing at karaoke" });
     expect(recap.days[0]?.others[0]?.entry?.kind).toBe("photo");
+  }, 30_000);
+
+  it("keeps a watched recap on the server for the viewer alone, once, so a new phone knows", async () => {
+    const leo = await member("Leo");
+    const ava = await member("Ava");
+    const id = randomUUID();
+    const context = { params: Promise.resolve({ id }) };
+    const created = await game(create(request(leo, { gameId: id, inviteeFirstName: "Ava", terms: {
+      startsOn: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10),
+      schedule: { count: 3 }, stakes: [{ kind: "prize", item: "Choose a book" }],
+      tasks: [{ seat: 0, text: "Move" }, { seat: 1, text: "Move" }],
+    } })));
+    await game(accept(request(ava, { termsVersion: 1, timeZone: "UTC" }), { params: Promise.resolve({ token: created.inviteToken! }) }));
+    await game(start(request(leo), context));
+    const early = await recapWatched(request(leo), context);
+    expect(early.status).toBe(409);
+    expect((await early.json()).error.code).toBe("GAME_NOT_LIVE");
+    const settled = await game(settle(request(leo), context));
+    expect(settled.recapWatched).toBeUndefined();
+    const stranger = await member("Stranger");
+    expect((await recapWatched(request(stranger), context)).status).toBe(404);
+
+    const watched = await game(recapWatched(request(leo), context));
+    expect(watched.recapWatched).toBe(true);
+    expect((await game(recapWatched(request(leo), context))).recapWatched).toBe(true);
+    const receipts = await getPrisma().gameEvent.findMany({ where: { gameId: id, type: "recap_watched" } });
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0]?.commandKey).toBe(`recap-watched:${id}:0`);
+    expect(receipts[0]?.commandKey).not.toContain(tokenMember.get(leo)!);
+
+    const leoHome: GameHomeView = await (await home(request(leo, undefined, "GET"))).json();
+    expect(leoHome.games.find(view => view.id === id)?.recapWatched).toBe(true);
+    const avaHome: GameHomeView = await (await home(request(ava, undefined, "GET"))).json();
+    expect(avaHome.games.find(view => view.id === id)?.recapWatched).toBeUndefined();
+    expect((await game(read(request(ava, undefined, "GET"), context))).recapWatched).toBeUndefined();
   }, 30_000);
 
   it("reports a photo, hides it and its upload from the reporter, then blocks and unblocks over HTTP", async () => {
