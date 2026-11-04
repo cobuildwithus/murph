@@ -210,6 +210,15 @@ notice retains the bound room's existing game allowance until provider dispatch,
 for at most the existing seven-day post-game access window; it grants no personal
 access or extra budget. Dispatch checks the cancelled event and original pair.
 
+Message on a live pair game texts the other player. The app asks
+`GET /api/game/v1/games/:id/message-recipient` only when the player taps it,
+never with Home, and gets `200 { ok: true, phone }`: the other player's
+verified number, which the game chat already shares between the two. `phone`
+is null when there's no one to text: a group, an invite or a finished game, a
+player who left or is suspended, a block either way, or no verified number.
+Anyone who isn't a current player gets `GAME_NOT_FOUND`. With null, or on any
+error, Messages opens with no recipient.
+
 An invite nobody accepts expires, and stays on the challenger's Home for a week
 marked expired. The invitee opens it, signs in, and shakes on the terms they saw; a
 changed version is refused with `TERMS_CHANGED`. Accepting makes the game live.
