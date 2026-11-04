@@ -12,7 +12,9 @@ export const vaultLocalStatePathDescriptors: readonly VaultLocalStatePathDescrip
     classification: "operational", portability: "portable", rebuildable: false,
     owner: "assistant-runtime-meal-name-repair",
     relativePath: ".runtime/operations/meal-name-repair",
-    description: "One-time meal-name repair cursor, pending revision-checked write and cumulative count receipts.",
+    // Tombstone: retained encrypted snapshots still carry this subtree. No
+    // runtime reads or writes it; remove only after those snapshots expire.
+    description: "Retired meal-name repair progress; retained unread for snapshot compatibility.",
   }),
   ...assistantLocalStateDescriptors,
   ...clinicalRecordsLocalStateDescriptors,

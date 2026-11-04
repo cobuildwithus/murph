@@ -64,6 +64,19 @@ describe("hosted member-action outcome route", () => {
     await expect(response.json()).resolves.toEqual({ recorded: true, schemaVersion: 1 });
   });
 
+  it("accepts an old runner repair receipt after Web removes the dispatcher", async () => {
+    const outcome = { ...OUTCOME, result: {
+      kind: "meal.names.repair", version: 1, batch: 0, done: true,
+      scanned: 1, renamed: 1, skipped: 0, invalid: 0, changed: 0,
+    } };
+    mocks.requireHostedCloudflareCallbackJsonRequest.mockResolvedValueOnce({ payload: outcome, userId: "member-1" });
+    const response = await route.POST(new Request(
+      "https://example.test/api/internal/hosted-mailbox/member-action-outcome", { method: "POST" },
+    ));
+    expect(response.status).toBe(200);
+    expect(mocks.recordMemberActionOutcome).toHaveBeenCalledWith({ memberId: "member-1", outcome, prisma });
+  });
+
   it("preserves a typed workout snapshot result from the signed runtime", async () => {
     const outcome = {
       ...OUTCOME,

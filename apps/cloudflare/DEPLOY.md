@@ -266,16 +266,28 @@ rollback target: queued actions use the existing closed encrypted member-action
 union and cannot be read by the pre-Meals runtime. Complete the normal native
 image rollout and signed deploy checks before declaring the runtime deployed.
 
-### One-time meal name repair consumer floor
+### Meal-name repair retirement
 
-Deploy Web's `meal.names.repair` action/result readers before the runtime consumer.
-Do not invoke the Ops repair route until the full native runtime distribution has
-converged and the signed deployment smoke proves the intended bundle. After the
-first batch is accepted, retain these closed-union readers on every rollback
-target until all queued batches and their outcomes have drained. The canonical
-meal schema does not change; old readers can display repaired titles and notes.
-Portable operation progress travels with ordinary encrypted snapshots. Verify the
-owner's companion Meals response before admitting the remaining member batches.
+Deploy Web first to remove the Ops repair endpoint and dispatch path, then deploy
+and converge the hosted runner. Do not run another repair. During Web-first skew,
+old runners can still post already-computed receipts: Web retains their result
+reader. Old Web requests reaching a new runner are decoded and completed as
+`unchanged` through normal checkpoint/outcome recording, without model calls,
+meal writes or usage. Restored pending requests follow that same no-op path;
+already-recording outcomes can finish their existing receipt handoff.
+
+The portable repair progress descriptor is a tombstone so old snapshots remain
+valid; progress is never resumed. Historical usage rows keep their existing
+accounting and display. No migration is required. Retain legacy request/result
+readers until old producers, mailbox rows and snapshots have drained. A rollback
+to the removed executor can resume pending repair work, so keep Web dispatch
+removed and prefer a forward fix; any rollback requires explicit authorization.
+
+Verify the Vercel production deployment and removal of the Ops route before
+starting the runner deployment. Complete native image convergence and the signed
+runtime deploy smoke, then inspect bounded runtime error aggregates for mailbox
+or checkpoint regressions. Old warm runners retain their old code until native
+convergence; retirement is complete only after both deployments are verified.
 
 ### Common-media secure file reader floor
 

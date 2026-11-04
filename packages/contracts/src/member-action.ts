@@ -476,15 +476,18 @@ export type WorkoutLiveSnapshotMemberActionV1 = z.infer<
   typeof workoutLiveSnapshotMemberActionV1Schema
 >;
 
-export const mealNamesRepairResultSchema = z.object({
+// Read-only compatibility for encrypted mailbox outcomes and checkpoint receipts
+// produced before retirement. Remove only after retained snapshots and rows drain.
+const legacyMealNamesRepairResultSchema = z.object({
   kind: z.literal("meal.names.repair"), version: z.literal(1),
   batch: z.number().int().min(0), done: z.boolean(),
   scanned: z.number().int().min(0), renamed: z.number().int().min(0), skipped: z.number().int().min(0),
   invalid: z.number().int().min(0), changed: z.number().int().min(0),
 }).strict();
-export type MealNamesRepairResult = z.infer<typeof mealNamesRepairResultSchema>;
 
 export const memberActionV1Schema = z.discriminatedUnion("kind", [
+  // Decode queued/restored legacy requests only; the runner consumes this as a
+  // no-op. Keep until old producers and retained snapshots have drained.
   z.object({ kind: z.literal("meal.names.repair"), version: z.literal(1), batch: z.number().int().min(0).max(100000) }).strict(),
   workoutLiveApplyMemberActionV1Schema,
   workoutLiveSnapshotMemberActionV1Schema,
@@ -561,7 +564,7 @@ export type WorkoutLiveApplyMemberActionResultV1 = z.infer<
 >;
 
 export const memberActionResultV1Schema = z.discriminatedUnion("kind", [
-  mealNamesRepairResultSchema,
+  legacyMealNamesRepairResultSchema,
   workoutLiveApplyMemberActionResultV1Schema,
   workoutLiveSnapshotMemberActionResultV1Schema,
 ]);

@@ -1754,7 +1754,7 @@ Meal dish naming and photo-retention investigation are tracked in
 
 Legacy meal naming repair and shared write validation are tracked in
 [the implementation plan](exec-plans/completed/2026-11-02-meal-legacy-names.md);
-`product-specs/ios-meals.md` owns its bounds, preservation and removal condition.
+`product-specs/ios-meals.md` now owns retirement and retained-state compatibility.
 Operator verification and member-admission handling are tracked in
 [the completion follow-up](exec-plans/completed/2026-11-02-meal-repair-operator-completion.md).
 
@@ -1804,3 +1804,6 @@ compatibility and shared recap privacy are tracked in
 Retired Sol selection, persisted-reader compatibility and historical usage pricing
 are tracked in [the removal plan](exec-plans/completed/2026-11-03-remove-gpt-56-sol.md).
 `../ARCHITECTURE.md` owns current model selection and the Web usage owner retains ledger pricing.
+
+Meal-name repair removal and compatibility proof are tracked in
+[the retirement plan](exec-plans/completed/2026-11-03-remove-meal-name-repair.md).

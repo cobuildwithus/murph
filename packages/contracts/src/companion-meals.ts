@@ -68,12 +68,3 @@ export function mealNameViolation(value: string): MealNameViolation | null {
   if (PLACE_PREFIX.test(name) && !/^(?:New York strip(?: steak)?|Boston cream pie|Kung Pao chicken|General Tso[’']s chicken)$/u.test(name)) return "place";
   return null;
 }
-
-/** Keep source wording, including portions/places, without duplicate appends. */
-export function preserveMealNameDetails(name: string, note: string | null | undefined): string {
-  const original = name.trim();
-  const current = note?.trim() ?? "";
-  const normalize = (value: string) => value.toLocaleLowerCase("en-US").replace(/\s+/gu, " ");
-  if (!original || normalize(current).includes(normalize(original))) return current;
-  return current ? `${current}\n${original}` : original;
-}
