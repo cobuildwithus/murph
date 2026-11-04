@@ -384,7 +384,8 @@ export interface GameDayView {
   localDate: string;
   /** True when the schedule doesn't count this day for the viewer. */
   off: boolean;
-  mine: GameEntryView | null;
+  /** Your post that day. `postedAt` is when the server took it in. */
+  mine: (GameEntryView & { postedAt?: string }) | null;
   /** Per other player, in seat order. */
   others: { seat: number; status: GameDayOtherStatus; entry: GameEntryView | null;
     /** Server receipt time for locked or visible posts; omitted for hidden/absent posts. */

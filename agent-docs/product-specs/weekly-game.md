@@ -686,6 +686,10 @@ The additive view fields are:
 - `GameDayView.others[].postedAt?: string`: the server's `receivedAt` as an
   ISO-8601 timestamp, now present on unlocked visible posts as well as locked
   posts. Reported, hidden, absent and withdrawn posts still omit it.
+- `GameDayView.mine.postedAt?: string`: the server's `receivedAt` for your
+  own post that day. The app skips the next-morning lead for a day you posted
+  second (theirs developed as your capture closed), so a reinstall or a new
+  phone doesn't replay a post you already watched develop.
 
 Older clients ignore the additive fields, and older responses may omit them.
 The separate iOS release owns the tap reveal, confirmation and case labels.
