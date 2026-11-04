@@ -71,7 +71,8 @@ describe("game proposal provider dispatch authority", () => {
     await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "game-recap:game" })).resolves.toBe(true);
     expect(findFirst).toHaveBeenCalledTimes(1);
     expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
-      id: "game", chatContainerMemberId: "room", status: "settled", players: expect.anything(),
+      id: "game", chatContainerMemberId: "room", status: "settled",
+      OR: [{ maxPlayers: 10 }, { maxPlayers: 2, players: { none: { leftAt: { not: null } } } }],
     }) }));
     await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "game-recap:game", playerMemberIds: ["person-a", "outsider"] }))
       .rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });

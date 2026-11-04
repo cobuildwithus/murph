@@ -1,6 +1,7 @@
 import "server-only";
 
 import { parseGameRecapEventId, hostedGameRecapSchema, type GameNoticeRoom, type HostedGameChatState, type HostedGameUpdate, type HostedGameRecap } from "@murphai/hosted-execution/runtime-control";
+import { groupGameRecapPlayers } from "./recap-cohort";
 import { gameChatProgress } from "./chat-progress";
 import { buildGameChallengeInstructions } from "./challenge";
 import { randomBytes } from "node:crypto";
@@ -272,10 +273,10 @@ export async function runGameChatUpdate(input: Omit<Parameters<typeof runGameCom
 async function gameChatEditCommand(input: Parameters<typeof runGameChatUpdate>[0], update: Extract<HostedGameUpdate, { operation: "edit_terms" }>): Promise<unknown> {
   const row = await getPrisma().game.findUnique({ where: { id: update.gameId }, include: { players: true, invitees: true } });
   if (!row || row.maxPlayers !== 10 || !await gameChatContextCurrent(row, input)) reject("NOT_A_PLAYER", "Use this game’s group chat.");
-  const seats = new Map(row.players.filter(hasGameIdentity).map(player => [player.memberId, player.seat]));
+  const seats = new Map(row.players.filter(player => !player.leftAt).filter(hasGameIdentity).map(player => [player.memberId, player.seat]));
   if (update.terms.tasks.length !== seats.size || new Set(update.terms.tasks.map(task => task.memberId)).size !== seats.size
     || update.terms.tasks.some(task => !seats.has(task.memberId))) reject("INVALID_REQUEST", "Include every seated player’s task.");
-  // Keep unjoined people's private overrides; shared tools expose only seated players.
+  // Keep private overrides outside the remaining-player task map.
   const [plain] = await openGameTexts([{ ...gameTarget(row, "terms_words"), value: row.termsWordsEncrypted }]);
   const words = parseTermWords(plain ?? "").versions.at(-1)!;
   const tasks = [...words.tasks.filter(task => ![...seats.values()].includes(task.seat)),
@@ -1016,6 +1017,7 @@ async function leave(context: CommandContext, gameId: string): Promise<null> {
     if (await settleLoaded(locked, context.actor)) { ended = true; return []; }
     const decision = decideLeave(loaded.state, context.actor);
     if (decision === "already-left") return [];
+    // A departure changes who votes, so any open ask must expire.
     const pending = parsePendingGameChange(loaded.row.pendingChange);
     await tx.gamePlayer.update({ where: { gameId_memberId: { gameId, memberId: context.actor } }, data: { leftAt: now } });
     if (decision === "void") await endGame(tx, gameId, { status: "void", result: Prisma.DbNull });
@@ -2107,7 +2109,7 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
   const loadedById = new Map(current.games.map((game) => [game.row.id, game]));
   const rows = [];
   for (const { row } of current.games) if (isGameOn(row) && await gameChatContextCurrent(row, context)) rows.push(row);
-  const profiles = await prisma.gameProfile.findMany({ where: { memberId: { in: [...new Set(rows.flatMap(row => row.maxPlayers === 10 ? row.players.filter(hasGameIdentity).map(player => player.memberId) : gameChatPlayerIds(row)))] } },
+  const profiles = await prisma.gameProfile.findMany({ where: { memberId: { in: [...new Set(rows.flatMap(row => row.maxPlayers === 10 ? row.players.filter(player => !player.leftAt).filter(hasGameIdentity).map(player => player.memberId) : gameChatPlayerIds(row)))] } },
     select: { memberId: true, firstNameEncrypted: true } });
   const plain = await openGameTexts([
     ...rows.map((row) => ({ ...gameTarget(row, "terms_words"), value: row.termsWordsEncrypted })),
@@ -2126,6 +2128,7 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
     && typeof offer.expiresAt === "string" && Date.parse(offer.expiresAt) > clock.getTime();
   return { ...(actorProfile ? { photoCheckIn: { introductionAvailable: actorProfile.chatPhotoIntroducedAt === null, hasPendingOffer } } : {}), games: rows.map((row, index) => {
     const state = loadedById.get(row.id)!.state;
+    const players = row.players.filter(player => row.maxPlayers !== 10 || !player.leftAt).filter(hasGameIdentity);
     const words = parseTermWords(plain[index] ?? "");
     const result = row.result === null ? null : parseStoredResult(row.result);
     const ticketGroups = new Map<string, { owedByMemberId: string; owedToMemberId: string; owedBySeats?: number[]; owedToSeats?: number[]; what: string; status: "open" | "redeemed" | "expired"; count: number }>();
@@ -2140,11 +2143,11 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
     const { checkInKind, ...terms } = termsView(state, words, row.maxPlayers === 10);
     // Chat exposes unjoined invitees only as a count, never their task overrides.
     if (row.maxPlayers === 10) terms.tasks = terms.tasks.filter(task => row.players.some(player => player.seat === task.seat && !player.leftAt));
-    return { ...(row.maxPlayers === 10 ? { maxPlayers: 10 as const, pendingInviteeCount: row.invitees.filter(invitee => !row.players.some(player => player.seat === invitee.seat && !player.leftAt)).length } : {}), id: row.id, status: state.game.status, terms: { ...terms, ...(checkInKind === "any" ? {} : { checkInKind }) },
+    return { ...(row.maxPlayers === 10 ? { maxPlayers: 10 as const, pendingInviteeCount: row.invitees.filter(invitee => !row.players.some(player => player.seat === invitee.seat)).length } : {}), id: row.id, status: state.game.status, terms: { ...terms, ...(checkInKind === "any" ? {} : { checkInKind }) },
       progress: gameChatProgress(state, gameNow(clock, row)),
-      result: result ? { scores: result.scores, tickets: [...ticketGroups.values()] } : null,
+      result: result ? { scores: result.scores.filter(score => row.maxPlayers !== 10 || players.some(player => player.memberId === score.memberId)), tickets: [...ticketGroups.values()] } : null,
       startsOn: gameDayOne(state.players) ?? fromDbDate(row.startsOn), lengthDays: row.lengthDays,
-      players: row.players.filter(hasGameIdentity).map((player) => ({ memberId: player.memberId, seat: player.seat, firstName: names.get(player.memberId) ?? "", dayOne: fromDbDate(player.dayOne), timeZone: player.timeZone })),
+      players: players.map((player) => ({ memberId: player.memberId, seat: player.seat, firstName: names.get(player.memberId) ?? "", dayOne: fromDbDate(player.dayOne), timeZone: player.timeZone })),
       pendingChange, changeControls: row.maxPlayers === 10 && row.status === "invited"
         ? { canStartNow: false, canEdit: actorMemberId === row.createdBy && areGroupTermsOpen(state, gameNow(clock, row)), canEditSchedule: false, canEditStartDate: false, editableFromDay: null }
         : gameChangeControls(state, gameNow(clock, row), pendingChange),
@@ -2206,12 +2209,15 @@ export type GameRecapMaterial = {
 /** Finished shared projection for the bound recap turn; private contact labels stay out. */
 export async function readGameRecapMaterial(gameId: string, containerMemberId: string, expectedPlayers: readonly string[]): Promise<GameRecapMaterial | null> {
   const prisma = getPrisma();
-  const row = await prisma.game.findFirst({ where: { id: gameId, chatContainerMemberId: containerMemberId, status: "settled", players: { none: { leftAt: { not: null } } } }, include: { invitees: true, players: { orderBy: { seat: "asc" } }, tickets: true } });
-  if (!row || !row.result || !row.players.every(hasGameIdentity) || row.maxPlayers !== 10 && !sameGamePlayers(row.players.map((player) => player.memberId), expectedPlayers)) return null;
+  const row = await prisma.game.findFirst({ where: { id: gameId, chatContainerMemberId: containerMemberId, status: "settled", OR: [{ maxPlayers: 10 }, { maxPlayers: 2, players: { none: { leftAt: { not: null } } } }] }, include: { invitees: true, players: { orderBy: { seat: "asc" } }, tickets: true } });
+  if (!row || !row.result) return null;
+  const recapPlayers = row.maxPlayers === 10 ? groupGameRecapPlayers(row) : row.players;
+  if (!recapPlayers || !recapPlayers.every(hasGameIdentity) || row.maxPlayers !== 10 && !sameGamePlayers(recapPlayers.map(player => player.memberId), expectedPlayers)) return null;
+  const memberIds = recapPlayers.map(player => player.memberId);
   if (await hasGameChatBlock(prisma, expectedPlayers)) return null;
   if (row.maxPlayers === 10 && !await readGroupGameChatAuthority(row, containerMemberId)) return null;
-  const rowEntries = await prisma.gameEntry.findMany({ where: { gameId }, orderBy: { receivedAt: "asc" } });
-  const profiles = await prisma.gameProfile.findMany({ where: { memberId: { in: row.players.map((player) => player.memberId) } }, select: { memberId: true, firstNameEncrypted: true } });
+  const rowEntries = await prisma.gameEntry.findMany({ where: { gameId, ...(row.maxPlayers === 10 ? { memberId: { in: memberIds } } : {}) }, orderBy: { receivedAt: "asc" } });
+  const profiles = await prisma.gameProfile.findMany({ where: { memberId: { in: memberIds } }, select: { memberId: true, firstNameEncrypted: true } });
   const reports = await prisma.gameReport.findMany({ where: { gameId, ...(row.maxPlayers === 10 ? {} : { entryId: { not: null } }) }, select: { entryId: true } });
   // A single shared story cannot honor different report masks. Keep the shared
   // recap quiet while any room member has hidden material from this game.
@@ -2239,7 +2245,7 @@ export async function readGameRecapMaterial(gameId: string, containerMemberId: s
   const terms = termsView(toRuleState(row, rowEntries), words);
   const state = toRuleState(row, rowEntries);
   const result = parseStoredResult(row.result);
-  const recapPlayers = row.players.filter(hasGameIdentity);
+  const scores = result.scores.filter(score => row.maxPlayers !== 10 || memberIds.includes(score.memberId));
   const postsByDay = Array.from({ length: row.lengthDays }, (_, dayIndex) => ({
     dayNumber: dayIndex + 1,
     dates: Object.fromEntries(recapPlayers.map((player) => [names.get(player.memberId) ?? "", player.dayOne ? addDays(fromDbDate(player.dayOne)!, dayIndex) : null])),
@@ -2253,12 +2259,12 @@ export async function readGameRecapMaterial(gameId: string, containerMemberId: s
     })),
   }));
   return {
-    players: row.players.map((player) => names.get(player.memberId) ?? ""), entries,
+    players: recapPlayers.map((player) => names.get(player.memberId) ?? ""), entries,
     validation: { group: row.maxPlayers === 10, startedAt: row.startedAt ?? row.createdAt, settledAt: row.settledAt,
-      playerNamesByMemberId: row.players.map((player) => ({ memberId: player.memberId, name: names.get(player.memberId) ?? "" })),
-      result: result.scores.filter(score => score.eligible !== false).map((score) => ({ memberId: score.memberId, name: names.get(score.memberId) ?? "", score: score.score })) },
-    game: { id: row.id, ...(row.maxPlayers === 10 ? { maxPlayers: 10 } : {}), players: row.players.filter(hasGameIdentity).map((player) => ({ memberId: player.memberId, name: names.get(player.memberId) ?? "", task: terms.tasks.find((task) => task.seat === player.seat)?.text ?? "" })),
-      lengthDays: row.lengthDays, schedule: terms.schedule, stakes: terms.stakes, score: result.scores.map((score) => ({ name: names.get(score.memberId) ?? "", score: score.score })), days: postsByDay },
+      playerNamesByMemberId: recapPlayers.map((player) => ({ memberId: player.memberId, name: names.get(player.memberId) ?? "" })),
+      result: scores.filter(score => score.eligible !== false).map((score) => ({ memberId: score.memberId, name: names.get(score.memberId) ?? "", score: score.score })) },
+    game: { id: row.id, ...(row.maxPlayers === 10 ? { maxPlayers: 10 } : {}), players: recapPlayers.map((player) => ({ memberId: player.memberId, name: names.get(player.memberId) ?? "", task: terms.tasks.find((task) => task.seat === player.seat)?.text ?? "" })),
+      lengthDays: row.lengthDays, schedule: terms.schedule, stakes: terms.stakes, score: scores.map((score) => ({ name: names.get(score.memberId) ?? "", score: score.score })), days: postsByDay },
   };
 }
 
@@ -2289,9 +2295,9 @@ export async function sealGameRecap(input: {
     if (receipts !== 1) return null;
     // Account deletion clears the recap under this row lock, so the roster is re-read after it.
     await tx.$queryRaw`SELECT id FROM game WHERE id = ${input.gameId} FOR UPDATE`;
-    const current = await tx.game.findFirst({ where: { id: input.gameId, chatContainerMemberId: input.containerMemberId, status: "settled", players: { none: { leftAt: { not: null } } } }, include: { players: { take: 11 } } });
-    if (!current) return null;
-    if (current.maxPlayers === 10 ? !audience || !await readGroupGameChatAuthority(current, input.containerMemberId, audience, tx)
+    const current = await tx.game.findFirst({ where: { id: input.gameId, chatContainerMemberId: input.containerMemberId, status: "settled", OR: [{ maxPlayers: 10 }, { maxPlayers: 2, players: { none: { leftAt: { not: null } } } }] }, include: { players: { take: 11 } } });
+    if (!current || current.wordsOwnerMemberId !== row.wordsOwnerMemberId) return null;
+    if (current.maxPlayers === 10 ? !groupGameRecapPlayers(current) || !audience || !await readGroupGameChatAuthority(current, input.containerMemberId, audience, tx)
       : !sameGamePlayers(current.players.map((player) => player.memberId), input.playerMemberIds) || await hasGameChatBlock(tx, input.playerMemberIds)) return null;
     if (scope.regenerationId) {
       const requested = await tx.gameEvent.findUnique({ where: { commandKey: input.eventId }, select: { gameId: true, type: true } });
@@ -2325,7 +2331,7 @@ export async function readGamePhotoPostingStateTx(tx: Prisma.TransactionClient, 
   const [loaded] = await loadGames(tx, [gameId]);
   if (!loaded || loaded.state.game.status !== "live") return null;
   const player = playerFor(loaded.state, actor);
-  if (!player) return null;
+  if (!player || player.leftAt) return null;
   const now = gameNow(await databaseNow(tx), loaded.row);
   const dayIndex = dayIndexAt(player, now);
   if (dayIndex === null || dayIndex < 0 || dayIndex >= loaded.row.lengthDays || !player.dayOne) return null;

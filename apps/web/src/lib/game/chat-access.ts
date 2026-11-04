@@ -18,6 +18,10 @@ export async function readGameChatFundingRooms(input: {
   if (!isGameEnabled() || memberIds.length === 0) return new Map();
   const cutoff = hostedThreadContainerParticipantAccessCutoff(input.now);
   const settledCutoff = new Date(input.now.getTime() - GAME_CHAT_SETTLED_ACCESS_MS);
+  const groupPlayers = Prisma.sql`EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = game.id
+      AND p.left_at IS NULL AND p.member_id = ANY(pair.player_ids))
+    AND NOT EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = game.id
+      AND p.left_at IS NULL AND (p.member_id IS NULL OR p.seat NOT BETWEEN 0 AND 9))`;
   const rows = await input.prisma.$queryRaw<Array<{ memberId: string; beneficiaryMemberId: string }>>(Prisma.sql`
     SELECT room.id AS "memberId", candidate.chat_container_member_id AS "beneficiaryMemberId"
     FROM hosted_member room
@@ -36,9 +40,7 @@ export async function readGameChatFundingRooms(input: {
         (SELECT game.id FROM game WHERE game.max_players = 10
           AND game.chat_container_member_id = room.id
           AND (game.status IN ('invited', 'live') OR (game.status = 'settled' AND game.settled_at > ${settledCutoff} AND game.settled_at <= ${input.now}))
-          AND game.created_by = ANY(pair.player_ids)
-              AND NOT EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = game.id
-                AND (p.left_at IS NOT NULL OR p.member_id IS NULL OR p.seat NOT BETWEEN 0 AND 9))
+          AND ${groupPlayers}
           ORDER BY game.created_at DESC, game.id LIMIT 1),
         -- An addressed rematch temporarily funds only its inherited primary
         -- room while the one bound-room notice is still waiting.
@@ -128,9 +130,7 @@ export async function readGameChatFundingRooms(input: {
             AND (game.invite_expires_at IS NULL OR game.invite_expires_at > ${input.now})) OR
           (game.status = 'settled' AND game.settled_at > ${settledCutoff} AND game.settled_at <= ${input.now}) OR
           (game.status = 'void' AND game.chat_container_member_id = room.id))
-        AND ((game.max_players = 10 AND game.created_by = ANY(pair.player_ids)
-              AND NOT EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = game.id
-                AND (p.left_at IS NOT NULL OR p.member_id IS NULL OR p.seat NOT BETWEEN 0 AND 9))) OR (game.max_players = 2 AND cardinality(pair.player_ids) = 2 AND ((game.status = 'invited'
+        AND ((game.max_players = 10 AND ${groupPlayers}) OR (game.max_players = 2 AND cardinality(pair.player_ids) = 2 AND ((game.status = 'invited'
               AND game.created_by = ANY(pair.player_ids)
               AND EXISTS (SELECT 1 FROM game_invitee invited WHERE invited.game_id = game.id AND invited.member_id = ANY(pair.player_ids) AND invited.member_id <> game.created_by))
           OR (game.status <> 'invited'

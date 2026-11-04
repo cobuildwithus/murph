@@ -1842,10 +1842,12 @@ existing accounting and provider access checks.
 Group room authority belongs to `readGroupGameChatAuthority`: complete provider
 handles with exactly one active Murph handle must match the original keyed
 addressed audience (2–10 people), using rotation read candidates and current
-Linq routing. Seated players must occupy addressed seats 0–9; departures and
-outside bearer seats suppress shared projections. Resolve verified accounts
-where they exist and check restrictions over their union with seated players.
-Unresolved handles are valid audience evidence and do not acquire account rights.
+Linq routing. Remaining players must have identities in addressed seats 0–9.
+Departures preserve access while the original provider audience stays intact.
+Deleting the room owner removes its binding. Resolve verified accounts where
+they exist and check restrictions over their union with all extant player IDs,
+including leavers. Unresolved handles are valid audience evidence and do not
+acquire account rights.
 
 Composer association is best-effort and accepts exactly one configured-origin
 invite token from a verified starter or seated sender. It binds only; ordinary
@@ -1853,10 +1855,10 @@ join claims the seat after matching memberId or verified contact read keys and
 checking legal/profile prerequisites. A savepoint protects ordinary ingestion
 from association statement failures. Diagnostics contain fixed reason codes only.
 Groups have no automatic bootstrap producer and cannot silently change rooms.
-Only seated players have names, status and content in shared projections;
-unjoined invitees appear only as counts. Private pending labels stay with the
-starter. Final lifecycle egress repeats the authority check and verifies the
-provider target. Lifecycle notices and recap links contain text only. Any group
+Only remaining players have names, status and authored evidence in shared
+projections; invitees with no player row appear only as counts. Private pending
+labels stay with the starter. Final lifecycle egress repeats the authority
+check and verifies the provider target. Lifecycle notices and recap links contain text only. Any group
 report withholds the shared recap, including media and quotes; private lore never
 enters group recap instructions.
 

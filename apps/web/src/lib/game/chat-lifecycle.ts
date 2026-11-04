@@ -1,4 +1,5 @@
 import "server-only";
+import { groupGameRecapPlayers } from "./recap-cohort";
 
 import { isPairRoster, isGameMemberSet } from "./roster";
 import type { Game, HostedLinqDelivery, Prisma, PrismaClient } from "@prisma/client";
@@ -209,6 +210,12 @@ function lifecyclePlayerMemberIds(game: GameChatLifecycleRecord | null, kind: Ga
   return [game.createdBy, game.invitees[0]?.memberId];
 }
 
+function isCurrentGroupGameChatLifecycle(game: Pick<GameChatLifecycleRecord, "players" | "settledAt">, kind: GameChatLifecycleKind): boolean {
+  if (["missed", "change_cancelled", "change_expired"].includes(kind)) return false;
+  if (kind === "started") return !game.players.some(player => player.leftAt);
+  return kind !== "recap" || groupGameRecapPlayers(game) !== null;
+}
+
 function isCurrentGameChatLifecycle(
   game: GameChatLifecycleRecord | null,
   kind: GameChatLifecycleKind,
@@ -218,7 +225,7 @@ function isCurrentGameChatLifecycle(
 ): game is GameChatLifecycleRecord {
   return Boolean(game && statuses.includes(game.status)
     && (kind !== "rematch" || !isGameInviteExpired(game, now))
-    && (game.maxPlayers === 10 ? players.length > 0 : isGameMemberSet(players)) && (game.maxPlayers !== 10 || !["missed", "change_cancelled", "change_expired"].includes(kind)));
+    && (game.maxPlayers === 10 ? players.length > 0 : isGameMemberSet(players)) && (game.maxPlayers !== 10 || isCurrentGroupGameChatLifecycle(game, kind)));
 }
 
 export async function deliverGameChatLifecycle(gameId: string, kind: GameChatLifecycleKind, proposalId?: string, now = new Date(), regenerationId?: string): Promise<boolean> {
@@ -415,6 +422,7 @@ async function enqueueGameLifecycle(input: {
       include: { players: { take: 11 } } });
     if (!current || (input.kind === "rematch" && isGameInviteExpired(current, new Date()))) return null;
     if (input.kind === "talk" && !await readCurrentGameTalk(tx, input.gameId, input.eventId.split(":")[2], new Date())) return null;
+    if (current.maxPlayers === 10 && !isCurrentGroupGameChatLifecycle(current, input.kind)) return null;
     if (input.audience && !await readGroupGameChatAuthority(current, input.containerMemberId, input.audience, tx)) return null;
     const result = await appendPreparedHostedMailboxEnvelopeTx({ prepared, tx });
     await markGameChatGenerationQueuedTx(input.eventId, tx, input.containerMemberId);
