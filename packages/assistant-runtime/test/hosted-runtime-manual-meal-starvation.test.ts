@@ -21,6 +21,7 @@ import {
   writeMailboxImportStateFile,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 import { mkdtemp } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { initializeVault } from "@murphai/core";
@@ -43,6 +44,7 @@ import {
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 import { runHostedWorkspaceAssistantPhase } from "../src/hosted-runtime/workspace-assistant-phase.ts";
 import { resolveHostedSystemMailboxFirstPendingDiagnostics } from "../src/hosted-runtime/system-mailbox-diagnostics.ts";
+import { createHostedWorkspaceBridgeMailboxImporter } from "../src/hosted-runtime/snapshot-bridge-mailbox.ts";
 
 const preparationObserver = vi.hoisted(() => vi.fn());
 vi.mock("../src/hosted-runtime/system-mailbox.ts", async (importOriginal) => {
@@ -66,9 +68,11 @@ vi.mock("../src/hosted-runtime/events/assistant-notification.ts", async (importO
   executeHostedManualMealPhotoWake: vi.fn(),
 }));
 
-test.each(["pending", "dirty-ack", "continuation", "retained-dirty-ack", "retained-due-dirty-ack", "retained-future-dirty-ack"] as const)(
-  "runs a due manual meal with an older due device owner: %s",
-  async (shape) => {
+test.each((["pending", "dirty-ack", "continuation", "retained-dirty-ack", "retained-due-dirty-ack", "retained-future-dirty-ack"] as const).flatMap(
+  (shape) => (["fresh", "restored"] as const).map((arrival) => ({ shape, arrival })),
+))(
+  "runs a due manual meal with an older due device owner: $shape / $arrival",
+  async ({ shape, arrival }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-meal-starvation-"));
     const events: string[] = [];
     const checkpoints: HostedWorkspaceCheckpointRequest[] = [];
@@ -86,11 +90,15 @@ test.each(["pending", "dirty-ack", "continuation", "retained-dirty-ack", "retain
       dedupeKey: "meal-photo:manual:" + "c".repeat(64),
       id: "meal_synthetic_overlap", kind: "meal-photo.captured", lane: "system", laneSeq: "2",
     });
+    const photoBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+    const readMealPhoto = vi.fn(async () => photoBytes);
+    const deleteMealPhoto = vi.fn(async () => { events.push("meal.photo-deleted"); });
     const mealWake = buildHostedExecutionMealPhotoCapturedWake({
       byteLength: 4, captureId: "c".repeat(64), capturedAt: TEST_NOW,
       directRoute: { channel: "linq", threadId: "synthetic_meal_chat" },
       eventId: mealItem.dedupeKey, mealPhotoKey: "synthetic_photo_key",
-      memberId: TEST_USER_ID, occurredAt: TEST_NOW, sha256: "a".repeat(64),
+      memberId: TEST_USER_ID, occurredAt: TEST_NOW,
+      sha256: createHash("sha256").update(photoBytes).digest("hex"),
     });
     const deviceSyncPort = shape === "retained-due-dirty-ack" ? createSnapshotDeviceSyncPort({
       connectionId: "device_sync_connection_synthetic", nextReconcileAt: "2026-04-27T00:10:00.000Z",
@@ -128,7 +136,7 @@ test.each(["pending", "dirty-ack", "continuation", "retained-dirty-ack", "retain
         },
       });
       // This is the local item produced by the meal importer after its canonical write.
-      await enqueueHostedSystemMailboxItem({
+      if (arrival === "restored") await enqueueHostedSystemMailboxItem({
         item: {
           item: mealItem,
           payload: { payloadCiphertext: "synthetic", payloadSchema: mealItem.payloadSchema,
@@ -168,21 +176,23 @@ test.each(["pending", "dirty-ack", "continuation", "retained-dirty-ack", "retain
         }));
       }
       const imported = createEmptyHostedMailboxImportState();
-      imported.watermarks.system = "2";
+      imported.watermarks.system = arrival === "fresh" ? "1" : "2";
       await writeMailboxImportStateFile(vaultRoot, imported);
-      expect((await readHostedSystemMailboxState(vaultRoot)).pending.find(
-        (item) => item.itemId === mealItem.id,
-      )).toMatchObject({ routeAction: "dispatch-assistant-notification", nextAttemptAt: null });
       const candidates = await resolveHostedSystemMailboxWakeCandidates({ vaultRoot, now: () => TEST_NOW });
-      expect(candidates.defaultOwned).toMatchObject({ at: TEST_NOW, reason: "assistant" });
-      if (shape.startsWith("retained-")) {
-        const state = await readHostedSystemMailboxState(vaultRoot);
-        const progress = resolveHostedSystemMailboxProgress({ importedSeq: "2", now, state });
-        expect(progress).toMatchObject({ firstPendingSeq: "2", deviceSyncContinuationSeqs: ["1"] });
-        expect(resolveHostedSystemMailboxFirstPendingDiagnostics({
-          continuationSeqs: progress.deviceSyncContinuationSeqs,
-          firstPendingSeq: progress.firstPendingSeq, now, state,
-        })).toEqual(expect.arrayContaining(["headDue=true", "headDeviceSync=false"]));
+      if (arrival === "restored") {
+        expect((await readHostedSystemMailboxState(vaultRoot)).pending.find(
+          (item) => item.itemId === mealItem.id,
+        )).toMatchObject({ routeAction: "dispatch-assistant-notification", nextAttemptAt: null });
+        expect(candidates.defaultOwned).toMatchObject({ at: TEST_NOW, reason: "assistant" });
+        if (shape.startsWith("retained-")) {
+          const state = await readHostedSystemMailboxState(vaultRoot);
+          const progress = resolveHostedSystemMailboxProgress({ importedSeq: "2", now, state });
+          expect(progress).toMatchObject({ firstPendingSeq: "2", deviceSyncContinuationSeqs: ["1"] });
+          expect(resolveHostedSystemMailboxFirstPendingDiagnostics({
+            continuationSeqs: progress.deviceSyncContinuationSeqs,
+            firstPendingSeq: progress.firstPendingSeq, now, state,
+          })).toEqual(expect.arrayContaining(["headDue=true", "headDeviceSync=false"]));
+        }
       }
       let workspace: HostedWorkspaceState = createWorkspaceState({
         nextWakeAt: TEST_NOW, nextWakeReason: "assistant",
@@ -201,6 +211,33 @@ test.each(["pending", "dirty-ack", "continuation", "retained-dirty-ack", "retain
         const restored = await createVaultSnapshotBundle({ vaultRoot });
         workspace = { ...workspace, snapshotRef: restored.snapshotRef };
         const artifacts = new Map([[restored.hash, restored.bytes]]);
+        const platform = createPlatform({
+          artifactBytesByHash: artifacts, deviceSyncPort, logRequests,
+          mailboxPort: createMailboxPort({ events, items: arrival === "fresh" ? [mealItem] : [] }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests: checkpoints, events, workspace,
+            checkpointWorkspace(request) {
+              events.push("checkpoint:" + request.reason);
+              workspace = createWorkspaceState({
+                snapshotRef: request.snapshotRef,
+                version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                nextWakeAt: request.nextWakeAt ?? null, nextWakeReason: request.nextWakeReason ?? null,
+                nextDefaultProcessingWakeAt: request.nextDefaultProcessingWakeAt ?? null,
+                nextDefaultProcessingWakeReason: request.nextDefaultProcessingWakeReason ?? null,
+                systemMailboxProgressGeneration: request.systemMailboxProgressGeneration,
+                redactedStatus: request.redactedStatus ?? null,
+              });
+              return workspace;
+            },
+          }),
+        });
+        platform.effectsPort = { ...platform.effectsPort, readMealPhoto, deleteMealPhoto };
+        const importItem = createHostedWorkspaceBridgeMailboxImporter({
+          decodeMailboxPayload: { decode: async () => ({ status: "decoded", wake: mealWake }) },
+          runtime: { commitTimeoutMs: null, forwardedEnv: {}, parserToolchain: { tools: {} },
+            platform, platformEnv: {}, resolvedConfig: createDeviceSyncResolvedConfig(), userEnv: {} },
+          vaultRoot,
+        });
         await runHostedWorkspaceRuntimeJobInProcess(
           createWorkspaceRuntimeJobInput({
             request: { attemptId: "attempt_synthetic_meal_" + invocation,
@@ -213,26 +250,8 @@ test.each(["pending", "dirty-ack", "continuation", "retained-dirty-ack", "retain
               artifacts.set(snapshot.hash, snapshot.bytes);
               return { snapshotRef: snapshot.snapshotRef };
             },
-            async importItem() { throw new Error("All mailbox work is already imported."); },
-            platform: createPlatform({
-              artifactBytesByHash: artifacts, deviceSyncPort, logRequests,
-              mailboxPort: createMailboxPort({ events, items: [] }),
-              workspacePort: createWorkspacePort({
-                checkpointRequests: checkpoints, events, workspace,
-                checkpointWorkspace(request) {
-                  workspace = createWorkspaceState({
-                    snapshotRef: request.snapshotRef,
-                    version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
-                    nextWakeAt: request.nextWakeAt ?? null, nextWakeReason: request.nextWakeReason ?? null,
-                    nextDefaultProcessingWakeAt: request.nextDefaultProcessingWakeAt ?? null,
-                    nextDefaultProcessingWakeReason: request.nextDefaultProcessingWakeReason ?? null,
-                    systemMailboxProgressGeneration: request.systemMailboxProgressGeneration,
-                    redactedStatus: request.redactedStatus ?? null,
-                  });
-                  return workspace;
-                },
-              }),
-            }),
+            importItem,
+            platform,
             runAssistantPhase: async (input) => {
               // Deterministic interleaving: device work finishes while the
               // default owner's context is preparing, before mailbox selection.
@@ -263,6 +282,9 @@ test.each(["pending", "dirty-ack", "continuation", "retained-dirty-ack", "retain
       expect(executeHostedManualMealPhotoWake).toHaveBeenCalledWith(expect.objectContaining({
         wake: mealWake, sourceMailboxItemId: mealItem.id,
       }));
+      expect(events.indexOf("meal.notification")).toBeLessThan(events.indexOf("checkpoint:idle_shutdown"));
+      expect(readMealPhoto).toHaveBeenCalledTimes(arrival === "fresh" ? 1 : 0);
+      expect(deleteMealPhoto).toHaveBeenCalledTimes(arrival === "fresh" ? 1 : 0);
       expect(pending.some((item) => item.itemId === mealItem.id)).toBe(false);
       if (shape.includes("dirty-ack")) {
         expect(events.filter((event) => event === "device.dirty-ack")).toHaveLength(1);
@@ -276,8 +298,10 @@ test.each(["pending", "dirty-ack", "continuation", "retained-dirty-ack", "retain
         expect(pending.some((item) => item.wake.kind === "device-sync.wake")).toBe(true);
       }
       if (shape === "retained-future-dirty-ack") {
-        expect(workspace.nextDefaultProcessingWakeAt).toBeNull();
-        expect(workspace.nextWakeAt).toBe(retainedAt);
+        // Real photo intake also installs the ordinary future meal closeout.
+        const closeoutAt = arrival === "fresh" ? "2026-04-27T03:00:00.000Z" : null;
+        expect(workspace.nextDefaultProcessingWakeAt).toBe(closeoutAt);
+        expect(workspace.nextWakeAt).toBe(closeoutAt ?? retainedAt);
         expect((await resolveHostedSystemMailboxWakeCandidates({ vaultRoot, now: () => now })).next)
           .toMatchObject({ at: retainedAt, executionClass: null });
         expect(pending).toEqual([expect.objectContaining({ status: "pending", attemptCount: 1,

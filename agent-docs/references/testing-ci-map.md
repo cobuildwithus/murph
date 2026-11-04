@@ -52,6 +52,16 @@ format and silent follow-up behavior.
 
 Last verified: 2026-09-11
 
+Manual meal selection is covered by
+`hosted-runtime-manual-meal-starvation.test.ts`: six device-owner states each
+exercise a fresh photo through the production importer and a restored pending
+notification. Each must reach the meal handler before the first idle snapshot,
+read and clean fresh photo staging exactly once, and avoid replay across three
+invocations. `hosted-runtime-meal-photo-import.test.ts` retains automatic-capture
+silence; the assistant-phase foreground and scheduling suites protect conversation
+priority and retry admission. Run these four suites with the assistant-runtime
+Vitest config and its package typecheck.
+
 Foreground promotion regression proof lives in the assistant-runtime entrypoint
 system-preemption suite: a conversation arriving during device completion or
 checkpointing is imported from its qualified batch before assistant admission,
