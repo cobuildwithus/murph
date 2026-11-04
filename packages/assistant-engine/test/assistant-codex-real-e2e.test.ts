@@ -396,6 +396,8 @@ import {
 } from '../src/assistant/outbox.ts'
 import { listAutomations as listFollowUpAutomations } from '@murphai/query'
 
+import { assertProductionHostedCapabilityParity } from './support/production-hosted-capabilities.js'
+
 const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
 const execFileAsync = promisify(execFile)
 const REAL_CODEX_E2E_TAG = 'real-codex-live'
@@ -415,18 +417,22 @@ function describeRealCodex(name: string, factory: () => void): void {
 }
 
 describeRealCodex('real natural goal canary journey', () => {
-  it('onboarding canary goal proposal sends one early update from a fresh thread', async () => {
+  it.each([
+    { name: 'onboarding canary goal proposal sends one early update from a fresh thread', capabilities: undefined },
+    { name: 'production hosted onboarding canary goal proposal sends one early update', capabilities: 'production-hosted' as const },
+  ])('$name', async ({ capabilities }) => {
     const config = await resolveRealCodexE2eConfig()
-    const fixture = await createCanonicalLiveFixture(config, 'linq')
+    const fixture = await createCanonicalLiveFixture(config, 'linq', { capabilities })
     const nativeExecute = clinicalExtractionCodex.executeCodexAppServerTurn
     const observer = vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn').mockImplementation(async (input) => {
       expect(input.developerInstructions).toContain('Routine onboarding/setup')
       expect(input.developerInstructions).toContain('Direct first-run Murph onboarding is open.')
       expect(input.developerInstructions).toContain('first tool round, alongside exactly one brief')
       expect(input.resumeSessionId).toBeFalsy()
+      if (capabilities) assertProductionHostedCapabilityParity(input)
       process.stdout.write(`[onboarding-goal-input] ${JSON.stringify({
         developerBytes: Buffer.byteLength(input.developerInstructions ?? ''),
-        dynamicTools: input.dynamicTools.length, freshThread: !input.resumeSessionId,
+        dynamicTools: input.dynamicTools.length, toolNames: input.dynamicTools.map((tool) => `${tool.namespace}.${tool.name}`), freshThread: !input.resumeSessionId,
       })}\n`)
       return nativeExecute(input)
     })
@@ -490,6 +496,7 @@ describeRealCodex('real natural goal canary journey', () => {
         cliInvocations: await fixture.commandCount(),
         commandCount: trace.filter((item) => item.method === 'item/started' && item.type === 'commandExecution').length,
         trace, reply: result.response,
+        commands: (await readFile(path.join(fixture.root, 'commands.jsonl'), 'utf8')).split('\n').filter(Boolean).map((line) => JSON.parse(line)),
       })}\n`)
       expect(progress).toHaveLength(1)
       // Delivery latency is the member-visible invariant; no extra timing tools
@@ -508,9 +515,19 @@ describeRealCodex('real natural goal canary journey', () => {
     }
   }, 300_000)
 
-  it('natural canary proposes a walking plan and persists it only after acceptance', async () => {
+  it.each([
+    { name: 'natural canary proposes a walking plan and persists it only after acceptance', capabilities: undefined },
+    { name: 'production hosted five-stage canary persists the accepted goal', capabilities: 'production-hosted' as const },
+  ])('$name', async ({ capabilities }) => {
     const config = await resolveRealCodexE2eConfig()
-    const fixture = await createCanonicalLiveFixture(config, 'linq')
+    const fixture = await createCanonicalLiveFixture(config, 'linq', { capabilities })
+    const nativeExecute = clinicalExtractionCodex.executeCodexAppServerTurn
+    const observer = capabilities ? vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn').mockImplementation(async (input) => {
+      assertProductionHostedCapabilityParity(input)
+      const result = await nativeExecute(input)
+      process.stdout.write(`[hosted-canary-provider] ${JSON.stringify({ developerBytes: Buffer.byteLength(input.developerInstructions ?? ''), dynamicTools: input.dynamicTools.length, resumed: !!input.resumeSessionId, toolActions: result.providerActionCount })}\n`)
+      return result
+    }) : null
     try {
       // Read the same synthetic messages sent by the production canary.
       const raw: unknown = JSON.parse(await readFile(new URL(
@@ -523,11 +540,42 @@ describeRealCodex('real natural goal canary journey', () => {
         if (!prompt) throw new Error(`Missing canary stage: ${stage}`)
         return prompt
       }
+      const sessionId = capabilities ? 'synthetic-hosted-five-stage' : undefined
+      if (sessionId) {
+        const now = new Date().toISOString()
+        await saveAssistantSession(fixture.vault, parseAssistantSessionRecord({
+          alias: null, schema: 'murph.assistant-session.v1', sessionId,
+          binding: { actorId: null, channel: 'linq', conversationKey: 'linq:direct:canonical-live-synthetic-thread',
+            delivery: null, identityId: null, threadId: 'canonical-live-synthetic-thread', threadIsDirect: true },
+          createdAt: now, updatedAt: now, lastTurnAt: null, resumeState: null, turnCount: 0,
+          target: { adapter: 'codex-cli', approvalPolicy: 'never', codexCommand: fixture.codexCommand,
+            codexHome: fixture.codexHome, model: config.model, modelProvider: config.modelProvider,
+            oss: false, profile: null, reasoningEffort: 'low', sandbox: 'workspace-write' },
+        }))
+        const replay = [
+          { stage: 'welcome', reply: ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE },
+          { stage: 'identity-question', reply: MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal },
+          { stage: 'runtime-identity', reply: 'Good to meet you, Robin. What would you most like from your health—something you want to improve, understand, handle, or be able to do?' },
+        ]
+        await appendAssistantTranscriptEntries(fixture.vault, sessionId, replay.flatMap(({ stage, reply }) => [
+          { kind: 'user' as const, text: promptFor(stage) }, { kind: 'assistant' as const, text: reply },
+        ]))
+        process.stdout.write(`[hosted-canary-replay] ${JSON.stringify(replay)}\n`)
+      }
       const timedMessage = async (stage: string) => {
         const before = await fixture.commandCount()
         const progressUpdates: { elapsedMs: number; text: string }[] = []
         const startedAt = performance.now()
+        const trace: { elapsedMs: number; method: string; type: string | null; tool: string | null }[] = []
         const result = await fixture.message(promptFor(stage), {
+          sessionId, includeEarlySessionOnboarding: !!capabilities,
+          onTraceEvent(event) {
+            const raw = readRecord(event.rawEvent)
+            const method = readString(raw?.method)
+            if (!method || !['item/started', 'item/completed', 'item/tool/call', 'thread/tokenUsage/updated'].includes(method)) return
+            const params = readRecord(raw?.params), item = readRecord(params?.item)
+            trace.push({ elapsedMs: Math.round(performance.now() - startedAt), method, type: readString(item?.type), tool: readString(item?.tool, params?.tool) })
+          },
           deliverResponse: true,
           deliveryDispatchMode: 'queue-only',
           deliveryIdempotencyKey: `synthetic-goal-canary-${stage}`,
@@ -560,7 +608,8 @@ describeRealCodex('real natural goal canary journey', () => {
           stage, elapsedMs, firstVisibleMs: progressUpdates[0]?.elapsedMs ?? elapsedMs,
           progressUpdates: progressUpdates.length, progressMessages: progressUpdates,
           cliInvocations: invocations.length,
-          commands: commands.map((command) => command.split(' ').slice(0, command.startsWith('commons ') ? 3 : 2).join(' ')),
+          commands, trace, reply: result.response,
+          goals: (await listGoals(fixture.vault)).length, regimens: (await readVaultRawTolerant(fixture.vault)).regimens.length,
         })}\n`)
         return { result, commands, progressUpdates }
       }
@@ -598,6 +647,7 @@ describeRealCodex('real natural goal canary journey', () => {
       expect(accepted.response).toMatch(/walk|plan/iu)
       expect(accepted.response).not.toMatch(/goal_[A-Z0-9]+|reg_[A-Z0-9]+|subagent|vault-cli/iu)
     } finally {
+      observer?.mockRestore()
       await fixture.close()
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
     }
