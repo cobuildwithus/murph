@@ -52,6 +52,9 @@ export function gameCommandTexts(command: GameCommand): GameText[] {
       if (command.type === "negotiate" && command.note !== undefined) texts.push({ kind: "words", text: command.note });
       else if (command.change?.kind === "edit") terms(command.change.tasks, command.change.stakes);
       break;
+    case "replyToPost":
+      if (command.kind === "text") texts.push({ kind: "words", text: command.text });
+      break;
     case "post":
       if (command.text) texts.push({ kind: command.kind === "excuse" ? "excuse" : "words", text: command.text });
       break;

@@ -124,6 +124,12 @@ The Settings vault export does not include:
    snapshot, transfers encryption ownership to the lowest-seat survivor, deletes
    account-owned entries, and retains anonymous seats and frozen ticket parties.
    Labels never transfer between viewers; games with nobody remaining are deleted.
+   Private `game_reply` rows cascade from both the parent entry and the author's
+   game profile. This removes replies sent or received by the deleted member,
+   including encrypted inline audio, while preserving the survivor's posts and
+   anonymous seat history. A reply report's reporter-owned encrypted text/audio
+   snapshot survives deletion of the live reply or reported account; deletion
+   of the reporter removes that evidence with their reports.
 8. Best-effort terminate the per-user hosted Temporal runtime workflow again after the Prisma transaction commits.
 9. Immediately attempt the receipt-owned Cloudflare Durable Object/R2, isolated runtime-log, Stripe-customer cleanup. Persist completion independently per target. Each target shares the five-second response-path budget plus a small receipt-settlement margin. Unconfigured, partial, timed-out, and failed targets remain pending.
 10. Best-effort terminate the per-user hosted Temporal runtime workflow again after Cloudflare cleanup, so any sleeping workflow state that survived a concurrent wake attempt is neutralized.
@@ -134,6 +140,7 @@ The Settings vault export does not include:
 
 | Store | Delete mode | Export mode | Notes |
 | --- | --- | --- | --- |
+| Weekly game replies (`game_reply`) | Cascade from author profile or parent entry/game | Not included in the vault-only Settings export | Encrypted text or inline AAC audio, no transcript. Report evidence is reporter-owned and follows report lifetime. |
 | `prisma.hosted_member` | Live delete | Metadata/counts | Deletes the member row after explicit child cleanup. Prisma cascade remains a safety net. |
 | `prisma.hosted_auth_record` | Member cascade | Not exported secret | Deletes member-bound login users, accounts and sessions. Independent pre-member verification/rate-limit records expire through bounded retention. No login record or bearer is exported. |
 | `prisma.hosted_member_approval_credentials` | Member cascade | Not exported secret | Deletes the encrypted approval credential aggregate and saved recovery-key digest. |

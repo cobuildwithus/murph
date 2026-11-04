@@ -15,7 +15,7 @@ import {
 export interface GameSealTarget {
   /** Whose key: the profile owner, the game's creator, the poster, the label owner. */
   memberId: string;
-  table: "game" | "game_contact_label" | "game_entry" | "game_profile" | "game_report";
+  table: "game" | "game_contact_label" | "game_entry" | "game_profile" | "game_report" | "game_reply";
   /** Labels bind to their owner, so an invite's label can move to its row as-is. */
   rowId: string;
   field: string;

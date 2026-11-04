@@ -2,13 +2,15 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 import { after } from "next/server";
-import { sendApplePush, type ApplePushRequest } from "../apple-push/send";
-import { companionPushRouteRegistrationSchema, forgetCompanionPushRoute } from "../companion/push-route";
+import { type ApplePushRequest } from "../apple-push/send";
+import { companionPushRouteRegistrationSchema } from "../companion/push-route";
 import { sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
 import { isGameOn } from "./access";
 import { dayIndexAt, eligibleFromDay, hasUnlockedDay, indexGameEntries, isScheduledDay, liveEntry, parseStoredTerms, type RuleState } from "./rules";
 import { addDays, dayStartInstant, gameLocalDate } from "./time";
+
+import { deliverGamePush, readGamePushRoutes } from "./push-delivery";
 
 type Slot = "first" | "completion";
 interface ClaimedPostNotification {
@@ -55,10 +57,7 @@ export async function claimGamePostNotification(tx: NotificationTx, input: {
   const recipients = state.players.filter(player => player.memberId !== actor && !player.leftAt && dayIndex >= eligibleFromDay(state, player));
   if (!recipients.length) return [];
   const ids = state.players.map(player => player.memberId);
-  const routes = await tx.companionPushRoute.findMany({
-    where: { userId: { in: recipients.map(player => player.memberId) }, alertsAllowed: true, gameSessionId: { not: null }, member: { suspendedAt: null } },
-    select: { userId: true, environment: true, token: true, topic: true, gameSessionId: true },
-  });
+  const routes = await readGamePushRoutes(tx, recipients.map(player => player.memberId));
   const blocks = await tx.gameBlock.findMany({ where: { blockerMemberId: { in: ids }, blockedMemberId: { in: ids } }, select: { blockerMemberId: true, blockedMemberId: true } });
   const pending = recipients.flatMap(recipient => {
     const route = routes.find(route => route.userId === recipient.memberId);
@@ -112,20 +111,7 @@ export function sendGamePostNotificationAfterResponse(notifications: readonly Cl
 
 /** Best effort, one attempt. A stale or ambiguous send never releases its claims. */
 export async function deliverGamePostNotification(notification: ClaimedPostNotification): Promise<void> {
-  let outcome = "failed";
-  try {
-    const db = getPrisma();
-    const current = await db.companionPushRoute.findFirst({
-      where: { userId: notification.memberId, ...notification.request.target, alertsAllowed: true, gameSessionId: notification.sessionId,
-        member: { suspendedAt: null, authRecords: { some: { model: "session", id: notification.sessionId, expiresAt: { gt: new Date() } } } } },
-      select: { userId: true },
-    });
-    if (!current || notification.request.expiresAt.getTime() <= Date.now() || !await stillValid(notification)) outcome = "superseded";
-    else {
-      outcome = await sendApplePush(notification.request);
-      if (outcome === "unregistered") await forgetCompanionPushRoute(notification.memberId, notification.request.target.token);
-    }
-  } catch { /* Optional delivery cannot turn a committed post into an error. */ }
+  const outcome = await deliverGamePush(notification, () => stillValid(notification));
   try {
     for (const claim of notification.claims) await getPrisma().gameEvent.updateMany({ where: { commandKey: claim.commandKey },
       data: { payload: { v: 2, recipientMemberId: notification.memberId, day: notification.day, slot: claim.slot, outcome } } });

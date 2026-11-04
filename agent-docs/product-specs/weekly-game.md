@@ -562,6 +562,70 @@ resulting avatar. No private photo is shared with the subject or other players.
 - **What can't be posted.** Money stakes, clearly dangerous tasks or dares,
   slurs and explicit sexual words are refused with "This can't be posted."
 
+## Replies
+
+In a live, not-yet-due two-player game (`maxPlayers === 2`), a player can
+leave one note on the other player's current visible post from any game day.
+Photo, words, reps, heart rate and route posts qualify; excuses do not.
+Groups have no Reply action. Replies give no points or completion credit.
+
+A typed note uses the words-post validator and local content filter: trim,
+one line, 1–140 UTF-16 units. A voice note is AAC in M4A, at most 400,000 raw
+bytes, with one sound track and 32 integer waveform levels from 0 to 100.
+Both the movie and media duration must be 1–30,500 ms; the stored duration
+comes from the media header. The extra half second accommodates AAC padding.
+Voice is never transcribed. Neither kind enters model input, Murph's chat,
+`read_game`, assistant tools, recaps, share data, logs or telemetry.
+
+The app's entry view carries an optional `reply` with its id, kind, creation
+time and `mine`. Text replies include text; voice replies include duration
+and waveform levels. Audio bytes come only from the authenticated playback
+route. Opponent entries carry `canReply`; groups omit it. Reads require the
+parent post to be live and visible and both players to remain present.
+A block or any report between the pair, in either direction and in any game,
+hides replies from both. This report rule applies only to replies; existing
+post, player-photo and recap report behavior stays unchanged. Reading,
+playing, deleting and reporting remain available after the game ends.
+
+The author can delete a reply even after a block or report. Deletion is silent
+and frees the post for a new reply with a new UUID. A retry using a deleted
+reply's UUID never recreates it. Withdrawing, retaking or removing the parent
+post deletes the reply. Deleting the game or either account also removes it.
+
+The post gets at most one push ever: “New voice note on your post.” or
+“New note on your post.” No name, duration or content enters the push. The
+server rechecks visibility before its single best-effort send, with a 24-hour
+expiry and no retry or reminder. A delete followed by another reply sends no
+second push. Old apps ignore the new view fields; a reply push opens the app
+without selecting a game until the native client supports `game_reply`.
+
+The receiver can report an incoming reply through the existing report route.
+The report targets the reply's author, leaves `entryId` null, and keeps a
+reporter-owned encrypted evidence copy. Evidence survives deletion of the
+reply or its author for human review. Ops removes only the reply; the post,
+score and recap remain intact. The existing report alert and review commitment
+apply. The reporter's account deletion removes their evidence.
+
+App routes:
+
+- `POST /api/game/v1/games/:id/entries/:entryId/replies`: `{replyId, kind:
+  "text", text}` or `{replyId, kind: "voice", audio, levels}`. `audio` is
+  base64. Mixed and unknown fields are refused; duration comes from the file.
+  This route alone permits a 600 KiB JSON body and requires current Terms.
+- `DELETE /api/game/v1/games/:id/replies/:replyId`: no body, author only,
+  idempotent, no current-Terms gate.
+- `GET /api/game/v1/games/:id/replies/:replyId/audio`: object-authorized game
+  bearer access, `audio/mp4`, private/no-store, nosniff; no signed URL.
+- `POST /api/game/v1/games/:id/reports`: `about: "reply"` and `replyId` with
+  the existing report fields. Stored report identity is recovered before
+  requiring live content, so alert retries work after hiding or deletion.
+- `GET /api/ops/game-reports/:reportId/audio`: Ops-authenticated evidence.
+
+Deploy the additive migration, then the complete Web backend, then the native
+client. Once a reply or reply report exists, this Web release is the rollback
+floor. Disable new replies with a forward fix that preserves reads, playback,
+delete and report review. Privacy Policy/version changes ship separately.
+
 ## Prove it
 
 In a live two-player game, a player can challenge the opponent's visible photo

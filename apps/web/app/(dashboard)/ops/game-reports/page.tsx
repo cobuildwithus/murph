@@ -34,7 +34,8 @@ export default async function HostedOpsGameReportsPage() {
       {reports.length === 0 ? <p className="text-sm text-muted-foreground">Nothing to review.</p> : null}
       {reports.map((report) => (
         <GameReportCard actions={<GameReportActions canEndGames={report.reportedMemberId !== null}
-          canRemovePost={report.entryId !== null && !report.postRemoved}
+          canRemovePost={Boolean(report.entryId || report.replyId) && !report.postRemoved}
+          removeLabel={report.content === "reply" ? "Remove the reply" : "Remove the post"}
           canSuspend={report.reportedMemberId !== null && !report.reportedSuspended} reportId={report.reportId} />}
         key={report.reportId} report={report} />
       ))}

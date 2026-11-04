@@ -4,11 +4,12 @@ vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
   requireActiveHostedAppSessionFromRequest: vi.fn(),
   reviewGameReport: vi.fn(),
+  readGameReportAudio: vi.fn(),
 }));
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
   requireActiveHostedAppSessionFromRequest: mocks.requireActiveHostedAppSessionFromRequest,
 }));
-vi.mock("@/src/lib/game/report-review", () => ({ reviewGameReport: mocks.reviewGameReport }));
+vi.mock("@/src/lib/game/report-review", () => ({ reviewGameReport: mocks.reviewGameReport, readGameReportAudio: mocks.readGameReportAudio }));
 
 import { POST } from "../app/api/ops/game-reports/route";
 
@@ -48,4 +49,20 @@ describe("game report review Ops boundary", () => {
     expect((await POST(request({ reportId: "report_0002" }))).status).toBe(404);
     expect(mocks.reviewGameReport).toHaveBeenCalledTimes(1);
   });
+});
+
+
+it("serves report audio only behind Ops auth, without cache or sniffing", async () => {
+  const { GET } = await import("../app/api/ops/game-reports/[reportId]/audio/route");
+  const request = new Request(`${base}/api/ops/game-reports/report_0001/audio`);
+  const context = { params: Promise.resolve({ reportId: "report_0001" }) };
+  mocks.readGameReportAudio.mockResolvedValue(new Uint8Array([1, 2, 3]));
+  const response = await GET(request, context);
+  expect(response.status).toBe(200);
+  expect(response.headers.get("Content-Type")).toBe("audio/mp4");
+  expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+  expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+  mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({ member: { id: "member_other" } });
+  expect((await GET(request, context)).status).toBe(404);
+  expect(mocks.readGameReportAudio).toHaveBeenCalledTimes(1);
 });

@@ -640,9 +640,9 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
   },
   {
     slug: "prisma.weekly_game",
-    label: "Weekly game profile, games, check-ins, labels, tickets, blocks and reports",
+    label: "Weekly game profile, games, check-ins, replies, labels, tickets, blocks and reports",
     deletion: "live-delete",
-    note: "Calls off the member's open and live games and keeps finished ones for the other player, who sees the name they knew them by; the member's seats, check-ins, labels and profile are deleted, and games nobody else is in are deleted. Tickets with the other player remain as history that can't be marked done. The member's blocks and the reports they made are deleted; a report about them stays for review with its snapshot, no longer linked to them. Game images are deleted with the member's other provider images.",
+    note: "Calls off the member's open and live games and keeps finished ones for the other player, who sees the name they knew them by; the member's seats, check-ins, labels and profile are deleted, and games nobody else is in are deleted. Tickets with the other player remain as history that can't be marked done. Private game_reply rows sent by the member or attached to their posts cascade, including encrypted inline audio. The member's blocks and the reports they made are deleted; a report about them stays for review with its reporter-owned text or audio snapshot, no longer linked to them. Game images are deleted with the member's other provider images.",
   },
   {
     slug: "backups",

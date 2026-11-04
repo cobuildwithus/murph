@@ -20,11 +20,12 @@ export async function respondToGameCommand(
   options: {
     answer?: (game: GameView, input: { command: Record<string, unknown>; memberId: string }) => Promise<GameView>;
     body: boolean;
+    limitBytes?: number;
     inviteToken?: string;
   } = { body: true },
 ): Promise<Response> {
   const memberId = await requireGameMember(request, options.inviteToken);
-  const body = options.body ? await readJsonObject(request, { limitBytes: BODY_LIMIT_BYTES }) : {};
+  const body = options.body ? await readJsonObject(request, { limitBytes: options.limitBytes ?? BODY_LIMIT_BYTES }) : {};
   const built = command(body);
   await requireCurrentTermsFor(memberId, built);
   const result = await runGameCommand({ actorMemberId: memberId, command: built, multiplayer: hasGameMultiplayer(request) });

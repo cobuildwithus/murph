@@ -1,10 +1,10 @@
 import "server-only";
 
 import { GAME_ENTRY_KINDS, GAME_REPORT_ABOUT } from "./contract";
-import { openGameTexts } from "./crypto";
+import { openGameTexts, openGameMedia } from "./crypto";
 import { gameMediaDelivery, isGameMediaStorageAvailable, readGameMedia } from "./media";
 import { gameReportContentLabel, gameReportReasonLabel } from "./report-alert";
-import { removeGamePostForReview, runGameCommand } from "./service";
+import { removeGamePostForReview, removeGameReplyForReview, runGameCommand } from "./service";
 import { getPrisma } from "../prisma";
 
 /**
@@ -22,6 +22,8 @@ export interface GameReportQueueItem {
   content: string;
   gameId: string | null;
   entryId: string | null;
+  replyId?: string | null;
+  audioUrl?: string | null;
   reporterMemberId: string;
   reportedMemberId: string | null;
   reportedSuspended: boolean;
@@ -36,7 +38,9 @@ export interface GameReportQueueItem {
 export async function readGameReportQueue(): Promise<GameReportQueueItem[]> {
   const prisma = getPrisma();
   const rows = await prisma.gameReport.findMany({
-    include: { entry: { select: { kind: true, withdrawnReason: true } }, reported: { select: { member: { select: { suspendedAt: true } } } } },
+    select: { id: true, createdAt: true, reason: true, about: true, gameId: true, entryId: true, replyId: true,
+      reporterMemberId: true, reportedMemberId: true, snapshotTextEncrypted: true, noteEncrypted: true, snapshotMediaKeys: true,
+      entry: { select: { kind: true, withdrawnReason: true } }, reported: { select: { member: { select: { suspendedAt: true } } } } },
     orderBy: [{ createdAt: "desc" }, { id: "asc" }],
     take: QUEUE_LIMIT,
     where: { reviewedAt: null },
@@ -50,10 +54,12 @@ export async function readGameReportQueue(): Promise<GameReportQueueItem[]> {
       entryKind: GAME_ENTRY_KINDS.find((kind) => kind === row.entry?.kind) ?? null, fromInvite: false }),
     createdAt: row.createdAt.toISOString(),
     entryId: row.entryId,
+    replyId: row.replyId,
+    audioUrl: row.about === "reply" && row.snapshotTextEncrypted === null ? `/api/ops/game-reports/${encodeURIComponent(row.id)}/audio` : null,
     gameId: row.gameId,
     images: await reviewImages(row.snapshotMediaKeys),
     note: plain[index * 2 + 1] ?? null,
-    postRemoved: row.entry === null ? row.about === "post" : row.entry.withdrawnReason === "removed",
+    postRemoved: row.about === "reply" ? row.replyId === null : row.entry === null ? row.about === "post" : row.entry.withdrawnReason === "removed",
     reason: gameReportReasonLabel(row.reason),
     reportedMemberId: row.reportedMemberId,
     reportedSuspended: row.reported?.member.suspendedAt != null,
@@ -91,9 +97,13 @@ export interface GameReportReview {
 /** Applies the chosen actions, then marks the report reviewed. Each action is safe to repeat. */
 export async function reviewGameReport(review: GameReportReview): Promise<{ found: boolean }> {
   const prisma = getPrisma();
-  const report = await prisma.gameReport.findUnique({ where: { id: review.reportId } });
+  const report = await prisma.gameReport.findUnique({ where: { id: review.reportId },
+    select: { id: true, about: true, replyId: true, entryId: true, reporterMemberId: true, reportedMemberId: true } });
   if (!report) return { found: false };
-  if (review.removePost && report.entryId) await removeGamePostForReview(report.entryId);
+  if (review.removePost) {
+    if (report.about === "reply" && report.replyId) await removeGameReplyForReview(report.replyId);
+    else if (report.about !== "reply" && report.entryId) await removeGamePostForReview(report.entryId);
+  }
   if (review.endGames && report.reportedMemberId) {
     const ended = await runGameCommand({ actorMemberId: report.reporterMemberId, command: { memberId: report.reportedMemberId, type: "block" } });
     // From an invite they never shared a game: there is nothing to end.
@@ -104,4 +114,12 @@ export async function reviewGameReport(review: GameReportReview): Promise<{ foun
   }
   await prisma.gameReport.updateMany({ data: { reviewedAt: new Date() }, where: { id: report.id, reviewedAt: null } });
   return { found: true };
+}
+
+/** Only the Ops-authenticated playback route calls this evidence reader. */
+export async function readGameReportAudio(reportId: string): Promise<Uint8Array | null> {
+  const report = await getPrisma().gameReport.findUnique({ where: { id: reportId },
+    select: { id: true, about: true, reporterMemberId: true, snapshotAudioEncrypted: true } });
+  if (report?.about !== "reply" || !report.snapshotAudioEncrypted) return null;
+  return openGameMedia({ envelope: report.snapshotAudioEncrypted, key: `game_report:${report.id}`, ownerMemberId: report.reporterMemberId });
 }

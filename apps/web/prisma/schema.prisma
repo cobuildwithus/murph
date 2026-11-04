@@ -2772,6 +2772,7 @@ model GameProfile {
   labelsAbout        GameContactLabel[] @relation("GameContactLabelSubject")
   blocksMade         GameBlock[]        @relation("GameBlockBlocker")
   blocksReceived     GameBlock[]        @relation("GameBlockBlocked")
+  replies            GameReply[]
   reportsMade        GameReport[]       @relation("GameReportReporter")
   reportsReceived    GameReport[]       @relation("GameReportReported")
 
@@ -2902,11 +2903,31 @@ model GameEntry {
   // "retake" (replaced by attempt 2) or "withdrawn" (taken back by its poster).
   withdrawnReason String?    @map("withdrawn_reason")
   player          GamePlayer @relation(fields: [gameId, memberId], references: [gameId, memberId], onDelete: Cascade)
+  reply           GameReply?
   reports         GameReport[]
 
   @@unique([gameId, memberId, dayIndex, attempt])
   @@index([memberId])
   @@map("game_entry")
+}
+
+// Private app-only notes. Ownership cascades independently from post and author.
+model GameReply {
+  id               String      @id
+  entryId          String      @unique @map("entry_id")
+  authorMemberId   String      @map("author_member_id")
+  kind             String
+  textEncrypted    String?     @map("text_encrypted")
+  audioEncrypted   String?     @map("audio_encrypted")
+  durationMs       Int?        @map("duration_ms")
+  levels           Int[]       @default([])
+  createdAt        DateTime    @default(now()) @map("created_at")
+  entry            GameEntry   @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  author           GameProfile @relation(fields: [authorMemberId], references: [memberId], onDelete: Cascade)
+  reports          GameReport[]
+
+  @@index([authorMemberId])
+  @@map("game_reply")
 }
 
 // One IOU. Its words come from the game's stake with the same key.
@@ -2950,7 +2971,9 @@ model GameReport {
   reportedMemberId      String?      @map("reported_member_id")
   gameId                String?      @map("game_id")
   entryId               String?      @map("entry_id")
-  // post, player, or terms
+  replyId               String?      @map("reply_id")
+  snapshotAudioEncrypted String?     @map("snapshot_audio_encrypted")
+  // post, player, terms, or reply
   about                 String
   // sexual, harassment, hate, violence, self_harm, money, or other
   reason                String
@@ -2965,6 +2988,10 @@ model GameReport {
   game                  Game?        @relation(fields: [gameId], references: [id], onDelete: SetNull)
   entry                 GameEntry?   @relation(fields: [entryId], references: [id], onDelete: SetNull)
 
+  reply                 GameReply?   @relation(fields: [replyId], references: [id], onDelete: SetNull)
+
+  @@unique([reporterMemberId, replyId])
+  @@index([replyId])
   @@unique([reporterMemberId, entryId])
   @@index([reporterMemberId, createdAt])
   @@index([reportedMemberId])

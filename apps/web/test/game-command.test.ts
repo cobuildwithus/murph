@@ -250,3 +250,33 @@ describe("weekly game command validator", () => {
     }
   });
 });
+
+
+describe("post reply commands", () => {
+  const base = { type: "replyToPost", gameId: "game_reply", entryId: "entry_reply", replyId: "reply_0001" };
+  it("uses words-post trimming and UTF-16 length, including raw newlines", () => {
+    for (const text of ["  Nice work  ", "x".repeat(140), "😀".repeat(70), " ", "x".repeat(141), "😀".repeat(71), "one\ntwo", "one\r", "one\u2028two"]) {
+      expect(codeOf(() => parseGameCommand({ ...base, kind: "text", text })))
+        .toBe(codeOf(() => parseGameCommand({ type: "post", gameId: base.gameId, entryId: base.entryId, kind: "words", text })));
+    }
+    expect(parseGameCommand({ ...base, kind: "text", text: "  Nice work  " })).toMatchObject({ text: "Nice work" });
+  });
+  it("rejects mixed, unknown and caller-supplied duration or transcript fields", () => {
+    for (const extra of [{ audio: "YQ==" }, { levels: [] }, { transcript: "words" }, { durationMs: 1 }, { memberId: "peer" }, { unknown: null }]) {
+      expect(codeOf(() => parseGameCommand({ ...base, kind: "text", text: "Good", ...extra }))).toBe("INVALID_REQUEST");
+    }
+    const voice = { ...base, kind: "voice", audio: "YQ==", levels: Array(32).fill(50) };
+    expect(parseGameCommand(voice)).toEqual(voice);
+    for (const extra of [{ text: "Good" }, { audio: "YQ" }, { audio: "YR==" }, { audio: "!!!!" }, { audio: Buffer.alloc(400_001).toString("base64") },
+      { levels: Array(31).fill(0) }, { levels: Array(33).fill(0) }, { levels: Array(32).fill(-1) }, { levels: Array(32).fill(101) }, { levels: Array(32).fill(0.5) }]) {
+      expect(codeOf(() => parseGameCommand({ ...voice, ...extra }))).toBe("INVALID_REQUEST");
+    }
+  });
+  it("requires a reply target, without an entry or invite, for reply reports", () => {
+    const report = { type: "report", about: "reply", gameId: "game_reply", reportId: "report_0001", replyId: "reply_0001", reason: "other" };
+    expect(parseGameCommand(report)).toEqual(report);
+    for (const extra of [{ replyId: undefined }, { entryId: "entry_reply" }, { about: "player" }, { gameId: undefined, token: "invite-token" }]) {
+      expect(codeOf(() => parseGameCommand({ ...report, ...extra }))).toBe("INVALID_REQUEST");
+    }
+  });
+});

@@ -48,6 +48,13 @@ describe("Apple push sender", () => {
     expect(JSON.parse(call.body).aps).toEqual({ alert: { body: "Wrist reminder", title: "Murph" }, "content-available": 1 });
   });
 
+  it("omits the alert title when the message has none", async () => {
+    const send = transport();
+    const alert: ApplePushRequest = { ...request, message: { body: "New note on your post.", kind: "alert" } };
+    expect(await sendApplePush(alert, { credentials, transport: send })).toBe("sent");
+    expect(JSON.parse(send.mock.calls[0]![0].body).aps).toEqual({ alert: { body: "New note on your post." }, "content-available": 1 });
+  });
+
   it("reuses one provider token instead of re-signing every push", async () => {
     const send = transport();
     const now = Date.parse("2026-10-05T13:00:00.000Z");

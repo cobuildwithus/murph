@@ -1822,3 +1822,10 @@ The current contract remains in [Hosted Temporal orchestration](references/hoste
 
 Fresh scheduled-reminder language regression evidence and unseeded onboarding
 proof are recorded in [the language verification plan](exec-plans/completed/2026-11-04-automation-language.md).
+
+Private two-player post replies, app-only visibility, inline encrypted audio,
+report evidence and the Web rollback floor are owned by
+[`Weekly Game · Replies`](product-specs/weekly-game.md#replies) and
+[`Architecture · Private post replies`](../ARCHITECTURE.md#private-post-replies).
+The reviewed implementation scope is recorded in
+[the post-replies plan](exec-plans/completed/2026-11-04-game-post-replies.md).

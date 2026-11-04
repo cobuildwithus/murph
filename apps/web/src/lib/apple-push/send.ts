@@ -19,7 +19,7 @@ export interface ApplePushTarget {
 // low priority and throttles them. Alerts are immediate but visible.
 export type ApplePushMessage =
   | { kind: "background" }
-  | { kind: "alert"; body: string; title: string };
+  | { kind: "alert"; body: string; title?: string };
 
 export type ApplePushResult = "sent" | "unregistered" | "failed";
 
@@ -79,7 +79,7 @@ export async function sendApplePush(
       body: JSON.stringify({
         ...request.data,
         aps: message.kind === "alert"
-          ? { alert: { body: message.body, title: message.title }, "content-available": 1 }
+          ? { alert: message.title ? { body: message.body, title: message.title } : { body: message.body }, "content-available": 1 }
           : { "content-available": 1 },
       }),
       headers: {
