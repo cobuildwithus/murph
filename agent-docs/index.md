@@ -1,5 +1,5 @@
 Fresh and restored manual-meal selection proof is recorded in
-[the selection verification plan](exec-plans/active/2026-11-03-meal-photo-selection-proof.md).
+[the selection verification plan](exec-plans/completed/2026-11-03-meal-photo-selection-proof.md).
 The behavior owner remains `../packages/assistant-runtime/README.md`.
 
 Group app terms preserve valid unjoined invitation overrides through edits using
