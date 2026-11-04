@@ -239,8 +239,9 @@ Run the loop when all of the following hold:
 
 The review target is the pushed PR head. Run the loop from a clean checkout or
 worktree of the PR branch at that pushed head so ReviewGPT artifacts, CI, and
-merge target all refer to the same commit. Do not run it on unpushed local
-changes, a dirty worktree, or a checkout that is not at the pushed head.
+merge target all refer to the same commit, except for a later short test-only
+commit as described below. Do not run it on unpushed local changes, a dirty
+worktree, or a checkout that is not at the pushed head.
 
 The PR body must carry the short intent, Product UX result, direct evidence,
 changelog decision, and any risk details required by
@@ -283,14 +284,17 @@ head and a resolved final review remain separate merge-readiness gates.
 
 Skip the final gate for docs/process-only PRs, prompt-primary PRs,
 frontend-only PRs that satisfy the eligibility exemption, trivial copy-only
-changes, other low-risk changes that satisfy
+changes, short test-only changes, other low-risk changes that satisfy
 `agent-docs/operations/completion-workflow.md` § Final ReviewGPT Eligibility, or
 explicit current-task user opt-out. If ReviewGPT is opted out and the
 cross-cutting trigger still applies, record the opt-out and continue with parent
 review and direct proof; do not substitute a mandatory local subagent.
 Prompt-primary PRs still require parent prompt inspection, and exempt
 frontend-only PRs still require Product UX, rendered, accessibility, and focused
-UI proof.
+UI proof. A short test-only commit pushed after a passing round, such as a
+fixture update for a CI failure, needs no new round: the merge head may differ
+from the last reviewed head only by those test files. Record it in the PR body
+and rely on green CI on the final head.
 Run the separate final gate only when other scope independently requires it or
 the current user explicitly asks for it.
 
