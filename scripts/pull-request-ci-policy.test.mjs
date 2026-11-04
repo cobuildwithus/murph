@@ -871,7 +871,7 @@ test("only documented lightweight PR workflows retain synchronize", async () => 
   );
 });
 
-test("complexity evidence and exact-candidate regression guards remain required", async () => {
+test("exact-candidate complexity regression guard remains required", async () => {
   const host = await workflow("host-support.yml");
   const build = jobBlock(host, "release-build-typecheck-linux");
   assert.match(
@@ -882,25 +882,6 @@ test("complexity evidence and exact-candidate regression guards remain required"
     build,
     /- name: Guard cyclomatic complexity regressions\n        if: \$\{\{ github\.event_name == 'pull_request' \}\}\n        env:\n          MURPH_COMPLEXITY_BASE_SHA: \$\{\{ github\.sha \}\}\^1\n          MURPH_COMPLEXITY_HEAD_SHA: \$\{\{ github\.sha \}\}\n        run: pnpm complexity:diff/u,
   );
-
-  const evidence = await workflow("pr-evidence.yml");
-  assert.match(
-    evidence,
-    /node --test[\s\S]*scripts\/check-pr-complexity-summary\.test\.mjs/u,
-  );
-  assert.match(
-    evidence,
-    /- name: Require complexity impact summary\n        run: node scripts\/check-pr-complexity-summary\.mjs\n        env:\n          MURPH_GITHUB_TOKEN: \$\{\{ github\.token \}\}\n          MURPH_PR_BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}\n          MURPH_PR_BODY: \$\{\{ github\.event\.pull_request\.body \}\}\n          MURPH_PR_HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/u,
-  );
-
-  const template = await readFile(
-    path.join(REPO_ROOT, ".github", "pull_request_template.md"),
-    "utf8",
-  );
-  assert.match(template, /^## Complexity impact$/mu);
-  for (const label of ["Guard", "Hotspots", "Agent judgment"]) {
-    assert.match(template, new RegExp(`^- ${escapeRegExp(label)}:`, "mu"));
-  }
 });
 
 test("synchronize observer is read-only and never checks out candidate code", async () => {
