@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runInNewContext } from 'node:vm'
 
@@ -23,6 +25,7 @@ const repository = fileURLToPath(new URL('../../../', import.meta.url))
 const promptPath = 'packages/assistant-engine/src/assistant/system-prompt.ts'
 const configPath = 'packages/assistant-runtime/src/hosted-runtime/codex-config.ts'
 const baseModule = new URL('../src/assistant/system-prompt.game-measurement-base.ts', import.meta.url)
+const baseBehaviorModule = new URL('../src/assistant/model-behavior.game-measurement-base.ts', import.meta.url)
 const baseCatalogModule = new URL('../src/assistant-codex/dynamic-tool-catalog.game-measurement-base.ts', import.meta.url)
 const baseGameModule = new URL('../src/assistant-codex/dynamic-tools/games.game-measurement-base.ts', import.meta.url)
 const temporaryPaths: string[] = []
@@ -70,7 +73,10 @@ afterAll(async () => {
 
 describe.skipIf(process.env.MURPH_MEASURE_GAME_INPUT !== '1')('group game tools initial input', () => {
   it.each(['direct', 'group'] as const)('complete first provider request (%s)', { timeout: 180_000 }, async (scope) => {
-    await writeFile(baseModule, gitSource(promptPath), { flag: 'wx' })
+    await writeFile(baseBehaviorModule, gitSource('packages/assistant-engine/src/assistant/model-behavior.ts'), { flag: 'wx' })
+    await writeFile(baseModule, gitSource(promptPath).replaceAll(
+      '"./model-behavior.js"', '"./model-behavior.game-measurement-base.js"',
+    ), { flag: 'wx' })
     await writeFile(baseGameModule, gitSource('packages/assistant-engine/src/assistant-codex/dynamic-tools/games.ts'), { flag: 'wx' })
     await writeFile(baseCatalogModule, gitSource('packages/assistant-engine/src/assistant-codex/dynamic-tool-catalog.ts').replaceAll(
       "'./dynamic-tools/games.js'", "'./dynamic-tools/games.game-measurement-base.js'",
@@ -121,6 +127,11 @@ describe.skipIf(process.env.MURPH_MEASURE_GAME_INPUT !== '1')('group game tools 
         assert.ok(body)
         expect(body.model).toBe('gpt-6.1-sol')
         expect(capture.json).toContain('functions')
+        const outputDirectory = process.env.MURPH_GAME_INPUT_OUTPUT_DIRECTORY
+        if (outputDirectory) {
+          await mkdir(outputDirectory, { recursive: true })
+          await writeFile(path.join(outputDirectory, `${scope}-${phase}.json`), capture.json.replaceAll(homedir(), '<HOME_DIR>'))
+        }
         captures.push({
           phase, bytes: Buffer.byteLength(capture.json),
           sha256: createHash('sha256').update(capture.json).digest('hex'),
@@ -141,7 +152,7 @@ describe.skipIf(process.env.MURPH_MEASURE_GAME_INPUT !== '1')('group game tools 
     } finally {
       await stopWarmCodexAppServer()
       await stub.close()
-      await Promise.all([baseModule, baseCatalogModule, baseGameModule].map((file) => rm(file, { force: true })))
+      await Promise.all([baseModule, baseBehaviorModule, baseCatalogModule, baseGameModule].map((file) => rm(file, { force: true })))
     }
   })
 })

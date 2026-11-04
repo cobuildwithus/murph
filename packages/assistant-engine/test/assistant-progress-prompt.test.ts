@@ -15,8 +15,8 @@ function prompt(overrides: Partial<AssistantSystemPromptInput> = {}): string {
 }
 
 describe('assistant progress prompt', () => {
-  it('starts a direct goal proposal with one first-round update while retaining routine silence', () => {
-    const text = prompt()
+  it.each([false, true])('starts a direct goal proposal with one first-round update while retaining routine silence (onboarding=%s)', (onboardingGuidance) => {
+    const text = prompt({ onboardingGuidance })
     const setup = text.split('\n').find((line) => line.startsWith('- Setup:'))
     expect(setup).toContain('in the first tool round, alongside exactly one brief `murph.send_progress_update`')
     expect(setup).not.toContain('alone first')
