@@ -77,6 +77,7 @@ import {
   buildHostedExecutionGroupJournalFactRecordedWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
+  buildHostedExecutionMemberActionRequestedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionRuntimeControlWake,
   deriveHostedExecutionErrorCode,
@@ -383,6 +384,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           hostedMailboxSystemFirstPendingSeq: null,
           hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
+          hostedMailboxSystemModelFreeWakeAt: null,
+          hostedMailboxSystemModelFreeWakeVersion: "1",
           hostedMailboxSystemDeviceSyncContinuationSeqs: [],
         },
         status: "idle",
@@ -1130,7 +1133,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
-  test("system mailbox mode converges restored handled progress exactly once without new mailbox rows", async () => {
+  test.each(["handled progress", "model-free wake"])("system mailbox mode converges restored %s exactly once without new mailbox rows", async (projection) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const artifactBytesByHash = new Map<string, Uint8Array>();
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -1249,10 +1252,15 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         ...currentWorkspace,
         redactedStatus: {
           ...currentWorkspace.redactedStatus,
-          hostedMailboxSystemHandledThroughSeq: "0",
+          hostedMailboxSystemHandledThroughSeq: projection === "handled progress" ? "0" : "1",
           hostedMailboxSystemImportedSeq: "1",
         },
       };
+
+      if (projection === "model-free wake") {
+        delete currentWorkspace.redactedStatus!.hostedMailboxSystemModelFreeWakeAt;
+        delete currentWorkspace.redactedStatus!.hostedMailboxSystemModelFreeWakeVersion;
+      }
 
       const firstResult = await runSystemMailboxPass(
         "attempt_synthetic_system_mailbox_progress_convergence_first",
@@ -1280,6 +1288,9 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         checkpointRequests[0]?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
         "1",
       );
+      assert.equal(checkpointRequests[0]?.redactedStatus?.hostedMailboxSystemModelFreeWakeAt, null);
+      assert.equal(checkpointRequests[0]?.redactedStatus?.hostedMailboxSystemModelFreeWakeVersion,
+        currentWorkspace.version);
       assert.equal(checkpointRequests[0]?.nextWakeAt, null);
       assert.equal(checkpointRequests[0]?.nextWakeReason, null);
       const repairCheckpointLog = readCapturedRuntimePhaseLogs({
@@ -8490,7 +8501,11 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
-  test("system mailbox mode keeps device-sync wake identity on execution failure", async () => {
+  test.each([
+    { processingMode: "system_mailbox", assistantExecutionBlocked: false },
+    { processingMode: "system_mailbox", assistantExecutionBlocked: true },
+    { processingMode: "default", assistantExecutionBlocked: false },
+  ] as const)("$processingMode keeps device-sync wake identity on execution failure (blocked=$assistantExecutionBlocked)", async ({ processingMode, assistantExecutionBlocked }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -8499,9 +8514,10 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       id: "mailbox_item_system_mailbox_device_execution_failure",
       kind: "device-sync.wake",
       lane: "system",
-      laneSeq: "1",
+      laneSeq: assistantExecutionBlocked ? "2" : "1",
     });
     let fetchSnapshotCalls = 0;
+    const successfulDeviceSyncPort = createEmptyDeviceSyncPort();
     const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
       async ackDirtyStateProcessed() {
         throw new Error("Device sync dirty ack should not run for execution failure.");
@@ -8524,9 +8540,10 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           userId: TEST_USER_ID,
         };
       },
-      async fetchSnapshot() {
+      async fetchSnapshot(request) {
         fetchSnapshotCalls += 1;
-        throw new Error("synthetic device-sync snapshot failure");
+        if (fetchSnapshotCalls === 1) throw new Error("synthetic device-sync snapshot failure");
+        return successfulDeviceSyncPort.fetchSnapshot(request);
       },
     };
 
@@ -8536,12 +8553,36 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       mocks.prepareHostedCodexAssistantProcess.mockClear();
       mocks.cancelPendingWarmCodexPreinitialization.mockClear();
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      if (assistantExecutionBlocked) {
+        const action = createMailboxItem({
+          id: "mailbox_item_retained_member_action", lane: "system", laneSeq: "1",
+          kind: "member.action.requested", dedupeKey: "member.action.requested:retained",
+        });
+        const resolved = createResolvedRuntimeControlSystemMailboxItem(action);
+        assert.equal(resolved.route.state, "route");
+        await enqueueHostedSystemMailboxItem({
+          item: { ...resolved, route: { ...resolved.route, action: "apply-member-action" } },
+          vaultRoot,
+          wake: buildHostedExecutionMemberActionRequestedWake({
+            eventId: action.dedupeKey, memberId: TEST_USER_ID, occurredAt: TEST_NOW,
+            request: {
+              actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243", requestedAt: TEST_NOW, schemaVersion: 1,
+              action: {
+                kind: "workout.live.apply", version: 1,
+                expectedWorkout: { actionBinding: "a".repeat(64), exercises: [{ name: "Leg press", sets: [{ logged: true }] }] },
+                mutations: [{ kind: "set.put", exerciseName: "Leg press", exercisePosition: 1,
+                  setPosition: 1, expectedResult: { kind: "reps", reps: null }, result: { kind: "reps", reps: 8 } }],
+              },
+            },
+          }),
+        });
+      }
       await enqueueDeviceSyncSystemMailboxItemForTest({
         item: deviceItem,
         vaultRoot,
       });
       const importState = createEmptyHostedMailboxImportState();
-      importState.watermarks.system = "1";
+      importState.watermarks.system = deviceItem.laneSeq;
       await writeMailboxImportStateFile(vaultRoot, importState);
       const restoredWorkspace = await createVaultSnapshotBundle({
         vaultRoot,
@@ -8551,7 +8592,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_system_mailbox_device_execution_failure",
-            processingMode: "system_mailbox",
+            processingMode,
+            ...(assistantExecutionBlocked ? { assistantExecutionBlocked: true } : {}),
             workspaceVersion: "0",
           },
           resolvedConfig: createDeviceSyncResolvedConfig(),
@@ -8582,21 +8624,38 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             }),
           }),
           async runAssistantPhase() {
-            throw new Error("System mailbox device-sync failure must not enter assistant phase.");
+            assert.equal(processingMode, "default");
+            return { progressed: false };
           },
           vaultRoot,
         },
       );
 
-      assert.equal(fetchSnapshotCalls, 1);
+      assert.equal(fetchSnapshotCalls, processingMode === "default" ? 0 : 1);
       assert.equal(result.status, "scheduled");
-      assert.equal(result.nextWakeReason, "device-sync.reconcile");
-      assert.equal(checkpointRequests.at(-1)?.nextWakeReason, "device-sync.reconcile");
+      const checkpoint = checkpointRequests.at(-1)!;
+      const genericReason = assistantExecutionBlocked ? "assistant" : "device-sync.reconcile";
+      if (processingMode === "system_mailbox") {
+        assert.equal(result.nextWakeReason, genericReason);
+        assert.equal(checkpoint.nextWakeReason, genericReason);
+      }
       const state = await readHostedSystemMailboxState(vaultRoot);
       const pendingItem = state.pending.find((item) => item.itemId === deviceItem.id) ?? null;
       assert.ok(pendingItem);
       assert.equal(pendingItem.routeAction, "run-device-sync-wake");
-      assert.equal(pendingItem.nextAttemptAt, result.nextWakeAt);
+      const retryAt = new Date(Date.parse(TEST_NOW)
+        + (processingMode === "default" ? 30_000 : 60_000)).toISOString();
+      // A default-mode handoff can checkpoint imported work before its first
+      // attempt. It needs the same projection as the blocked system retry.
+      assert.equal(pendingItem.nextAttemptAt, retryAt);
+      assert.equal(checkpoint.redactedStatus?.hostedMailboxSystemModelFreeWakeAt, retryAt);
+      assert.equal(checkpoint.redactedStatus?.hostedMailboxSystemModelFreeWakeVersion,
+        (BigInt(checkpoint.expectedWorkspaceVersion) + 1n).toString());
+      if (assistantExecutionBlocked) {
+        assert.equal(checkpoint.nextDefaultProcessingWakeAt, TEST_NOW);
+        assert.equal(checkpoint.nextDefaultProcessingWakeReason, "assistant");
+      }
+      assert.doesNotThrow(() => parseHostedWorkspaceCheckpointRequest(checkpoint));
       assert.equal(
         checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
         "0",
@@ -8941,6 +9000,10 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         result.immediateRecheckRequested,
         defaultOwnerHandoffExpected || assistantAdmissionExpected ? true : undefined,
       );
+      const followUpCheckpoint = checkpointRequests.at(-1)!;
+      assert.equal(followUpCheckpoint.redactedStatus?.hostedMailboxSystemModelFreeWakeAt, followUpWakeAt);
+      assert.equal(followUpCheckpoint.redactedStatus?.hostedMailboxSystemModelFreeWakeVersion,
+        (BigInt(followUpCheckpoint.expectedWorkspaceVersion) + 1n).toString());
       assert.equal(
         checkpointRequests.at(-1)?.nextWakeAt,
         followUpWakeAt,

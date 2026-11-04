@@ -1,6 +1,6 @@
 # Hosted Temporal Orchestration ADR
 
-Last verified: 2026-09-09
+Last verified: 2026-11-03
 
 ## Decision
 
@@ -150,35 +150,41 @@ attempt.
 
 An exact system-mailbox pointer is admission, not completion. Web projects the
 authenticated `hostedMailboxSystemHandledThroughSeq` scalar from the existing
-redacted workspace checkpoint and projects `model_free` when live eligible work
-exists after that prefix, otherwise `default_owned` for retained live work.
-The first-row lookup adds at most one tenant-scoped, ordered, filtered lookup
-when its head requires the default owner. That independent lookup starts after
-the greater of the handled prefix and the checkpointed imported watermark:
-later rows can already be complete while the default head retains the prefix.
-Imported independent retries instead use the runtime's canonical `mailbox` or
-`device-sync.reconcile` wake; a due deadline admits `model_free`, while a future
-deadline participates in `blocked.retryAt`. A due assistant wake alone never
-makes that default-owned frontier runnable in system mode. Missing imported
-progress falls back to the handled prefix. The lookup reads no payloads and
-uses no transaction. This class admits execution; it neither completes the
-earlier row nor changes the handled prefix. Runtime claims own independent execution. Environment completion is one generic
-model-free kind, as is deterministic member-channel reconciliation; Temporal
-does not know their product meaning or select a feature-specific processing
-mode. The wire shape and the existing two processing modes remain unchanged.
-Deploy the runtime consumer before the broader Web readiness producer. Older
-Web producers remain safe but can delay independent work behind a default-owned
-head; older runtime consumers retain that delay with newer Web facts. Neither
-skew may retire a live pointer before its handled prefix advances. No Temporal
-workflow command or history changes are required, and rollback preserves the
-existing snapshot, mailbox, and receipt readers.
-This readiness correction uses existing fields and needs only a Web release;
-no private workflow commands, patch markers, or runner request shapes change.
-An in-flight workflow consumes the corrected result at its next facts Activity;
-historical Activity results remain unchanged during replay. Existing runners
-keep their imported-watermark and model-free retry projection contract. Older
-Web with current workers/runners retains the excess polling; reverting Web
-restores that behavior without discarding work. No worker migration is needed.
+redacted workspace checkpoint. Runtime also publishes
+`hostedMailboxSystemModelFreeWakeAt` (an ISO timestamp or explicit null) and
+`hostedMailboxSystemModelFreeWakeVersion` (the accepted checkpoint's workspace
+version). These are derived projections, not new execution state. Older runners
+can preserve unknown status keys, so Web trusts the deadline only when the
+version matches the current workspace. Missing, invalid, or carried-forward
+projections retain the original handled-prefix lookup exactly.
+
+With a current projection, a due model-free deadline admits `model_free`, even
+when a local continuation has no remaining Web mailbox lag. A future deadline
+participates in `blocked.retryAt`. Explicit null means no imported model-free
+work remains. Web independently checks fresh model-free rows strictly after the
+greater of the imported and handled watermarks; completed imported rows cannot
+keep dispatching behind a retained default head. A due generic `assistant` wake
+cannot identify pending device retries: it may win over their later deadlines.
+The generic wake reason is therefore not a model-free readiness heuristic.
+
+The lookup reads no payloads, uses no transaction, and adds at most one ordered,
+tenant-scoped filtered read after the first live row. Readiness neither completes
+the earlier row nor changes handled progress. Runtime claims still own execution,
+and the existing classifier covers device, Environment, deterministic channel
+reconciliation and eligible exact notifications. Temporal receives the same
+frontier and blocked-retry facts, with the same two processing modes.
+
+Deploy Web first, then the runner. New Web with an older runner retains base
+handled-prefix polling until a current runner publishes the projection. New
+runners with pre-change Web remain readable: redacted JSON permits these scalar
+keys, and old Web ignores them and retains base polling. The superseded Web-only
+candidate that unconditionally trusts imported progress is not a safe release
+or rollback target. Rolling back a runner against new Web is safe: its next
+checkpoint changes the workspace version, so copied status falls back to base
+readiness. Reverting Web to pre-change main also restores polling without losing
+work. No Temporal worker release, workflow command, patch marker, request shape,
+or history change is required. In-flight workflows consume new facts at their
+next Activity; replay keeps the recorded historical Activity results.
 
 Usage restoration does not rely on the system retry timer: Ops resets signal
 `runtime_recheck_requested` after commit, credit fulfillment retries that handoff

@@ -789,6 +789,8 @@ describe("hosted orchestration reconciliation facts", () => {
         redactedStatusJson: {
           hostedMailboxSystemHandledThroughSeq: "4",
           hostedMailboxSystemImportedSeq: "6",
+          hostedMailboxSystemModelFreeWakeAt: null,
+          hostedMailboxSystemModelFreeWakeVersion: "4",
         },
       });
       mocks.readHostedWorkspace.mockResolvedValue(workspace);
@@ -827,17 +829,21 @@ describe("hosted orchestration reconciliation facts", () => {
     },
   );
 
-  it.each(["device-sync.reconcile", "mailbox"])(
-    "keeps an imported %s retry behind a default head asleep until its deadline",
-    async (reason) => {
+  it.each(["default head", "model-free head", "handled local continuation"])(
+    "keeps an imported retry with a %s asleep until its deadline",
+    async (scenario) => {
       const retryAt = "2026-05-20T12:05:00.000Z";
       mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-        nextWakeAt: retryAt, nextWakeReason: reason,
+        // The older default head wins the unrestricted generic wake.
+        nextWakeAt: FIXED_NOW, nextWakeReason: "assistant",
         nextDefaultProcessingWakeAt: FIXED_NOW,
         nextDefaultProcessingWakeReason: "assistant",
         systemMailboxProgressGeneration: "7",
         redactedStatusJson: {
-          hostedMailboxSystemHandledThroughSeq: "4", hostedMailboxSystemImportedSeq: "6",
+          hostedMailboxSystemHandledThroughSeq: scenario === "handled local continuation" ? "6" : "4",
+          hostedMailboxSystemImportedSeq: "6",
+          hostedMailboxSystemModelFreeWakeAt: retryAt,
+          hostedMailboxSystemModelFreeWakeVersion: "4",
         },
       }));
       mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
@@ -845,7 +851,8 @@ describe("hosted orchestration reconciliation facts", () => {
       ]);
       mocks.readHostedMailboxFirstLiveSystemItemAfterSeq.mockImplementation(async (input) =>
         input.modelFreeOnly ? null : {
-          dedupeKey: "member.action.requested:synthetic", kind: "member.action.requested", laneSeq: "5",
+          dedupeKey: scenario === "default head" ? "member.action.requested:synthetic" : "device-sync.wake:imported",
+          kind: scenario === "default head" ? "member.action.requested" : "device-sync.wake", laneSeq: "5",
         },
       );
       mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
@@ -855,12 +862,43 @@ describe("hosted orchestration reconciliation facts", () => {
         await (await reconciliationRoute.GET(requestForFacts(), routeContext())).json(),
       );
       const future = await readFacts();
-      expect(future.workspace?.systemMailboxFrontier).toBe("default_owned");
+      expect(future.workspace?.systemMailboxFrontier).toBe(scenario === "default head" ? "default_owned" : null);
       expect(future.blocked?.retryAt).toBe(retryAt);
       vi.setSystemTime(new Date(retryAt));
       expect((await readFacts()).workspace?.systemMailboxFrontier).toBe("model_free");
     },
   );
+
+  it.each([
+    {},
+    { hostedMailboxSystemModelFreeWakeAt: null },
+    { hostedMailboxSystemModelFreeWakeAt: null, hostedMailboxSystemModelFreeWakeVersion: "3" },
+  ])("preserves the base handled-prefix lookup for absent or carried-forward status %j", async (status) => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: FIXED_NOW, nextWakeReason: "assistant",
+      redactedStatusJson: {
+        hostedMailboxSystemHandledThroughSeq: "4", hostedMailboxSystemImportedSeq: "6",
+        ...status,
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: "0" }, { lane: "system", maxSeq: "6" },
+    ]);
+    mocks.readHostedMailboxFirstLiveSystemItemAfterSeq.mockImplementation(async (input) =>
+      input.modelFreeOnly
+        ? BigInt(input.afterSeq) < 6n
+          ? { dedupeKey: "device-sync.wake:imported", kind: "device-sync.wake", laneSeq: "6" }
+          : null
+        : { dedupeKey: "member.action.requested:synthetic", kind: "member.action.requested", laneSeq: "5" },
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(
+      await (await reconciliationRoute.GET(requestForFacts(), routeContext())).json(),
+    );
+    expect(facts.workspace?.systemMailboxFrontier).toBe("model_free");
+    expect(mocks.readHostedMailboxFirstLiveSystemItemAfterSeq).toHaveBeenLastCalledWith(
+      expect.objectContaining({ afterSeq: "4", modelFreeOnly: true }),
+    );
+  });
 
   it("uses zero as the system handled frontier when no checkpoint exists", async () => {
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([

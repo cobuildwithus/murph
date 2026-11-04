@@ -33,11 +33,13 @@ import {
 } from "../src/hosted-runtime/mailbox-state.ts";
 import {
   readHostedSystemMailboxState,
+  resolveHostedSystemMailboxWakeCandidates,
+  selectHostedModelFreeSystemMailboxItems,
   updateHostedSystemMailboxState,
   type HostedSystemMailboxPendingItem,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 import { enqueueHostedSystemMailboxItem } from "../src/hosted-runtime/system-mailbox.ts";
-import { buildHostedExecutionDeviceSyncWake } from "@murphai/hosted-execution";
+import { buildHostedExecutionDeviceSyncWake, buildHostedExecutionRuntimeControlWake } from "@murphai/hosted-execution";
 import type {
   HostedMailboxPostCheckpointEffectResult,
 } from "../src/hosted-runtime/mailbox-import.ts";
@@ -129,6 +131,51 @@ describe("hosted mailbox import checkpoint wrapper", () => {
     }
   });
 
+  test("publishes a future model-free mailbox retry even when its execution class is null", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-mailbox-checkpoint-"));
+    const retryAt = "2026-04-26T00:01:00.000Z";
+    const wake = buildHostedExecutionRuntimeControlWake({
+      eventId: "runtime.maintenance-requested:synthetic", kind: "runtime.maintenance-requested",
+      occurredAt: TEST_NOW, userId: TEST_USER_ID,
+    });
+    const pending: HostedSystemMailboxPendingItem = {
+      attemptCount: 1, itemId: "synthetic_retry", lastAttemptAt: TEST_NOW,
+      lastErrorCode: null, lastErrorMessage: null, mailboxDedupeKey: wake.eventId,
+      mailboxLaneSeq: "1", nextAttemptAt: retryAt, occurredAt: TEST_NOW,
+      postCheckpointRecord: null, requestId: null,
+      routeAction: "apply-runtime-control-request", status: "pending", wake,
+    };
+    try {
+      await updateHostedSystemMailboxState(vaultRoot, () => ({ pending: [pending] }));
+      await writeHostedMailboxImportState({ vaultRoot, state: {
+        ...createEmptyHostedMailboxImportState(), watermarks: { conversation: "0", system: "1" },
+      } });
+      const selected = await resolveHostedSystemMailboxWakeCandidates({
+        now: () => TEST_NOW, state: selectHostedModelFreeSystemMailboxItems({ pending: [pending] }), vaultRoot,
+      });
+      assert.deepEqual(selected.next, { at: retryAt, executionClass: null, reason: "mailbox" });
+      const { mailboxPort } = createMailboxPort({ items: [createMailboxItem()] });
+      const result = await importHostedMailboxPrefixAndCheckpoint({
+        expectedUserId: TEST_USER_ID, limitPerLane: 10, mailboxPort,
+        now: () => TEST_NOW, requestId: "synthetic_retry_import", vaultRoot,
+        importItem: async () => ({ status: "imported" }),
+        createCheckpointRequest: () => ({
+          attemptId: "synthetic_attempt", expectedWorkspaceVersion: "0", leaseGeneration: "1",
+          nextWakeAt: TEST_NOW, nextWakeReason: "assistant", reason: "import", snapshotRef: null,
+        }),
+        workspacePort: { async checkpoint(request) {
+          assert.equal(request.redactedStatus?.hostedMailboxSystemModelFreeWakeAt, retryAt);
+          assert.equal(request.redactedStatus?.hostedMailboxSystemModelFreeWakeVersion, "1");
+          assert.doesNotThrow(() => parseHostedWorkspaceCheckpointRequest(request));
+          return createCheckpointResponse(request);
+        } },
+      });
+      assert.equal(result.checkpoint?.checkpointed, true);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   test("writes changed mailbox import state before checkpointing the workspace", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-mailbox-checkpoint-"));
     const item = createMailboxItem({
@@ -164,6 +211,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
             hostedMailboxSystemHandledThroughSeq: "0",
             hostedMailboxSystemImportedSeq: "0",
             hostedMailboxSystemDeviceSyncContinuationSeqs: [],
+            hostedMailboxSystemModelFreeWakeAt: null,
           });
           Object.assign(input.redactedStatus, {
             hostedMailboxImportedCount: 999,
@@ -232,6 +280,8 @@ describe("hosted mailbox import checkpoint wrapper", () => {
         hostedMailboxSystemHandledThroughSeq: "0",
         hostedMailboxSystemImportedSeq: "0",
         hostedMailboxSystemDeviceSyncContinuationSeqs: [],
+        hostedMailboxSystemModelFreeWakeAt: null,
+        hostedMailboxSystemModelFreeWakeVersion: "1",
       });
       assert.equal(
         JSON.stringify(checkpointRequests).includes("ciphertext_inline_synthetic_checkpoint"),
@@ -397,6 +447,8 @@ describe("hosted mailbox import checkpoint wrapper", () => {
         hostedMailboxSystemHandledThroughSeq: "0",
         hostedMailboxSystemImportedSeq: "2",
         hostedMailboxSystemDeviceSyncContinuationSeqs: [],
+        hostedMailboxSystemModelFreeWakeAt: TEST_NOW,
+        hostedMailboxSystemModelFreeWakeVersion: "1",
       });
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });

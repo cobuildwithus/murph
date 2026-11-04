@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-09-04
+Last verified: 2026-11-03
 
 ## Postgres runtime authority
 
@@ -1130,12 +1130,39 @@ After quiescence, full snapshots derive `systemMailboxProgressGeneration` from
 the checkpoint request builder's latest accepted workspace and advance it only
 for system progress not yet checkpointed.
 
-After a device item records a durable follow-up deadline, that
-`device-sync.reconcile` deadline remains in the canonical model-free
-`nextWakeAt` selection; an independently due or future assistant deadline
-remains available through `nextDefaultProcessingWakeAt` instead of replacing
-the device deadline. A cold pass with assistant execution blocked also retains
-the future device deadline when no mailbox item is runnable yet.
+Checkpoint redacted status independently publishes
+`hostedMailboxSystemModelFreeWakeAt` (ISO timestamp or null) and
+`hostedMailboxSystemModelFreeWakeVersion` (the successor workspace version).
+The runtime filters pending items through `selectHostedModelFreeSystemMailboxItems`
+before its existing wake selector runs. Future retries can have
+`executionClass: null`; filtering the selected result would lose them. This
+projection includes imported rows, retained device continuations and local
+model-free timers. It does not change generic `nextWakeAt` selection or the
+separate `nextDefaultProcessingWakeAt` assistant intent.
+
+Import checkpoints, canonical runtime status publication, and quiescent idle
+snapshots recompute the projection. The existing restored-progress gate also
+publishes a missing or stale projection once for an otherwise idle usage-blocked
+invocation when local progress is at least the canonical progress. Due model-free
+work uses its normal completion checkpoint; unchanged later invocations need no
+new snapshot.
+The independent device completion callback
+marks the workspace dirty and reaches those same publication owners; it does
+not need a separate wake authority. Default-mode checkpoints also publish it:
+imported device work can remain pending when assistant execution yields or a
+model call fails. A failed device attempt retains its retry even when an older
+due default-owned head wins the generic wake.
+
+Web trusts the timestamp only at its matching workspace version. This binding
+is required because older runners merge unknown redacted keys into later
+checkpoints. A missing or stale projection uses the original handled-prefix
+readiness lookup. A current null excludes already imported model-free rows; new
+rows above the imported watermark remain independently eligible. Current future
+deadlines enter the existing blocked retry timer, and due deadlines admit system
+processing even when handled progress has already reached the Web high-water.
+The checkpoint parser and store accept additive scalar keys without an allowlist
+update. Ship the Web consumer before the runner producer; either pre-change
+reader retains base behavior under skew. No Temporal command changes are needed.
 Current conversation work and explicitly approved continuations retain
 foreground priority. A default request behind `system_mailbox`, including
 an authenticated Web-direct request, wakes the exact active child with the

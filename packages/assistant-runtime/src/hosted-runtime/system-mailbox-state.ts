@@ -161,13 +161,22 @@ export async function recoverHostedSystemMailboxClaims(vaultRoot: string): Promi
 export async function readHostedSystemMailboxProgress(input: {
   importedSeq: string;
   now?: () => string;
+  state?: HostedSystemMailboxState;
   vaultRoot: string;
-}): Promise<HostedSystemMailboxProgress> {
-  return resolveHostedSystemMailboxProgress({
-    importedSeq: input.importedSeq,
-    now: (input.now ?? (() => new Date().toISOString()))(),
-    state: await readHostedSystemMailboxState(input.vaultRoot),
+}): Promise<HostedSystemMailboxProgress & { modelFreeWakeAt: string | null }> {
+  const now = (input.now ?? (() => new Date().toISOString()))();
+  const state = input.state ?? await readHostedSystemMailboxState(input.vaultRoot);
+  // Filter items before selecting a wake: future retries have no executionClass,
+  // and the unrestricted selector can hide them behind an earlier assistant head.
+  const { next } = await resolveHostedSystemMailboxWakeCandidates({
+    now: () => now,
+    state: selectHostedModelFreeSystemMailboxItems(state),
+    vaultRoot: input.vaultRoot,
   });
+  return {
+    ...resolveHostedSystemMailboxProgress({ importedSeq: input.importedSeq, now, state }),
+    modelFreeWakeAt: next.at,
+  };
 }
 
 export interface HostedSystemMailboxProgress {
