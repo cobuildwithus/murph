@@ -261,21 +261,17 @@ function buildObservation(input: {
     });
   }
   // Cloudflare can return an impossible message age in a single read, and the
-  // count and age are not read together. A stall pages only after two checks
-  // in a row see a backlog whose oldest message is past the threshold.
+  // count and age are not read together. Hold a stall back for one check when
+  // the previous check gave a usable reading that showed no stall; an unknown
+  // or failed previous read does not hold it back.
   const stall = readMainQueueStall(input.main, input.observedAtMs);
-  const previous = input.previousObservation;
-  const stallConfirmed = stall !== null
-    && previous !== null
-    && readMainQueueStall(previous.main, previous.observedAtMs) !== null;
-  if (stallConfirmed) {
+  const stallHeldBack = stall !== null
+    && showsNoMainQueueStall(input.previousObservation);
+  if (stall !== null && !stallHeldBack) {
     conditions.push(stall);
   }
   const mainQueueHealthIncomplete = input.main !== null
-    && (
-      (input.main.backlogCount > 0) !== (input.main.oldestMessageAtMs !== null)
-      || (stall !== null && !stallConfirmed)
-    );
+    && (!hasConsistentMainAge(input.main) || stallHeldBack);
   if (
     input.failedQueues.length > 0
     && input.consecutiveMetricsFailures
@@ -317,6 +313,19 @@ function readMainQueueStall(
     kind: "main_queue_stalled",
     oldestMessageAtMs: main.oldestMessageAtMs,
   };
+}
+
+function showsNoMainQueueStall(
+  observation: DeviceWebhookQueueHealthObservation | null,
+): boolean {
+  return observation !== null
+    && observation.main !== null
+    && hasConsistentMainAge(observation.main)
+    && readMainQueueStall(observation.main, observation.observedAtMs) === null;
+}
+
+function hasConsistentMainAge(main: DeviceWebhookQueueMetricSnapshot): boolean {
+  return (main.backlogCount > 0) === (main.oldestMessageAtMs !== null);
 }
 
 function buildAlertMessage(
