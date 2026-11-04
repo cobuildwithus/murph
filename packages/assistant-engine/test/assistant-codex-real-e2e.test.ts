@@ -1717,6 +1717,7 @@ function readFocusedSleepPatternProjectionCommand(command: string): string {
 describeRealCodex('real Codex sleep summary cards', () => {
   it.each([
     ['sleep card: general sleep question attaches the host-built card', 'How did I sleep last night?', 'general'],
+    ['sleep card: nightly recap discovers the deferred host-built card', 'Give me a recap of my last night of sleep.', 'general'],
     ['sleep card: specific deep sleep question answers in text', 'What was my deep sleep last night?', 'specific'],
     ['sleep card: compound sleep and training question stays text', 'How did I sleep and should I train today?', 'compound'],
     ['sleep card: missing night answers truthfully without a card', 'How did I sleep last night?', 'missing'],

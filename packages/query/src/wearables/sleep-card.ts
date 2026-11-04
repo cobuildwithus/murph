@@ -38,7 +38,7 @@ export async function resolveWearableSleepCardNight(
   )[0];
   if (!night) return null;
   const timeZone = night.timeZone && isValidIanaTimeZone(night.timeZone) ? night.timeZone : reportingZone;
-  const recovery = (await summarizeWearableRecoveryRuntime(vaultRoot, { date: night.date }))[0] ?? null;
+  const recovery = await resolveSleepCardRecovery(vaultRoot, wakeDate, night);
   let sdnnMilliseconds: number | null = null;
   const start = Date.parse(night.sleepStartAt ?? "");
   const end = Date.parse(night.sleepEndAt ?? "");
@@ -59,4 +59,26 @@ export async function resolveWearableSleepCardNight(
     }
   }
   return { night, recovery, timeZone, sdnnMilliseconds };
+}
+
+/**
+ * Resting HR for the card's wake date, from the night's own wearable first.
+ * Public summaries omit candidates, so the provider-filtered reader keeps the
+ * value with this night; another wearable's value is used only when this one
+ * has none. The general summary may substitute lowest sleeping HR, which a
+ * sleep card must never label as resting HR.
+ */
+async function resolveSleepCardRecovery(
+  vaultRoot: string,
+  wakeDate: string,
+  night: ProjectedWearableSleepSummary,
+): Promise<ProjectedWearableRecoverySummary | null> {
+  const provider = night.provider ?? night.totalSleepMinutes.selection.provider;
+  let recovery = provider
+    ? (await summarizeWearableRecoveryRuntime(vaultRoot, { date: wakeDate, providers: [provider] }))[0] ?? null
+    : null;
+  if (recovery?.restingHeartRate.selection.resolution !== "direct") {
+    recovery = (await summarizeWearableRecoveryRuntime(vaultRoot, { date: wakeDate }))[0] ?? null;
+  }
+  return recovery?.restingHeartRate.selection.resolution === "fallback" ? null : recovery;
 }

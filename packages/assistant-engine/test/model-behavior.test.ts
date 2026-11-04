@@ -1304,7 +1304,9 @@ describe('assistant system prompt cache stability', () => {
     // reporting it logged as unknown. Direct input grows 307 UTF-8 bytes and
     // groups are unchanged; focused Terra arrival-check journeys moved from 0/3
     // to 5/5. Retain the prior 128-character margin.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(79_737)
+    // Sleep-card discovery replaces the generic nightly-summary read direction,
+    // adding 557 characters. Preserve the existing 128-character margin.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(80_294)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -1611,7 +1613,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toMatchInlineSnapshot(`"68a1d5108af16ff8649843be4ab7aa231321228a52be79e80f0f3010cfea7c67"`)
-    expect(promptA.cacheMetadata.stableRouteCapabilityPromptHash).toMatchInlineSnapshot(`"c636dea248569b4b041de827f6954d50768ed7b895fa9b8d7e5273b9c37d065f"`)
+    expect(promptA.cacheMetadata.stableRouteCapabilityPromptHash).toMatchInlineSnapshot(`"e2c858c68a87be1554bd7d72f15bc6b994c2b480afadaaead0957c6180fbabdb"`)
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
     )

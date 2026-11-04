@@ -354,6 +354,7 @@ rebuild for this storage change.
 `resolveWearableSleepCardNight(vaultRoot, { wakeDate })` selects one eligible
 night by localized wake date from a bounded adjacent stored-date read. It
 retains total-only evidence, excludes naps/short/tentative sessions, returns
-recovery for the selected stored date, and optionally enriches absent RMSSD
+recovery on the wake date with resting HR from the night's provider when present
+(otherwise the cross-provider selection on that date), and optionally enriches absent RMSSD
 with canonical SDNN samples inside the sleep window. Night timezone precedes
 validated vault reporting timezone. `wearables day` semantics are unchanged.

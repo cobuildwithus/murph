@@ -3,12 +3,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { initializeVault, withCanonicalWriteLock } from "@murphai/core";
-import { resolveWearableSleepCardNight, summarizeWearableDayRuntime } from "../src/index.ts";
+import { resolveWearableSleepCardNight, summarizeWearableDayRuntime, summarizeWearableRecoveryRuntime } from "../src/index.ts";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
-type Night = { date: string; total?: number; start?: string; end?: string; zone?: string; type?: string; state?: string; rhr?: number; provider?: string };
+type Night = { date: string; total?: number; start?: string; end?: string; zone?: string; type?: string; state?: string; rhr?: number; hrv?: number; lowestHr?: number; provider?: string };
 async function vault(nights: Night[], zone = "UTC", sdnn: Array<[string, number]> = []) {
   const root = await mkdtemp(path.join(tmpdir(), "sleep-card-query-")); roots.push(root);
   await initializeVault({ vaultRoot: root, timezone: zone, createdAt: "2026-01-01T00:00:00Z" });
@@ -19,6 +19,8 @@ async function vault(nights: Night[], zone = "UTC", sdnn: Array<[string, number]
     if (night.start && night.end) rows.push({ ...base, id: `evt_synthetic_window_${i}`, kind: "sleep_session", title: "Synthetic sleep", startAt: night.start, endAt: night.end, durationMinutes: (Date.parse(night.end) - Date.parse(night.start)) / 60_000, sleepType: night.type ?? "main_sleep", sleepState: night.state ?? "confirmed", externalRef: ref });
     if (night.total !== undefined) rows.push({ ...base, id: `evt_synthetic_total_${i}`, kind: "observation", title: "Synthetic sleep total", metric: "totalSleepMinutes", value: night.total, unit: "minutes", externalRef: { ...ref, facet: "totalSleepMinutes" } });
     if (night.rhr !== undefined) rows.push({ ...base, id: `evt_synthetic_rhr_${i}`, kind: "observation", title: "Synthetic recovery", metric: "restingHeartRate", value: night.rhr, unit: "bpm", externalRef: { ...ref, resourceType: "daily", facet: "restingHeartRate" } });
+    if (night.hrv !== undefined) rows.push({ ...base, id: `evt_synthetic_hrv_${i}`, kind: "observation", title: "Synthetic sleep HRV", metric: "hrv", value: night.hrv, unit: "ms", externalRef: { ...ref, facet: "hrv" } });
+    if (night.lowestHr !== undefined) rows.push({ ...base, id: `evt_synthetic_lowest_hr_${i}`, kind: "observation", title: "Synthetic lowest sleep HR", metric: "lowestHeartRate", value: night.lowestHr, unit: "bpm", externalRef: { ...ref, facet: "lowestHeartRate" } });
   }
   for (const [i, [at, value]] of sdnn.entries()) rows.push({ schemaVersion: "murph.event.v1", source: "device", id: `evt_synthetic_sdnn_${i}`, kind: "observation", title: "Synthetic SDNN", occurredAt: at, recordedAt: at, metric: "hrv-sdnn", value, unit: "ms", externalRef: { system: "apple_health", resourceType: "metric", resourceId: `synthetic-sdnn-${i}`, facet: "hrv-sdnn" } });
   await withCanonicalWriteLock(root, async () => {
@@ -29,13 +31,51 @@ async function vault(nights: Night[], zone = "UTC", sdnn: Array<[string, number]
 }
 
 describe("sleep card night resolver", () => {
-  it("localizes a previous stored date in Tokyo and joins recovery by that stored date", async () => {
-    const root = await vault([{ date: "2026-11-02", start: "2026-11-02T15:18:00Z", end: "2026-11-02T23:02:00Z", zone: "Asia/Tokyo", total: 436, rhr: 45 }, { date: "2026-11-03", total: 100, rhr: 90 }], "America/New_York");
+  it("joins recovery by localized wake date while retaining the selected night's HRV", async () => {
+    const root = await vault([{ date: "2026-11-02", start: "2026-11-02T15:00:00Z", end: "2026-11-02T23:00:00Z", zone: "Asia/Tokyo", total: 420, rhr: 63, hrv: 72, provider: "whoop" }, { date: "2026-11-03", total: 100, rhr: 57, hrv: 81, provider: "whoop" }], "America/New_York");
     const result = await resolveWearableSleepCardNight(root, { wakeDate: "2026-11-03" });
     expect(result?.night.date).toBe("2026-11-02");
     expect(result?.timeZone).toBe("Asia/Tokyo");
-    expect(result?.recovery?.restingHeartRate.selection.value).toBe(45);
+    expect(result?.recovery?.date).toBe("2026-11-03");
+    expect(result?.recovery?.restingHeartRate.selection.value).toBe(57);
+    expect(result?.night.hrv.selection.value).toBe(72);
     expect((await summarizeWearableDayRuntime(root, "2026-11-03"))?.sleep?.totalSleepMinutes.selection.value).toBe(100);
+  });
+  it("prefers the night's wearable over the cross-provider recovery winner", async () => {
+    const root = await vault([
+      { date: "2026-11-03", start: "2026-11-02T23:00:00Z", end: "2026-11-03T07:00:00Z", total: 420, rhr: 62, hrv: 84, provider: "oura" },
+      { date: "2026-11-03", rhr: 54, hrv: 70, provider: "whoop" },
+    ]);
+    expect((await summarizeWearableRecoveryRuntime(root, { date: "2026-11-03" }))[0]?.restingHeartRate.selection).toMatchObject({ provider: "whoop", value: 54 });
+    const result = await resolveWearableSleepCardNight(root, { wakeDate: "2026-11-03" });
+    expect(result?.night.provider).toBe("oura");
+    expect(result?.recovery?.restingHeartRate.selection).toMatchObject({ provider: "oura", value: 62 });
+    expect(result?.night.hrv.selection).toMatchObject({ provider: "oura", value: 84 });
+  });
+  it("falls back on the wake date only when the night's provider has no resting HR", async () => {
+    const root = await vault([
+      { date: "2026-11-02", start: "2026-11-02T23:00:00Z", end: "2026-11-03T07:00:00Z", total: 420, rhr: 62, provider: "oura" },
+      { date: "2026-11-03", hrv: 84, provider: "oura" },
+      { date: "2026-11-03", rhr: 54, provider: "whoop" },
+    ]);
+    const result = await resolveWearableSleepCardNight(root, { wakeDate: "2026-11-03" });
+    expect(result?.recovery?.date).toBe("2026-11-03");
+    expect(result?.recovery?.restingHeartRate.selection).toMatchObject({ provider: "whoop", value: 54 });
+  });
+  it("uses the total's provider for a night without a sleep window", async () => {
+    const root = await vault([{ date: "2026-11-03", total: 420, rhr: 62, provider: "oura" }, { date: "2026-11-03", rhr: 54, provider: "whoop" }]);
+    const result = await resolveWearableSleepCardNight(root, { wakeDate: "2026-11-03" });
+    expect(result?.night.provider).toBeNull();
+    expect(result?.recovery?.restingHeartRate.selection).toMatchObject({ provider: "oura", value: 62 });
+  });
+  it.each([true, false])("does not mistake the recovery reader's lowest-HR fallback for resting HR (other RHR: %s)", async (otherRestingHr) => {
+    const root = await vault([
+      { date: "2026-11-03", start: "2026-11-02T23:00:00Z", end: "2026-11-03T07:00:00Z", total: 420, lowestHr: 48, provider: "oura" },
+      ...(otherRestingHr ? [{ date: "2026-11-03", rhr: 54, provider: "whoop" }] : []),
+    ]);
+    expect((await summarizeWearableRecoveryRuntime(root, { date: "2026-11-03", providers: ["oura"] }))[0]?.restingHeartRate.selection).toMatchObject({ value: 48, fallbackFromMetric: "lowestHeartRate" });
+    const result = await resolveWearableSleepCardNight(root, { wakeDate: "2026-11-03" });
+    expect(result?.recovery?.restingHeartRate.selection.value ?? null).toBe(otherRestingHr ? 54 : null);
   });
   it("uses the validated reporting zone when the night has no zone", async () => {
     const root = await vault([{ date: "2026-11-02", start: "2026-11-02T15:18:00Z", end: "2026-11-02T23:02:00Z", total: 436 }], "Asia/Tokyo");
