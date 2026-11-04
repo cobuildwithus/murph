@@ -1,6 +1,6 @@
 # iOS Meals API
 
-Last verified: 2026-11-02
+Last verified: 2026-11-04
 
 ## Scope and ownership
 
@@ -302,6 +302,50 @@ All requests below use the existing first-party native
 do not send a member ID to select another account. Responses use
 `Cache-Control: no-store`. JSON examples are synthetic, and read examples are
 field selections from larger responses unless explicitly stated otherwise.
+
+### Private numbers
+
+`GET /api/device-sync/companion/numbers` accepts no query parameters. It uses
+Meals' bearer, active-access and consent authority, including native-session and
+authority rechecks after decryption. Every response uses `Cache-Control: no-store`.
+It reads only saved `core`, `metricsIndex` and the deduplicated buckets for
+`resting-heart-rate`, `total-sleep-minutes`, `steps` and `estimated-vo2-max`, passing
+the same selection to session creation and decoding. It never wakes or refreshes
+the runtime and adds no persisted projection.
+
+The response has exactly `timeZone`, `savedAt` (replica generation timestamp),
+`freshness`, `window: { from, through }`, and `numbers`. The window is 90 inclusive
+local dates ending today in the vault's canonical zone, already saved in core's
+`meals.timeZone` even for members with no meals. Legacy replicas without that zone
+return retryable 503 `NUMBERS_PROJECTION_UNAVAILABLE`; there is no UTC fallback.
+`freshness` uses the same age/generation assessment as Journal. A missing replica,
+missing replica object or empty session returns exactly
+`{ "numbers": null, "freshness": "stale" }`. Missing requested buckets or unreadable
+saved data return the same retryable 503. Unknown query parameters return 400
+`NUMBERS_INVALID_REQUEST` before replica I/O.
+
+`numbers` has exactly `restingHeartRate`, `sleep`, `steps`, `vo2Max`, in that order.
+Each is null when no usable daily value exists in the window; otherwise it has:
+
+- `unit`: respectively `bpm`, `minutes`, `steps`, `ml/kg/min`.
+- `latest: { date, value }` and ascending `daily: [{ date, value }]`, with one
+  value per saved local date. Provider precedence is already applied in the
+  replica. Remaining same-date daily/value rows use the last observed row (ID
+  breaks timestamp ties); aggregate and comparator rows are excluded.
+- `stale`: latest date is older than the catalog threshold, currently 14 local
+  days for daily metrics and 45 for VO2 max, independent of replica freshness.
+- `comparison`: null without coverage, otherwise
+  `{ baseline: { from, through, value, days }, current: { from, through, value, days }, delta }`.
+  Bounds are the first seven and last seven dates of the 90-day window; `days`
+  counts distinct measured dates. Daily metrics use means with at least four
+  dates per window. VO2 uses its existing intermittent median/two-date policy
+  within those same requested bounds. Missing dates are never filled.
+
+Normalization and comparison use the public health-metrics primitives. Arithmetic
+uses unrounded canonical values; wire values and delta are rounded to integers
+for heart rate, sleep and steps, and one decimal for VO2. Delta keeps the raw
+current-minus-baseline direction. No source IDs, labels, health context, meals,
+notes, lab rows or metric-selection metadata appear in this response.
 
 ### Edit with Murph
 
