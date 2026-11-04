@@ -262,8 +262,8 @@ it("recovers a real legacy import from the frozen production core client without
 
 function publicDays(input: typeof days) { return input.map(day => ({ ...day, meals: day.meals.map(item => ({ ...item, photo: null })) })); }
 
-it("signs only the selected owner meals and never leaks storage metadata", async () => {
-  const thumbnail = { relativePath: "raw/meals/2026/11/meal_fixture/thumbnail.jpg", sha256: "b".repeat(64), byteSize: 100, width: 640, height: 480 };
+it.each(["thumbnail.jpg", "thumbnail-v2-synthetic-operation.jpg"])("signs selected owner meals without storage metadata: %s", async filename => {
+  const thumbnail = { relativePath: `raw/meals/2026/11/meal_fixture/${filename}`, sha256: "b".repeat(64), byteSize: 100, width: 640, height: 480 };
   const saved = structuredClone(projection);
   Object.assign(saved.days[0]!.meals[0]!, { thumbnail });
   Object.assign(saved.days[1]!.meals[0]!, { thumbnail: { ...thumbnail, sha256: "c".repeat(64) } });

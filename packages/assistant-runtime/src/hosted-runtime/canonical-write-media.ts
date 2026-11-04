@@ -19,6 +19,7 @@ import type {
 } from "./platform.ts";
 import {
   publishHostedWorkspaceMediaReferences,
+  isHostedMealMediaV2Path,
   readHostedMediaReferenceCatalogue,
   writeHostedMediaReferenceCatalogue,
   type HostedMediaReference,
@@ -196,12 +197,19 @@ async function restoreHostedCanonicalWriteMediaReferences(input: {
   let changed = false;
   for (const action of input.receipt.actions) {
     if (action.kind === "raw_upsert" && action.mediaRef) {
+      const previous = entries.get(action.targetRelativePath);
+      const completed = previous?.pendingUpload === false
+        && previous.mediaId === action.mediaRef.id && previous.mediaKind === action.mediaRef.mediaKind
+        && previous.sha256 === action.sha256 && previous.byteSize === action.byteLength;
       entries.set(action.targetRelativePath, {
         byteSize: action.byteLength,
         expiresAt: action.mediaRef.expiresAt,
         mediaId: action.mediaRef.id,
         mediaKind: action.mediaRef.mediaKind,
         mimeType: action.mediaType,
+        // Meal receipts include the bytes. Delivery may not have happened yet;
+        // restore must retry even if a prior PUT lost its reply.
+        ...(isHostedMealMediaV2Path(action.targetRelativePath) ? { pendingUpload: !completed } : {}),
         recordedAt: action.mediaRef.recordedAt,
         relativePath: action.targetRelativePath,
         sha256: action.sha256,

@@ -1819,3 +1819,11 @@ The current contract remains in [Hosted Temporal orchestration](references/hoste
 Meal thumbnail retry after failed canonical publication and terminal media cleanup
 is verified in [the retention recovery plan](exec-plans/completed/2026-11-04-meal-photo-retention-retry.md).
 `../ARCHITECTURE.md` owns the thumbnail identity and deletion contract.
+
+The [reviewed meal-thumbnail durability plan](exec-plans/completed/2026-11-04-meal-thumbnail-upload-durability-reviewed.md)
+records bounded idle delivery, acknowledged cleanup, compatibility and red/green
+proof. `../ARCHITECTURE.md` owns the current delivery and rollback contract.
+The [prototype plan](exec-plans/completed/2026-11-04-meal-thumbnail-upload-durability.md)
+and [generation-chain evaluation](exec-plans/completed/2026-11-04-meal-thumbnail-generation-evaluation.md)
+remain historical evidence; their foreground recovery and legacy-marker
+assumptions were superseded by the reviewed implementation.

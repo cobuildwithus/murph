@@ -1,3 +1,9 @@
+import { createMealMediaStore } from "./hosted-meal-media.harness.ts";
+import { runHostedMealMediaMaintenance, createHostedMealMediaBudget } from "../src/hosted-runtime/meal-media-maintenance.ts";
+import { HostedRuntimeMediaWriteError } from "../src/hosted-runtime/platform.ts";
+async function uploadCommittedHostedMealMediaReferences(input: { vaultRoot: string; mediaStore: HostedRuntimeMediaStore }) {
+  return runHostedMealMediaMaintenance({ ...input, budget: createHostedMealMediaBudget(), signal: new AbortController().signal, persistRetry: async () => {} });
+}
 import { showMealRecord, removeAutomaticMealPhotoRecord } from "@murphai/vault-usecases/records";
 import * as pendingInputIndex from "../src/hosted-runtime/pending-input-index.ts";
 import { parseHostedCanonicalWriteReceiptArtifact } from "../src/hosted-runtime/canonical-write-receipt.ts";
@@ -60,6 +66,7 @@ import type {
 import {
   publishHostedWorkspaceMediaReferencesForSnapshot,
   readHostedMediaReferenceCatalogue,
+  writeHostedMediaReferenceCatalogue,
 } from "../src/hosted-runtime/media-references.ts";
 
 test.each(["warm", "restored"])("retires an expired generated capture in a %s workspace", async (workspace) => {
@@ -828,7 +835,7 @@ test.each([
     },
     async record(descriptor) {
       recordCalls.push(descriptor.mediaId);
-      if (retiredIds.has(descriptor.mediaId)) throw new Error("Media lifetime registration was rejected.");
+      if (retiredIds.has(descriptor.mediaId)) throw new HostedRuntimeMediaWriteError({ cause: new Error("Media lifetime registration was rejected."), retryable: true });
       deadlines.set(descriptor.mediaId, descriptor.expiresAt ?? null);
     },
   };
@@ -934,25 +941,57 @@ test.each([
   }
 });
 
-test.each(["warm", "restored"])("meal retention retries a rolled-back thumbnail after terminal media cleanup in a %s workspace", async (workspaceKind) => {
+test.each(["warm", "restored"].flatMap(workspaceKind => ["receipt", "receipt_response", "put_response", "registration_response"].map(failureKind => ({ workspaceKind, failureKind }))))("meal retention recovers $failureKind failure in a $workspaceKind workspace", async ({ workspaceKind, failureKind }) => {
   const root = await mkdtemp(path.join(tmpdir(), "murph-meal-retention-retry-"));
   let vaultRoot = path.join(root, "live");
   const store = createHostedRuntimeMediaStoreStub();
   const retiredIds = new Set<string>();
+  const lifetimes = new Map<string, string | null>();
+  let losePutResponse = failureKind === "put_response";
+  let loseRegistrationResponse = failureKind === "registration_response";
+  let failDelete = false;
   const mediaStore: HostedRuntimeMediaStore = {
     ...store.mediaStore,
+    async record(descriptor) {
+      if (retiredIds.has(descriptor.mediaId)) throw new HostedRuntimeMediaWriteError({ cause: new Error("Media lifetime registration was rejected."), retryable: true });
+      lifetimes.set(descriptor.mediaId, descriptor.expiresAt ?? null);
+      if (loseRegistrationResponse) {
+        loseRegistrationResponse = false;
+        throw new HostedRuntimeMediaWriteError({ cause: new Error("Synthetic lost registration response"), retryable: true });
+      }
+    },
     async put(descriptor) {
-      if (retiredIds.has(descriptor.mediaId)) throw new Error("Runtime upload admission was rejected.");
+      if (retiredIds.has(descriptor.mediaId)) throw new HostedRuntimeMediaWriteError({ cause: new Error("Runtime upload admission was rejected."), retryable: true });
       await store.mediaStore.put(descriptor);
+      // Model the remote PUT's lifetime registration before its reply is lost.
+      lifetimes.set(descriptor.mediaId, descriptor.expiresAt ?? null);
+      if (losePutResponse) {
+        losePutResponse = false;
+        throw new HostedRuntimeMediaWriteError({ cause: new Error("Synthetic lost media PUT response"), retryable: true });
+      }
     },
     async delete(descriptor) {
+      if (failDelete) { failDelete = false; throw new HostedRuntimeMediaWriteError({ cause: new Error("Synthetic media deletion failure"), retryable: true }); }
+      if (!lifetimes.has(descriptor.mediaId) && !retiredIds.has(descriptor.mediaId)) throw new HostedRuntimeMediaWriteError({ cause: new Error("HTTP 409: absent retirement"), retryable: true });
       retiredIds.add(descriptor.mediaId);
+      lifetimes.delete(descriptor.mediaId);
       await store.mediaStore.delete?.(descriptor);
     },
   };
-  const { artifactStore } = createHostedRuntimeArtifactStoreStub();
+  const { artifactStore, storedBytesByHash } = createHostedRuntimeArtifactStoreStub();
+  let rejectedReceipt = "";
   const capturedAt = "2030-01-01T12:00:00.000Z";
   const now = new Date("2030-04-01T12:00:00.000Z");
+  const accepted: { snapshot?: { bytes: Uint8Array; hash: string } } = {};
+  const checkpoint = async () => {
+    await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore });
+    const bytes = await snapshotHostedBundleRoots({ kind: "vault", roots: [{ root: vaultRoot, rootKey: "vault" }] });
+    assert.ok(bytes);
+    const hash = sha256HostedBundleHex(bytes);
+    await artifactStore.put({ bytes, sha256: hash });
+    accepted.snapshot = { bytes, hash };
+    await uploadCommittedHostedMealMediaReferences({ vaultRoot, mediaStore });
+  };
   try {
     await initializeVault({ vaultRoot, timezone: "UTC" });
     const photoPath = path.join(root, "fixture.png");
@@ -962,40 +1001,60 @@ test.each(["warm", "restored"])("meal retention retries a rolled-back thumbnail 
     const maintain = (failReceipt: boolean) => withHostedCanonicalWritePort({
       async persistCanonicalWrite(persistence) {
         const externalized = await externalizeHostedCanonicalWriteMediaPayloads({ persistence, mediaStore, vaultRoot });
+        if (failReceipt) {
+          rejectedReceipt = `${JSON.stringify(externalized.receipt, null, 2)}\n`;
+          // Reproduce an old runner's acknowledged pre-receipt upload. New
+          // runners must also recover its already-terminal media identity.
+          const entry = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]!;
+          await mediaStore.put({ ...entry, bytes: new Uint8Array(await readFile(path.join(vaultRoot, entry.relativePath))) });
+        }
         await appendHostedCanonicalWriteReceiptToArtifactLog({
           ...externalized, previousStatus: {},
           artifactStore: failReceipt ? {
             ...artifactStore,
-            async put() { throw new Error("Synthetic receipt upload failure"); },
+            async put(input) {
+              if (failureKind === "receipt_response") await artifactStore.put(input);
+              throw new Error("Synthetic receipt upload failure");
+            },
           } : artifactStore,
         });
       },
     }, () => runMealPhotoMaintenance({ vaultRoot, now }));
 
-    await expect(maintain(true)).rejects.toThrow("Synthetic receipt upload failure");
-    expect(store.putCalls).toHaveLength(1);
-    const rolledBackMediaId = store.putCalls[0]!.mediaId;
-    expect((await readEvent({ vaultRoot, eventId: first.event.id })).event).not.toHaveProperty("photoThumbnail");
-    expect(await readFile(path.join(vaultRoot, first.photo!.relativePath))).toEqual(photoBytes);
-    expect(await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).toMatchObject({ prunedMediaCount: 1 });
-    expect(retiredIds.has(rolledBackMediaId)).toBe(true);
+    const receiptFailure = failureKind.startsWith("receipt");
+    if (receiptFailure) {
+      await expect(maintain(true)).rejects.toThrow("Synthetic receipt upload failure");
+      expect([...storedBytesByHash.values()].some(bytes => Buffer.from(bytes).toString("utf8") === rejectedReceipt)).toBe(failureKind === "receipt_response");
+      expect((await readEvent({ vaultRoot, eventId: first.event.id })).event).not.toHaveProperty("photoThumbnail");
+      expect(await readFile(path.join(vaultRoot, first.photo!.relativePath))).toEqual(photoBytes);
+      expect(await uploadCommittedHostedMealMediaReferences({ vaultRoot, mediaStore })).toMatchObject({ retired: 1 });
+      expect(retiredIds.has(store.putCalls[0]!.mediaId)).toBe(true);
+      await checkpoint();
+    } else {
+      await maintain(false);
+      expect(store.putCalls).toHaveLength(0);
+      await checkpoint();
+      // A failed delivery effect cannot roll back the accepted canonical meal.
+      expect((await readEvent({ vaultRoot, eventId: first.event.id })).event).toHaveProperty("photoThumbnail");
+      expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]).toMatchObject({ pendingUpload: true, expiresAt: null });
+      expect([...lifetimes.values()]).toEqual([null]);
+    }
+    const firstMediaId = [...retiredIds][0] ?? [...lifetimes.keys()][0]!;
 
     if (workspaceKind === "restored") {
-      const snapshot = await snapshotHostedBundleRoots({ kind: "vault", roots: [{ root: vaultRoot, rootKey: "vault" }] });
-      assert.ok(snapshot);
-      const hash = sha256HostedBundleHex(snapshot);
-      await artifactStore.put({ bytes: snapshot, sha256: hash });
+      assert.ok(accepted.snapshot);
+      const { bytes, hash } = accepted.snapshot;
       vaultRoot = path.join(root, "restored");
       await restoreHostedWorkspaceRuntimeJobWorkspace({ vaultRoot,
-        platform: { ...createPlatform({ artifactBytesByHash: new Map([[hash, snapshot]]), mailboxPort: null, workspacePort: null }), artifactStore, logPort: null, mediaStore },
-        workspace: createWorkspaceState({ snapshotRef: createSnapshotFixtureRef({ hash, size: snapshot.byteLength }) }),
+        platform: { ...createPlatform({ artifactBytesByHash: new Map([[hash, bytes]]), mailboxPort: null, workspacePort: null }), artifactStore, logPort: null, mediaStore },
+        workspace: createWorkspaceState({ snapshotRef: createSnapshotFixtureRef({ hash, size: bytes.byteLength }) }),
       });
     }
 
     const second = await addMeal({ vaultRoot, photoPath, photoCapturedAt: capturedAt, occurredAt: capturedAt });
-    await expect(maintain(false)).resolves.toMatchObject({ thumbnailCount: 2, retiredPhotoCount: 2, blockedMealCount: 0, hasMore: false, nextEligibleAt: null });
-    expect(store.storedBytesByMediaId.has(rolledBackMediaId)).toBe(false);
-    expect(store.putCalls.slice(1).every(call => call.mediaId !== rolledBackMediaId)).toBe(true);
+    await expect(maintain(false)).resolves.toMatchObject({ thumbnailCount: receiptFailure ? 2 : 1, retiredPhotoCount: receiptFailure ? 2 : 1, blockedMealCount: 0, hasMore: false, nextEligibleAt: null });
+    await checkpoint();
+    expect(store.storedBytesByMediaId.has(firstMediaId)).toBe(!receiptFailure);
     for (const meal of [first, second]) {
       expect(JSON.parse(await readFile(path.join(vaultRoot, meal.photo!.relativePath), "utf8"))).toMatchObject({ reason: "meal_photo_retention" });
       const current = (await readEvent({ vaultRoot, eventId: meal.event.id })).event;
@@ -1004,17 +1063,131 @@ test.each(["warm", "restored"])("meal retention retries a rolled-back thumbnail 
       expect([...await readFile(path.join(vaultRoot, current.photoThumbnail.relativePath))].slice(0, 2)).toEqual([255, 216]);
     }
     await expect(maintain(false)).resolves.toMatchObject({ thumbnailCount: 0, retiredPhotoCount: 0, blockedMealCount: 0, nextEligibleAt: null });
-    expect(store.putCalls).toHaveLength(3);
+    expect(store.storedBytesByMediaId.size).toBe(2);
     for (const meal of [first, second]) await deleteEvent({ vaultRoot, eventId: meal.event.id });
+    failDelete = true;
+    await expect(publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).rejects.toThrow("Synthetic media deletion failure");
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toHaveLength(2);
     expect(await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).toMatchObject({ prunedMediaCount: 2 });
+    await checkpoint();
     expect(store.storedBytesByMediaId.size).toBe(0);
+    expect(lifetimes.size).toBe(0);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test.each(["before_registration", "partial_put", "old_catalogue"])("cold receipt recovery retains meal upload intent across orphan grace: %s", async (failureKind) => {
+  const root = await mkdtemp(path.join(tmpdir(), "murph-meal-pending-recovery-"));
+  let vaultRoot = path.join(root, "live");
+  const store = createHostedRuntimeMediaStoreStub();
+  const { artifactStore } = createHostedRuntimeArtifactStoreStub();
+  const lifetimes = new Map<string, number | null>();
+  const retired = new Set<string>();
+  let failPut = failureKind === "partial_put";
+  let clockMs = Date.parse("2030-04-01T12:00:00.000Z");
+  const mediaStore: HostedRuntimeMediaStore = { ...store.mediaStore,
+    async record(descriptor) {
+      if (retired.has(descriptor.mediaId)) throw new HostedRuntimeMediaWriteError({ cause: new Error("Terminal media identity"), retryable: true });
+      lifetimes.set(descriptor.mediaId, descriptor.expiresAt == null ? null : Date.parse(descriptor.expiresAt));
+    },
+    async put(descriptor) {
+      if (retired.has(descriptor.mediaId)) throw new HostedRuntimeMediaWriteError({ cause: new Error("Terminal media identity"), retryable: true });
+      // Admission creates provisional grace only when no registration exists.
+      if (!lifetimes.has(descriptor.mediaId)) lifetimes.set(descriptor.mediaId, clockMs + 65 * 60_000);
+      await store.mediaStore.put(descriptor);
+      if (failPut) { failPut = false; throw new HostedRuntimeMediaWriteError({ cause: new Error("Synthetic interrupted PUT before remote registration"), retryable: true }); }
+      lifetimes.set(descriptor.mediaId, null);
+    },
+    async delete(descriptor) {
+      if (!lifetimes.has(descriptor.mediaId) && !retired.has(descriptor.mediaId)) throw new HostedRuntimeMediaWriteError({ cause: new Error("HTTP 409: absent retirement"), retryable: true });
+      retired.add(descriptor.mediaId);
+      lifetimes.delete(descriptor.mediaId);
+      await store.mediaStore.delete?.(descriptor);
+    },
+  };
+  try {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const photoPath = path.join(root, "fixture.png");
+    await writeFile(photoPath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==", "base64"));
+    const capturedAt = "2030-01-01T12:00:00.000Z";
+    const meal = await addMeal({ vaultRoot, photoPath, photoCapturedAt: capturedAt, occurredAt: capturedAt });
+    const baseline = await snapshotHostedBundleRoots({ kind: "vault", roots: [{ root: vaultRoot, rootKey: "vault" }] });
+    assert.ok(baseline);
+    const baselineHash = sha256HostedBundleHex(baseline);
+    await artifactStore.put({ bytes: baseline, sha256: baselineHash });
+    let status = {};
+    await withHostedCanonicalWritePort({ async persistCanonicalWrite(persistence) {
+      const externalized = await externalizeHostedCanonicalWriteMediaPayloads({ persistence, mediaStore, vaultRoot });
+      status = hostedCanonicalWriteReceiptLogStatusFields(await appendHostedCanonicalWriteReceiptToArtifactLog({
+        ...externalized, artifactStore, previousStatus: status,
+      }));
+    } }, () => runMealPhotoMaintenance({ vaultRoot, now: new Date(clockMs) }));
+    expect(store.putCalls).toHaveLength(0);
+    expect(lifetimes.size).toBe(0);
+
+    // The receipt committed, but no delivery promotion or snapshot took place.
+    // Restore more than one orphan-grace window later from the older snapshot.
+    clockMs += 2 * 60 * 60_000;
+    vaultRoot = path.join(root, "receipt-restored");
+    const restored = await restoreHostedWorkspaceRuntimeJobWorkspace({ vaultRoot,
+      platform: { ...createPlatform({ artifactBytesByHash: new Map([[baselineHash, baseline]]), mailboxPort: null, workspacePort: null }), artifactStore, logPort: null, mediaStore },
+      workspace: createWorkspaceState({ snapshotRef: createSnapshotFixtureRef({ hash: baselineHash, size: baseline.byteLength }), redactedStatus: status }),
+    });
+    expect(restored.canonicalWriteReceiptCount).toBe(1);
+    expect(restored).not.toHaveProperty("mealMediaUploadStateChanged");
+    await uploadCommittedHostedMealMediaReferences({ vaultRoot, mediaStore });
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]).toMatchObject({ pendingUpload: failureKind === "partial_put" });
+    expect(store.putCalls).toHaveLength(1);
+    clockMs += 2 * 60 * 60_000;
+    for (const [mediaId, expiry] of lifetimes) {
+      if (expiry !== null && expiry <= clockMs) await mediaStore.delete?.({ mediaId });
+    }
+    expect(retired.size).toBe(0);
+    await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore });
+    if (failureKind === "old_catalogue") {
+      // An older runner ignores the field when writing its next catalogue.
+      const catalogue = await readHostedMediaReferenceCatalogue({ vaultRoot });
+      for (const entry of catalogue.entries) delete entry.pendingUpload;
+      await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue });
+    }
+    const pending = await snapshotHostedBundleRoots({ kind: "vault", roots: [{ root: vaultRoot, rootKey: "vault" }] });
+    assert.ok(pending);
+    const pendingHash = sha256HostedBundleHex(pending);
+    await artifactStore.put({ bytes: pending, sha256: pendingHash });
+    vaultRoot = path.join(root, "snapshot-restored");
+    await restoreHostedWorkspaceRuntimeJobWorkspace({ vaultRoot,
+      platform: { ...createPlatform({ artifactBytesByHash: new Map([[pendingHash, pending]]), mailboxPort: null, workspacePort: null }), artifactStore, logPort: null, mediaStore },
+      workspace: createWorkspaceState({ snapshotRef: createSnapshotFixtureRef({ hash: pendingHash, size: pending.byteLength }) }),
+    });
+    await uploadCommittedHostedMealMediaReferences({ vaultRoot, mediaStore });
+    expect(store.storedBytesByMediaId.size).toBe(1);
+    expect(new Set(store.putCalls.map(call => call.mediaId)).size).toBe(1);
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]).toMatchObject({ pendingUpload: false });
+
+    // The next checkpoint saves completion. Further cold starts do no PUTs.
+    await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore });
+    const settled = await snapshotHostedBundleRoots({ kind: "vault", roots: [{ root: vaultRoot, rootKey: "vault" }] });
+    assert.ok(settled);
+    const settledHash = sha256HostedBundleHex(settled);
+    await artifactStore.put({ bytes: settled, sha256: settledHash });
+    const putCount = store.putCalls.length;
+    vaultRoot = path.join(root, "settled-restored");
+    await restoreHostedWorkspaceRuntimeJobWorkspace({ vaultRoot,
+      platform: { ...createPlatform({ artifactBytesByHash: new Map([[settledHash, settled]]), mailboxPort: null, workspacePort: null }), artifactStore, logPort: null, mediaStore },
+      workspace: createWorkspaceState({ snapshotRef: createSnapshotFixtureRef({ hash: settledHash, size: settled.byteLength }) }),
+    });
+    expect(store.putCalls).toHaveLength(putCount);
+    await deleteEvent({ vaultRoot, eventId: meal.event.id });
+    await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore });
+    expect(store.storedBytesByMediaId.size).toBe(0);
+    expect(lifetimes.size).toBe(0);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("meal thumbnail and full-photo deletion survives canonical receipt replay and prunes encrypted objects", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "murph-meal-media-replay-"));
   const vaultRoot = path.join(root, "live"), restoredRoot = path.join(root, "restored");
-  const store = createHostedRuntimeMediaStoreStub();
+  const faithful = createMealMediaStore();
+  const store = { mediaStore: faithful.mediaStore, storedBytesByMediaId: faithful.bytes, get putCalls() { return faithful.calls.filter(call => call.operation === "put"); } };
   const persisted: HostedCanonicalWritePersistenceInput[] = [];
   try {
     await initializeVault({ vaultRoot, timezone: "UTC" });
@@ -1030,8 +1203,11 @@ test("meal thumbnail and full-photo deletion survives canonical receipt replay a
       expect(await runMealPhotoMaintenance({ vaultRoot, now: new Date(captureTime) })).toMatchObject({ thumbnailCount: 1, blockedMealCount: 0 });
       const refs = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries;
       expect(refs).toHaveLength(1);
-      expect(store.putCalls).toHaveLength(1);
-      expect(refs.filter(ref => ref.expiresAt === null)).toHaveLength(1);
+      expect(store.putCalls).toHaveLength(0);
+      expect(refs[0]).toMatchObject({ pendingUpload: true, expiresAt: null });
+      // An older runner may already have uploaded this receipt's delivery copy.
+      const entry = refs[0]!;
+      await store.mediaStore.put({ ...entry, bytes: new Uint8Array(await readFile(path.join(vaultRoot, entry.relativePath))) });
       await deleteEvent({ vaultRoot, eventId: meal.event.id });
     });
     expect(store.storedBytesByMediaId.size).toBe(1);
@@ -1041,10 +1217,13 @@ test("meal thumbnail and full-photo deletion survives canonical receipt replay a
       await applyHostedCanonicalWriteReceiptWithMedia(input);
       await applyHostedCanonicalWriteReceiptWithMedia(input);
     }
-    // Replay does not erase the cleanup pointers or eagerly delete objects.
+    // Replay retains pending cleanup pointers without publishing deleted media.
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot: restoredRoot })).entries[0]).toMatchObject({ pendingUpload: true });
     expect(store.storedBytesByMediaId.size).toBe(1);
+    await uploadCommittedHostedMealMediaReferences({ vaultRoot: restoredRoot, mediaStore: store.mediaStore });
+    expect(store.putCalls).toHaveLength(1);
     const cleaned = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot: restoredRoot, mediaStore: store.mediaStore });
-    expect(cleaned.prunedMediaCount).toBe(1);
+    expect(cleaned.prunedMediaCount).toBe(0);
     expect(store.storedBytesByMediaId.size).toBe(0);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

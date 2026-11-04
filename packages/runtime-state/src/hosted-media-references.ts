@@ -37,6 +37,7 @@ export function resolveHostedMediaReferenceCataloguePath(vaultRoot: string): str
 export async function readHostedMediaReferenceCatalogueValue(vaultRoot: string): Promise<{
   schema: typeof HOSTED_MEDIA_REFS_SCHEMA;
   entries: unknown[];
+  mealUploadCursor?: string;
 }> {
   let raw: string;
   try {
@@ -61,7 +62,8 @@ export async function readHostedMediaReferenceCatalogueValue(vaultRoot: string):
       if (seen.has(cold.relativePath)) throw new HostedColdHistoryUnavailableError();
       seen.add(cold.relativePath);
     }
-    return { schema: HOSTED_MEDIA_REFS_SCHEMA, entries: value.entries };
+    return { schema: HOSTED_MEDIA_REFS_SCHEMA, entries: value.entries,
+      ...(typeof value.mealUploadCursor === "string" ? { mealUploadCursor: value.mealUploadCursor } : {}) };
   } catch {
     throw new HostedColdHistoryUnavailableError();
   }

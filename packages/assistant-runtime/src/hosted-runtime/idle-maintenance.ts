@@ -1,3 +1,4 @@
+import { runHostedMealMediaMaintenance, HOSTED_MEAL_MEDIA_RETRY_MS } from "./meal-media-maintenance.ts";
 import {
   compactWarmCodexThread,
   type CodexWarmThreadCompactionOutcome,
@@ -111,6 +112,7 @@ export type HostedIdleMaintenanceOutcome =
 // mid-teardown. Future idle-time maintenance belongs here as additional plain
 // statements.
 export async function runHostedIdleCheckpointMaintenance(input: {
+  mealMedia?: Omit<Parameters<typeof runHostedMealMediaMaintenance>[0], "signal" | "vaultRoot">;
   credentialSource: AssistantUsageCredentialSource;
   generatedImageRetentionMaxCaptures?: number;
   materializeRetentionCandidatePaths?: ((
@@ -199,6 +201,8 @@ export async function runHostedIdleCheckpointMaintenance(input: {
         retentionStage = "meal_photos";
         retentionWake = mergeInboxRetentionWakes(retentionWake,
           await maintainMealPhotos(input, vaultRoot, abortController.signal));
+        retentionWake = mergeInboxRetentionWakes(retentionWake,
+          await maintainMealMedia(input, vaultRoot, abortController.signal));
         retentionStage = "generated_images";
         const generatedImageRetentionMaxCaptures =
           input.generatedImageRetentionMaxCaptures === undefined
@@ -522,6 +526,7 @@ async function maintainMealPhotos(
     materializeCandidatePaths: input.materializeRetentionCandidatePaths, protectedStoredPaths: input.protectedStoredPaths });
   const meals = input.persistGeneratedImageRetention
     ? await input.persistGeneratedImageRetention(maintain) : await maintain();
+  if (input.mealMedia) input.mealMedia.budget.fullPhotosRetired += meals.retiredPhotoCount;
   if (meals.thumbnailCount || meals.retiredPhotoCount || meals.blockedMealCount) {
     emitHostedExecutionStructuredLog({ component: "runtime", phase: "checkpoint", level: "info", userId: input.memberId,
       message: "Meal photo maintenance completed.",
@@ -941,4 +946,12 @@ function buildInterruptedMaintenanceOutcome(input: {
     outcome,
     resolveInboxMediaRetentionFailureWake(),
   );
+}
+
+
+async function maintainMealMedia(input: Parameters<typeof runHostedIdleCheckpointMaintenance>[0], vaultRoot: string, signal: AbortSignal): Promise<HostedIdleMaintenanceWake> {
+  if (input.pendingWork || !input.mealMedia) return {};
+  const media = await runHostedMealMediaMaintenance({ ...input.mealMedia, vaultRoot, signal });
+  if (media.failed > 0) throw media.failure;
+  return media.pending > 0 ? resolveInboxMediaRetentionFailureWake(HOSTED_MEAL_MEDIA_RETRY_MS) : {};
 }
