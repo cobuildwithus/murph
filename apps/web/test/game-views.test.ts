@@ -184,7 +184,7 @@ describe("weekly game views: tickets", () => {
     });
   });
 
-  it("separates canonical profile photos from viewer-private overrides for shared exports", () => {
+  it("prefers canonical profile photos and keeps private fallbacks out of shared exports", () => {
     const state = liveState();
     const profile = "game/hbm_ava/profile.jpg";
     const privatePhoto = "game/hbm_leo/contact.jpg";
@@ -193,11 +193,11 @@ describe("weekly game views: tickets", () => {
     expect(plain.avatarUrl).toBe(plain.profileAvatarUrl);
     expect(plain.profileAvatarUrl).toContain(encodeURIComponent(profile));
     const overridden = view(state, LEO, JOIN_AT, { ...input, avatarKeys: new Map([[AVA, privatePhoto]]) }).players[1];
-    expect(overridden.avatarUrl).toContain(encodeURIComponent(privatePhoto));
+    expect(overridden.avatarUrl).toBe(plain.avatarUrl);
     expect(overridden.profileAvatarUrl).toBe(plain.profileAvatarUrl);
     const removed = view(state, LEO, JOIN_AT, { avatarKeys: new Map([[AVA, privatePhoto]]) }).players[1];
     expect(removed.profileAvatarUrl).toBeNull();
-    expect(removed.avatarUrl).toBe(overridden.avatarUrl);
+    expect(removed.avatarUrl).toContain(encodeURIComponent(privatePhoto));
   });
 
   it("expires an open ticket just after its 14-day use-by time, and never a redeemed one", () => {
@@ -341,6 +341,19 @@ describe("weekly game views: post to unlock", () => {
     expect(leoView.startsOn).toBeNull();
     const picked: RuleState = { ...invited, game: { ...invited.game, startsOn: "2026-10-19" } };
     expect(view(picked, LEO, JOIN_AT, { invitee: { memberId: null, name: "Ava", photoKey: null, relationship: null } }).startsOn).toBe("2026-10-19");
+  });
+
+  it("prefers own profile, then pending invite photo, then saved label for an addressed invite", () => {
+    const base = liveState();
+    const state: RuleState = { ...base, game: { ...base.game, status: "invited" }, players: [{ ...base.players[0], dayOne: null }] };
+    const profile = "game/hbm_ava/profile.jpg", pending = "game/hbm_leo/pending.jpg", saved = "game/hbm_leo/saved.jpg";
+    const input = { avatarKeys: new Map([[AVA, saved]]), invitee: { memberId: AVA, name: "Ava", photoKey: pending, relationship: null } };
+    expect(view(state, LEO, JOIN_AT, { ...input, profileAvatarKeys: new Map([[AVA, profile]]) }).players[1])
+      .toMatchObject({ avatarUrl: gameMediaUrl(profile), profileAvatarUrl: gameMediaUrl(profile) });
+    expect(view(state, LEO, JOIN_AT, input).players[1])
+      .toMatchObject({ avatarUrl: gameMediaUrl(pending), profileAvatarUrl: null });
+    expect(view(state, LEO, JOIN_AT, { ...input, invitee: { ...input.invitee, photoKey: null } }).players[1])
+      .toMatchObject({ avatarUrl: gameMediaUrl(saved), profileAvatarUrl: null });
   });
 
   it("shows the viewer's own typed relationship for others, never for themselves", () => {

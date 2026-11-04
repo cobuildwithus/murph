@@ -118,6 +118,12 @@ export interface SetProfileBody {
   photoKey?: string | null;
 }
 
+/** PUT /players/:memberId/photo. Private to you; their own profile photo wins. */
+export interface SetPlayerPhotoBody {
+  /** Your finished upload, only while they have no profile photo; null removes yours. */
+  photoKey: string | null;
+}
+
 export interface GameProfileView {
   memberId: string;
   firstName: string;
@@ -271,6 +277,8 @@ export type GameCommand =
   | ({ type: "proposeChange"; gameId: string } & ProposeGameChangeBody)
   | { type: "respondChange"; gameId: string; proposalId: string; decision: "approve" | "decline" | "cancel" }
   | ({ type: "setProfile" } & SetProfileBody)
+  /** Set or clear your private photo of someone you play with. */
+  | ({ type: "setPlayerPhoto"; memberId: string } & SetPlayerPhotoBody)
   | ({ type: "createGame" } & CreateGameBody)
   | ({ type: "join"; token: string } & AcceptInviteBody)
   | ({ type: "negotiate"; token: string } & NegotiateInviteBody)
@@ -306,7 +314,7 @@ export interface GamePlayerView {
   seat: number;
   /** The viewer's private label name if set, else the player's own first name. */
   firstName: string;
-  /** The viewer's private photo override, else this person's chosen profile photo. */
+  /** This person's chosen profile photo, else the viewer's private photo. */
   avatarUrl: string | null;
   /** Only the person's own chosen photo. Use this for explicitly shared exports. */
   profileAvatarUrl: string | null;

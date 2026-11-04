@@ -47,6 +47,7 @@ import { bindPairGameChat } from "@/src/lib/game/chat-membership";
 import type { GameCommand, GameTermsInput } from "@/src/lib/game/contract";
 import { putGameMedia } from "@/src/lib/game/media";
 import * as gameMedia from "@/src/lib/game/media";
+import { gameMediaUrl } from "@/src/lib/game/views";
 import { withHistoryPhotoDeliveries } from "@/src/lib/game/http/media-routes";
 import { sealGameText } from "@/src/lib/game/crypto";
 import {
@@ -657,7 +658,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const joined = await ok(ava, { type: "join", token: created!.inviteToken!, termsVersion: 1, timeZone: "Australia/Sydney" });
     expect(joined!.players[1]).toMatchObject({ avatarUrl: homePhoto, profileAvatarUrl: homePhoto });
     const opponentView = (await readGame(gameId, leo))!.players[1];
-    expect(opponentView.avatarUrl).toContain(encodeURIComponent(privatePhoto));
+    expect(opponentView.avatarUrl).toBe(homePhoto);
     expect(opponentView.profileAvatarUrl).toBe(homePhoto);
     expect(await authorizeMediaRead(leo, canonical)).toBe(true);
     expect(await authorizeMediaRead(stranger, canonical)).toBe(false);
@@ -675,8 +676,110 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(await authorizeMediaRead(leo, replacement)).toBe(false);
     const removed = (await readGame(gameId, leo))!.players[1];
     expect(removed.profileAvatarUrl).toBeNull();
-    expect(removed.avatarUrl).toBe(opponentView.avatarUrl);
+    expect(removed.avatarUrl).toContain(encodeURIComponent(privatePhoto));
     expect((await getPrisma().gameContactLabel.findUnique({ where: { ownerMemberId_subjectMemberId: { ownerMemberId: leo, subjectMemberId: ava } } }))!.photoKey).toBe(privatePhoto);
+  });
+
+  it("lets the joiner set, replace and remove a private challenger photo across game, Home and history", async () => {
+    const challenger = await member("Challenger", "UTC");
+    const joiner = await member("Joiner", "UTC");
+    const stranger = await member("Stranger", "UTC");
+    const { gameId } = await startGame(challenger, joiner, {}, "UTC");
+    const where = { ownerMemberId_subjectMemberId: { ownerMemberId: joiner, subjectMemberId: challenger } };
+    const change = (photoKey: string | null): GameCommand => ({ type: "setPlayerPhoto", memberId: challenger, photoKey });
+    await ok(joiner, change(null));
+    expect(await getPrisma().gameContactLabel.findUnique({ where })).toBeNull();
+    const privatePhoto = await upload(joiner, "private-challenger");
+    expect(await run(joiner, change(privatePhoto))).toEqual({ ok: true, game: null });
+    const avatarUrl = gameMediaUrl(privatePhoto);
+    expect((await readGame(gameId, joiner))!.players[0]).toMatchObject({ avatarUrl, profileAvatarUrl: null });
+    expect((await readHome(joiner)).games.find(game => game.id === gameId)!.players[0]).toMatchObject({ avatarUrl, profileAvatarUrl: null });
+    expect((await readGame(gameId, challenger))!.players[0]).toMatchObject({ avatarUrl: null, profileAvatarUrl: null });
+    expect(await authorizeMediaRead(joiner, privatePhoto)).toBe(true);
+    expect(await authorizeMediaRead(challenger, privatePhoto)).toBe(false);
+    expect(await authorizeMediaRead(stranger, privatePhoto)).toBe(false);
+    const otherGame = await startGame(stranger, challenger, {}, "UTC");
+    expect((await readGame(otherGame.gameId, stranger))!.players[1].avatarUrl).toBeNull();
+
+    const replacement = await upload(joiner, "private-challenger-replacement");
+    await ok(joiner, change(replacement));
+    await ok(joiner, change(replacement));
+    await devSettleNow(gameId, challenger);
+    expect((await readHistory(joiner)).people.find(person => person.memberId === challenger)!.avatarUrl).toBe(gameMediaUrl(replacement));
+    await ok(joiner, change(null));
+    await ok(joiner, change(null));
+    expect((await readGame(gameId, joiner))!.players[0]).toMatchObject({ avatarUrl: null, profileAvatarUrl: null });
+    expect((await readHistory(joiner)).people.find(person => person.memberId === challenger)).not.toHaveProperty("avatarUrl");
+    expect(await getPrisma().gameContactLabel.findUnique({ where })).toMatchObject({ photoKey: null, nameEncrypted: null, relationshipEncrypted: null });
+  });
+
+  it("preserves private label words and permits clearing while the subject has their own photo", async () => {
+    const owner = await member("Owner", "UTC"), subject = await member("Subject", "UTC");
+    const { gameId } = await startGame(owner, subject, { inviteeFirstName: "Friend", inviteeLabel: { relationship: "teammate" } }, "UTC");
+    const where = { ownerMemberId_subjectMemberId: { ownerMemberId: owner, subjectMemberId: subject } };
+    const before = await getPrisma().gameContactLabel.update({ where, data: { updatedAt: new Date("2020-01-01") } });
+    const photoKey = await upload(owner, "private-subject");
+    const command: GameCommand = { type: "setPlayerPhoto", memberId: subject, photoKey };
+    await ok(owner, command);
+    const saved = await getPrisma().gameContactLabel.findUniqueOrThrow({ where });
+    expect(saved).toMatchObject({ nameEncrypted: before.nameEncrypted, relationshipEncrypted: before.relationshipEncrypted, photoKey });
+    expect(saved.updatedAt.getTime()).toBeGreaterThan(before.updatedAt.getTime());
+    await ok(subject, { type: "setProfile", photoKey: await upload(subject, "own-subject") });
+    expect(await run(owner, command)).toMatchObject({ ok: false, status: 400, error: { code: "INVALID_REQUEST", message: expect.stringContaining("own profile photo") } });
+    expect((await getPrisma().gameContactLabel.findUniqueOrThrow({ where })).photoKey).toBe(photoKey);
+    await ok(owner, { ...command, photoKey: null });
+    expect(await getPrisma().gameContactLabel.findUniqueOrThrow({ where })).toMatchObject({ nameEncrypted: before.nameEncrypted, relationshipEncrypted: before.relationshipEncrypted, photoKey: null });
+    const shown = (await readGame(gameId, owner))!.players[1];
+    expect(shown.avatarUrl).toBe(shown.profileAvatarUrl);
+    expect(shown.avatarUrl).not.toBeNull();
+  });
+
+  it("rejects private photos of self or unrelated people and requires the actor's finished upload", async () => {
+    const owner = await member("Owner", "UTC"), subject = await member("Subject", "UTC"), stranger = await member("Stranger", "UTC");
+    await startGame(owner, subject, {}, "UTC");
+    const photoKey = await upload(owner, "owned-private");
+    expect(await errorCode(owner, { type: "setPlayerPhoto", memberId: owner, photoKey })).toBe("INVALID_REQUEST");
+    for (const key of [photoKey, null]) {
+      expect(await errorCode(owner, { type: "setPlayerPhoto", memberId: stranger, photoKey: key })).toBe("NOT_A_PLAYER");
+    }
+    for (const key of [await upload(subject, "not-owned"), `${mediaKeyPrefixFor(owner)}${"0".repeat(64)}.jpg`]) {
+      expect(await errorCode(owner, { type: "setPlayerPhoto", memberId: subject, photoKey: key })).toBe("MEDIA_MISSING");
+    }
+  });
+
+  it.each(["owner", "subject"])("rejects private photo writes when the %s blocked the other", async blocker => {
+    const owner = await member("Owner", "UTC"), subject = await member("Subject", "UTC");
+    const { gameId } = await startGame(owner, subject, {}, "UTC");
+    const photoKey = await upload(owner, "blocked-private");
+    await ok(owner, { type: "setPlayerPhoto", memberId: subject, photoKey });
+    await ok(blocker === "owner" ? owner : subject, { type: "block", memberId: blocker === "owner" ? subject : owner });
+    for (const key of [photoKey, null]) {
+      expect(await errorCode(owner, { type: "setPlayerPhoto", memberId: subject, photoKey: key })).toBe("NOT_A_PLAYER");
+    }
+    expect((await readGame(gameId, owner))!.players[1].avatarUrl).toBeNull();
+  });
+
+  it("hides invite label photos behind the subject's profile across detail, Home, history and pending rematches", async () => {
+    const owner = await member("Owner", "UTC"), subject = await member("Subject", "UTC");
+    const privatePhoto = await upload(owner, "invite-label");
+    const { gameId } = await startGame(owner, subject, { inviteeLabel: { photoKey: privatePhoto } }, "UTC");
+    const ownPhoto = await upload(subject, "own-profile");
+    const privateUrl = gameMediaUrl(privatePhoto), ownUrl = gameMediaUrl(ownPhoto);
+    expect((await readGame(gameId, owner))!.players[1]).toMatchObject({ avatarUrl: privateUrl, profileAvatarUrl: null });
+    await ok(subject, { type: "setProfile", photoKey: ownPhoto });
+    expect((await readGame(gameId, owner))!.players[1]).toMatchObject({ avatarUrl: ownUrl, profileAvatarUrl: ownUrl });
+    expect((await readHome(owner)).games.find(game => game.id === gameId)!.players[1].avatarUrl).toBe(ownUrl);
+    await devSettleNow(gameId, owner);
+    expect((await readHistory(owner)).people.find(person => person.memberId === subject)!.avatarUrl).toBe(ownUrl);
+    const pendingPhoto = await upload(owner, "pending-invite-label");
+    const rematch = await ok(owner, { type: "createGame", gameId: randomUUID(), previousGameId: gameId,
+      inviteeFirstName: "Friend", inviteeLabel: { photoKey: pendingPhoto }, terms: TERMS });
+    expect(rematch!.players[1]).toMatchObject({ avatarUrl: ownUrl, profileAvatarUrl: ownUrl });
+    await ok(subject, { type: "setProfile", photoKey: null });
+    expect((await readGame(rematch!.id, owner))!.players[1]).toMatchObject({ avatarUrl: gameMediaUrl(pendingPhoto), profileAvatarUrl: null });
+    expect((await readGame(gameId, owner))!.players[1]).toMatchObject({ avatarUrl: privateUrl, profileAvatarUrl: null });
+    expect((await readHistory(owner)).people.find(person => person.memberId === subject)!.avatarUrl).toBe(privateUrl);
+    expect((await getPrisma().gameContactLabel.findUniqueOrThrow({ where: { ownerMemberId_subjectMemberId: { ownerMemberId: owner, subjectMemberId: subject } } })).photoKey).toBe(privatePhoto);
   });
 
   it("requires initial name and time zone before a photo-only profile update", async () => {

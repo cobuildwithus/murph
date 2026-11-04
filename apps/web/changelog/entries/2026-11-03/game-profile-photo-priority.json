@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-03",
+  "order": 100,
+  "item": {
+    "id": "game-profile-photo-priority",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Your chosen game photo takes priority",
+    "summary": "When you set a profile photo, other players see it throughout the game, even if they saved a private photo of you.",
+    "details": "Their private photo stays saved and appears again if you remove yours. Only the person who saved a private photo can see it.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": []
+  }
+}

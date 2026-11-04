@@ -233,19 +233,34 @@ decryption and validated image-upload path when their source and key remain.
 
 When inviting, the challenger can attach a private photo and relationship for
 the invitee alongside the first name they typed. Only the challenger ever sees
-them, in every game with that person; the photo is that player's picture in
-the challenger's views. The latest invite wins: a name, photo or relationship
+them, in every game with that person; the photo is that player's fallback picture
+in the challenger's views. The latest invite wins: a name, photo or relationship
 typed for that person replaces what the challenger typed before.
 
 Each member may also upload, replace or remove their own profile photo. It syncs
 across devices and becomes their default when creating or joining a game. Inside
-the app, the viewer's private contact photo wins over the person's profile photo,
-then initials. Shared recap exports use only each person's own profile photo,
+the app, the person's own profile photo wins, then the viewer's private contact
+photo, then initials. An addressed pending invite uses the person's own profile
+photo first, then the pending invite photo, then the viewer's saved contact photo.
+Private photos stay stored while hidden and appear again if the person removes
+their own photo. Shared recap exports use only each person's own profile photo,
 never private contact overrides. Daily challenge photos remain separate.
 Profile media is authenticated: the owner, existing game participants and an
 addressed rematch's participants can read the current profile photo. Public
 invite previews never include profile photos. Removing a profile photo clears
 this default without deleting other people's private contact choices.
+
+Either player can set or change their private photo of someone they play or
+played with through `PUT /api/game/v1/players/:memberId/photo` with
+`{ "photoKey": "<own-finished-upload-key>" }`. The subject must have no profile
+photo; otherwise the command returns `INVALID_REQUEST`. Sending
+`{ "photoKey": null }` clears only the caller's private photo, even when the
+subject has a profile photo, and leaves the private name and relationship alone.
+Clearing an absent label is a no-op. Self-targets return `INVALID_REQUEST`;
+unrelated players and blocks in either direction return `NOT_A_PLAYER`.
+Uploads use the existing `MEDIA_MISSING` ownership/completion guard. Success is
+HTTP 200 with `{ "ok": true, "game": null }`; normal game reads return the
+resulting avatar. No private photo is shared with the subject or other players.
 
 ## Rules
 
