@@ -163,6 +163,11 @@ describe("group calendar after leaving", () => {
     expect(decideLeave(state, AVA)).toBe("left");
     state.players[1].leftAt = now;
     assertGroupTermsOpen(state, LEO, now, 1);
+    // Day 1 beginning alone does not lock group terms; the first check-in or the game's end does.
+    const dayOneBegun = new Date("2030-03-11T12:00:00Z");
+    expect(codeOf(() => assertGroupTermsOpen(state, LEO, dayOneBegun, 1))).toBe("OK");
+    expect(codeOf(() => assertGroupTermsOpen(post(state, third, dayOneBegun), LEO, dayOneBegun, 1))).toBe("GAME_NOT_LIVE");
+    expect(codeOf(() => assertGroupTermsOpen(state, LEO, new Date("2030-04-30T12:00:00Z"), 1))).toBe("GAME_NOT_LIVE");
     const schedule = scheduleEditedTerms(state, "2030-03-13")!;
     state.players = state.players.map(player => ({ ...player, dayOne: schedule.players.find(next => next.memberId === player.memberId)?.dayOne ?? player.dayOne }));
     state = post(post(state, LEO, at(state, LEO, 0, 12)), third, at(state, third, 5, 12));
@@ -239,6 +244,9 @@ describe("weekly game: terms", () => {
     expect(codeOf(() => decideNewTerms({ ...base, startsOn: "2026-10-16" }, options))).toBe("INVALID_REQUEST");
     expect(codeOf(() => decideNewTerms({ ...base, startsOn: "2026-12-15" }, options))).toBe("OK");
     expect(codeOf(() => decideNewTerms({ ...base, startsOn: "2026-12-16" }, options))).toBe("INVALID_REQUEST");
+    // Group edits may also restart on the latest player's today.
+    expect(codeOf(() => decideNewTerms({ ...base, startsOn: "2026-10-16" }, { ...options, allowToday: true }))).toBe("OK");
+    expect(codeOf(() => decideNewTerms({ ...base, startsOn: "2026-10-15" }, { ...options, allowToday: true }))).toBe("INVALID_REQUEST");
   });
 });
 
