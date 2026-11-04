@@ -162,7 +162,7 @@ export async function runLinqProductionCanary(
       previousReplyAt = replyAt;
       if (stage === "runtime-identity" || stage === "goal-proposal" || stage === "accept-goal") {
         const expectedCount = stage === "accept-goal" ? 1 : 0;
-        const outcome = await waitForCanonicalGoalOutcome(config, expectedCount, stage);
+        const outcome = await waitForCanonicalGoalOutcome(config, expectedCount, stage, reply);
         if (stage === "runtime-identity") canonicalOutcome.baselineGoalCount = outcome.matchingGoalCount;
         if (stage === "accept-goal") canonicalOutcome.savedGoalCount = outcome.matchingGoalCount;
         if (stage === "goal-proposal") canonicalOutcome.proposalGoalCount = outcome.matchingGoalCount;
@@ -266,23 +266,29 @@ async function waitForCanonicalGoalOutcome(
   config: LinqProductionCanaryConfig,
   expectedCount: 0 | 1,
   stage: string,
+  reply: string,
 ): Promise<LinqProductionCanaryOutcome> {
+  // Keyword heuristics only: "saved"/"set up" claims and three explicit save offers.
+  // Emit closed categories, never reply copy or matched text.
+  const replyDiagnostics = `; reply_chars=${Math.min(reply.length, 10000)}; reply_question=${reply.includes("?")}`
+    + `; reply_save_claim=${/\b(?:saved|set up)\b/iu.test(reply)}`
+    + `; reply_save_offer=${/\b(?:want me to|shall i|should i) save\b/iu.test(reply)}`;
   const signal = AbortSignal.timeout(CANARY_OUTCOME_WAIT_MS);
   for (let attempt = 0; attempt < CANARY_OUTCOME_WAIT_MS / CANARY_OUTCOME_POLL_MS; attempt += 1) {
     const outcome = await readCanonicalGoalOutcome(config, signal, stage);
-    if (signal.aborted) throwCanaryFailure(`outcome-not-ready; stage=${stage}`);
+    if (signal.aborted) throwCanaryFailure(`outcome-not-ready; stage=${stage}${replyDiagnostics}`);
     if (outcome?.ready) {
       if (outcome.totalGoalCount > expectedCount
         || outcome.totalGoalCount !== outcome.matchingGoalCount
         || outcome.matchingGoalIdCount !== outcome.matchingGoalCount) {
-        throwCanaryFailure(`outcome-cardinality-invalid; stage=${stage}`);
+        throwCanaryFailure(`outcome-cardinality-invalid; stage=${stage}${replyDiagnostics}`);
       }
       if (outcome.matchingGoalCount === expectedCount) return outcome;
     }
     await delay(CANARY_OUTCOME_POLL_MS, undefined, { signal })
-      .catch(() => throwCanaryFailure(`outcome-not-ready; stage=${stage}`));
+      .catch(() => throwCanaryFailure(`outcome-not-ready; stage=${stage}${replyDiagnostics}`));
   }
-  throwCanaryFailure(`outcome-not-ready; stage=${stage}`);
+  throwCanaryFailure(`outcome-not-ready; stage=${stage}${replyDiagnostics}`);
 }
 
 async function reportCanaryFailureDiagnostics(
