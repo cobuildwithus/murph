@@ -25,6 +25,22 @@ function codeOf(run: () => unknown): string {
 }
 
 describe("weekly game command validator", () => {
+  it("requires a player id and an explicit private photo upload or null", () => {
+    const command = { type: "setPlayerPhoto", memberId: "hbm_ava", photoKey: PHOTO_KEY };
+    expect(parseGameCommand({ ...command, actorMemberId: "hbm_other" })).toEqual(command);
+    expect(parseGameCommand({ ...command, photoKey: null })).toEqual({ ...command, photoKey: null });
+    for (const memberId of [undefined, null, "", "a".repeat(129), 123]) {
+      expect(codeOf(() => parseGameCommand({ ...command, memberId }))).toBe("INVALID_REQUEST");
+    }
+    expect(codeOf(() => parseGameCommand({ type: "setPlayerPhoto", memberId: "hbm_ava" }))).toBe("INVALID_REQUEST");
+    for (const photoKey of [undefined, 123, false, {}]) {
+      expect(codeOf(() => parseGameCommand({ ...command, photoKey }))).toBe("INVALID_REQUEST");
+    }
+    for (const photoKey of ["", "https://example.com/photo.jpg", "game/../photo.jpg"]) {
+      expect(codeOf(() => parseGameCommand({ ...command, photoKey }))).toBe("MEDIA_MISSING");
+    }
+  });
+
   it("accepts trimmed one-line words without an upload and bounds the locked preview", () => {
     const command = { type: "post", gameId: "game_words", entryId: "entry_words", kind: "words", text: "  Walked outside  ", blurHash: "x".repeat(64) };
     expect(parseGameCommand(command)).toMatchObject({ text: "Walked outside", mediaKeys: [], blurHash: "x".repeat(64) });

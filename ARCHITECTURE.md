@@ -5799,7 +5799,13 @@ The game profile's nullable `photo_key` references an owned, completed upload.
 `photoKey: null` removes the canonical photo. Initial creation still requires
 first name and time zone. Its additive `profile` reply returns the committed
 member id, name, zone and `avatarUrl`; `GET /home` includes that same canonical
-photo on `me`. Player `avatarUrl` prefers the viewer's private contact override;
+photo on `me`. Player `avatarUrl` prefers the member's own profile photo, then
+the viewer's private contact photo (pending invites use their photo before the
+saved label). `PUT /players/:memberId/photo` changes only the viewer's label
+photo for an unblocked person they play with, using the existing pair lock and
+profile row lock. Upload verification precedes the short database-only
+transaction; a subject's own photo prevents setting a private one but never
+clearing it. Hidden private photos remain stored for fallback;
 `profileAvatarUrl` carries only the canonical photo for shared exports. Profile
 reads batch with existing name reads. Media authorization checks the current
 profile key and shared game participation (including addressed rematches), then
