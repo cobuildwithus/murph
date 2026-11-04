@@ -20,14 +20,14 @@ const GAME_ID = "game_synthetic";
 const EVENT_ID = `game-recap:${GAME_ID}`;
 const PAIR_FINGERPRINT = "0123456789abcdef0123456789abcdef";
 
-function recapWake(eventId = EVENT_ID) {
+function recapWake(eventId = EVENT_ID, loreAccess?: "read") {
   return buildHostedExecutionAssistantNotificationRequestedWake({
     eventId,
     memberId: "hbm_synthetic",
     occurredAt: "2036-08-25T18:00:00.000Z",
     notification: {
       instructions: "Compose the recap.",
-      responsePolicy: { kind: "require_game_recap", gameId: GAME_ID, eventId, pairFingerprint: PAIR_FINGERPRINT },
+      responsePolicy: { kind: "require_game_recap", gameId: GAME_ID, eventId, pairFingerprint: PAIR_FINGERPRINT, ...(loreAccess ? { loreAccess } : {}) },
       route: {
         actorId: null,
         channel: "linq",
@@ -45,7 +45,7 @@ beforeEach(() => {
 });
 
 describe("hosted game recap notification", () => {
-  it.each([EVENT_ID, `${EVENT_ID}:synthetic_request`])("hands the recap turn the platform group tool from the minimal mailbox context: %s", async (eventId) => {
+  it.each([EVENT_ID, `${EVENT_ID}:synthetic_request`].flatMap(eventId => [undefined, "read" as const].map(loreAccess => ({ eventId, loreAccess }))))("hands the recap turn the platform group tool from the minimal mailbox context: %s", async ({ eventId, loreAccess }) => {
     const request = vi.fn(async () => ({ action: "read_game" as const, result: { status: "ok" as const, state: { games: [] } } }));
     const groupToolPort = { request };
     let received: AssistantNotificationInput | null = null;
@@ -60,11 +60,11 @@ describe("hosted game recap notification", () => {
       executionContext: { hosted: { memberId: "hbm_synthetic", userEnvKeys: [] } },
       groupToolPort,
       vaultRoot: "/synthetic-vault",
-      wake: recapWake(eventId),
+      wake: recapWake(eventId, loreAccess),
     });
     const hosted = (received as AssistantNotificationInput | null)?.executionContext?.hosted;
     expect(hosted?.groupTool).toBe(groupToolPort);
-    expect(hosted?.gameRecapScope).toEqual({ gameId: GAME_ID, eventId, pairFingerprint: PAIR_FINGERPRINT });
+    expect(hosted?.gameRecapScope).toEqual({ gameId: GAME_ID, eventId, pairFingerprint: PAIR_FINGERPRINT, ...(loreAccess ? { loreAccess } : {}) });
     expect(request).toHaveBeenCalledWith({ action: "read_game", origin: { kind: "game_recap", gameId: GAME_ID, eventId } });
   });
 

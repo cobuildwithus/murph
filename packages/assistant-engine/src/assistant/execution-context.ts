@@ -581,7 +581,7 @@ export type AssistantWorkspaceArtifactMaterializer = (
 ) => Promise<AssistantWorkspaceArtifactMaterializationResult>
 
 export interface AssistantHostedExecutionContext {
-  gameRecapScope?: { gameId: string; eventId: string; pairFingerprint: string } | null
+  gameRecapScope?: { gameId: string; eventId: string; pairFingerprint: string; loreAccess?: 'read' } | null
   gameMissedCheckInScope?: { gameId: string; eventId: string; memberId: string; firstMissedDate: string; pairFingerprint: string } | null
   actionApprovalPort?: AssistantHostedActionApprovalPort | null
   assertTurnCommitAuthority?(input: {
@@ -678,11 +678,11 @@ export function appendAssistantHostedDynamicContextPrompt(input: {
   }
 }
 
-function normalizeAssistantGameRecapScope(scope: AssistantHostedExecutionContext['gameRecapScope']): { gameId: string; eventId: string; pairFingerprint: string } | null {
+function normalizeAssistantGameRecapScope(scope: AssistantHostedExecutionContext['gameRecapScope']): AssistantHostedExecutionContext['gameRecapScope'] {
   const gameId = normalizeNullableString(scope?.gameId)
   const eventId = normalizeNullableString(scope?.eventId)
   const pairFingerprint = normalizeNullableString(scope?.pairFingerprint)
-  return gameId && eventId && pairFingerprint ? { gameId, eventId, pairFingerprint } : null
+  return gameId && eventId && pairFingerprint ? { gameId, eventId, pairFingerprint, ...(scope?.loreAccess === 'read' ? { loreAccess: 'read' as const } : {}) } : null
 }
 
 function normalizeAssistantGameMissedCheckInScope(scope: AssistantHostedExecutionContext['gameMissedCheckInScope']): NonNullable<AssistantHostedExecutionContext['gameMissedCheckInScope']> | null {

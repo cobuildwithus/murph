@@ -5,7 +5,7 @@ import { handleGameChatPhoto } from "./chat-photo";
 import type { Prisma } from "@prisma/client";
 import { isHostedLinqConversationMessageWake, isHostedTelegramConversationMessageWake } from "@murphai/hosted-execution";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
-import { parseGameRecapEventId, gameLiveLoreGuidanceForState, hostedGameChatStateSchema, type HostedGameToolRequest, type HostedGameToolResponse, type HostedGameRecap } from "@murphai/hosted-execution/runtime-control";
+import { parseGameRecapEventId, GAME_LIVE_LORE_GUIDANCE, hostedGameChatStateSchema, type HostedGameChatState, type HostedGameToolRequest, type HostedGameToolResponse, type HostedGameRecap } from "@murphai/hosted-execution/runtime-control";
 import type { HostedExecutionExternalThreadRouteAuthority, HostedExecutionConversationMessageWake } from "@murphai/hosted-execution/contracts";
 import { requireHostedRuntimeCallbackTx, type HostedRuntimeIdentity } from "../hosted-execution/runtime-owner";
 import { buildHostedMailboxLiveItemWhere, decodeHostedMailboxStoredPayloads, readHostedMailboxConversationWakeByAssistantInputId } from "../hosted-mailbox/store";
@@ -18,7 +18,7 @@ import { gameRecapMessage } from "./recap-message";
 import { gameRecapToolResult, validateGameRecap, withValidGameSuperlatives, type GameRecapChatMessage } from "./recap";
 import { addressedGameRematchWhere, gameChatPlayerIds, gamePairWhere, readGameChatPlayerIds, readGameChatAudience, readGroupGameChatAuthority, type GameChatAudience, hasGameChatRestriction, requireExactGameChat, sameGamePlayers } from "./chat-membership";
 import { isGameEnabled, isGameOn } from "./access";
-import { gamePairLoreFingerprint } from "./audience";
+import { gameGroupLoreFingerprint, gamePairLoreFingerprint } from "./audience";
 
 type Input = { audience?: GameChatAudience; multiplayer?: boolean; memberId: string; runtimeIdentity: HostedRuntimeIdentity | null; request: HostedGameToolRequest; playerMemberIds?: readonly string[] };
 
@@ -101,8 +101,22 @@ async function gameChatToolResponse(input: Input, playerMemberIds: readonly stri
   dayOutcome: Extract<Awaited<ReturnType<typeof runGameCommand>>, { ok: true }>["dayOutcome"],
   photoResult: Awaited<ReturnType<typeof handleGameChatPhoto>> | null): Promise<HostedGameToolResponse> {
   const state = await readGameToolState(input, playerMemberIds, actor);
-  const loreGuidance = input.request.action === "read_game" ? gameLiveLoreGuidanceForState(state) : undefined;
-  return { action: input.request.action, result: { status: "ok", state, ...(loreGuidance ? { loreGuidance, loreFingerprint: gamePairLoreFingerprint(playerMemberIds) } : {}), ...(dayOutcome ? { dayOutcome } : {}), ...(photoResult?.photoOutcome ? { photoOutcome: photoResult.photoOutcome } : {}) } };
+  const lore = input.request.action === "read_game" ? await readGameToolLore(state, playerMemberIds) : {};
+  return { action: input.request.action, result: { status: "ok", state, ...lore, ...(dayOutcome ? { dayOutcome } : {}), ...(photoResult?.photoOutcome ? { photoOutcome: photoResult.photoOutcome } : {}) } };
+}
+
+/** Resolve only authorized returned games, including non-live games; never expose audience keys. */
+async function readGameToolLore(state: HostedGameChatState, players: readonly string[]): Promise<{ loreGuidance?: string; loreFingerprint?: string }> {
+  if (!state.games.some(game => game.status === "live")) return {};
+  const rows = await getPrisma().game.findMany({ where: { id: { in: state.games.map(game => game.id) } },
+    select: { id: true, maxPlayers: true, audienceKey: true }, take: state.games.length });
+  const keys = state.games.map(game => {
+    const row = rows.find(row => row.id === game.id);
+    if (row?.maxPlayers === 10) return row.audienceKey ? gameGroupLoreFingerprint(row.audienceKey) : null;
+    return row?.maxPlayers === 2 && players.length === 2 ? gamePairLoreFingerprint(players) : null;
+  });
+  const key = keys[0];
+  return key && keys.every(candidate => candidate === key) ? { loreGuidance: GAME_LIVE_LORE_GUIDANCE, loreFingerprint: key } : {};
 }
 
 function sameRoomIdentities(left: readonly string[], right: readonly string[]): boolean {
@@ -142,8 +156,8 @@ async function handleScheduledGameRead(input: Input): Promise<HostedGameToolResp
   if (!input.multiplayer && players.length !== 2) return { action: "read_game", result: { status: "unavailable", error: "game_player_unavailable" } };
   if (!isGameOn({ players: players.map(memberId => ({ memberId })) })) return { action: "read_game", result: { status: "unavailable", error: "GAME_DISABLED: Games are invite-only for now." } };
   const state = await readGameToolState(input, players);
-  const loreGuidance = gameLiveLoreGuidanceForState(state);
-  return { action: "read_game", result: { status: "ok", state, ...(loreGuidance ? { loreGuidance, loreFingerprint: gamePairLoreFingerprint(players) } : {}) } };
+  const lore = await readGameToolLore(state, players);
+  return { action: "read_game", result: { status: "ok", state, ...lore } };
 }
 
 /** A free player may agree to their game without gaining personal AI access. */

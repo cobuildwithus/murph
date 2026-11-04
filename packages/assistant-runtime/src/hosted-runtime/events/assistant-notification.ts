@@ -809,7 +809,8 @@ function gameRecapHostedScope(
     throw new TypeError("Game recap requires its trusted control port.");
   }
   return {
-    gameRecapScope: { gameId: policy.gameId, eventId: policy.eventId, pairFingerprint: policy.pairFingerprint },
+    gameRecapScope: { gameId: policy.gameId, eventId: policy.eventId, pairFingerprint: policy.pairFingerprint,
+      ...(policy.loreAccess ? { loreAccess: policy.loreAccess } : {}) },
     groupTool: groupToolPort,
   };
 }

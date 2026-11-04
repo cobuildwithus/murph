@@ -1,3 +1,7 @@
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { normalizeAssistantExecutionContext } from '../src/assistant/execution-context.js'
 import { describe, expect, it, vi } from 'vitest'
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { executeMurphDynamicToolRequest, resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tools.js'
@@ -270,6 +274,73 @@ describe('game recap dynamic contract', () => {
     ])
     for (const request of requests) expect(parseHostedRuntimeGroupToolRequest(request)).toEqual(request)
     expect(savedChatLines).toEqual([`${recap.chatLine}\nWatch the recap: https://recaps.murph.test/recap/game_bound`])
+  })
+  it.each([undefined, 'read' as const])('preserves recap lore authority and records only the canonical bare line; access=%s', async loreAccess => {
+    const vault = await mkdtemp(path.join(tmpdir(), 'game-lore-'))
+    try {
+      const fingerprint = 'b'.repeat(32)
+      const target = path.join(vault, 'games', `lore-${fingerprint}.md`)
+      const delivery = `${recap.chatLine}\nWatch the recap: https://recaps.murph.test/recap/game_bound`
+      const request = vi.fn<NonNullable<AssistantHostedToolContext['groupTool']>['request']>()
+      request.mockResolvedValue({ action: 'write_recap', result: { status: 'ok', recapOutcome: 'ok', recap, chatLine: delivery } })
+      const savedChatLines: string[] = []
+      const executionContext = normalizeAssistantExecutionContext({ hosted: { memberId: 'synthetic-room', userEnvKeys: [], groupTool: { request },
+        gameRecapScope: { gameId: 'game_bound', eventId: 'game-recap:game_bound', pairFingerprint: fingerprint, ...(loreAccess ? { loreAccess } : {}) } } }).hosted
+      const ctx = createAssistantHostedToolContext({ executionContext,
+        messageInput: { channel: 'linq', vault } as never, session: { binding: { channel: 'linq' }, sessionId: 'synthetic-lore-session' } as never,
+        recordSavedGameRecapChatLine: line => savedChatLines.push(line),
+      })
+      const call = async (tool: string, args: unknown) => {
+        const parsed = parse(tool, args)
+        if (!parsed) throw new Error('Expected game request')
+        return executeMurphDynamicToolRequest({ request: parsed, hostedToolContext: ctx, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+      }
+      expect(ctx.currentGameRecapScope?.()).toEqual(executionContext?.gameRecapScope)
+      expect((await call('game_lore', { operation: 'read' })).rpcResult.success).toBe(true)
+      expect(await ctx.readGameLore?.()).toBe('')
+      if (loreAccess) {
+        await expect(ctx.replaceGameLore?.('Private recap caption')).rejects.toThrow('read-only')
+        const denied = await call('game_lore', { operation: 'replace', content: 'Private recap caption' })
+        expect(denied.rpcResult.success).toBe(false)
+        expect(denied.rpcResult.contentItems[0]?.text).toContain('read-only')
+      } else {
+        expect((await call('game_lore', { operation: 'replace', content: 'Existing pair lore.' })).rpcResult.success).toBe(true)
+      }
+      request.mockResolvedValueOnce({ action: 'write_recap', result: { status: 'rejected', recapOutcome: 'Try again.' } })
+      await call('write_recap', recap)
+      expect(await ctx.readGameLore?.()).toBe(loreAccess ? '' : 'Existing pair lore.')
+      expect(savedChatLines).toEqual([])
+      for (const chatLine of ['A submitted candidate.', 'A different replay candidate.']) {
+        expect((await call('write_recap', { ...recap, chatLine })).rpcResult.success).toBe(true)
+      }
+      expect(savedChatLines).toEqual([delivery, delivery])
+      const stored = await readFile(target, 'utf8')
+      if (loreAccess) {
+        expect(stored.split('Chat line used:').length - 1).toBe(1)
+        expect(stored).toContain(`Chat line used: ${recap.chatLine}`)
+        expect(stored).not.toMatch(/candidate|https:|Private recap caption/u)
+        expect(request.mock.calls.at(-1)?.[0]).toMatchObject({ priorChatLines: [recap.chatLine] })
+      } else expect(stored).toBe('Existing pair lore.')
+    } finally { await rm(vault, { recursive: true, force: true }) }
+  })
+  it('trims oldest whole lines to keep the trusted lore append within 64 KiB of UTF-8', async () => {
+    const vault = await mkdtemp(path.join(tmpdir(), 'game-lore-bound-'))
+    try {
+      const target = path.join(vault, 'games', `lore-${'c'.repeat(32)}.md`)
+      await mkdir(path.dirname(target))
+      const recent = 'Recent room callback.\n'
+      const oldest = 'é'.repeat(Math.floor((64 * 1024 - Buffer.byteLength(recent) - 1) / 2)) + '\n'
+      await writeFile(target, oldest + recent)
+      const ctx = createAssistantHostedToolContext({ executionContext: { memberId: 'synthetic-room', userEnvKeys: [], gameRecapScope: { gameId: 'game_bound', eventId: 'game-recap:game_bound', pairFingerprint: 'c'.repeat(32), loreAccess: 'read' } },
+        messageInput: { channel: 'linq', vault } as never, session: { binding: { channel: 'linq' }, sessionId: 'synthetic-lore-session' } as never,
+      })
+      await ctx.appendGameRecapChatLine?.(recap.chatLine)
+      const stored = await readFile(target, 'utf8')
+      expect(Buffer.byteLength(stored)).toBeLessThanOrEqual(64 * 1024)
+      expect(stored.startsWith(recent)).toBe(true)
+      expect(stored).not.toContain('é')
+      expect(stored).toContain(`Chat line used: ${recap.chatLine}`)
+    } finally { await rm(vault, { recursive: true, force: true }) }
   })
   it('prepares lore only in Linq group rooms and never fails the turn', async () => {
     const lore = { action: 'read_game' as const, result: { status: 'ok' as const, state: { games: [] }, loreFingerprint: 'a'.repeat(32), loreGuidance: 'Keep the lore.' } }

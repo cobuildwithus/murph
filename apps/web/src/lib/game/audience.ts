@@ -23,6 +23,15 @@ export function gamePairLoreFingerprint(memberIds: readonly string[]): string {
     .slice(0, 32);
 }
 
+/** The stored original audience survives joins, departures and rematches. */
+export function gameGroupLoreFingerprint(audienceKey: string): string {
+  return createHash("sha256")
+    .update("murph-group-game-lore-v1\0")
+    .update(audienceKey)
+    .digest("hex")
+    .slice(0, 32);
+}
+
 /** Addresses exist only during preparation, never in the game row or event log. */
 export function gameAudienceKeys(contacts: readonly Pick<HostedLinqParticipantContact, "kind" | "value">[]) {
   const handles = contacts.map(contact => {

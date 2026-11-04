@@ -199,11 +199,12 @@ export interface AssistantHostedToolContext {
   }): void
   currentScheduledPhoneCallScope?(): AssistantHostedScheduledPhoneCallScope | null
   currentUserActionScope?(): AssistantHostedUserActionScope | null
-  currentGameRecapScope?(): { gameId: string; eventId: string; pairFingerprint: string } | null
+  currentGameRecapScope?(): NonNullable<AssistantHostedExecutionContext['gameRecapScope']> | null
   currentGameMissedCheckInScope?(): { gameId: string; eventId: string; memberId: string; firstMissedDate: string; pairFingerprint: string } | null
   prepareGameLore?(): Promise<string | null>
   readGameLore?(): Promise<string>
   replaceGameLore?(content: string): Promise<void>
+  appendGameRecapChatLine?(chatLine: string): Promise<void>
   recordSavedGameRecapChatLine?(chatLine: string): void
   currentProductFeedbackAcceptedInputIds?(): readonly string[]
   readonly computerToolsAvailable: boolean
@@ -387,8 +388,22 @@ export function createAssistantHostedToolContext(input: {
   }
   const gameLorePath = async (): Promise<string> => {
     const scope = await prepareGameLore()
-    if (!scope || !/^[a-f0-9]{32}$/u.test(scope.fingerprint)) throw new TypeError('Pair lore authority is unavailable.')
+    if (!scope || !/^[a-f0-9]{32}$/u.test(scope.fingerprint)) throw new TypeError('Game lore authority is unavailable.')
     return path.join(input.messageInput.vault, 'games', `lore-${scope.fingerprint}.md`)
+  }
+  const readGameLore = async (): Promise<string> => {
+    try {
+      return (await readFile(await gameLorePath(), 'utf8')).slice(-64 * 1024)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
+      throw error
+    }
+  }
+  const writeGameLore = async (content: string): Promise<void> => {
+    if (Buffer.byteLength(content, 'utf8') > 64 * 1024) throw new TypeError('Game lore is too large.')
+    const target = await gameLorePath()
+    await mkdir(path.dirname(target), { recursive: true })
+    await writeFile(target, content, { encoding: 'utf8', mode: 0o600 })
   }
   const readCurrentInvocationScope = (): AssistantHostedInvocationScope | null => {
     if (readCurrentHostedImageCompletionEffectScope() !== null) {
@@ -616,19 +631,24 @@ export function createAssistantHostedToolContext(input: {
     currentGameRecapScope: () => executionContext?.gameRecapScope ?? null,
     currentGameMissedCheckInScope: () => executionContext?.gameMissedCheckInScope ?? null,
     prepareGameLore: async () => (await prepareGameLore())?.guidance || null,
-    readGameLore: async () => {
-      try {
-        return (await readFile(await gameLorePath(), 'utf8')).slice(-64 * 1024)
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
-        throw error
-      }
-    },
+    readGameLore,
     replaceGameLore: async (content) => {
-      if (Buffer.byteLength(content, 'utf8') > 64 * 1024) throw new TypeError('Pair lore is too large.')
-      const target = await gameLorePath()
-      await mkdir(path.dirname(target), { recursive: true })
-      await writeFile(target, content, { encoding: 'utf8', mode: 0o600 })
+      if (executionContext?.gameRecapScope?.loreAccess === 'read') throw new TypeError('Game lore is read-only for this recap.')
+      await writeGameLore(content)
+    },
+    appendGameRecapChatLine: async (chatLine) => {
+      if (executionContext?.gameRecapScope?.loreAccess !== 'read') return
+      const marker = `Chat line used: ${chatLine.replace(/\s+/gu, ' ').trim()}`
+      const lines = (await readGameLore()).split(/\r?\n/u)
+      if (lines.includes(marker)) return
+      if (lines.at(-1) === '') lines.pop()
+      lines.push(marker)
+      let bytes = Buffer.byteLength(lines.join('\n') + '\n', 'utf8')
+      let start = 0
+      while (bytes > 64 * 1024 && start < lines.length - 1) {
+        bytes -= Buffer.byteLength(lines[start++]!, 'utf8') + 1
+      }
+      await writeGameLore(lines.slice(start).join('\n') + '\n')
     },
     recordSavedGameRecapChatLine: input.recordSavedGameRecapChatLine,
     currentProductFeedbackAcceptedInputIds: () =>

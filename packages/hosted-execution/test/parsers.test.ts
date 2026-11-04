@@ -4547,3 +4547,21 @@ function parsePreMaxHostedRuntimeFamilyPlanCode(value: unknown): "edge" | "pulse
 
   throw new TypeError("Pre-Max hosted runtime Family plan code is not supported.");
 }
+
+describe("game recap lore response policy", () => {
+  const policy = { kind: "require_game_recap", gameId: "game_synthetic", eventId: "game-recap:game_synthetic", pairFingerprint: "a".repeat(32) };
+  const event = (responsePolicy: object) => ({ kind: "assistant.notification.requested", userId: "synthetic_room", notification: {
+    instructions: "Write the recap.", responsePolicy,
+    route: { actorId: null, channel: "linq", delivery: { kind: "explicit", target: "synthetic_chat" }, identityId: null, threadId: "synthetic_chat", threadIsDirect: false },
+  } });
+  it.each([{}, { loreAccess: "read" }])("accepts old and read-only recap policies: %j", extra => {
+    expect(parseHostedExecutionEvent(event({ ...policy, ...extra }))).toMatchObject(event({ ...policy, ...extra }));
+    if (!("loreAccess" in extra)) expect(parseHostedExecutionEvent(event(policy))).not.toHaveProperty("notification.responsePolicy.loreAccess");
+  });
+  it.each(["write", "replace", "", null, true, 1])("rejects unknown lore access %j", loreAccess => {
+    expect(() => parseHostedExecutionEvent(event({ ...policy, loreAccess }))).toThrow(/loreAccess/u);
+  });
+  it("still rejects unknown recap keys", () => {
+    expect(() => parseHostedExecutionEvent(event({ ...policy, lorePath: "arbitrary" }))).toThrow();
+  });
+});

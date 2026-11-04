@@ -1859,8 +1859,16 @@ Only remaining players have names, status and authored evidence in shared
 projections; invitees with no player row appear only as counts. Private pending
 labels stay with the starter. Final lifecycle egress repeats the authority
 check and verifies the provider target. Lifecycle notices and recap links contain text only. Any group
-report withholds the shared recap, including media and quotes; private lore never
-enters group recap instructions.
+report withholds the shared recap, including media and quotes. Recaps may read
+only the authorized room-audience game lore, never private memory or contact
+labels. Group lore keys derive from the stored original audience, not the room
+ID or current seats; a changed audience cannot inherit its notebook. Live lore
+contains only room conversation and shared game state, never app-only captions
+or photo details. Person notes retain memberIds beside names, but messages omit
+IDs and recap callbacks include only eligible players. Group recap lore is
+read-only in the runner because recap evidence includes app-only posts. Trusted
+code records only the accepted canonical bare room chat line, once, within the
+existing 64 KiB limit; that line must use room-visible evidence only.
 
 
 Game proposals are structural metadata under the canonical game lock. The

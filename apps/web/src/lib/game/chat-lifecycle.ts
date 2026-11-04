@@ -22,7 +22,7 @@ import { deliverGameChangeProposal } from "./chat-delivery";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 import { gameChallengeKey, isGameInviteExpired } from "./rules";
 import { firstDatesOfMissRuns } from "./missed-check-in";
-import { gamePairLoreFingerprint } from "./audience";
+import { gameGroupLoreFingerprint, gamePairLoreFingerprint } from "./audience";
 
 // One discovery (20 × 3s plus one 3s recheck) and one frozen recovery
 // (10s create + 3s roster check) cap provider wait at 76s per 180s cron.
@@ -329,12 +329,12 @@ async function deliverCurrentGameChatLifecycle(input: {
 }): Promise<boolean> {
   const { boundOnly, eventId, game, gameId, instructions, kind, players, prisma } = input;
   if (game.maxPlayers === 10) {
-    if (!game.chatContainerMemberId) return false;
+    if (!game.chatContainerMemberId || !game.audienceKey) return false;
     const audience = await readGroupGameChatAuthority(game, game.chatContainerMemberId);
     if (!audience) return false;
     const destination = await resolveHostedAssistantNotificationDestination({ memberId: game.chatContainerMemberId, prisma });
     if (!destination || destination.conversationShape !== "thread-container" || destination.route.channel !== "linq") return false;
-    return enqueueGameLifecycle({ audience, containerMemberId: game.chatContainerMemberId, gameId, kind, eventId, instructions, destination, players });
+    return enqueueGameLifecycle({ audience, game, containerMemberId: game.chatContainerMemberId, gameId, kind, eventId, instructions, destination, players });
   }
   const identities = await Promise.all(players.map((memberId) => readHostedMemberIdentity({ memberId, prisma })));
   const phones = identities.flatMap((identity) => identity?.phoneNumberVerifiedAt && identity.phoneNumber ? [identity.phoneNumber] : []);
@@ -347,7 +347,7 @@ async function deliverCurrentGameChatLifecycle(input: {
   if (!destination) return boundOnly ? false : (await prepareGameChatBootstrap(gameId, eventId, instructions)) !== null;
   if (destination.conversationShape !== "thread-container" || destination.route.channel !== "linq") throw new Error("Game chat route is unavailable.");
   await requireExactChat(containerMemberId!, phones);
-  return enqueueGameLifecycle({ containerMemberId: containerMemberId!, gameId, kind, eventId, instructions, destination, players });
+  return enqueueGameLifecycle({ game, containerMemberId: containerMemberId!, gameId, kind, eventId, instructions, destination, players });
 }
 
 /** Read shared context only for notices that actually describe game terms. */
@@ -390,6 +390,7 @@ async function lifecycleInstructions(game: Pick<Game, "id" | "chatContainerMembe
 }
 
 async function enqueueGameLifecycle(input: {
+  game: Pick<Game, "maxPlayers" | "audienceKey">;
   audience?: GameChatAudience;
   containerMemberId: string; gameId: string; kind: GameChatLifecycleKind; eventId: string; instructions: string;
   players: readonly string[];
@@ -406,7 +407,10 @@ async function enqueueGameLifecycle(input: {
   const prepared = await prepareHostedMailboxEnvelopeAppend({ prisma, envelope: buildHostedExecutionAssistantNotificationRequestedWake({
     eventId: input.eventId, memberId: input.containerMemberId, occurredAt: new Date().toISOString(),
     notification: { ...bound, instructions: input.instructions, responsePolicy: input.kind === "recap"
-      ? { kind: "require_game_recap", gameId: input.gameId, eventId: input.eventId, pairFingerprint: gamePairLoreFingerprint(input.players) }
+      ? { kind: "require_game_recap", gameId: input.gameId, eventId: input.eventId,
+          ...(input.game.maxPlayers === 10
+            ? { pairFingerprint: gameGroupLoreFingerprint(input.game.audienceKey!), loreAccess: "read" }
+            : { pairFingerprint: gamePairLoreFingerprint(input.players) }) }
       : input.kind === "missed"
       ? (() => {
           const match = /^game-missed:[^:]+:([^:]+):(\d{4}-\d{2}-\d{2})$/u.exec(input.eventId);
