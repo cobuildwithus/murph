@@ -9,6 +9,6 @@
     "summary": "In a 1v1 game, you can swap the prize or dare any time before the game ends, as long as your friend says yes in your game chat.",
     "details": "Ask Murph in your game chat, or use Edit game in the app. The new prize or dare counts for the whole game. Tasks can still change until Day 1 begins, then stay as agreed.",
     "relevanceTags": ["games"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [4530]
   }
 }
