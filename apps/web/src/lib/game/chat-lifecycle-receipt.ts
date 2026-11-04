@@ -7,7 +7,7 @@ import { Prisma } from "@prisma/client";
 import { buildHostedLinqDeliveryId } from "../hosted-onboarding/linq-delivery-store";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 
-export type GameChatLifecycleKind = "started" | "rematch" | "change_cancelled" | "change_expired" | "cancelled" | "recap" | "missed" | "challenge";
+export type GameChatLifecycleKind = "started" | "rematch" | "change_cancelled" | "change_expired" | "cancelled" | "recap" | "missed" | "challenge" | "talk";
 
 export function gameChatLifecycleEventId(gameId: string, kind: GameChatLifecycleKind, proposalId?: string, regenerationId?: string): string {
   if (kind === "challenge") {
@@ -16,7 +16,7 @@ export function gameChatLifecycleEventId(gameId: string, kind: GameChatLifecycle
   }
   if (kind === "recap" && regenerationId) return `game-recap:${gameId}:${regenerationId}`;
   if (kind === "missed") throw new Error("Missed-day lifecycle identity requires the player and first date.");
-  if (kind === "change_cancelled" || kind === "change_expired") {
+  if (kind === "talk" || kind === "change_cancelled" || kind === "change_expired") {
     if (!proposalId) throw new Error("Game change resolution requires its proposal identity.");
     return `game-${kind.replace("_", "-")}:${gameId}:${proposalId}`;
   }

@@ -157,6 +157,17 @@ describe("weekly game command validator", () => {
     expect(codeOf(() => parseGameCommand({ ...post("excuse", ".jpg"), text: "Sick today" }))).toBe("INVALID_REQUEST");
   });
 
+  it("takes exactly one cleaned talk note or concrete change", () => {
+    const base = { type: "negotiate", token: "invite", proposalId: "proposal_talk", termsVersion: 1, timeZone: "UTC" };
+    expect(parseGameCommand({ ...base, note: "  Can we pick another prize?\u200B  " })).toEqual({ ...base, note: "Can we pick another prize?" });
+    for (const fields of [{}, { note: "" }, { note: " \u200B\u200D " }, { note: null }, { note: 4 },
+      { note: "x".repeat(501) }, { note: "Talk", change: { kind: "edit", lengthDays: 10 } }]) {
+      expect(codeOf(() => parseGameCommand({ ...base, ...fields }))).toBe("INVALID_REQUEST");
+    }
+    for (const note of ["x", "x".repeat(500)]) expect(parseGameCommand({ ...base, note })).toEqual({ ...base, note });
+    expect(parseGameCommand({ ...base, change: { kind: "edit", lengthDays: 10 } })).toEqual({ ...base, change: { kind: "edit", lengthDays: 10 } });
+  });
+
   it("takes an excuse as its transcript only", () => {
     const excuse = { entryId: "entry_0001", gameId: "game_0001", kind: "excuse", type: "post" };
     expect(parseGameCommand({ ...excuse, text: "  Flight was delayed  " })).toEqual({

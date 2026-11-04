@@ -6007,6 +6007,14 @@ date remains honored. Cancelling or declining a proposal does not accept the
 original challenge. The original invite expiry bounds abandoned negotiation and
 releases that game's slot.
 
+The HTTP negotiate command accepts exactly one concrete change or a cleaned
+1–500 character talk note. A note claims the invitee's seat with status
+`negotiating` and no pending change. Its `talk_requested` event holds only the
+author-owned encrypted note, bound to `game`, the game ID and
+`talk_note:<proposalId>`. The event uses the ordinary
+`game-change:<gameId>:<proposalId>` replay key. Shared-word moderation checks
+abuse without treating an objection as a proposed task or prize.
+
 `game.pending_change` is one versioned structural proposal serialized with the
 existing game row lock. Day boundaries never expire it. Acceptance derives
 `fromDay` from the furthest-ahead player under that lock, retaining earlier terms
@@ -6096,6 +6104,17 @@ the exact room, two-player audience and immutable cancellation history. Pending,
 failed and chat-origin requests do not reserve a cancellation notice. Cancellation
 never changes the agreed rules or starts a negotiating challenge. Started context offers optional first-few-days
 reminders without scheduling them; later opt-in must read current rules.
+
+Talk reserves `game_talk` with delivery key `game-talk:<gameId>:<proposalId>`
+and source reference equal to the game ID. Immediate delivery and the minute
+sweep share the lifecycle dispatcher. Generation and egress require an unexpired
+negotiating pair with its original talk event. A later concrete proposal does
+not stale the talk; its pending bootstrap keeps the talk first in the room.
+Frozen first messages reconcile their original text and key like proposals.
+Account deletion voids the pair game before any note decrypt; the sweep retires
+its pending receipt. App views batch the author's talk events and receipts in
+two reads, for negotiating games only, to derive `talkDelivery` without another
+mutable game field.
 
 `chat-lifecycle.ts` drains one due intent and one frozen recovery per existing minute
 onboarding sweep. Discovery makes at most twenty serial 3-second roster reads

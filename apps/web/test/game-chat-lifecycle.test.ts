@@ -56,7 +56,7 @@ describe("durable game chat lifecycle", () => {
   it("filters supported templates and non-null references before the bounded drain", async () => {
     await drainGameChatLifecycle({ now });
     expect(m.receipts).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
-      template: { in: ["game_started", "game_rematch", "game_proposal", "game_change_cancelled", "game_change_expired", "game_cancelled", "game_recap", "game_missed", "game_challenge"] },
+      template: { in: ["game_started", "game_rematch", "game_proposal", "game_talk", "game_change_cancelled", "game_change_expired", "game_cancelled", "game_recap", "game_missed", "game_challenge"] },
       sourceRef: { not: null },
     }), take: 1 }));
   });

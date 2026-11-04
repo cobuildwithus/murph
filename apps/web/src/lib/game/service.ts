@@ -107,6 +107,7 @@ import {
   type GameTicketRow,
   type GameViewInput,
 } from "./views";
+import { parseGameTalkPayload } from "./talk";
 import { departedLabels } from "./account-deletion";
 import { gameMemberIds, hasGameIdentity } from "./roster";
 import { areGamePlayersBlocked, GAME_BLOCK_LIMIT, isHiddenBy, lockGamePair, readGameBlocks, type GameBlocks } from "./blocks";
@@ -177,18 +178,7 @@ export async function runGameCommand(input: {
     const chatAudience = input.chatAudience ?? (input.multiplayer && input.chatContainerMemberId ? await readGameChatAudience(input.chatContainerMemberId) : undefined);
     const applied = await runCommand({ chatAudience, actor, now: input.now, chatContainerMemberId: input.chatContainerMemberId, chatPlayerMemberIds: input.chatPlayerMemberIds, beforeMutationTx: input.beforeMutationTx, postGuard: input.postGuard }, command);
     const { gameId, dayOutcome, composer } = typeof applied === "object" && applied !== null ? applied : { gameId: applied };
-    if ((command.type === "proposeChange" || command.type === "negotiate") && !input.chatContainerMemberId && gameId) {
-      const proposalId = command.proposalId;
-      try {
-        await deliverGameChangeProposal(gameId, proposalId);
-      } catch {
-        // The durable proposal survives unavailable routing/provider work. A retry
-        // uses the same identity; never overwrite a later proposal or queued send.
-        await getPrisma().$executeRaw`UPDATE game SET pending_change = jsonb_set(pending_change, '{deliveryStatus}', '"failed"'::jsonb)
-          WHERE id = ${gameId} AND pending_change->>'id' = ${proposalId}
-          AND pending_change->>'deliveryStatus' IN ('pending', 'failed')`;
-      }
-    }
+    await deliverAppGameNegotiation(command, gameId, input.chatContainerMemberId);
     await deliverCreatedRematch(command, gameId, input.chatContainerMemberId);
     const game = gameId && !input.chatContainerMemberId ? await readGame(gameId, actor, input.multiplayer) : null;
     return { game: game && composer ? { ...game, composer } : game, ok: true, ...(dayOutcome ? { dayOutcome } : {}) };
@@ -197,6 +187,30 @@ export async function runGameCommand(input: {
       return { error: error.error, ok: false, status: GAME_ERROR_STATUS[error.error.code] };
     }
     throw error;
+  }
+}
+
+async function deliverAppGameNegotiation(command: GameCommand, gameId: string | null, chatContainerMemberId?: string): Promise<void> {
+  if (!gameId || chatContainerMemberId) return;
+  if (command.type === "negotiate" && command.note !== undefined) {
+    try {
+      const { deliverGameChatLifecycle } = await import("./chat-lifecycle");
+      await deliverGameChatLifecycle(gameId, "talk", command.proposalId);
+    } catch {
+      // The committed receipt stays recoverable by the lifecycle sweep.
+    }
+  }
+  if ((command.type === "proposeChange" || command.type === "negotiate" && command.change !== undefined)) {
+    const proposalId = command.proposalId;
+    try {
+      await deliverGameChangeProposal(gameId, proposalId);
+    } catch {
+      // The durable proposal survives unavailable routing/provider work. A retry
+      // uses the same identity; never overwrite a later proposal or queued send.
+      await getPrisma().$executeRaw`UPDATE game SET pending_change = jsonb_set(pending_change, '{deliveryStatus}', '"failed"'::jsonb)
+        WHERE id = ${gameId} AND pending_change->>'id' = ${proposalId}
+        AND pending_change->>'deliveryStatus' IN ('pending', 'failed')`;
+    }
   }
 }
 
@@ -414,8 +428,8 @@ interface LockedStep {
   clock: Date;
 }
 
-type GameEventType = "challenged" | "left" | "terms_edited" | "day_marked_incomplete" | "day_restored" | "cancelled" | "blocked" | "removed" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
-/** What changed, for the history: ids and numbers only, never words. */
+type GameEventType = "talk_requested" | "challenged" | "left" | "terms_edited" | "day_marked_incomplete" | "day_restored" | "cancelled" | "blocked" | "removed" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
+/** History holds metadata and sealed words, never plaintext. */
 interface GameEventDraft {
   createdAt?: Date;
   commandKey?: string;
@@ -432,6 +446,9 @@ async function writeEvents(tx: Tx, gameId: string, actor: string, events: readon
     await reserveGameChatLifecycleTx({ gameId, kind: "started", now: new Date(), tx });
   }
   for (const event of events) {
+    if (event.type === "talk_requested" && typeof event.payload.proposalId === "string") {
+      await reserveGameChatLifecycleTx({ gameId, kind: "talk", proposalId: event.payload.proposalId, now: new Date(), tx });
+    }
     if (!chatOrigin && event.type === "change_proposed" && typeof event.payload.proposalId === "string") {
       await reserveGameChatProposalTx({ gameId, proposalId: event.payload.proposalId, now: new Date(), tx });
     }
@@ -1508,7 +1525,7 @@ function assertPreparedWords(row: Game, prepared: PreparedGameChangeWords): void
   if (prepared.baseWordsEncrypted !== undefined && row.termsWordsEncrypted !== prepared.baseWordsEncrypted) reject("TERMS_CHANGED", "The game changed. Take another look.");
 }
 
-/** Claiming a seat proposes terms; it never accepts the original challenge. */
+/** Claiming a seat opens negotiation; it never accepts the original challenge. */
 async function negotiate(context: CommandContext, command: Extract<GameCommand, { type: "negotiate" }>): Promise<string> {
   const prisma = getPrisma();
   const owner = await prisma.game.findUnique({ where: { inviteTokenHash: sha256Hex(command.token) } });
@@ -1518,7 +1535,9 @@ async function negotiate(context: CommandContext, command: Extract<GameCommand, 
   const creator = owner.createdBy;
   if (creator === context.actor) reject("NOT_A_PLAYER", "Only the invited player can suggest changes here.");
   if (!await prisma.gameProfile.findUnique({ where: { memberId: context.actor }, select: { memberId: true } })) reject("PROFILE_REQUIRED", "Add your first name first.");
-  const prepared = await prepareGameChangeWords(owner, command.change, command.termsVersion);
+  const prepared = command.change === undefined ? null : await prepareGameChangeWords(owner, command.change, command.termsVersion);
+  const noteEncrypted = command.note === undefined ? null : await seal({ table: "game", rowId: owner.id,
+    field: `talk_note:${command.proposalId}`, memberId: context.actor }, command.note);
   await maintainPair(creator, context.actor);
   await runLocked(owner.id, withPairLock(context, creator), async ({ tx, loaded, now }) => {
       await rejectBlockedJoin(tx, creator, context.actor);
@@ -1528,6 +1547,16 @@ async function negotiate(context: CommandContext, command: Extract<GameCommand, 
       const joined = decideJoin(await withCurrentTimeZones(tx, loaded.state), { memberId: context.actor, termsVersion: command.termsVersion, timeZone: command.timeZone, now });
       if (joined.kind !== "join") reject("INVITE_USED", "This invite was already used.");
       await assertPairCapacity(tx, creator, context.actor, now, owner.id);
+      if (noteEncrypted !== null) {
+        await tx.gamePlayer.create({ data: { gameId: owner.id, memberId: context.actor, seat: joined.seat, timeZone: command.timeZone, joinedAt: now } });
+        await tx.game.update({ where: { id: owner.id }, data: { status: "negotiating", pendingChange: Prisma.DbNull } });
+        await acceptInvitation(tx, loaded.row, context.actor, joined.seat);
+        return [
+          { type: "negotiation_joined", payload: { seat: joined.seat } },
+          { type: "talk_requested", commandKey: key, payload: { proposalId: command.proposalId, noteEncrypted } },
+        ];
+      }
+      if (!prepared || !command.change) throw new Error("Game negotiation requires a note or change.");
       assertPreparedWords(loaded.row, prepared);
       const negotiation: RuleState = { ...loaded.state, game: { ...loaded.state.game, status: "negotiating" },
         players: [...loaded.state.players, { memberId: context.actor, seat: joined.seat, timeZone: command.timeZone, dayOne: null }] };
@@ -2554,6 +2583,7 @@ async function openInvitePreview(row: PreviewGame, multiplayer: boolean, memberI
     startsOn: game.startsOn,
     status: "open",
     supportsNegotiation: row.maxPlayers === 2,
+    ...(row.maxPlayers === 2 ? { supportsTalk: true } : {}),
     lengthDays: row.lengthDays,
     terms: previewTerms,
   };
@@ -2741,7 +2771,7 @@ async function buildViewInputs(
   const memberIds = [...new Set([viewerId, ...games.flatMap((game) => gameMemberIds(game.row.players))])];
   // An addressed rematch's invitee isn't a player yet, but the challenger's label for them still applies.
   const labelSubjects = [...memberIds, ...games.flatMap(game => gameMemberIds(game.row.invitees))];
-  const [profiles, labels, tickets, pendingViews, blocks, reported, challenges] = await Promise.all([
+  const [profiles, labels, tickets, pendingViews, blocks, reported, challenges, talkViews] = await Promise.all([
     prisma.gameProfile.findMany({ where: { memberId: { in: labelSubjects } } }),
     prisma.gameContactLabel.findMany({ where: { ownerMemberId: viewerId, subjectMemberId: { in: labelSubjects } } }),
     history ? [] : prisma.gameTicket.findMany({
@@ -2751,6 +2781,7 @@ async function buildViewInputs(
     knownBlocks ?? readGameBlocks(prisma, viewerId, labelSubjects),
     readReportedBy(viewerId, { gameIds: games.map((game) => game.row.id), players: labelSubjects }),
     readGameChallenges(prisma, games.filter(game => !history && game.row.maxPlayers === 2).map(game => game.row.id)),
+    readTalkDeliveryViews(games.filter(game => game.row.status === "negotiating").map(game => game.row.id), viewerId, history),
   ]);
   const hiddenEntryIds = reported.entries;
   const hiddenMemberIds = new Set([...blocks.blocked, ...blocks.blockedBy]);
@@ -2857,6 +2888,7 @@ async function buildViewInputs(
       multiplayer, home, groupsEnabled: areGameGroupsEnabled(), audienceKey: game.row.audienceKey,
       challenges: challenges.get(game.row.id) ?? [],
       pendingChange: pendingViews.get(game.row.id) ?? null,
+      talkDelivery: talkViews.get(game.row.id),
       avatarKeys,
       profileAvatarKeys,
       entryWords,
@@ -2927,5 +2959,27 @@ async function readPendingChangeViews(rows: readonly Pick<Game, "id" | "wordsOwn
       deliveryStatus: terminal ? "failed" : status === "accepted" || status === "delivered" || status === "sent_no_receipt_expected" ? "sent" : proposal.deliveryStatus,
       deliveryRetryable: !terminal,
     }];
+  }));
+}
+
+/** The note author's delivery view comes from the talk receipt, never a mutable game field. */
+async function readTalkDeliveryViews(gameIds: readonly string[], viewerId: string, history: boolean): Promise<Map<string, NonNullable<GameView["talkDelivery"]>>> {
+  if (history || !gameIds.length) return new Map();
+  const db = getPrisma();
+  const events = await db.gameEvent.findMany({ where: { gameId: { in: [...gameIds] }, actor: viewerId, type: "talk_requested" },
+    select: { gameId: true, payload: true }, take: gameIds.length });
+  const talks = events.flatMap(event => {
+    const payload = parseGameTalkPayload(event.payload);
+    const key = payload && createHostedLinqDeliveryIdempotencyLookupKey(`game-talk:${event.gameId}:${payload.proposalId}`);
+    return key ? [{ gameId: event.gameId, key }] : [];
+  });
+  if (!talks.length) return new Map();
+  const receipts = await db.hostedLinqDelivery.findMany({ where: { idempotencyKey: { in: talks.map(talk => talk.key) } },
+    select: { idempotencyKey: true, status: true } });
+  const statuses = new Map(receipts.map(receipt => [receipt.idempotencyKey, receipt.status]));
+  return new Map(talks.map(talk => {
+    const status = statuses.get(talk.key);
+    return [talk.gameId, status === "failed" || status === "skipped" ? "failed"
+      : status === "accepted" || status === "delivered" || status === "sent_no_receipt_expected" ? "sent" : "pending"];
   }));
 }

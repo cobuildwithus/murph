@@ -61,12 +61,7 @@ export function parseGameCommand(value: unknown): GameCommand {
     case "createGame":
       return create(input);
     case "negotiate":
-      return {
-        type: "negotiate", token: opaque(input.token, "token"),
-        termsVersion: integer(input.termsVersion, "termsVersion", 1),
-        timeZone: timeZone(input.timeZone), proposalId: clientId(input.proposalId, "proposalId"),
-        change: parseGameChange(input.change),
-      };
+      return negotiate(input);
     case "join":
       return {
         termsVersion: integer(input.termsVersion, "termsVersion", 1),
@@ -89,6 +84,17 @@ export function parseGameCommand(value: unknown): GameCommand {
     default:
       return reject("INVALID_REQUEST", "Unknown command.");
   }
+}
+
+function negotiate(input: Record<string, unknown>): Extract<GameCommand, { type: "negotiate" }> {
+  if ((input.note === undefined) === (input.change === undefined)) reject("INVALID_REQUEST", "Send a note or a change.");
+  return {
+    type: "negotiate", token: opaque(input.token, "token"),
+    termsVersion: integer(input.termsVersion, "termsVersion", 1),
+    timeZone: timeZone(input.timeZone), proposalId: clientId(input.proposalId, "proposalId"),
+    ...(input.note === undefined ? { change: parseGameChange(input.change) }
+      : { note: reportNote(input.note) ?? reject("INVALID_REQUEST", "A note needs 1 to 500 characters.") }),
+  };
 }
 
 function dayCompletion(input: Record<string, unknown>): Extract<GameCommand, { type: "setDayCompletion" }> {

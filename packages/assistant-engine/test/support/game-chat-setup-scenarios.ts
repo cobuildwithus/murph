@@ -31,6 +31,12 @@ const full = 'Murph, set up a challenge for us: I walk twenty minutes, Sam reads
 const create = (name: string, message = full, terms: CreateTerms = SETUP_TERMS): GameSetupScenario => ({ name, message, create: terms, reply: [/walk(?:s|ing)? (?:twenty|20) minutes/i, /read(?:s|ing)? (?:a|one|1) chapter/i, /film/i, /Sam/i, /\?/u] })
 const termsHistory = 'Ava: My task is Walk twenty minutes. Sam: My task is Read a chapter. Ava: Winner gets to Choose the film.'
 export const GAME_CHAT_SETUP_SCENARIOS: GameSetupScenario[] = [
+  { name: 'game talk follow-up proposes only the current speakers requested prize', state: 'waiting',
+    history: 'Murph: Sam wants to talk about the film prize before agreeing. Nothing has changed. Ava, what do you think? Sam: Breakfast in bed would be fun.',
+    message: 'Murph, I would like breakfast in bed as the prize instead. Ask Sam if that works.',
+    operation: 'propose', change: { kind: 'edit', stakes: [{ kind: 'prize', item: 'Breakfast in bed' }] },
+    reply: [/Sam/i, /breakfast in bed/i, /\?/u], forbidden: /now live|has started|you.ve agreed|we.ve changed/i },
+
   create('full terms in one message'),
   create('default seven days every day', 'Murph, set up a game: I walk twenty minutes, Sam reads a chapter, winner chooses the film. Start when Sam agrees.'),
   { ...create('dare for loser', 'Murph, set up a 7-day everyday game: I walk twenty minutes, Sam reads a chapter, loser must Sing karaoke. Start when Sam agrees.', { ...SETUP_TERMS, stakes: [{ kind: 'dare', item: 'Sing karaoke' }] }), reply: [/walk(?:s|ing)? (?:twenty|20) minutes/i, /read(?:s|ing)? (?:a|one|1) chapter/i, /loser|loses/i, /karaoke/i, /\?/u] },

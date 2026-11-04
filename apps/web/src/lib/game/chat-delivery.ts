@@ -62,7 +62,7 @@ async function prepareGameChatPlayers(game: Game & { players: GamePlayer[] }, pr
 
 /** Revalidate the audience outside the existing provider dispatch transaction. */
 export async function readGameProposalDeliveryPlayers(key: string | null, containerMemberId: string, target?: string | null): Promise<readonly string[] | GameChatAudience | undefined> {
-  const match = /^(game-change|game-started|game-rematch|game-change-cancelled|game-change-expired|game-cancelled|game-recap|game-missed|game-challenge):([^:]+)/.exec(key ?? "");
+  const match = /^(game-talk|game-change|game-started|game-rematch|game-change-cancelled|game-change-expired|game-cancelled|game-recap|game-missed|game-challenge):([^:]+)/.exec(key ?? "");
   if (!match) return undefined;
   const game = await getPrisma().game.findUnique({ where: { id: match[2] }, include: { players: { take: 11 } } });
   if (game?.maxPlayers !== 10) return requireExactGameChat(containerMemberId);

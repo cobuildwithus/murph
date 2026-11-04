@@ -27,7 +27,7 @@ async function setup() {
   roomPlayers.set(room, [a,b]);
   return {a,b,c,room,gameId,token:created.game.inviteToken};
 }
-function negotiate(token: string, proposalId = randomUUID()): Extract<GameCommand,{type:"negotiate"}> {
+function negotiate(token: string, proposalId = randomUUID()): Extract<GameCommand,{type:"negotiate"}> & { change: import("@/src/lib/game/contract").GameChange } {
   return { type:"negotiate",token,proposalId,termsVersion:1,timeZone:"America/New_York",change:{kind:"edit",tasks:[tasks[0],{seat:1,text:"Practice guitar"}],schedule:{days:[4,0]},stakes:[{kind:"prize",item:"Choose the film"}]} };
 }
 
