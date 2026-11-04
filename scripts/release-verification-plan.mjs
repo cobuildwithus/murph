@@ -20,13 +20,13 @@ export const PACKAGE_COVERAGE_PLAN = Object.freeze([
   { dir: "packages/assistant-engine", shard: "assistant-engine" },
   { dir: "packages/assistant-runtime", shard: "assistant-runtime" },
 
-  // Core, Device Sync, Query, and Vault dominate platform-b; the smaller owners
-  // fill platform-a.
-  { dir: "packages/core", shard: "platform-b" },
+  // Package timings from Host Support run 41704908795 total ~361s per platform-b
+  // group, including startup and artifact checks; smaller owners fill platform-a.
+  { dir: "packages/core", shard: "platform-b1" },
   { dir: "packages/cloudflare-hosted-control", shard: "platform-a" },
-  { dir: "packages/contracts", shard: "platform-b" },
-  { dir: "packages/clinical-records", shard: "platform-b" },
-  { dir: "packages/device-syncd", shard: "platform-b" },
+  { dir: "packages/contracts", shard: "platform-b1" },
+  { dir: "packages/clinical-records", shard: "platform-b2" },
+  { dir: "packages/device-syncd", shard: "platform-b1" },
   { dir: "packages/exercise-library", shard: "platform-a" },
   { dir: "packages/gateway-core", shard: "platform-a" },
 
@@ -37,13 +37,13 @@ export const PACKAGE_COVERAGE_PLAN = Object.freeze([
   { dir: "packages/hosted-execution", shard: "platform-a" },
   { dir: "packages/importers", shard: "platform-a" },
   { dir: "packages/inbox-services", shard: "platform-a" },
-  { dir: "packages/inboxd", shard: "platform-b" },
-  { dir: "packages/messaging-ingress", shard: "platform-b" },
+  { dir: "packages/inboxd", shard: "platform-b2" },
+  { dir: "packages/messaging-ingress", shard: "platform-b1" },
   { dir: "packages/operator-config", shard: "platform-a" },
-  { dir: "packages/parsers", shard: "platform-b" },
-  { dir: "packages/query", shard: "platform-b" },
-  { dir: "packages/runtime-state", shard: "platform-b" },
-  { dir: "packages/vault-usecases", shard: "platform-b" },
+  { dir: "packages/parsers", shard: "platform-b2" },
+  { dir: "packages/query", shard: "platform-b2" },
+  { dir: "packages/runtime-state", shard: "platform-b2" },
+  { dir: "packages/vault-usecases", shard: "platform-b2" },
   // Keep the other child-runtime-heavy owner last so local composed coverage
   // can refill unrelated work before its Assistant Engine exclusion holds the
   // shared-host head. Hosted CI gives it a singleton runner.

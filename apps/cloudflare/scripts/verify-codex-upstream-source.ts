@@ -62,7 +62,6 @@ async function main(): Promise<void> {
       "fetch",
       "--quiet",
       "--depth=1",
-      "--filter=blob:none",
       "origin",
       `refs/tags/${inventory.upstreamTag}`,
     ], upstreamRepository);
@@ -78,8 +77,8 @@ async function main(): Promise<void> {
     }
 
     // Verify the same patch the deployment build applies to this exact release.
-    // The commit pins every tree. Checking against the index fetches only the
-    // blobs the patch touches instead of materializing the whole checkout.
+    // The commit pins every tree. The shallow fetch includes all blobs, so
+    // checking against the index needs neither lazy fetches nor a checkout.
     runGit(["read-tree", "FETCH_HEAD"], upstreamRepository);
     runGit([
       "apply", "--cached", "--check", path.join(repoRoot, "patches/codex-public-live.patch"),
