@@ -65,7 +65,8 @@ export async function runReminderLanguageJourney(config: CanonicalLiveConfig, sc
     const authorDay = toLocalDayKey(new Date(), scenario.timezone)
     const authorInstant = resolveFloatingIsoTimestampInTimeZone(`${authorDay}T12:00:00`, scenario.timezone)?.timestamp
     if (!authorInstant) throw new Error('Expected a local noon instant.')
-    vi.useFakeTimers({ toFake: ['Date'] })
+    // Advance with real time so elapsed-time deadlines still fire after each jump.
+    vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true })
     vi.setSystemTime(new Date(authorInstant))
     evidence.authorInstant = authorInstant
     const opening = await fixture.message(scenario.opening, { executionContext })
@@ -153,12 +154,15 @@ export async function runReminderLanguageJourney(config: CanonicalLiveConfig, sc
   } finally {
     vi.useRealTimers()
     observer.mockRestore()
-    const outputDirectory = process.env.MURPH_REMINDER_LANGUAGE_EVIDENCE_DIR
-    if (outputDirectory) {
-      await mkdir(outputDirectory, { recursive: true })
-      const safe = JSON.stringify(evidence, null, 2).replaceAll(fixture.root, '<FIXTURE_ROOT>').replaceAll(homedir(), '<HOME_DIR>')
-      await writeFile(path.join(outputDirectory, `${scenario.id}.json`), safe + '\n')
+    try {
+      const outputDirectory = process.env.MURPH_REMINDER_LANGUAGE_EVIDENCE_DIR
+      if (outputDirectory) {
+        await mkdir(outputDirectory, { recursive: true })
+        const safe = JSON.stringify(evidence, null, 2).replaceAll(fixture.root, '<FIXTURE_ROOT>').replaceAll(homedir(), '<HOME_DIR>')
+        await writeFile(path.join(outputDirectory, `${scenario.id}.json`), safe + '\n')
+      }
+    } finally {
+      await fixture.close()
     }
-    await fixture.close()
   }
 }
