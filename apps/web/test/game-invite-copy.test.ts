@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { inviteShareCopy } from "@/app/g/[token]/invite-copy";
+import { describeInviteTiming, inviteShareCopy } from "@/app/g/[token]/invite-copy";
 import type { GameInvitePreview, GameSchedule } from "@/src/lib/game/contract";
 
 const GROUP: Extract<GameInvitePreview, { status: "open" }> = {
@@ -48,5 +48,21 @@ describe("invite share copy", () => {
         title: "Leo challenged you", description: "FOR THE WINNER: Breakfast in bed.",
       });
     }
+  });
+
+  it.each<[GameSchedule, number | undefined, string | null, string]>([
+    [{ days: [0, 1, 2, 3, 4, 5, 6] }, undefined, null, "Every day for a week. Starts once you say yes."],
+    [{ days: [0, 1, 2, 3, 4] }, 14, null, "Weekdays for 2 weeks. Starts once you say yes."],
+    [{ days: [4, 0, 2] }, 10, "2026-10-19", "Mon, Wed, Fri for 10 days. Starts Oct 19."],
+    [{ count: 1 }, 3, null, "Any 1 day in 3 days. Starts once you say yes."],
+    [{ count: 50 }, 75, null, "Any 50 days in 75 days. Starts once you say yes."],
+  ])("says when a pair game runs the way the app's invite card does", (schedule, lengthDays, startsOn, line) => {
+    const pair = { ...GROUP, maxPlayers: 2 as const, group: undefined, lengthDays, startsOn, terms: { ...GROUP.terms, schedule } };
+    expect(describeInviteTiming(pair)).toBe(line);
+  });
+
+  it("names no start for a group unless one was picked", () => {
+    expect(describeInviteTiming(GROUP)).toBe("Weekdays for 2 weeks.");
+    expect(describeInviteTiming({ ...GROUP, startsOn: "2026-11-09" })).toBe("Weekdays for 2 weeks. Starts Nov 9.");
   });
 });
