@@ -1815,3 +1815,7 @@ Meal-name repair removal and compatibility proof are tracked in
 Usage-blocked system readiness and restoration wake proof is recorded in
 [the scheduling correction plan](exec-plans/completed/2026-11-03-blocked-system-poll.md).
 The current contract remains in [Hosted Temporal orchestration](references/hosted-temporal-orchestration.md).
+
+Meal thumbnail retry after failed canonical publication and terminal media cleanup
+is verified in [the retention recovery plan](exec-plans/completed/2026-11-04-meal-photo-retention-retry.md).
+`../ARCHITECTURE.md` owns the thumbnail identity and deletion contract.
