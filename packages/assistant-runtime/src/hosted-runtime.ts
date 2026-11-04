@@ -250,7 +250,6 @@ import {
   readHostedSystemMailboxState,
   recoverHostedSystemMailboxClaims,
   readHostedSystemMailboxProgress,
-  resolveHostedSystemMailboxProgress,
   type HostedSystemMailboxPendingItem,
   type HostedSystemMailboxState,
 } from "./hosted-runtime/system-mailbox-state.ts";
@@ -2161,6 +2160,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           ? workspacePort
           : foregroundWorkspacePort;
         const redactedStatus = await withHostedMailboxProgressStatus({
+          workspaceVersion: (BigInt(checkpointMetadata.expectedWorkspaceVersion) + 1n).toString(),
           redactedStatus: {
             ...(checkpointInput.clearCanonicalWriteReceiptLog
               ? omitHostedCanonicalWriteReceiptLogStatusFields(checkpointRequestBuilder.readRedactedStatus())
@@ -3033,6 +3033,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       );
       const restoredSystemMailboxProgressNeedsCheckpoint =
         await hasRestoredSystemMailboxProgressAheadOfWorkspace({
+          assistantExecutionBlocked,
+          workspaceVersion: checkpointMetadata.expectedWorkspaceVersion,
           importedSeq: initialMailboxImport.state.watermarks.system,
           redactedStatus: activeWorkspace?.redactedStatus ?? null,
           vaultRoot: restored.vaultRoot,
@@ -3472,6 +3474,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           && activeWorkspace.nextDefaultProcessingWakeAt === wake.nextDefaultProcessingWakeAt
           && activeWorkspace.nextDefaultProcessingWakeReason === wake.nextDefaultProcessingWakeReason
           && !await hasRestoredSystemMailboxProgressAheadOfWorkspace({
+            assistantExecutionBlocked,
+            workspaceVersion: checkpointMetadata.expectedWorkspaceVersion,
             importedSeq: latestMailboxImport.state.watermarks.system,
             redactedStatus: activeWorkspace.redactedStatus ?? null,
             vaultRoot: restored.vaultRoot,
@@ -3629,6 +3633,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           immediateRecheckRequested: recheckOwner !== null,
           nextWake: returnedWake,
           redactedStatus: await withHostedMailboxProgressStatus({
+            workspaceVersion: checkpointMetadata.expectedWorkspaceVersion,
             mailboxState: latestMailboxImport.state,
             redactedStatus: currentRedactedStatus,
             systemMailboxState,
@@ -6782,6 +6787,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         const runtimeDirtyAfterForeground = result.runtimeStateDirty
           || hostedVaultStartupPreparation.mutated
           || await hasRestoredSystemMailboxProgressAheadOfWorkspace({
+            assistantExecutionBlocked,
+            workspaceVersion: checkpointMetadata.expectedWorkspaceVersion,
             importedSeq: result.latestMailboxImport.state.watermarks.system,
             redactedStatus: committedWorkspace?.redactedStatus ?? null,
             vaultRoot: restored.vaultRoot,
@@ -8671,6 +8678,7 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
     });
   input.assertRuntimeNotAborted();
   const redactedStatus = await withHostedMailboxProgressStatus({
+    workspaceVersion: (BigInt(input.checkpointRequestBuilder.latestWorkspace()?.version ?? "0") + 1n).toString(),
     redactedStatus: input.retainCanonicalWriteReceiptLogStatus
       ? input.redactedStatus
       : omitHostedCanonicalWriteReceiptLogStatusFields(input.redactedStatus),
@@ -8750,6 +8758,8 @@ function readHostedConversationConsumedSeqFromStatus(
 }
 
 async function hasRestoredSystemMailboxProgressAheadOfWorkspace(input: {
+  assistantExecutionBlocked: boolean;
+  workspaceVersion: string;
   importedSeq: string;
   redactedStatus: HostedRuntimeRedactedJson | null;
   vaultRoot: string;
@@ -8775,7 +8785,12 @@ async function hasRestoredSystemMailboxProgressAheadOfWorkspace(input: {
   return localImportedSeq >= canonicalImportedSeq
     && localHandledThroughSeq >= canonicalHandledThroughSeq
     && (
-      localImportedSeq > canonicalImportedSeq
+      // An otherwise idle blocked pass must publish this once, even when its
+      // counters already match. Due work uses its normal completion checkpoint.
+      (input.assistantExecutionBlocked
+        && !hostedRuntimeWakeIsDue(localProgress.modelFreeWakeAt)
+        && input.redactedStatus?.hostedMailboxSystemModelFreeWakeVersion !== input.workspaceVersion)
+      || localImportedSeq > canonicalImportedSeq
       || localHandledThroughSeq > canonicalHandledThroughSeq
       || localProgress.deviceSyncContinuationSeqs.some((seq) =>
         !Array.isArray(canonicalContinuationSeqs)
@@ -8785,6 +8800,7 @@ async function hasRestoredSystemMailboxProgressAheadOfWorkspace(input: {
 }
 
 async function withHostedMailboxProgressStatus(input: {
+  workspaceVersion: string;
   mailboxState?: HostedMailboxImportState;
   redactedStatus: HostedWorkspaceInvocationResult["redactedStatus"] | null;
   systemMailboxState?: HostedSystemMailboxState;
@@ -8795,9 +8811,10 @@ async function withHostedMailboxProgressStatus(input: {
   });
   const systemMailboxState = input.systemMailboxState
     ?? await readHostedSystemMailboxState(input.vaultRoot);
-  const systemMailboxProgress = resolveHostedSystemMailboxProgress({
+  const systemMailboxProgress = await readHostedSystemMailboxProgress({
     importedSeq: mailboxState.watermarks.system,
     state: systemMailboxState,
+    vaultRoot: input.vaultRoot,
   });
   return {
     ...(input.redactedStatus ?? {}),
@@ -8821,6 +8838,10 @@ async function withHostedMailboxProgressStatus(input: {
     hostedMailboxSystemFirstPendingClassifierFailures:
       systemMailboxProgress.firstPendingClassifierFailures,
     hostedMailboxSystemImportedSeq: mailboxState.watermarks.system,
+    hostedMailboxSystemModelFreeWakeAt: systemMailboxProgress.modelFreeWakeAt,
+    // Old runners preserve unknown status keys. Bind this projection to the
+    // published version so a later old-runner checkpoint cannot reuse it.
+    hostedMailboxSystemModelFreeWakeVersion: input.workspaceVersion,
     hostedMailboxSystemHandledThroughSeq:
       systemMailboxProgress.handledThroughSeq,
     hostedMailboxSystemFirstPendingSeq:

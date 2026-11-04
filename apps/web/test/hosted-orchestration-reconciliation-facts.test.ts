@@ -765,6 +765,141 @@ describe("hosted orchestration reconciliation facts", () => {
     });
   });
 
+  it.each(["assistant", "assistant_due"])(
+    "does not read completed independent rows as runnable work behind a blocked %s head",
+    async (reason) => {
+      const rows = [
+        { dedupeKey: "member.action.requested:synthetic", kind: "member.action.requested", laneSeq: "5" },
+        { dedupeKey: "device-sync.wake:completed", kind: "device-sync.wake", laneSeq: "6" },
+      ];
+      mocks.readHostedMailboxFirstLiveSystemItemAfterSeq.mockImplementation(async (input) =>
+        rows.find((row) => BigInt(row.laneSeq) > BigInt(input.afterSeq)
+          && (!input.modelFreeOnly || row.kind === "device-sync.wake")) ?? null,
+      );
+      mocks.readHostedMailboxMaxSeqByLane.mockImplementation(async () => [
+        { lane: "conversation", maxSeq: "0" },
+        { lane: "system", maxSeq: rows.at(-1)!.laneSeq },
+      ]);
+      const workspace = buildWorkspaceRecord({
+        nextWakeAt: FIXED_NOW,
+        nextWakeReason: reason,
+        nextDefaultProcessingWakeAt: FIXED_NOW,
+        nextDefaultProcessingWakeReason: reason,
+        systemMailboxProgressGeneration: "7",
+        redactedStatusJson: {
+          hostedMailboxSystemHandledThroughSeq: "4",
+          hostedMailboxSystemImportedSeq: "6",
+          hostedMailboxSystemModelFreeWakeAt: null,
+          hostedMailboxSystemModelFreeWakeVersion: "4",
+        },
+      });
+      mocks.readHostedWorkspace.mockResolvedValue(workspace);
+      mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+        decision: buildUsageLimitExceededGateDecision(), status: "denied",
+      });
+      const readFacts = async () => parseHostedRuntimeReconciliationFacts(
+        await (await reconciliationRoute.GET(requestForFacts(), routeContext())).json(),
+      );
+
+      // Repeated reconciliation must not advertise the already imported device
+      // row. The default-owned head still owns the same handled prefix.
+      for (let cycle = 0; cycle < 3; cycle += 1) {
+        const facts = await readFacts();
+        expect(facts.workspace?.systemMailboxFrontier).toBe("default_owned");
+        expect(facts.workspace?.hostedMailboxSystemHandledThroughSeq).toBe("4");
+        expect(facts.blocked).toEqual({
+          reason: "ai_usage_denied",
+          retryAt: buildUsageLimitExceededGateDecision().retryAfter.toISOString(),
+        });
+        vi.advanceTimersByTime(600_000);
+      }
+
+      rows.push({ dedupeKey: "device-sync.wake:new", kind: "device-sync.wake", laneSeq: "7" });
+      expect((await readFacts()).workspace?.systemMailboxFrontier).toBe("model_free");
+      workspace.redactedStatusJson = {
+        ...workspace.redactedStatusJson, hostedMailboxSystemImportedSeq: "7",
+      };
+      expect((await readFacts()).workspace?.systemMailboxFrontier).toBe("default_owned");
+
+      mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
+      const restored = await readFacts();
+      expect(restored.blocked).toBeNull();
+      expect(restored.workspace?.nextDefaultProcessingWakeAt).toBe(FIXED_NOW);
+      expect(restored.workspace?.systemMailboxFrontier).toBe("default_owned");
+    },
+  );
+
+  it.each(["default head", "model-free head", "handled local continuation"])(
+    "keeps an imported retry with a %s asleep until its deadline",
+    async (scenario) => {
+      const retryAt = "2026-05-20T12:05:00.000Z";
+      mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+        // The older default head wins the unrestricted generic wake.
+        nextWakeAt: FIXED_NOW, nextWakeReason: "assistant",
+        nextDefaultProcessingWakeAt: FIXED_NOW,
+        nextDefaultProcessingWakeReason: "assistant",
+        systemMailboxProgressGeneration: "7",
+        redactedStatusJson: {
+          hostedMailboxSystemHandledThroughSeq: scenario === "handled local continuation" ? "6" : "4",
+          hostedMailboxSystemImportedSeq: "6",
+          hostedMailboxSystemModelFreeWakeAt: retryAt,
+          hostedMailboxSystemModelFreeWakeVersion: "4",
+        },
+      }));
+      mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+        { lane: "conversation", maxSeq: "0" }, { lane: "system", maxSeq: "6" },
+      ]);
+      mocks.readHostedMailboxFirstLiveSystemItemAfterSeq.mockImplementation(async (input) =>
+        input.modelFreeOnly ? null : {
+          dedupeKey: scenario === "default head" ? "member.action.requested:synthetic" : "device-sync.wake:imported",
+          kind: scenario === "default head" ? "member.action.requested" : "device-sync.wake", laneSeq: "5",
+        },
+      );
+      mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+        decision: buildUsageLimitExceededGateDecision(), status: "denied",
+      });
+      const readFacts = async () => parseHostedRuntimeReconciliationFacts(
+        await (await reconciliationRoute.GET(requestForFacts(), routeContext())).json(),
+      );
+      const future = await readFacts();
+      expect(future.workspace?.systemMailboxFrontier).toBe(scenario === "default head" ? "default_owned" : null);
+      expect(future.blocked?.retryAt).toBe(retryAt);
+      vi.setSystemTime(new Date(retryAt));
+      expect((await readFacts()).workspace?.systemMailboxFrontier).toBe("model_free");
+    },
+  );
+
+  it.each([
+    {},
+    { hostedMailboxSystemModelFreeWakeAt: null },
+    { hostedMailboxSystemModelFreeWakeAt: null, hostedMailboxSystemModelFreeWakeVersion: "3" },
+  ])("preserves the base handled-prefix lookup for absent or carried-forward status %j", async (status) => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: FIXED_NOW, nextWakeReason: "assistant",
+      redactedStatusJson: {
+        hostedMailboxSystemHandledThroughSeq: "4", hostedMailboxSystemImportedSeq: "6",
+        ...status,
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: "0" }, { lane: "system", maxSeq: "6" },
+    ]);
+    mocks.readHostedMailboxFirstLiveSystemItemAfterSeq.mockImplementation(async (input) =>
+      input.modelFreeOnly
+        ? BigInt(input.afterSeq) < 6n
+          ? { dedupeKey: "device-sync.wake:imported", kind: "device-sync.wake", laneSeq: "6" }
+          : null
+        : { dedupeKey: "member.action.requested:synthetic", kind: "member.action.requested", laneSeq: "5" },
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(
+      await (await reconciliationRoute.GET(requestForFacts(), routeContext())).json(),
+    );
+    expect(facts.workspace?.systemMailboxFrontier).toBe("model_free");
+    expect(mocks.readHostedMailboxFirstLiveSystemItemAfterSeq).toHaveBeenLastCalledWith(
+      expect.objectContaining({ afterSeq: "4", modelFreeOnly: true }),
+    );
+  });
+
   it("uses zero as the system handled frontier when no checkpoint exists", async () => {
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
       { lane: "conversation", maxSeq: "0" },

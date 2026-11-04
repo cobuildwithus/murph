@@ -179,13 +179,15 @@ export async function readHostedRuntimeReconciliationFacts(
   }
 
   reportStage?.("canonical_mailbox");
+  const modelFreeWakeAt = readHostedRuntimeSystemModelFreeWakeAt(workspace);
   const workspaceWithSystemMailboxFrontier = {
     ...projectedWorkspace,
     systemMailboxFrontier: await readHostedRuntimeSystemMailboxFrontier({
       at: now,
       handledThroughSeq:
         projectedWorkspace.hostedMailboxSystemHandledThroughSeq ?? "0",
-      maxSeqByLane,
+      mailboxLag,
+      modelFreeWakeAt,
       prisma,
       userId: input.userId,
     }),
@@ -262,6 +264,7 @@ export async function readHostedRuntimeReconciliationFacts(
         reason: "ai_usage_denied",
         retryAt: resolveHostedRuntimeAiBlockedRetryAt({
           aiRetryAt: gate.decision.retryAfter.toISOString(),
+          modelFreeWakeAt,
           noticeRetryAt,
           now,
           workspace: workspaceWithSystemMailboxFrontier,
@@ -352,6 +355,7 @@ function hostedRuntimeReconciliationNeedsAiUsageGate(input: {
 
 function resolveHostedRuntimeAiBlockedRetryAt(input: {
   aiRetryAt: string | null;
+  modelFreeWakeAt: string | null | undefined;
   noticeRetryAt: Date | null;
   now: Date;
   workspace: HostedRuntimeReconciliationFactsWorkspace;
@@ -362,6 +366,7 @@ function resolveHostedRuntimeAiBlockedRetryAt(input: {
   return earliestHostedRuntimeReconciliationTimestamp([
     input.noticeRetryAt?.toISOString() ?? null,
     input.aiRetryAt,
+    readHostedRuntimeFutureTimestamp(input.modelFreeWakeAt ?? null, input.now),
     defaultProcessingWake.reason === HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON
       ? readHostedRuntimeFutureTimestamp(defaultProcessingWake.at, input.now)
       : null,
@@ -732,12 +737,16 @@ function readHostedRuntimeDefaultProcessingWake(
 async function readHostedRuntimeSystemMailboxFrontier(input: {
   at: Date;
   handledThroughSeq: string;
-  maxSeqByLane: readonly { lane: string; maxSeq: string }[];
+  mailboxLag: readonly HostedMailboxLaneLag[];
+  modelFreeWakeAt: string | null | undefined;
   prisma: PrismaClient;
   userId: string;
 }): Promise<HostedRuntimeSystemMailboxFrontierClass | null> {
-  const systemMaxSeq = input.maxSeqByLane.find(({ lane }) => lane === "system")
-    ?.maxSeq ?? "0";
+  // Local continuations can outlive the Web handled prefix entirely.
+  if (isHostedRuntimeWakeDue(input.modelFreeWakeAt ?? null, input.at)) return "model_free";
+  const systemLane = input.mailboxLag.find(({ lane }) => lane === "system");
+  const systemMaxSeq = systemLane?.maxSeq ?? "0";
+  const importedSeq = systemLane?.importedSeq ?? "0";
   if (BigInt(systemMaxSeq) <= BigInt(input.handledThroughSeq)) {
     return null;
   }
@@ -753,17 +762,33 @@ async function readHostedRuntimeSystemMailboxFrontier(input: {
   }
 
   const executionClass = classifyHostedFirstLiveSystemItemOwnership(frontier);
-  if (executionClass === "model_free") return executionClass;
-  // Readiness is independent of the handled prefix. A retained assistant item
-  // must not hide consented deterministic work when assistant usage is blocked.
+  const legacyCheckpoint = input.modelFreeWakeAt === undefined;
+  if (legacyCheckpoint && executionClass === "model_free") return executionClass;
+  // Only the runtime knows whether an imported independent row is still pending.
+  // Old checkpoints retain the exact handled-prefix lookup until they publish it.
   const independent = await readHostedMailboxFirstLiveSystemItemAfterSeq({
-    afterSeq: input.handledThroughSeq,
+    afterSeq: !legacyCheckpoint && BigInt(importedSeq) > BigInt(input.handledThroughSeq)
+      ? importedSeq
+      : input.handledThroughSeq,
     at: input.at,
     modelFreeOnly: true,
     prisma: input.prisma,
     userId: input.userId,
   });
-  return independent ? classifyHostedFirstLiveSystemItemOwnership(independent) : executionClass;
+  return independent
+    ? classifyHostedFirstLiveSystemItemOwnership(independent)
+    : executionClass === "default_owned" ? executionClass : null;
+}
+
+function readHostedRuntimeSystemModelFreeWakeAt(
+  workspace: HostedWorkspaceRecord | null,
+): string | null | undefined {
+  const status = readHostedMailboxRedactedStatusRecord(workspace?.redactedStatusJson);
+  if (status?.hostedMailboxSystemModelFreeWakeVersion !== workspace?.version) return undefined;
+  const at = status?.hostedMailboxSystemModelFreeWakeAt;
+  return at === null || typeof at === "string" && Number.isFinite(Date.parse(at))
+    ? at
+    : undefined;
 }
 
 export function classifyHostedFirstLiveSystemItemOwnership(input: {

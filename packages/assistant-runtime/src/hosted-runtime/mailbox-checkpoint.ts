@@ -185,10 +185,12 @@ export async function importHostedMailboxPrefixAndCheckpoint(
   try {
     const systemMailboxProgress = await readHostedSystemMailboxProgress({
       importedSeq: importResult.state.watermarks.system,
+      now: input.now,
       vaultRoot: input.vaultRoot,
     });
     const redactedStatus = {
       ...buildHostedMailboxImportRedactedStatus(importResult),
+      hostedMailboxSystemModelFreeWakeAt: systemMailboxProgress.modelFreeWakeAt,
       hostedMailboxSystemFirstPendingClassifierFailures:
         systemMailboxProgress.firstPendingClassifierFailures,
       hostedMailboxSystemHandledThroughSeq:
@@ -208,7 +210,11 @@ export async function importHostedMailboxPrefixAndCheckpoint(
     checkpoint = await input.workspacePort.checkpoint({
       ...checkpointRequest,
       reason: checkpointReason,
-      redactedStatus: cloneHostedRuntimeRedactedJson(redactedStatus),
+      redactedStatus: {
+        ...cloneHostedRuntimeRedactedJson(redactedStatus),
+        hostedMailboxSystemModelFreeWakeVersion:
+          (BigInt(checkpointRequest.expectedWorkspaceVersion) + 1n).toString(),
+      },
     });
     if (checkpoint.workspace.userId !== input.expectedUserId) {
       throw new HostedMailboxImportCheckpointUserMismatchError({
