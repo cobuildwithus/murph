@@ -642,7 +642,7 @@ describe("production conversation canary runner", () => {
   ])("rejects an already-present goal or invalid canonical provenance at baseline", async (outcome) => {
     prepareCompleteConversation();
     vi.mocked(fetch).mockResolvedValueOnce(resetResponse()).mockResolvedValueOnce(outcomeResponse(outcome));
-    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-cardinality-invalid; stage=runtime-identity" });
+    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-cardinality-invalid; stage=runtime-identity; reply_chars=54; reply_question=true; reply_save_claim=false; reply_save_offer=false" });
     expect(mocks.spaceSend).toHaveBeenCalledTimes(3);
   });
 
@@ -658,7 +658,7 @@ describe("production conversation canary runner", () => {
       .mockResolvedValueOnce(outcomeResponse({ ready: true, matchingGoalCount: 0, matchingGoalIdCount: 0 }))
       .mockResolvedValueOnce(outcomeResponse({ ready: true, matchingGoalCount: 0, matchingGoalIdCount: 0 }))
       .mockResolvedValueOnce(outcomeResponse(outcome));
-    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-cardinality-invalid; stage=accept-goal" });
+    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-cardinality-invalid; stage=accept-goal; reply_chars=38; reply_question=false; reply_save_claim=false; reply_save_offer=false" });
     expect(mocks.spaceSend).toHaveBeenCalledTimes(5);
     expect(mocks.stop).toHaveBeenCalledOnce();
   });
@@ -701,7 +701,7 @@ describe("production conversation canary runner", () => {
     vi.mocked(fetch).mockResolvedValueOnce(resetResponse()).mockImplementation(async () =>
       outcomeResponse({ ready: false, matchingGoalCount: 0, matchingGoalIdCount: 0 }));
 
-    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-not-ready; stage=runtime-identity" });
+    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-not-ready; stage=runtime-identity; reply_chars=54; reply_question=true; reply_save_claim=false; reply_save_offer=false" });
     expect(clock.elapsedMs()).toBe(HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS + 120_000);
     expect(vi.mocked(fetch).mock.calls.filter(([, options]) => options?.method === "GET"))
       .toHaveLength(CANARY_OUTCOME_WAIT_MS / CANARY_OUTCOME_POLL_MS);
@@ -709,13 +709,47 @@ describe("production conversation canary runner", () => {
     expect(mocks.stop).toHaveBeenCalledOnce();
   });
 
-  it("does not accept a confirmation when the canonical goal never appears", async () => {
-    prepareCompleteConversation();
-    mockCanaryObservationClock();
-    vi.mocked(fetch).mockResolvedValueOnce(resetResponse())
-      .mockImplementation(async () => outcomeResponse({ ready: true, matchingGoalCount: 0, matchingGoalIdCount: 0 }));
-    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-not-ready; stage=accept-goal" });
-    expect(mocks.spaceSend).toHaveBeenCalledTimes(5);
+  describe.each(["outcome-not-ready", "outcome-cardinality-invalid"])("%s reply diagnostics", (failure) => {
+    it.each([
+      {
+        label: "false save claim",
+        reply: "I've saved your synthetic-private-marker plan.",
+        categories: "reply_chars=46; reply_question=false; reply_save_claim=true; reply_save_offer=false",
+      },
+      {
+        label: "question re-offer",
+        reply: "Want me to save your synthetic-private-marker plan?",
+        categories: "reply_chars=51; reply_question=true; reply_save_claim=false; reply_save_offer=true",
+      },
+      {
+        label: "plain non-question reply",
+        reply: "I can help with your synthetic-private-marker plan.",
+        categories: "reply_chars=51; reply_question=false; reply_save_claim=false; reply_save_offer=false",
+      },
+      {
+        label: "capped reply length",
+        reply: `${"synthetic-private-marker ".repeat(500)}?`,
+        categories: "reply_chars=10000; reply_question=true; reply_save_claim=false; reply_save_offer=false",
+      },
+    ])("reports only closed categories for a $label", async ({ reply, categories }) => {
+      prepareCompleteConversation();
+      mocks.messages[4] = inboundMessage({ text: reply });
+      mockCanaryObservationClock();
+      const count = failure === "outcome-not-ready" ? 0 : 2;
+      vi.mocked(fetch).mockResolvedValueOnce(resetResponse())
+        .mockResolvedValueOnce(outcomeResponse({ ready: true, matchingGoalCount: 0, matchingGoalIdCount: 0 }))
+        .mockResolvedValueOnce(outcomeResponse({ ready: true, matchingGoalCount: 0, matchingGoalIdCount: 0 }))
+        .mockImplementation(async () => outcomeResponse({ ready: true, matchingGoalCount: count, matchingGoalIdCount: count }));
+
+      const error = await runLinqProductionCanary(TEST_ENV).catch((failure: unknown) => failure);
+      const name = `${failure}; stage=accept-goal; ${categories}`;
+      expect(error).toMatchObject({ name, message: "The Linq production canary failed." });
+      expect(String(error)).toBe(`${name}: The Linq production canary failed.`);
+      expect(String(error)).not.toContain(reply);
+      expect(JSON.stringify(error)).not.toContain("synthetic-private-marker");
+      expect(mocks.spaceSend).toHaveBeenCalledTimes(5);
+      expect(mocks.stop).toHaveBeenCalledOnce();
+    });
   });
 
   it("rejects a goal created before the person accepts the proposal", async () => {
@@ -723,7 +757,7 @@ describe("production conversation canary runner", () => {
     vi.mocked(fetch).mockResolvedValueOnce(resetResponse())
       .mockResolvedValueOnce(outcomeResponse({ ready: true, matchingGoalCount: 0, matchingGoalIdCount: 0 }))
       .mockResolvedValueOnce(outcomeResponse({ ready: true, matchingGoalCount: 1, matchingGoalIdCount: 1 }));
-    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-cardinality-invalid; stage=goal-proposal" });
+    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-cardinality-invalid; stage=goal-proposal; reply_chars=56; reply_question=true; reply_save_claim=false; reply_save_offer=false" });
     expect(mocks.spaceSend).toHaveBeenCalledTimes(4);
   });
 
@@ -790,7 +824,7 @@ describe("production conversation canary runner", () => {
         throw new Error("Expected the request deadline to expire.");
       });
 
-    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-not-ready; stage=runtime-identity" });
+    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-not-ready; stage=runtime-identity; reply_chars=54; reply_question=true; reply_save_claim=false; reply_save_offer=false" });
     expect(clock.elapsedMs()).toBe(CANARY_OUTCOME_WAIT_MS);
     expect(mocks.spaceSend).toHaveBeenCalledTimes(3);
     expect(mocks.stop).toHaveBeenCalledOnce();
@@ -804,7 +838,7 @@ describe("production conversation canary runner", () => {
         clock.advance(CANARY_OUTCOME_WAIT_MS);
         return outcomeResponse({ ready: true, matchingGoalCount: 0, matchingGoalIdCount: 0 });
       });
-    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-not-ready; stage=runtime-identity" });
+    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "outcome-not-ready; stage=runtime-identity; reply_chars=54; reply_question=true; reply_save_claim=false; reply_save_offer=false" });
     expect(mocks.spaceSend).toHaveBeenCalledTimes(3);
   });
 
