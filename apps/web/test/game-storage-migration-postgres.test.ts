@@ -66,6 +66,8 @@ function expectedPair(id: string, viewerId: string) {
     words, names: new Map([[members[0], "Alex"], [members[1], viewerId === members[0] ? "Teammate" : "Sam"]]), avatarKeys: new Map(), relationships: new Map(),
     invitee: id === "waiting" ? { memberId: members[1], name: viewerId === members[0] ? "Teammate" : "Sam", photoKey: null, relationship: null } : null,
     inviteToken: null, inviteExpiresAt: null, entryWords: new Map(), result: id === "settled" ? result : null, recap: null,
+    // Both players posted days 0 to 2, so the live game's other-player posts take a reply.
+    entryReplies: new Map(), replyEligibleEntryIds: new Set(id === "live" ? state.entries.filter(entry => entry.memberId !== viewerId).map(entry => entry.id) : []),
     tickets: id === "settled" ? [{ id: "ticket", gameId: id, stakeKey: "prize", owedBySeats: [1], owedToSeats: [0], players, status: "open", createdAt: at, redeemedAt: null }] : [] };
   return buildGameView(input);
 }
@@ -104,6 +106,9 @@ describe.skipIf(!enabled)("canonical game storage migration PostgreSQL proof", (
       expect((await client.query("SELECT seat, member_id, recipient_lookup_key, pending_label FROM game_invitee WHERE game_id = 'live'")).rows).toEqual([{ seat: 1, member_id: members[1], recipient_lookup_key: null, pending_label: label }]);
       expect((await client.query("SELECT owed_by_seats, owed_to_seats FROM game_ticket")).rows).toEqual([{ owed_by_seats: [1], owed_to_seats: [0] }]);
       expect((await client.query("SELECT count(*)::int AS n FROM game_entry")).rows[0].n).toBe(12);
+      // Today's readers need the later, additive migrations too.
+      const later = (await readdir(migrations, { withFileTypes: true })).filter(entry => entry.isDirectory() && entry.name > migrationId).map(entry => entry.name).sort();
+      for (const directory of later) await client.query(await readFile(new URL(`${directory}/migration.sql`, migrations), "utf8"));
       for (const id of ["live", "settled", "waiting"]) for (const viewer of members) expect(await readGame(id, viewer)).toEqual(before.get(`${id}:${viewer}`));
       await expect(client.query("UPDATE game SET max_players = 3 WHERE id = 'live'")).rejects.toMatchObject({ code: "23514" });
       await expect(client.query("UPDATE game_player SET member_id = NULL WHERE game_id = 'live' AND seat = 1")).rejects.toMatchObject({ code: "23514" });

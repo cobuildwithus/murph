@@ -2993,6 +2993,10 @@ async function buildViewInputs(
   const memberIds = [...new Set([viewerId, ...games.flatMap((game) => gameMemberIds(game.row.players))])];
   // An addressed rematch's invitee isn't a player yet, but the challenger's label for them still applies.
   const labelSubjects = [...memberIds, ...games.flatMap(game => gameMemberIds(game.row.invitees))];
+  // Replies exist only in 1v1 games; group-only and history reads add no queries.
+  const pairGames = history ? [] : games.filter(game => game.row.maxPlayers === 2);
+  const pairEntryIds = pairGames.flatMap(game => game.entries.map(entry => entry.id));
+  const pairPeers = pairEntryIds.length ? [...new Set(pairGames.flatMap(game => gameMemberIds(game.row.players)))].filter(id => id !== viewerId) : [];
   const [profiles, labels, tickets, pendingViews, blocks, reported, challenges, talkViews, replies, replyReported] = await Promise.all([
     prisma.gameProfile.findMany({ where: { memberId: { in: labelSubjects } } }),
     prisma.gameContactLabel.findMany({ where: { ownerMemberId: viewerId, subjectMemberId: { in: labelSubjects } } }),
@@ -3004,8 +3008,8 @@ async function buildViewInputs(
     readReportedBy(viewerId, { gameIds: games.map((game) => game.row.id), players: labelSubjects }),
     readGameChallenges(prisma, games.filter(game => !history && game.row.maxPlayers === 2).map(game => game.row.id)),
     readTalkDeliveryViews(games.filter(game => game.row.status === "negotiating").map(game => game.row.id), viewerId, history),
-    history ? [] : prisma.gameReply.findMany({ where: { entryId: { in: games.filter(game => game.row.maxPlayers === 2).flatMap(game => game.entries.map(entry => entry.id)) } }, select: replyMetadataSelect }),
-    history ? new Set<string>() : readReplyReportedMembers(prisma, viewerId, memberIds.filter(id => id !== viewerId)),
+    pairEntryIds.length ? prisma.gameReply.findMany({ where: { entryId: { in: pairEntryIds } }, select: replyMetadataSelect }) : [],
+    readReplyReportedMembers(prisma, viewerId, pairPeers),
   ]);
   const hiddenEntryIds = reported.entries;
   const hiddenMemberIds = new Set([...blocks.blocked, ...blocks.blockedBy]);
