@@ -89,6 +89,7 @@ export class DeviceWebhookQueueHealthMonitor {
           ...collected,
           consecutiveMetricsFailures,
           observedAtMs,
+          previousObservation: this.store.readLatestObservation(),
         });
         this.store.recordObservation({
           consecutiveMetricsFailures,
@@ -250,6 +251,7 @@ function buildObservation(input: {
   failedQueues: readonly DeviceWebhookQueueMetricName[];
   main: DeviceWebhookQueueMetricSnapshot | null;
   observedAtMs: number;
+  previousObservation: DeviceWebhookQueueHealthObservation | null;
 }): DeviceWebhookQueueHealthObservation {
   const conditions: DeviceWebhookQueueHealthCondition[] = [];
   if (input.deadLetter && input.deadLetter.backlogCount > 0) {
@@ -258,20 +260,22 @@ function buildObservation(input: {
       kind: "dead_letter_backlog",
     });
   }
-  const oldestMainMessageAtMs = input.main?.oldestMessageAtMs ?? null;
-  const mainQueueHealthIncomplete = input.main !== null
-    && input.main.backlogCount > 0
-    && oldestMainMessageAtMs === null;
-  if (oldestMainMessageAtMs !== null) {
-    const ageMs = Math.max(0, input.observedAtMs - oldestMainMessageAtMs);
-    if (ageMs >= DEVICE_WEBHOOK_QUEUE_STALL_AGE_MS) {
-      conditions.push({
-        ageMs,
-        kind: "main_queue_stalled",
-        oldestMessageAtMs: oldestMainMessageAtMs,
-      });
-    }
+  // Cloudflare can return an impossible message age in a single read, and the
+  // count and age are not read together. A stall pages only after two checks
+  // in a row see a backlog whose oldest message is past the threshold.
+  const stall = readMainQueueStall(input.main, input.observedAtMs);
+  const previous = input.previousObservation;
+  const stallConfirmed = stall !== null
+    && previous !== null
+    && readMainQueueStall(previous.main, previous.observedAtMs) !== null;
+  if (stallConfirmed) {
+    conditions.push(stall);
   }
+  const mainQueueHealthIncomplete = input.main !== null
+    && (
+      (input.main.backlogCount > 0) !== (input.main.oldestMessageAtMs !== null)
+      || (stall !== null && !stallConfirmed)
+    );
   if (
     input.failedQueues.length > 0
     && input.consecutiveMetricsFailures
@@ -297,6 +301,24 @@ function buildObservation(input: {
   };
 }
 
+function readMainQueueStall(
+  main: DeviceWebhookQueueMetricSnapshot | null,
+  observedAtMs: number,
+): Extract<DeviceWebhookQueueHealthCondition, { kind: "main_queue_stalled" }> | null {
+  if (!main || main.backlogCount === 0 || main.oldestMessageAtMs === null) {
+    return null;
+  }
+  const ageMs = Math.max(0, observedAtMs - main.oldestMessageAtMs);
+  if (ageMs < DEVICE_WEBHOOK_QUEUE_STALL_AGE_MS) {
+    return null;
+  }
+  return {
+    ageMs,
+    kind: "main_queue_stalled",
+    oldestMessageAtMs: main.oldestMessageAtMs,
+  };
+}
+
 function buildAlertMessage(
   observation: DeviceWebhookQueueHealthObservation,
 ): string {
@@ -305,7 +327,10 @@ function buildAlertMessage(
       return `- Dead-letter backlog: ${condition.backlogCount} message(s).`;
     }
     if (condition.kind === "main_queue_stalled") {
-      return `- Oldest main-queue message age: ${formatMinutes(condition.ageMs)}.`;
+      return [
+        `- Oldest main-queue message age: ${formatMinutes(condition.ageMs)}`,
+        `(main backlog: ${observation.main?.backlogCount ?? 0} message(s)).`,
+      ].join(" ");
     }
     return [
       "- Queue metrics unavailable for",

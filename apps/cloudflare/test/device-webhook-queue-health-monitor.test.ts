@@ -83,26 +83,77 @@ describe("device webhook Queue health monitor", () => {
     });
   });
 
-  it("pages for a main Queue message that is at least fifteen minutes old", async () => {
+  it("pages when two checks in a row see a main Queue message at least fifteen minutes old", async () => {
+    const stalledMetrics = metrics({
+      backlogCount: 2,
+      oldestMessageAtMs: FIVE_MINUTES_MS,
+    });
     const harness = createHarness({
-      mainMetrics: [metrics({
-        backlogCount: 1,
-        oldestMessageAtMs: FIVE_MINUTES_MS,
-      })],
+      mainMetrics: [stalledMetrics, stalledMetrics],
       nowMs: 20 * 60 * 1_000,
     });
 
+    await expect(harness.run()).resolves.toEqual({
+      conditions: [],
+      observationStatus: "partial",
+      outcome: "alert_deferred",
+    });
+    expect(harness.sent).toEqual([]);
+
+    harness.setNow(25 * 60 * 1_000);
     await expect(harness.run()).resolves.toMatchObject({
       conditions: [{
-        ageMs: FIFTEEN_MINUTES_MS,
+        ageMs: FIFTEEN_MINUTES_MS + FIVE_MINUTES_MS,
         kind: "main_queue_stalled",
         oldestMessageAtMs: FIVE_MINUTES_MS,
       }],
       outcome: "alert_sent",
     });
     expect(harness.sent[0]?.message).toContain(
-      "Oldest main-queue message age: 15 minutes.",
+      "Oldest main-queue message age: 20 minutes (main backlog: 2 message(s)).",
     );
+  });
+
+  it("does not page for one impossible main Queue age between healthy checks", async () => {
+    const nineteenDaysMs = 19 * 24 * ONE_HOUR_MS;
+    const nowMs = nineteenDaysMs + ONE_HOUR_MS;
+    const harness = createHarness({
+      mainMetrics: [
+        metrics({ backlogCount: 1, oldestMessageAtMs: nowMs - 1_000 }),
+        metrics({
+          backlogBytes: 3_000,
+          backlogCount: 1,
+          oldestMessageAtMs: nowMs - nineteenDaysMs,
+        }),
+        metrics({ oldestMessageAtMs: nowMs - nineteenDaysMs }),
+        metrics(),
+      ],
+      nowMs,
+    });
+
+    await expect(harness.run()).resolves.toMatchObject({ outcome: "healthy" });
+
+    harness.setNow(nowMs + FIVE_MINUTES_MS);
+    await expect(harness.run()).resolves.toEqual({
+      conditions: [],
+      observationStatus: "partial",
+      outcome: "alert_deferred",
+    });
+
+    harness.setNow(nowMs + FIVE_MINUTES_MS * 2);
+    await expect(harness.run()).resolves.toEqual({
+      conditions: [],
+      observationStatus: "partial",
+      outcome: "alert_deferred",
+    });
+
+    harness.setNow(nowMs + FIVE_MINUTES_MS * 3);
+    await expect(harness.run()).resolves.toMatchObject({ outcome: "healthy" });
+    expect(harness.sent).toEqual([]);
+    expect(harness.monitor.readState()).toMatchObject({
+      incidentOpen: false,
+      incidentSequence: 0,
+    });
   });
 
   it("preserves backlog metrics when Cloudflare cannot determine message age", async () => {
@@ -148,7 +199,9 @@ describe("device webhook Queue health monitor", () => {
     const harness = createHarness({
       mainMetrics: [
         stalledMetrics,
+        stalledMetrics,
         metrics({ backlogCount: 1 }),
+        stalledMetrics,
         stalledMetrics,
         metrics(),
       ],
@@ -156,11 +209,15 @@ describe("device webhook Queue health monitor", () => {
     });
 
     await expect(harness.run()).resolves.toMatchObject({
+      outcome: "alert_deferred",
+    });
+    harness.setNow(25 * 60 * 1_000);
+    await expect(harness.run()).resolves.toMatchObject({
       outcome: "alert_sent",
     });
     expect(harness.sent).toHaveLength(1);
 
-    harness.setNow(25 * 60 * 1_000);
+    harness.setNow(30 * 60 * 1_000);
     await expect(harness.run()).resolves.toEqual({
       conditions: [],
       observationStatus: "partial",
@@ -171,7 +228,18 @@ describe("device webhook Queue health monitor", () => {
       incidentSequence: 1,
     });
 
-    harness.setNow(30 * 60 * 1_000);
+    harness.setNow(35 * 60 * 1_000);
+    await expect(harness.run()).resolves.toEqual({
+      conditions: [],
+      observationStatus: "partial",
+      outcome: "alert_deferred",
+    });
+    expect(harness.monitor.readState()).toMatchObject({
+      incidentOpen: true,
+      incidentSequence: 1,
+    });
+
+    harness.setNow(40 * 60 * 1_000);
     await expect(harness.run()).resolves.toMatchObject({
       conditions: [{ kind: "main_queue_stalled" }],
       outcome: "alert_deferred",
@@ -182,7 +250,7 @@ describe("device webhook Queue health monitor", () => {
       incidentSequence: 1,
     });
 
-    harness.setNow(35 * 60 * 1_000);
+    harness.setNow(45 * 60 * 1_000);
     await expect(harness.run()).resolves.toMatchObject({
       outcome: "healthy",
     });
