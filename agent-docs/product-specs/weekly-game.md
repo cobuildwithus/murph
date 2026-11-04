@@ -245,16 +245,20 @@ this default without deleting other people's private contact choices.
 
 ## Rules
 
-- **Days.** On acceptance or negotiation approval, the accepting player's
-  earliest Day 1 is their game-local today between 03:00 inclusive and 20:00
-  exclusive, otherwise their next game date. The other player's earliest is
-  their own game-local today. Everyone shares the later date, or an explicitly
+- **Days.** On acceptance or negotiation approval, each player's earliest
+  Day 1 is their game-local today between 03:00 inclusive and 15:00
+  exclusive, otherwise their next game date. Between midnight and 03:00 that is
+  the calendar date that has just begun, so a late-night start opens at 03:00.
+  The cutoff applies to every player, not only the one accepting, so a game
+  goes live today only while it is before 3pm for everyone. Everyone shares
+  the later date, or an explicitly
   selected later date, moved forward to the first date the schedule counts, so
   Day 1 is always a scheduled day and every game has at least one. Length
   still counts calendar days from that Day 1. Empty schedules are refused at
   create. A day runs 3am to 3am in each player's own time zone,
   frozen at go-live from their profile, so day number N is the same date and
-  weekday for everyone. Explicit dates remain tomorrow to 60 days out.
+  weekday for everyone. Explicit dates at creation remain tomorrow to 60 days
+  out; an agreed change can pick any date from the latest player's today.
 - **Start now.** Day 1 becomes the latest "today" among the players (or the
   first scheduled date after it), so nobody's Day 1 is already over: across
   the date line the player behind starts tomorrow. It is offered only when it
@@ -651,7 +655,11 @@ Native clients render and capture artifacts; there is no server map or dare bank
 
 ## Changes agreed in chat
 
-Before Day 1, either player can propose Start now or a different start date.
+Before Day 1, either player can propose Start now. Until anyone checks in
+(any post, words or excuse), either player can propose a different start date,
+even after Day 1 has begun, from the latest player's today to 60 days out. That
+move rebuilds the calendar from the new Day 1 with one terms version from day
+zero.
 Players can also propose a new duration (3–365 days) or weekdays.
 Their tap records their agreement. When the invitation is accepted, Murph
 introduces the agreed challenge in one natural message and offers optional
@@ -746,7 +754,7 @@ they do not create more included credit. Suspension, withdrawn health-data conse
 feature flag and member allowlist still apply. Tasks and stakes can be negotiated only while the game is negotiating. Both
 lock at kickoff (`live`), even before Day 1. Schedule and duration remain
 editable from the first unstarted day, with at least one future unstarted day.
-Start dates lock as soon as either player starts Day 1. These edits never
+Start dates lock once either player checks in. These edits never
 rewrite check-ins or existing tickets.
 
 An invitee can choose Suggest changes and submit concrete alternative rules
@@ -773,7 +781,7 @@ winner or dare for the loser, schedule, length and optional Day 1. It asks only
 for missing choices and states the defaults: seven days, every day. App limits
 apply: 3–365 days, task/stake text up to 200 characters, named weekdays or any N
 days over the entire game, and a picked date tomorrow through 60 days out.
-Omitting the date uses acceptance time, including the existing 03:00–20:00
+Omitting the date uses acceptance time, including the existing 03:00–15:00
 start-today window and schedule alignment. Start now uses the existing mutually
 agreed change only when offered. New games store `checkInKind: any`.
 

@@ -722,26 +722,35 @@ describe("weekly game: access", () => {
 
 describe("v1 rule boundaries", () => {
   it.each([
-    ["2026-10-16T06:59:59Z", "2026-10-16"], // 02:59, next game date
+    ["2026-10-16T06:59:59Z", "2026-10-16"], // 02:59, the date that has just begun
     ["2026-10-16T07:00:00Z", "2026-10-16"], // 03:00
-    ["2026-10-16T23:59:59Z", "2026-10-16"], // 19:59
-    ["2026-10-17T00:00:00Z", "2026-10-17"], // 20:00
-    ["2026-10-17T04:30:00Z", "2026-10-17"], // 00:30, next game date
-  ])("uses the accepting actor's cutoff at %s", (instant, expected) => {
+    ["2026-10-16T18:59:59Z", "2026-10-16"], // 14:59
+    ["2026-10-16T19:00:00Z", "2026-10-17"], // 15:00
+    ["2026-10-17T04:30:00Z", "2026-10-17"], // 00:30, the date that has just begun
+  ])("starts today only before 3pm local at %s", (instant, expected) => {
     const now = new Date(instant);
     const join = decideJoin(invited(), {memberId:AVA,now,termsVersion:1,timeZone:NYC});
     expect(join).toMatchObject({players:[{dayOne:expected},{dayOne:expected}]});
     const negotiating = live(invited(), NYC);
     negotiating.game.status = "negotiating";
     negotiating.players.forEach((player) => {player.dayOne = null;});
-    expect(decideNegotiationStart(negotiating, LEO, now, null).players.map((player) => player.dayOne)).toEqual([expected,expected]);
+    expect(decideNegotiationStart(negotiating, now, null).players.map((player) => player.dayOne)).toEqual([expected,expected]);
   });
-  it("uses the approver rather than proposer when their cutoff differs", () => {
+  it("applies the 3pm cutoff to every player, not just the one accepting", () => {
     const state = live(); state.game.status = "negotiating";
     state.players.forEach((player) => { player.dayOne = null; });
     // Sydney is 23:00 and New York is 08:00 on the same game date.
-    expect(decideNegotiationStart(state, LEO, JOIN_AT, null).players[0].dayOne).toBe("2026-10-16");
-    expect(decideNegotiationStart(state, AVA, JOIN_AT, null).players[0].dayOne).toBe("2026-10-17");
+    expect(decideNegotiationStart(state, JOIN_AT, null).players[0].dayOne).toBe("2026-10-17");
+    // Warsaw invites just after midnight; New York accepts at 6:22pm.
+    const warsaw = invited(); warsaw.players[0].timeZone = "Europe/Warsaw"; warsaw.game.inviteExpiresAt = new Date("2026-11-10T00:00:00Z");
+    expect(decideJoin(warsaw, {memberId:AVA,now:new Date("2026-11-03T23:22:04Z"),termsVersion:1,timeZone:NYC}))
+      .toMatchObject({players:[{dayOne:"2026-11-04"},{dayOne:"2026-11-04"}]});
+    // New York accepts at 1pm, already 7pm in Warsaw.
+    expect(decideJoin(warsaw, {memberId:AVA,now:new Date("2026-11-03T18:00:00Z"),termsVersion:1,timeZone:NYC}))
+      .toMatchObject({players:[{dayOne:"2026-11-04"},{dayOne:"2026-11-04"}]});
+    // New York accepts at 8am, 2pm in Warsaw: both can still start today.
+    expect(decideJoin(warsaw, {memberId:AVA,now:new Date("2026-11-03T13:00:00Z"),termsVersion:1,timeZone:NYC}))
+      .toMatchObject({players:[{dayOne:"2026-11-03"},{dayOne:"2026-11-03"}]});
   });
   it.each([3, 7, 75, 365])("accepts %s days and refuses out-of-range new lengths and stakes", (lengthDays) => {
     const terms = {lengthDays,schedule:EVERY_DAY,stakes:[STAKE_INPUT],tasks:[{seat:0,text:"Read"},{seat:1,text:"Walk"}]};
@@ -869,10 +878,8 @@ describe("weekly game: self-play round 1 regressions", () => {
     expect(picked.players[0].dayOne).toBe("2026-10-19");
     // Negotiated agreement starting on a Saturday does the same, whoever approves.
     const negotiating: RuleState = { ...picked, game: { ...picked.game, status: "negotiating" }, players: picked.players.map((player) => ({ ...player, dayOne: null })) };
-    for (const actor of [LEO, AVA]) {
-      expect(decideNegotiationStart(negotiating, actor, acceptedAt("2026-10-16", NYC), "2026-10-17").players.map((player) => player.dayOne)).toEqual(["2026-10-19", "2026-10-19"]);
-      expect(decideNegotiationStart(negotiating, actor, acceptedAt("2026-10-17", NYC), null).players[0].dayOne).toBe("2026-10-19");
-    }
+    expect(decideNegotiationStart(negotiating, acceptedAt("2026-10-16", NYC), "2026-10-17").players.map((player) => player.dayOne)).toEqual(["2026-10-19", "2026-10-19"]);
+    expect(decideNegotiationStart(negotiating, acceptedAt("2026-10-17", NYC), null).players[0].dayOne).toBe("2026-10-19");
     // Start now on a Saturday starts on the next scheduled day.
     const later = live(game({ days: [0, 2] }, 3, NYC, "2026-10-28"), NYC, acceptedAt("2026-10-17", NYC));
     expect(decideStartNow(later, acceptedAt("2026-10-17", NYC)).players[0].dayOne).toBe("2026-10-19");

@@ -541,7 +541,7 @@ export function decideJoin(
   if (group && game.status === "live") return { kind: "join", seat, startedAt: input.now, activates: false, players: [{ ...joiner, dayOne: joiner.dayOne! }] };
   return { kind: "join", seat, startedAt: input.now, ...(group ? { activates: true } : {}),
     ...scheduleFor(state, [...remainingPlayers(state).filter(player => player.memberId !== input.memberId), joiner],
-      player => player.memberId === input.memberId ? acceptanceStartDate(input.now, player.timeZone) : gameLocalDate(input.now, player.timeZone), game.startsOn) };
+      player => acceptanceStartDate(input.now, player.timeZone), game.startsOn) };
 }
 
 type JoinInput = Parameters<typeof decideJoin>[1];
@@ -597,12 +597,12 @@ function assertAddressee(game: RuleGame, memberId: string): void {
 }
 
 /** Agreement starts a negotiation at approval time, never at the invitee's arrival. */
-export function decideNegotiationStart(state: RuleState, actor: string, now: Date, startsOn: string | null): Schedule {
+export function decideNegotiationStart(state: RuleState, now: Date, startsOn: string | null): Schedule {
   if (state.game.status !== "negotiating" || !isPairRoster(state.players)) reject("GAME_NOT_LIVE", "Both players must join before agreeing.");
   if (startsOn !== null) {
     return scheduleFor(state, state.players, () => startsOn);
   }
-  return scheduleFor(state, state.players, (player) => player.memberId === actor ? acceptanceStartDate(now, player.timeZone) : gameLocalDate(now, player.timeZone), startsOn ?? state.game.startsOn);
+  return scheduleFor(state, state.players, (player) => acceptanceStartDate(now, player.timeZone), state.game.startsOn);
 }
 
 export interface PostDecision {

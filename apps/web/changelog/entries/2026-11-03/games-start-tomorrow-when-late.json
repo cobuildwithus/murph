@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-03",
+  "order": 100,
+  "item": {
+    "id": "games-start-tomorrow-when-late",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Late games start the next day",
+    "summary": "A game that goes live after 3pm for either player now starts the next day, so nobody gets a short first day.",
+    "details": "Until anyone checks in, you can still ask Murph to move the start date, even after Day 1 has begun. Both players agree to the new date.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": [4526]
+  }
+}

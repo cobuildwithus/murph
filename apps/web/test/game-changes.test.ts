@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gameChangeCancellationNeedsNotice, decideApprovedGameChange, decideGameChange, firstUnstartedGameDay, gameChangeControls, isGameChangeExpired, parsePendingGameChange } from "@/src/lib/game/changes";
+import { gameChangeCancellationNeedsNotice, decideApprovedGameChange, decideGameChange, firstUnstartedGameDay, gameChangeControls, isGameChangeExpired, parsePendingGameChange, pendingGameChangeView } from "@/src/lib/game/changes";
 import { parseGameCommand } from "@/src/lib/game/command";
 import { scorePlayer, type RuleState } from "@/src/lib/game/rules";
 import { dayStartInstant } from "@/src/lib/game/time";
@@ -43,7 +43,7 @@ describe("weekly game mutually agreed changes", () => {
   it("rejects historical starts, shrinking away started days and count-mode reinterpretation", () => {
     const s = state();
     expect(() => decideGameChange(s, "player_a", { kind: "start_now" }, DURING)).toThrow();
-    expect(() => decideGameChange(s, "player_a", { kind: "edit", startsOn: "2026-11-10" }, DURING)).toThrow();
+    expect(() => decideGameChange(s, "player_a", { kind: "edit", startsOn: "2026-11-03" }, DURING)).toThrow("from today");
     expect(() => decideGameChange(s, "player_a", { kind: "edit", lengthDays: 2 }, DURING)).toThrow();
     expect(() => decideGameChange(s, "player_a", { kind: "edit", schedule: { count: 2 } }, DURING)).toThrow();
     s.game.terms.versions[0].schedule = { count: 4 };
@@ -103,6 +103,22 @@ describe("weekly game mutually agreed changes", () => {
     s.players.forEach((player) => { player.dayOne = "2026-11-10"; });
     const proposal = { ...pending(), ...decideGameChange(s, "player_a", { kind: "edit", startsOn: "2026-11-04" }, BEFORE) };
     expect(decideApprovedGameChange(s, "player_b", proposal, DURING).effectiveFromDay).toBe(0);
+  });
+  it("moves a begun Day 1 until someone checks in, rebuilding the calendar from Day 1", () => {
+    const s = state();
+    expect(gameChangeControls(s, DURING, null)).toMatchObject({ canStartNow: false, canEditStartDate: true, editableFromDay: 2 });
+    const today = decideGameChange(s, "player_b", { kind: "edit", startsOn: "2026-11-04" }, DURING);
+    expect(today).toMatchObject({ effectiveFromDay: 0, startsOn: "2026-11-04" });
+    const proposal = { ...pending(), ...decideGameChange(s, "player_a", { kind: "edit", startsOn: "2026-11-05", schedule: { days: [3,4] } }, DURING) };
+    expect(proposal).toMatchObject({ effectiveFromDay: 0, startsOn: "2026-11-05" });
+    expect(pendingGameChangeView(s, proposal, DURING)?.effectiveFromDay).toBe(0);
+    const agreedAt = new Date("2026-11-05T17:00:00Z");
+    expect(decideApprovedGameChange(s, "player_b", proposal, agreedAt)).toMatchObject({ effectiveFromDay: 0, startsOn: "2026-11-05" });
+    s.entries.push({ id: "entry_1", memberId: "player_b", dayIndex: 1, attempt: 1, kind: "words", mediaKeys: [], receivedAt: DURING, blurHash: null, withdrawnAt: null });
+    expect(gameChangeControls(s, DURING, null).canEditStartDate).toBe(false);
+    expect(() => decideGameChange(s, "player_a", { kind: "edit", startsOn: "2026-11-05" }, DURING)).toThrow("locks once someone checks in");
+    expect(() => decideApprovedGameChange(s, "player_b", proposal, agreedAt)).toThrow("locks once someone checks in");
+    expect(isGameChangeExpired(s, proposal, agreedAt)).toBe(true);
   });
   it("allows a final-day extension without making new obligations for a day already over", () => {
     const s = state(); const lastDay = new Date("2026-11-09T17:00:00Z");

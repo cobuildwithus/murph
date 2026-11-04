@@ -1675,7 +1675,7 @@ async function applyApprovedChange(locked: LockedStep, gameId: string, proposal:
     await assertPairCapacity(tx, actor, other.memberId, now, gameId);
     const agreedState: RuleState = { ...loaded.state, game: { ...loaded.state.game, terms, lengthDays: lengthDays ?? loaded.state.game.lengthDays,
       ...(proposal.change.kind === "edit" && proposal.change.startsOn === null ? { startsOn: null } : {}) } };
-    const schedule = decideNegotiationStart(agreedState, actor, now, proposal.startsOn);
+    const schedule = decideNegotiationStart(agreedState, now, proposal.startsOn);
     await writeSchedule(tx, gameId, schedule);
     await tx.game.update({ where: { id: gameId }, data: { status: "live", startedAt: clock } });
     return [
