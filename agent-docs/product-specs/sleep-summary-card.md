@@ -18,8 +18,10 @@ classification and total-only evidence remain eligible. Main sleep wins first,
 then the largest total, latest end and stable stored-date tie break. Existing
 `wearables day` selection is unchanged.
 
-Recovery comes from the selected night's stored date, which can differ from the
-wake date. Resting HR never means average or lowest sleeping HR. Sleep HRV is
+Resting HR comes from recovery on the local wake date, preferring the selected
+night's provider (or the total's provider for a night without a window). Only
+when that provider has no resting HR does the card use the cross-provider
+selection for the same wake date. Resting HR never means average or lowest sleeping HR. Sleep HRV is
 RMSSD; absent sleep HRV may use the mean of canonical `hrv-sdnn` points inside
 that night's valid window. The read is bounded to adjacent dates and 10,000
 points; saturation omits enrichment. A date-wide or daytime HRV mean is not a

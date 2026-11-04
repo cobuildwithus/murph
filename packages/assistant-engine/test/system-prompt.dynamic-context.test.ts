@@ -29,6 +29,17 @@ const baseConversationInput: AssistantSystemPromptInput = {
 }
 
 describe('assistant dynamic context prompt blocks', () => {
+  it('advertises deferred sleep cards before the generic wearable read path', () => {
+    const { prompt } = buildAssistantSystemPromptLayers({ ...baseConversationInput, conversationScope: 'direct', channel: 'linq', hostedRuntime: true })
+    expect(prompt).toContain('For a general nightly sleep summary in a private direct conversation')
+    expect(prompt).toContain('discover `murph.attach_sleep_card` through native `tool_search` or code-mode `ALL_TOOLS`')
+    expect(prompt).toContain('after success, send no final text or media')
+    expect(prompt).toContain('Specific single-metric questions, compound questions, and advice requests use verified text')
+    expect(prompt).toContain('If the tool is unavailable or returns `no_sleep_for_date`, answer truthfully in text')
+    expect(prompt.indexOf('discover `murph.attach_sleep_card`')).toBeLessThan(prompt.indexOf('For other wearable reads'))
+    expect(prompt).not.toContain('`vault-cli wearables latest` for recent nightly summaries')
+  })
+
   it.each(['direct', 'group'] as const)('separates reminder model selection from route inheritance in %s chats', conversationScope => {
     const { prompt } = buildAssistantSystemPromptLayers({ ...baseConversationInput, conversationScope, channel: 'linq', hostedRuntime: true, assistantHostedAutomationAvailable: true })
     expect(prompt).toContain('Always include this override')
