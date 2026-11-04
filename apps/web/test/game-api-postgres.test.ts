@@ -134,11 +134,13 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
       params: Promise.resolve({ token: created.inviteToken! }),
     }));
     expect(joined.status).toBe("live");
-    expect(joined.changeControls).toMatchObject({ canEditTasks: false, canEditStakes: false });
+    // Live before Day 1: tasks and the dare stay open to a mutual change.
+    expect(joined.changeControls).toMatchObject({ canEditTasks: true, canEditStakes: true });
     await game(start(request(challenger), context));
     await photo(challenger, id, 1);
     const both = await photo(invitee, id, 2);
     expect(both.players.map((player) => player.streak)).toEqual([1, 1]);
+    expect(both.changeControls).toMatchObject({ canEditTasks: false, canEditStakes: true });
     await game(advance(request(challenger, { days: 1 }), context));
     const dayTwo = await photo(challenger, id, 3);
     expect(dayTwo.players.find((player) => player.isMe)?.streak).toBe(2);

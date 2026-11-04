@@ -189,11 +189,21 @@ describe('game dynamic tools', () => {
     expect(port).toHaveBeenCalledTimes(1)
     expect(result.rpcResult.contentItems[0]?.text).toContain('Read the game')
   })
+  it('names a missing expectedTermsVersion instead of blaming the gameId', async () => {
+    const args = { messageRef: inputId, operation: 'propose', gameId: 'game_synthetic', proposalId: 'proposal_synthetic', change: { kind: 'edit', stakes: [{ kind: 'prize', item: 'Breakfast in bed' }] } }
+    expect(parse('update_game', args)?.kind).toBe('invalid-game-arguments')
+    const result = await execute(args)
+    expect(result.rpcResult.success).toBe(false)
+    expect(result.rpcResult.contentItems[0]?.text).toContain('(check: expectedTermsVersion)')
+    expect(result.rpcResult.contentItems[0]?.text).not.toContain('Breakfast')
+    expect(MURPH_UPDATE_GAME_TOOL.inputSchema.properties.expectedTermsVersion.description).toContain('Required for propose')
+  })
   it('round-trips negotiated task and whole-game stake scope without identity selectors', () => {
     const change = { kind: 'edit', tasks: [{seat:0,text:'Read'},{seat:1,text:'Stretch'}], stakes:[{kind:'per_miss',item:'Make tea'}], stakesApplyToWholeGame:true, startsOn:null }
     const request = {action:'update_game',origin,update:{operation:'propose',gameId:approval.gameId,proposalId:approval.proposalId,expectedTermsVersion:1,change}}
     expect(parseHostedRuntimeGroupToolRequest(request)).toEqual(request)
-    expect(MURPH_UPDATE_GAME_TOOL.description).toContain('Stakes and tasks are locked once the game has started')
+    expect(MURPH_UPDATE_GAME_TOOL.description).toContain('Tasks lock once either player’s Day 1 begins')
+    expect(MURPH_UPDATE_GAME_TOOL.description).toContain('The prize or dare can change until the game is over')
     expect(MURPH_UPDATE_GAME_TOOL.description).not.toContain('including earlier misses')
     expect(GAME_SETUP_CHAT_GUIDANCE).toContain('Negotiating games have no active obligations')
     expect(parse('update_game',{...approval,operation:'propose',expectedTermsVersion:1,change})?.kind).toBe('game')
@@ -332,7 +342,7 @@ it('cancels a not-yet-started game for the current speaker with no proposal or e
   expect(port).toHaveBeenCalledExactlyOnceWith({ action: 'update_game', origin, update: { operation: 'cancel_game', gameId: 'game_synthetic' } })
   expect(parse('update_game', { ...args, proposalId: 'proposal_synthetic' })?.kind).toBe('invalid-game-arguments')
   expect(MURPH_UPDATE_GAME_TOOL.inputSchema.properties.operation.enum).toContain('cancel_game')
-  expect(MURPH_UPDATE_GAME_TOOL.description).toContain('A live game cannot be called off: its stakes are locked')
+  expect(MURPH_UPDATE_GAME_TOOL.description).toContain('A live game cannot be called off: it settles on schedule')
   expect(MURPH_UPDATE_GAME_TOOL.description).toContain('the backend posts the one cancellation notice in this chat: do not announce it yourself')
 })
 
@@ -346,7 +356,7 @@ it('teaches one pending change, current-ask-only proposals, plain refusals and o
   expect(description).toContain('error gives a code, then the rule or next step')
   expect(description).toContain('is still open, not missed')
   expect(description).not.toMatch(/unposted/u)
-  expect(description).toContain('When a player asks to, say once and plainly that they stay as agreed for this game, then offer what can still change: its length or schedule from the next unstarted day, marking their own day not done, or new tasks or a new prize in their next game. Do not repeat their request back or ask it again.')
+  expect(description).toContain('When a player asks to change tasks after Day 1 has begun, say once and plainly that they stay as agreed for this game, then offer what can still change: the prize or dare, its length or schedule from the next unstarted day, marking their own day not done, or new tasks in their next game. Do not repeat their request back or ask it again.')
   expect(description).toContain('Say a player asked for or wants a change, as in “Ava wants 14 days instead of 7”, never that they proposed it.')
 })
 
