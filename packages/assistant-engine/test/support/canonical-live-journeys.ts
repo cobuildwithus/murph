@@ -42,7 +42,7 @@ export interface CanonicalLiveFixture {
   codexCommand: string
   commandCount(): Promise<number>
   cli(args: readonly string[], vault?: string): Promise<string>
-  message(prompt: string, input?: Partial<Pick<AssistantMessageInput, 'vault' | 'sessionId' | 'threadId' | 'threadIsDirect' | 'executionContext' | 'beforeProviderAcceptedInputs' | 'deliverResponse' | 'deliveryDispatchMode' | 'deliveryIdempotencyKey' | 'turnTrigger'>>): ReturnType<typeof sendAssistantMessageLocal>
+  message(prompt: string, input?: Partial<Pick<AssistantMessageInput, 'vault' | 'sessionId' | 'threadId' | 'threadIsDirect' | 'executionContext' | 'beforeProviderAcceptedInputs' | 'deliverResponse' | 'deliveryDispatchMode' | 'deliveryIdempotencyKey' | 'turnTrigger' | 'includeEarlySessionOnboarding' | 'onTraceEvent'>>): ReturnType<typeof sendAssistantMessageLocal>
   close(): Promise<void>
 }
 
