@@ -354,3 +354,12 @@ async function bindGameInviteRoomTx(input: Parameters<typeof associateGameChatIn
   if (!await readGroupGameChatAuthority(current, containerMemberId, prepared, tx)) { inviteFailure("authority_unavailable"); return; }
   await tx.game.update({ where: { id: current.id }, data: { chatContainerMemberId: containerMemberId } });
 }
+
+export async function gameChatContextCurrent(row: GroupRoomGame & Parameters<typeof gameChatPlayerIds>[0],
+  input: { chatContainerMemberId?: string; chatPlayerMemberIds?: readonly string[]; chatAudience?: GameChatAudience }, tx: Prisma.TransactionClient = getPrisma()): Promise<boolean> {
+  if (row.maxPlayers !== 10) return sameGamePlayers(gameChatPlayerIds(row), input.chatPlayerMemberIds ?? [])
+    && (!input.chatAudience || input.chatAudience.contacts.length === 2 && !await hasGameChatRestriction(tx, input.chatAudience.memberIds));
+  const room = input.chatContainerMemberId;
+  return Boolean(room && row.chatContainerMemberId === room && input.chatAudience
+    && await readGroupGameChatAuthority(row, room, input.chatAudience, tx));
+}

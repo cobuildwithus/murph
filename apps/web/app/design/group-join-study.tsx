@@ -384,7 +384,7 @@ function GroupJoinPageMock({
             Shared
           </span>
           <p className="text-sm leading-relaxed text-foreground">
-            Your name, plus what you choose below.
+            Your name and the numbers you pick, with the people in this group, in the chat and in the Murph app.
           </p>
         </div>
         <div className="h-px bg-border" />

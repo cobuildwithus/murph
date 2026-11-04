@@ -186,7 +186,7 @@ function renderGroupJoin(input: {
       </header>
 
       <div className="flex flex-col gap-3">
-        <ClarityRow label="Shared" text="Your name, plus what you choose below." />
+        <ClarityRow label="Shared" text="Your name and the numbers you pick, with the people in this group, in the chat and in the Murph app." />
         <div className="h-px bg-border" />
         <ClarityRow
           label="Private"

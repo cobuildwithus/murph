@@ -1057,3 +1057,19 @@ not break the streak. Home exposes the member's most recent live non-excuse
 entry kind across games as `me.usualKind`, or null before their first post.
 Chat progress includes at most fourteen recent day statuses per player and
 retains whole-game score and target totals.
+
+## Pair board current run
+
+The app pair board derives `inARow` across this pair's visible games bound to
+its selected chat. Each local date counts once only when every scheduled
+obligation is credited. Use `completedEntry`, `eligibleFromDay`, and effective
+`termsForDay`/`isScheduledDay`; excuses, withdrawals and incomplete attempts
+never count. Dates with nothing scheduled are skipped. An unfinished current
+date does not break the run until it ends at 3 AM in each game's frozen player
+time zone. Receipt dates do not replace credited day indexes. Frozen game
+results and winners are unchanged. No streak is stored.
+
+Reads admit at most 100 games and 5,000 live attempts for this calculation;
+if either bound is exceeded, return null rather than a truncated streak.
+The earliest scheduled Day 1 is read independently without those history caps.
+The [iOS game contract](ios-game.md#pair-health-board) owns the board API.
