@@ -5674,7 +5674,7 @@ describe("Linq group chat auto-provision", () => {
     mockAllowedThreadUsage();
   }
 
-  it.each(["mismatch", "nonmember", "timeout", "association-failure", "replay", "apex", "extra-token"])("ingests an ordinary composer invite through the webhook: %s", async scenario => {
+  it.each(["mismatch", "nonmember", "timeout", "association-failure", "replay", "apex", "play", "foreign-play", "extra-token"])("ingests an ordinary composer invite through the webhook: %s", async scenario => {
     const prisma = createStatefulThreadRoutePrisma();
     mockSuccessfulGroupProvision({ prisma, senderCore });
     mockSenderLookup(senderCore);
@@ -5702,7 +5702,8 @@ describe("Linq group chat auto-provision", () => {
       return { isGroup: true, handlesComplete: true, handles: [{ handle: "+15550000000", isMe: true, status: "active" }, ...roster.map(handle => ({ handle, isMe: false, status: "active" }))] };
     });
     vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://www.example.test");
-    const link = `https://${scenario === "apex" ? "" : "www."}example.test/g/${token}`;
+    const link = scenario === "foreign-play" ? `https://play.example.org/g/${token}`
+      : `https://${scenario === "apex" ? "" : scenario === "play" ? "play." : "www."}example.test/g/${token}`;
     const text = scenario === "extra-token" ? `${link} https://example.test/g/second_synthetic_invite_token` : `Family challenge ${link}`;
     vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest).mockReturnValue(buildLinqMessageReceivedEvent({ text }) as never);
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -5710,7 +5711,7 @@ describe("Linq group chat auto-provision", () => {
       const response = await handleHostedOnboardingLinqWebhook({ rawBody: "{}", signature: null, timestamp: null });
       expect(response).toMatchObject({ ok: true, ignored: false, reason: "wake-appended-thread-route" });
       expect(mailboxStore.appendHostedMailboxEnvelopeWithSourceMessageTx).toHaveBeenCalled();
-      if (["nonmember", "replay", "apex"].includes(scenario)) {
+      if (["nonmember", "replay", "apex", "play"].includes(scenario)) {
         expect(game.chatContainerMemberId).toBeTruthy();
         expect(gameUpdate).toHaveBeenCalledOnce();
         expect(game.players).toHaveLength(1);

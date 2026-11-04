@@ -1009,26 +1009,38 @@ from the repository root. IP blocks, managed mitigation and attack mode are
 conservative conflicts; earlier bypasses do not suppress them. Platform DDoS
 mitigation outside the project configuration is not observable by this check.
 
-The Apple association route serves public JSON with a one-hour cache and no
-session or redirect. Only `G9DJH2XUMK.ai.withmurph.app` claims `/recap/*` through
-`applinks.details[].appIDs` and `components`; invites, referrals and all other
-paths remain Web links. The proxy matcher excludes the route; Next's global
-security headers do not change its content type or cache policy. No i18n,
-redirect or trailing-slash override applies to its canonical URL.
-The existing `/recap/[gameId]` page remains the fallback. The iOS entitlement
-and recap routing ship separately.
+The Apple association route serves public JSON with a one-hour browser cache
+and no session or redirect. It reads the request host, so it is dynamic. Only
+`G9DJH2XUMK.ai.withmurph.app` is named through `applinks.details[].appIDs` and
+`components`. On www (and any other host) it claims `/recap/*` only; invites,
+referrals and all other paths there remain Web links, because the App Store
+build also claims www and routes every universal link to its Telegram handler.
+On `play.withmurph.ai`, the invite link host, it claims `/g/*` only. Only app
+builds that open invites claim the play host, so older builds and phones without
+the app open the same `/g/[token]` page there. The play host is a domain of this
+Vercel project (Cloudflare CNAME, DNS only) with no host-specific routing; page
+metadata still resolves against the www `metadataBase`. Game chat invite
+association accepts the configured origin's www, apex and `play.` hosts.
+The proxy matcher excludes the route; Next's global security headers do not
+change its content type or cache policy. No i18n, redirect or trailing-slash
+override applies to its canonical URL. The existing `/recap/[gameId]` and
+`/g/[token]` pages remain the fallbacks. The iOS entitlements and link routing
+ship separately.
 
-After deploy, check the origin without following redirects and Apple's cached
-copy:
+After deploy, check each origin without following redirects and Apple's cached
+copies:
 
 ```sh
 curl -i -A "AASA-Bot/1.0.0" https://www.withmurph.ai/.well-known/apple-app-site-association
+curl -i -A "AASA-Bot/1.0.0" https://play.withmurph.ai/.well-known/apple-app-site-association
 curl -i https://app-site-association.cdn-apple.com/a/v1/www.withmurph.ai
+curl -i https://app-site-association.cdn-apple.com/a/v1/play.withmurph.ai
 ```
 
-Expect 200, `application/json`, the production recap-only body, and no `Location`
-or `Set-Cookie` from the origin. Then test a recap link from Messages with and
-without the compatible app installed.
+Expect 200, `application/json`, the recap-only body on www, the invite-only body
+on play, and no `Location` or `Set-Cookie` from either origin. Then test a recap
+link and a play-host invite link from Messages with and without the compatible
+app installed.
 
 Provider-owned webhook-admin settings:
 
