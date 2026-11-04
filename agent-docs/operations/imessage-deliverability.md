@@ -197,16 +197,18 @@ Sleep summaries use strict envelope 8, with envelope 7 reserved. The private-dir
 selector tool builds the night from canonical wearable data by local wake date.
 A general nightly summary receives one card and no final text; specific metrics,
 compound questions and advice stay text. Linq sends `sleep_summary` with
-`interactive:false` via `LINQ_SLEEP_SUMMARY_CARD_INTERACTIVE`; this static-only
-rollout protects old installed extensions as well as app-absent and macOS
-recipients. Its bitmap shows present values, its caption is the short wake date,
-there is no subcaption, and `fallback_text` is `Your sleep summary.` Text recovery
+`interactive:false` by default, protecting old installed extensions as well as
+app-absent and macOS recipients. The Worker-only
+`MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS` allowlist enables compatible testers via
+the per-invocation `MURPH_NATIVE_SLEEP_CARD_ENABLED=1` flag; no member list
+enters the runner. Its bitmap shows present values, its caption is the short
+wake date, there is no subcaption, and `fallback_text` is `Your sleep summary.` Text recovery
 and Telegram preserve the same values and HRV method. Deploy Web's envelope-8
 reader before the runner. Once any sleep intent is persisted, including a sent
 intent, the sleep-capable reader and text renderer are the runner rollback
 floor. Draining pending work is insufficient. Disable the producer by a forward
-fix retaining those readers. Native delivery needs a separate explicit owner
-decision after old-extension, new-extension, no-extension and macOS checks;
+fix retaining those readers. Native delivery beyond the allowlist needs a
+separate explicit owner decision after old-extension, new-extension, no-extension and macOS checks;
 App Store availability alone does not prove installed-client compatibility.
 See `agent-docs/product-specs/sleep-summary-card.md`.
 

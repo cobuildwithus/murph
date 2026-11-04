@@ -10,6 +10,7 @@ import type {
 import {
   HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV,
 } from "@murphai/hosted-execution/env";
+import { MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
 } from "@murphai/hosted-execution/orchestration-control";
@@ -290,6 +291,11 @@ export class RuntimeInvocationPreparation {
         input.hostedAssistantReasoningEffortOverride;
     }
     const configSource = this.input.runnerStoreCache.readRuntimeConfigSource();
+    // Worker-only allowlist: only the per-member boolean reaches the runner.
+    if (configSource.MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS
+      ?.split(",").some((memberId) => memberId.trim() === input.userId)) {
+      forwardedEnv[MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV] = "1";
+    }
     const stores = input.stores;
     const readRunnerSecrets = async () =>
       await stores.runnerSecrets.readRunnerSecrets(input.userId);

@@ -9,6 +9,7 @@ import {
 import {
   HOSTED_ELEVENLABS_ENV_NAMES,
 } from "@murphai/hosted-execution/assistant-capabilities";
+import { MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV } from "@murphai/operator-config/hosted-assistant-config-constants";
 
 import {
   requireHostedProviderFetchDependencies,
@@ -54,6 +55,9 @@ export function buildHostedLinqChannelEnv(input: {
   userEnv: Readonly<Record<string, string>>;
 }): Record<string, string> {
   const env: Record<string, string> = {};
+  if (input.forwardedEnv[MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV] === "1") {
+    env[MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV] = "1";
+  }
 
   const userToken = readHostedChannelEnvValue(input.userEnv, "LINQ_API_TOKEN");
   if (userToken) {
