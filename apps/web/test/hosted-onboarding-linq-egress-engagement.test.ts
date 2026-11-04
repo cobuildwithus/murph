@@ -2005,7 +2005,7 @@ describe("hosted Linq egress authority", () => {
     const handles = people.map(id => `${id}@example.test`);
     const { gameAudienceKeys } = await import("@/src/lib/game/audience");
     const key = gameAudienceKeys(handles.map(value => ({ kind: "email" as const, value }))).current;
-    const current = { ...game, audienceKey: key, status: scenario === "unjoined-recap" ? "settled" : "live" };
+    const current = { ...game, audienceKey: key, ...(scenario === "unjoined-recap" ? { status: "settled", settledAt: new Date() } : { status: "live" }) };
     prisma.game.findFirst.mockResolvedValue(current);
     Object.assign(prisma.game, { findUnique: vi.fn().mockResolvedValue(current) });
     if (scenario === "rotation") {
@@ -2128,7 +2128,8 @@ describe("hosted Linq egress authority", () => {
           // No newest-game lookup: an already-live rematch cannot revoke this recap.
           expect(prisma.game.findFirst).toHaveBeenCalledTimes(1);
           expect(prisma.game.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
-            id: "game", chatContainerMemberId: "member-1", status: "settled", players: { none: { leftAt: { not: null } } },
+            id: "game", chatContainerMemberId: "member-1", status: "settled",
+            OR: [{ maxPlayers: 10 }, { maxPlayers: 2, players: { none: { leftAt: { not: null } } } }],
           }) }));
         }
         if (scenario === "regenerated-recap") {
