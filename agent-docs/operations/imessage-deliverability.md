@@ -127,8 +127,9 @@ Murph to read its saved title and requires both the delivered title and a fresh 
 readback. Observation waits for checkpointed conversation input and current
 replica publication, outside the reply latency budget. This proves canonical
 goal cardinality, not physical message delivery exactly once. The goal-proposal
-reply must arrive in under forty seconds; every other reply must arrive in under
-twenty seconds. Each turn's budget also applies to its inter-reply gap when measured.
+and acceptance replies must arrive in under forty seconds; every other reply
+must arrive in under twenty seconds. Each turn's budget also applies to its
+inter-reply gap when measured.
 The existing deterministic hosted-local full-stack journey
 owns onboarding follow-up behavior. Do not hold this shared live identity open
 for the multi-day follow-up window or add a second reset lifecycle to the
