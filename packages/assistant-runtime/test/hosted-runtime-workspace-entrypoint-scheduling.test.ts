@@ -495,6 +495,8 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
           hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
           hostedMailboxSystemDeviceSyncContinuationSeqs: [],
+          hostedMailboxSystemModelFreeWakeAt: null,
+          hostedMailboxSystemModelFreeWakeVersion: "1",
         },
         status: "budget_exhausted",
       });

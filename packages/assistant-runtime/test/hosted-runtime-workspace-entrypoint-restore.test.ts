@@ -1456,6 +1456,8 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
           hostedMailboxSystemDeviceSyncContinuationSeqs: [],
+          hostedMailboxSystemModelFreeWakeAt: null,
+          hostedMailboxSystemModelFreeWakeVersion: "1",
         },
         status: "scheduled",
       });
