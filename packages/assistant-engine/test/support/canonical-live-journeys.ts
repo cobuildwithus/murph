@@ -32,6 +32,7 @@ export interface CanonicalLiveConfig {
   model: string
   modelProvider: string
   onProviderRequestStarted?: () => void
+  timezone?: string
 }
 
 export interface CanonicalLiveFixture {
@@ -71,7 +72,7 @@ export async function createCanonicalLiveFixture(config: CanonicalLiveConfig, ch
   const vault = path.join(root, 'vault')
   const bin = path.join(root, '.local', 'bin')
   await mkdir(bin, { recursive: true })
-  await initializeVault({ vaultRoot: vault, timezone: 'UTC' })
+  await initializeVault({ vaultRoot: vault, timezone: config.timezone ?? 'UTC' })
   const env: NodeJS.ProcessEnv = {
     ...config.env,
     HOME: root,

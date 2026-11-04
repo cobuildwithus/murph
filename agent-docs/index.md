@@ -1815,3 +1815,6 @@ Meal-name repair removal and compatibility proof are tracked in
 Usage-blocked system readiness and restoration wake proof is recorded in
 [the scheduling correction plan](exec-plans/completed/2026-11-03-blocked-system-poll.md).
 The current contract remains in [Hosted Temporal orchestration](references/hosted-temporal-orchestration.md).
+
+Fresh scheduled-reminder language regression evidence and unseeded onboarding
+proof are recorded in [the language verification plan](exec-plans/completed/2026-11-04-automation-language.md).
