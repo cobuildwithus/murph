@@ -1806,4 +1806,4 @@ are tracked in [the removal plan](exec-plans/completed/2026-11-03-remove-gpt-56-
 `../ARCHITECTURE.md` owns current model selection and the Web usage owner retains ledger pricing.
 
 Meal-name repair removal and compatibility proof are tracked in
-[the retirement plan](exec-plans/active/2026-11-03-remove-meal-name-repair.md).
+[the retirement plan](exec-plans/completed/2026-11-03-remove-meal-name-repair.md).
