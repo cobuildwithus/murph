@@ -84,6 +84,7 @@ import {
   type RuleState,
   type Schedule,
   type StoredResult,
+  type GameTerms,
   type TermWords,
 } from "./rules";
 import { addDays, gameLocalDate } from "./time";
@@ -1053,13 +1054,25 @@ async function prepareGroupChange(before: LoadedGame, command: Extract<GameComma
   const [plain] = await openGameTexts([{ ...gameTarget(before.row, "terms_words"), value: before.row.termsWordsEncrypted }]);
   const words = parseTermWords(plain ?? "");
   const players = remainingPlayers(before.state);
-  const prepared = decideNewTerms(command.terms, { maxPlayers: 10,
+  const prepared = decideNewTerms(keepShownStart(before.state, command.terms), { maxPlayers: 10,
     inviteeSeats: [...groupTaskOverrideSeats(before.state.game, words.versions.at(-1)!.tasks), ...players.map(player => player.seat)],
     today: players.map(player => gameLocalDate(now, player.timeZone)).sort().at(-1)!, allowToday: true,
     currentStartsOn: before.state.game.startsOn, newKey: () => generateHostedRandomPrefixedId("gsk") });
   const change = normalizeGroupGameChange(before.state, words, prepared);
   return { change, ...await prepareGameChangeWords(before.row, change, command.expectedTermsVersion, words),
     baseWordsEncrypted: before.row.termsWordsEncrypted };
+}
+
+/**
+ * read_game shows the effective Day 1, which can differ from the stored picked
+ * date once activation aligns it to the schedule. Echoing it, or leaving the
+ * date out, keeps the start unchanged.
+ */
+function keepShownStart(state: RuleState, terms: GameTerms): GameTerms {
+  if (terms.startsOn !== undefined && terms.startsOn !== (gameDayOne(state.players) ?? state.game.startsOn)) return terms;
+  const kept = { ...terms };
+  delete kept.startsOn;
+  return state.game.startsOn ? { ...kept, startsOn: state.game.startsOn } : kept;
 }
 
 async function proposeGroupChange(context: CommandContext, command: Extract<GameCommand, { type: "editTerms" }>, before: LoadedGame): Promise<string> {

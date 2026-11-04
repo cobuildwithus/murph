@@ -16,6 +16,7 @@ import { parseStoredResult, canRedeemGroupTicket } from "@/src/lib/game/rules";
 import { dayStartInstant, GAME_GRACE_MS } from "@/src/lib/game/time";
 import { prepareGameAccountDeletion, applyGameAccountDeletionTx } from "@/src/lib/game/account-deletion";
 import type { GameCommand, GameTerms } from "@/src/lib/game/command";
+import type { GameSchedule } from "@/src/lib/game/contract";
 
 const chatProof = vi.hoisted(() => ({ rooms: new Map<string, string[]>(), sender: "", wake: null as unknown }));
 const lifecycleProof = vi.hoisted(() => ({ destination: vi.fn(), bind: vi.fn(), route: vi.fn(), prepare: vi.fn(), append: vi.fn(), mailbox: vi.fn(), signal: vi.fn() }));
@@ -1316,6 +1317,38 @@ describe.skipIf(!enabled)("group majority changes", () => {
     expect(saved.terms).toMatchObject({ versions: [{ n: 1, fromDay: 0 }, { n: 2, fromDay: 3 }] });
     const [plain] = await openGameTexts([{ table: "game", field: "terms_words", rowId: saved.id, memberId: saved.wordsOwnerMemberId, value: saved.termsWordsEncrypted }]);
     expect(JSON.parse(plain!)).toMatchObject({ groupWord: "Crew", versions: [{ defaultTask: "Take a walk" }, { n: 2, defaultTask: "Take a walk" }] });
+  });
+
+  it("treats the shown Day 1 or a missing date as no start change after a check-in", async () => {
+    const weekdays: GameSchedule = { days: [0, 1, 2, 3, 4] };
+    const [a, b, c] = [await person(), await person(), await person()];
+    // A Saturday pick on a weekday schedule: Day 1 lands on Monday 2030-03-11.
+    const game = await create(a, [b, c], { terms: { ...terms, schedule: weekdays, startsOn: "2030-03-09" } });
+    for (const player of [b, c]) await ok(player.id, join(game.token));
+    const context = await groupContext(game.id, [a, b, c]);
+    const now = new Date("2030-03-12T12:00:00Z");
+    await ok(b.id, { type: "post", gameId: game.id, entryId: randomUUID(), kind: "words", mediaKeys: [], text: "Done" }, now);
+    const shown = (await readGameChatState(context.chatContainerMemberId, [a.id, b.id, c.id], a.id)).games.find(candidate => candidate.id === game.id)!;
+    expect(shown.startsOn).toBe("2030-03-11");
+    expect((await gameRow(game.id)).startsOn?.toISOString().slice(0, 10)).toBe("2030-03-09");
+    const { startsOn: _picked, ...base } = terms;
+    const ask = (actor: Person, expectedTermsVersion: number, startsOn?: string, proposalId = randomUUID()) => runGameChatUpdate({ ...context, actorMemberId: actor.id, now,
+      update: { operation: "edit_terms", gameId: game.id, expectedTermsVersion, proposalId, terms: { ...base, schedule: weekdays, lengthDays: 12,
+        defaultTask: terms.defaultTask!, tasks: [a, b, c].map(p => ({ memberId: p.id, text: terms.defaultTask! })), stakes: [{ kind: "prize", item: "Choose our next outing" }],
+        ...(startsOn ? { startsOn } : {}) } } });
+    const echoed = randomUUID();
+    expect(await ask(b, 1, "2030-03-11", echoed)).toMatchObject({ ok: true });
+    expect((await gameRow(game.id)).pendingChange).toMatchObject({ change: { kind: "edit", lengthDays: 12 } });
+    expect((await gameRow(game.id)).pendingChange).not.toHaveProperty("change.startsOn");
+    expect(await runGameChatUpdate({ ...context, actorMemberId: b.id, now, update: { operation: "cancel", gameId: game.id, proposalId: echoed } })).toMatchObject({ ok: true });
+    const omitted = randomUUID();
+    expect(await ask(b, 1, undefined, omitted)).toMatchObject({ ok: true });
+    expect((await gameRow(game.id)).pendingChange).not.toHaveProperty("change.startsOn");
+    expect(await runGameChatUpdate({ ...context, actorMemberId: c.id, now, update: { operation: "approve", gameId: game.id, proposalId: omitted } })).toMatchObject({ ok: true });
+    const saved = await gameRow(game.id);
+    expect(saved).toMatchObject({ pendingChange: null, lengthDays: 12, terms: { versions: [{ n: 1 }, { n: 2 }] } });
+    expect(saved.players.map(player => player.dayOne?.toISOString().slice(0, 10))).toEqual(["2030-03-11", "2030-03-11", "2030-03-11"]);
+    expect(await ask(a, 2, "2030-03-18")).toMatchObject({ ok: false, error: { code: "DAY_CLOSED" } });
   });
 
   it("targets a terms report at the applied proposal's author, not the deciding voter", async () => {
