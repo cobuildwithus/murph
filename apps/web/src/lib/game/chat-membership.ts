@@ -290,7 +290,7 @@ function preparedGameRoom(room: string, audience: Awaited<ReturnType<typeof read
   } };
 }
 
-/** Use the same configured origin as public invite/recap links, allowing its www/apex alias. */
+/** Use the same configured origin as public invite/recap links, allowing its www/apex alias and the `play.` invite host. */
 function gameInviteTokens(text: string): string[] {
   const origin = readHostedPublicOrigin();
   if (!origin) return [];
@@ -298,7 +298,7 @@ function gameInviteTokens(text: string): string[] {
   const tokens = [...text.matchAll(/https?:\/\/[^\s<>"']+\/g\/([A-Za-z0-9_-]{16,128})(?=$|[\s?#.,)])/gu)].flatMap(match => {
     const url = new URL(match[0]);
     return url.protocol === expected.protocol && url.port === expected.port
-      && url.hostname.replace(/^www\./u, "") === expected.hostname.replace(/^www\./u, "")
+      && url.hostname.replace(/^(?:www|play)\./u, "") === expected.hostname.replace(/^www\./u, "")
       && url.pathname === `/g/${match[1]}` ? [match[1]] : [];
   });
   return [...new Set(tokens)];
