@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-04",
+  "order": 100,
+  "item": {
+    "id": "game-first-poster-develops",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Going first gets the reveal too",
+    "summary": "In a 1v1 game, your friend's photo now develops on Home the first time you see it, even when you posted first and theirs came in hours later.",
+    "details": "If it came in after you went to bed, it's the first thing on Home the next morning; close it and today's card is there. The notification says \"They're in too.\" Your friend never learns when you looked. Available in the latest app version.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": [4542]
+  }
+}
