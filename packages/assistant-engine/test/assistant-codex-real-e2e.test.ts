@@ -1,3 +1,4 @@
+import { REMINDER_LANGUAGE_CASES, runReminderLanguageJourney } from './support/reminder-language-journey.js'
 import { listCanonicalWriteEvidence, readCanonicalAuditRecords } from './canonical-audit-test-helpers.js'
 import { GAME_CHAT_SETUP_SCENARIOS, SETUP_PLAYERS, SETUP_TERMS } from './support/game-chat-setup-scenarios.js'
 import { buildBluetoothHelpInstructions } from './support/bluetooth-help.js'
@@ -3649,7 +3650,6 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
       const commandLogPath = path.join(workingDirectory, 'identity-commands.log')
       try {
         await initializeVault({ vaultRoot: workingDirectory, timezone: 'America/New_York' })
-        await upsertMemory(workingDirectory, { section: 'Preferences', text: 'Observed conversational language: English.' })
         // The executable and loader remain environment values, never copied
         // machine-specific paths in a generated fixture.
         await writeFile(path.join(workingDirectory, 'vault-cli'), [
@@ -3665,7 +3665,6 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           ...turnInput,
           configOverrides: [...CHILD_MODEL_SELECTION_CONFIG_OVERRIDES, ...await readHostedDelegationHintOverrides()],
           developerInstructions: buildDirectConversationDeveloperInstructions(true, [
-            'Canonical memory preference: Observed conversational language: English.',
             'Visible direct conversation imported from confirmed Web replies:',
             `Murph: ${ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE}`,
             'Member: Yes, ready.',
@@ -3744,6 +3743,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         await waitForWarmCodexBackgroundWork()
         const memory = await readMemoryDocument(workingDirectory)
         const identity = memory.records.map((record) => record.text).join('\n')
+        expect(identity).not.toMatch(/observed conversational language.*English/iu)
         expect(childUsages).toHaveLength(1)
         expect(identity).toMatch(/Robin/u)
         expect(identity).toMatch(/34/u)
@@ -47555,4 +47555,12 @@ describeRealCodex('real Codex exact group games', () => {
       expect(reply.length).toBeLessThan(350)
     } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
   }, 360_000)
+})
+
+describeRealCodex('fresh next-day reminder language', () => {
+  it.each(REMINDER_LANGUAGE_CASES)('$id keeps the current language through Sol authoring and Luna delivery', async scenario => {
+    const config = await resolveRealCodexE2eConfig({ productionTransport: true })
+    try { await runReminderLanguageJourney(config, scenario) }
+    finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
+  }, 600_000)
 })
