@@ -213,9 +213,10 @@ access or extra budget. Dispatch checks the cancelled event and original pair.
 Message on a live pair game texts the other player. The app asks
 `GET /api/game/v1/games/:id/message-recipient` only when the player taps it,
 never with Home, and gets `200 { ok: true, phone }`: the other player's
-verified number, which the game chat already shares between the two. `phone`
-is null when there's no one to text: a group, an invite or a finished game, a
-player who left or is suspended, a block either way, or no verified number.
+current verified number, the one Murph uses for their game chat. It's an
+exchange: `phone` is null unless both players have verified numbers, and also
+for a group, an invite or a finished game, a player who left or is suspended,
+or a block either way.
 Anyone who isn't a current player gets `GAME_NOT_FOUND`. With null, or on any
 error, Messages opens with no recipient.
 

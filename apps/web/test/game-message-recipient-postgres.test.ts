@@ -12,6 +12,7 @@ import type { GameView } from "../src/lib/game/contract";
 import { getPrisma } from "../src/lib/prisma";
 
 // Each member's verified number, by member id; a member missing here has none.
+// The decrypt is stubbed; the identity row (verified, encrypted) is real.
 const phones = vi.hoisted(() => new Map<string, string>());
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", async (original) => ({
   ...await original<typeof import("@/src/lib/hosted-onboarding/hosted-member-identity-store")>(),
@@ -43,8 +44,13 @@ async function member(firstName: string, phone?: string) {
   const id = `game-recipient-${randomUUID()}`;
   const token = randomUUID().replaceAll("-", "");
   memberIds.push(id);
-  if (phone) phones.set(id, phone);
   await getPrisma().hostedMember.create({ data: { id } });
+  if (phone) {
+    phones.set(id, phone);
+    await getPrisma().hostedMemberIdentity.create({
+      data: { memberId: id, phoneNumberEncrypted: "synthetic-sealed-phone", phoneNumberVerifiedAt: new Date() },
+    });
+  }
   const adapter = hostedAuthAdapter(getPrisma())({});
   const dates = { createdAt: new Date(), updatedAt: new Date() };
   await adapter.create({ model: "user", forceAllowId: true,
@@ -105,17 +111,24 @@ describe.skipIf(!enabled)("Message on a live pair game texts the other player", 
     expect(await messageRecipient(leo.token, id)).toBeNull();
   }, 30_000);
 
-  it("has no one to text for an unverified number, a block either way, or a suspended player", async () => {
+  it("is an exchange: no one to text unless both players have a verified number", async () => {
     const leo = await member("Leo", "+15555550111"), ava = await member("Ava");
     const { id } = await liveGame(leo.token, ava.token);
     expect(await messageRecipient(leo.token, id)).toBeNull();
-    expect(await messageRecipient(ava.token, id)).toBe("+15555550111");
+    expect(await messageRecipient(ava.token, id)).toBeNull();
+  }, 30_000);
+
+  it("has no one to text across a block either way, or for a suspended player", async () => {
+    const leo = await member("Leo", "+15555550121"), ava = await member("Ava", "+15555550122");
+    const { id } = await liveGame(leo.token, ava.token);
+    expect(await messageRecipient(ava.token, id)).toBe("+15555550121");
 
     // A block row is enough, even before the block has called the game off.
     await getPrisma().gameBlock.create({ data: { blockerMemberId: leo.id, blockedMemberId: ava.id } });
     expect(await messageRecipient(ava.token, id)).toBeNull();
+    expect(await messageRecipient(leo.token, id)).toBeNull();
     await getPrisma().gameBlock.deleteMany({ where: { blockerMemberId: leo.id } });
-    expect(await messageRecipient(ava.token, id)).toBe("+15555550111");
+    expect(await messageRecipient(ava.token, id)).toBe("+15555550121");
 
     await getPrisma().hostedMember.update({ where: { id: leo.id }, data: { suspendedAt: new Date() } });
     expect(await messageRecipient(ava.token, id)).toBeNull();
