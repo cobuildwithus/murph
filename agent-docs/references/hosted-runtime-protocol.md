@@ -1974,12 +1974,12 @@ side table or lane high-water advance past gaps. The runtime-progress monitor
 uses that same terminal distinction without redefining the contiguous floor:
 conversation candidates above the effective floor must still have
 `consumed_at IS NULL`, while system-lane candidates retain their existing
-live-row semantics. An imported assistant-owned
-`assistant.notification.requested` head is an intentional pause only while the
+live-row semantics. An imported `default_owned` system head, including
+`member.action.requested`, is an intentional pause only while the
 canonical read-only usage gate reports `ai_usage_limit_exceeded`. The monitor
-classifies notification ownership with the shared execution classifier, so
+classifies head ownership with the shared execution classifier, so
 model-free notifications and device heads remain alertable. Import must cover
-the notification head and every live pending row already at least 15 minutes old,
+the head and every live pending row already at least 15 minutes old,
 with the highest aged sequence derived in the same bounded mailbox scan. Fresh
 unimported suffix rows do not inherit the paused head's age; an unimported row
 at the 15-minute boundary prevents exclusion even when newer rows also arrive.
@@ -1990,6 +1990,12 @@ mailbox acknowledgements, allowance, or execution. When allowance returns, the
 original handling age applies again. This remains a contiguous-frontier monitor,
 not proof of completion for every later retained system item.
 Every other unhandled system head ages from mailbox creation.
+Imported `member.activated`, `device-sync.wake`, and `meal-photo.captured` heads
+may await a foreground checkpoint within its existing publication deadline.
+This requires current-owner terminal foreground evidence newer than the saved
+workspace, valid chronology, and import coverage within durable high water.
+Missing evidence or an expired deadline restores the original handling age;
+import alone never grants this deferral.
 Import, workspace version, progress generation, and workspace-wide wake changes
 cannot establish completion or a deferral for that particular item. The runtime
 still projects independent model-free and assistant deadlines through `nextWakeAt`

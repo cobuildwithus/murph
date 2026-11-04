@@ -4,6 +4,10 @@ unchanged. The projection contract is owned by [Weekly Game](product-specs/weekl
 Group history uses the latest round's shared default task for every viewer,
 including players with a seat override; the same spec owns that contract.
 
+Default-owned usage-pause and meal-photo foreground-checkpoint alert exemptions
+are recorded in [the wake investigation plan](exec-plans/completed/2026-11-03-system-lane-default-wake.md).
+The current monitor contract is in [the hosted runtime protocol](references/hosted-runtime-protocol.md).
+
 Public group invite Web rendering and pair preservation are owned by
 [Weekly Game](product-specs/weekly-game.md); proof and the PR lane are tracked in
 [the invite preview plan](exec-plans/completed/2026-11-03-group-invite-web.md).
