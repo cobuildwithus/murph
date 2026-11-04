@@ -25,7 +25,6 @@ import {
   parseStoredTerms,
   playerFor,
   scorePlayer,
-  scheduleEditedTerms,
   type RuleState,
   type Schedule,
   type StoredStake,
@@ -168,8 +167,8 @@ describe("group calendar after leaving", () => {
     expect(codeOf(() => assertGroupTermsOpen(state, LEO, dayOneBegun, 1))).toBe("OK");
     expect(codeOf(() => assertGroupTermsOpen(post(state, third, dayOneBegun), LEO, dayOneBegun, 1))).toBe("GAME_NOT_LIVE");
     expect(codeOf(() => assertGroupTermsOpen(state, LEO, new Date("2030-04-30T12:00:00Z"), 1))).toBe("GAME_NOT_LIVE");
-    const schedule = scheduleEditedTerms(state, "2030-03-13")!;
-    state.players = state.players.map(player => ({ ...player, dayOne: schedule.players.find(next => next.memberId === player.memberId)?.dayOne ?? player.dayOne }));
+    // An agreed start-date change moves every retained seat together.
+    state.players = state.players.map(player => ({ ...player, dayOne: "2030-03-13" }));
     state = post(post(state, LEO, at(state, LEO, 0, 12)), third, at(state, third, 5, 12));
     for (const players of [state.players, [state.players[1], state.players[0], state.players[2]]]) {
       const reordered = { ...state, players };

@@ -47708,6 +47708,86 @@ describeRealCodex('real Codex exact group games', () => {
   }, 360_000)
 })
 
+describeRealCodex('real Codex group majority changes', () => {
+  it.each(['ask', 'waiting vote', 'deciding vote'] as const)('group majority change %s', async phase => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-group-majority-e2e-'))
+    const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    const { hostedGameToolResponseSchema } = await import('@murphai/hosted-execution/runtime-control')
+    const inputId = 'ain_' + 'c'.repeat(32)
+    const origin = { kind: 'accepted_input' as const, assistantInputId: inputId }
+    const calls: import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest[] = []
+    const actorSeat = phase === 'ask' ? 1 : phase === 'waiting vote' ? 0 : 2
+    const players = ['Alex', 'Sam', 'River', 'Taylor'].map((firstName, seat) => ({ memberId: `player_${seat}`, firstName, timeZone: 'UTC', isSender: seat === actorSeat }))
+    let written = false
+    let proposalId = 'proposal_group_fixture'
+    const tasks = players.map(player => ({ memberId: player.memberId, text: 'Walk outside' }))
+    const schedule = { days: [0, 1, 2, 3, 4, 5, 6] }
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: true, groupConversation: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantHostedGroupToolSurface: 'families',
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
+          currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T12:00:00.000Z', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+        }),
+        dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL, ...resolveMurphDynamicTools({}).filter(tool => tool.name === 'finish_without_reply')],
+        hostedToolContext: {
+          computerToolsAvailable: false, vaultFileSendAvailable: false,
+          groupTool: { request: async request => {
+            calls.push(request)
+            if (request.action !== 'read_game' && request.action !== 'update_game') throw new Error('Unexpected game effect')
+            if (request.action === 'update_game') {
+              expect(written).toBe(false)
+              if (phase === 'ask') {
+                expect(request.update).toMatchObject({ operation: 'edit_terms', gameId: 'game_group_fixture', expectedTermsVersion: 1,
+                  proposalId: expect.any(String), terms: { defaultTask: 'Walk outside', tasks, schedule, stakes: [{ kind: 'prize', item: 'Choose a movie' }] } })
+                if (request.update.operation !== 'edit_terms' || !request.update.proposalId) throw new Error('Missing group ask')
+                proposalId = request.update.proposalId
+              } else expect(request.update).toEqual({ operation: 'approve', gameId: 'game_group_fixture', proposalId })
+              written = true
+            }
+            const applied = written && phase === 'deciding vote'
+            const votes = [{ memberId: 'player_1', vote: 'yes' },
+              ...(phase === 'deciding vote' || written && phase === 'waiting vote' ? [{ memberId: 'player_0', vote: 'yes' }] : [])]
+            return hostedGameToolResponseSchema.parse({ action: request.action, result: { status: 'ok', state: {
+              players, games: [{ id: 'game_group_fixture', maxPlayers: 10, pendingInviteeCount: 0, status: 'live', lengthDays: 7, startsOn: '2030-03-07',
+                terms: { n: applied ? 2 : 1, fromDay: 0, tasks: players.map((_, seat) => ({ seat, text: 'Walk outside' })), defaultTask: 'Walk outside', schedule,
+                  stakes: [{ kind: 'prize', item: applied ? 'Choose a movie' : 'Choose lunch' }] },
+                players: players.map((player, seat) => ({ memberId: player.memberId, firstName: player.firstName, timeZone: player.timeZone, seat, dayOne: '2030-03-07' })),
+                pendingChange: applied || phase === 'ask' && !written ? null : { id: proposalId, proposedByMemberId: 'player_1', expectedTermsVersion: 1,
+                  change: { kind: 'edit', stakes: [{ kind: 'prize', item: 'Choose a movie' }] }, effectiveFromDay: 0, startsOn: null, origin: 'chat', deliveryStatus: 'conversation', votes, yesNeeded: 3 - votes.length },
+                changeControls: { canStartNow: false, canEdit: phase === 'ask' && !written, canEditSchedule: true, canEditStartDate: true, canEditTasks: true, canEditStakes: true, editableFromDay: 0 },
+              }],
+            } } })
+          } },
+          currentUserActionScope: () => ({ conversationId: 'synthetic-room', inboundMailboxItemIds: [], recipientKey: 'synthetic-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-session', conversationScope: 'group' }),
+          currentInvocationScope: () => ({ origin: { ...origin, sessionId: 'synthetic-session' }, conversationScope: 'group' }),
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send authorized') },
+        },
+        prompt: `Alex, Sam, River and Taylor are seated in Alex's walking challenge with Murph. ${phase === 'ask' ? '' : 'Sam asked to change the prize from choosing lunch to choosing a movie. That ask is waiting for yeses.'}\nCurrent accepted message from ${players[actorSeat].firstName} (Message ref: ${inputId}, Occurred at: 2030-03-06T12:00:00.000Z): ${phase === 'ask' ? 'Murph, can we change the prize to choosing a movie? Keep everything else the same.' : 'Murph, yes, I agree to Sam’s movie prize.'}`,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const reply = result.finalMessage.trim()
+      process.stdout.write(`[group majority change ${phase}] ${JSON.stringify({ reply, actions: calls.map(call => call.action === 'update_game' ? call.update.operation : call.action) })}\n`)
+      expect(calls.map(call => call.action)).toEqual(['read_game', 'update_game'])
+      expect(written).toBe(true)
+      expect(reply).not.toMatch(/player_|game_group|proposal|poll|only.*starter|everyone.*agreed/iu)
+      if (phase === 'deciding vote') {
+        expect(reply).toMatch(/movie/iu)
+        expect(reply).not.toMatch(/need.*yes|waiting|does that work|agree\?/iu)
+      } else {
+        expect(reply).toMatch(phase === 'ask' ? /(?:2|two).*?(?:yes|agree)|(?:yes|agree).*?(?:2|two)/iu : /(?:1|one).*?(?:yes|agree)|(?:yes|agree).*?(?:1|one)/iu)
+        expect(reply).not.toMatch(/prize (?:is|has) (?:now|changed)|all set|done[.!]/iu)
+      }
+      expect(reply.length).toBeLessThan(350)
+    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
+  }, 360_000)
+})
+
 describeRealCodex('fresh next-day reminder language', () => {
   it.each(REMINDER_LANGUAGE_CASES)('$id keeps the current language through Sol authoring and Luna delivery', async scenario => {
     const config = await resolveRealCodexE2eConfig({ productionTransport: true })

@@ -1,7 +1,7 @@
 import { GAME_STAKE_KINDS, type GameChange, type GameChangeControls, type GamePendingChange, type GameSchedule } from "./contract";
 import { parseGameChange } from "./command";
 import { isRecord } from "../primitives";
-import { currentTerms, gameDayOne, dayIndexAt, decideStartNow, firstScheduledDate, GameRuleError, GAME_MIN_LENGTH_DAYS, GAME_MAX_LENGTH_DAYS, GAME_MAX_START_DAYS_OUT, isGameDue, playerFor, reject, validSchedule, validNewStakes, type StoredStake, type RuleState } from "./rules";
+import { currentTerms, gameDayOne, dayIndexAt, decideStartNow, firstScheduledDate, GameRuleError, GAME_MIN_LENGTH_DAYS, GAME_MAX_LENGTH_DAYS, GAME_MAX_START_DAYS_OUT, isGameDue, remainingPlayers, reject, validSchedule, validNewStakes, type StoredStake, type RuleState, type NewTerms, type TermWords } from "./rules";
 import { isPairRoster } from "./roster";
 import { acceptanceStartDate, addDays, gameLocalDate, weekdayOf } from "./time";
 
@@ -21,15 +21,16 @@ function changeFromDay(state: RuleState, change: GameChange, now: Date, canMoveS
   return movesStartDate(change) && canMoveStart ? 0 : firstUnstartedGameDay(state, now);
 }
 
-export function gameChangeControls(state: RuleState, now: Date, pending: GamePendingChange | null): GameChangeControls {
+export function gameChangeControls(state: RuleState, now: Date, pending: Pick<GamePendingChange, "id"> | null): GameChangeControls {
   const day = firstUnstartedGameDay(state, now);
   // Negotiation is still a two-person agreement policy.
-  const live = state.game.seats === 2 && ["live", "negotiating"].includes(state.game.status) && isPairRoster(state.players);
+  const live = state.game.seats === 10 ? state.game.status === "live"
+    : state.game.seats === 2 && ["live", "negotiating"].includes(state.game.status) && isPairRoster(state.players);
   // Once either player's last day is over, the game is done for changes.
   const editable = live && !pending && !isGameDue(state, now) && day <= state.game.lengthDays;
   const enabled = editable && day < GAME_MAX_LENGTH_DAYS;
   return {
-    canStartNow: enabled && day === 0 && startNowMovesDayOne(state, now),
+    canStartNow: state.game.seats === 2 && enabled && day === 0 && startNowMovesDayOne(state, now),
     canEdit: editable,
     canEditSchedule: enabled && day < state.game.lengthDays && (day === 0 || "days" in currentTerms(state.game.terms).schedule),
     // Until anyone posts, Day 1 can still move, even after it has begun.
@@ -43,7 +44,8 @@ export function gameChangeControls(state: RuleState, now: Date, pending: GamePen
 }
 
 /** Proposal words are sealed before the transaction and atomically applied on agreement. */
-export interface StoredGamePendingChange extends GamePendingChange {
+export interface StoredGamePendingChange extends Omit<GamePendingChange, "votes"> {
+  votes?: Record<string, "yes" | "no">;
   termsWordsEncrypted?: string;
   tasksChanged?: true;
   stakes?: StoredStake[];
@@ -64,8 +66,48 @@ export function parsePendingGameChange(value: unknown): StoredGamePendingChange 
     ...(typeof value.termsWordsEncrypted === "string" ? { termsWordsEncrypted: value.termsWordsEncrypted } : {}),
     ...(value.tasksChanged === true ? { tasksChanged: true as const } : {}),
     ...(Array.isArray(value.stakes) ? { stakes: value.stakes.map(parseStoredStake) } : {}),
+    ...(value.votes === undefined ? {} : { votes: parseChangeVotes(value.votes) }),
     ...readPendingDeliveryState(value),
   };
+}
+
+function parseChangeVotes(value: unknown): Record<string, "yes" | "no"> {
+  if (!isRecord(value) || Object.keys(value).length > 10) throw new Error("Stored game votes are malformed.");
+  return Object.fromEntries(Object.entries(value).map(([memberId, vote]) => {
+    if (vote !== "yes" && vote !== "no") throw new Error("Stored game vote is malformed.");
+    return [memberId, vote];
+  }));
+}
+
+/** Only remaining seated players count; a late join adds an undecided voter. */
+export function gameChangeMajority(state: RuleState, votes: Record<string, "yes" | "no">) {
+  const players = remainingPlayers(state);
+  const yes = players.filter(player => votes[player.memberId] === "yes").length;
+  const undecided = players.filter(player => votes[player.memberId] === undefined).length;
+  return { approved: yes * 2 > players.length, declined: (yes + undecided) * 2 <= players.length,
+    yesNeeded: Math.max(0, Math.floor(players.length / 2) + 1 - yes) };
+}
+
+/** Full group input becomes the same edit delta used by pair approval. */
+export function normalizeGroupGameChange(state: RuleState, words: TermWords, next: NewTerms): GameChange {
+  const previous = currentTerms(state.game.terms);
+  const oldWords = [...words.versions].reverse().find(version => version.n <= previous.n)!;
+  const newTerms = currentTerms(next.terms);
+  const newWords = next.words.versions[0];
+  const tasksChanged = oldWords.defaultTask !== newWords.defaultTask || remainingPlayers(state).some(player =>
+    (oldWords.tasks.find(task => task.seat === player.seat)?.text ?? oldWords.defaultTask)
+    !== (newWords.tasks.find(task => task.seat === player.seat)?.text ?? newWords.defaultTask));
+  const oldStakes = previous.stakes.map(stake => ({ kind: stake.kind, item: oldWords.stakes.find(word => word.key === stake.key)?.item }));
+  const stakes = newTerms.stakes.map(stake => ({ kind: stake.kind, item: newWords.stakes.find(word => word.key === stake.key)!.item }));
+  const change: GameChange = { kind: "edit",
+    ...(!isSameGameChange({ kind: "edit", schedule: previous.schedule }, { kind: "edit", schedule: newTerms.schedule }) ? { schedule: newTerms.schedule } : {}),
+    ...(state.game.lengthDays !== next.lengthDays ? { lengthDays: next.lengthDays } : {}),
+    ...(state.game.startsOn !== next.startsOn ? { startsOn: next.startsOn } : {}),
+    ...(tasksChanged ? { tasks: newWords.tasks, defaultTask: newWords.defaultTask } : {}),
+    ...(JSON.stringify(oldStakes) !== JSON.stringify(stakes) ? { stakes } : {}),
+  };
+  if (Object.keys(change).length === 1) reject("INVALID_REQUEST", "Nothing changed.");
+  return change;
 }
 
 /** Conversation state records the source, never a provider delivery receipt. */
@@ -93,7 +135,7 @@ export function isGameChangeOutdated(state: RuleState, pending: StoredGamePendin
 
 /** Why the other player's agreement would refuse this change now, or null while it can still apply. */
 export function gameChangeRefusal(state: RuleState, pending: StoredGamePendingChange, now: Date): string | null {
-  const approver = state.players.find((player) => player.memberId !== pending.proposedByMemberId) ?? state.players[0];
+  const approver = remainingPlayers(state).find((player) => player.memberId !== pending.proposedByMemberId) ?? state.players[0];
   try {
     decideApprovedGameChange(state, approver.memberId, pending, now);
     return null;
@@ -116,7 +158,7 @@ export function decideGameChange(state: RuleState, actor: string, change: GameCh
 
 /** `agreedStart` is an approved proposal's stored date, whose bounds the approval check already owns. */
 function decideChange(state: RuleState, actor: string, change: GameChange, now: Date, sealedWords?: SealedWordChanges, agreedStart?: string): GameChangeDecision {
-  if (!playerFor(state, actor)) reject("NOT_A_PLAYER", "This game belongs to its players.");
+  if (!remainingPlayers(state).some(player => player.memberId === actor)) reject("NOT_A_PLAYER", "This game belongs to its players.");
   const controls = gameChangeControls(state, now, null);
   if (!controls.canEdit) reject("GAME_NOT_LIVE", "This game is no longer open for changes.");
   const effectiveFromDay = changeFromDay(state, change, now, controls.canEditStartDate);
@@ -149,7 +191,7 @@ export function isSameGameChange(left: GameChange, right: GameChange): boolean {
 }
 
 /** Only an app request already queued or sent needs a separate cancellation notice, unless Murph's reply in the bound chat already gave it. */
-export function gameChangeCancellationNeedsNotice(pending: GamePendingChange, decision: "approve" | "decline" | "cancel", answeredInBoundChat = false): boolean {
+export function gameChangeCancellationNeedsNotice(pending: Pick<GamePendingChange, "origin" | "deliveryStatus">, decision: "approve" | "decline" | "cancel", answeredInBoundChat = false): boolean {
   return !answeredInBoundChat && decision === "cancel" && pending.origin === "app" && ["queued", "sent"].includes(pending.deliveryStatus);
 }
 
@@ -183,7 +225,15 @@ export function agreedDayOne(state: RuleState, pending: StoredGamePendingChange,
 
 /** Pending days are a current preview, never a promise fixed at proposal time. */
 export function pendingGameChangeView(state: RuleState, pending: GamePendingChange | null, now: Date): GamePendingChange | null {
-  return pending ? { ...pending, effectiveFromDay: changeFromDay(state, pending.change, now, true) } : null;
+  if (!pending) return null;
+  const view = { ...pending, effectiveFromDay: changeFromDay(state, pending.change, now, true) };
+  if (state.game.seats !== 10) return view;
+  const players = remainingPlayers(state);
+  const votes = pending.votes?.filter(vote => players.some(player => player.memberId === vote.memberId)) ?? [];
+  const change = pending.change;
+  const seatedChange = change.kind === "edit" && change.tasks ? { ...change,
+    tasks: [...players].sort((a, b) => a.seat - b.seat).map(player => ({ seat: player.seat, text: change.tasks!.find(task => task.seat === player.seat)?.text ?? change.defaultTask! })) } : change;
+  return { ...view, change: seatedChange, votes, yesNeeded: gameChangeMajority(state, Object.fromEntries(votes.map(({ memberId, vote }) => [memberId, vote]))).yesNeeded };
 }
 
 /** Before play, Day 1 moves to a scheduled day; once play starts, the rest of the game must keep one. */

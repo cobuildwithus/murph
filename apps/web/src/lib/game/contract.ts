@@ -154,6 +154,7 @@ export interface GameInviteTargetInput {
 
 export interface EditGameTermsBody {
   expectedTermsVersion: number;
+  proposalId?: string;
   terms: GameTermsInput;
 }
 
@@ -229,7 +230,7 @@ export interface ReportGameBody {
 export type GameChange =
   | { kind: "start_now" }
   | { kind: "edit"; schedule?: GameSchedule; lengthDays?: number; startsOn?: string | null;
-      tasks?: GameTask[]; stakes?: GameStake[]; stakesApplyToWholeGame?: true };
+      tasks?: GameTask[]; defaultTask?: string; stakes?: GameStake[]; stakesApplyToWholeGame?: true };
 
 export interface ProposeGameChangeBody {
   proposalId: string;
@@ -251,6 +252,8 @@ export interface GamePendingChange {
   deliveryRetryable?: boolean;
   /** Fixed start date agreed to, including a start-now proposal. */
   startsOn: string | null;
+  votes?: { memberId: string; vote: "yes" | "no" }[];
+  yesNeeded?: number;
 }
 
 export interface GameChangeControls {

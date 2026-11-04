@@ -41,7 +41,11 @@ describe('game dynamic tools', () => {
     const tasks = Array.from({ length: 10 }, (_, index) => ({ memberId: `player_${index}`, text: 'Walk' }))
     expect(parse('update_game', { messageRef: inputId, operation: 'edit_terms', gameId: 'game_group_one', expectedTermsVersion: 1,
       terms: { defaultTask: 'Walk', tasks, schedule: { count: 5 }, stakes: [{ kind: 'prize', item: 'Choose lunch' }] } })).toMatchObject({ kind: 'game' })
-    expect(GAME_GROUP_CHAT_GUIDANCE).toContain('Only the starter')
+    expect(GAME_GROUP_CHAT_GUIDANCE).toContain('Any seated player')
+    expect(GAME_GROUP_CHAT_GUIDANCE).toContain('yesNeeded')
+    expect(GAME_GROUP_CHAT_GUIDANCE).toContain('a yes or no is final for that ask')
+    expect(GAME_GROUP_CHAT_GUIDANCE).not.toMatch(/Groups have no change requests|Only the starter can edit/u)
+    expect(MURPH_UPDATE_GAME_TOOL.description).not.toMatch(/only the starter can edit_terms|no proposals/u)
     expect(GAME_GROUP_CHAT_GUIDANCE).toContain('Never nudge')
   })
 
@@ -381,3 +385,17 @@ it('offers one seated task for a group starter edit', () => {
   expect(GAME_GROUP_CHAT_GUIDANCE).toContain('pendingInviteeCount')
   expect(GAME_GROUP_CHAT_GUIDANCE).toContain('server preserves private unjoined overrides')
 })
+
+it('passes a seated player’s group edit proposal and individual vote through the real contracts', async () => {
+  const update = { operation: 'edit_terms', gameId: 'game_group_one', expectedTermsVersion: 2, proposalId: 'proposal_group_new',
+    terms: { defaultTask: 'Walk', tasks: ['player_0', 'player_1', 'player_2'].map(memberId => ({ memberId, text: 'Walk' })), schedule: { count: 5 }, stakes: [{ kind: 'prize', item: 'Choose lunch' }] } }
+  const request = parse('update_game', { messageRef: inputId, ...update })!
+  expect(request).toMatchObject({ kind: 'game', request: { update } })
+  const requestPort = vi.fn().mockResolvedValue({ action: 'update_game', result: { status: 'ok', state: { games: [] } } })
+  await executeMurphDynamicToolRequest({ request, hostedToolContext: { ...context(), groupTool: { request: requestPort } }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+  expect(requestPort).toHaveBeenCalledExactlyOnceWith({ action: 'update_game', origin, update })
+  for (const operation of ['approve', 'decline']) {
+    expect(parse('update_game', { messageRef: secondInput, operation, gameId: update.gameId, proposalId: update.proposalId })).toMatchObject({ kind: 'game', request: { messageRef: secondInput, update: { operation, proposalId: update.proposalId } } })
+    expect(parse('update_game', { messageRef: inputId, operation, gameId: update.gameId, proposalId: update.proposalId, memberId: 'someone_else' })).not.toMatchObject({ kind: 'game' })
+  }
+});
