@@ -512,7 +512,7 @@ function dayViews(input: GameViewInput, players: readonly RulePlayer[], entries:
       ...(input.multiplayer ? { progress: { latestPosterSeats: showOthers ? latestPosterSeats(input, players, index, entries) : [] } } : {}),
       index,
       localDate: addDays(viewer.dayOne!, index),
-      mine: mine && visible.has(mine.id) ? entryView(mine, input) : null,
+      mine: mine && visible.has(mine.id) ? { ...entryView(mine, input), postedAt: mine.receivedAt.toISOString() } : null,
       off: !isScheduledDay(state, index),
       others: showOthers ? others.map((other) => otherDayView(input, visible, other, index, entries)) : [],
     };

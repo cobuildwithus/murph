@@ -162,6 +162,8 @@ describe("weekly game views: tickets", () => {
     const unlocked = view(state, LEO, now, overrides).days[0].others[0];
     expect(unlocked.entry).toMatchObject({ data, text: "private caption" });
     expect(unlocked.postedAt).toBe(posted.receivedAt.toISOString());
+    // Your own post carries its receipt time, so the app can tell who went second.
+    expect(view(state, LEO, now, overrides).days[0].mine?.postedAt).toBe(own.receivedAt.toISOString());
     // Its blur stays for the app to show while the picture loads.
     expect(unlocked.blurHash).toBe("synthetic-blur");
     own.withdrawnAt = now;
