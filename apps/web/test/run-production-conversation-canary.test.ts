@@ -252,13 +252,25 @@ describe("production conversation canary runner", () => {
     expect(mocks.stop).toHaveBeenCalledOnce();
   });
 
-  it("keeps the acceptance reply budget at twenty seconds after a thirty-second proposal", async () => {
-    prepareCompleteConversation({ proposalLatencyMs: 30_000, acceptanceLatencyMs: 20_000 });
+  it.each([20_000, 30_000, 39_999])("allows an acceptance reply after %i ms and completes the canonical save check", async (acceptanceLatencyMs) => {
+    prepareCompleteConversation({ proposalLatencyMs: 30_000, acceptanceLatencyMs });
 
-    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toHaveProperty(
+    const result = await runLinqProductionCanary(TEST_ENV);
+    expect(result.turns[4]).toEqual({ latencyMs: acceptanceLatencyMs, senderSendMs: 0, stage: "accept-goal", turn: 5 });
+    expect(result.canonicalOutcome).toEqual({ baselineGoalCount: 0, savedGoalCount: 1, proposalGoalCount: 0 });
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(5);
+    expect(mocks.stop).toHaveBeenCalledOnce();
+  });
+
+  it.each([40_000, 60_000])("rejects an acceptance reply after %i ms with its forty-second budget", async (acceptanceLatencyMs) => {
+    prepareCompleteConversation({ proposalLatencyMs: 30_000, acceptanceLatencyMs });
+    const report = vi.fn();
+
+    await expect(runLinqProductionCanary(TEST_ENV, report)).rejects.toHaveProperty(
       "name",
-      "reply-latency-budget-exceeded; turn=5; metric=send_to_reply; elapsed_ms=20000; budget_ms=20000",
+      `reply-latency-budget-exceeded; turn=5; metric=send_to_reply; elapsed_ms=${acceptanceLatencyMs}; budget_ms=40000`,
     );
+    expect(report).toHaveBeenCalledWith({ latencyMs: acceptanceLatencyMs, senderSendMs: 0, stage: "accept-goal", turn: 5 });
     expect(mocks.spaceSend).toHaveBeenCalledTimes(5);
     expect(mocks.stop).toHaveBeenCalledOnce();
   });
