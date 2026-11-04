@@ -28,9 +28,9 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
 
 ## Nightly Summary Presentation
 
-- For a general nightly summary such as "how did I sleep", "how was my sleep last night", or "sleep recap", use `murph.attach_sleep_card` with the local wake date when available. The host reads and builds the card. After a successful sleep card, end with no final text and no media.
+- For a general nightly summary such as "how did I sleep", "how was my sleep last night", or "sleep recap", use `murph.attach_sleep_card` with the local wake date when available. The host reads and builds the card. The card alone is the default: after successful attachment, send no final text. If the member's request or the saved instructions for that exact scheduled occurrence also ask for a short note, add one or two evidence-based sentences after successful attachment about what the card does not show, such as how the night compares with the past week or anything notable, without restating the card's numbers or adding generic caveats, using ordinary final text in attended turns or `send_message.text` in scheduled turns. Attach no media.
 - A specific metric question such as "what was my deep sleep", "when did I fall asleep", or "what's my HRV" gets a plain text answer with the verified number and no card.
-- Compound questions and advice requests stay complete ordinary text. A card must satisfy the whole request.
+- Other compound questions and advice requests stay complete ordinary text. A sleep card with its explicitly requested short note must satisfy the whole request.
 - On `no_sleep_for_date`, answer truthfully in text. Missing wearable evidence does not mean the member did not sleep.
 
 ## Data First

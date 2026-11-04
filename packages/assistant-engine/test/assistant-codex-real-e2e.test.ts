@@ -2,7 +2,7 @@ import { REMINDER_LANGUAGE_CASES, runReminderLanguageJourney } from './support/r
 import { listCanonicalWriteEvidence, readCanonicalAuditRecords } from './canonical-audit-test-helpers.js'
 import { GAME_CHAT_SETUP_SCENARIOS, SETUP_PLAYERS, SETUP_TERMS } from './support/game-chat-setup-scenarios.js'
 import { buildBluetoothHelpInstructions } from './support/bluetooth-help.js'
-import { SYNTHETIC_SLEEP_NIGHT_VALUES, seedSyntheticSleepNight } from './support/sleep-card-fixture.js'
+import { SYNTHETIC_PRIOR_SLEEP_NIGHTS, SYNTHETIC_SLEEP_NIGHT_VALUES, seedSyntheticSleepNight } from './support/sleep-card-fixture.js'
 import { readHostedDelegationHintOverrides } from './support/hosted-delegation-hints.js'
 import { materializeRegimenLabelFixture, REGIMEN_FUZZY_FOOD_NAMES, REGIMEN_LABEL_SCENARIOS, REGIMEN_SHAKE_TOTALS } from './support/supplement-regimen-label-fixture.js'
 import { seedImportedRecallMeal, seedImportedRecallPhoto, SYNTHETIC_IMPORTED_MEAL } from './support/imported-record-recall-fixture.js'
@@ -147,7 +147,7 @@ import {
   refreshAssistantContextSnapshot,
 } from '../src/assistant/context-snapshot.ts'
 import { applyAssistantVaultFileSendApprovalResult, requestAssistantVaultFileSend } from '../src/assistant/vault-file-send.ts'
-import { dispatchAssistantOutboxIntent, listAssistantOutboxIntents } from '../src/assistant/outbox.ts'
+import { deliverAssistantOutboxMessage, dispatchAssistantOutboxIntent, listAssistantOutboxIntents } from '../src/assistant/outbox.ts'
 import { upsertAssistantInputEvent, updateAssistantInputAttachmentEvidence } from '../src/assistant/input-store.js'
 import { readAnalyzeVideoConversationEvents, snapshotConversationAttachmentAuthorities } from '../src/assistant-codex/analyze-video-tool.js'
 import { assertNoSongAttachmentFailure } from './support/song-receipt-proof.ts'
@@ -1862,6 +1862,7 @@ function readFocusedSleepPatternProjectionCommand(command: string): string {
 describeRealCodex('real Codex sleep summary cards', () => {
   it.each([
     ['sleep card: general sleep question attaches the host-built card', 'How did I sleep last night?', 'general'],
+    ['sleep card: explicitly requested short note survives attachment', 'Send me my sleep card for last night with a short note about how I am trending.', 'note'],
     ['sleep card: nightly recap discovers the deferred host-built card', 'Give me a recap of my last night of sleep.', 'general'],
     ['sleep card: specific deep sleep question answers in text', 'What was my deep sleep last night?', 'specific'],
     ['sleep card: compound sleep and training question stays text', 'How did I sleep and should I train today?', 'compound'],
@@ -1877,7 +1878,7 @@ describeRealCodex('real Codex sleep summary cards', () => {
       if (scenario === 'missing') {
         await initializeVault({ vaultRoot, timezone: 'UTC', createdAt: '2026-01-01T00:00:00Z' })
       } else {
-        await seedSyntheticSleepNight(vaultRoot, 'oura', { ...SYNTHETIC_SLEEP_NIGHT_VALUES }, { timeZone: 'UTC' })
+        await seedSyntheticSleepNight(vaultRoot, 'oura', { ...SYNTHETIC_SLEEP_NIGHT_VALUES }, { timeZone: 'UTC', ...(scenario === 'note' ? { priorNights: SYNTHETIC_PRIOR_SLEEP_NIGHTS } : {}) })
       }
       await cp(resolveAssistantSkillsRoot(), skillsRoot, { recursive: true })
       await materializeFocusedActivityProjectionCli({ binDirectory, commandLogPath, vaultRoot })
@@ -1915,11 +1916,19 @@ describeRealCodex('real Codex sleep summary cards', () => {
         Object.entries(snapshot).filter(([file]) => file.startsWith('ledger/') || file === 'vault.json'))
       expect(healthRecords(await snapshotRealCodexCanonicalVault(vaultRoot))).toEqual(healthRecords(before))
       expect(result.responseMedia ?? []).toEqual([])
-      if (scenario === 'general') {
+      if (scenario === 'general' || scenario === 'note') {
         expect(attachments).toHaveLength(1)
         expect(attachments[0]).toMatchObject({ tool: 'attach_sleep_card', argumentsValue: { date: '2026-11-03' } })
         expect(result.responseCard).toMatchObject({ kind: 'sleep_summary', localDate: '2026-11-03', totalSleepMinutes: 436, stages: { deepMinutes: 141, remMinutes: 118, lightMinutes: 177 } })
-        expect(authoredReply).toBe('')
+        if (scenario === 'general') expect(authoredReply).toBe('')
+        else {
+          expect(authoredReply).not.toBe('')
+          expect(authoredReply).not.toMatch(/—| - |can't combine|cannot combine|unable to combine/iu)
+          // The note adds what the card cannot show: the trend across the earlier nights.
+          expect(authoredReply).toMatch(/nights?|recent|earlier|previous|than|trend/iu)
+          expect(result.finalMessage).toBe(renderAssistantResponseCardText(result.responseCard!, authoredReply))
+          expect(result.transcriptMessage).toBe(result.finalMessage)
+        }
       } else {
         expect(result.responseCard).toBeNull()
         expect(authoredReply).not.toBe('')
@@ -1933,6 +1942,108 @@ describeRealCodex('real Codex sleep summary cards', () => {
       }
     } finally { await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths]) }
   })
+})
+
+describeRealCodex('real Codex sleep card scheduled notes', () => {
+  it('sleep card: edits existing morning instructions then queues its scheduled note', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const root = await mkdtemp(path.join(tmpdir(), 'synthetic-sleep-note-scheduled-'))
+    const requests: AssistantHostedAutomationToolRequest[] = []
+    try {
+      const vaultRoot = path.join(root, 'vault')
+      const binDirectory = path.join(root, 'bin')
+      await seedSyntheticSleepNight(vaultRoot, 'oura', { ...SYNTHETIC_SLEEP_NIGHT_VALUES }, { timeZone: 'UTC', priorNights: SYNTHETIC_PRIOR_SLEEP_NIGHTS })
+      await materializeFocusedActivityProjectionCli({ binDirectory, commandLogPath: path.join(root, 'commands.log'), vaultRoot })
+      const original = (await upsertAutomation({
+        vaultRoot, slug: 'synthetic-morning-sleep', title: 'Morning sleep recap', status: 'active', continuityPolicy: 'fresh',
+        now: new Date('2026-11-03T08:00:00.000Z'), schedule: { kind: 'dailyLocal', localTime: '09:00' },
+        route: { channel: 'linq', deliveryTarget: 'synthetic-sleep-chat', threadId: 'synthetic-sleep-chat', threadIsDirect: true, identityId: null, participantId: null },
+        instructions: 'Send a brief morning sleep recap in text.',
+      })).record
+      let inspectedVersion: string | null = null
+      const automationTool: NonNullable<CodexAppServerTurnInput['hostedToolContext']>['automationTool'] = {
+        async request(request) {
+          requests.push(request)
+          if (request.action !== 'inspect' && request.action !== 'patch') throw new Error('Only the existing morning automation may be edited.')
+          expect(request.lookup).toBe(original.automationId)
+          const before = await showAutomation({ vaultRoot, automationId: request.lookup })
+          if (!before) throw new Error('Expected synthetic automation.')
+          if (request.action === 'inspect') inspectedVersion = before.updatedAt
+          else {
+            expect(request.expectedUpdatedAt).toBe(inspectedVersion)
+            expect(Object.keys(request).sort()).toEqual(['action', 'expectedUpdatedAt', 'instructions', 'lookup'])
+            expect(request.instructions).toMatch(/sleep.*card/iu)
+            expect(request.instructions).toMatch(/short|brief|sentence/iu)
+            expect(request.instructions).not.toMatch(/—| - /u)
+            await patchAutomation({ vaultRoot, lookup: request.lookup, expectedUpdatedAt: request.expectedUpdatedAt, instructions: request.instructions, now: new Date('2026-11-03T08:30:00.000Z') })
+          }
+          const record = await showAutomation({ vaultRoot, automationId: request.lookup })
+          if (!record) throw new Error('Expected canonical automation readback.')
+          return { action: request.action, automationId: record.automationId, lookupId: record.automationId, created: false,
+            routeBinding: 'preserved', title: record.title, instructions: record.instructions, schedule: record.schedule,
+            status: record.status, updatedAt: record.updatedAt, effectiveTimeZone: 'UTC',
+            occurrenceProjection: { status: 'resolved', nextOccurrenceAt: '2026-11-03T09:00:00.000Z' } }
+        },
+      }
+      const common = {
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, groupConversation: false, vaultRoot,
+        env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot() }, fixtureBinDirectory: binDirectory,
+        model: config.model, modelProvider: config.modelProvider, reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory: root,
+      } as const
+      const developerOptions = {
+        assistantCliContract: null, assistantHostedAutomationAvailable: true, channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
+        conversationScope: 'direct', currentLocalDate: '2026-11-03', currentInstant: '2026-11-03T08:30:00.000Z', currentTimeZone: 'UTC',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+      } as const
+      const correction = await executeRealCodexAppServerTurn({
+        ...common, dynamicTools: [MURPH_AUTOMATION_TOOL],
+        developerInstructions: buildAssistantSystemPrompt({ ...developerOptions, ordinaryInboundTurn: true, turnTrigger: 'automation-auto-reply' }),
+        hostedToolContext: { ...createRealCodexSupportHostedToolContext('direct'), automationTool },
+        prompt: `My existing morning sleep recap is automation ${original.automationId}. Going forward, send my sleep card in its place along with a short note about how I'm trending and anything else interesting. Keep its schedule and destination.`,
+      })
+      expect(requests.slice(0, 2).map(request => request.action)).toEqual(['inspect', 'patch'])
+      expect(requests.filter(request => request.action === 'patch')).toHaveLength(1)
+      expect(requests.every(request => request.action === 'inspect' || request.action === 'patch')).toBe(true)
+      expect(correction.finalMessage).not.toMatch(/can't combine|cannot combine|unable to combine|—| - /iu)
+      const saved = await showAutomation({ vaultRoot, automationId: original.automationId })
+      expect(saved?.schedule).toEqual(original.schedule)
+      expect(saved?.route).toEqual(original.route)
+      expect((await listAutomations({ vaultRoot })).items).toHaveLength(1)
+      const source = findCanonicalAssistantCronRecordInList(await listCanonicalAssistantCronRecords(vaultRoot), original.automationId)
+      if (!source || source.kind !== 'automation') throw new Error('Expected canonical sleep automation.')
+      const occurrenceAt = '2026-11-03T09:00:00.000Z'
+      const runtimeState = createAssistantCronCanonicalRuntimeRecord({ jobId: resolveCanonicalAssistantCronJobId(source), now: occurrenceAt })
+      const instructions = buildAssistantCronExecutionInstructions({ source, runtimeState, kind: 'canonical', job: projectCanonicalAssistantCronJob({ source, runtimeState }) }, { automationId: null, contextReferences: [] })
+      const prepared = await prepareAssistantCronNotificationInput({
+        instructions, vault: vaultRoot, workingDirectory: root, turnTrigger: 'automation-cron', scheduledAutomationScheduleKind: source.schedule.kind,
+        scheduledInvocationAuthority: { automationId: source.automationId, occurrenceAt },
+        outboxAutomationAuthority: { automationId: source.automationId, expectedUpdatedAt: source.updatedAt },
+      }, { sessionId: 'synthetic-scheduled-sleep-session' })
+      const result = await executeRealCodexAppServerTurn({
+        ...common, dynamicTools: [MURPH_ATTACH_SLEEP_CARD_TOOL], prompt: prepared.instructions,
+        developerInstructions: buildAssistantSystemPrompt({ ...developerOptions, currentInstant: occurrenceAt, ordinaryInboundTurn: false, scheduledOccurrenceAt: occurrenceAt, turnTrigger: 'automation-cron' }),
+      })
+      const attachments = readCapabilityRoutingActions(result.jsonEvents).filter(action => action.kind === 'dynamic' && action.tool.startsWith('attach_'))
+      expect(attachments).toHaveLength(1)
+      expect(attachments[0]).toMatchObject({ tool: 'attach_sleep_card', argumentsValue: { date: '2026-11-03' } })
+      expect(result.responseCard?.kind).toBe('sleep_summary')
+      expect(result.responseMedia).toEqual([])
+      const decision = parseAssistantNotificationDecision(result.providerAuthoredFinalMessage ?? '')
+      expect(decision.kind).toBe('send_message')
+      if (decision.kind !== 'send_message' || !result.responseCard) throw new Error('Expected a scheduled sleep note.')
+      expect(decision.text.trim()).not.toBe('')
+      expect(decision.text).not.toMatch(/—| - |privateSummary|can't combine|cannot combine/iu)
+      process.stdout.write('[sleep-card-scheduled-note-text] ' + JSON.stringify({ savedInstructions: saved?.instructions ?? null, confirmation: correction.finalMessage, scheduledNote: decision.text }) + '\n')
+      const message = renderAssistantResponseCardText(result.responseCard, decision.text)
+      const queued = await deliverAssistantOutboxMessage({ card: result.responseCard, channel: 'linq', threadId: 'synthetic-sleep-chat', threadIsDirect: true, dispatchMode: 'queue-only', message, sessionId: 'synthetic-scheduled-sleep-session', turnId: 'synthetic-scheduled-sleep-turn', vault: vaultRoot })
+      expect(queued.intent).toMatchObject({ message, card: result.responseCard, status: 'pending' })
+      expect(message).not.toContain('privateSummary')
+      expect(await showAutomation({ vaultRoot, automationId: original.automationId })).toEqual(saved)
+      process.stdout.write(JSON.stringify({ scenario: 'sleep-note-edit-and-scheduled', patchCount: 1, attachmentCount: attachments.length, queued: true }) + '\n')
+    } finally { await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths]) }
+  }, 900_000)
 })
 
 describeRealCodex('real Codex focused sleep-pattern projection e2e', () => {

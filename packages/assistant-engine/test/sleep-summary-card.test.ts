@@ -68,9 +68,17 @@ describe('host-built sleep summary attachment', () => {
   it('keeps the production skill routing general, specific, compound and missing-night outcomes explicit', async () => {
     const skill = await readFile(new URL('../skills/sleep-improvement/SKILL.md', import.meta.url), 'utf8')
     expect(skill).toContain('murph.attach_sleep_card')
-    expect(skill).toContain('end with no final text')
+    expect(skill).toContain('The card alone is the default: after successful attachment, send no final text.')
     expect(skill).toContain('plain text answer with the verified number and no card')
-    expect(skill).toContain('Compound questions and advice requests stay complete ordinary text')
+    expect(skill).toContain('Other compound questions and advice requests stay complete ordinary text')
+    for (const policy of [skill, MURPH_ATTACH_SLEEP_CARD_TOOL.description]) {
+      expect(policy).toContain("saved instructions for that exact scheduled occurrence")
+      expect(policy).toContain('one or two evidence-based sentences after successful attachment')
+      expect(policy).toContain('ordinary final text in attended turns')
+      expect(policy).toContain('send_message.text')
+      expect(policy).toContain('Attach no media.')
+      expect(policy).not.toMatch(/—| - /u)
+    }
     expect(skill).toContain('On `no_sleep_for_date`')
     expect(skill).toContain('awake time, never as WASO or an awakening count')
   })

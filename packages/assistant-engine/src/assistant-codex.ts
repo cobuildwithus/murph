@@ -894,14 +894,18 @@ function renderCodexResponseCardPresentation(input: {
   cardTextFallback: CompactTableWorkoutResponseCardV1 | null
   omitCardTracking: boolean
   nutritionIntroduction?: string | null
+  sleepCompanion?: string | null
 }): { message: string; transcript: string } | null {
   if (input.card) {
-    const message = renderAssistantResponseCardText(input.card, input.nutritionIntroduction)
+    const companion = input.card.kind === 'sleep_summary'
+      ? input.sleepCompanion : input.nutritionIntroduction
+    const message = renderAssistantResponseCardText(input.card, companion)
     return {
       message,
       transcript: input.omitCardTracking
-        ? renderAssistantResponseCardText(input.card)
-        : renderAssistantResponseCardTranscriptText(input.card, input.nutritionIntroduction),
+        ? renderAssistantResponseCardText(input.card,
+            input.card.kind === 'sleep_summary' ? input.sleepCompanion : undefined)
+        : renderAssistantResponseCardTranscriptText(input.card, companion),
     }
   }
   if (input.cardTextFallback) {
@@ -930,6 +934,7 @@ function buildCodexFinalResponsePresentation(input: {
     cardTextFallback: input.cardTextFallback,
     omitCardTracking: hasRequiredClarifications,
     nutritionIntroduction: input.nutritionIntroduction,
+    sleepCompanion: input.modelMessage,
   })
   const semanticMessage = renderedCard?.message ?? input.modelMessage
   const requiredMessage =
@@ -3945,6 +3950,7 @@ async function runCodexAppServerTurnOnProcess(
       card: trailingSteerCandidate.card,
       cardTextFallback: trailingSteerCandidate.cardTextFallback,
       omitCardTracking: false,
+      sleepCompanion: trailingSteerCandidate.response,
     })
     const response = renderedCard?.message ?? trailingSteerCandidate.response
     const transcriptResponse = renderedCard?.transcript ?? response

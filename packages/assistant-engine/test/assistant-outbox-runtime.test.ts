@@ -1,3 +1,4 @@
+import { SYNTHETIC_SLEEP_CARD } from './support/sleep-card-fixture.js'
 import {
   access,
   chmod,
@@ -8353,6 +8354,49 @@ describe('assistant outbox runtime', () => {
     expect(dispatched.deliveryError).toMatchObject({
       code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
     })
+  })
+
+  it.each([false, true])('bounds sleep-note capability retries with accepted card evidence %s', async (partial) => {
+    const { vaultRoot } = await createAssistantVault('synthetic-sleep-note-budget-')
+    const note = 'Synthetic sleep context.'
+    const message = renderAssistantResponseCardText(SYNTHETIC_SLEEP_CARD, note)
+    const seeded = await createIntent(vaultRoot, { card: SYNTHETIC_SLEEP_CARD, channel: 'linq', explicitTarget: 'synthetic-chat', message, sessionId: 'synthetic-session', turnId: 'synthetic-turn' })
+    if (partial) {
+      mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(Object.assign(new VaultCliError('ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY', 'Synthetic note failure.', {
+        providerMessageEffects: [{ message: null, providerMessageId: 'synthetic-card' }],
+      }), {
+        deliveryMayHaveSucceeded: true, providerMessageId: 'synthetic-card', providerMessageIds: ['synthetic-card'], providerThreadId: 'synthetic-chat', target: 'synthetic-chat', targetKind: 'thread',
+      }))
+      const first = await dispatchAssistantOutboxIntent({ force: true, intentId: seeded.intentId, vault: vaultRoot })
+      expect(first.intent).toMatchObject({ status: 'retryable', deliveryConfirmationPending: false, delivery: { providerMessageIds: ['synthetic-card'] } })
+    }
+    const current = await readAssistantOutboxIntent(vaultRoot, seeded.intentId)
+    if (!current) throw new Error('Expected synthetic intent.')
+    await saveAssistantOutboxIntent(vaultRoot, { ...current, attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS - 1 })
+    mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(new VaultCliError('LINQ_API_REQUEST_FAILED', 'Synthetic malformed capability.', { operation: 'check_imessage_capability', retryable: true }))
+    const exhausted = await dispatchAssistantOutboxIntent({ force: true, intentId: seeded.intentId, vault: vaultRoot })
+    expect(exhausted.intent).toMatchObject({ status: 'failed', nextAttemptAt: null, attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS, card: SYNTHETIC_SLEEP_CARD, message, lastError: { code: 'ASSISTANT_DELIVERY_RETRY_EXHAUSTED' } })
+    if (partial) expect(exhausted.intent.delivery).toMatchObject({ providerMessageIds: ['synthetic-card'] })
+    await dispatchAssistantOutboxIntent({ intentId: seeded.intentId, vault: vaultRoot })
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(partial ? 2 : 1)
+  })
+
+  it('persists a sleep note and ordered provider effects through outbox replay', async () => {
+    const { vaultRoot } = await createAssistantVault('synthetic-sleep-note-replay-')
+    const note = 'Synthetic sleep context.'
+    const message = renderAssistantResponseCardText(SYNTHETIC_SLEEP_CARD, note)
+    const seeded = await createIntent(vaultRoot, { card: SYNTHETIC_SLEEP_CARD, channel: 'linq', explicitTarget: 'synthetic-chat', message, sessionId: 'synthetic-session', turnId: 'synthetic-turn' })
+    mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(Object.assign(new VaultCliError('ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY', 'Synthetic note failure.', {
+      providerMessageEffects: [{ message: null, providerMessageId: 'synthetic-card' }],
+    }), { deliveryMayHaveSucceeded: true, providerMessageId: 'synthetic-card', providerMessageIds: ['synthetic-card'], providerThreadId: 'synthetic-chat', target: 'synthetic-chat', targetKind: 'thread' }))
+    const first = await dispatchAssistantOutboxIntent({ force: true, intentId: seeded.intentId, vault: vaultRoot })
+    expect(first.intent).toMatchObject({ status: 'retryable', card: SYNTHETIC_SLEEP_CARD, message, delivery: { providerMessageIds: ['synthetic-card'], providerMessageEffects: [{ message: null, providerMessageId: 'synthetic-card' }] } })
+    const key = `assistant-outbox:${seeded.intentId}`
+    const effects = [{ message: null, providerMessageId: 'synthetic-card' }, { message: note, providerMessageId: 'synthetic-note' }]
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({ delivery: createDelivery({ channel: 'linq', idempotencyKey: key, providerMessageId: 'synthetic-note', providerMessageIds: ['synthetic-card', 'synthetic-note'], providerMessageEffects: effects, target: 'synthetic-chat', targetKind: 'thread' }), deliveryDeduplicated: false, deliveryTransportIdempotent: true, outboxIntentId: null, session: undefined })
+    const recovered = await dispatchAssistantOutboxIntent({ force: true, intentId: seeded.intentId, vault: vaultRoot })
+    expect(recovered.intent).toMatchObject({ status: 'sent', card: SYNTHETIC_SLEEP_CARD, message, delivery: { providerMessageId: 'synthetic-note', providerMessageIds: ['synthetic-card', 'synthetic-note'], providerMessageEffects: effects } })
+    for (const [input] of mockedDeliverAssistantMessageOverBinding.mock.calls) expect(input).toMatchObject({ card: SYNTHETIC_SLEEP_CARD, message, idempotencyKey: key })
   })
 
   it('keeps Linq text-plus-link partial delivery retryable with its accepted text identity', async () => {

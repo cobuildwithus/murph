@@ -1,8 +1,9 @@
+import { createHash } from 'node:crypto'
 import { Buffer } from 'node:buffer'
 import { MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV } from '../src/hosted-assistant-config-constants.js'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { sleepSummaryResponseCardV1Schema, type AssistantResponseCard } from '@murphai/contracts'
-import { buildLinqIMessageAppCardImageUrl, buildLinqIMessageAppCardUrl, buildLinqIMessageAppFallbackText, buildLinqIMessageAppLayout, buildTelegramRichMessage, renderAssistantResponseCardText, renderAssistantResponseCardTranscriptText } from '../src/assistant-response-cards.js'
+import { buildLinqIMessageAppCardImageUrl, buildLinqIMessageAppCardUrl, buildLinqIMessageAppFallbackText, buildLinqIMessageAppLayout, buildTelegramRichMessage, readSleepSummaryNote, renderAssistantResponseCardText, renderAssistantResponseCardTranscriptText } from '../src/assistant-response-cards.js'
 import { sendLinqIMessageAppCard, type LinqFetch } from '../src/linq-runtime.js'
 
 const complete = sleepSummaryResponseCardV1Schema.parse({
@@ -67,5 +68,83 @@ describe('sleep summary delivery', () => {
       expect(bodies.at(-1)).toMatchObject({ message: { parts: [{ interactive: true }] } })
     }
     expect(bodies).toHaveLength(3)
+  })
+})
+
+
+describe('sleep summary companion note', () => {
+  const note = 'This synthetic night follows the recent pattern. See https://example.test/sleep'
+  const summary = renderAssistantResponseCardText(totalOnly)
+  const composed = `${summary}\n\n${note}`
+  const env = { LINQ_API_TOKEN: 'synthetic-token' }
+
+  it.each([undefined, null, '', '  ', summary, `  ${summary}  `])(
+    'keeps absent and legacy companions card-only case %#', (message) => {
+      expect(readSleepSummaryNote(totalOnly, message)).toBeNull()
+      expect(renderAssistantResponseCardText(totalOnly, message)).toBe(summary)
+      expect(renderAssistantResponseCardTranscriptText(totalOnly, message)).toBe(summary)
+    },
+  )
+  it.each([note, `  ${note}  `, composed])('composes exactly once case %#', (message) => {
+    expect(readSleepSummaryNote(totalOnly, message)).toBe(note)
+    expect(renderAssistantResponseCardText(totalOnly, message)).toBe(composed)
+    expect(renderAssistantResponseCardTranscriptText(totalOnly, message)).toBe(composed)
+    expect(buildLinqIMessageAppLayout(totalOnly, message)).toEqual(buildLinqIMessageAppLayout(totalOnly))
+  })
+  it('escapes the note after the Telegram table', () => {
+    const html = buildTelegramRichMessage(totalOnly, '<note> & context').html
+    expect(html).toMatch(/<\/table><p>&lt;note&gt; &amp; context<\/p>$/u)
+  })
+  it.each(['0', '1'])('sends card then one plain note with long unhashed keys (native %s)', async (flag) => {
+    const bodies: Array<{ message: { idempotency_key: string; parts: unknown[] } }> = []
+    const fetchImplementation: LinqFetch = async (_url, init) => {
+      bodies.push(JSON.parse(String(init.body)))
+      return new Response(JSON.stringify({ message: { id: bodies.length === 1 ? 'synthetic-card' : 'synthetic-note' } }))
+    }
+    const key = 'synthetic-delivery:'.repeat(20)
+    const hash = (value: string) => `linq-idempotency:sha256:${createHash('sha256').update(value).digest('hex')}`
+    const result = await sendLinqIMessageAppCard({ card: totalOnly, chatId: 'synthetic-chat', idempotencyKey: key, companionMessage: composed }, {
+      env: { ...env, [MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV]: flag }, fetchImplementation,
+    })
+    expect(bodies).toHaveLength(2)
+    expect(bodies[0]).toMatchObject({ message: { idempotency_key: hash(key), parts: [{ type: 'imessage_app', interactive: flag === '1' }] } })
+    expect(bodies[1]).toEqual({ message: { idempotency_key: hash(`${key}:note`), parts: [{ type: 'text', value: note }] } })
+    expect(result).toMatchObject({
+      message: { id: 'synthetic-note' }, providerMessageIds: ['synthetic-card', 'synthetic-note'],
+      providerMessageEffects: [{ message: null, providerMessageId: 'synthetic-card' }, { message: note, providerMessageId: 'synthetic-note' }],
+    })
+  })
+  it.each(['rejected', 'missing', 'duplicate'])('preserves only accepted card evidence on a %s note and dedupes replay', async (failure) => {
+    const accepted = new Map<string, string>()
+    const keys: string[] = []
+    let failNote = true
+    const fetchImplementation: LinqFetch = async (_url, init) => {
+      const { message } = JSON.parse(String(init.body))
+      keys.push(message.idempotency_key)
+      const isNote = message.idempotency_key.endsWith(':note')
+      if (isNote && failNote) {
+        if (failure === 'rejected') return new Response('{}', { status: 422 })
+        return new Response(JSON.stringify({ message: failure === 'missing' ? {} : { id: 'synthetic-card' } }))
+      }
+      const id = accepted.get(message.idempotency_key) ?? (isNote ? 'synthetic-note' : 'synthetic-card')
+      accepted.set(message.idempotency_key, id)
+      return new Response(JSON.stringify({ message: { id } }))
+    }
+    const input = { card: totalOnly, chatId: 'synthetic-chat', idempotencyKey: 'synthetic-pair', companionMessage: note }
+    await expect(sendLinqIMessageAppCard(input, { env, fetchImplementation })).rejects.toMatchObject({
+      code: 'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY', deliveryMayHaveSucceeded: true,
+      providerMessageIds: ['synthetic-card'],
+      context: { idempotencyKey: 'synthetic-pair', providerMessageEffects: [{ message: null, providerMessageId: 'synthetic-card' }] },
+    })
+    failNote = false
+    await expect(sendLinqIMessageAppCard(input, { env, fetchImplementation })).resolves.toMatchObject({ providerMessageIds: ['synthetic-card', 'synthetic-note'] })
+    expect(keys).toEqual(['synthetic-pair', 'synthetic-pair:note', 'synthetic-pair', 'synthetic-pair:note'])
+    expect(accepted.size).toBe(2)
+  })
+  it('rejects an oversized note before accepting the card', async () => {
+    const fetchImplementation = vi.fn<LinqFetch>()
+    await expect(sendLinqIMessageAppCard({ card: totalOnly, chatId: 'synthetic-chat', idempotencyKey: 'synthetic-pair', companionMessage: 'x'.repeat(1_000_001) }, { env, fetchImplementation }))
+      .rejects.toMatchObject({ code: 'LINQ_INVALID_INPUT', deliveryMayHaveSucceeded: false })
+    expect(fetchImplementation).not.toHaveBeenCalled()
   })
 })

@@ -63,7 +63,7 @@ const partialCases = (
 describe.skipIf(!runPostgresProof)(
   "Hosted Linq rich-link partial ordering with PostgreSQL",
   () => {
-    it("consumes the exact answered mailbox row only after the rich link recovers", async () => {
+    it.each(["rich-link", "sleep-note"])("consumes the exact answered mailbox row only after the %s pair recovers", async (pair) => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
       const suffix = randomUUID();
       const memberId = `hbm_rich_link_mailbox_${suffix}`;
@@ -71,6 +71,7 @@ describe.skipIf(!runPostgresProof)(
       const idempotencyKey = `assistant-outbox:rich-link-mailbox-${suffix}`;
       const deliveryLookupKey =
         createHostedLinqDeliveryIdempotencyLookupKey(idempotencyKey);
+      const receiptEventId = `evt-synthetic-${pair}-${suffix}`;
       const failedAt = new Date("2026-07-29T18:00:02.000Z");
 
       if (!deliveryLookupKey) {
@@ -100,7 +101,7 @@ describe.skipIf(!runPostgresProof)(
           failureCode: PARTIAL_FAILURE_CODE,
           idempotencyKey,
           linqChatId: `chat-rich-link-mailbox-${suffix}`,
-          messageIds: [`msg-rich-link-mailbox-${suffix}`],
+          messageIds: [`msg-${pair}-primary-${suffix}`],
           prisma,
           sourceRef: `intent-rich-link-mailbox-${suffix}`,
           targetKind: "thread",
@@ -119,9 +120,20 @@ describe.skipIf(!runPostgresProof)(
           status: "failed",
         });
 
+        await ingestRuntimeDeliveryReceipt({
+          chatId: `chat-rich-link-mailbox-${suffix}`, eventId: receiptEventId,
+          messageId: `msg-${pair}-primary-${suffix}`, phoneNumber: "+12025550100", prisma,
+          receiptAt: new Date("2026-07-29T18:00:03.000Z"), status: "delivered",
+        });
+        await expect(prisma.hostedLinqDelivery.findUnique({
+          select: { failureCode: true, status: true }, where: { idempotencyKey: deliveryLookupKey },
+        })).resolves.toEqual({ failureCode: PARTIAL_FAILURE_CODE, status: "failed" });
+        await expect(prisma.hostedMailboxItem.findUnique({ select: { consumedAt: true }, where: { id: mailboxItemId } }))
+          .resolves.toEqual({ consumedAt: null });
+
         const acceptedAt = new Date("2026-07-29T18:00:05.000Z");
-        const primaryMessageId = `msg-rich-link-mailbox-${suffix}`;
-        const linkMessageId = `msg-rich-link-recovered-${suffix}`;
+        const primaryMessageId = `msg-${pair}-primary-${suffix}`;
+        const linkMessageId = `msg-${pair}-secondary-${suffix}`;
         await recordHostedLinqRuntimeDeliveryOutcomeTx({
           acceptedAt: new Date("2026-07-29T18:00:03.000Z"),
           answeredMailboxItemIds: [mailboxItemId],
@@ -180,6 +192,9 @@ describe.skipIf(!runPostgresProof)(
       } finally {
         await prisma.hostedLinqDelivery.deleteMany({
           where: { idempotencyKey: deliveryLookupKey },
+        });
+        await prisma.hostedLinqProviderEvent.deleteMany({
+          where: { eventId: createHostedLinqProviderEventLookupKey(receiptEventId) },
         });
         await prisma.hostedMember.deleteMany({ where: { id: memberId } });
         await prisma.$disconnect();

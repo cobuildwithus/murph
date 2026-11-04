@@ -210,6 +210,27 @@ export const challengeStandingsResponseCardJsonSchema =
 export const DAILY_NUTRITION_OPTIONAL_GOALS_INTRO =
   'Here’s your nutrition card. If you’d like, we can set up goals too.'
 
+export function readSleepSummaryNote(
+  card: AssistantResponseCard | null | undefined,
+  message: string | null | undefined,
+): string | null {
+  if (card?.kind !== 'sleep_summary') return null
+  const text = message?.trim() ?? ''
+  const summary = renderSleepSummaryResponseCardText(card)
+  if (!text || text === summary) return null
+  return (text.startsWith(`${summary}\n\n`)
+    ? text.slice(summary.length + 2).trim()
+    : text) || null
+}
+
+function renderSleepSummaryWithNote(
+  card: Extract<AssistantResponseCard, { kind: 'sleep_summary' }>,
+  message: string | null | undefined,
+): string {
+  return [renderSleepSummaryResponseCardText(card), readSleepSummaryNote(card, message)]
+    .filter((value) => value !== null).join('\n\n')
+}
+
 /** A single fixed invitation, not a general card-plus-prose escape hatch. */
 export function readDailyNutritionIntroduction(
   card: AssistantResponseCard | null | undefined,
@@ -249,7 +270,7 @@ export function renderAssistantResponseCardText(
     case 'telegram_rich_content':
       return renderTelegramRichContentResponseCardTextV1(parsed)
     case 'sleep_summary':
-      return renderSleepSummaryResponseCardText(parsed)
+      return renderSleepSummaryWithNote(parsed, companionMessage)
     case 'challenge_standings':
       return renderChallengeStandingsResponseCardText(parsed)
   }
@@ -295,7 +316,7 @@ export function renderAssistantResponseCardTranscriptText(
     case 'telegram_rich_content':
       return renderTelegramRichContentResponseCardTextV1(parsed)
     case 'sleep_summary':
-      return renderSleepSummaryResponseCardText(parsed)
+      return renderSleepSummaryWithNote(parsed, companionMessage)
     case 'challenge_standings':
       return renderChallengeStandingsResponseCardText(parsed)
   }
@@ -324,8 +345,11 @@ export function buildTelegramRichMessage(
       return { html: renderTelegramExerciseRoutineCardHtml(parsed) }
     case 'telegram_rich_content':
       return { html: parsed.html, skip_entity_detection: true }
-    case 'sleep_summary':
-      return { html: `<h2>Sleep</h2><p>${formatSleepCardDate(parsed.localDate)}</p><img src="${buildLinqIMessageAppCardImageUrl(parsed)}" alt="Sleep summary" /><table>${sleepSummaryCardValueRows(parsed).map(([label, value]) => `<tr><th>${escapeTelegramRichHtml(label)}</th><td>${escapeTelegramRichHtml(value)}</td></tr>`).join('')}</table>` }
+    case 'sleep_summary': {
+      const note = readSleepSummaryNote(parsed, companionMessage)
+      return { html: `<h2>Sleep</h2><p>${formatSleepCardDate(parsed.localDate)}</p><img src="${buildLinqIMessageAppCardImageUrl(parsed)}" alt="Sleep summary" /><table>${sleepSummaryCardValueRows(parsed).map(([label, value]) => `<tr><th>${escapeTelegramRichHtml(label)}</th><td>${escapeTelegramRichHtml(value)}</td></tr>`).join('')}</table>` + (note
+        ? `<p>${escapeTelegramRichHtml(note)}</p>` : '') }
+    }
     case 'challenge_standings':
       return { html: renderTelegramChallengeStandingsCardHtml(parsed) }
   }
