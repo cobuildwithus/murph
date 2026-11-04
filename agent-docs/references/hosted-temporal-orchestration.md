@@ -153,9 +153,16 @@ authenticated `hostedMailboxSystemHandledThroughSeq` scalar from the existing
 redacted workspace checkpoint and projects `model_free` when live eligible work
 exists after that prefix, otherwise `default_owned` for retained live work.
 The first-row lookup adds at most one tenant-scoped, ordered, filtered lookup
-when its head requires the default owner. It reads no payloads and uses no
-transaction. This class admits execution; it neither completes the earlier row
-nor changes the handled prefix. Runtime claims own independent execution. Environment completion is one generic
+when its head requires the default owner. That independent lookup starts after
+the greater of the handled prefix and the checkpointed imported watermark:
+later rows can already be complete while the default head retains the prefix.
+Imported independent retries instead use the runtime's canonical `mailbox` or
+`device-sync.reconcile` wake; a due deadline admits `model_free`, while a future
+deadline participates in `blocked.retryAt`. A due assistant wake alone never
+makes that default-owned frontier runnable in system mode. Missing imported
+progress falls back to the handled prefix. The lookup reads no payloads and
+uses no transaction. This class admits execution; it neither completes the
+earlier row nor changes the handled prefix. Runtime claims own independent execution. Environment completion is one generic
 model-free kind, as is deterministic member-channel reconciliation; Temporal
 does not know their product meaning or select a feature-specific processing
 mode. The wire shape and the existing two processing modes remain unchanged.
@@ -165,6 +172,21 @@ head; older runtime consumers retain that delay with newer Web facts. Neither
 skew may retire a live pointer before its handled prefix advances. No Temporal
 workflow command or history changes are required, and rollback preserves the
 existing snapshot, mailbox, and receipt readers.
+This readiness correction uses existing fields and needs only a Web release;
+no private workflow commands, patch markers, or runner request shapes change.
+An in-flight workflow consumes the corrected result at its next facts Activity;
+historical Activity results remain unchanged during replay. Existing runners
+keep their imported-watermark and model-free retry projection contract. Older
+Web with current workers/runners retains the excess polling; reverting Web
+restores that behavior without discarding work. No worker migration is needed.
+
+Usage restoration does not rely on the system retry timer: Ops resets signal
+`runtime_recheck_requested` after commit, credit fulfillment retries that handoff
+through its Stripe receipt, and allowance-restoring plan transitions collect the
+same post-commit recheck. Ordinary allowance exhaustion returns its period end
+as `blocked.retryAt`, giving Temporal the rollover deadline even with no new
+input. The default-processing wake remains intact throughout the block.
+
 Temporal applies three distinct retirement
 rules: a handled-through frontier that reaches the pointer lane sequence retires
 it as completed; an explicit `systemMailboxFrontier: null` retires only

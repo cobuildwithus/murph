@@ -185,7 +185,9 @@ export async function readHostedRuntimeReconciliationFacts(
       at: now,
       handledThroughSeq:
         projectedWorkspace.hostedMailboxSystemHandledThroughSeq ?? "0",
-      maxSeqByLane,
+      mailboxLag,
+      nextWakeAt: projectedWorkspace.nextWakeAt,
+      nextWakeReason: projectedWorkspace.nextWakeReason,
       prisma,
       userId: input.userId,
     }),
@@ -362,6 +364,9 @@ function resolveHostedRuntimeAiBlockedRetryAt(input: {
   return earliestHostedRuntimeReconciliationTimestamp([
     input.noticeRetryAt?.toISOString() ?? null,
     input.aiRetryAt,
+    isHostedRuntimeSystemMailboxWakeReason(input.workspace.nextWakeReason)
+      ? readHostedRuntimeFutureTimestamp(input.workspace.nextWakeAt, input.now)
+      : null,
     defaultProcessingWake.reason === HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON
       ? readHostedRuntimeFutureTimestamp(defaultProcessingWake.at, input.now)
       : null,
@@ -732,12 +737,15 @@ function readHostedRuntimeDefaultProcessingWake(
 async function readHostedRuntimeSystemMailboxFrontier(input: {
   at: Date;
   handledThroughSeq: string;
-  maxSeqByLane: readonly { lane: string; maxSeq: string }[];
+  mailboxLag: readonly HostedMailboxLaneLag[];
+  nextWakeAt: string | null;
+  nextWakeReason: string | null;
   prisma: PrismaClient;
   userId: string;
 }): Promise<HostedRuntimeSystemMailboxFrontierClass | null> {
-  const systemMaxSeq = input.maxSeqByLane.find(({ lane }) => lane === "system")
-    ?.maxSeq ?? "0";
+  const systemLane = input.mailboxLag.find(({ lane }) => lane === "system");
+  const systemMaxSeq = systemLane?.maxSeq ?? "0";
+  const importedSeq = systemLane?.importedSeq ?? "0";
   if (BigInt(systemMaxSeq) <= BigInt(input.handledThroughSeq)) {
     return null;
   }
@@ -754,16 +762,29 @@ async function readHostedRuntimeSystemMailboxFrontier(input: {
 
   const executionClass = classifyHostedFirstLiveSystemItemOwnership(frontier);
   if (executionClass === "model_free") return executionClass;
-  // Readiness is independent of the handled prefix. A retained assistant item
-  // must not hide consented deterministic work when assistant usage is blocked.
+  // Imported work owns its retry through the runtime's wake projection. Rows
+  // behind a retained default head can already be complete even though that
+  // head prevents the contiguous handled prefix from advancing.
+  if (
+    isHostedRuntimeSystemMailboxWakeReason(input.nextWakeReason)
+    && isHostedRuntimeWakeDue(input.nextWakeAt, input.at)
+  ) {
+    return "model_free";
+  }
   const independent = await readHostedMailboxFirstLiveSystemItemAfterSeq({
-    afterSeq: input.handledThroughSeq,
+    afterSeq: BigInt(importedSeq) > BigInt(input.handledThroughSeq)
+      ? importedSeq
+      : input.handledThroughSeq,
     at: input.at,
     modelFreeOnly: true,
     prisma: input.prisma,
     userId: input.userId,
   });
   return independent ? classifyHostedFirstLiveSystemItemOwnership(independent) : executionClass;
+}
+
+function isHostedRuntimeSystemMailboxWakeReason(reason: string | null): boolean {
+  return reason === "device-sync.reconcile" || reason === "mailbox";
 }
 
 export function classifyHostedFirstLiveSystemItemOwnership(input: {
