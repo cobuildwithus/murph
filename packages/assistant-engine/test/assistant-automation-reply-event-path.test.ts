@@ -1,3 +1,5 @@
+import { SYNTHETIC_SLEEP_CARD } from './support/sleep-card-fixture.js'
+import { renderAssistantResponseCardText } from '@murphai/operator-config/assistant-response-cards'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -425,6 +427,28 @@ describe('assistant auto-reply event-first path', () => {
       `native reply to Message ref ${correction.event.inputId}`,
     )
     expect(prompt).not.toContain('linq-msg-prior-turn-target')
+  })
+
+  it.each(['card', 'note'] as const)('resolves a sleep pair reply from the exact %s effect', async (part) => {
+    const vault = await createTempVault()
+    const note = 'Synthetic sleep context.'
+    const summary = renderAssistantResponseCardText(SYNTHETIC_SLEEP_CARD)
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([{
+      ...createOutboxMessage({ channel: 'linq', intentId: 'synthetic-sleep-intent', message: `${summary}\n\n${note}`,
+        providerMessageEffects: [{ message: null, providerMessageId: 'synthetic-card' }, { message: note, providerMessageId: 'synthetic-note' }],
+        providerMessageId: 'synthetic-note', providerMessageIds: ['synthetic-card', 'synthetic-note'],
+        sentAt: '2026-08-07T21:09:00.000Z', sessionId: 'session-automation', target: 'thread-1',
+      }), card: SYNTHETIC_SLEEP_CARD,
+    }])
+    const reply = createLinqGroupCandidate({ inputId: 'ain_16161616161616161616161616161616', messageId: 'synthetic-reply', occurredAt: '2026-08-07T21:10:00.000Z', replyToMessageId: `synthetic-${part}`, text: 'Got it.' })
+    await processAssistantAutoReplyGroup({ allowSelfAuthored: false, context: createReplyContext(reply), enabledChannels: ['linq'], inboxServices: createInboxServices(), requestId: null, sessionMaxAgeMs: null, vault })
+    const prompt = readSentPrompt()
+    expect(prompt).not.toContain(summary)
+    if (part === 'note') expect(prompt).toContain(note)
+    else {
+      expect(prompt).not.toContain(note)
+      expect(prompt).toContain('The exact reply target has no attested text or media.')
+    }
   })
 
   it('keeps an attested Murph native reply target authoritative', async () => {

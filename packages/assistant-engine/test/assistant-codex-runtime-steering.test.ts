@@ -1,3 +1,4 @@
+import { SYNTHETIC_SLEEP_CARD } from './support/sleep-card-fixture.js'
 import {
   DAILY_NUTRITION_RESPONSE_CARD,
   MockChildProcess,
@@ -818,6 +819,30 @@ describe('steered final segments', () => {
     abortController.abort(new DOMException('turn cancelled', 'AbortError'))
     expect(forwardedSignal.aborted).toBe(true)
     expect(result.finalMessage).toBe('You belong to Sunday runners.')
+  })
+
+  it.each([false, true])('retains a sleep note exactly once through final presentation and promotion (steer %s)', async (steer) => {
+    vi.spyOn(sleepCardBuilder, 'resolveTrustedSleepSummaryCard').mockResolvedValue(SYNTHETIC_SLEEP_CARD)
+    const note = 'This synthetic night follows the recent pattern.'
+    const composed = renderAssistantResponseCardText(SYNTHETIC_SLEEP_CARD, note)
+    const steps: Parameters<typeof runScriptedSteeredFinalSegmentsTurn>[0][number][] = [
+      completedItemEvent({ id: 'synthetic-request', type: 'user_message', message: 'Show my sleep card with a short note.' }),
+      { card: SYNTHETIC_SLEEP_CARD, expectedText: 'response card attached', id: 941, kind: 'attach-response-card', tool: 'attach_sleep_card' },
+      completedItemEvent({ id: 'synthetic-note', type: 'assistant_message', message: note }),
+    ]
+    if (steer) steps.push(
+      completedItemEvent({ id: 'synthetic-followup', type: 'user_message', message: 'Thanks, one more thought.' }),
+      completedItemEvent({ id: 'synthetic-answer', type: 'assistant_message', message: 'Follow-up answer.' }),
+    )
+    const result = await runScriptedSteeredFinalSegmentsTurn(steps, { responseCardsAvailable: true })
+    if (steer) {
+      expect(result.finalMessage).toBe('Follow-up answer.')
+      expect(result.precedingAgentMessageSegments).toEqual([{ deliveryContextOrdinal: 0, media: [], response: composed }])
+    } else {
+      expect(result.responseCard).toEqual(SYNTHETIC_SLEEP_CARD)
+      expect(result.finalMessage).toBe(composed)
+      expect(result.transcriptMessage).toBe(composed)
+    }
   })
 
   it('lets the latest steered context replace an earlier response card', async () => {

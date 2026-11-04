@@ -22,7 +22,11 @@ import type {
 import type { AutomationScheduleKind } from '@murphai/contracts'
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
-import type { AssistantResponseCard } from '@murphai/operator-config/assistant-response-cards'
+import {
+  renderAssistantResponseCardText,
+  renderAssistantResponseCardTranscriptText,
+  type AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   readMemoryDocument,
@@ -694,7 +698,9 @@ export async function sendAssistantNotificationLocal(
                   runtimeReplacesFinalPresentation:
                     runtimeOwnsFinalPresentation &&
                     !hasAppendOnlyRuntimePresentation,
-                  runtimeResponse: providerResult.response,
+                  runtimeResponse: providerResult.responseCard?.kind === 'sleep_summary'
+                    ? renderAssistantResponseCardText(providerResult.responseCard)
+                    : providerResult.response,
                 })
           )
           if (runtimeOwnsFinalPresentation && decision.kind !== 'send_message') {
@@ -1069,6 +1075,16 @@ function resolveAssistantNotificationPresentation(input: {
   }
   runtimeOwnsFinalPresentation: boolean
 }): AssistantNotificationPresentation {
+  if (input.providerResult.responseCard?.kind === 'sleep_summary') {
+    return {
+      responseText: renderAssistantResponseCardText(
+        input.providerResult.responseCard, input.decision.text,
+      ),
+      transcriptText: renderAssistantResponseCardTranscriptText(
+        input.providerResult.responseCard, input.decision.text,
+      ),
+    }
+  }
   if (!input.runtimeOwnsFinalPresentation) {
     const responseText = normalizeRequiredText(
       input.decision.text,
