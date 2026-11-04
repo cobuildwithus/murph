@@ -3745,10 +3745,7 @@ case "$*" in
   *".baseRefOid"*) printf '%s\\n' "$TEST_BASE_SHA" ;;
   *".headRefOid"*) printf '%s\\n' "$TEST_HEAD_SHA" ;;
   *".body"*)
-    printf 'ReviewGPT first-reviewed head: %s\\n' "$TEST_FIRST_SHA"
-    if [[ -n "\${TEST_PRIOR_INVALID_HEAD:-}" ]]; then
-      printf 'Invalid initial attempt: head %s; capture validation failed. No substantive review.\\n' "$TEST_PRIOR_INVALID_HEAD"
-    fi
+    printf '## Why and outcome\\nSynthetic packaging change.\\n'
     case "\${TEST_CONTEXT_SENSITIVITY:-routine}" in
       missing) ;;
       duplicate)
@@ -3907,9 +3904,6 @@ printf 'ZIP: %s (%s bytes)\n' \
               REVIEW_GPT_PR_REF: '',
               REVIEW_GPT_PR_URL: '123',
               TEST_BASE_SHA: baseHead,
-              TEST_FIRST_SHA:
-                roundEnv.TEST_RECORDED_FIRST_HEAD ??
-                (roundEnv.REVIEW_GPT_ROUND_NUMBER === '1' ? head : firstHead),
               TEST_HEAD_SHA: head,
               ...roundEnv,
             },
@@ -3936,6 +3930,7 @@ printf 'ZIP: %s (%s bytes)\n' \
         REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
         REVIEW_GPT_ROUND_NUMBER: '1',
         REVIEW_GPT_RENDERED_EVIDENCE_PATHS: 'audit-packages/desktop.png',
+        TEST_CONTEXT_SENSITIVITY: 'missing',
       })
       expect(roundOne.result.status, roundOne.result.stderr).toBe(0)
       const roundOneMetadata = JSON.parse(
@@ -3950,7 +3945,7 @@ printf 'ZIP: %s (%s bytes)\n' \
         roundNumber: 1,
         reviewScope: 'full',
         contextMode: 'full_snapshot',
-        contextSensitivity: 'routine',
+        contextSensitivity: 'undeclared',
         prChangedLines: 2,
         prChangedFiles: 1,
         contextAnchorHead: firstHead,
@@ -3995,20 +3990,18 @@ printf 'ZIP: %s (%s bytes)\n' \
       ).toBe('review-gpt-pr-context/rendered-evidence/01-desktop.png\n')
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
 
-      const firstValidAttempt = invokePackager('first-valid-attempt-new-head', currentHead, {
-        TEST_PRIOR_INVALID_HEAD: firstHead,
+      const roundOneExplicitHead = invokePackager('round-one-explicit-head', currentHead, {
         REVIEW_GPT_FIRST_REVIEWED_HEAD: currentHead,
         REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
         REVIEW_GPT_ROUND_NUMBER: '1',
-        TEST_RECORDED_FIRST_HEAD: currentHead,
       })
-      expect(firstValidAttempt.result.status, firstValidAttempt.result.stderr).toBe(0)
-      const firstValidMetadata = JSON.parse(execFileSync(
+      expect(roundOneExplicitHead.result.status, roundOneExplicitHead.result.stderr).toBe(0)
+      const roundOneExplicitMetadata = JSON.parse(execFileSync(
         'unzip',
-        ['-p', firstValidAttempt.zipPath, 'review-gpt-pr-context/review-round.json'],
+        ['-p', roundOneExplicitHead.zipPath, 'review-gpt-pr-context/review-round.json'],
         { encoding: 'utf8' },
       )) as Record<string, unknown>
-      expect(firstValidMetadata).toMatchObject({
+      expect(roundOneExplicitMetadata).toMatchObject({
         roundNumber: 1,
         reviewScope: 'full',
         contextMode: 'full_snapshot',
@@ -4019,16 +4012,33 @@ printf 'ZIP: %s (%s bytes)\n' \
       })
       expect(execFileSync(
         'unzip',
-        ['-p', firstValidAttempt.zipPath, 'review-gpt-pr-context/pr-body.md'],
+        ['-p', roundOneExplicitHead.zipPath, 'review-gpt-pr-context/pr-body.md'],
         { encoding: 'utf8' },
-      )).toContain(`Invalid initial attempt: head ${firstHead}; capture validation failed.`)
+      )).toBe('## Why and outcome\nSynthetic packaging change.\nReviewGPT context sensitivity: routine\n')
       for (const delta of ['since-first-reviewed-head.diff', 'since-previous-reviewed-head.diff']) {
         expect(execFileSync(
           'unzip',
-          ['-p', firstValidAttempt.zipPath, `review-gpt-pr-context/${delta}`],
+          ['-p', roundOneExplicitHead.zipPath, `review-gpt-pr-context/${delta}`],
           { encoding: 'utf8' },
         )).toBe('')
       }
+
+      expect(execFileSync(
+        'unzip',
+        ['-p', roundOne.zipPath, 'review-gpt-pr-context/pr-body.md'],
+        { encoding: 'utf8' },
+      )).toBe('## Why and outcome\nSynthetic packaging change.\n')
+
+      const roundOneWrongHead = invokePackager('round-one-wrong-head', firstHead, {
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: baseHead,
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+        REVIEW_GPT_ROUND_NUMBER: '1',
+        TEST_CONTEXT_SENSITIVITY: 'missing',
+      })
+      expect(roundOneWrongHead.result.status).not.toBe(0)
+      expect(roundOneWrongHead.result.stderr).toContain(
+        'round 1 first-reviewed head must equal the current PR head',
+      )
 
       const roundTwo = invokePackager('round-two', currentHead, {
         REVIEW_GPT_FIRST_REVIEWED_HEAD: firstHead,
@@ -4411,6 +4421,16 @@ printf 'ZIP: %s (%s bytes)\n' \
       )
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
 
+      const missingFirst = invokePackager('missing-first', currentHead, {
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
+        REVIEW_GPT_ROUND_NUMBER: '2',
+      })
+      expect(missingFirst.result.status).not.toBe(0)
+      expect(missingFirst.result.stderr).toContain(
+        'later ReviewGPT rounds require REVIEW_GPT_FIRST_REVIEWED_HEAD and REVIEW_GPT_PREVIOUS_REVIEWED_HEAD',
+      )
+
       const malformedFirst = invokePackager('malformed-first', currentHead, {
         REVIEW_GPT_FIRST_REVIEWED_HEAD: 'not-a-sha',
         REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
@@ -4422,22 +4442,11 @@ printf 'ZIP: %s (%s bytes)\n' \
       )
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
 
-      const resetBaseline = invokePackager('reset-baseline', currentHead, {
-        REVIEW_GPT_FIRST_REVIEWED_HEAD: baseHead,
-        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
-        REVIEW_GPT_ROUND_NUMBER: '2',
-      })
-      expect(resetBaseline.result.status).not.toBe(0)
-      expect(resetBaseline.result.stderr).toContain(
-        'REVIEW_GPT_FIRST_REVIEWED_HEAD must match the immutable PR body baseline',
-      )
-
       const unavailableHead = 'f'.repeat(40)
       const unavailableBaseline = invokePackager('unavailable-baseline', currentHead, {
         REVIEW_GPT_FIRST_REVIEWED_HEAD: unavailableHead,
         REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
         REVIEW_GPT_ROUND_NUMBER: '2',
-        TEST_RECORDED_FIRST_HEAD: unavailableHead,
       })
       expect(unavailableBaseline.result.status).not.toBe(0)
       expect(unavailableBaseline.result.stderr).toContain(
@@ -4448,7 +4457,6 @@ printf 'ZIP: %s (%s bytes)\n' \
         REVIEW_GPT_FIRST_REVIEWED_HEAD: nonAncestorHead,
         REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: firstHead,
         REVIEW_GPT_ROUND_NUMBER: '2',
-        TEST_RECORDED_FIRST_HEAD: nonAncestorHead,
       })
       expect(nonAncestorBaseline.result.status).not.toBe(0)
       expect(nonAncestorBaseline.result.stderr).toContain(

@@ -166,21 +166,20 @@ already covered. Do not repeat the work plan or every possible review lens.
 
 ### Review launch preflight
 
-Before final ReviewGPT, read back the rendered PR body and confirm the complete
-intent and evidence. Add exactly one of each machine-readable line:
+A review round needs the stable pushed candidate; PR-description content cannot
+block or invalidate it. PR-body CI checks remain separate completion gates.
 
-- `ReviewGPT first-reviewed head: <full-sha>`: the 40-character pushed commit
-  from `git rev-parse HEAD`; this baseline stays immutable after the first valid
-  substantive review. Before then, an invalid initial attempt followed by an
-  authorized head change uses the recovery in `pr-reviewgpt-loop.md`.
-- `ReviewGPT context sensitivity: routine` or
-  `ReviewGPT context sensitivity: sensitive`, with a reason. Any sensitive
-  trigger above makes it sensitive regardless of size. Missing/invalid metadata
-  defaults to a full snapshot, not a small correction packet.
+`ReviewGPT context sensitivity: routine` or
+`ReviewGPT context sensitivity: sensitive` is optional. Any sensitive trigger
+above makes the context sensitive regardless of size. Missing, malformed, or
+duplicate declarations default to a full snapshot; an explicit routine
+declaration retains the small-correction path when eligible.
 
-Use `pr-reviewgpt-loop.md` for packaging and later rounds. Launch on the stable
-pushed candidate concurrently with CI. A PR-body edit may retrigger evidence
-validation without changing the reviewed commit baseline.
+Use `pr-reviewgpt-loop.md` for packaging and later rounds. Round 1 derives the
+first-reviewed head from the pushed head; later rounds carry the first and
+previous reviewed heads through environment variables. Launch concurrently
+with CI. A PR-body edit may retrigger evidence validation without changing the
+reviewed commit baseline.
 
 ### Changelog examples
 
@@ -229,8 +228,8 @@ Rejected findings need no reviewer agreement.
 For accepted issues, prefer deletion, reordering, derivation, or correction at
 the current owner. Prove a real deployed/legacy consumer or persisted shape
 before adding compatibility machinery. A hypothetical future rollout is not
-sufficient. If fixes repeatedly grow the same mechanism, use the review loop's
-retrospective before adding another layer.
+sufficient. If fixes repeatedly grow the same mechanism, reconsider the
+smallest correction at its current owner.
 
 The final ReviewGPT Finding Disposition Boundary remains authoritative:
 `FINDINGS` requires evidence-backed disposition, then authorized remediation
