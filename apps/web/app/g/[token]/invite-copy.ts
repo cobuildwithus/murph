@@ -1,4 +1,4 @@
-import type { GameInvitePreview, GameSchedule, GameStake } from "@/src/lib/game/contract";
+import type { GameCheckInKind, GameInvitePreview, GameSchedule, GameStake } from "@/src/lib/game/contract";
 
 const WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -13,14 +13,48 @@ export function describeSchedule(schedule: GameSchedule): string {
   return [...schedule.days].sort((left, right) => left - right).map((day) => WEEKDAY_NAMES[day]).join(", ");
 }
 
+/** Over the stake, as the app's tickets say it; the link preview card sets it in capitals. */
 export function describeStakeLabel(stake: GameStake): string {
-  return stake.kind === "per_miss" ? "Each missed day" : stake.kind === "dare" ? "Loser has to" : "FOR THE WINNER";
+  return stake.kind === "per_miss" ? "Each missed day" : stake.kind === "dare" ? "The loser has to" : "For the winner";
 }
 
 /** Prize and dare copy describes the whole-game outcome. */
 export function describeStakeSentence(stake: GameStake): string {
   if (stake.kind === "per_miss") return `Every day you miss, you owe ${stake.item}.`;
   return stake.kind === "dare" ? `Loser has to ${stake.item}.` : `FOR THE WINNER: ${stake.item}.`;
+}
+
+/**
+ * The line under the invite page's headline, as the app's invite card says it:
+ * "Every day for a week. Starts once you say yes." A group names no start
+ * unless one was picked; it may already be running.
+ */
+export function describeInviteTiming(preview: Extract<GameInvitePreview, { status: "open" }>): string {
+  const { schedule } = preview.terms;
+  const days = preview.lengthDays ?? 7;
+  const length = days === 7 ? "a week" : days % 7 === 0 ? `${days / 7} weeks` : `${days} days`;
+  const when = "count" in schedule
+    ? `Any ${schedule.count} ${schedule.count === 1 ? "day" : "days"} in ${length}.`
+    : `${describeSchedule(schedule)} for ${length}.`;
+  if (preview.startsOn) return `${when} Starts ${describeStartDate(preview.startsOn)}.`;
+  return preview.maxPlayers === 10 ? when : `${when} Starts once you say yes.`;
+}
+
+/** A required check-in, said before anyone accepts. Free choice needs no line. */
+export function describeCheckIn(kind: GameCheckInKind | undefined): string | null {
+  if (kind === "any") return null;
+  return kind === "heart_rate" ? "Prove it with heart rate from a wearable." : "Prove it with a photo.";
+}
+
+/** A closed link, in the app's words. It names nobody but whoever called it off. */
+export function closedInviteCopy(preview: Exclude<GameInvitePreview, { status: "open" }> | null): { title: string; detail: string } {
+  if (preview?.status === "used") return { detail: "Someone already shook on it. Ask for a new one.", title: "This link is used up." };
+  if (preview?.status === "expired") {
+    if (preview.reason !== "cancelled") return { detail: "It wasn't shaken on in time. Ask for a new one.", title: "This invite ran out." };
+    const name = preview.inviterFirstName?.trim();
+    return { detail: "Ask for a new one.", title: name ? `${name} called this one off.` : "This invite was called off." };
+  }
+  return { detail: "Check the link, or ask for a new one.", title: "This link isn't available." };
 }
 
 /** "Oct 19" for a picked start date (YYYY-MM-DD), read as a calendar date. */

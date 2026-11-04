@@ -72,8 +72,8 @@ describe("weekly game invite link preview", () => {
       expect(html).toContain("Breakfast in bed");
       expect(html).not.toMatch(/PRIVATE_|alreadyIn|pendingLabel|isn&#x27;t available|challenged you|—| - /u);
     }
-    expect(page).toContain("Everyone");
-    expect(page).toContain("Days");
+    expect(page).toContain("Weekdays for 2 weeks.");
+    expect(page).not.toContain("Everyone");
     expect(page).not.toContain("Artifact");
     expect(page).toContain('href="ai.withmurph.app://invite/group_token"');
     expect(image.headers.get("Cache-Control")).toBe("no-store");

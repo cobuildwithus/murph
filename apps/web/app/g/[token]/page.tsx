@@ -40,7 +40,9 @@ export async function generateMetadata(props: GameInvitePageProps): Promise<Meta
 export default async function GameInvitePage(props: GameInvitePageProps) {
   const token = await resolveDecodedRouteParam(props.params, "token");
   return (
-    <main className="min-h-dvh bg-background px-6 py-7 text-foreground sm:px-10 sm:py-9">
+    <main className="flex min-h-dvh flex-col bg-[#1C1915]">
+      {/* The night ground reaches past the page: overscroll and Safari's bars. */}
+      <style>{"html,body{background:#1C1915}"}</style>
       <GameInviteView appUrl={gameInviteAppUrl(token)} preview={await readPreview(token)} />
     </main>
   );

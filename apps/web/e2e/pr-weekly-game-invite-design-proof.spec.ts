@@ -5,15 +5,15 @@ import { expect, test } from "@playwright/test";
 const STATES = {
   group: "Leo started a family challenge",
   "link-group": "Leo started a family challenge",
-  "any-artifact": "Choose each day",
-  dare: "Loser has to",
+  "any-artifact": "Weekdays for a week. Starts once you say yes.",
+  dare: "The loser has to",
   "link-dare": "LOSER HAS TO",
-  "heart-rate": "Heart-rate graph · wearable required",
-  expired: "This invite expired. Ask for a new link.",
-  missing: "This invite isn't available",
-  open: "Open in Murph",
-  "open-any-days": "Any 5 days total",
-  used: "This challenge was already accepted.",
+  "heart-rate": "Prove it with heart rate from a wearable.",
+  expired: "This invite ran out.",
+  missing: "This link isn't available.",
+  open: "Get the app",
+  "open-any-days": "Any 5 days in a week",
+  used: "This link is used up.",
   "link-open": "Breakfast in bed",
   "link-open-any-days": "STARTS OCT 19",
   "link-closed": "This invite isn't available",
@@ -33,23 +33,24 @@ for (const width of [390, 1280]) {
       expect(await surface.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
     }
     await expect(study.locator('[data-design-state="open"]')).toContainText("Leo challenged you");
-    await expect(study.locator('[data-design-state="group"]')).toContainText("Everyone");
+    await expect(study.locator('[data-design-state="group"]')).not.toContainText("Everyone");
     await expect(study.locator('[data-design-state="group"]')).toContainText("A healthy meal");
-    await expect(study.locator('[data-design-state="group"]')).toContainText("Weekdays · 14 days");
+    await expect(study.locator('[data-design-state="group"]')).toContainText("Weekdays for 2 weeks.");
     await expect(study.locator('[data-design-state="group"]')).not.toContainText("Artifact");
-    await expect(study.locator('[data-design-state="open"]')).toContainText("No Murph yet? Get it on the App Store");
+    await expect(study.locator('[data-design-state="open"]')).toContainText("Already have Murph? Open it");
+    await expect(study.locator('[data-design-state="open"]')).not.toContainText("Copy link");
     await expect(study.locator('[data-design-state="open"]')).toContainText("Mon, Wed, Fri");
     // The link preview names the challenger against "You" (never the invitee's private name), and nobody when closed.
     await expect(study.locator('[data-design-state="link-open"]')).toContainText("Leo");
     await expect(study.locator('[data-design-state="link-open"]')).toContainText("You");
     await expect(study.locator('[data-design-state="link-open"]')).not.toContainText("Ava");
     await expect(study.locator('[data-design-state="link-closed"]')).not.toContainText("Leo");
-    await expect(study.locator('[data-design-state="open"]')).toContainText("FOR THE WINNER");
+    await expect(study.locator('[data-design-state="open"]')).toContainText("For the winner");
     await expect(study.locator('[data-design-state="dare"]')).toContainText("75 days");
     await expect(study.locator('[data-design-state="link-dare"]')).toContainText("75 DAYS");
     await expect(study).not.toContainText("of the week");
     await expect(study.locator('[data-design-state="any-artifact"]')).toContainText("Weekdays");
-    await expect(study.locator('[data-design-state="any-artifact"]')).toContainText("Artifact");
+    await expect(study.locator('[data-design-state="any-artifact"]')).not.toContainText("Prove it");
     await expect(study).not.toContainText("paste it in Murph");
     const output = process.env.DESIGN_PROOF_OUTPUT_DIR;
     if (!output) return;
