@@ -1,8 +1,14 @@
 # Reply to their post: one note or voice note in a live 1v1 game
 
-Status: reviewed (ReviewGPT architecture review, 2026-11-04); building
+Status: completed
 Created: 2026-11-04
 Updated: 2026-11-04
+
+## Build notes
+
+- Reply pushes carry no title: `apple-push/send.ts` now allows a title-less alert, so the notification reads only "New voice note on your post." or "New note on your post.".
+- View builds read replies only when they include a 1v1 game, so group-only and history reads keep their query budget.
+- AVFoundation output at the app's settings (AAC mono, 24 kHz, 32 kbps; 1, 12 and 30 s) passes `inspectReplyAudio`; a physical-device recording is checked with the iOS release.
 
 ## Review outcome
 
@@ -501,3 +507,4 @@ weekly-game spec.
    policy becomes false.
 3. Earlier-day note when the sender's card is locked: wait for unlock
    (recommended) rather than draw a slip over a locked card.
+Completed: 2026-11-04
