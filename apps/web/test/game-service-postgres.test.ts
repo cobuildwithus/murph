@@ -532,7 +532,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(push).toHaveBeenCalledTimes(1);
     await ok(recipient, await photo(recipient, gameId, "notification-other-direction"));
     expect(push).toHaveBeenCalledTimes(2);
-    expect(push.mock.calls[1]?.[0].message.body).toBe("There's a new post in your game. Take a look.");
+    expect(push.mock.calls[1]?.[0].message).toMatchObject({ title: "They're in too.", body: "Theirs develops when you open it." });
     const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
     vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(tomorrow);
     expect((await runAndRespond({

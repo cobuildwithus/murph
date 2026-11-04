@@ -47,10 +47,16 @@ describe("one daily game notifier", () => {
     expect(m.send).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ data: { gameId: "game-a", notification: "game_post" },
       message: { kind: "alert", title: "New game check-in", body: "Someone posted. Share yours to see it." } }));
   });
-  it.each([null, clock])("keeps the pair's permanent unlock copy after withdrawal %s", async withdrawnAt => {
+  it.each([null, clock])("tells a pair's first poster theirs develops, even after withdrawal %s", async withdrawnAt => {
     const s = state(); s.entries.push(post("p1", { withdrawnAt }));
     const [notification] = await claim(s); await deliverGamePostNotification(notification);
-    expect(m.send.mock.calls[0][0].message.body).toBe("There's a new post in your game. Take a look.");
+    expect(m.send.mock.calls[0][0].message).toEqual({ kind: "alert", title: "They're in too.", body: "Theirs develops when you open it." });
+  });
+  it("keeps group copy for a recipient who already posted", async () => {
+    const s = state(3); s.entries.push(post("p1"));
+    const n = (await claim(s)).find(n => n.memberId === "p1")!;
+    await deliverGamePostNotification(n);
+    expect(m.send.mock.calls[0][0].message).toEqual({ kind: "alert", title: "New game check-in", body: "There's a new post in your game. Take a look." });
   });
   it("claims first then completion and includes incomplete artifacts", async () => {
     const s = state(3); const first = (await claim(s)).find(n => n.memberId === "p2")!;

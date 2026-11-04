@@ -328,8 +328,11 @@ resulting avatar. No private photo is shared with the subject or other players.
   the first eligible peer artifact, then completion ("Everyone's in but you."
   or "Everyone's in."). Incomplete artifacts count as submitted; excuses do
   not. The posting actor is excluded. Simultaneous milestones consume both
-  claims and send one message. Pairs always coincide and retain their existing
-  generic copy and permanent-unlock wording. Claims use `GameEvent.commandKey`
+  claims and send one message. Pairs always coincide: a pair recipient who
+  hasn't posted that day gets the generic "Someone posted. Share yours to see
+  it."; one who already has (permanent unlock) gets "They're in too." /
+  "Theirs develops when you open it.", because the app develops a post the
+  first time its viewer sees it on Home. Claims use `GameEvent.commandKey`
   over game, recipient and the real 03:00-to-03:00 day in their frozen zone;
   legacy daily receipts consume both slots. Candidate posts participate in the
   calculation. Retakes, retries, corrections and excuses create no new slots.

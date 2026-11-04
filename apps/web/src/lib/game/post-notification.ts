@@ -92,14 +92,21 @@ export async function claimGamePostNotification(tx: NotificationTx, input: {
       request: {
         collapseId: sha256Hex(claims[claims.length - 1]!.commandKey), data: { gameId: state.game.id, notification: "game_post" },
         expiresAt: dayStartInstant(addDays(item.day, 1), item.recipient.timeZone),
-        message: { kind: "alert", title: "New game check-in", body: !pair && completion
-          ? item.progress.everyone ? "Everyone's in." : "Everyone's in but you."
-          : hasUnlockedDay(state.entries, item.recipient.memberId, dayIndex) ? "There's a new post in your game. Take a look." : "Someone posted. Share yours to see it." },
+        message: postMessage(pair, hasUnlockedDay(state.entries, item.recipient.memberId, dayIndex), completion, item.progress.everyone),
         target: item.target,
       },
     });
   }
   return notifications;
+}
+
+/** One recipient's push. No names or content. A pair's first poster gets
+ * theirs developing on Home the first time they look, so the push says so. */
+function postMessage(pair: boolean, unlocked: boolean, completion: boolean, everyone: boolean) {
+  if (pair && unlocked) return { kind: "alert", title: "They're in too.", body: "Theirs develops when you open it." } as const;
+  const body = !pair && completion ? everyone ? "Everyone's in." : "Everyone's in but you."
+    : unlocked ? "There's a new post in your game. Take a look." : "Someone posted. Share yours to see it.";
+  return { kind: "alert", title: "New game check-in", body } as const;
 }
 
 /** A push never holds up the committed post's HTTP answer. */
