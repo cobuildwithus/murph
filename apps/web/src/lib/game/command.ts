@@ -32,7 +32,11 @@ export type GameInviteTarget = GameInviteTargetInput;
  */
 export function parseGameCommand(value: unknown): GameCommand {
   const input = record(value, "command");
+  const removal = removalCommand(input);
+  if (removal) return removal;
   switch (input.type) {
+    case "replyToPost":
+      return replyToPost(input);
     case "challenge":
       return { type: "challenge", gameId: clientId(input.gameId, "gameId"), entryId: clientId(input.entryId, "entryId") };
     case "leave":
@@ -41,8 +45,6 @@ export function parseGameCommand(value: unknown): GameCommand {
       return { type: "editTerms", gameId: clientId(input.gameId, "gameId"), expectedTermsVersion: integer(input.expectedTermsVersion, "expectedTermsVersion", 1), terms: terms(record(input.terms, "terms")) };
     case "setDayCompletion":
       return dayCompletion(input);
-    case "cancelInvite":
-      return { type: "cancelInvite", gameId: clientId(input.gameId, "gameId") };
     case "proposeChange":
       return {
         type: "proposeChange", gameId: clientId(input.gameId, "gameId"),
@@ -73,8 +75,6 @@ export function parseGameCommand(value: unknown): GameCommand {
       };
     case "post":
       return post(input);
-    case "withdraw":
-      return { entryId: clientId(input.entryId, "entryId"), gameId: clientId(input.gameId, "gameId"), type: "withdraw" };
     case "redeem":
       return { ticketId: opaque(input.ticketId, "ticketId"), type: "redeem" };
     case "report":
@@ -85,6 +85,19 @@ export function parseGameCommand(value: unknown): GameCommand {
       return { type: "unblock", memberId: opaque(input.memberId, "memberId") };
     default:
       return reject("INVALID_REQUEST", "Unknown command.");
+  }
+}
+
+/** No-body removal routes carry only their path identities. */
+function removalCommand(input: Record<string, unknown>): GameCommand | null {
+  switch (input.type) {
+    case "deleteReply":
+      return { type: "deleteReply", gameId: clientId(input.gameId, "gameId"), replyId: clientId(input.replyId, "replyId") };
+    case "withdraw":
+      return { type: "withdraw", gameId: clientId(input.gameId, "gameId"), entryId: clientId(input.entryId, "entryId") };
+    case "cancelInvite":
+      return { type: "cancelInvite", gameId: clientId(input.gameId, "gameId") };
+    default: return null;
   }
 }
 
@@ -158,6 +171,21 @@ function post(input: Record<string, unknown>): GameCommand {
     ...optional(input.blurHash, (value) => ({ blurHash: string(value, "blurHash", 64) })),
     ...optional(input.captureAgeMs, (value) => ({ captureAgeMs: integer(value, "captureAgeMs", 0, CAPTURE_AGE_MAX_MS) })),
   };
+}
+
+function replyToPost(input: Record<string, unknown>): Extract<GameCommand, { type: "replyToPost" }> {
+  const kind = oneOf(input.kind, "kind", ["text", "voice"] as const);
+  const allowed = new Set(["type", "gameId", "entryId", "replyId", "kind", ...(kind === "text" ? ["text"] : ["audio", "levels"])]);
+  if (Object.keys(input).some(key => !allowed.has(key))) reject("INVALID_REQUEST", "Send one text or voice note.");
+  const ids = { type: "replyToPost" as const, gameId: clientId(input.gameId, "gameId"), entryId: clientId(input.entryId, "entryId"), replyId: clientId(input.replyId, "replyId") };
+  if (kind === "text") return { ...ids, kind, text: oneLineWords(input.text) };
+  const audio = string(input.audio, "audio", Math.ceil(400_000 / 3) * 4);
+  if (!audio || audio.length % 4 !== 0 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(audio)) reject("INVALID_REQUEST", "Send an M4A voice note.");
+  const bytes = Buffer.from(audio, "base64");
+  if (bytes.length > 400_000 || bytes.toString("base64") !== audio) reject("INVALID_REQUEST", "Send an M4A voice note of at most 400 KB.");
+  const levels = list(input.levels, "levels", 32).map(value => integer(value, "levels", 0, 100));
+  if (levels.length !== 32) reject("INVALID_REQUEST", "Include 32 waveform levels.");
+  return { ...ids, kind, audio, levels };
 }
 
 function oneLineWords(value: unknown): string {
@@ -309,16 +337,17 @@ function report(input: Record<string, unknown>): GameCommand {
   };
 }
 
-/** One post (`entryId`), the player, or the terms; an invite's report is never about a post. */
+/** Exactly one content target; invites can report only the player or terms. */
 function reportTarget(input: Record<string, unknown>) {
   const target = idOrToken(input, "gameId");
   const where = "token" in target ? { token: target.token } : { gameId: target.id };
   const entryId = input.entryId === undefined ? undefined : clientId(input.entryId, "entryId");
+  const replyId = input.replyId === undefined ? undefined : clientId(input.replyId, "replyId");
   const about = input.about === undefined ? (entryId ? "post" : "player") : oneOf(input.about, "about", GAME_REPORT_ABOUT);
-  if ((about === "post") !== (entryId !== undefined) || ("token" in where && about === "post")) {
-    reject("INVALID_REQUEST", "A post report names its entryId; other reports don't.");
+  if ((about === "post") !== (entryId !== undefined) || ("token" in where && (about === "post" || about === "reply")) || (about === "reply") !== (replyId !== undefined)) {
+    reject("INVALID_REQUEST", "A post report needs entryId; a reply report needs replyId. Other reports need neither.");
   }
-  return { ...where, about, ...(entryId ? { entryId } : {}) };
+  return { ...where, about, ...(entryId ? { entryId } : {}), ...(replyId ? { replyId } : {}) };
 }
 
 /** A report's optional note: cleaned like other words, at most 500 characters; blank is none. */

@@ -176,3 +176,15 @@ it("requires one kind superlative per eligible group member and rejects hidden q
   expect(errors).toContainEqual(expect.stringContaining("quote isn't"));
   expect(errors).toContainEqual(expect.stringContaining("isn't in this game"));
 });
+
+
+it("cannot cite a private reply as a quote or photo in the recap or share material", () => {
+  const replyText = "Synthetic private reply, not a post";
+  const recap = { ...valid, pages: [{ background: "paper" as const, blocks: [
+    { kind: "quote" as const, quote: { who: "Ava", text: replyText } },
+    { kind: "photo" as const, entryIds: ["private_reply_id"], style: "fullBleed" as const },
+  ] }, ...valid.pages.slice(1)] };
+  const errors = validateGameRecap({ recap, players, entries });
+  expect(errors.length).toBeGreaterThan(0);
+  expect(errors.some(error => error.includes("private_reply_id"))).toBe(true);
+});

@@ -14,6 +14,7 @@ export function GameReportCard({ actions, report }: { actions: ReactNode; report
         </span>
       </div>
       {report.snapshotText ? <p className="whitespace-pre-wrap text-sm">{report.snapshotText}</p> : null}
+      {report.audioUrl ? <a className="text-sm underline underline-offset-4" href={report.audioUrl} target="_blank" rel="noreferrer">Listen to reported voice note</a> : null}
       {report.images.map((src) => (
         // Short-lived signed links; a plain img keeps them out of the image optimizer.
         // eslint-disable-next-line @next/next/no-img-element

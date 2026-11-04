@@ -451,3 +451,22 @@ describe("weekly game view: results soon", () => {
     expect(view(settled, LEO, new Date(endOf(state, LEO) + 10 * HOUR)).settlesAt).toBeNull();
   });
 });
+
+
+it("hydrates app replies on the target entry and omits the feature from groups", () => {
+  const state = liveState();
+  state.entries = [entry(LEO, 0, 1), entry(AVA, 0, 1)];
+  const target = state.entries[0].id;
+  const reply = { id: "reply_view", kind: "text" as const, text: "Nice work", mine: true, createdAt: JOIN_AT.toISOString() };
+  const inputs = { entryReplies: new Map([[target, reply]]), replyEligibleEntryIds: new Set<string>() };
+  const sent = view(state, AVA, JOIN_AT, inputs);
+  expect(sent.days[0].others[0].entry).toMatchObject({ reply, canReply: false });
+  expect(sent.days[0].mine).not.toHaveProperty("reply");
+  const received = view(state, LEO, JOIN_AT, { ...inputs, entryReplies: new Map([[target, { ...reply, mine: false }]]) });
+  expect(received.days[0].mine?.reply?.mine).toBe(false);
+  expect(received.days[0].mine).not.toHaveProperty("canReply");
+  expect(view(state, AVA, JOIN_AT, { replyEligibleEntryIds: new Set([target]) }).days[0].others[0].entry?.canReply).toBe(true);
+  state.game.seats = 10;
+  expect(JSON.stringify(view(state, AVA, JOIN_AT, { ...inputs, multiplayer: true }))).not.toContain('"reply":');
+  expect(JSON.stringify(view(state, AVA, JOIN_AT, { ...inputs, multiplayer: true }))).not.toContain('"canReply":');
+});

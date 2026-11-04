@@ -5868,6 +5868,73 @@ its poster can read the upload; hosted image bytes stay until a per-image
 delete route exists), ends the pair's games through a block by the reporter,
 suspends the reported member (`suspended_at`), and marks the report reviewed.
 
+### Private post replies
+
+`game_reply` belongs to a unique `GameEntry` and its author's `GameProfile`,
+with cascades from both. It has no separate game id or player-seat FK. Text
+uses the member secure-box target `game_reply`/row id/`text`; voice uses the
+existing byte envelope bound to `game_reply:<id>`. SQL enforces text/voice
+shape, 1–30,500 ms duration and exactly 32 integer levels from 0 to 100.
+The 400,000-byte AAC/M4A cap keeps audio inline. A 365-day pair has at most
+730 live replies. Replies follow their post/account lifetime, without a
+separate retention clock or external media store.
+
+`reply-audio.ts` walks bounded ISO-BMFF boxes, requires a single AAC sound
+track and local sample references, checks chunk/sample bounds and rejects
+fragments. Both `mvhd` and `mdhd` enforce the duration cap; `mdhd` supplies
+the stored duration. No audio decoder, transcript or model call is involved.
+
+`replies.ts` owns read access and write eligibility. App views, playback,
+report validation and push revalidation all use `replyReadAccess`. Visibility
+requires the parent entry's explicit masks, two present players, no block,
+and no report between the pair in either direction across any game. The
+cross-game report rule is reply-only. Creation additionally requires a live,
+not-due pair game, the opponent's non-excuse post and an empty unique slot.
+
+`service.ts` seals before the game transaction and writes under the existing
+game lock. A content-free `game-reply:<replyId>` event binds actor, game and
+entry, so replay after deletion never resurrects content. A different id can
+reuse the slot. The independent `game-reply-push:<entryId>` event consumes the
+post's one lifetime notification. Terms, parsing and moderation precede replay.
+No pair-lock change is needed: a report racing in another game can leave an
+unread row, but all reads and the push recheck visibility.
+
+Only app `buildViewInputs` hydrates replies: one batch by entry ids with an
+explicit metadata select excluding audio, one pair-report query and the
+existing batched text decryption. Shared `loadGames`/`RuleState`, chat state,
+recap material, history/share exports and assistant tools never load replies.
+The playback route authorizes game, reply and viewer before opening bytes;
+responses are private/no-store `audio/mp4` with nosniff. The upload route alone
+raises the JSON cap to 600 KiB. See the Weekly Game Replies section for wire
+fields and routes.
+
+Deletion emits no event or receiver notification. `deleteEntryReplyTx` also
+runs in withdrawal, retake and Ops post-removal transactions because those
+paths retain entry tombstones. Physical entry/game deletes and either account's
+profile/entry deletion cascade without a new account-deletion branch.
+
+Reply reports leave `entryId` null and uniquely bind reporter and reply.
+Their optional `snapshotAudioEncrypted` is re-sealed for the reporter under
+`game_report:<reportId>`. Report identity is recovered before live visibility
+checks, allowing alert retry after deletion. The Ops queue selects columns
+explicitly, exposes an authenticated audio path and never fetches audio bytes.
+Ops removal dispatches to the same locked reply deletion; post score and recap
+are unchanged. Evidence outlives the author's account and follows the reporter's
+existing report lifetime.
+
+`push-delivery.ts` shares route/session, permission, suspension, APNs delivery
+and unregistered-token cleanup with post notifications. Reply claims and
+subject checks remain separate. The push body is exactly “New voice note on
+your post.” or “New note on your post.”, with data `{gameId, notification:
+"game_reply"}`. The sender's required title matches post pushes. Delivery is
+one best-effort attempt after the response, with expiry 24 hours after sending.
+No names, lengths, content, digests or media links enter events or pushes.
+
+Apply the additive migration before Web. This complete reply-aware Web release
+is the rollback floor once replies or reply reports exist. Recovery uses a
+forward fix retaining reads, playback, deletion and review. No Worker, runner,
+assistant or legal-version change is part of this release.
+
 ### Weekly game post notifications
 
 The posting transaction includes the candidate in the canonical entry snapshot

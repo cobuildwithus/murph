@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   canEnterGame: vi.fn(),
   control: null as null | { gameImageDelivery: ReturnType<typeof vi.fn> },
   mediaKeyPrefixFor: vi.fn(),
+  readGameReplyAudio: vi.fn(),
   readGame: vi.fn(),
   readHistory: vi.fn(),
   readHome: vi.fn(),
@@ -41,6 +42,7 @@ vi.mock("@/src/lib/game/service", () => ({
   devStartNow: mocks.devStartNow,
   canEnterGame: mocks.canEnterGame,
   mediaKeyPrefixFor: mocks.mediaKeyPrefixFor,
+  readGameReplyAudio: mocks.readGameReplyAudio,
   readGame: mocks.readGame,
   readHistory: mocks.readHistory,
   readHome: mocks.readHome,
@@ -59,6 +61,9 @@ vi.mock("@/src/lib/hosted-execution/control", () => ({
 }));
 
 type Routes = {
+  replies: typeof import("../app/api/game/v1/games/[id]/entries/[entryId]/replies/route");
+  reply: typeof import("../app/api/game/v1/games/[id]/replies/[replyId]/route");
+  replyAudio: typeof import("../app/api/game/v1/games/[id]/replies/[replyId]/audio/route");
   challenges: typeof import("../app/api/game/v1/games/[id]/challenges/route");
   block: typeof import("../app/api/game/v1/blocks/[memberId]/route");
   inviteBlock: typeof import("../app/api/game/v1/invites/[token]/block/route");
@@ -120,6 +125,9 @@ let signedInAs = LEO;
 describe("weekly game routes", () => {
   beforeAll(async () => {
     routes = {
+      replies: await import("../app/api/game/v1/games/[id]/entries/[entryId]/replies/route"),
+      reply: await import("../app/api/game/v1/games/[id]/replies/[replyId]/route"),
+      replyAudio: await import("../app/api/game/v1/games/[id]/replies/[replyId]/audio/route"),
       challenges: await import("../app/api/game/v1/games/[id]/challenges/route"),
       block: await import("../app/api/game/v1/blocks/[memberId]/route"),
       inviteBlock: await import("../app/api/game/v1/invites/[token]/block/route"),
@@ -158,6 +166,7 @@ describe("weekly game routes", () => {
     mocks.requireHostedMemberAuthFromBearerToken.mockImplementation(async () => ({ member: { id: signedInAs } }));
     mocks.canEnterGame.mockResolvedValue(true);
     mocks.mediaKeyPrefixFor.mockImplementation((memberId: string) => `game/${memberId}/`);
+    mocks.readGameReplyAudio.mockResolvedValue(new Uint8Array([1, 2, 3]));
     mocks.readGame.mockResolvedValue(VIEW);
     mocks.readHistory.mockResolvedValue({ people: [] });
     mocks.runGameCommand.mockResolvedValue({ game: VIEW, ok: true });
@@ -166,6 +175,30 @@ describe("weekly game routes", () => {
   afterEach(async () => {
     vi.unstubAllEnvs();
     await rm(mediaDir, { force: true, recursive: true });
+  });
+
+  it("gives only the reply upload 600 KiB and uses the path identity", async () => {
+    const body = { gameId: "forged-game", entryId: "forged-entry", replyId: "reply_0001", kind: "voice", audio: Buffer.alloc(400_000).toString("base64"), levels: Array(32).fill(50) };
+    const response = await routes.replies.POST(writeRequest("POST", "/reply", body), params({ id: GAME_ID, entryId: "entry_reply" }));
+    expect(response.status).toBe(200);
+    expect(mocks.runGameCommand.mock.calls[0][0].command).toMatchObject({ gameId: GAME_ID, entryId: "entry_reply", type: "replyToPost" });
+    expect((await routes.entries.POST(writeRequest("POST", "/post", body), params({ id: GAME_ID }))).status).toBe(413);
+    expect((await routes.replies.POST(writeRequest("POST", "/reply", { ...body, audio: "x".repeat(600 * 1024) }), params({ id: GAME_ID, entryId: "entry_reply" }))).status).toBe(413);
+  });
+
+  it("authenticates audio reads, applies the service's object decision, and disables caching", async () => {
+    const request = new Request(`${BASE}/games/${GAME_ID}/replies/reply_0001/audio`);
+    const context = params({ id: GAME_ID, replyId: "reply_0001" });
+    const response = await routes.replyAudio.GET(request, context);
+    expect(response.status).toBe(200);
+    expect(mocks.readGameReplyAudio).toHaveBeenCalledWith(GAME_ID, "reply_0001", LEO);
+    expect(response.headers.get("Content-Type")).toBe("audio/mp4");
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    mocks.readGameReplyAudio.mockResolvedValue(null);
+    expect((await routes.replyAudio.GET(request, context)).status).toBe(404);
+    mocks.requireHostedMemberAuthFromBearerToken.mockRejectedValue(hostedOnboardingError({ code: "UNAUTHENTICATED", httpStatus: 401, message: "Sign in" }));
+    expect((await routes.replyAudio.GET(request, context)).status).toBe(401);
   });
 
   it("opens Prove it through the signed-in actor and returns the ordinary game envelope", async () => {
@@ -418,6 +451,7 @@ describe("weekly game routes", () => {
     let grants: ReturnType<typeof termsGrant>[];
     const findMany = vi.fn(async () => grants);
     const gated = {
+      "POST reply": () => routes.replies.POST(writeRequest("POST", `/games/${GAME_ID}/entries/entry_reply/replies`, { replyId: "reply_0001", kind: "text", text: "Good" }), params({ id: GAME_ID, entryId: "entry_reply" })),
       "POST /games/:id/challenges": () => routes.challenges.POST(
         writeRequest("POST", `/games/${GAME_ID}/challenges`, { entryId: "entry_prove_it" }), params({ id: GAME_ID })),
       "POST /games": () => routes.create.POST(writeRequest("POST", "/games", { gameId: GAME_ID })),
@@ -432,6 +466,8 @@ describe("weekly game routes", () => {
       "POST /tickets/:id/redeem": () => routes.redeem.POST(writeRequest("POST", "/tickets/t_1/redeem"), params({ id: "t_1" })),
     };
     const open = {
+      "DELETE reply": () => routes.reply.DELETE(writeRequest("DELETE", `/games/${GAME_ID}/replies/reply_0001`), params({ id: GAME_ID, replyId: "reply_0001" })),
+      "GET reply audio": () => routes.replyAudio.GET(new Request(`${BASE}/games/${GAME_ID}/replies/reply_0001/audio`), params({ id: GAME_ID, replyId: "reply_0001" })),
       "GET /home": () => routes.home.GET(new Request(`${BASE}/home`)),
       "GET /history": () => routes.history.GET(new Request(`${BASE}/history`)),
       "GET /games/:id": () => routes.game.GET(new Request(`${BASE}/games/${GAME_ID}`), params({ id: GAME_ID })),

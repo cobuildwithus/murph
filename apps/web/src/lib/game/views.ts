@@ -94,6 +94,8 @@ export interface GameTicketRow {
 }
 
 export interface GameViewInput {
+  entryReplies?: ReadonlyMap<string, import("./contract").GameReplyView>;
+  replyEligibleEntryIds?: ReadonlySet<string>;
   challenges?: readonly RuleChallenge[];
   multiplayer?: boolean;
   home?: boolean;
@@ -237,6 +239,10 @@ function entryView(entry: RuleEntry, input: GameViewInput): GameEntryView {
   const challenge = input.challenges?.find(challenge => challenge.entryId === entry.id);
   const status = challenge && gameChallengeStatus(input.state, challenge, input.now);
   return {
+    ...(input.state.game.seats === 2 ? {
+      ...(input.entryReplies?.has(entry.id) ? { reply: input.entryReplies.get(entry.id) } : {}),
+      ...(entry.memberId !== input.viewerId && input.replyEligibleEntryIds !== undefined ? { canReply: input.replyEligibleEntryIds?.has(entry.id) ?? false } : {}),
+    } : {}),
     ...(challenge && (status === "open" || status === "stood") ? { challenge: { status, deadlineAt: challenge.deadlineAt.toISOString(), byYou: challenge.actor === input.viewerId } } : {}),
     ...(entry.incomplete ? { incomplete: true as const } : {}),
     entryId: entry.id,

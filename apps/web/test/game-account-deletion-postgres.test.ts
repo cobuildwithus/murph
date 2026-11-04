@@ -73,6 +73,30 @@ describe.skipIf(!runPostgresProof)("weekly game when a player deletes their acco
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: memberIds } } });
   });
 
+  it.each([
+    ["live", "creator"], ["live", "invitee"], ["settled", "creator"], ["settled", "invitee"],
+  ] as const)("cascades replies in both directions when the %s game's %s deletes", async (status, role) => {
+    const a = await member("Ava"), b = await member("Sam"), gameId = await live(a, b);
+    const aPost = randomUUID(), bPost = randomUUID();
+    await ok(a, { type: "post", gameId, entryId: aPost, kind: "words", text: "Owner post", mediaKeys: [] });
+    await ok(b, { type: "post", gameId, entryId: bPost, kind: "words", text: "Peer post", mediaKeys: [] });
+    await ok(a, { type: "replyToPost", gameId, entryId: bPost, replyId: randomUUID(), kind: "text", text: "Reply A" });
+    await ok(b, { type: "replyToPost", gameId, entryId: aPost, replyId: randomUUID(), kind: "text", text: "Reply B" });
+    if (status === "settled") await devSettleNow(gameId, a);
+    const gone = role === "creator" ? a : b, stays = gone === a ? b : a, survivingPost = gone === a ? bPost : aPost;
+    const postBefore = await getPrisma().gameEntry.findUniqueOrThrow({ where: { id: survivingPost } });
+    await deleteAccount(gone);
+    expect(await getPrisma().gameReply.count({ where: { entryId: { in: [aPost, bPost] } } })).toBe(0);
+    expect(await getPrisma().gameEntry.findUnique({ where: { id: survivingPost } })).toEqual(postBefore);
+    const view = (await readGame(gameId, stays))!;
+    expect(view.status).toBe(status === "live" ? "void" : "settled");
+    expect(view.players.find(player => player.left)).toMatchObject({ memberId: null });
+    expect(view.days[0].mine?.entryId).toBe(survivingPost);
+    expect(view.days[0].mine).not.toHaveProperty("reply");
+    await deleteAccount(stays);
+    expect(await getPrisma().game.findUnique({ where: { id: gameId } })).toBeNull();
+  });
+
   it.each(["creator", "invitee"] as const)("calls off a live game when the %s deletes, keeping the other player's posts", async (leaver) => {
     const leo = await member("Leo");
     const ava = await member("Ava");

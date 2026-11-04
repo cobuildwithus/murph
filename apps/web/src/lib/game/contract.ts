@@ -194,7 +194,7 @@ export const GAME_REPORT_REASONS = ["sexual", "harassment", "hate", "violence", 
 export type GameReportReason = (typeof GAME_REPORT_REASONS)[number];
 
 /** What a report is about: one post, their name and photo, or the task and stake they wrote. */
-export const GAME_REPORT_ABOUT = ["post", "player", "terms"] as const;
+export const GAME_REPORT_ABOUT = ["post", "player", "terms", "reply"] as const;
 export type GameReportAbout = (typeof GAME_REPORT_ABOUT)[number];
 
 /**
@@ -207,6 +207,7 @@ export type GameReportAbout = (typeof GAME_REPORT_ABOUT)[number];
  * step. Retrying with the same `reportId` is safe.
  */
 export interface ReportGameBody {
+  replyId?: string;
   reportedMemberId?: string;
   reportId: string;
   reason: GameReportReason;
@@ -266,7 +267,19 @@ export interface GameChangeControls {
 /** Receipt for a speaker-owned day correction in the bound game chat. */
 export type GameDayOutcome = { date: string; status: "marked_incomplete" | "restored" | "already_incomplete" | "already_complete" | "no_artifact" };
 
+export type ReplyToPostBody = { replyId: string } & (
+  | { kind: "text"; text: string }
+  | { kind: "voice"; audio: string; levels: number[] }
+);
+
+export type GameReplyView = { id: string; createdAt: string; mine: boolean } & (
+  | { kind: "text"; text: string }
+  | { kind: "voice"; durationMs: number; levels: number[] }
+);
+
 export type GameCommand =
+  | ({ type: "replyToPost"; gameId: string; entryId: string } & ReplyToPostBody)
+  | { type: "deleteReply"; gameId: string; replyId: string }
   /** POST /games/:id/challenges { entryId: string }. Actor comes from authentication. */
   | { type: "challenge"; gameId: string; entryId: string }
   | { type: "leave"; gameId: string }
@@ -342,6 +355,8 @@ export interface GamePlayerView {
 export type GameDayOtherStatus = "posted" | "locked" | "missed" | "none" | "off";
 
 export interface GameEntryView {
+  reply?: GameReplyView;
+  canReply?: boolean;
   challenge?: { status: "open" | "stood"; deadlineAt: string; byYou: boolean };
   /** Self-reported incomplete day; omitted after restore. Does not hide the artifact. */
   incomplete?: true;
@@ -573,6 +588,7 @@ export type GameInvitePreview =
   | { status: "expired"; reason?: "cancelled"; inviterFirstName?: string };
 
 export type GameErrorCode =
+  | "REPLY_USED"
   | "UNAUTHENTICATED"
   | "GAME_DISABLED"
   | "INVALID_REQUEST"
