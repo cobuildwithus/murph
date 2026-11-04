@@ -10,7 +10,7 @@ import type {
 import {
   HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV,
 } from "@murphai/hosted-execution/env";
-import { MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV } from "@murphai/operator-config/hosted-assistant-config-constants";
+import { MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
 } from "@murphai/hosted-execution/orchestration-control";

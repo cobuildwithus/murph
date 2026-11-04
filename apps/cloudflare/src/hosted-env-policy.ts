@@ -13,7 +13,7 @@ import {
 import {
   HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES,
 } from "@murphai/hosted-execution/assistant-capabilities";
-import { MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV } from "@murphai/operator-config/hosted-assistant-config-constants";
+import { MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   type StringEnvSource,
 } from "./string-env.ts";

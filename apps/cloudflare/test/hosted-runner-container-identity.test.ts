@@ -1,4 +1,4 @@
-import { MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV } from "@murphai/operator-config/hosted-assistant-config-constants";
+import { MURPH_NATIVE_SLEEP_CARD_ENABLED_ENV } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
