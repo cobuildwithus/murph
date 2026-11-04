@@ -1,3 +1,4 @@
+import { createMealMediaStore, mediaFailure } from "./hosted-meal-media.harness.ts";
 import type {
   HostedExecutionAssistantAskCompletedWake,
   HostedExecutionAssistantAskRequestedWake,
@@ -28,6 +29,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import {
   access,
+  readFile,
   chmod,
   mkdir,
   mkdtemp,
@@ -63,6 +65,10 @@ import {
 } from "@murphai/assistant-engine/assistant-state";
 import {
   initializeVault,
+  addMeal,
+  deleteEvent,
+  runMealPhotoMaintenance,
+  withHostedCanonicalWritePort,
   withCanonicalWriteLock,
 } from "@murphai/core";
 import {
@@ -84,6 +90,10 @@ import {
 import {
   createHostedWorkspaceRuntimeBridgeJobOptions,
 } from "../src/hosted-runtime/snapshot-bridge.ts";
+
+import { publishHostedWorkspaceMediaReferencesForSnapshot, readHostedMediaReferenceCatalogue } from "../src/hosted-runtime/media-references.ts";
+import { externalizeHostedCanonicalWriteMediaPayloads } from "../src/hosted-runtime/canonical-write-media.ts";
+import { appendHostedCanonicalWriteReceiptToArtifactLog } from "../src/hosted-runtime/canonical-write-receipt-log.ts";
 
 import {
   drainHostedRuntimeLogWritesBestEffort,
@@ -247,6 +257,114 @@ describe("checkpoint bridge post-Web lease diagnostics", () => {
 });
 
 describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
+  it.each(["retry", "delete_immediately"])("a lost media reply leaves no orphan when the next action is %s", async (nextAction) => {
+    const vaultRoot = await createVaultRoot();
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const photoPath = path.join(vaultRoot, "fixture.png");
+    await writeFile(photoPath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==", "base64"));
+    const capturedAt = "2030-01-01T12:00:00.000Z";
+    const meal = await addMeal({ vaultRoot, photoPath, photoCapturedAt: capturedAt, occurredAt: capturedAt });
+    const { platform } = createRuntimePlatform();
+    const store = createMealMediaStore();
+    let loseReply = true;
+    store.hooks.after = async operation => {
+      if (operation === "put" && loseReply) { loseReply = false; throw mediaFailure("Synthetic lost media reply"); }
+    };
+    platform.mediaStore = store.mediaStore;
+    const idle = () => deliverPendingMealMediaForTest(vaultRoot, store.mediaStore);
+    const port = { async persistCanonicalWrite(persistence: Parameters<typeof externalizeHostedCanonicalWriteMediaPayloads>[0]["persistence"]) {
+      const externalized = await externalizeHostedCanonicalWriteMediaPayloads({ persistence, vaultRoot, mediaStore: platform.mediaStore });
+      await appendHostedCanonicalWriteReceiptToArtifactLog({ ...externalized, artifactStore: platform.artifactStore, previousStatus: null });
+    } };
+    const maintain = () => withHostedCanonicalWritePort(port, () => runMealPhotoMaintenance({ vaultRoot, now: new Date("2030-04-01T12:00:00.000Z") }));
+    const options = createBridgeOptions({ platform, vaultRoot });
+    const checkpoint = () => options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    try { await maintain(); } catch (error) { expect(String(error)).toContain("Synthetic lost media reply"); }
+    await idle();
+    expect(store.bytes.size).toBe(1);
+    // Reconciliation alone cannot invent a pointer lost before a canonical
+    // commit. Deletion is allowed to arrive before any maintenance retry.
+    await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore: platform.mediaStore });
+    if (nextAction === "retry") { await maintain(); await idle(); await checkpoint(); }
+    await withHostedCanonicalWritePort(port, () => deleteEvent({ vaultRoot, eventId: meal.event.id }));
+    await idle(); await checkpoint();
+    expect(store.bytes.size).toBe(0);
+    expect(store.activeUnlimited()).toBe(0);
+  });
+
+  it.each([false, true])("acknowledged upload and failed receipt converge after retirement (receiptStored=%s)", async receiptStored => {
+    const vaultRoot = await createVaultRoot();
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const photoPath = path.join(vaultRoot, "fixture.png");
+    await writeFile(photoPath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==", "base64"));
+    const capturedAt = "2030-01-01T12:00:00.000Z";
+    const meal = await addMeal({ vaultRoot, photoPath, photoCapturedAt: capturedAt, occurredAt: capturedAt });
+    const { platform } = createRuntimePlatform();
+    const store = createMealMediaStore(); platform.mediaStore = store.mediaStore;
+    let failReceipt = true;
+    const port = { async persistCanonicalWrite(persistence: Parameters<typeof externalizeHostedCanonicalWriteMediaPayloads>[0]["persistence"]) {
+      const externalized = await externalizeHostedCanonicalWriteMediaPayloads({ persistence, vaultRoot, mediaStore: store.mediaStore });
+      if (failReceipt) {
+        // Seed the acknowledged legacy upload when the new writer defers it.
+        const entry = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]!;
+        if (entry.pendingUpload) await store.mediaStore.put({ ...entry, bytes: await readFile(path.join(vaultRoot, entry.relativePath)) });
+      }
+      await appendHostedCanonicalWriteReceiptToArtifactLog({ ...externalized, previousStatus: null,
+        artifactStore: failReceipt ? { ...platform.artifactStore, async put(artifact) {
+          if (receiptStored) await platform.artifactStore.put(artifact);
+          throw new Error("Synthetic receipt response failure");
+        } } : platform.artifactStore });
+    } };
+    const maintain = () => withHostedCanonicalWritePort(port, () => runMealPhotoMaintenance({ vaultRoot, now: new Date("2030-04-01T12:00:00.000Z") }));
+    await expect(maintain()).rejects.toThrow("Synthetic receipt response failure");
+    expect(store.bytes.size).toBe(1);
+    await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore: store.mediaStore });
+    await deliverPendingMealMediaForTest(vaultRoot, store.mediaStore);
+    expect(store.bytes.size).toBe(0);
+    expect([...store.rows.values()].every(row => row.retired)).toBe(true);
+    failReceipt = false;
+    await expect(maintain()).resolves.toMatchObject({ retiredPhotoCount: 1, blockedMealCount: 0 });
+    await deliverPendingMealMediaForTest(vaultRoot, store.mediaStore);
+    await withHostedCanonicalWritePort(port, () => deleteEvent({ vaultRoot, eventId: meal.event.id }));
+    await deliverPendingMealMediaForTest(vaultRoot, store.mediaStore);
+    await createBridgeOptions({ platform, vaultRoot }).createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    expect(store.bytes.size).toBe(0); expect(store.activeUnlimited()).toBe(0);
+  });
+
+  it.each(["rejected", "lost_response", "accepted"])("snapshot publication never delivers pending meal media: %s", async outcome => {
+    const vaultRoot = await createVaultRoot();
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const photoPath = path.join(vaultRoot, "fixture.png");
+    await writeFile(photoPath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==", "base64"));
+    const capturedAt = "2030-01-01T12:00:00.000Z";
+    await addMeal({ vaultRoot, photoPath, photoCapturedAt: capturedAt, occurredAt: capturedAt });
+    await runMealPhotoMaintenance({ vaultRoot, now: new Date("2030-04-01T12:00:00.000Z") });
+    const { calls, platform } = createRuntimePlatform();
+    const store = createMealMediaStore(); platform.mediaStore = store.mediaStore;
+    const complete = calls.completeSnapshotSession.getMockImplementation()!;
+    calls.completeSnapshotSession.mockImplementationOnce(async input => {
+      expect(store.calls).toEqual([]);
+      expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]).toMatchObject({ pendingUpload: true });
+      const completed = await complete(input);
+      if (outcome === "lost_response") throw new Error("Synthetic lost checkpoint response");
+      if (outcome === "rejected") completed.checkpoint.checkpointed = false;
+      return completed;
+    });
+    const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+    const build = vi.mocked(snapshotArchiveBuilder.buildEncryptedSnapshot).getMockImplementation()!;
+    vi.mocked(snapshotArchiveBuilder.buildEncryptedSnapshot).mockImplementation(async input => {
+      expect(input.archiveEntries.some(entry => entry.relativePath.endsWith("/hosted-media-refs.json"))).toBe(true);
+      return build(input);
+    });
+    const options = createBridgeOptions({ platform, vaultRoot, snapshotArchiveBuilder });
+    const checkpoint = () => options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    if (outcome === "lost_response") await expect(checkpoint()).rejects.toThrow("Synthetic lost checkpoint response");
+    else await expect(checkpoint()).resolves.toMatchObject({ checkpoint: { checkpointed: outcome === "accepted" } });
+    await checkpoint();
+    expect(store.calls).toEqual([]);
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]).toMatchObject({ pendingUpload: true });
+  });
+
   it("fails closed when the mailbox decoder is missing", () => {
     const { platform } = createRuntimePlatform();
 
@@ -3133,4 +3251,14 @@ async function expectLeaseFailure(
   expect(thrown.code).toBe(expected.code);
   expect(thrown.stage).toBe(expected.stage);
   return thrown;
+}
+
+
+async function deliverPendingMealMediaForTest(vaultRoot: string, mediaStore: NonNullable<HostedRuntimePlatform["mediaStore"]>) {
+  // Baseline-compatible regression: old writers PUT during receipt preparation;
+  // only v2 writers publish pending intent and use the subsequent idle owner.
+  if (!(await readHostedMediaReferenceCatalogue({ vaultRoot })).entries.some(entry => entry.pendingUpload)) return;
+  const { runHostedMealMediaMaintenance, createHostedMealMediaBudget } = await import("../src/hosted-runtime/meal-media-maintenance.ts");
+  await runHostedMealMediaMaintenance({ vaultRoot, mediaStore,
+    signal: new AbortController().signal, budget: createHostedMealMediaBudget(), persistRetry: async () => {} });
 }

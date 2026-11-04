@@ -21,6 +21,39 @@ import { createHostedArtifactMaterializer } from "../src/hosted-runtime/artifact
 
 const closedPath = "ledger/integration-ingests/2020/2020-01.jsonl.br";
 
+test("failed media pruning retains newly uploaded cold history and the cleanup pointer", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "cold-ingests-prune-retry-"));
+  const objects = new Map<string, Uint8Array>();
+  let failDelete = true;
+  const mediaStore: HostedRuntimeMediaStore = {
+    put: async entry => { objects.set(entry.mediaId, entry.bytes); },
+    get: async entry => objects.get(entry.mediaId) ?? null,
+    delete: async ({ mediaId }) => {
+      if (failDelete) { failDelete = false; throw new Error("Synthetic prune failure"); }
+      objects.delete(mediaId);
+    },
+  };
+  try {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const stale = { byteSize: 3, expiresAt: null, mediaId: "a".repeat(64), mediaKind: "image" as const,
+      mimeType: "image/jpeg", recordedAt: "2020-01-01T00:00:00.000Z",
+      relativePath: "raw/meals/synthetic/thumbnail-stale.jpg", sha256: "b".repeat(64) };
+    objects.set(stale.mediaId, new Uint8Array([1, 2, 3]));
+    await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue: { schema: HOSTED_MEDIA_REFS_SCHEMA, entries: [stale] } });
+    await mkdir(path.dirname(path.join(vaultRoot, closedPath)), { recursive: true });
+    await writeFile(path.join(vaultRoot, closedPath), brotliCompressSync(Buffer.from('{"synthetic":true}\n')));
+    await expect(publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).rejects.toThrow("Synthetic prune failure");
+    const catalogue = await readHostedMediaReferenceCatalogue({ vaultRoot });
+    expect(new Set(catalogue.entries.map(entry => entry.mediaId))).toEqual(new Set(objects.keys()));
+    expect(catalogue.entries).toHaveLength(2);
+    await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore });
+    expect(objects.size).toBe(1);
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toEqual([
+      expect.objectContaining({ relativePath: closedPath, mediaKind: "integration-ingest" }),
+    ]);
+  } finally { await rm(vaultRoot, { recursive: true, force: true }); }
+});
+
 test("snapshot excludes closed ingest months, retains current month and sparse references", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "cold-ingests-"));
   const objects = new Map<string, Uint8Array>();

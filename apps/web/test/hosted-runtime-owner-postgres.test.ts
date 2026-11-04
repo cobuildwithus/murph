@@ -1473,6 +1473,30 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       command: { operation: "register", ...runtime, descriptor } })).toMatchObject({ applied: false, reason: "expired" });
   });
 
+  it.each(["retire", "sweep", "late_null"] as const)("terminalizes never-uploaded pending media through finite registration: %s", async finish => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const now = new Date();
+    const descriptor = { mediaId: "a".repeat(64), mediaKind: "image" as const,
+      byteSize: 12, sha256: "b".repeat(64), expiresAt: new Date(0).toISOString() };
+    const run = (command: Parameters<typeof executeHostedRuntimeMediaCommand>[0]["command"]) =>
+      executeHostedRuntimeMediaCommand({ prisma: first, userId, command, now });
+    expect(await run({ operation: "retire", ...runtime, mediaId: descriptor.mediaId })).toMatchObject({ applied: false });
+    expect(await run({ operation: "register", ...runtime, descriptor })).toMatchObject({ applied: true });
+    if (finish === "late_null") {
+      // Finite registration alone is not terminal; a prior null request can land.
+      expect(await run({ operation: "register", ...runtime, descriptor: { ...descriptor, expiresAt: null } })).toMatchObject({ applied: true });
+      expect(await observer.hostedRuntimeMedia.findUniqueOrThrow({ where: { userId_mediaId: { userId, mediaId: descriptor.mediaId } } })).toMatchObject({ expiresAt: null, retiredAt: null });
+    }
+    if (finish === "sweep") {
+      expect((await claimHostedRuntimeResourceCleanup({ prisma: second, now })).media.filter(row => row.userId === userId)).toHaveLength(1);
+    } else expect(await run({ operation: "retire", ...runtime, mediaId: descriptor.mediaId })).toMatchObject({ applied: true });
+    expect(await run({ operation: "register", ...runtime, descriptor: { ...descriptor, expiresAt: null } })).toMatchObject({ applied: false, reason: "expired" });
+    expect(await run({ operation: "admit_put", ...runtime, descriptor, writeId: "late-put", uploadId: "late-upload" })).toMatchObject({ applied: false, reason: "expired" });
+    expect(await run({ operation: "retire", ...runtime, mediaId: descriptor.mediaId })).toMatchObject({ applied: true });
+    expect(await observer.hostedRuntimeMedia.count({ where: { userId, retiredAt: null, expiresAt: null } })).toBe(0);
+  });
+
   it("keeps media retirement terminal and fences purge acknowledgements after a late upload", async () => {
     const userId = await member();
     const runtime = identity((await claim(userId)).owner);

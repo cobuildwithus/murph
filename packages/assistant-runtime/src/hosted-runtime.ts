@@ -1,3 +1,4 @@
+import { createHostedMealMediaBudget, createHostedMealMediaMaintenance, needsHostedMealMediaCheckpoint, withHostedMealMediaRetry, mergeHostedMealMediaRetry, type HostedMealMediaBudget } from "./hosted-runtime/meal-media-maintenance.ts";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -1448,12 +1449,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   // Restore preparation can precede this invocation and owns its receipt-replay
   // scope. Once adopted, every invocation lane shares the restored materializer.
   let materialize: HostedWorkspaceArtifactMaterializer | undefined;
+  const mealMediaBudget = createHostedMealMediaBudget();
   const result = await withIntegrationIngestMaterializer(
     options.vaultRoot,
     async (paths) => { await materialize?.(paths); },
     () => runHostedWorkspaceRuntimeJobInProcessImpl(input, options, (restoredMaterializer) => {
       materialize = restoredMaterializer;
-    }),
+    }, mealMediaBudget),
   );
   const runtimeReleaseSha = options.runtimeIssueProvenance?.releaseSha ?? null;
   void writeHostedRuntimeLogBestEffort({
@@ -1487,6 +1489,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             result.redactedStatus ?? null,
             "hostedMailboxSystemImportedSeq",
           ),
+        ...(mealMediaBudget.pending === null ? {} : {
+          mealFullPhotosRetired: mealMediaBudget.fullPhotosRetired,
+          mealThumbnailUploadsCompleted: mealMediaBudget.uploaded,
+          mealThumbnailUploadsPending: mealMediaBudget.pending,
+        }),
         invocationStatus: result.status,
         nextWakeAt: result.nextWakeAt ?? null,
         nextWakeReason: result.nextWakeReason ?? null,
@@ -1584,6 +1591,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
   input: HostedAssistantWorkspaceRuntimeJobInput,
   options: HostedWorkspaceRuntimeJobOptions,
   adoptMaterializer: (materialize: HostedWorkspaceArtifactMaterializer) => void,
+  mealMediaBudget: HostedMealMediaBudget,
 ): Promise<HostedWorkspaceInvocationResult> {
   const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime, options.platform);
   const mailboxPort = runtime.platform.mailboxPort ?? null;
@@ -2285,6 +2293,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     }
     if (input.request.processingMode === "inbox_media_retention") {
       return await runHostedInboxMediaRetentionOnlyCheckpoint({
+        mealMediaBudget,
+        canonicalWriteReceiptRecoveryFailed,
         assertRuntimeNotAborted,
         canonicalWriteRunnerInput: {
           checkpointRuntimeRedactedStatus,
@@ -7069,6 +7079,21 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                     HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_YIELD_THRESHOLD
                       - pendingCanonicalReceiptCount,
                   ),
+                  mealMedia: createHostedMealMediaMaintenance({
+                    disabled: canonicalWriteReceiptRecoveryFailed,
+                    mediaStore: guardedRuntime.platform.mediaStore, budget: mealMediaBudget,
+                    projectedWakeAt: pendingWake.nextWakeAt,
+                    persistRetry: async (retryAt, signal) => {
+                      const workspace = checkpointRequestBuilder.latestWorkspace() ?? committedWorkspace;
+                      if (!workspace) throw new Error("Meal media retry requires a durable workspace.");
+                      const next = mergeHostedMealMediaRetry(workspace, retryAt);
+                      signal.throwIfAborted();
+                      const checkpoint = await checkpointRuntimeRedactedStatus({ reason: "canonical_runtime_commit",
+                        redactedStatus: checkpointRequestBuilder.readRedactedStatus(), workspace: next });
+                      signal.throwIfAborted();
+                      rebaseCommittedWorkspace(checkpoint.workspace);
+                    },
+                  }),
                   materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
                   memberId: input.request.userId,
                   model: idleMaintenanceModel,
@@ -7099,8 +7124,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                       runnerInput: {
                         ...baseRunnerInput,
                         workspace,
-                        checkpointRuntimeRedactedStatus: (checkpoint) => checkpointRuntimeRedactedStatus({
+                        checkpointRuntimeRedactedStatus: async (checkpoint) => checkpointRuntimeRedactedStatus({
                           ...checkpoint,
+                          workspace: await withHostedMealMediaRetry(checkpoint.workspace, restored.vaultRoot),
                           nextWakeAt: workspace?.nextWakeAt ?? null,
                           nextWakeReason: workspace?.nextWakeReason ?? null,
                         }),
@@ -7425,6 +7451,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       };
 
       await prepareInitialForegroundState();
+      runtimeStateDirty = await needsHostedMealMediaCheckpoint({ dirty: runtimeStateDirty, recoveryFailed: canonicalWriteReceiptRecoveryFailed, vaultRoot: restored.vaultRoot });
       while (await prepareNextRuntimeCheckpoint()) {
         const initialCheckpointWakeLatencySeed = pendingCheckpointWakeLatencySeed;
         pendingCheckpointWakeLatencySeed = null;
@@ -7837,6 +7864,7 @@ function classifyHostedBrowserVaultReplicaRefresh(
 // contract a structural invariant: a new retention call site cannot omit it
 // without changing this signature.
 export async function runHostedPendingInputProtectedIdleMaintenance(input: {
+  mealMedia?: Parameters<typeof runHostedIdleCheckpointMaintenance>[0]["mealMedia"];
   credentialSource: Parameters<typeof runHostedIdleCheckpointMaintenance>[0]["credentialSource"];
   generatedImageRetentionMaxCaptures?: number;
   materializeWorkspaceArtifacts: HostedWorkspaceArtifactMaterializer;
@@ -7860,6 +7888,7 @@ export async function runHostedPendingInputProtectedIdleMaintenance(input: {
       vaultRoot: input.vaultRoot,
     });
   return await runHostedIdleCheckpointMaintenance({
+    mealMedia: input.mealMedia,
     credentialSource: input.credentialSource,
     ...(input.generatedImageRetentionMaxCaptures === undefined
       ? {}
@@ -7897,6 +7926,8 @@ export async function runHostedPendingInputProtectedIdleMaintenance(input: {
 }
 
 async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
+  canonicalWriteReceiptRecoveryFailed: boolean;
+  mealMediaBudget: HostedMealMediaBudget;
   assertRuntimeNotAborted: () => void;
   canonicalWriteRunnerInput: HostedWorkspaceRunnerInput;
   checkpointRequestBuilder: ReturnType<typeof createHostedWorkspaceSnapshotCheckpointRequestBuilder>;
@@ -7937,6 +7968,19 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
           credentialSource: "platform",
           generatedImageRetentionMaxCaptures:
             input.generatedImageRetentionMaxCaptures(),
+          mealMedia: createHostedMealMediaMaintenance({
+            disabled: input.canonicalWriteReceiptRecoveryFailed,
+            mediaStore: input.canonicalWriteRunnerInput.platform.mediaStore, budget: input.mealMediaBudget,
+            projectedWakeAt: workspace.nextWakeAt,
+            persistRetry: async (retryAt, signal) => {
+              const next = mergeHostedMealMediaRetry(workspace, retryAt);
+              signal.throwIfAborted();
+              const checkpoint = await input.canonicalWriteRunnerInput.checkpointRuntimeRedactedStatus!({
+                reason: "canonical_runtime_commit", redactedStatus: workspace.redactedStatus ?? null, workspace: next });
+              signal.throwIfAborted();
+              workspace = checkpoint.workspace;
+            },
+          }),
           materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
           memberId: input.input.request.userId,
           model: null,
@@ -7947,6 +7991,9 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
               previousRedactedStatus: workspace.redactedStatus ?? null,
               runnerInput: {
                 ...input.canonicalWriteRunnerInput,
+                checkpointRuntimeRedactedStatus: async checkpoint => input.canonicalWriteRunnerInput.checkpointRuntimeRedactedStatus!({
+                  ...checkpoint, workspace: await withHostedMealMediaRetry(checkpoint.workspace, input.vaultRoot),
+                }),
                 workspace,
               },
               write,
@@ -9178,18 +9225,18 @@ function createAbortGuardedHostedRuntimeMediaStore(
   return {
     ...(mediaStore.delete
       ? {
-          delete: (deleteInput) =>
-            guard(() => mediaStore.delete!(deleteInput)),
+          delete: (deleteInput, context) =>
+            guard(() => mediaStore.delete!(deleteInput, context)),
         }
       : {}),
     get: (getInput, context) => guard(() => mediaStore.get(getInput, context)),
     ...(mediaStore.record
       ? {
-          record: (recordInput) =>
-            guard(() => mediaStore.record!(recordInput)),
+          record: (recordInput, context) =>
+            guard(() => mediaStore.record!(recordInput, context)),
         }
       : {}),
-    put: (putInput) => guard(() => mediaStore.put(putInput)),
+    put: (putInput, context) => guard(() => mediaStore.put(putInput, context)),
   };
 }
 

@@ -48,6 +48,14 @@ export { HOSTED_MEDIA_REFS_RELATIVE_PATH, HOSTED_MEDIA_REFS_SCHEMA } from "@murp
 
 const RAW_INBOX_PREFIX = `${VAULT_LAYOUT.rawInboxDirectory}/`;
 const RAW_MEALS_PREFIX = `${VAULT_LAYOUT.rawMealsDirectory}/`;
+export function isHostedPendingMealMedia(entry: HostedMediaReference): boolean {
+  return isHostedMealMediaV2Path(entry.relativePath) && entry.pendingUpload === true;
+}
+
+export function isHostedMealMediaV2Path(relativePath: string): boolean {
+  return /^raw\/meals\/.+\/thumbnail-v2-[a-zA-Z0-9_-]+\.jpg$/u.test(relativePath);
+}
+
 const RAW_CAPTURES_PREFIX = `${VAULT_LAYOUT.rawCapturesDirectory}/`;
 
 export interface HostedMediaReference {
@@ -56,6 +64,7 @@ export interface HostedMediaReference {
   mediaId: string;
   mediaKind: HostedRuntimeMediaKind;
   mimeType: string | null;
+  pendingUpload?: boolean;
   recordedAt: string;
   relativePath: string;
   sha256: string;
@@ -63,6 +72,7 @@ export interface HostedMediaReference {
 
 export interface HostedMediaReferenceCatalogue {
   entries: HostedMediaReference[];
+  mealUploadCursor?: string;
   schema: typeof HOSTED_MEDIA_REFS_SCHEMA;
 }
 
@@ -103,24 +113,41 @@ export async function publishHostedWorkspaceMediaReferencesForSnapshot(input: {
     mediaStore: input.mediaStore,
     includeColdIngests: true,
   });
+  // Save new uploads as well as earlier cleanup pointers before pruning; a
+  // failed deletion must not forget another kind's newly uploaded media.
   await writeHostedMediaReferenceCatalogue({
     catalogue: {
-      entries,
+      ...existingCatalogue,
+      entries: dedupeHostedMediaReferenceEntries([...existingCatalogue.entries, ...entries]),
       schema: HOSTED_MEDIA_REFS_SCHEMA,
     },
     vaultRoot: input.vaultRoot,
   });
 
+  // Unacknowledged pending cleanup belongs to the abortable idle owner.
+  // Preserve its pointer without obstructing snapshots on an absent-row 409.
   const nextMediaIds = new Set(entries.map((entry) => entry.mediaId));
+  entries.push(...existingCatalogue.entries.filter(entry => isHostedPendingMealMedia(entry) && !nextMediaIds.has(entry.mediaId)));
   let prunedMediaCount = 0;
   for (const entry of existingCatalogue.entries) {
     assertHostedMediaReferenceLive(input.signal);
-    if (nextMediaIds.has(entry.mediaId)) {
+    if (nextMediaIds.has(entry.mediaId) || isHostedPendingMealMedia(entry)) {
       continue;
     }
     await input.mediaStore.delete?.({ mediaId: entry.mediaId });
     prunedMediaCount += 1;
   }
+
+  // Keep cleanup pointers until retirement is acknowledged; a failed deletion
+  // must remain discoverable on the next warm checkpoint attempt.
+  await writeHostedMediaReferenceCatalogue({
+    catalogue: {
+      ...existingCatalogue,
+      entries,
+      schema: HOSTED_MEDIA_REFS_SCHEMA,
+    },
+    vaultRoot: input.vaultRoot,
+  });
 
   return {
     // Meal CLI/native image tools read local paths. Keep their canonical bytes
@@ -143,7 +170,7 @@ export async function publishHostedWorkspaceMediaReferences(input: {
   const byPath = new Map(existingCatalogue.entries.map((entry) => [entry.relativePath, entry]));
   for (const entry of entries) byPath.set(entry.relativePath, entry);
   await writeHostedMediaReferenceCatalogue({
-    catalogue: { entries: [...byPath.values()], schema: HOSTED_MEDIA_REFS_SCHEMA },
+    catalogue: { ...existingCatalogue, entries: [...byPath.values()], schema: HOSTED_MEDIA_REFS_SCHEMA },
     vaultRoot: input.vaultRoot,
   });
   return entries;
@@ -407,16 +434,17 @@ function collectCaptureHostedMediaCandidates(
     }
     // Legacy full photos stay in the encrypted vault until bounded maintenance
     // creates their thumbnail. A foreground write must not upload the backlog.
-    if (record.kind === "meal" && !record.photoThumbnail) continue;
+    const thumbnail = record.kind === "meal" ? record.photoThumbnail : null;
+    if (record.kind === "meal" && !thumbnail) continue;
     for (const rawRef of collectEventRawReferencePaths(record)) {
-      const normalized = normalizeHostedMediaVaultPath(rawRef, record.kind === "meal" ? RAW_MEALS_PREFIX : RAW_CAPTURES_PREFIX);
+      const normalized = normalizeHostedMediaVaultPath(rawRef, thumbnail ? RAW_MEALS_PREFIX : RAW_CAPTURES_PREFIX);
       const mediaKind = normalized ? readHostedMediaKindFromPath(normalized) : null;
-      if (record.kind === "meal" && normalized !== record.photoThumbnail?.relativePath) continue;
+      if (thumbnail && normalized !== thumbnail.relativePath) continue;
       if (!mediaKind || !normalized) {
         continue;
       }
       candidates.push({
-        byteSize: null,
+        byteSize: thumbnail?.byteSize ?? null,
         expiresAt: isGeneratedImageCaptureEvent(record)
           ? new Date(Date.parse(record.recordedAt) + GENERATED_IMAGE_CAPTURE_RETENTION_WINDOW_MS).toISOString()
           : null,
@@ -424,7 +452,7 @@ function collectCaptureHostedMediaCandidates(
         mimeType: readHostedMediaMimeTypeFromPath(normalized),
         recordedAt: normalizeHostedMediaRecordedAt(record.recordedAt),
         relativePath: normalized,
-        sha256: null,
+        sha256: thumbnail?.sha256 ?? null,
       });
     }
   }
@@ -544,6 +572,7 @@ async function prepareHostedMediaReferenceFromLocalFile(input: {
   ) {
     const mergedEntry = {
       ...entry,
+      ...(input.existing.pendingUpload === undefined ? {} : { pendingUpload: input.existing.pendingUpload }),
       expiresAt: resolveUpdatedHostedMediaExpiresAt(
         input.existing.expiresAt,
         entry.expiresAt,
@@ -566,6 +595,11 @@ async function prepareHostedMediaReferenceFromLocalFile(input: {
       entry: mergedEntry,
       uploaded: false,
     };
+  }
+  // Meal bytes remain in receipts and snapshots. Persist their delivery intent
+  // before the first PUT: a response can be lost after remote registration.
+  if (isHostedMealMediaV2Path(entry.relativePath)) {
+    return { entry: { ...entry, pendingUpload: true }, uploaded: false };
   }
   const resolved = await resolveVaultPathOnDisk(input.vaultRoot, entry.relativePath);
   const bytes = new Uint8Array(await readFile(resolved.absolutePath));
@@ -666,6 +700,7 @@ function parseHostedMediaReferenceCatalogue(
     };
   }
   return {
+    ...(typeof value.mealUploadCursor === "string" ? { mealUploadCursor: value.mealUploadCursor } : {}),
     entries: value.entries
       .map(parseHostedMediaReference)
       .filter((entry): entry is HostedMediaReference => entry !== null)
@@ -696,6 +731,9 @@ function parseHostedMediaReference(value: unknown): HostedMediaReference | null 
     mediaId,
     mediaKind,
     mimeType: normalizeHostedMediaMimeType(value.mimeType),
+    // Only the new namespace implies deferred delivery after an old writer
+    // drops the marker. Legacy absence is settled, never a bulk upload request.
+    ...(isHostedMealMediaV2Path(relativePath) ? { pendingUpload: value.pendingUpload !== false } : {}),
     recordedAt,
     relativePath,
     sha256,

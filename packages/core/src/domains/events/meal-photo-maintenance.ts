@@ -108,7 +108,10 @@ async function maintainMeal(input: {
       const next: Meal = structuredClone(record);
       next.photoCapturedAt = input.capturedAt;
       if (thumbnail) {
-        const relativePath = path.posix.join(path.posix.dirname(photo.relativePath), `thumbnail-${photo.sha256}.jpg`);
+        // Older hosted writers uploaded before receipt acknowledgement; rollback
+        // cleanup could permanently retire that identity. Fresh batches avoid
+        // those tombstones, while receipt replay keeps the committed path.
+        const relativePath = path.posix.join(path.posix.dirname(photo.relativePath), `thumbnail-v2-${batch.operationId}.jpg`);
         const raw = await batch.stageRawBytes({ targetRelativePath: relativePath, originalFileName: "meal-thumbnail.jpg", mediaType: "image/jpeg", content: thumbnail.data, allowExistingMatch: true });
         const artifact = await describeRawArtifact(raw, "photo_thumbnail");
         manifest.manifest.artifacts.push(artifact);

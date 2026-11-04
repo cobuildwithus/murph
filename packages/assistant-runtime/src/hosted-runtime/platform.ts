@@ -301,14 +301,14 @@ export interface HostedRuntimeArtifactStore extends
   HostedRuntimeArtifactWriter {}
 
 export interface HostedRuntimeMediaWriter {
-  delete?(input: Pick<HostedRuntimeMediaDescriptor, "mediaId">): Promise<void>;
+  delete?(input: Pick<HostedRuntimeMediaDescriptor, "mediaId">, context?: { signal?: AbortSignal | null }): Promise<void>;
   record?(input: HostedRuntimeMediaDescriptor & {
     expiresAt?: string | null;
-  }): Promise<void>;
+  }, context?: { signal?: AbortSignal | null }): Promise<void>;
   put(input: HostedRuntimeMediaDescriptor & {
     bytes: Uint8Array;
     expiresAt?: string | null;
-  }): Promise<void>;
+  }, context?: { signal?: AbortSignal | null }): Promise<void>;
 }
 
 export interface HostedRuntimeMediaStore extends
