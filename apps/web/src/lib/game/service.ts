@@ -1018,13 +1018,17 @@ async function cancelInvite(context: CommandContext, gameId: string): Promise<st
  * key free of who it was once account deletion rewrites the actor.
  */
 async function watchRecap(actor: string, gameId: string): Promise<string> {
-  const prisma = getPrisma();
-  const player = await prisma.gamePlayer.findUnique({ where: { gameId_memberId: { gameId, memberId: actor } },
-    select: { seat: true, game: { select: { status: true } } } });
-  if (!player) reject("GAME_NOT_FOUND", "Game not found.");
-  if (player.game.status !== "settled") reject("GAME_NOT_LIVE", "This game's recap isn't ready.");
-  await prisma.gameEvent.createMany({ skipDuplicates: true, data: [{ gameId, actor, type: "recap_watched",
-    commandKey: `recap-watched:${gameId}:${player.seat}`, payload: { v: 1 } }] });
+  await getPrisma().$transaction(async tx => {
+    // Account deletion scrubs event actors under this lock: a receipt lands
+    // before it (and is scrubbed) or finds the seat already gone.
+    await tx.$queryRaw`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
+    const player = await tx.gamePlayer.findUnique({ where: { gameId_memberId: { gameId, memberId: actor } },
+      select: { seat: true, game: { select: { status: true } } } });
+    if (!player) reject("GAME_NOT_FOUND", "Game not found.");
+    if (player.game.status !== "settled") reject("GAME_NOT_LIVE", "This game's recap isn't ready.");
+    await tx.gameEvent.createMany({ skipDuplicates: true, data: [{ gameId, actor, type: "recap_watched",
+      commandKey: `recap-watched:${gameId}:${player.seat}`, payload: { v: 1 } }] });
+  });
   return gameId;
 }
 

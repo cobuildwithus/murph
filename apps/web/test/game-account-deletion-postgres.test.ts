@@ -207,6 +207,45 @@ describe.skipIf(!runPostgresProof)("weekly game when a player deletes their acco
     ]);
   });
 
+  it("never keeps a deleted member's id on a recap receipt, whichever lands first", async () => {
+    const db = getPrisma();
+    const receipts = (gameId: string) => db.gameEvent.findMany({ where: { gameId, type: "recap_watched" }, select: { actor: true } });
+
+    // Receipt first: two at once still make one, and deletion scrubs it with Ava's other events.
+    const leo = await member("Leo");
+    const ava = await member("Ava");
+    const first = await live(leo, ava);
+    await devSettleNow(first, leo);
+    const both = await Promise.all([run(ava, { gameId: first, type: "watchRecap" }), run(ava, { gameId: first, type: "watchRecap" })]);
+    expect(both.map(result => result.ok)).toEqual([true, true]);
+    expect(await receipts(first)).toEqual([{ actor: ava }]);
+    expect(await deleteAccount(ava)).toMatchObject({ kept: 1 });
+    expect(await receipts(first)).toEqual([{ actor: "system" }]);
+
+    // Deletion first, the game kept for Mia: Sam's receipt, admitted before, waits on the game lock and then finds no seat.
+    const sam = await member("Sam");
+    const mia = await member("Mia");
+    const second = await live(sam, mia);
+    await devSettleNow(second, sam);
+    const prepared = await prepareGameAccountDeletion({ memberIds: [sam], prisma: db });
+    let receipt: ReturnType<typeof run> | undefined;
+    let waited = false;
+    await db.$transaction(async (tx) => {
+      await applyGameAccountDeletionTx({ memberIds: [sam], now: new Date(), prepared, tx });
+      receipt = run(sam, { gameId: second, type: "watchRecap" });
+      for (let tries = 0; tries < 100 && !waited; tries += 1) {
+        const [{ waiting }] = await db.$queryRaw<{ waiting: number }[]>`SELECT count(*)::int AS waiting FROM pg_locks WHERE NOT granted`;
+        waited = waiting > 0;
+        if (!waited) await new Promise(resolve => setTimeout(resolve, 20));
+      }
+      await tx.hostedMember.delete({ where: { id: sam } });
+    }, { timeout: 15_000 });
+    expect(waited).toBe(true);
+    expect(await receipt).toMatchObject({ ok: false, error: { code: "GAME_NOT_FOUND" } });
+    expect(await db.game.count({ where: { id: second } })).toBe(1);
+    expect(await receipts(second)).toEqual([]);
+  }, 30_000);
+
   it("deletes a finished game once both players have left", async () => {
     const leo = await member("Leo");
     const ava = await member("Ava");
