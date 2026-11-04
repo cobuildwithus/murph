@@ -636,6 +636,16 @@ export interface GameError {
   retryable?: boolean;
 }
 
+/**
+ * GET /games/:id/message-recipient, asked only when a player taps Message on
+ * a live pair game: the other player's verified number, or null when there's
+ * no one to text.
+ */
+export interface GameMessageRecipientView {
+  ok: true;
+  phone: string | null;
+}
+
 /** Returned only when creation explicitly prepares a Messages handoff. */
 export interface CreateGameView extends GameView {
   composer?: { murphPhoneNumber: string };
