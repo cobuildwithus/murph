@@ -512,6 +512,8 @@ export interface GameHistoryPersonView {
   memberId: string;
   firstName: string;
   avatarUrl?: string;
+  /** Only their own chosen photo, so the app knows a private one can't be set. */
+  profileAvatarUrl?: string;
   record: { won: number; lost: number; tied: number };
   games: GameHistoryGameView[];
 }
