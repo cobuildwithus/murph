@@ -238,7 +238,7 @@ export async function readGroupGameChatAuthority(game: GroupRoomGame, containerM
   if (!audience.keys.candidates.includes(game.audienceKey)) return null;
   const route = await readHostedThreadRouteByThreadIdentity({ channel: "linq", threadId: audience.threadId, prisma });
   if (route?.containerMemberId !== containerMemberId) return null;
-  if (game.players.some(player => !player.memberId || player.leftAt || player.seat < 0 || player.seat > 9)) return null;
+  if (game.players.some(player => !player.leftAt && (!player.memberId || player.seat < 0 || player.seat > 9))) return null;
   const restricted = [...new Set([...audience.memberIds, ...game.players.flatMap(player => player.memberId ? [player.memberId] : [])])];
   return await hasGameChatRestriction(prisma, restricted) ? null : audience;
 }

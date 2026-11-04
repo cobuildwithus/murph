@@ -72,7 +72,7 @@ the proposer. Each person can answer only for themselves; their yes or no is
 final for that ask. Repeating the same answer is a no-op, even after resolution.
 One ask waits at a time, and only its proposer can cancel it. Unjoined invitees
 and departed players do not count. A late join adds an undecided voter; a
-departure clears the ask because it detaches chat access.
+departure clears the ask because it changes who votes.
 
 Group changes use the pair edit delta, pending JSON and approved terms writer.
 Tasks lock once Day 1 begins, the start date at the first check-in, and the prize
@@ -92,10 +92,12 @@ Brief refusals during either version window are accepted. No migration or
 additional capability flag is needed; production group admission stays dark.
 
 A pre-settlement leave is silent, preserves evidence and excludes the player
-from prizes, debts and new content. Leaving a waiting invitation voids it, as
-does an active game falling below two remaining players. Group blocks mask content symmetrically without changing scores or
-ending the game. Explicit player reports identify their subject; posts remain
-counted when their reporter hides them.
+from prizes, debts and new app content. A leaver still in the group text sees
+Murph’s later shared messages and can call read_game, but cannot mutate the game.
+Leaving a waiting invitation voids it, as does an active game falling below two
+remaining players. Group blocks mask content symmetrically without changing
+scores or ending the game. Explicit player reports identify their subject;
+posts remain counted when their reporter hides them.
 
 Exactly one winner's prize is shared by a proper subset tied for the highest
 numeric score. An all-way tie has no ticket. Eligibility and scores freeze at

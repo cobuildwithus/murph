@@ -1,4 +1,5 @@
 import "server-only";
+import { groupGameRecapPlayers } from "./recap-cohort";
 import { getPrisma } from "../prisma";
 import { lockGamePair } from "./blocks";
 import { hasGameChatBlock, sameGamePlayers } from "./chat-membership";
@@ -12,29 +13,45 @@ export interface GameRecapRegenerationRequest {
   execute: boolean;
 }
 
+type RecapRoster = { maxPlayers: number; settledAt: Date | null; status: string;
+  players: Array<{ memberId: string | null; leftAt: Date | null }> };
+
+function recapRosterRefusal(game: RecapRoster | null, expected: readonly string[]): string | null {
+  if (!game) return "ineligible_roster";
+  if (game.maxPlayers === 10 && game.status !== "settled") return "not_settled";
+  const players = game.maxPlayers === 10 ? groupGameRecapPlayers(game) : game.players;
+  if (game.maxPlayers === 10 && !players) return "player_departed";
+  if (!sameGamePlayers(players?.map(player => player.memberId) ?? [], expected)) return "ineligible_roster";
+  if (game.status !== "settled") return "not_settled";
+  if (game.maxPlayers !== 10 && game.players.some(player => player.leftAt !== null)) return "player_departed";
+  return null;
+}
+
 /** Ops authentication belongs to the route. No provider, crypto or signal work here. */
 export async function requestGameRecapRegeneration(input: GameRecapRegenerationRequest & { operatorMemberId: string }) {
   const prisma = getPrisma();
   const eventId = gameChatLifecycleEventId(input.gameId, "recap", undefined, input.regenerationId);
   const result = (outcome: string) => ({ gameId: input.gameId, regenerationId: input.regenerationId, eventId,
     dryRun: !input.execute, outcome });
-  const seed = await prisma.game.findUnique({ where: { id: input.gameId }, select: { players: { select: { memberId: true, leftAt: true }, take: 11 } } });
-  const players = seed?.players.map((player) => player.memberId) ?? [];
+  const seed = await prisma.game.findUnique({ where: { id: input.gameId }, select: { maxPlayers: true, settledAt: true, status: true, players: { select: { memberId: true, leftAt: true }, take: 11 } } });
+  if (seed?.maxPlayers === 10 && seed.status !== "settled") return result("not_settled");
+  const cohort = seed?.maxPlayers === 10 ? groupGameRecapPlayers(seed) : seed?.players;
+  if (seed?.maxPlayers === 10 && !cohort) return result("player_departed");
+  const players = cohort?.map(player => player.memberId) ?? [];
   if (!sameGamePlayers(players, players)) return result("ineligible_roster");
   return prisma.$transaction(async (tx) => {
-    await lockGamePair(tx, players[0]!, players[1]!);
+    if (seed?.maxPlayers !== 10) await lockGamePair(tx, players[0]!, players[1]!);
     // Account deletion also owns this row before changing the roster or recap.
     await tx.$queryRaw`SELECT id FROM game WHERE id = ${input.gameId} FOR UPDATE`;
     const game = await tx.game.findUnique({ where: { id: input.gameId }, select: {
-      status: true, chatContainerMemberId: true, recapEncrypted: true,
+      maxPlayers: true, settledAt: true, status: true, chatContainerMemberId: true, recapEncrypted: true,
       players: { select: { memberId: true, leftAt: true }, take: 11 },
     } });
-    if (!game || !sameGamePlayers(game.players.map((player) => player.memberId), players)) return result("ineligible_roster");
-    if (game.status !== "settled") return result("not_settled");
-    if (game.players.some(player => player.leftAt !== null)) return result("player_departed");
+    const refusal = recapRosterRefusal(game, players);
+    if (!game || refusal) return result(refusal ?? "ineligible_roster");
     if (!isGameOn(game)) return result("game_disabled");
     if (!game.chatContainerMemberId) return result("chat_unavailable");
-    if (await hasGameChatBlock(tx, players)) return result("players_blocked");
+    if (await hasGameChatBlock(tx, game.players.flatMap(player => player.memberId ? [player.memberId] : []))) return result("players_blocked");
     const prior = await tx.gameEvent.findUnique({ where: { commandKey: eventId }, select: { id: true } });
     if (prior) return result("already_requested");
     if (!game.recapEncrypted) return result("recap_unavailable");

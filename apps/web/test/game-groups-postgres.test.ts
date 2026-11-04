@@ -7,9 +7,14 @@ import { buildHostedMemberPhoneIdentityFields } from "@/src/lib/hosted-onboardin
 import { createHostedEmailLookupKey, createHostedExternalThreadIdentityLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { areGameGroupsEnabled } from "@/src/lib/game/access";
 import { gameAudienceKeys } from "@/src/lib/game/audience";
-import { runGameCommand, readGame, readHome, readGameChatState, runGameChatUpdate, readGameRecapMaterial, authorizeMediaRead } from "@/src/lib/game/service";
-import { readGameChatAudience } from "@/src/lib/game/chat-membership";
-import type { HostedGameUpdate } from "@murphai/hosted-execution/runtime-control";
+import { runGameCommand, readGame, readHome, readGameChatState, runGameChatUpdate, readGameRecapMaterial, sealGameRecap, authorizeMediaRead } from "@/src/lib/game/service";
+import { assertGameProposalDeliveryCurrentTx } from "@/src/lib/game/chat-delivery-authority";
+import { readGameChatFundingRooms } from "@/src/lib/game/chat-access";
+import { requestGameRecapRegeneration } from "@/src/lib/game/recap-regeneration";
+import { markGameChatGenerationQueuedTx, reserveGameChatLifecycleTx } from "@/src/lib/game/chat-lifecycle-receipt";
+import { readGameChatAudience, readGroupGameChatAuthority } from "@/src/lib/game/chat-membership";
+import type { HostedExecutionConversationMessageWake } from "@murphai/hosted-execution/contracts";
+import type { HostedGameRecap, HostedGameUpdate } from "@murphai/hosted-execution/runtime-control";
 import { hostedGameChatStateSchema } from "@murphai/hosted-execution/runtime-control";
 import { openGameTexts } from "@/src/lib/game/crypto";
 import { parseStoredResult, canRedeemGroupTicket } from "@/src/lib/game/rules";
@@ -1304,6 +1309,10 @@ describe.skipIf(!enabled)("group majority changes", () => {
     await ok(g.people[1].id, { type: "leave", gameId: g.game.id });
     expect(await gameRow(g.game.id)).toMatchObject({ pendingChange: null, status: count === 2 ? "void" : "live" });
     expect(await db.gameEvent.findFirst({ where: { gameId: g.game.id, type: "change_expired" } })).toMatchObject({ payload: { proposalId: g.proposalId, reason: "A player left." } });
+    const shared = await readGameChatState(g.context.chatContainerMemberId, g.people.map(p => p.id));
+    expect(shared.games.map(game => game.id)).toEqual(count === 2 ? [] : [g.game.id]);
+    // A real provider roster change still detaches the surviving game.
+    chatProof.rooms.set(g.context.chatContainerMemberId, g.people.filter((_, i) => i !== 1).map(p => p.email));
     expect((await readGameChatState(g.context.chatContainerMemberId, g.people.map(p => p.id))).games).toEqual([]);
   });
 
@@ -1358,5 +1367,226 @@ describe.skipIf(!enabled)("group majority changes", () => {
     const reportId = randomUUID();
     await ok(g.people[0].id, { type: "report", gameId: g.game.id, reportId, about: "terms", reason: "harassment" });
     expect(await db.gameReport.findUnique({ where: { id: reportId } })).toMatchObject({ reportedMemberId: g.people[1].id });
+  });
+});
+
+async function leaverChatGame() {
+  const people = await Promise.all([person(), person(), person()]);
+  for (const [i, p] of people.entries()) await ok(p.id, { type: "setProfile", firstName: ["Alex", "Sam", "River"][i], timeZone: "UTC" });
+  const room = await exactRoom(people);
+  const game = await create(people[0], people.slice(1), { terms: { ...terms, tasks: [{ seat: 2, text: "Private leaver task" }] } });
+  for (const p of people.slice(1)) await ok(p.id, join(game.token));
+  const members = people.map(p => p.id);
+  const context = { multiplayer: true, chatContainerMemberId: room, chatPlayerMemberIds: members,
+    chatAudience: await readGameChatAudience(room), beforeMutationTx: async () => {} };
+  return { people, room, game, members, context };
+}
+
+async function queuedGroupRecap(g: Awaited<ReturnType<typeof leaverChatGame>>) {
+  const eventId = `game-recap:${g.game.id}`;
+  await reserveGameChatLifecycleTx({ gameId: g.game.id, kind: "recap", now: createdAt, tx: db });
+  await markGameChatGenerationQueuedTx(eventId, db, g.room);
+  const recap: HostedGameRecap = { pages: [
+    { background: "paper", blocks: [{ kind: "headline", text: "A week outside" }] },
+    { background: "sage", blocks: [{ kind: "headline", text: "New paths together" }] },
+    { background: "night", blocks: [{ kind: "headline", text: "The next walk awaits" }] },
+  ], chatLine: "The walking challenge ended. New routes made a shared week.",
+  superlatives: g.people.slice(0, 2).map((p, i) => ({ memberId: p.id, title: `Route finder ${i + 1}`, line: "Brought a walking task to the week." })) };
+  return { beforeMutationTx: async () => {}, containerMemberId: g.room, eventId, gameId: g.game.id, playerMemberIds: g.members, recap };
+}
+
+function leaverChatWake(room: string): HostedExecutionConversationMessageWake {
+  return { eventId: "synthetic-leaver-message", kind: "conversation.message", occurredAt: "2030-03-09T12:00:00Z", userId: room,
+    message: { channel: "linq", phoneLookupKey: "synthetic-phone-key",
+      routeAuthority: { channel: "linq", containerMemberId: room, threadId: room, accountLookupKey: "synthetic-line" },
+      linqMessage: { chatId: room, from: "+15555550101", isFromMe: false, messageId: "synthetic-message", threadIsDirect: false,
+        parts: [{ type: "text", value: "A sunny walk" }, { type: "media", mimeType: "image/jpeg", attachmentId: "synthetic-photo" }] } } };
+}
+
+function prepareGroupLifecycle(room: string) {
+  Object.values(lifecycleProof).forEach(mock => mock.mockReset());
+  lifecycleProof.destination.mockResolvedValue({ conversationShape: "thread-container", route: { channel: "linq" } });
+  lifecycleProof.bind.mockReturnValue({ route: { channel: "linq", delivery: { kind: "thread", target: room }, accountId: "line" },
+    externalThreadRouteAuthority: { channel: "linq", containerMemberId: room, threadId: room, accountLookupKey: "line-key" } });
+  lifecycleProof.prepare.mockResolvedValue({}); lifecycleProof.append.mockResolvedValue({ mailboxItemId: "synthetic-leaver-notice" });
+  lifecycleProof.mailbox.mockResolvedValue(null);
+}
+
+describe.skipIf(!enabled)("group chat after departure", () => {
+  it("keeps remaining-player reads, funding, check-ins and majority edits while refusing leaver mutations", async () => {
+    const g = await leaverChatGame();
+    await ok(g.people[2].id, { type: "leave", gameId: g.game.id });
+    expect(await readGroupGameChatAuthority(await gameRow(g.game.id), g.room)).not.toBeNull();
+    const shared = (await readGameChatState(g.room, g.members, g.people[2].id)).games[0];
+    expect(shared).toMatchObject({ id: g.game.id, pendingInviteeCount: 0 });
+    expect(shared.players.map(p => p.memberId).sort()).toEqual(g.members.slice(0, 2).sort());
+    expect(shared.progress?.players.map(p => p.memberId).sort()).toEqual(g.members.slice(0, 2).sort());
+    expect(shared.terms.tasks).toHaveLength(2);
+    expect(await requestGameRecapRegeneration({ gameId: g.game.id, regenerationId: "live_game", operatorMemberId: "system", execute: false })).toMatchObject({ outcome: "not_settled" });
+    chatProof.sender = g.people[2].id; chatProof.wake = leaverChatWake(g.room);
+    const { handleGameChatTool } = await import("@/src/lib/game/chat-tool");
+    expect(await handleGameChatTool({ memberId: g.room, multiplayer: true, runtimeIdentity: null,
+      request: { action: "read_game", origin: { kind: "accepted_input", assistantInputId: "ain_synthetic_leaver_read" } } }))
+      .toMatchObject({ result: { status: "ok", state: { games: [{ id: g.game.id, players: shared.players }] } } });
+    expect(JSON.stringify(shared)).not.toContain("Private leaver task");
+    expect((await readGameChatFundingRooms({ memberIds: [g.room], now: new Date(), prisma: db })).get(g.room)).toBe(g.room);
+    const proposalId = randomUUID();
+    const update: Extract<HostedGameUpdate, { operation: "edit_terms" }> = { operation: "edit_terms", gameId: g.game.id,
+      proposalId, expectedTermsVersion: shared.terms.n, terms: { ...shared.terms, defaultTask: shared.terms.defaultTask!,
+        tasks: shared.terms.tasks.map(task => ({ memberId: shared.players.find(p => p.seat === task.seat)!.memberId, text: task.text })),
+        stakes: [{ kind: "prize", item: "Choose dinner" }] } };
+    expect(await runGameChatUpdate({ ...g.context, actorMemberId: g.people[0].id, now: createdAt, update })).toMatchObject({ ok: true });
+    const vote = (actor: string) => runGameChatUpdate({ ...g.context, actorMemberId: actor, now: createdAt,
+      update: { operation: "approve", gameId: g.game.id, proposalId } });
+    expect(await vote(g.people[2].id)).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
+    expect(await vote(g.people[1].id)).toMatchObject({ ok: true });
+    const saved = await gameRow(g.game.id);
+    const [words] = await openGameTexts([{ table: "game", field: "terms_words", rowId: saved.id, memberId: saved.wordsOwnerMemberId, value: saved.termsWordsEncrypted }]);
+    expect(JSON.parse(words!).versions.at(-1).tasks).toContainEqual({ seat: 2, text: "Private leaver task" });
+    const post = (actor: string) => runGameCommand({ ...g.context, actorMemberId: actor, now: new Date("2030-03-09T12:00:00Z"),
+      command: { type: "post", gameId: g.game.id, entryId: randomUUID(), kind: "words", text: "A walk by the river" } });
+    expect(await post(g.people[0].id)).toMatchObject({ ok: true });
+    expect(await post(g.people[2].id)).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
+    // Restrictions still include departed identities, even if the caller omits them.
+    await db.gameBlock.create({ data: { blockerMemberId: g.people[2].id, blockedMemberId: g.people[0].id } });
+    expect(await readGroupGameChatAuthority(await gameRow(g.game.id), g.room, { ...g.context.chatAudience, memberIds: g.members.slice(0, 2) })).toBeNull();
+  });
+
+  it("refuses a leaver's photo offer and save before selection, offer writes or media import", async () => {
+    const g = await leaverChatGame();
+    await ok(g.people[2].id, { type: "leave", gameId: g.game.id });
+    const now = new Date("2030-03-09T12:00:00Z");
+    await db.game.update({ where: { id: g.game.id }, data: { devClockOffsetMs: BigInt(now.getTime() - Date.now()) } });
+    const { handleGameChatPhoto } = await import("@/src/lib/game/chat-photo");
+    const media = await import("@/src/lib/game/chat-photo-media");
+    const download = vi.spyOn(media, "downloadGameChatPhoto");
+    const { readGamePhotoPostingStateTx } = await import("@/src/lib/game/service");
+    expect(await db.$transaction(tx => readGamePhotoPostingStateTx(tx, g.game.id, g.people[0].id))).not.toBeNull();
+    expect(await db.$transaction(tx => readGamePhotoPostingStateTx(tx, g.game.id, g.people[2].id))).toBeNull();
+    for (const operation of ["offer", "save"] as const) expect(await handleGameChatPhoto({ actor: g.people[2].id,
+      multiplayer: true, containerMemberId: g.room, playerMemberIds: g.members, messageRef: "ain_synthetic_leaver_photo",
+      photo: { operation, gameId: g.game.id, sourceMessageRef: "ain_synthetic_leaver_photo", attachmentOrdinal: 1 },
+      authorize: async () => ({ actor: g.people[2].id, wake: leaverChatWake(g.room) }) })).toMatchObject({ status: "rejected", error: "photo_check_in_unavailable" });
+    expect(download).not.toHaveBeenCalled();
+    expect(await db.gameProfile.findUnique({ where: { memberId: g.people[2].id } })).toMatchObject({ chatPhotoOffer: null, chatPhotoIntroducedAt: null });
+  });
+
+  it("restores room authority and funding when an outside bearer leaves", async () => {
+    const g = await leaverChatGame();
+    const bearer = await person();
+    await ok(bearer.id, join(g.game.token));
+    expect((await gameRow(g.game.id)).players.at(-1)?.seat).toBeGreaterThan(9);
+    expect(await readGroupGameChatAuthority(await gameRow(g.game.id), g.room)).toBeNull();
+    expect((await readGameChatFundingRooms({ memberIds: [g.room], now: new Date(), prisma: db })).size).toBe(0);
+    await ok(bearer.id, { type: "leave", gameId: g.game.id });
+    expect((await readGameChatState(g.room, g.members)).games[0]?.players).toHaveLength(3);
+    expect((await readGameChatFundingRooms({ memberIds: [g.room], now: new Date(), prisma: db })).get(g.room)).toBe(g.room);
+    chatProof.rooms.set(g.room, g.people.slice(0, 2).map(p => p.email));
+    expect(await readGroupGameChatAuthority(await gameRow(g.game.id), g.room)).toBeNull();
+  });
+
+  it.each([0, 2])("keeps the room after non-owner account deletion at seat %i, including the creator", async seat => {
+    const g = await leaverChatGame();
+    // Runtime ownership belongs to a surviving player, independently of game creation.
+    await db.hostedThreadContainer.update({ where: { memberId: g.room }, data: { ownerMemberId: g.people[1].id } });
+    await erase(g.people[seat].id);
+    const row = await gameRow(g.game.id);
+    expect(row.players[seat]).toMatchObject({ memberId: null, leftAt: expect.any(Date) });
+    expect(row.createdBy).toBe(seat === 0 ? null : g.people[0].id);
+    expect(await readGroupGameChatAuthority(row, g.room)).not.toBeNull();
+    const shared = (await readGameChatState(g.room, g.members.filter((_, i) => i !== seat))).games[0];
+    expect(shared).toMatchObject({ pendingInviteeCount: 0, players: expect.any(Array) });
+    expect(shared.players).toHaveLength(2);
+    expect((await readGameChatFundingRooms({ memberIds: [g.room], now: new Date(), prisma: db })).get(g.room)).toBe(g.room);
+  });
+
+  it("keeps fresh reads but retires kickoff at enqueue and final delivery after departure", async () => {
+    const g = await leaverChatGame();
+    prepareGroupLifecycle(g.room);
+    const { deliverGameChatLifecycle } = await vi.importActual<typeof import("@/src/lib/game/chat-lifecycle")>("@/src/lib/game/chat-lifecycle");
+    const delivery = { tx: db, containerMemberId: g.room, audience: g.context.chatAudience, deliveryIdempotencyKey: `game-started:${g.game.id}` };
+    expect(await assertGameProposalDeliveryCurrentTx(delivery)).toBe(true);
+    await ok(g.people[2].id, { type: "leave", gameId: g.game.id });
+    expect((await readGameChatState(g.room, g.members)).games).toHaveLength(1);
+    expect(await deliverGameChatLifecycle(g.game.id, "started")).toBe(false);
+    expect(lifecycleProof.prepare).not.toHaveBeenCalled();
+    expect(await db.hostedLinqDelivery.findFirst({ where: { sourceRef: g.game.id, template: "game_started" } })).toMatchObject({ status: "skipped", skipReason: "game_lifecycle_superseded" });
+    await expect(assertGameProposalDeliveryCurrentTx(delivery)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+  });
+
+  it("projects, validates, enqueues, seals, delivers and regenerates only the remaining recap cohort", async () => {
+    const g = await leaverChatGame();
+    const kept = await entry(g.game.id, g.people[0].id, 0);
+    const gone = await entry(g.game.id, g.people[2].id, 0);
+    await ok(g.people[2].id, { type: "leave", gameId: g.game.id });
+    await settle(g.game.id, g.people[0].id);
+    const material = await readGameRecapMaterial(g.game.id, g.room, g.members);
+    expect(material?.players).toEqual(["Alex", "Sam"]);
+    expect(material?.entries.map(e => e.entryId)).toEqual([kept.id]);
+    expect(JSON.stringify(material)).not.toContain(gone.id);
+    expect(JSON.stringify(material)).not.toContain("River");
+    expect(material?.validation.playerNamesByMemberId.map(p => p.memberId)).toEqual(g.members.slice(0, 2));
+    expect(material?.validation.result.map(p => p.memberId)).toEqual(g.members.slice(0, 2));
+    const mailbox = await import("@/src/lib/hosted-mailbox/store");
+    const decoded = vi.spyOn(mailbox, "decodeHostedMailboxStoredPayloads").mockResolvedValue([leaverChatWake(g.room)]);
+    const { readGameRecapChatMessages } = await import("@/src/lib/game/chat-tool");
+    chatProof.sender = g.people[2].id;
+    expect(await readGameRecapChatMessages({ containerMemberId: g.room, material: material! })).toEqual([]);
+    chatProof.sender = "synthetic-non-player";
+    expect(await readGameRecapChatMessages({ containerMemberId: g.room, material: material! })).toEqual([]);
+    chatProof.sender = g.people[0].id;
+    expect(await readGameRecapChatMessages({ containerMemberId: g.room, material: material! })).toEqual([{ playerName: "Alex", text: "A sunny walk" }]);
+    decoded.mockRestore();
+    const shared = (await readGameChatState(g.room, g.members)).games[0];
+    expect(shared.result?.scores.map(p => p.memberId)).toEqual(g.members.slice(0, 2));
+    expect(parseStoredResult((await gameRow(g.game.id)).result).scores).toHaveLength(3);
+    prepareGroupLifecycle(g.room);
+    const { deliverGameChatLifecycle } = await vi.importActual<typeof import("@/src/lib/game/chat-lifecycle")>("@/src/lib/game/chat-lifecycle");
+    expect(await deliverGameChatLifecycle(g.game.id, "recap")).toBe(true);
+    expect(lifecycleProof.prepare.mock.calls[0][0].envelope.notification.instructions).not.toContain("River");
+    const sealInput = await queuedGroupRecap(g);
+    const { validateGameRecap } = await import("@/src/lib/game/recap");
+    expect(validateGameRecap({ recap: sealInput.recap, players: material!.players, entries: material!.entries, result: material!.validation.result, group: true })).toEqual([]);
+    expect(await sealGameRecap(sealInput)).toEqual(sealInput.recap);
+    expect(await assertGameProposalDeliveryCurrentTx({ tx: db, containerMemberId: g.room, audience: g.context.chatAudience, deliveryIdempotencyKey: sealInput.eventId })).toBe(true);
+    await db.hostedLinqDelivery.updateMany({ where: { sourceRef: g.game.id, template: "game_recap" }, data: { status: "accepted" } });
+    expect(await requestGameRecapRegeneration({ gameId: g.game.id, regenerationId: "after_departure", operatorMemberId: "system", execute: true })).toMatchObject({ outcome: "reserved" });
+    await db.gameBlock.create({ data: { blockerMemberId: g.people[2].id, blockedMemberId: g.people[0].id } });
+    expect(await requestGameRecapRegeneration({ gameId: g.game.id, regenerationId: "blocked_leaver", operatorMemberId: "system", execute: true })).toMatchObject({ outcome: "players_blocked" });
+  });
+
+  it.each(["at_settlement", "after_settlement", "one_survivor"])("refuses an invalid recap cohort (%s) before generation and at every later gate", async condition => {
+    const g = await leaverChatGame();
+    await ok(g.people[2].id, { type: "leave", gameId: g.game.id });
+    const settled = await settle(g.game.id, g.people[0].id);
+    expect(await readGameRecapMaterial(g.game.id, g.room, g.members)).not.toBeNull();
+    const sealInput = await queuedGroupRecap(g);
+    const leftAt = condition === "one_survivor" ? createdAt : new Date(settled.settledAt!.getTime() + (condition === "after_settlement" ? 1 : 0));
+    await db.gamePlayer.update({ where: { gameId_seat: { gameId: g.game.id, seat: 1 } }, data: { leftAt } });
+    expect(await readGameRecapMaterial(g.game.id, g.room, g.members)).toBeNull();
+    expect(await sealGameRecap(sealInput)).toBeNull();
+    await expect(assertGameProposalDeliveryCurrentTx({ tx: db, containerMemberId: g.room, audience: g.context.chatAudience, deliveryIdempotencyKey: sealInput.eventId })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    expect(await requestGameRecapRegeneration({ gameId: g.game.id, regenerationId: "invalid_cohort", operatorMemberId: "system", execute: true })).toMatchObject({ outcome: "player_departed" });
+    await db.hostedLinqDelivery.updateMany({ where: { sourceRef: g.game.id, template: "game_recap" }, data: { status: "awaiting_generation" } });
+    prepareGroupLifecycle(g.room);
+    const { deliverGameChatLifecycle } = await vi.importActual<typeof import("@/src/lib/game/chat-lifecycle")>("@/src/lib/game/chat-lifecycle");
+    expect(await deliverGameChatLifecycle(g.game.id, "recap")).toBe(false);
+    expect(lifecycleProof.prepare).not.toHaveBeenCalled();
+    expect(await db.hostedLinqDelivery.findFirst({ where: { sourceRef: g.game.id, template: "game_recap" } })).toMatchObject({ status: "skipped", skipReason: "game_lifecycle_superseded" });
+  });
+
+  it("refuses sealing when deletion rekeys a departed words owner under the game lock", async () => {
+    const g = await leaverChatGame();
+    await db.hostedThreadContainer.update({ where: { memberId: g.room }, data: { ownerMemberId: g.people[1].id } });
+    await ok(g.people[0].id, { type: "leave", gameId: g.game.id });
+    await settle(g.game.id, g.people[1].id);
+    expect(await readGameRecapMaterial(g.game.id, g.room, g.members)).not.toBeNull();
+    const sealInput = await queuedGroupRecap(g);
+    const prepared = await prepareGameAccountDeletion({ memberIds: [g.people[0].id], prisma: db });
+    expect(await sealGameRecap({ ...sealInput, beforeMutationTx: async tx => { await applyGameAccountDeletionTx({ memberIds: [g.people[0].id], prepared, tx, now: new Date("2030-04-02T12:00:00Z") }); } })).toBeNull();
+    const row = await gameRow(g.game.id);
+    expect(row.wordsOwnerMemberId).not.toBe(g.people[0].id);
+    expect(row.recapEncrypted).toBeNull();
+    expect(await readGameRecapMaterial(g.game.id, g.room, g.members.slice(1))).not.toBeNull();
   });
 });

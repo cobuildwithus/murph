@@ -6006,12 +6006,16 @@ never claims invitees; later link messages naturally retry it.
 `readGroupGameChatAuthority` is the sole group room check for association,
 shared reads, commands, lifecycle enqueue and final egress. It requires a current
 Linq route, a complete provider roster with exactly one active Murph handle,
-rotating keyed equality with the original addressed audience, and only addressed
-seats (0–9). Resolved verified room members plus seated players are checked for
-blocks, suspension and revoked consent. Unresolved handles are allowed; account
-membership is not audience evidence. A stored binding never permits retargeting.
-Runtime funding derives bounded database eligibility; it never grants projection
-or delivery authority.
+rotating keyed equality with the original addressed audience, and remaining
+players with identities in addressed seats (0–9). A departure keeps the room; a
+leaver exiting the group text changes its audience and detaches it. Deleting the
+room owner removes the room and clears the binding; ownership is not transferred.
+Resolved verified room members plus all extant player IDs, including leavers,
+are checked for blocks, suspension and revoked consent. Unresolved handles are
+allowed; account membership is not audience evidence. A stored binding never
+permits retargeting.
+Runtime funding checks remaining addressed players and requires one in the room
+roster. It never grants projection or delivery authority.
 
 After a chat mutation and before recap sealing, tools compare the complete fresh
 keyed audience. Response projections and scheduled reads retain the full proof;
@@ -6022,12 +6026,18 @@ cannot supply its room merely because its two seated members match the pair.
 
 Approval matches an addressed invitee by memberId or verified contact read keys
 and calls ordinary join, including legal and profile prerequisites. Unaddressed
-bearer acceptance remains app-only, and an outside seated joiner suppresses chat.
-Shared names, task overrides and statuses describe seated players only; unjoined
-addressees appear as a pending count. Private labels never leave the starter.
-Group recaps exclude private labels and lore and are withheld if any report makes
-shared content unsafe. Duplicate first names receive stable numbered labels.
-Every eligible person gets one kind superlative. The hard shame validator rejects
+bearer acceptance remains app-only, and an outside joiner suppresses chat until
+they leave. Shared names, tasks, progress and scores describe remaining players
+only; invitees without any player row appear as a pending count. Departed seats
+cannot rejoin. Kickoff is withheld once anyone has left. Private labels never
+leave the starter.
+
+Group recaps use remaining players, excluding leavers from authored evidence.
+The cohort requires at least two remaining identities and no departure at or
+after settlement, for reads, enqueue, sealing, delivery and regeneration. Recaps
+exclude private labels and lore and are withheld if any report makes sharing
+unsafe. Duplicate first names receive stable numbered labels. Every eligible
+person gets one kind superlative. The hard shame validator rejects
 clearly negative labels while allowing praise such as “never missed a day”; the
 prompt prohibits singling out missing people. Lifecycle messages and recap links
 are text-only, so unjoined relatives cannot receive player media attachments.

@@ -1,5 +1,6 @@
 import "server-only";
 
+import { groupGameRecapPlayers } from "./recap-cohort";
 import { readCurrentGameTalk } from "./talk";
 
 import { isPairRoster, hasGameIdentity } from "./roster";
@@ -66,11 +67,11 @@ async function assertGameRecapDeliveryCurrentTx(
 ): Promise<true> {
   const players = input.playerMemberIds ?? [];
   const game = await input.tx.game.findFirst({
-    where: { id: gameId, chatContainerMemberId: input.containerMemberId, status: "settled", players: { none: { leftAt: { not: null } } },
+    where: { id: gameId, chatContainerMemberId: input.containerMemberId, status: "settled", OR: [{ maxPlayers: 10 }, { maxPlayers: 2, players: { none: { leftAt: { not: null } } } }],
       ...(regenerationId ? { events: { some: { commandKey: `${input.deliveryIdempotencyKey}:accepted`, type: "recap_regeneration_accepted" } } } : {}) },
     include: { invitees: true, players: { take: 11 } },
   });
-  if (!game || !await deliveryAudienceCurrent(input, game, players)) return stale();
+  if (!game || game.maxPlayers === 10 && !groupGameRecapPlayers(game) || !await deliveryAudienceCurrent(input, game, players)) return stale();
   if (game.maxPlayers === 10 && await input.tx.gameReport?.findFirst({ where: { gameId }, select: { id: true } })) return stale();
   return true;
 }
@@ -156,7 +157,8 @@ async function assertGameStartedDeliveryCurrentTx(
     where: { id: gameId, chatContainerMemberId: input.containerMemberId, status: "live" },
     include: { invitees: true, players: { take: 11 } },
   });
-  if (!game || !await deliveryAudienceCurrent(input, game, input.playerMemberIds ?? [])) return stale();
+  if (!game || game.maxPlayers === 10 && game.players.some(player => player.leftAt)
+    || !await deliveryAudienceCurrent(input, game, input.playerMemberIds ?? [])) return stale();
   return true;
 }
 
