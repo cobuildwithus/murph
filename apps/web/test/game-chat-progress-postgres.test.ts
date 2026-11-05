@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import sharp from "sharp";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getPrisma } from "../src/lib/prisma";
 import { handleGameChatPhoto } from "../src/lib/game/chat-photo";
@@ -116,8 +117,9 @@ describe.skipIf(!enabled)("shared game progress canonical PostgreSQL proof", () 
     expect(wake.message.linqMessage.parts).toEqual([{ type: "media", attachmentId: "synthetic-attachment", mimeType: "image/jpeg" }]);
     expect(JSON.stringify(wake)).not.toContain("signature");
     const common = { actor: a, containerMemberId: alternateRoom, playerMemberIds: [a,b], authorize: async (_tx: unknown, ref: string) => ({ actor: a, wake: ref === sourceRef ? wake : yesWake }) };
-    photoProvider.metadata.mockReset().mockResolvedValue({ id: "synthetic-attachment", content_type: "image/jpeg", size_bytes: 3, download_url: "https://cdn.linqapp.com/refreshed?signature=synthetic" });
-    const download = vi.fn(async () => new Response(new Uint8Array([255,216,255])));
+    const camera = await sharp({ create: { width: 8, height: 8, channels: 3, background: "#808080" } }).jpeg().toBuffer();
+    photoProvider.metadata.mockReset().mockResolvedValue({ id: "synthetic-attachment", content_type: "image/jpeg", size_bytes: camera.byteLength, download_url: "https://cdn.linqapp.com/refreshed?signature=synthetic" });
+    const download = vi.fn(async () => new Response(new Uint8Array(camera)));
     vi.stubGlobal("fetch", download);
     const offered = await handleGameChatPhoto({ ...common, messageRef: sourceRef, photo: { operation: "offer", gameId, sourceMessageRef: sourceRef, attachmentOrdinal: 1 } });
     expect(offered).toEqual({ status: "ok", photoOutcome: "offer" });
@@ -130,7 +132,9 @@ describe.skipIf(!enabled)("shared game progress canonical PostgreSQL proof", () 
     expect(await handleGameChatPhoto(yes)).toEqual({ status: "ok", photoOutcome: "saved" });
     expect(await handleGameChatPhoto(yes)).toEqual({ status: "ok", photoOutcome: "saved" });
     expect(photoProvider.metadata).toHaveBeenCalledExactlyOnceWith("synthetic-attachment");
-    expect(imageControl.putGameImage).toHaveBeenCalledExactlyOnceWith({ bytes: new Uint8Array([255,216,255]), contentType: "image/jpeg", mediaId: expect.stringMatching(/^[a-f0-9]{64}\.jpg$/u), userId: a });
+    expect(imageControl.putGameImage).toHaveBeenCalledExactlyOnceWith({ bytes: expect.any(Uint8Array), contentType: "image/jpeg", mediaId: expect.stringMatching(/^[a-f0-9]{64}\.jpg$/u), userId: a });
+    const stored = imageControl.putGameImage.mock.calls[0]![0] as { bytes: Uint8Array };
+    expect(await sharp(stored.bytes).metadata()).toMatchObject({ format: "jpeg", width: 8, height: 8 });
     expect(download).toHaveBeenCalledExactlyOnceWith("https://cdn.linqapp.com/refreshed?signature=synthetic", expect.objectContaining({ redirect: "error" }));
     expect(await db.gameEntry.count({ where: { gameId } })).toBe(1);
     expect((await db.gameEntry.findFirstOrThrow({ where: { gameId } })).memberId).toBe(a);
