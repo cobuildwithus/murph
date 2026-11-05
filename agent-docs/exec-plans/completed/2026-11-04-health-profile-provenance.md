@@ -1,6 +1,6 @@
 # Health profile CLI and evidence provenance in the Murph prompt
 
-Status: active
+Status: completed
 Created: 2026-11-04
 Updated: 2026-11-04
 
@@ -180,3 +180,5 @@ see Decisions.)
   prompt unchanged; CLI family index gains one `profile` line.
 - Complexity: the scoped CLI router's 17 CLI-only roots moved into one
   registrar table (debt 23 to 8) instead of adding a case.
+- Final ReviewGPT (PR #4573, round 1 at 8c5195e1d9): PASS, no findings.
+Completed: 2026-11-04
