@@ -1,6 +1,6 @@
 # Fewer model rounds on the goal proposal turn
 
-Status: active
+Status: completed
 Created: 2026-11-05
 Updated: 2026-11-05
 
@@ -74,3 +74,4 @@ outcome: a grounded proposal, nothing saved until the member accepts.
   `pnpm --silent complexity:diff`.
 - Expected outcomes: all pass. The production canary after the runner deploy
   gives the real latency.
+Completed: 2026-11-05
