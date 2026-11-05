@@ -6419,7 +6419,8 @@ function assertGameRematchEgressSupported(idempotencyKey: string | null | undefi
 /**
  * Asks Web, when Murph calls `react_to_message`, whether Linq already accepted
  * Web's "on it" tapback on this exact member message. iMessage keeps one
- * tapback per sender per message, so a second reaction would replace it.
+ * tapback per sender per message, so Murph's reaction replaces it and Murph
+ * is told which emoji was there.
  * Read-only (authority-only engagement, no dispatch fence). Returns the emoji
  * or null; errors fall open so the reaction is queued as before. The caller
  * bounds the wait.

@@ -718,10 +718,11 @@ describeRealCodex('real natural goal canary journey', () => {
   }, 600_000)
 })
 
-// Web's "on it" tapback already sits on the member's message; Murph's own
-// react_to_message must not replace it, and the turn still ends cleanly.
+// Web's "on it" tapback already sits on the member's message. Murph's own
+// react_to_message replaces it, learns which emoji was there, and never
+// talks about the swap.
 describeRealCodex('real Codex reaction on an already-tapped message', () => {
-  it('ack tapback dedupe skips the second reaction and finishes without mentioning it', async () => {
+  it('ack tapback replace queues Murph\'s reaction over the tapback and never mentions it', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-ack-dedupe-'))
     const messageRef = `ain_${'9'.repeat(32)}`
@@ -745,7 +746,7 @@ describeRealCodex('real Codex reaction on an already-tapped message', () => {
         authorizeAcceptedMessageTarget: async (input) => {
           authorizations.push({ action: input.action, messageRef: input.messageRef })
           return input.messageRef === messageRef
-            ? { ackReaction: '👍', targetInputId: messageRef }
+            ? { ackReaction: '⏰', targetInputId: messageRef }
             : null
         },
         baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -766,19 +767,17 @@ describeRealCodex('real Codex reaction on an already-tapped message', () => {
       const actions = readCapabilityRoutingActions(result.jsonEvents)
       const reactCalls = actions.filter((action) => action.kind === 'dynamic' && action.tool === MURPH_REACT_TO_MESSAGE_TOOL.name)
       const finished = actions.some((action) => action.kind === 'dynamic' && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name)
-      process.stdout.write(`[ack-dedupe-live] ${JSON.stringify({ authorizations, finished, finalMessage: result.finalMessage, reactCalls: reactCalls.length, reactions: result.reactions })}\n`)
-      // The model reached for a reaction, was told the message already has
-      // one, and no second tapback was queued.
+      process.stdout.write(`[ack-replace-live] ${JSON.stringify({ authorizations, finished, finalMessage: result.finalMessage, reactCalls: reactCalls.length, reactions: result.reactions })}\n`)
+      // The model reacted over the ⏰, was told which emoji it replaced, and
+      // its one reaction is queued for delivery.
       expect(reactCalls.length).toBeGreaterThanOrEqual(1)
       expect(authorizations).toContainEqual({ action: 'reaction', messageRef })
-      expect(result.reactions).toEqual([])
-      // Reaction-only turn: it ends quietly, or with text that never talks
-      // about the tapback mechanics.
+      expect(result.reactions).toHaveLength(1)
+      expect(result.reactions[0]).toMatchObject({ targetInputId: messageRef })
       if (finished) {
         expect(result.finalAction).toEqual({ kind: 'none' })
-      } else {
-        expect(result.finalMessage).not.toMatch(/emoji|react|tapback|thumbs|👍|already/iu)
       }
+      expect(result.finalMessage).not.toMatch(/emoji|tapback|replac|⏰|already reacted/iu)
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }
