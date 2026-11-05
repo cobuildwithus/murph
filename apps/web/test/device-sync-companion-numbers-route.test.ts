@@ -287,6 +287,18 @@ it("requires distinct covered dates, ignores summary/comparator rows, and keeps 
   expect(body.numbers.sleep).toBeNull();
 });
 
+it("keeps a day's summary over a later raw reading, and raw readings on days without one", async () => {
+  const raw = { sourceFamily: "event", sourceKind: "observation" };
+  shards = await splitBrowserVaultReplica(fixture([
+    row("total-sleep-minutes", from, 400, "minutes", raw),
+    row("total-sleep-minutes", through, 480, "minutes", { observedAt: `${through}T00:00:00.000Z`, sourceKind: "sleep-summary" }),
+    row("total-sleep-minutes", through, 90, "minutes", { ...raw, id: "metric-row:raw", observedAt: `${through}T13:00:00.000Z` }),
+  ]));
+  const body = await (await GET(request())).json();
+  expect(body.numbers.sleep.daily).toEqual([{ date: from, value: 400 }, { date: through, value: 480 }]);
+  expect(body.numbers.sleep.latest).toEqual({ date: through, value: 480 });
+});
+
 it("uses catalog stale thresholds and returns null for data older than a year or in unsupported units", async () => {
   shards = await splitBrowserVaultReplica(fixture([
     row("resting-heart-rate", addDaysToIsoDate(through, -15), 60, "bpm"),
