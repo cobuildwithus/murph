@@ -57,7 +57,7 @@ projection-rebuild ownership that landed on `main` through PR 816.
 - `pnpm --filter @murphai/health-metrics test:coverage` passed: 7 files,
   65 tests.
 - `pnpm --filter @murphai/query test:coverage` passed: 58 files, 567 tests.
-- All 35 Murph Age tests, all 79 experiment-analysis tests, and the focused web
+- All 79 experiment-analysis tests, and the focused web
   lab-history suite (19 tests) passed.
 - Scenario integrity passed with 204 scenarios, 11 sample inputs, and 28 golden
   directories.

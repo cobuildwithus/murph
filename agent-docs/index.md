@@ -1859,3 +1859,7 @@ Current requirements remain in `operations/completion-workflow.md` and
 
 GPT Image 2.6 migration: [execution plan](exec-plans/completed/2026-11-04-image-26.md).
 The current model and compatibility contract remain in `../ARCHITECTURE.md`.
+
+Retired feature residue cleanup is tracked in [the removal record](exec-plans/completed/2026-11-05-remove-age-remnants.md).
+
+Changelog deletion evidence is owned by `../apps/web/changelog/README.md`; [verification record](exec-plans/completed/2026-11-05-changelog-deleted-entry-proof.md).

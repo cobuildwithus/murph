@@ -11,7 +11,7 @@ Success means the CLI no longer exposes `intake raw`, assistant attachment namin
 
 ## Constraints
 
-- Preserve unrelated dirty hosted-runtime, hosted-local, and Murph Age work.
+- Preserve unrelated dirty hosted-runtime, hosted-local work.
 - Do not add compatibility shims for removed CLI surfaces.
 - Do not change attachment behavior: parser evidence remains audio/video-only, while PDFs, CSVs, documents, and other inspectable files stay raw-path-first.
 - Do not edit immutable completed plan snapshots except for generated or live references that are required by tests.

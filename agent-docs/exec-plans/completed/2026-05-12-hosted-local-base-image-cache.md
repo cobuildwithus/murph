@@ -30,7 +30,7 @@ Updated: 2026-05-12
 
 - Keep the implementation simple and composable; prefer one shared image tag/source of truth over new state files.
 - Do not expose local paths, account usernames, secrets, raw auth headers, or direct personal identifiers in docs, logs, commits, or examples.
-- Preserve unrelated dirty hosted-runner and Murph Age worktree edits.
+- Preserve unrelated dirty hosted-runner worktree edits.
 
 ## Risks and mitigations
 

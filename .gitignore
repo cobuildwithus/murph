@@ -106,7 +106,6 @@ apps/cloudflare/.deploy
 # Local staged research artifacts
 research-artifacts/
 source-artifacts/
-scripts/murph-age/
 
 # Private founder strategy docs & assets — local only, never published
 agent-docs/product-ideas.md

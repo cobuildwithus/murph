@@ -591,27 +591,6 @@ test('agent-visible input-file command surfaces stay explicitly reviewed', async
   assert.deepEqual(inputCommands, reviewedInputCommands)
 })
 
-test('retired Murph Age commands are absent from generated agent artifacts', async () => {
-  const commands = await loadFullLlmCommands()
-  const generatedTypes = await readFile(
-    new URL('../src/incur.generated.ts', import.meta.url),
-    'utf8',
-  )
-  const configSchema = parseJsonObject(
-    await readFile(new URL('../config.schema.json', import.meta.url), 'utf8'),
-    'config schema',
-  )
-  const rootCommands = requireRecord(
-    requireRecord(configSchema.properties, 'config schema properties').commands,
-    'config schema commands',
-  )
-  const commandProperties = requireRecord(rootCommands.properties, 'config schema command properties')
-
-  assert.equal(commands.some((command) => /^age(?: |$)/u.test(command.name)), false)
-  assert.doesNotMatch(generatedTypes, /^\s*['"]age(?: |['"])/mu)
-  assert.equal(Object.hasOwn(commandProperties, 'age'), false)
-})
-
 test('wearables activity list exposes explicit bounded workout detail on demand', async () => {
   const detailDescription =
     'Include bounded workoutFeatures and splits (up to 32 workouts per day and 64 splits per workout). Use when the question needs lap or split rows. Prefer --include-workout-summaries for individual workout facts without splits; omit both options for day totals. Choose the required level before the first and only activity-list data read; never use a smaller output as a probe before retrying with detail.'

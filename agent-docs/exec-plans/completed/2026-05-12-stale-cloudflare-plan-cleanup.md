@@ -46,6 +46,6 @@ Updated: 2026-05-12
 - Direct readback confirmed both stale plans moved to `agent-docs/exec-plans/completed/` and the broad-runner ledger row was removed in the worktree.
 - `git diff --check -- <touched plan paths>` passed.
 - `rg -n "agent-docs/exec-plans/active/big-refactor-bug-fix\\.md|agent-docs/exec-plans/active/token-cleanup\\.md|deferredCheckpointRequired" agent-docs/exec-plans/active --glob '!2026-05-12-stale-cloudflare-plan-cleanup.md' --glob '!COORDINATION_LEDGER.md'` returned no matches.
-- `pnpm typecheck` failed in unrelated Murph Age script work outside this docs change (`scripts/murph-age/r399-midus2-biomarker-increment.ts` missing `uniqueColumns` and one argument-count mismatch).
+- `pnpm typecheck` failed in unrelated script work outside this docs change (unrelated code missing `uniqueColumns` and one argument-count mismatch).
 - `pnpm test` failed in unrelated CLI coverage (`packages/cli/test/device-cli.test.ts` timed out in `device connect uses hosted CLI bridge in hosted runtime without local daemon credentials`).
 Completed: 2026-05-12

@@ -28,7 +28,7 @@ Add a regression test proving hosted user-data deletion during the narrow window
 ## Verification
 
 - `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/user-runner-alarm.test.ts` passed after the awaited and detached pre-container deletion regressions were added: 11 tests.
-- `bash scripts/workspace-verify.sh test:diff apps/cloudflare/test/user-runner-alarm.test.ts agent-docs/exec-plans/active/2026-05-12-hosted-deletion-pre-container-race.md agent-docs/exec-plans/active/COORDINATION_LEDGER.md` was attempted and failed before Cloudflare verification on unrelated repo TS tools errors in `scripts/murph-age/r399-midus2-biomarker-increment.ts`.
+- `bash scripts/workspace-verify.sh test:diff apps/cloudflare/test/user-runner-alarm.test.ts agent-docs/exec-plans/active/2026-05-12-hosted-deletion-pre-container-race.md agent-docs/exec-plans/active/COORDINATION_LEDGER.md` was attempted and failed before Cloudflare verification on unrelated repo TS tools errors in unrelated code.
 - `pnpm --dir apps/cloudflare verify` passed after the final test changes: 72 files, 829 tests.
 - Security/privacy review found no leakage or authority regression; it noted the detached `waitUntil` retry path as a residual gap, which is now covered by the second regression.
 - Coverage-write review made no edits and agreed the initial awaited drain regression directly covered the requested race; the final diff adds the detached-path regression as additional coverage.
