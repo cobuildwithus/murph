@@ -17,9 +17,14 @@ class IndexBucket extends MemoryEncryptedR2Bucket {
     const keys = [...this.objects.keys()].filter(key => key.startsWith(prefix));
     return { objects: keys.slice(0, limit).map(key => ({ key })), truncated: keys.length > limit };
   }
-  override async put(key: string, value: string, options?: { onlyIf?: unknown }): Promise<void> {
-    if (options?.onlyIf && this.objects.has(key)) return;
-    return super.put(key, value);
+  readonly reads: string[] = [];
+  override async get(key: string) {
+    this.reads.push(key);
+    return super.get(key);
+  }
+  // Like R2: the stored object, or null when an `onlyIf` condition failed.
+  override async put(key: string, value: string, options?: { onlyIf?: unknown }): Promise<unknown> {
+    return options?.onlyIf && this.objects.has(key) ? null : super.put(key, value);
   }
 }
 
@@ -113,6 +118,10 @@ describe("private game Images", () => {
     const bucket = new IndexBucket(), p = provider();
     const store = createGameImageStore({ deploymentOrigin, bucket, images: p.images, userId: "member_leo" });
     await store.upload(mediaId, bytes);
+    const [pointerKey] = [...bucket.objects.keys()];
+    // A won conditional write is its own confirmation: the pointer is read
+    // once before the upload (is it already stored?) and never again.
+    expect(bucket.reads.filter(key => key === pointerKey)).toHaveLength(1);
     await store.upload(mediaId, bytes);
     expect(p.upload).toHaveBeenCalledTimes(1);
     expect(p.upload.mock.calls[0]?.[1]).toMatchObject({ requireSignedURLs: true });
@@ -125,6 +134,34 @@ describe("private game Images", () => {
     expect(p.sign).toHaveBeenCalledWith({ variant: "gameavatar", expiresIn: 300 });
     await store.delivery(mediaId, "photo");
     expect(p.sign).toHaveBeenLastCalledWith({ variant: "gamephoto", expiresIn: 300 });
+  });
+
+  it("returns a stored copy without waiting on the inspection that ran alongside it", async () => {
+    const bucket = new IndexBucket(), p = provider();
+    const store = createGameImageStore({ deploymentOrigin, bucket, images: p.images, userId: "member_leo" });
+    await store.upload(mediaId, bytes);
+    p.info.mockRejectedValueOnce(new Error("synthetic inspection outage"));
+    await expect(store.upload(mediaId, bytes)).resolves.toBeUndefined();
+    expect(p.upload).toHaveBeenCalledTimes(1);
+  });
+
+  it("replies once the pointer is stored and clears its receipt after the reply", async () => {
+    const bucket = new IndexBucket(), p = provider();
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const remove = bucket.delete.bind(bucket);
+    vi.spyOn(bucket, "delete").mockImplementation(async (key) => { await held; return remove(key); });
+    const after: Promise<unknown>[] = [];
+    const store = createGameImageStore({
+      deploymentOrigin, bucket, images: p.images, userId: "member_leo", executionCtx: { waitUntil: work => { after.push(work); } },
+    });
+    const receipts = () => [...bucket.objects.keys()].filter(key => key.startsWith("game-image-uploads/"));
+    await store.upload(mediaId, bytes);
+    await expect(store.stat(mediaId)).resolves.toEqual({ byteLength: bytes.length });
+    expect(receipts()).toHaveLength(1);
+    release();
+    await Promise.all(after);
+    expect(receipts()).toHaveLength(0);
   });
 
   it("signs provider-valid variants accepted by deployment admission", async () => {

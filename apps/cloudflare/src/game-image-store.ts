@@ -31,7 +31,11 @@ type Pointer = { schema: "murph.game-image.v1"; imageId: string; byteLength: num
  * The existing opaque owner/content path keeps upload retries idempotent.
  * Cloudflare Images is the sole durable owner of new game image bytes.
  */
-export function createGameImageStore(input: { bucket: R2BucketLike; images: GameImagesBinding; userId: string; deploymentOrigin: string }) {
+export function createGameImageStore(input: {
+  bucket: R2BucketLike; images: GameImagesBinding; userId: string; deploymentOrigin: string;
+  /** The Worker's context: its `waitUntil` lets work finish after the reply. Awaited when absent. */
+  executionCtx?: { waitUntil(work: Promise<unknown>): void };
+}) {
   const origin = requireDeploymentOrigin(input.deploymentOrigin);
   const pointerKey = async (mediaId: string) =>
     (await hostedGameMediaObjectKey({ mediaId, userId: input.userId })).replace(/\.json\.enc$/u, POINTER_SUFFIX);
@@ -50,11 +54,14 @@ export function createGameImageStore(input: { bucket: R2BucketLike; images: Game
       const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array(bytes))),
         (byte) => byte.toString(16).padStart(2, "0")).join("");
       if (hash !== mediaId.split(".")[0]) throw new TypeError("Game image content key does not match.");
+      // Inspect while looking for a stored copy, which returns without needing
+      // the answer. Inspect before durable upload admission: invalid input and
+      // inspection outages cannot leave a receipt that blocks account cleanup.
+      // No image is stored by this operation. Hosted upload failures remain ambiguous.
+      const inspected = requireValidImage(input.images, bytes, mediaId);
+      inspected.catch(() => undefined);
       if (await read(mediaId)) return;
-      // Inspect before durable upload admission: invalid input and inspection
-      // outages cannot leave a receipt that blocks account cleanup. No image
-      // is stored by this operation. Hosted upload failures remain ambiguous.
-      await requireValidImage(input.images, bytes, mediaId);
+      await inspected;
       const { delete: remove } = requireR2DeletionCapabilities(input.bucket);
       const paths = await uploadPaths(input.userId, origin);
       const receipt = `${paths.pending}${crypto.randomUUID()}.json`;
@@ -79,16 +86,24 @@ export function createGameImageStore(input: { bucket: R2BucketLike; images: Game
         throw new Error("Game image privacy was not confirmed.");
       }
       const pointer: Pointer = { byteLength: bytes.length, imageId: uploaded.id, schema: "murph.game-image.v1" };
-      // R2 conditional creation elects one winner for concurrent retries.
-      // A lost/ambiguous response leaves an owner-tagged image that account
-      // deletion also finds independently of the pointer.
-      await input.bucket.put(await pointerKey(mediaId), JSON.stringify(pointer), {
+      // R2 conditional creation elects one winner for concurrent retries, and
+      // its answer says whether this upload won: only a lost (or unanswered)
+      // race reads the winner. A lost/ambiguous response leaves an
+      // owner-tagged image that account deletion also finds without the pointer.
+      const created = await input.bucket.put(await pointerKey(mediaId), JSON.stringify(pointer), {
         httpMetadata: { contentType: "application/json" }, onlyIf: { etagDoesNotMatch: "*" },
       });
-      const winner = await read(mediaId);
-      if (winner?.imageId !== uploaded.id) await input.images.hosted.image(uploaded.id).delete();
-      if (!winner) throw new Error("Game image storage was not confirmed.");
-      await remove(receipt);
+      if (!created) {
+        const winner = await read(mediaId);
+        if (winner?.imageId !== uploaded.id) await input.images.hosted.image(uploaded.id).delete();
+        if (!winner) throw new Error("Game image storage was not confirmed.");
+      }
+      // The image is stored once its pointer is. Clearing the receipt can
+      // finish after the reply: a receipt left behind makes account deletion
+      // wait, as after any ambiguous upload, and never leaves an image behind.
+      const cleared = remove(receipt);
+      if (input.executionCtx) input.executionCtx.waitUntil(cleared);
+      else await cleared;
     },
     async delivery(mediaId: string, variant: GameImageVariant) {
       const pointer = await read(mediaId);
