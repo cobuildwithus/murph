@@ -732,9 +732,16 @@ function resolveCodexAttemptCapabilities(
     executionPlan.profile.toolProfile === 'output-only-turn'
   const gameHostTurn =
     executionPlan.profile.toolProfile === 'game-host-turn'
+  // Process isolation (one-shot member-read process, read-only sandbox, no
+  // resume) covers both follow-up evaluations and the onboarding check-in.
+  // Only follow-up evaluations also lose Murph tools; the onboarding check-in
+  // keeps the planned tools and their host-side context like any private run.
   const readOnlyAutomationTurn = isReadOnlyScheduledTurn(
     executionPlan.input, attemptPlan.routePlan.followUpInvocation,
   )
+  const followUpEvaluationTurn =
+    attemptPlan.routePlan.followUpInvocation === true
+  const onboardingGoalCheckinTurn = readOnlyAutomationTurn && !followUpEvaluationTurn
   const nativeCapabilitiesRestrictedTurn = [
     outputOnlyTurn,
     gameHostTurn,
@@ -771,8 +778,13 @@ function resolveCodexAttemptCapabilities(
     normalizeNullableString(audience.channel)?.toLowerCase() === 'email'
   const hostedCapabilitiesRestricted =
     nativeCapabilitiesRestrictedTurn || restrictedOneShotTurn
-  const toolsRestricted = outputOnlyTurn || readOnlyAutomationTurn
-  const publicInternetRestricted = toolsRestricted || toolOnlyMaintenanceTurn
+  const hostedToolContextRestricted =
+    hostedCapabilitiesRestricted && !gameHostTurn && !onboardingGoalCheckinTurn
+  const toolsRestricted = outputOnlyTurn || followUpEvaluationTurn
+  // The onboarding check-in keeps its tools but not open web access: its
+  // policy limits it to the conversation and targeted vault reads.
+  const publicInternetRestricted =
+    toolsRestricted || toolOnlyMaintenanceTurn || readOnlyAutomationTurn
   const ordinaryHostedWorkspaceTurn =
     Boolean(executionPlan.executionContext?.hosted) &&
     !hostedCapabilitiesRestricted &&
@@ -796,6 +808,7 @@ function resolveCodexAttemptCapabilities(
     ordinaryHostedWorkspaceTurn,
     hostedLocalTestProviderTurn,
     hostedCapabilitiesRestricted,
+    hostedToolContextRestricted,
     toolsRestricted,
     publicInternetRestricted,
   }
@@ -922,7 +935,7 @@ function buildCodexAttemptProviderInput(
       groupRoomModelMaintenanceAuthorized:
         capabilities.groupRoomModelMaintenanceTurn,
       memberMemoryMaintenanceAuthorized: capabilities.memberMemoryMaintenanceTurn,
-      hostedToolContext: capabilities.hostedCapabilitiesRestricted && !capabilities.gameHostTurn
+      hostedToolContext: capabilities.hostedToolContextRestricted
         ? null
         : executionPlan.hostedToolContext ?? null,
       materializeWorkspaceArtifacts: capabilities.hostedCapabilitiesRestricted

@@ -1355,7 +1355,12 @@ describe('assistant Codex turn planning', () => {
       session: createSession(),
       sharedPlan: createSharedPlan(),
     })
-    expect(onboardingGoalCheckinPlan.dynamicTools).toEqual([])
+    // The check-in is a private scheduled run, so it gets the ordinary tools;
+    // its policy asks it to propose before changing anything. Without a
+    // hosted automation port, only the follow-up-attachment path offers
+    // `automation`, and the check-in never attaches a follow-up.
+    expect(onboardingGoalCheckinPlan.dynamicTools.map((tool) => tool.name))
+      .toEqual(ordinaryToolNames.filter((name) => name !== 'automation'))
     expect(onboardingGoalCheckinPlan.assistantCliContract).toBe(
       'bootstrap contract',
     )
@@ -3559,7 +3564,7 @@ describe('assistant Codex turn planning', () => {
       .toContain('ask_grok')
   })
 
-  it('plans calendar links for accepted direct Linq text turns only', async () => {
+  it('plans calendar links for every private direct Linq turn only', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
     )
@@ -3614,8 +3619,10 @@ describe('assistant Codex turn planning', () => {
     }
 
     expect(await planToolNamesFor()).toContain('create_calendar_link')
+    // The link is a URL for the reply, so a turn without a new message
+    // (an automation run, say) may build one too.
     expect(await planToolNamesFor({ accepted: false }))
-      .not.toContain('create_calendar_link')
+      .toContain('create_calendar_link')
     expect(await planToolNamesFor({ channel: 'telegram' }))
       .not.toContain('create_calendar_link')
     expect(await planToolNamesFor({ threadIsDirect: false }))
@@ -3803,6 +3810,7 @@ describe('assistant Codex turn planning', () => {
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
+          calendarLinkAvailable: true,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
@@ -3900,6 +3908,7 @@ describe('assistant Codex turn planning', () => {
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
+          calendarLinkAvailable: true,
         }),
         routeFingerprint: route.routeFingerprint ?? route.routeId,
       }),
@@ -5083,7 +5092,8 @@ describe('assistant Codex turn planning', () => {
 
       const toolNames = plan.dynamicTools.map((tool) => tool.name)
       expect(toolNames.includes('create_phone_call')).toBe(expectedAvailable)
-      expect(toolNames.includes('get_phone_call_status')).toBe(expectedAvailable)
+      // Status is an owner-bound read, so every private turn may check a call.
+      expect(toolNames.includes('get_phone_call_status')).toBe(threadIsDirect)
       expect(toolNames).not.toContain('stop_phone_call')
       expect(toolNames.includes('create_calendar_link')).toBe(channel === 'linq' && threadIsDirect)
       expect(toolNames).not.toContain('submit_product_feedback')
@@ -5111,8 +5121,8 @@ describe('assistant Codex turn planning', () => {
     ['direct', true, true],
     ['group', false, false],
   ] as const)(
-    'offers response cards, but no other scheduled tools, to a %s automation run without occurrence authority',
-    async (_scope, threadIsDirect, cardsAvailable) => {
+    'offers private reads and cards, but no occurrence-keyed effects, to a %s automation run without occurrence authority',
+    async (_scope, threadIsDirect, privateTurn) => {
       planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(null)
       planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
       planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -5156,12 +5166,82 @@ describe('assistant Codex turn planning', () => {
       })
 
       const toolNames = plan.dynamicTools.map((tool) => tool.name)
-      expect(toolNames.includes('attach_sleep_card')).toBe(cardsAvailable)
-      expect(toolNames.includes('attach_response_card')).toBe(cardsAvailable)
+      expect(toolNames.includes('attach_sleep_card')).toBe(privateTurn)
+      expect(toolNames.includes('attach_response_card')).toBe(privateTurn)
+      expect(toolNames.includes('create_calendar_link')).toBe(privateTurn)
+      expect(toolNames.includes('get_phone_call_status')).toBe(privateTurn)
+      // Effects keyed on a scheduled occurrence still need one.
       expect(toolNames).not.toContain('create_phone_call')
-      expect(toolNames).not.toContain('create_calendar_link')
+      expect(toolNames).not.toContain('stop_phone_call')
+      expect(toolNames).not.toContain('poll')
+      expect(toolNames).not.toContain('create_clinical_records_connect_link')
     },
   )
+
+  it('offers cards to an interactive private notification and a group automation run on Telegram', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(null)
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const plan = async (input: {
+      channel: 'linq' | 'telegram'
+      threadIsDirect: boolean
+      threadScope: 'isolated-thread' | 'session-thread'
+      turnTrigger: 'automation-cron' | 'manual-deliver'
+    }) => (await resolveAssistantRouteTurnPlan({
+      acceptedInputItems: [],
+      executionContext: input.threadIsDirect
+        ? null
+        : { hosted: { memberId: 'member-card-turns', userEnvKeys: [] } },
+      input: {
+        ...createMessageInput(),
+        channel: input.channel,
+        scheduledInvocationAuthority: null,
+        scheduledOccurrenceAt: input.turnTrigger === 'automation-cron'
+          ? '2026-11-05T15:17:05.711Z'
+          : null,
+        threadIsDirect: input.threadIsDirect,
+        turnTrigger: input.turnTrigger,
+      },
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: input.threadScope,
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-11-05',
+        currentTimeZone: 'America/New_York',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan({}, {
+        channel: input.channel,
+        threadIsDirect: input.threadIsDirect,
+        threadId: 'card-turn-thread',
+      }),
+    })).dynamicTools.map((tool) => tool.name)
+
+    // A manual meal photo estimate runs as an isolated manual-deliver turn.
+    const mealEstimate = await plan({
+      channel: 'linq',
+      threadIsDirect: true,
+      threadScope: 'isolated-thread',
+      turnTrigger: 'manual-deliver',
+    })
+    expect(mealEstimate).toContain('attach_response_card')
+    expect(mealEstimate).toContain('attach_sleep_card')
+
+    const groupTelegramRun = await plan({
+      channel: 'telegram',
+      threadIsDirect: false,
+      threadScope: 'session-thread',
+      turnTrigger: 'automation-cron',
+    })
+    expect(groupTelegramRun).toContain('attach_telegram_rich_content')
+    expect(groupTelegramRun).toContain('attach_exercise_routine_card')
+    expect(groupTelegramRun).not.toContain('attach_sleep_card')
+  })
 
   it('withholds group phone calls without participant targeting authority', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(

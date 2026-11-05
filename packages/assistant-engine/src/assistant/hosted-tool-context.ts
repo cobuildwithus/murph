@@ -180,6 +180,8 @@ export interface AssistantHostedToolContext {
   claimIMessageContactAssistantInputId?(): string | null
   currentScheduledAutomationAuthority?(): HostedRuntimeGroupEmailScheduledAuthority | null
   currentInvocationScope?(): AssistantHostedInvocationScope | null
+  /** The turn's authenticated audience, whatever woke the turn. */
+  currentConversationScope?(): AssistantConversationScope
   currentConversationPollRoute?(): {
     channel: 'linq' | 'telegram'
     target: string
@@ -616,6 +618,8 @@ export function createAssistantHostedToolContext(input: {
       return deliveryContext.messageInput.scheduledAutomationAuthority ?? null
     },
     currentInvocationScope: readCurrentInvocationScope,
+    currentConversationScope: () =>
+      input.getConversationScope?.() ?? 'unverified-external',
     currentConversationPollRoute: () => {
       const { messageInput } = readDeliveryContext()
       const channel = messageInput.channel
