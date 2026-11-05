@@ -123,7 +123,7 @@ function presentNumber(
   const round = (value: number) => Number(value.toFixed(metric.precision));
   const byDate = new Map<string, { date: string; value: number }>();
   const rows = client.metrics.series({ metricKey: metric.key, from: window.from, to: window.through, grain: "day" });
-  // Saved projection owns provider precedence. Keep its latest value on a date;
+  // Series rows end each date on its highest-priority source, so the last stands;
   // do not average multiple observations or manufacture missing dates.
   for (const row of rows) {
     if (row.statistic !== "value" || row.comparator != null) continue;

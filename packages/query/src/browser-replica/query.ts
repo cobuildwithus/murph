@@ -1,3 +1,5 @@
+import { metricSourcePriority } from "@murphai/health-metrics";
+
 import {
   type BrowserVaultEntity,
   type BrowserVaultEntityFilters,
@@ -353,9 +355,12 @@ function matchesMetricSelectionFilters(row: BrowserVaultMetricSelectionRow, filt
   return true;
 }
 
+/** Each date ends on its highest-priority source, the precedence metric selection uses. */
 function sortMetricRowsAsc(rows: readonly BrowserVaultMetricRow[]): BrowserVaultMetricRow[] {
   return rows.slice().sort((left, right) => {
     if (left.date !== right.date) return left.date.localeCompare(right.date);
+    const priorityDelta = metricSourcePriority(right.sourceKind) - metricSourcePriority(left.sourceKind);
+    if (priorityDelta !== 0) return priorityDelta;
     if (left.observedAt !== right.observedAt) return left.observedAt.localeCompare(right.observedAt);
     return left.id.localeCompare(right.id);
   });
