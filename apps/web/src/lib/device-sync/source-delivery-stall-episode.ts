@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import {
   isSourceRecoveryNoticeEligible,
 } from "@murphai/device-syncd/source-staleness";
+import { ASK_TO_OPEN_MURPH_FOR_STALE_APPLE_HEALTH } from "@murphai/hosted-execution/companion-presence";
 
 import { readHostedSourceNoDataOutreachPolicy } from "./source-no-data-outreach-policy";
 
@@ -32,6 +33,7 @@ export function resolveHostedSourceDeliveryStallNoticeCandidate(input: {
 }): HostedSourceDeliveryStallNoticeCandidate | null {
   if (
     !SOURCE_ID_PATTERN.test(input.sourceId)
+    || isAppleHealthCheckInSwitchedOff(input.sourceProviderSlug)
     || !isSourceRecoveryNoticeEligible(input)
     || input.lastDataAt === null
   ) {
@@ -45,6 +47,12 @@ export function resolveHostedSourceDeliveryStallNoticeCandidate(input: {
     sourceInstanceKey: input.sourceInstanceKey,
     sourceProviderSlug: input.sourceProviderSlug,
   };
+}
+
+/** Its copy asks the member to open Murph; one flag owns those asks. */
+function isAppleHealthCheckInSwitchedOff(sourceProviderSlug: string): boolean {
+  return !ASK_TO_OPEN_MURPH_FOR_STALE_APPLE_HEALTH
+    && sourceProviderSlug.trim().toLowerCase() === "apple_health_kit";
 }
 
 export function buildHostedSourceDeliveryStallNoticeKey(
@@ -117,6 +125,7 @@ export async function isHostedSourceDeliveryStallEpisodeCurrentTx(input: {
     : null;
   if (
     !source
+    || isAppleHealthCheckInSwitchedOff(source.sourceProviderSlug)
     || source.connection.userId !== input.memberId
     || source.connection.status !== "active"
     || source.lastDataAt === null

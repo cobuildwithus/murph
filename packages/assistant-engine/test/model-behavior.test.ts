@@ -1102,7 +1102,7 @@ describe('assistant local PDF evidence guidance', () => {
     },
   )
 
-  it('keeps stale Apple Health troubleshooting app-mediated', () => {
+  it('does not ask members to open Murph for stale Apple Health while the switch is off', () => {
     const directPrompt = buildAssistantSystemPrompt(
       createCommonCodexPromptInput(),
     )
@@ -1114,11 +1114,12 @@ describe('assistant local PDF evidence guidance', () => {
     )
 
     expect(directPrompt).toContain(
-      'ask the member to open Murph on their iPhone so its app-mediated import can run',
+      'If connected Apple Health data is stale or missing, work from what is available and do not raise opening Murph or syncing unprompted.',
     )
     expect(directPrompt).toContain(
-      'then re-check the metric and date',
+      'Only when the member asks why it is missing or what to try, say that opening Murph on their iPhone lets the Apple Health import run, then re-check the metric and date.',
     )
+    expect(directPrompt).not.toContain('app-mediated import')
     expect(directPrompt).toContain(
       "Opening Apple's Health app does not refresh Murph.",
     )
@@ -1615,7 +1616,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toMatchInlineSnapshot(`"68a1d5108af16ff8649843be4ab7aa231321228a52be79e80f0f3010cfea7c67"`)
-    expect(promptA.cacheMetadata.stableRouteCapabilityPromptHash).toMatchInlineSnapshot(`"3ffe5dc506994dc7c7c93430466ac0589ac9c6c47b0b0047b73b555687c53122"`)
+    expect(promptA.cacheMetadata.stableRouteCapabilityPromptHash).toMatchInlineSnapshot(`"de57c7b7601718d8d5f8ad8414ee7ee58a4c6ce3425953973d5cfcc2605c8684"`)
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
     )

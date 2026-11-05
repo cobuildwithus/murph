@@ -16,6 +16,7 @@ import {
   toLocalDayKey,
   type AssistantTonePreference,
 } from "@murphai/contracts";
+import { ASK_TO_OPEN_MURPH_FOR_STALE_APPLE_HEALTH } from "@murphai/hosted-execution/companion-presence";
 import {
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
@@ -1650,9 +1651,12 @@ function buildAssistantIosAppDownloadGuidanceText(
 function buildAssistantHealthRelayGuidanceText(
   androidAppAvailable: boolean,
 ): string {
+  const staleAppleHealthGuidance = ASK_TO_OPEN_MURPH_FOR_STALE_APPLE_HEALTH
+    ? "If connected Apple Health data is stale or missing, ask the member to open Murph on their iPhone so its app-mediated import can run, then re-check the metric and date."
+    : "If connected Apple Health data is stale or missing, work from what is available and do not raise opening Murph or syncing unprompted. Only when the member asks why it is missing or what to try, say that opening Murph on their iPhone lets the Apple Health import run, then re-check the metric and date.";
   const appleHealthRelayGuidance = `Apple Health relay (saved health data, not live Bluetooth heart rate):
 - Apple Health works now in the Murph iPhone app. For Apple Watch, WHOOP, Zepp/Amazfit, Xiaomi/Mi Fitness, RingConn, COROS, Suunto, or supported Huawei Health relay setup, open Murph, sign in, and connect Apple Health.
-- If connected Apple Health data is stale or missing, ask the member to open Murph on their iPhone so its app-mediated import can run, then re-check the metric and date. Opening Apple's Health app does not refresh Murph. Do not promise immediate sync or suggest reconnecting unless authentication or permission failed.
+- ${staleAppleHealthGuidance} Opening Apple's Health app does not refresh Murph. Do not promise immediate sync or suggest reconnecting unless authentication or permission failed.
 - WHOOP limits third-party access. Direct sync omits steps; Apple Health may relay them. Do not infer/request missing steps.
 - WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow; then connect Apple Health in Murph.
 - No documented WHOOP settings deeplink; never invent one.

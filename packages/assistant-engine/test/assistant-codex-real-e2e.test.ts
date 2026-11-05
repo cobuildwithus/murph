@@ -30892,6 +30892,78 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
   )
 
   it(
+    'does not ask the member to open Murph when Apple Health is quietly stale',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const evidence = [
+        'Current synthetic evidence from the completed required reads:',
+        '- Oura is connected; last night it recorded 7h 40m of sleep.',
+        '- Apple Health is connected and authorized. Its newest steps record is July 23; nothing is recorded for July 24 through July 26.',
+      ].join('\n')
+      const probes = [
+        {
+          kind: 'member-question',
+          prompt: [
+            evidence,
+            'The current private member message is: "How did I sleep, and how were my steps this weekend?"',
+          ].join('\n'),
+        },
+        {
+          kind: 'scheduled-morning-note',
+          prompt: [
+            'Scheduled check-in. Saved instructions: Send one short morning note about last night\'s sleep and yesterday\'s steps.',
+            evidence,
+          ].join('\n'),
+        },
+      ]
+
+      try {
+        for (const probe of probes) {
+          const workingDirectory = await mkdtemp(
+            path.join(tmpdir(), 'murph-stale-apple-health-quiet-e2e-'),
+          )
+          try {
+            const result = await executeRealCodexAppServerTurn({
+              approvalPolicy: 'never',
+              baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+              codexCommand:
+                normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+                ?? undefined,
+              codexHome: config.codexHome,
+              developerInstructions:
+                buildMidnightLinqReminderDeveloperInstructions(),
+              dynamicTools: [],
+              env: config.env,
+              model: config.model,
+              modelProvider: config.modelProvider,
+              prompt: probe.prompt,
+              reasoningEffort: 'low',
+              sandbox: 'workspace-write',
+              workingDirectory,
+            })
+
+            process.stdout.write(
+              `[stale-apple-health-quiet-e2e] ${JSON.stringify({
+                finalMessage: result.finalMessage,
+                kind: probe.kind,
+              })}\n`,
+            )
+            expect(result.finalMessage).toMatch(/7\s?h(?:ours?)?\s?(?:and\s)?40|7:40/iu)
+            expect(result.finalMessage).not.toMatch(
+              /(?:open|opening|launch|reopen)[^.!?\n]{0,60}(?:Murph|the app)|Check for new data|(?:try|please|can you|could you)[^.!?\n]{0,40}sync|reconnect/iu,
+            )
+          } finally {
+            await removeRealCodexTemporaryPaths([workingDirectory])
+          }
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    720_000,
+  )
+
+  it(
     'chooses buffered timing after a completed weekly wearable summary',
     async () => {
       const config = await resolveRealCodexE2eConfig()

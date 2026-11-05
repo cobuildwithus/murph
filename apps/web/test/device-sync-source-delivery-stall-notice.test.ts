@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   runWithPreparedHostedMailboxItemAppendCrypto: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
 }));
+// Production ships the Apple Health check-in switched off. These tests turn it
+// on to keep its behavior covered for when it comes back.
+const flag = vi.hoisted(() => ({ askToOpenMurph: true }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeWithPreparedCryptoTx:
@@ -35,6 +38,12 @@ vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", () => ({
     mocks.resolveHostedAssistantNotificationDestination,
 }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.getPrisma }));
+vi.mock("@murphai/hosted-execution/companion-presence", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@murphai/hosted-execution/companion-presence")>()),
+  get ASK_TO_OPEN_MURPH_FOR_STALE_APPLE_HEALTH() {
+    return flag.askToOpenMurph;
+  },
+}));
 vi.mock("@/src/lib/device-sync/source-no-data-outreach-policy", () => ({
   readHostedSourceNoDataOutreachPolicy:
     mocks.readHostedSourceNoDataOutreachPolicy,
@@ -45,6 +54,7 @@ import {
   materializeHostedSourceDeliveryStallNotice,
   resolveHostedSourceDeliveryStallNoticeCandidate,
 } from "@/src/lib/device-sync/source-delivery-stall-notice";
+import { isHostedSourceDeliveryStallEpisodeCurrentTx } from "@/src/lib/device-sync/source-delivery-stall-episode";
 
 const BASE_INPUT = {
   connectionId: "connection-1",
@@ -81,6 +91,7 @@ const DIRECT_LINQ_DESTINATION = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  flag.askToOpenMurph = true;
   const tx = {
     $queryRaw: mocks.lockSource,
     deviceConnectionSource: {
@@ -169,6 +180,53 @@ describe("hosted source delivery-stall notice identity", () => {
       ...candidate,
       lifecycleEpoch: 5,
     })).not.toBe(key);
+  });
+});
+
+describe("Apple Health check-in switch", () => {
+  it("starts and sends no Apple Health check-in while off; other providers continue", async () => {
+    const apple = { ...BASE_INPUT, sourceProviderSlug: "apple_health_kit" };
+    const queuedKey = buildHostedSourceDeliveryStallNoticeKey({
+      connectionId: apple.connectionId,
+      lastDataAt: apple.lastDataAt,
+      lifecycleEpoch: apple.lifecycleEpoch,
+      sourceId: apple.sourceId,
+      sourceInstanceKey: apple.sourceInstanceKey,
+      sourceProviderSlug: apple.sourceProviderSlug,
+    });
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: apple.sourceId }]),
+      deviceConnectionSource: {
+        findUnique: vi.fn().mockResolvedValue({
+          connection: { status: "active", userId: "member-1" },
+          connectionId: apple.connectionId,
+          id: apple.sourceId,
+          lastDataAt: new Date(apple.lastDataAt),
+          lastErrorCode: null,
+          lifecycleEpoch: apple.lifecycleEpoch,
+          sourceInstanceKey: apple.sourceInstanceKey,
+          sourceProviderSlug: apple.sourceProviderSlug,
+          status: apple.status,
+        }),
+      },
+    };
+    const checkQueued = () => isHostedSourceDeliveryStallEpisodeCurrentTx({
+      deliveryIdempotencyKey: queuedKey,
+      memberId: "member-1",
+      now: apple.now,
+      tx: tx as never,
+    });
+
+    expect(await checkQueued()).toBe("current");
+
+    flag.askToOpenMurph = false;
+    expect(resolveHostedSourceDeliveryStallNoticeCandidate(apple)).toBeNull();
+    expect(await checkQueued()).toBe("superseded");
+    expect(resolveHostedSourceDeliveryStallNoticeCandidate(BASE_INPUT)).not.toBeNull();
+    expect(resolveHostedSourceDeliveryStallNoticeCandidate({
+      ...BASE_INPUT,
+      sourceProviderSlug: "whoop_v2",
+    })).not.toBeNull();
   });
 });
 
