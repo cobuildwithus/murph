@@ -314,8 +314,9 @@ the same selection to session creation and decoding. It never wakes or refreshes
 the runtime and adds no persisted projection.
 
 The response has exactly `timeZone`, `savedAt` (replica generation timestamp),
-`freshness`, `window: { from, through }`, `demographics`, and `numbers`. The window is 90 inclusive
-local dates ending today in the vault's canonical zone, already saved in core's
+`freshness`, `window: { from, through }`, `demographics`, and `numbers`. The window is 365 inclusive
+local dates ending today (all the replica keeps, `METRIC_LOOKBACK_DAYS`), so the
+app's charts can show up to a year, in the vault's canonical zone, already saved in core's
 `meals.timeZone` even for members with no meals. Legacy replicas without that zone
 return retryable 503 `NUMBERS_PROJECTION_UNAVAILABLE`; there is no UTC fallback.
 `freshness` uses the same age/generation assessment as Journal. A missing replica,
@@ -337,7 +338,8 @@ Each is null when no usable daily value exists in the window; otherwise it has:
   days for daily metrics and 45 for VO2 max, independent of replica freshness.
 - `comparison`: null without coverage, otherwise
   `{ baseline: { from, through, value, days }, current: { from, through, value, days }, delta }`.
-  Bounds are the first seven and last seven dates of the 90-day window; `days`
+  Bounds are the first seven of the last 90 dates ending today and the last seven
+  dates of the window, so a year of `daily` leaves the change as it was; `days`
   counts distinct measured dates. Daily metrics use means with at least four
   dates per window. VO2 uses its existing intermittent median/two-date policy
   within those same requested bounds. Missing dates are never filled.
