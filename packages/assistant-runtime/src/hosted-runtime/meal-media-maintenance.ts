@@ -175,9 +175,13 @@ export function createHostedMealMediaMaintenance(input: {
     projectedDeadlineMs: input.projectedWakeAt ? Date.parse(input.projectedWakeAt) : undefined };
 }
 
+// A dirty runtime needs an idle checkpoint timer; pending media is the only dirt
+// here, so arm it before the caller's checkpoint loop reads the flag.
 export async function needsHostedMealMediaCheckpoint(input: {
-  dirty: boolean; recoveryFailed: boolean; vaultRoot: string;
+  armIdleCheckpoint: () => void; dirty: boolean; recoveryFailed: boolean; vaultRoot: string;
 }): Promise<boolean> {
   if (input.dirty || input.recoveryFailed) return input.dirty;
-  return hasHostedPendingMealMedia(input.vaultRoot);
+  if (!await hasHostedPendingMealMedia(input.vaultRoot)) return false;
+  input.armIdleCheckpoint();
+  return true;
 }
