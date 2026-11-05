@@ -1,5 +1,5 @@
 import { readGameProposalDeliveryPlayers } from "@/src/lib/game/chat-delivery";
-import { assertGameProposalDeliveryCurrentTx } from "@/src/lib/game/chat-delivery-authority";
+import { assertGameProposalDeliveryCurrentTx, readGameRematchDeliveryRevision } from "@/src/lib/game/chat-delivery-authority";
 import { HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX } from "@murphai/hosted-execution";
 import { parseHostedExecutionResolvedLinqDeliveryRoute } from "@murphai/hosted-execution/routes";
 import {
@@ -90,8 +90,11 @@ export const POST = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
 
   const gameChatPlayers = await readGameProposalDeliveryPlayers(idempotencyKey, userId, expectedResolvedRoute?.target ?? target);
+  const rematchTermsVersion = await readGameRematchDeliveryRevision(idempotencyKey, userId);
 
-  const gameAuthority = gameChatPlayers && "memberIds" in gameChatPlayers
+  const gameAuthority = gameChatPlayers && "policy" in gameChatPlayers
+    ? { playerMemberIds: gameChatPlayers.audience.memberIds, audience: gameChatPlayers.audience, groupMissedPolicy: gameChatPlayers.policy }
+    : gameChatPlayers && "memberIds" in gameChatPlayers
     ? { playerMemberIds: gameChatPlayers.memberIds, audience: gameChatPlayers } : { playerMemberIds: gameChatPlayers };
 
   const assertion = await prisma.$transaction(async (tx) => {
@@ -137,6 +140,7 @@ export const POST = withJsonError(async (request: Request) => {
       deliveryIdempotencyKey: idempotencyKey,
       containerMemberId: userId,
       ...gameAuthority,
+      rematchTermsVersion,
       tx,
     });
 
@@ -273,6 +277,7 @@ export const POST = withJsonError(async (request: Request) => {
   const resolvedRoute = assertion.asserted.resolvedRoute;
   return jsonOk({
     ok: true,
+    ...(idempotencyKey?.startsWith("game-rematch:") ? { gameRematchAuthorityChecked: true } : {}),
     ...(assertion.assistantAskFallbackRequired
       ? { assistantAskFallbackRequired: true }
       : {}),

@@ -8,8 +8,11 @@ import { parseGameRecapEventId } from "@murphai/hosted-execution/runtime-control
 import { Prisma } from "@prisma/client";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { gameResolutionNoticeKind, parseGameResolutionNotice, readGameChangeResolution } from "./change-resolution";
-import { isGameInviteExpired } from "./rules";
+import { currentTerms, isGameInviteExpired, parseStoredTerms } from "./rules";
+import { readHostedMailboxWakeByDedupeKey } from "../hosted-mailbox/store";
 import { readGroupGameChatAuthority, sameGamePlayers } from "./chat-membership";
+import type { HostedGameGroupMissedCheckInPolicy } from "@murphai/hosted-execution/runtime-control";
+import { isGroupMissedDayBatchCurrentTx } from "./group-missed-day";
 
 /** Returns true only for the current proposal and proven audience; stale outbox work cannot announce a replaced edit. */
 export async function assertGameProposalDeliveryCurrentTx(input: {
@@ -17,6 +20,8 @@ export async function assertGameProposalDeliveryCurrentTx(input: {
   containerMemberId: string;
   playerMemberIds?: readonly string[];
   audience?: GameNoticeAudience;
+  rematchTermsVersion?: number | null;
+  groupMissedPolicy?: HostedGameGroupMissedCheckInPolicy;
   tx: Prisma.TransactionClient;
   now?: Date;
 }): Promise<boolean> {
@@ -26,16 +31,26 @@ export async function assertGameProposalDeliveryCurrentTx(input: {
   const recap = parseGameRecapEventId(key);
   if (recap) return assertGameRecapDeliveryCurrentTx(input, recap.gameId, recap.regenerationId);
   if (key.startsWith("game-recap:")) return stale();
-  const missed = /^game-missed:([^:]+):([^:]+):(\d{4}-\d{2}-\d{2})$/u.exec(key);
-  if (missed) return assertGameMissedDeliveryCurrentTx(input, missed[1], missed[2]);
+  if (key.startsWith("game-missed:")) return assertGameMissedEventDeliveryCurrentTx(input, key);
   if (key.startsWith("game-cancelled:")) return assertGameCancelledDeliveryCurrentTx(input);
   if (key.startsWith("game-change-cancelled:") || key.startsWith("game-change-expired:") || key.startsWith("game-change-resolved:")) return assertGameChangeResolvedDeliveryCurrentTx(input);
   const rematch = /^game-rematch:([^:]+)$/.exec(key);
   if (rematch) return assertGameRematchDeliveryCurrentTx(input, rematch[1]);
+  if (key.startsWith("game-rematch:")) return stale();
   const lifecycle = /^game-started:([^:]+)$/.exec(key);
   if (lifecycle) return assertGameStartedDeliveryCurrentTx(input, lifecycle[1]);
   if (!key.startsWith("game-change:")) return false;
   return assertGameChangeProposalDeliveryCurrentTx(input, key);
+}
+
+async function assertGameMissedEventDeliveryCurrentTx(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], key: string): Promise<true> {
+  const missed = /^game-missed:([^:]+):([^:]+):(\d{4}-\d{2}-\d{2})$/u.exec(key);
+  if (!missed) return stale();
+  if (missed[2] !== "group") return assertGameMissedDeliveryCurrentTx(input, missed[1], missed[2]);
+  const policy = input.groupMissedPolicy;
+  if (!policy || policy.eventId !== key || policy.roomId !== input.containerMemberId || !input.audience
+    || !await isGroupMissedDayBatchCurrentTx(policy, input.audience, input.tx, input.now ?? new Date())) return stale();
+  return true;
 }
 
 async function assertGameTalkDeliveryCurrentTx(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], key: string): Promise<true> {
@@ -110,19 +125,38 @@ async function assertGameChangeProposalDeliveryCurrentTx(
 async function assertGameRematchDeliveryCurrentTx(
   input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], gameId: string,
 ): Promise<true> {
+  if (input.rematchTermsVersion != null) await input.tx.$queryRaw`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
   const game = await input.tx.game.findFirst({
     where: { id: gameId, chatContainerMemberId: input.containerMemberId, status: "invited" },
     include: { invitees: true, players: { take: 11 } },
   });
   if (game?.maxPlayers === 10) {
+    if (currentTerms(parseStoredTerms(game.terms)).n !== input.rematchTermsVersion || isGameInviteExpired(game, input.now ?? new Date())) return stale();
     if (!await deliveryAudienceCurrent(input, game, input.playerMemberIds ?? [])) return stale();
     return true;
   }
+  return assertPairRematchDeliveryCurrent(input, game);
+}
+
+function assertPairRematchDeliveryCurrent(
+  input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0],
+  game: Prisma.GameGetPayload<{ include: { invitees: true; players: true } }> | null,
+): true {
   if (!game?.createdBy || !game.invitees[0]?.memberId || game.players.length !== 1
     || isGameInviteExpired(game, input.now ?? new Date())
     || game.players[0]?.memberId !== game.createdBy
     || !sameGamePlayers([game.createdBy, game.invitees[0]?.memberId], input.playerMemberIds ?? [])) return stale();
   return true;
+}
+
+/** Read the immutable mailbox revision outside the short provider-claim transaction. */
+export async function readGameRematchDeliveryRevision(eventId: string | null, containerMemberId: string): Promise<number | null> {
+  if (!eventId?.startsWith("game-rematch:")) return null;
+  const wake = await readHostedMailboxWakeByDedupeKey({ dedupeKey: eventId, userId: containerMemberId });
+  if (!wake || !("notification" in wake)) return null;
+  const policy = wake.notification.responsePolicy;
+  return policy?.kind === "require_game_rematch" && policy.eventId === eventId && eventId === `game-rematch:${policy.gameId}`
+    ? policy.termsVersion : null;
 }
 async function assertGameCancelledDeliveryCurrentTx(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0]): Promise<true> {
   const cancelled = /^game-cancelled:([^:]+)$/.exec(input.deliveryIdempotencyKey ?? "");

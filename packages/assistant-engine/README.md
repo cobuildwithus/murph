@@ -651,14 +651,19 @@ Research scout and Personal Patterns are retired managed automations. Their immu
 
 Group game tools consume the capable hosted-execution contract and choose group
 instructions from immutable `maxPlayers: 10`, including a two-person turnout.
-The starter edits while invited; live group asks require more than half of
-remaining players to agree. Start now is a majority ask only when
-`changeControls.canStartNow` is true; it never accepts invitees. Group copy never uses vs., nudges through another person, shaming or
-body/weight jokes. Per-game remaining-player names disambiguate shared state and
-Prove it facts. Only the accused may concede their own day; Murph never judges
-evidence or asks the room for a verdict. Unjoined people appear as a count except
-a consenting Talk author's profile name and submitted note. Talk accepts no
-invitation and changes no terms. Tools preserve private unjoined task overrides. Shared recaps require one kind
+Ordinary reads compose shared setup and native poll instructions once, followed
+by the pair/group fragments for all modes present. The selected game's immutable
+mode governs consent even in mixed rooms. Only the starter edits an invited
+group; live changes require the existing strict majority. Start now requires
+canStartNow and a majority ask; it accepts no invitees. Eligible players may be
+named from returned evidence; never shame, joke about bodies or weight, or nudge
+someone through another person, or use vs. in group copy. Stable numbered first
+names within each game's remaining-player cohort disambiguate shared state and
+Prove it facts. Only the
+accused may concede their own day; Murph never judges evidence or asks the room
+for a verdict. Unjoined people appear as a count except a consenting Talk
+author's profile name and submitted note. Talk accepts no invitation and changes
+no terms. Tools preserve private unjoined task overrides. Shared recaps require one kind
 superlative per eligible person. They read authorized room-audience game lore
 and the bounded transcript for callbacks about eligible memberIds, excluding
 private material, leavers and unjoined people. `loreAccess: "read"` forbids lore
@@ -667,3 +672,24 @@ records the canonical bare `recap.chatLine` once as `Chat line used:`, trimming
 oldest lines to 64 KiB. Pair recap lore writes stay unchanged. The focused real-Codex
 journey `group game addressed acceptance with duplicate first names` exercises
 production prompt builders, read_game and canonical approve arguments.
+
+Group Same again copies previous terms first; requested modifications use one
+invited starter edit, or the majority path if someone joined meanwhile. Confirm
+only returned state and never recover by creating another game. Web supplies
+compact comparison facts plus the canonical revision; `require_game_rematch`
+is rejected by unsupported runners, and final sends require Web's current
+revision/room acknowledgement. After an already-delivered offer changes, ask for
+fresh agreement; hidden individual tasks require private invitation review.
+Cancellation leaves its one announcement to the lifecycle owner, even when live.
+
+Kickoff offers share the pair wording: a strictly earlier live game suppresses
+the offer, simultaneous starts each offer, and settled games do not suppress.
+Offers never schedule. On explicit individual consent, existing automations save
+the exact game and requester IDs, local time, timezone and bounded duration.
+Each occurrence calls scheduled `read_game`, requires an OK result, the exact
+game's live status and the requester in its current players, then derives their name
+and task. It skips missing games, departures, ended games or unavailable room
+authority. Never substitute another game or schedule for someone else's request.
+Group missed-day batches and change-resolution notifications have separate
+producers; batch lore writes require room-only evidence and final room authority,
+while group recap lore stays read-only.

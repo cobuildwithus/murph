@@ -200,7 +200,7 @@ export interface AssistantHostedToolContext {
   currentScheduledPhoneCallScope?(): AssistantHostedScheduledPhoneCallScope | null
   currentUserActionScope?(): AssistantHostedUserActionScope | null
   currentGameRecapScope?(): NonNullable<AssistantHostedExecutionContext['gameRecapScope']> | null
-  currentGameMissedCheckInScope?(): { gameId: string; eventId: string; memberId: string; firstMissedDate: string; pairFingerprint: string } | null
+  currentGameMissedCheckInScope?(): NonNullable<AssistantHostedExecutionContext['gameMissedCheckInScope']> | null
   prepareGameLore?(): Promise<string | null>
   readGameLore?(): Promise<string>
   replaceGameLore?(content: string): Promise<void>

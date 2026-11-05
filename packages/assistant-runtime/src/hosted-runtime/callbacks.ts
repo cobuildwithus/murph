@@ -6302,6 +6302,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   }
   const normalized: HostedRuntimeLinqRecentInboundEngagementResult = result ?? {};
   assertHostedAssistantProgressUpdateNotAcknowledged({ ...input, result: normalized });
+  assertGameRematchEgressSupported(input.idempotencyKey, normalized);
   if (input.authorityCheckOnly !== true && normalized.deliveryBlockCode) {
     const code = `ASSISTANT_LINQ_EGRESS_${
       normalized.deliveryBlockCode.toUpperCase()
@@ -6405,6 +6406,13 @@ function assertHostedAssistantLinqProviderDispatchClaim(input: {
       "Hosted Linq provider dispatch may already have started and requires reconciliation.",
       { retryable: false },
     ));
+  }
+}
+
+/** Older Web cannot acknowledge the revision fence, even for two-human group rooms. */
+function assertGameRematchEgressSupported(idempotencyKey: string | null | undefined, result: HostedRuntimeLinqRecentInboundEngagementResult): void {
+  if (idempotencyKey?.startsWith("game-rematch:") && result.gameRematchAuthorityChecked !== true) {
+    throw new VaultCliError("ASSISTANT_GAME_REMATCH_AUTHORITY_UNAVAILABLE", "Web must confirm current rematch revision authority before delivery.", { retryable: true });
   }
 }
 

@@ -1,4 +1,5 @@
 import "server-only";
+import { compareGroupRematch, rematchSeat } from "./rematch";
 
 import { parseGameRecapEventId, hostedGameRecapSchema, type GameNoticeRoom, type HostedGameChatState, type HostedGameUpdate, type HostedGameRecap } from "@murphai/hosted-execution/runtime-control";
 import { groupGameRecapPlayers } from "./recap-cohort";
@@ -81,6 +82,7 @@ import {
   parseStoredResult,
   parseStoredTerms,
   parseTermWords,
+  effectiveTermWords,
   playerFor,
   reject,
   settleDueAt,
@@ -90,7 +92,7 @@ import {
   type GameTerms,
   type TermWords,
 } from "./rules";
-import { addDays, gameLocalDate } from "./time";
+import { addDays, daysBetween, gameLocalDate } from "./time";
 import { agreedDayOne, gameChangeCancellationNeedsNotice, decideApprovedGameChange, pendingGameChangeView, decideGameChange, gameChangeControls, gameChangeMajority, normalizeGroupGameChange, gameChangeRefusal, isGameChangeExpired, isGameChangeOutdated, isSameGameChange, parsePendingGameChange, type StoredGamePendingChange } from "./changes";
 import { prepareGameChangeWords, readPendingGameChanges, type PreparedGameChangeWords } from "./change-words";
 import { deliverGameChangeProposal } from "./chat-delivery";
@@ -732,9 +734,9 @@ async function prepareGroupRematch(actor: string, previousGameId: string) {
   const [plain] = await openGameTexts([{ ...gameTarget(previous, "terms_words"), value: previous.termsWordsEncrypted }]);
   const words = parseTermWords(plain ?? "");
   const oldSeat = previous.createdBy === actor ? 0 : previous.invitees.find(invitee => invitee.memberId === actor)!.seat;
-  const remap = (seat: number) => seat === 0 ? oldSeat : seat === oldSeat ? 0 : seat;
+  const remap = (seat: number) => rematchSeat(seat, oldSeat);
   const version = currentTerms(parseStoredTerms(previous.terms));
-  const currentWords = words.versions.find(words => words.n === version.n)!;
+  const currentWords = effectiveTermWords(words, version.n);
   const invitees = [{ seat: 0, memberId: previous.createdBy, recipientLookupKey: null }, ...previous.invitees]
     .filter(invitee => invitee.memberId !== actor && (invitee.memberId !== null || invitee.recipientLookupKey !== null))
     .map(invitee => ({ seat: remap(invitee.seat), memberId: invitee.memberId,
@@ -2165,11 +2167,16 @@ export type GameChatState = HostedGameChatState;
 
 /** Shared, word-minimized context for the existing-room rematch notice. */
 export async function readGameRematchNotice(gameId: string, playerMemberIds: readonly string[], now = new Date()) {
-  if (!sameGamePlayers(playerMemberIds, playerMemberIds)) return null;
   const prisma = getPrisma();
-  const current = await prisma.game.findUnique({ where: { id: gameId }, select: { previousGameId: true } });
-  if (!current?.previousGameId) return null;
-  const loaded = await loadGames(prisma, [gameId, current.previousGameId]);
+  const current = await prisma.game.findUnique({ where: { id: gameId }, select: { previousGameId: true, maxPlayers: true } });
+  if (current?.maxPlayers === 10) return readGroupRematchNotice(gameId, current.previousGameId, now);
+  return readPairGameRematchNotice(gameId, current?.previousGameId ?? null, playerMemberIds, now);
+}
+
+async function readPairGameRematchNotice(gameId: string, previousGameId: string | null, playerMemberIds: readonly string[], now: Date) {
+  if (!sameGamePlayers(playerMemberIds, playerMemberIds) || !previousGameId) return null;
+  const prisma = getPrisma();
+  const loaded = await loadGames(prisma, [gameId, previousGameId]);
   const rematch = loaded[0];
   const previous = loaded[1];
   if (!rematch || !previous || rematch.row.status !== "invited" || isGameInviteExpired(rematch.state.game, now) || previous.row.status !== "settled"
@@ -2210,6 +2217,42 @@ export async function readGameRematchNotice(gameId: string, playerMemberIds: rea
     rematch: rematchRules,
     startsOn: fromDbDate(rematch.row.startsOn),
   };
+}
+
+async function readGroupRematchNotice(gameId: string, previousGameId: string | null, now: Date) {
+  const games = await getPrisma().game.findMany({ where: { id: { in: previousGameId ? [gameId, previousGameId] : [gameId] } },
+    include: { invitees: true, players: { take: 11 } } });
+  const rematch = games.find(game => game.id === gameId);
+  const previous = games.find(game => game.id === previousGameId);
+  if (!rematch || rematch.status !== "invited" || !rematch.chatContainerMemberId || !rematch.createdBy
+    || isGameInviteExpired(rematch, now)
+    || previousGameId && (!previous || previous.status !== "settled" || previous.maxPlayers !== 10)) return null;
+  const terms = parseStoredTerms(rematch.terms);
+  const audience = await readGroupGameChatAuthority(rematch, rematch.chatContainerMemberId);
+  if (!audience) return null;
+  const shared = (await readGameChatState(rematch.chatContainerMemberId, audience.memberIds, undefined, true, audience)).games.find(game => game.id === gameId);
+  const requester = shared?.players.find(player => player.memberId === rematch.createdBy);
+  if (!shared || !requester || shared.terms.n !== currentTerms(terms).n) return null;
+  const comparison = await prepareGroupRematchComparison(rematch, previous);
+  if (comparison === undefined) return null;
+  return { maxPlayers: 10 as const, termsVersion: currentTerms(terms).n, requester: requester.firstName,
+    startsOn: fromDbDate(rematch.startsOn), comparison,
+    terms: { defaultTask: shared.terms.defaultTask, tasks: shared.terms.tasks, stakes: shared.terms.stakes.map(({ kind, item }) => ({ kind, item })),
+      schedule: shared.terms.schedule, checkInKind: shared.terms.checkInKind ?? "any", lengthDays: shared.lengthDays } };
+}
+
+async function prepareGroupRematchComparison(
+  rematch: Prisma.GameGetPayload<{ include: { invitees: true } }>,
+  previous: Prisma.GameGetPayload<{ include: { invitees: true } }> | undefined,
+) {
+  const rows = previous ? [rematch, previous] : [rematch];
+  const plain = await openGameTexts(rows.map(row => ({ ...gameTarget(row, "terms_words"), value: row.termsWordsEncrypted })));
+  const rules = { terms: parseStoredTerms(rematch.terms), words: parseTermWords(plain[0] ?? ""), lengthDays: rematch.lengthDays };
+  const starterSeat = previous?.createdBy === rematch.createdBy ? 0
+    : previous?.invitees.find(invitee => invitee.memberId === rematch.createdBy)?.seat;
+  if (previous && starterSeat === undefined) return undefined;
+  return previous ? compareGroupRematch({ terms: parseStoredTerms(previous.terms), words: parseTermWords(plain[1] ?? ""), lengthDays: previous.lengthDays },
+    rules, starterSeat!, [0, ...rematch.invitees.map(invitee => invitee.seat)]) : null;
 }
 
 /** Which game a room notice means when other open games could confuse it. */
@@ -2310,29 +2353,35 @@ function gameChatPhotoCheckIn(profile: Pick<GameProfile, "chatPhotoIntroducedAt"
   return { photoCheckIn: { introductionAvailable: profile.chatPhotoIntroducedAt === null, hasPendingOffer } };
 }
 
-/** Bounded hourly-sharded sweep; lifecycle receipts own retries after discovery. */
+/** Room-keyset paging completes each room before any claim, across discovery pages. */
 export async function reserveDueGameMissedDayCheckIns(now = new Date()): Promise<number> {
   const prisma = getPrisma();
   const shard = Math.floor(now.getTime() / 60_000) % 60;
   let reserved = 0;
   await visitGameMissedCheckInPages({
     readPage: async (cursor, limit) => (await prisma.$queryRaw<Array<{ id: string }>>`
-      SELECT id FROM game
-      WHERE max_players = 2 AND status = 'live' AND chat_container_member_id IS NOT NULL
+      SELECT DISTINCT chat_container_member_id AS id FROM game
+      WHERE status = 'live' AND chat_container_member_id IS NOT NULL
         AND mod(abs(hashtext(chat_container_member_id)::bigint), 60) = ${shard}
-        AND id > ${cursor}
-      ORDER BY id LIMIT ${limit}`).map((row) => row.id),
-    visit: async (ids) => {
-      const loaded = await loadGames(prisma, [...ids]);
-      for (const game of loaded) {
-        for (const run of gameMissedCheckInRuns(game.state, now)) {
-          if (!run.dueAt || !isMissedCheckInDueNow({ dueAt: run.dueAt, now })) continue;
-          const dueAt = run.dueAt;
-          const added = await prisma.$transaction((tx) => reserveGameMissedDayTx({
-            gameId: game.row.id, memberId: run.memberId, playerMemberIds: game.state.players.map((candidate) => candidate.memberId),
-            firstMissedDate: run.firstMissedDate, dueAt, tx,
-          }));
-          if (added) reserved += 1;
+        AND chat_container_member_id > ${cursor}
+      ORDER BY id LIMIT ${limit}`).map(row => row.id),
+    visit: async rooms => {
+      const { reserveGroupGameMissedDay } = await import("./group-missed-day");
+      for (const roomId of rooms) {
+        const rows = await prisma.game.findMany({ where: { chatContainerMemberId: roomId, status: "live" }, select: { id: true, maxPlayers: true }, take: 21 });
+        if (rows.length > 20) continue;
+        if (rows.some(row => row.maxPlayers === 10)) {
+          reserved += await reserveGroupGameMissedDay(roomId, rows.map(row => row.id), now);
+          continue;
+        }
+        for (const game of await loadGames(prisma, rows.map(row => row.id))) {
+          for (const run of gameMissedCheckInRuns(game.state, now)) {
+            if (!run.dueAt || !isMissedCheckInDueNow({ dueAt: run.dueAt, now })) continue;
+            if (await prisma.$transaction(tx => reserveGameMissedDayTx({
+              gameId: game.row.id, memberId: run.memberId, playerMemberIds: game.state.players.map(player => player.memberId),
+              firstMissedDate: run.firstMissedDate, dueAt: run.dueAt!, tx,
+            }))) reserved += 1;
+          }
         }
       }
     },
@@ -2340,12 +2389,48 @@ export async function reserveDueGameMissedDayCheckIns(now = new Date()): Promise
   return reserved;
 }
 
-/** Same canonical miss rules as reservation; shared progress intentionally omits artifact flags. */
+/** The bounded structural loader is also used under the final game mutation locks. */
+export async function loadGameMissedCheckInGames(db: Db, gameIds: readonly string[]) {
+  if (gameIds.length > 20 || new Set(gameIds).size !== gameIds.length) throw new Error("Game missed-day batch exceeds its room bound.");
+  if (gameIds.length === 0) return [];
+  const entryBound = gameIds.length * 10 * 365 * 2;
+  const [rows, entries] = await Promise.all([
+    db.game.findMany({ where: { id: { in: [...gameIds] } }, include: { invitees: true, players: true } }),
+    db.gameEntry.findMany({ where: { gameId: { in: [...gameIds] }, attempt: { gt: 0 }, withdrawnAt: null },
+      orderBy: { receivedAt: "asc" }, take: entryBound + 1,
+      select: { id: true, gameId: true, memberId: true, dayIndex: true, attempt: true, kind: true, incomplete: true,
+        receivedAt: true, withdrawnAt: true, mediaKeys: true, blurHash: true } }),
+  ]);
+  if (entries.length > entryBound) throw new Error("Game missed-day entries exceed their rule bound.");
+  return rows.map(row => ({ row, state: toRuleState(row, entries.filter(entry => entry.gameId === row.id)) }));
+}
+
+/** Canonical evidence for both single-game and multi-game pair notices. */
 export async function readGameMissedCheckInBatch(gameIds: string[], firstMissedDate: string, now = new Date()) {
-  const games = await loadGames(getPrisma(), gameIds.slice(0, GAME_MAX_OPEN_PER_PAIR));
-  return games.flatMap((game) => gameMissedCheckInRuns(game.state, now)
-    .filter((run) => run.firstMissedDate === firstMissedDate)
-    .map((run) => ({ gameId: game.row.id, memberId: run.memberId, missedDates: run.missedDates })));
+  const games = await loadGameMissedCheckInGames(getPrisma(), gameIds);
+  return games.flatMap(game => gameMissedCheckInRuns(game.state, now)
+    .filter(run => run.firstMissedDate === firstMissedDate)
+    .map(run => ({ gameId: game.row.id, memberId: run.memberId, missedDates: run.missedDates })));
+}
+
+/** Only remaining players' task words and public profile names enter the room. */
+export async function readGameMissedCheckInWords(games: Awaited<ReturnType<typeof loadGameMissedCheckInGames>>, firstMissedDate: string) {
+  const memberIds = [...new Set(games.flatMap(game => remainingPlayers(game.state).map(player => player.memberId)))];
+  const profiles = await getPrisma().gameProfile.findMany({ where: { memberId: { in: memberIds } }, select: { memberId: true, firstNameEncrypted: true } });
+  const plain = await openGameTexts([
+    ...games.map(({ row }) => ({ ...gameTarget(row, "terms_words"), value: row.termsWordsEncrypted })),
+    ...profiles.map(profile => ({ field: "first_name", table: "game_profile" as const, rowId: profile.memberId, memberId: profile.memberId, value: profile.firstNameEncrypted })),
+  ]);
+  const names = gameChatNames(profiles.map((profile, index) => ({ memberId: profile.memberId, firstName: plain[games.length + index] ?? "" })));
+  const tasks = new Map(games.map((game, index) => {
+    const words = parseTermWords(plain[index] ?? "");
+    return [game.row.id, new Map(remainingPlayers(game.state).map(player => {
+      const version = termsForDay(game.state.game.terms, daysBetween(player.dayOne!, firstMissedDate));
+      const versionWords = [...words.versions].reverse().find(words => words.n <= version.n);
+      return [player.memberId, versionWords?.tasks.find(task => task.seat === player.seat)?.text ?? versionWords?.defaultTask ?? ""];
+    }))];
+  }));
+  return { names, tasks };
 }
 
 export type GameRecapMaterial = {
@@ -2655,7 +2740,7 @@ async function loadHistoryGames(db: Db, gameIds: readonly string[], viewerId: st
   });
 }
 
-export function toRuleState(row: GameRow, entries: readonly GameEntry[]): RuleState {
+export function toRuleState(row: GameRow, entries: readonly Pick<GameEntry, "attempt" | "dayIndex" | "id" | "kind" | "mediaKeys" | "memberId" | "withdrawnAt" | "receivedAt" | "blurHash" | "incomplete">[]): RuleState {
   return {
     entries: entries.map((entry) => ({
       attempt: entry.attempt,

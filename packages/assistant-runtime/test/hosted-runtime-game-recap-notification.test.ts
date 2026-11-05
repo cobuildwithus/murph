@@ -45,6 +45,26 @@ beforeEach(() => {
 });
 
 describe("hosted game recap notification", () => {
+  it("binds group missed-day scope to the room with writable lore and no group control port", async () => {
+    const wake = recapWake();
+    const policy = { kind: "game_group_missed_check_in" as const, roomId: wake.userId, eventId: `game-missed:${wake.userId}:group:2030-03-04`,
+      firstMissedDate: "2030-03-04", pairFingerprint: PAIR_FINGERPRINT, conversationLaneSeq: "17",
+      batch: [{ gameId: GAME_ID, termsVersion: 1, remainingMemberIds: ["one", "two"], misses: [{ memberId: "one", missedDates: ["2030-03-04"] }] }] };
+    wake.eventId = policy.eventId; wake.notification.responsePolicy = policy;
+    mocks.sendAssistantNotification.mockResolvedValue({ decision: { kind: "skip", privateSummary: "Already explained." }, deliveryOutcome: null, response: "", session: { sessionId: "synthetic" } });
+    await executeHostedAssistantNotificationWake({ executionContext: { hosted: { memberId: wake.userId, userEnvKeys: [] } }, vaultRoot: "/synthetic-vault", wake });
+    const input = mocks.sendAssistantNotification.mock.calls[0]![0] as AssistantNotificationInput;
+    expect(input.executionContext?.hosted?.gameMissedCheckInScope).toEqual(policy);
+    expect(input.executionContext?.hosted?.gameRecapScope).toBeUndefined();
+    expect(input.executionContext?.hosted?.groupTool).toBeUndefined();
+    expect(input.responsePolicy).toEqual(policy);
+    mocks.sendAssistantNotification.mockClear();
+    for (const invalid of [{ ...wake, userId: "wrong-room" }, { ...wake, eventId: "wrong-event" },
+      { ...wake, notification: { ...wake.notification, route: { ...wake.notification.route, threadIsDirect: true } } }]) {
+      await expect(executeHostedAssistantNotificationWake({ executionContext: { hosted: { memberId: wake.userId, userEnvKeys: [] } }, vaultRoot: "/synthetic-vault", wake: invalid })).rejects.toThrow();
+    }
+    expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
+  });
   it.each([EVENT_ID, `${EVENT_ID}:synthetic_request`].flatMap(eventId => [undefined, "read" as const].map(loreAccess => ({ eventId, loreAccess }))))("hands the recap turn the platform group tool from the minimal mailbox context: %s", async ({ eventId, loreAccess }) => {
     const request = vi.fn(async () => ({ action: "read_game" as const, result: { status: "ok" as const, state: { games: [] } } }));
     const groupToolPort = { request };

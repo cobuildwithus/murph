@@ -1,3 +1,4 @@
+import type { HostedGameGroupMissedCheckInPolicy } from "./game-group-missed.ts";
 import type {
   HostedDataKeyEnvelopeV1,
   HostedExecutionBundleKind as RuntimeHostedExecutionBundleKind,
@@ -247,8 +248,10 @@ export type HostedExecutionAssistantNotificationPromptProfile =
   (typeof HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES)[number];
 
 export type HostedExecutionAssistantNotificationResponsePolicy =
+  | HostedGameGroupMissedCheckInPolicy
   | { kind: "allow_send_or_skip" }
   | { kind: "require_send" }
+  | { kind: "require_game_rematch"; gameId: string; eventId: string; termsVersion: number }
   | { kind: "require_send_exact_text"; text: string }
   | {
       kind: "require_game_recap";

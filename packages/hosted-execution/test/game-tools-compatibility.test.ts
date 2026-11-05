@@ -5,8 +5,37 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseHostedRuntimeGroupToolRequest, parseHostedRuntimeGroupToolResponse } from "../src/parsers/runtime-control.ts";
 import { hostedGameToolRequestSchema, hostedGameToolResponseSchema } from "../src/game-tools.ts";
+import { parseHostedExecutionEvent } from "../src/parsers.ts";
 
 const origin = { kind: "accepted_input", assistantInputId: "ain_synthetic" };
+
+const rematchNotice = (termsVersion: unknown = 1) => ({ kind: "assistant.notification.requested", userId: "synthetic_room", notification: {
+  instructions: "Synthetic compact comparison", responsePolicy: { kind: "require_game_rematch", gameId: "game_synthetic", eventId: "game-rematch:game_synthetic", termsVersion },
+  route: { actorId: null, channel: "linq", delivery: { kind: "explicit", target: "synthetic_chat" }, identityId: null, threadId: "synthetic_chat", threadIsDirect: false },
+} });
+
+it("requires exact group rematch revision authority", () => {
+  expect(parseHostedExecutionEvent(rematchNotice())).toMatchObject(rematchNotice());
+  for (const revision of [undefined, null, 0, -1, 1.5, "1"]) {
+    const event = rematchNotice(); event.notification.responsePolicy.termsVersion = revision;
+    expect(() => parseHostedExecutionEvent(event)).toThrow();
+  }
+  const event = rematchNotice(); event.notification.responsePolicy.eventId = "game-rematch:other";
+  expect(() => parseHostedExecutionEvent(event)).toThrow();
+});
+
+it.skipIf(process.env.MURPH_VERIFY_GAME_SKEW !== "1")("old runners reject revision-bound group rematches before generation", async () => {
+  const root = fileURLToPath(new URL("../../../", import.meta.url));
+  const target = new URL(`../src/.game-rematch-skew-${randomUUID()}.ts`, import.meta.url);
+  await writeFile(target, execFileSync("git", ["show", "b2694496c0665990fa0fd283b5041e5018a38d3e:packages/hosted-execution/src/parsers.ts"], { cwd: root, encoding: "utf8" }), { flag: "wx" });
+  try {
+    const legacy = await import(target.href) as typeof import("../src/parsers.ts");
+    expect(() => legacy.parseHostedExecutionEvent(rematchNotice())).toThrow(/kind/u);
+    const pair = rematchNotice();
+    const legacyPair = { ...pair, notification: { ...pair.notification, responsePolicy: { kind: "require_send" } } };
+    expect(legacy.parseHostedExecutionEvent(legacyPair)).toEqual(parseHostedExecutionEvent(legacyPair));
+  } finally { await rm(target, { force: true }); }
+});
 const game = {
   id: "game_synthetic", status: "live", lengthDays: 7, startsOn: "2030-04-01",
   terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Read" }], schedule: { days: [0, 1, 2, 3, 4] }, stakes: [{ kind: "winner_gets", item: "Choose the next game" }] },

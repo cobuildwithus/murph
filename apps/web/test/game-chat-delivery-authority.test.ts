@@ -1,8 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
+import { execFileSync } from "node:child_process";
+import { writeFile, rm } from "node:fs/promises";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, type Game } from "@prisma/client";
 import { assertGameProposalDeliveryCurrentTx } from "../src/lib/game/chat-delivery-authority";
 const now = new Date("2030-03-04T16:00:00Z");
+const legacyModule = new URL("../src/lib/game/chat-delivery-authority.group-missed-skew-base.ts", import.meta.url);
+afterAll(async () => { await rm(legacyModule, { force: true }); });
 const row = () => ({
   id: "game", createdBy: "person-a", chatContainerMemberId: "room", pendingChange: { v: 1, id: "proposal", proposedByMemberId: "person-a", expectedTermsVersion: 1, change: { kind: "edit", schedule: { days: [5, 6] } }, effectiveFromDay: 0, startsOn: null, deliveryStatus: "queued" },
   previousGameId: null, invitees: [], maxPlayers: 2, audienceKey: null, wordsOwnerMemberId: "person-a", round: 1, status: "live", terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: [0, 1, 2, 3, 4] }, stakes: [] }] }, termsWordsEncrypted: "synthetic", inviteTokenHash: null, inviteTokenEncrypted: null, inviteExpiresAt: null, lengthDays: 7, startsOn: null, startedAt: now, devClockOffsetMs: null, result: null, recapEncrypted: null, settledAt: null, createdAt: now, updatedAt: now,
@@ -24,6 +28,21 @@ function setup() {
   return { findFirst, findMany, event, setGame, input: { tx: prisma, containerMemberId: "room", deliveryIdempotencyKey: "game-change:game:proposal", playerMemberIds: ["person-a", "person-b"], now } };
 }
 describe("game proposal provider dispatch authority", () => {
+  // Reads the base revision from git history; runs in the local MURPH_VERIFY_GAME_SKEW lane.
+  it.skipIf(process.env.MURPH_VERIFY_GAME_SKEW !== "1")("the pinned old Web rejects a room-based missed event even for two-human groups", async () => {
+    const source = execFileSync("git", ["show", "b2694496c0665990fa0fd283b5041e5018a38d3e:apps/web/src/lib/game/chat-delivery-authority.ts"],
+      { cwd: new URL("../../../", import.meta.url), encoding: "utf8" });
+    await writeFile(legacyModule, source, { flag: "wx" });
+    const legacy: typeof import("../src/lib/game/chat-delivery-authority") = await import(legacyModule.href);
+    const { input, findFirst } = setup();
+    const missed = { ...input, deliveryIdempotencyKey: "game-missed:room:group:2030-03-04" };
+    findFirst.mockResolvedValue(null);
+    await expect(legacy.assertGameProposalDeliveryCurrentTx(missed)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: "room" }) }));
+    findFirst.mockResolvedValue({ ...row(), id: "room", maxPlayers: 10 });
+    await expect(legacy.assertGameProposalDeliveryCurrentTx(missed)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    await expect(assertGameProposalDeliveryCurrentTx(missed)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+  });
   it("requires the resolved refusal event and exact bound audience", async () => {
     const { input, event, setGame } = setup();
     const refusal={...input,deliveryIdempotencyKey:"game-change-expired:game:proposal"};
@@ -32,6 +51,11 @@ describe("game proposal provider dispatch authority", () => {
     await expect(assertGameProposalDeliveryCurrentTx({...refusal,playerMemberIds:["person-a","outsider"]})).rejects.toMatchObject({code:"GAME_CHANGE_SUPERSEDED"});
     setGame(null);
     await expect(assertGameProposalDeliveryCurrentTx(refusal)).rejects.toMatchObject({code:"GAME_CHANGE_SUPERSEDED"});
+  });
+  it("rejects a malformed rematch key without granting authority", async () => {
+    const { input, findFirst } = setup();
+    await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "game-rematch:game:extra" })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    expect(findFirst).not.toHaveBeenCalled();
   });
   it("does not interfere with unrelated runtime deliveries", async () => {
     const { input, findFirst } = setup();

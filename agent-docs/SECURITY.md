@@ -1873,14 +1873,23 @@ join claims the seat after matching memberId or verified contact read keys and
 checking legal/profile prerequisites. A savepoint protects ordinary ingestion
 from association statement failures. Diagnostics contain fixed reason codes only.
 Groups have no automatic bootstrap producer and cannot silently change rooms.
-Shared game projections name only remaining players using a per-game naming
-cohort; unjoined invitees appear as counts. A group Talk notice is the narrow
+Shared game projections expose names, status and authored evidence only for
+remaining players, using a per-game naming cohort; unjoined invitees appear
+as counts. A group Talk notice is the narrow
 consented exception: its unseated author shares their own profile name and
 submitted note, never a private invite label. Challenge notices use the same
 remaining-player cohort and the target day's shared default task, never private
-task overrides, a challenger's personal GameView, captions, excuses, private replies or media. Private pending
-labels stay with the starter. Final lifecycle egress repeats the authority
-check and verifies the provider target. Lifecycle notices and recap links contain text only. Any group
+task overrides, a challenger's personal GameView, captions, excuses, private
+replies or media. Private pending labels stay with the starter. Rematch
+comparison decrypts canonical assignments
+inside Web and emits only shared scalar changes and a generic individual-task
+change flag, never unjoined assignments or labels. Publication and final rematch
+egress compare the immutable mailbox terms revision under the game lock. An
+unsupported revision policy or missing Web authority acknowledgement fails closed,
+including a two-human group room. One receipt owns the invitation. A revision
+fence does not prove consent after delivery: changed visible terms need renewed
+individual agreement; private task review stays in the addressed app invitation.
+Final lifecycle egress repeats the authority check and verifies the provider target. Lifecycle notices and recap links contain text only. Any group
 report withholds the shared recap, including media and quotes. Recaps may read
 only the authorized room-audience game lore, never private memory or contact
 labels. Group lore keys derive from the stored original audience, not the room
@@ -1890,7 +1899,48 @@ or photo details. Person notes retain memberIds beside names, but messages omit
 IDs and recap callbacks include only eligible players. Group recap lore is
 read-only in the runner because recap evidence includes app-only posts. Trusted
 code records only the accepted canonical bare room chat line, once, within the
-existing 64 KiB limit; that line must use room-visible evidence only.
+existing 64 KiB limit; that line must use room-visible evidence only. A separate
+group missed-day batch may grant writable lore only for authorized room-visible
+evidence, never app captions or media. Its producer and final egress must use
+`readGroupGameChatAuthority` for every included game and current eligible person;
+a room identifier alone grants no authority. Group missed-day production uses
+the guarded batch policy described below.
+
+A kickoff reminder offer supplies no consent. Existing automation saves bind the
+requesting member, exact game, chosen local time and timezone, and bounded duration.
+Every occurrence requires an OK scheduled read, that exact game's live status
+and the requester in its current players. Missing, ended, departed or unavailable
+state suppresses delivery; another game or another person's request cannot substitute.
+
+Group missed-day turns use that same original-audience lore namespace with
+replacement writes, because their evidence contains only room conversation and
+shared structural state. A mixed room never merges pair lore or different group
+notebooks. Public names are disambiguated once across the room; private labels,
+unjoined task overrides, captions and media never enter the instructions.
+`readGroupGameChatAuthority` remains the sole group authority at collection,
+publication, recovery and final egress, including two-person turnout.
+
+The strict `game_group_missed_check_in` policy in the encrypted mailbox binds
+the exact room/event/date, original-audience digest, bounded twenty-game batch,
+terms versions, full remaining-player sets, canonical misses and conversation
+watermark. Final egress reads this exact envelope outside its transaction;
+caller-supplied batch facts cannot authorize sending. Publication and dispatch
+lock all contributing game rows in ID order through their atomic claims, then
+recheck the canonical batch, binding, rollout/restriction rules and audience.
+Any new departure invalidates, including a nonaffected player; earlier historical
+departures do not. Provider lookup and decryption stay outside these locks.
+The mailbox causal-append lock protects the conversation-lane watermark through
+publication/dispatch. New conversation suppresses even unrelated chatter, while
+notification appends do not. Suppression, quiet, settlement and uncertain sends
+retain the immutable room/date claim. Authorized mixed two-contact rooms share
+the existing pair-before-game reservation lock and consult both receipt families
+by delivery hash even after receipt metadata is rewritten.
+
+Deploy the compatible policy readers and runner before the Web producer. Older
+runners reject the unknown policy before generation and older Web rejects the
+room-based event as missing valid game authority, including two-human groups.
+Keep the compatible reader/egress release as the rollback floor once new
+envelopes exist; keep production group admission dark. No migration or backfill.
 
 
 Group Talk takes the author member lock before the game lock and rechecks active

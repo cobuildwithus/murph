@@ -25,6 +25,7 @@ import { bindPairGameChat, findExistingGameChat, readGroupGameChatAuthority, typ
 export { isExactGameChat, requireExactGameChat } from "./chat-membership";
 import { prepareGameChatBootstrap } from "./chat-bootstrap";
 import { markGameChatGenerationQueuedTx } from "./chat-lifecycle-receipt";
+import { readGroupMissedDayDeliveryAuthority } from "./group-missed-day";
 
 /** Called after the game transaction. All provider and crypto work stays outside game locks. */
 export async function deliverGameChangeProposal(gameId: string, proposalId: string, now = new Date()): Promise<boolean> {
@@ -91,7 +92,12 @@ async function prepareGameChatPlayers(game: Game & { players: GamePlayer[] }, pr
 }
 
 /** Revalidate the audience outside the existing provider dispatch transaction. */
-export async function readGameProposalDeliveryPlayers(key: string | null, containerMemberId: string, target?: string | null): Promise<readonly string[] | GameNoticeAudience | undefined> {
+export async function readGameProposalDeliveryPlayers(key: string | null, containerMemberId: string, target?: string | null): Promise<readonly string[] | GameNoticeAudience | NonNullable<Awaited<ReturnType<typeof readGroupMissedDayDeliveryAuthority>>> | undefined> {
+  if (/^game-missed:[^:]+:group:/u.test(key ?? "")) {
+    const authority = await readGroupMissedDayDeliveryAuthority(key!, containerMemberId, target);
+    if (!authority) throw new Error("Game missed-day authority is unavailable.");
+    return authority;
+  }
   const match = /^(game-talk|game-change|game-started|game-rematch|game-change-cancelled|game-change-expired|game-change-resolved|game-cancelled|game-recap|game-missed|game-challenge):([^:]+)/.exec(key ?? "");
   if (!match) return undefined;
   const game = await getPrisma().game.findUnique({ where: { id: match[2] }, include: { invitees: { select: { memberId: true, recipientLookupKey: true } }, players: { take: 11 } } });
