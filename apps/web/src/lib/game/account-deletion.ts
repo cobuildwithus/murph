@@ -5,6 +5,7 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { isRecord } from "../primitives";
 import { toPrismaJsonObject } from "../device-sync/prisma-store/prisma-json";
 import { labelTarget, openGameTexts, sealGameText } from "./crypto";
+import { GAME_ROSTER_CHANGE_REASON, resolveGroupGameChangeTx } from "./change-resolution";
 
 const GAME_DELETION_LIMIT = 1_000;
 const ACTIVE = new Set(["invited", "negotiating", "live"]);
@@ -128,9 +129,11 @@ export async function applyGameAccountDeletionTx(input: { memberIds: readonly st
     const remaining = row.players.filter(player => player.memberId && !leaving.includes(player.memberId) && player.leftAt === null);
     const active = ACTIVE.has(row.status) && (row.maxPlayers === 2 || (row.status !== "invited" && remaining.length < 2));
     if (active) calledOff += 1;
+    await resolveGroupGameChangeTx({ tx, game: row, actor: "system", now: input.now,
+      outcome: "change_expired", reason: GAME_ROSTER_CHANGE_REASON });
     await tx.game.update({ where: { id: row.id }, data: {
       wordsOwnerMemberId: plan.owner, termsWordsEncrypted: plan.termsWordsEncrypted,
-      recapEncrypted: null, pendingChange: Prisma.DbNull,
+      recapEncrypted: null, ...(row.maxPlayers === 10 ? {} : { pendingChange: Prisma.DbNull }),
       ...(active ? { status: "void", result: Prisma.DbNull } : {}),
       ...(row.createdBy && leaving.includes(row.createdBy) ? { createdBy: null, inviteTokenEncrypted: null } : {}),
       ...(!active && row.result !== null ? { result: withoutMembers(row.result, leaving) } : {}),

@@ -3,6 +3,40 @@
 The canonical wire types live in `apps/web/src/lib/game/contract.ts`.
 The [weekly-game spec](weekly-game.md) owns rules, authority and delivery.
 
+## Group change requests
+
+Opt in with `X-Murph-Game-Multiplayer: 1`; immutable `maxPlayers === 10` selects
+group behavior, including two remaining players. Missing controls mean unavailable.
+Invited starter edits remain immediate. Live `changeControls.canEdit` enables
+`PUT /api/game/v1/games/:id/terms` with
+`{proposalId, expectedTermsVersion, terms}`. `permissions.canEditTerms` continues
+to mean direct invited editing. Live editable terms now expose only the default
+and remaining-player tasks: return those fields; Web preserves hidden overrides
+and rejects explicit hidden-seat changes. Invited editing retains broader seats.
+
+When `changeControls.canStartNow` is true, send
+`POST /api/game/v1/games/:id/changes` with
+`{proposalId, expectedTermsVersion, change:{kind:"start_now"}}`. It requests an
+earlier scheduled Day 1 and does not activate an invited game or accept invitees.
+Render `pendingChange.startsOn` as requested until the game confirms application.
+The pending card retains `id`, `proposedByMemberId`, `change`, `effectiveFromDay`,
+`votes:[{memberId,vote:"yes"|"no"}]` and `yesNeeded`.
+
+Remaining nonproposers without a recorded answer can use
+`POST /api/game/v1/games/:id/changes/:proposalId` with
+`{decision:"approve"|"decline"}`. The proposer's yes already counts; every
+person's first answer is final. Only the proposer can `DELETE` the same path.
+Pairs keep chat-only approval. Authentication and paths supply actor and IDs.
+Use the returned game or refresh it; `CHANGE_PENDING`, `TERMS_CHANGED` and
+`CHANGE_EXPIRED` are refreshable conflicts. After approval refresh terms version,
+start date and player calendars; late acceptance uses that fresh terms version.
+
+App asks require a proven existing room and reserve one announcement. Display
+existing `deliveryStatus` and `deliveryRetryable`; `conversation` means the chat
+reply owns the announcement. A deciding app vote receives one outcome notice.
+Deploy Web, then runner, then this UI while group admission stays dark. Updated
+Web resolution-receipt readers form the rollback floor once receipts exist.
+
 ## Off-day entry refusal
 
 `POST /api/game/v1/games/:id/entries` returns HTTP 409:

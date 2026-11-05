@@ -1,3 +1,6 @@
+import { execFileSync } from "node:child_process";
+import { writeFile, rm } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { getPrisma } from "@/src/lib/prisma";
@@ -45,4 +48,21 @@ describe.skipIf(!enabled)("game lifecycle drain against PostgreSQL", () => {
       expect(await db.hostedLinqDelivery.findUnique({ where: { id: untouched.id } })).toMatchObject({ status: "awaiting_generation", attemptedAt: untouched.attemptedAt });
     }
   });
+  it("keeps new resolution receipts isolated from the old sweeper, then handles them with the new one", async () => {
+    const target = new URL(`../src/lib/game/.plan-a-legacy-lifecycle-${randomUUID()}.ts`, import.meta.url);
+    const root = fileURLToPath(new URL("../../../", import.meta.url));
+    await writeFile(target, execFileSync("git", ["show", "b2694496c0665990fa0fd283b5041e5018a38d3e:apps/web/src/lib/game/chat-lifecycle.ts"], { cwd: root, encoding: "utf8" }), { flag: "wx" });
+    try {
+      const old = await import(target.href) as typeof import("@/src/lib/game/chat-lifecycle");
+      const missing = randomUUID(), proposal = randomUUID();
+      const resolved = receipt({ eventId: `game-change-resolved:${missing}:${proposal}`, template: "game_change_resolved", sourceRef: `${missing}:${proposal}`, attemptedAt: new Date(0) });
+      const supported = receipt({ eventId: `game-cancelled:${missing}`, template: "game_cancelled", sourceRef: missing, attemptedAt: new Date(1_000) });
+      await getPrisma().hostedLinqDelivery.createMany({ data: [resolved, supported] });
+      expect((await old.drainGameChatLifecycle()).attempted).toBe(1);
+      expect(await getPrisma().hostedLinqDelivery.findUnique({ where: { id: resolved.id } })).toMatchObject({ status: "awaiting_generation", attemptedAt: new Date(0) });
+      expect((await drainGameChatLifecycle()).attempted).toBe(1);
+      expect(await getPrisma().hostedLinqDelivery.findUnique({ where: { id: resolved.id } })).toMatchObject({ status: "skipped" });
+    } finally { await rm(target, { force: true }); }
+  });
+
 });

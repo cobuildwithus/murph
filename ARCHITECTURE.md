@@ -5648,12 +5648,19 @@ zone. Eligibility is `clamp(daysBetween(dayOne, localDate(joinedAt)), 0, length)
 The initial 20:00 cutoff does not discard a late joiner's current day. Join and
 leave settle due state first under the game lock. A starter's direct `editTerms`
 requires the expected version and rechecks that the game is still invited.
-Live groups normalize full chat terms into the existing edit delta and sealed
-words, then use the same pending-change and approval writer as pairs. Remaining
-seated players vote once per ask; a strict majority, including the proposer,
-applies it. Pending JSON owns the votes; `change_voted` events own per-member
-replay receipts. Group writes take the game lock without the pair lock. A leave
-clears the ask. The weekly game spec owns timing, projection and rollout rules.
+Live group app and chat terms share canonical preparation: merge hidden task
+overrides, seal outside locks, then revalidate the remaining member/seat basis,
+version, ciphertext and room authority under the game lock. One locked proposal
+primitive owns replay, pending state and events for full terms and Start now.
+Remaining seated players vote once per ask; a strict majority, including the
+proposer, applies it. Pending JSON owns votes; `change_voted` events own replay.
+Freshness precedes each first vote, while historical same-vote retries survive
+resolution. Canonical rule loading includes surviving entries and a bounded
+posted-event history probe so deletion cannot reopen Start now eligibility.
+Group writes take the game lock without the pair lock. `change-resolution.ts`
+owns terminal pending-state removal, canonical keyed reason/tally and eligible
+notice reservation for votes, reads, settlement, leave and retained deletion.
+The weekly game spec owns timing, projection and rollout rules.
 
 Leaving before settlement retains evidence, excludes access and competition,
 and voids a waiting invitation or an activated group below two remaining players. Group settlement waits
@@ -5669,8 +5676,8 @@ audience identity, invitations, group word and terms, remapping task seats when
 the starter changes; unclaimable erased invitations are dropped. Outside bearers
 may create a fresh challenge. Group words,
 shared task, sparse overrides and prize text remain in encrypted `TermWords`.
-HTTP capability, group serializers, notifications and chat admission are later
-rollout work; this lifecycle introduces no schema or route.
+HTTP capability, group serializers, notifications and chat admission share the
+existing game owners; production group admission remains dark.
 
 Invitations retain original seats and optional member/keyed-lookup identity,
 never recipient destinations. An invitation's pending private label belongs to
@@ -6060,9 +6067,9 @@ never claims invitees; later link messages naturally retry it.
 `readGroupGameChatAuthority` is the sole group room check for association,
 shared reads, commands, lifecycle enqueue and final egress. It requires a current
 Linq route, a complete provider roster with exactly one active Murph handle,
-remaining players with identities in addressed seats (0–9), and either rotating
-keyed equality with the original addressed audience or a proven subset with at
-least two people and every remaining player still resolved in the text. Each
+remaining players with identities in addressed seats (0–9) who resolve in the
+current text on both exact and subset paths, and either rotating keyed equality
+with the original addressed audience or a proven subset with at least two people. Each
 subset contact must resolve to an addressed player (left or not) or bound
 invitee, or match its own unbound invitation's lookup read keys, whether or not
 it resolves. Bound invitation keys grant nothing. Adding anyone outside the
@@ -6189,14 +6196,21 @@ author-owned encrypted note, bound to `game`, the game ID and
 abuse without treating an objection as a proposed task or prize.
 
 `game.pending_change` is one versioned structural proposal serialized with the
-existing game row lock. Day boundaries never expire it. Acceptance derives
+existing game row lock. Ordinary day boundaries alone do not expire an edit;
+a requested group start date must remain exactly eligible. Acceptance derives
 `fromDay` from the furthest-ahead player under that lock, retaining earlier terms
 versions. App/shared pending views derive `effectiveFromDay` at read time.
 Impossible approvals clear the proposal and record `change_expired` with a
 plain reason before returning the error; an existing bound room receives one
 `game_change_expired` lifecycle receipt keyed by game and proposal. Generation
-uses the immutable reason and dispatch verifies the resolution event, room and
-exact pair. This path never discovers or bootstraps a room and remains eligible
+uses the immutable reason and dispatch verifies the resolution event and room
+authority. The keyed resolution reader is shared by generation, recovery and
+egress, including historical group outcomes after settlement or voiding.
+The database-only current-change reader uses canonical `loadGames` rule state.
+Final proposal dispatch claims lock the game through the provider fence, so a
+claim serializes against votes, departures, posts and joins. A claim committed
+first may still deliver after a later mutation. Provider and crypto work stay
+outside game locks. This path never discovers or bootstraps a room and remains eligible
 if the game ends before its notice drains, under existing post-game funding limits.
  `game.chat_container_member_id` references its primary outbound
 room; delete clears the binding. It is not a read or mutation permission. App `POST /api/game/v1/games/:id/changes`
@@ -6274,7 +6288,15 @@ blocks another bootstrap wake until the room attaches; the waiting proposal then
 uses the ordinary routed delivery. The existing
 drain and bootstrap support live and negotiating games, and dispatch revalidates
 the exact room, two-player audience and immutable cancellation history. Pending,
-failed and chat-origin requests do not reserve a cancellation notice. Cancellation
+failed and chat-origin pair requests do not reserve a cancellation notice. Groups
+announce cancellation of a conversational ask when cancelled outside its bound
+chat. App deciding votes reserve `game_change_resolved`; bound-chat replies
+suppress that extra outcome. All group producers and final egress use
+`readGroupGameChatAuthority` without pair discovery or bootstrap. Keyed outcomes
+describe only the resolved ask, with shared canonical task disambiguation and
+neutral departure reasons. Updated Web receipt readers are the rollback floor
+once these new receipts exist; deploy Web, then runner, then iOS with production
+group admission dark. Cancellation
 never changes the agreed rules or starts a negotiating challenge. Started context offers optional first-few-days
 reminders without scheduling them; later opt-in must read current rules.
 

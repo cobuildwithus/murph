@@ -1854,8 +1854,10 @@ existing accounting and provider access checks.
 Group room authority belongs to `readGroupGameChatAuthority`: complete provider
 handles with exactly one active Murph handle and current Linq routing must match
 the original keyed audience or prove a subset of at least two people. Remaining
-players must have identities in addressed seats 0–9 and, for a subset, resolve
-in the current text. Each subset contact must resolve to an addressed player
+players must have identities in addressed seats 0–9 and resolve in the current
+text on both exact and subset paths. Exact rooms may retain tombstoned departed
+contacts; original handle equality cannot substitute for remaining-player
+identity evidence. Each subset contact must resolve to an addressed player
 (left or not) or bound invitee, or match its own unbound invitation's lookup read
 candidates, even if registered. Bound invitation keys grant nothing; null
 identities never match. Adding anyone outside the original audience or losing
@@ -1891,14 +1893,26 @@ Game proposals are structural metadata under the canonical game lock. The
 initiating signed-in player agrees by proposing. In pairs, the other identified
 player may approve or decline; in live groups, each remaining seated player
 answers only for themselves once per proposal and a strict majority applies it.
-Only the proposer may cancel. Live group edits require bound chat authority;
-the app permits direct group edits only while the starter is alone. Chat tools resolve
+Only the proposer may cancel. Live app asks require authenticated remaining-player
+membership and proven bound room authority; direct edits remain invited-starter
+only. Chat and app share hidden-override preservation and the locked proposal
+writer. Live editable projections exclude unjoined/departed task overrides;
+explicit hidden-seat writes fail. The prepared remaining member/seat basis must
+still match under lock. Chat tools resolve
 identity from a current accepted group message and revalidate the runtime fence,
 route and exact game binding inside the mutation transaction. Fresh provider
 rosters guard shared reads; private contact labels, entries, excuses, photos and
 invite tokens never enter the chat projection. Group-only game eligibility does
 not grant personal AI access and cannot override suspension, consent withdrawal
 or the game rollout gate. Existing group usage limits remain enforced.
+Final proposal dispatch holds the game lock through its provider claim and uses
+canonical rule state, including historical posted attempts after entry deletion.
+Resolution receipts contain structural facts only. Their keyed reader validates
+the original ask at generation, recovery and egress, without treating later
+settlement or a replacement ask as revocation. Disambiguation uses authorized
+shared task terms, never private labels, hidden overrides, captions or media.
+Departure expiry never identifies the leaver. A notice grants only the existing
+bound-room funding window, including void-game cancellation/expiry recovery.
 
 The protected checkpoint assessment also accepts an optional sealed
 `mailboxInspection` request in `assess` mode, with a distinct sealed request

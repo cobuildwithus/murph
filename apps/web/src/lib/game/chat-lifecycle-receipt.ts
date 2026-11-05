@@ -7,7 +7,7 @@ import { Prisma } from "@prisma/client";
 import { buildHostedLinqDeliveryId } from "../hosted-onboarding/linq-delivery-store";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 
-export type GameChatLifecycleKind = "started" | "rematch" | "change_cancelled" | "change_expired" | "cancelled" | "recap" | "missed" | "challenge" | "talk";
+export type GameChatLifecycleKind = "started" | "rematch" | "change_cancelled" | "change_expired" | "change_resolved" | "cancelled" | "recap" | "missed" | "challenge" | "talk";
 
 export function gameChatLifecycleEventId(gameId: string, kind: GameChatLifecycleKind, proposalId?: string, regenerationId?: string): string {
   if (kind === "challenge") {
@@ -16,7 +16,7 @@ export function gameChatLifecycleEventId(gameId: string, kind: GameChatLifecycle
   }
   if (kind === "recap" && regenerationId) return `game-recap:${gameId}:${regenerationId}`;
   if (kind === "missed") throw new Error("Missed-day lifecycle identity requires the player and first date.");
-  if (kind === "talk" || kind === "change_cancelled" || kind === "change_expired") {
+  if (kind === "talk" || kind === "change_cancelled" || kind === "change_expired" || kind === "change_resolved") {
     if (!proposalId) throw new Error("Game change resolution requires its proposal identity.");
     return `game-${kind.replace("_", "-")}:${gameId}:${proposalId}`;
   }
@@ -48,7 +48,7 @@ export async function reserveGameChatLifecycleTx(input: {
   if (!key) throw new Error("Game lifecycle delivery identity is unavailable.");
   await input.tx.hostedLinqDelivery.createMany({
     data: [{ id: buildHostedLinqDeliveryId(key), idempotencyKey: key,
-      source: "game_lifecycle", sourceRef: (input.kind === "change_cancelled" || input.kind === "change_expired") ? `${input.gameId}:${input.proposalId}` : input.regenerationId ? `${input.gameId}:${input.regenerationId}` : input.gameId, template: `game_${input.kind}`,
+      source: "game_lifecycle", sourceRef: (input.kind === "change_cancelled" || input.kind === "change_expired" || input.kind === "change_resolved") ? `${input.gameId}:${input.proposalId}` : input.regenerationId ? `${input.gameId}:${input.regenerationId}` : input.gameId, template: `game_${input.kind}`,
       status: "awaiting_generation", targetKind: "thread", attemptedAt: input.now }],
     skipDuplicates: true,
   });

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const m = vi.hoisted(() => ({
-  groupAuthority: vi.fn(), challengeCase: vi.fn(), challengeInstructions: vi.fn(),
+  groupAuthority: vi.fn(), challengeCase: vi.fn(), challengeInstructions: vi.fn(), currentChange: vi.fn(),
   event: vi.fn(), receipts: vi.fn(), frozen: vi.fn(), recover: vi.fn(), receiptUpdate: vi.fn(), game: vi.fn(), current: vi.fn(), bind: vi.fn(),
   state: vi.fn(), rematchNotice: vi.fn(), identity: vi.fn(), discover: vi.fn(), exact: vi.fn(), bootstrap: vi.fn(), proposal: vi.fn(),
   destination: vi.fn(), mailbox: vi.fn(), prepare: vi.fn(), append: vi.fn(), signal: vi.fn(), route: vi.fn(),
@@ -11,7 +11,7 @@ vi.mock("../src/lib/prisma", () => {
   return { getPrisma: () => ({ ...db, $transaction: async (fn: (tx: typeof db) => unknown) => fn(db) }) };
 });
 vi.mock("../src/lib/game/service", () => ({ readGameChatState: m.state, readGameNoticeRoom: m.room, readGameMissedCheckInBatch: m.missedBatch, readGameRematchNotice: m.rematchNotice,
-  readGameChallengeCase: m.challengeCase, readGameChallengeInstructions: m.challengeInstructions,
+  readGameChallengeCase: m.challengeCase, readGameChallengeInstructions: m.challengeInstructions, readCurrentGameChange: m.currentChange,
   readGameRecapMaterial: m.recapMaterial, reserveDueGameMissedDayCheckIns: m.reserveMissed }));
 vi.mock("../src/lib/game/chat-tool", () => ({ readGameRecapChatMessages: m.recapMessages, readGameChatTranscript: m.transcript }));
 vi.mock("../src/lib/game/chat-membership", () => ({ bindPairGameChat: async (_id: string, _players: string[], candidate: string | null) => candidate, findExistingGameChat: m.discover, requireExactChat: m.exact, readGroupGameChatAuthority: m.groupAuthority }));
@@ -40,6 +40,7 @@ describe("durable game chat lifecycle", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     m.reserveMissed.mockResolvedValue(0);
+    m.event.mockResolvedValue({ gameId: "game", type: "change_cancelled", payload: { proposalId: "proposal" } });
     m.missedBatch.mockResolvedValue([{ gameId: "game", memberId: "person-a", missedDates: ["2030-03-03"] }, { gameId: "second-game", memberId: "person-b", missedDates: ["2030-03-03"] }]);
     m.receipts.mockResolvedValue([receipt]); m.frozen.mockResolvedValue([]); m.recover.mockResolvedValue(true); m.receiptUpdate.mockResolvedValue({ count: 1 });
     m.game.mockResolvedValue(game); m.current.mockResolvedValue({ id: "game" }); m.bind.mockResolvedValue({ count: 1 });
@@ -57,7 +58,7 @@ describe("durable game chat lifecycle", () => {
   it("filters supported templates and non-null references before the bounded drain", async () => {
     await drainGameChatLifecycle({ now });
     expect(m.receipts).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
-      template: { in: ["game_started", "game_rematch", "game_proposal", "game_talk", "game_change_cancelled", "game_change_expired", "game_cancelled", "game_recap", "game_missed", "game_challenge"] },
+      template: { in: ["game_started", "game_rematch", "game_proposal", "game_talk", "game_change_cancelled", "game_change_expired", "game_change_resolved", "game_cancelled", "game_recap", "game_missed", "game_challenge"] },
       sourceRef: { not: null },
     }), take: 1 }));
   });
@@ -192,7 +193,7 @@ describe("durable game chat lifecycle", () => {
     expect(m.signal).toHaveBeenLastCalledWith({ expectedUserId: "room", mailboxItemId: "rematch-notice" });
   });
   it.each(["The proposed start date has passed. Propose a new date.", "The proposed game length ends on a day already started. Propose a longer game."])("queues one existing-room refusal with the immutable reason: %s", async (reason) => {
-    m.event.mockResolvedValue({ type:"change_expired", payload:{reason} });
+    m.event.mockResolvedValue({ gameId: "game", type:"change_expired", payload:{proposalId: "proposal", reason} });
     m.receipts.mockResolvedValue([{...receipt, template:"game_change_expired", sourceRef:"game:proposal"}]);
     await expect(drainGameChatLifecycle({now})).resolves.toEqual({attempted:1,queued:1,deferred:0});
     const notification = m.prepare.mock.calls[0][0].envelope.notification;
@@ -367,6 +368,15 @@ describe("durable game chat lifecycle", () => {
     m.receipts.mockResolvedValue([{ ...receipt, template: "game_proposal", idempotencyKey: "hash:game-change:game:proposal" }]); m.game.mockResolvedValue({ pendingChange, status: "live" });
     await drainGameChatLifecycle({ now });
     expect(m.proposal).not.toHaveBeenCalled(); expect(m.receiptUpdate).toHaveBeenLastCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "skipped", skipReason: "game_proposal_superseded" }) }));
+  });
+  it.each(["awaiting_generation", "generation_queued"])("checks canonical group eligibility before proposal %s", async (status) => {
+    m.receipts.mockResolvedValue([{ ...receipt, template: "game_proposal", status, idempotencyKey: "hash:game-change:game:proposal" }]);
+    m.game.mockResolvedValue({ ...game, maxPlayers: 10, pendingChange: pending });
+    m.currentChange.mockResolvedValue(null);
+    await drainGameChatLifecycle({ now });
+    expect(m.currentChange).toHaveBeenCalledWith(expect.anything(), "game", "proposal", now);
+    expect(m.receiptUpdate).toHaveBeenLastCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "skipped" }) }));
+    expect(m.proposal).not.toHaveBeenCalled(); expect(m.signal).not.toHaveBeenCalled();
   });
   it.each(["live", "negotiating"])("announces cancellation once for a %s game through the existing lifecycle", async (status) => {
     m.receipts.mockResolvedValue([{ ...receipt, sourceRef: "game:proposal", template: "game_change_cancelled", idempotencyKey: "hash:game-change-cancelled:game:proposal" }]);

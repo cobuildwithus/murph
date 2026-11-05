@@ -454,7 +454,10 @@ it('offers one seated task for a group starter edit', () => {
   expect(parse('update_game', { messageRef: inputId, operation: 'edit_terms', gameId: 'game_group_one', expectedTermsVersion: 1,
     terms: { defaultTask: 'Walk', tasks: [{ memberId: 'player_0', text: 'Walk' }], schedule: { count: 5 }, stakes: [{ kind: 'prize', item: 'Choose lunch' }] } })).toMatchObject({ kind: 'game' })
   expect(GAME_GROUP_CHAT_GUIDANCE).toContain('pendingInviteeCount')
-  expect(GAME_GROUP_CHAT_GUIDANCE).toContain('server preserves private unjoined overrides')
+  expect(GAME_GROUP_CHAT_GUIDANCE).toContain('server preserves hidden overrides')
+  expect(GAME_GROUP_CHAT_GUIDANCE).toContain('canStartNow')
+  expect(GAME_GROUP_CHAT_GUIDANCE).toContain('start_now')
+  expect(GAME_GROUP_CHAT_GUIDANCE).not.toContain('Never offer Start now')
 })
 
 it('passes a seated player’s group edit proposal and individual vote through the real contracts', async () => {
