@@ -1429,7 +1429,7 @@ describe('Codex provider routing', () => {
     }))
   })
 
-  it('keeps onboarding goal check-ins on a vault-readable but mutation-denied turn', async () => {
+  it('gives onboarding goal check-ins their planned tools inside the vault-readable one-shot process', async () => {
     const route = createRoute({
       providerOptions: {
         modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
@@ -1552,15 +1552,20 @@ describe('Codex provider routing', () => {
     expect(providerInput?.codexThreadConfig).not.toHaveProperty(
       'features.shell_tool',
     )
+    // The planned tools and their host-side context reach the provider; the
+    // process stays a one-shot, read-only, member-read, unresumed thread.
+    expect(providerInput?.dynamicTools).toEqual([MURPH_GENERATE_SONG_TOOL])
+    expect(providerInput?.hostedToolContext).toBe(
+      (await providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mock.results[0]?.value)
+        ?.hostedToolContext,
+    )
+    expect(providerInput?.providerFetch).toBe(hostedProviderFetch)
     expect(providerInput).toMatchObject({
-      dynamicTools: [],
       environments: [],
-      hostedToolContext: null,
       materializeWorkspaceArtifacts: null,
       permissions: MURPH_MEMBER_READ_PERMISSION_PROFILE,
       processLifetime: 'one-shot',
       progressDelivery: null,
-      providerFetch: null,
       providerThreadEphemeral: true,
       publicInternetFetch: null,
       requireHostedPrivateImageDelivery: false,

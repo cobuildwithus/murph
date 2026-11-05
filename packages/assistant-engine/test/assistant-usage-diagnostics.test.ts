@@ -76,6 +76,19 @@ describe('private usage diagnostics', () => {
     } }) })
     expect((await execute(hosted)).rpcResult.success).toBe(true)
   })
+  it('permits any private turn, including one with no message or occurrence', async () => {
+    const hosted = context({
+      currentConversationScope: () => 'direct',
+      currentInvocationScope: () => null,
+      currentUserActionScope: () => null,
+    })
+    expect((await execute(hosted)).rpcResult.success).toBe(true)
+  })
+  it.each(['group', 'unverified-external'] as const)('rejects a %s audience even with a private-looking origin', async (scope) => {
+    const hosted = context({ currentConversationScope: () => scope })
+    expect((await execute(hosted)).rpcResult.success).toBe(false)
+    expect(hosted.usageDiagnostics?.read).not.toHaveBeenCalled()
+  })
   it('fails safely without transport or authority', async () => {
     expect((await execute(context({ usageDiagnostics: null }))).rpcResult.success).toBe(false)
     const hosted = context({ currentInvocationScope: () => null })

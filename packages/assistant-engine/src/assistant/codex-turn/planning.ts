@@ -33,7 +33,6 @@ import {
   readAssistantGroupRoomModelPrompt,
 } from '../group-room-model.js'
 import {
-  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
 } from '../managed-automations.js'
@@ -518,11 +517,10 @@ function resolveAssistantSpecializedDynamicTools(input: {
   hostedToolContext: AssistantHostedToolContext | null
   maintenanceProfile: AssistantMessageInput['maintenanceProfile']
   maintenanceTurn: boolean
-  onboardingGoalCheckinTurn: boolean
   outputOnlyTurn: boolean
   scheduledAutomationId: string | null | undefined
 }): MurphDynamicTool[] | null {
-  if (input.outputOnlyTurn || input.onboardingGoalCheckinTurn) return []
+  if (input.outputOnlyTurn) return []
   if (input.gameHostTurn) return resolveAssistantGameHostDynamicTools(input.hostedToolContext)
   if (!input.maintenanceTurn) return null
   if (input.maintenanceProfile === 'group-room-model'
@@ -653,25 +651,23 @@ function hasPrivateLinqUserInput(
     && delivery.threadIsDirect === true && acceptedInputIds.length > 0
 }
 
-/** Status is a read bound server-side to the call owner, so a verified scheduled call scope suffices. */
+/** Status is a read bound server-side to the call owner, so any private turn or a verified call scope suffices. */
 function isPhoneCallStatusAvailable(
   input: AssistantRouteTurnPlanInput,
+  privateInteractiveProviderTurn: boolean,
   interactivePhoneCallAction: boolean,
   scheduledPhoneCallScope: ReturnType<typeof resolveAssistantHostedScheduledPhoneCallScope>,
 ): boolean {
-  return (interactivePhoneCallAction || scheduledPhoneCallScope !== null)
+  return (privateInteractiveProviderTurn || interactivePhoneCallAction || scheduledPhoneCallScope !== null)
     && typeof input.hostedToolContext?.phoneCalls?.status === 'function'
 }
 
-/** Murph-owned direct Linq output: a current message or a verified scheduled occurrence. */
-function hasPrivateLinqInvocation(
+/** A calendar link only builds a URL for the reply, so any private direct Linq turn may make one. */
+function isPrivateLinqTurn(
   privateInteractiveProviderTurn: boolean,
   delivery: ReturnType<typeof resolveAssistantCurrentAudienceDeliveryFields>,
-  acceptedInputIds: readonly string[],
-  scheduledInvocationScope: ReturnType<typeof resolveAssistantHostedScheduledInvocationScope>,
 ): boolean {
   return privateInteractiveProviderTurn && delivery.channel === 'linq' && delivery.threadIsDirect === true
-    && (acceptedInputIds.length > 0 || scheduledInvocationScope !== null)
 }
 
 function resolveCommunicationToolAvailability({
@@ -682,7 +678,6 @@ function resolveCommunicationToolAvailability({
   authenticatedGroupProviderTurn,
   userActionAcceptedInputIds,
   scheduledPhoneCallScope,
-  scheduledInvocationScope,
   currentAudienceDeliveryFields,
   interactivePhoneCallAudience,
 }: {
@@ -693,7 +688,6 @@ function resolveCommunicationToolAvailability({
   authenticatedGroupProviderTurn: boolean
   userActionAcceptedInputIds: readonly string[]
   scheduledPhoneCallScope: ReturnType<typeof resolveAssistantHostedScheduledPhoneCallScope>
-  scheduledInvocationScope: ReturnType<typeof resolveAssistantHostedScheduledInvocationScope>
   currentAudienceDeliveryFields: ReturnType<typeof resolveAssistantCurrentAudienceDeliveryFields>
   interactivePhoneCallAudience: boolean
 }) {
@@ -726,13 +720,13 @@ function resolveCommunicationToolAvailability({
         scheduledPhoneCallScope !== null ||
         interactivePhoneCallAction
       ),
-    phoneCallStatusAvailable: isPhoneCallStatusAvailable(input, interactivePhoneCallAction, scheduledPhoneCallScope),
+    phoneCallStatusAvailable: isPhoneCallStatusAvailable(
+      input, privateInteractiveProviderTurn, interactivePhoneCallAction, scheduledPhoneCallScope,
+    ),
     phoneCallStopAvailable:
       interactivePhoneCallAction &&
       typeof input.hostedToolContext?.phoneCalls?.stop === 'function',
-    calendarLinkAvailable: hasPrivateLinqInvocation(
-      privateInteractiveProviderTurn, currentAudienceDeliveryFields, userActionAcceptedInputIds, scheduledInvocationScope,
-    ),
+    calendarLinkAvailable: isPrivateLinqTurn(privateInteractiveProviderTurn, currentAudienceDeliveryFields),
     conversationAttachmentsAvailable:
       conversationMediaTurn &&
       input.hostedToolContext?.currentConversationAttachmentAuthorities !== undefined,
@@ -744,39 +738,24 @@ function resolveCommunicationToolAvailability({
   }
 }
 
+// A card only shapes the reply this turn already delivers, and that reply's
+// delivery identity dedupes retries. So every private or authenticated group
+// conversation turn may attach one, whatever woke it: a message, a clock or
+// device-activity automation, a manual run, or an interactive notification.
 function resolveResponseCardAvailability({
   input,
   privateInteractiveProviderTurn,
-  scheduledInvocationScope,
-  ordinaryInboundTurn,
   resolvedChannel,
   authenticatedGroupProviderTurn,
 }: {
   input: AssistantRouteTurnPlanInput
   privateInteractiveProviderTurn: boolean
-  scheduledInvocationScope: ReturnType<typeof resolveAssistantHostedScheduledInvocationScope>
-  ordinaryInboundTurn: boolean
   resolvedChannel: string | null | undefined
   authenticatedGroupProviderTurn: boolean
 }) {
-  const ordinaryOrScheduledInvocation =
-    scheduledInvocationScope !== null ||
-    (ordinaryInboundTurn && input.input.scheduledInvocationAuthority == null)
-  // A card only shapes the reply, so every private automation run may attach
-  // one, including a device-activity run, which is a local cron job without
-  // occurrence authority of its own. Its other scheduled tools stay gated.
-  const privateAutomationRun =
-    input.input.turnTrigger === 'automation-cron' &&
-    input.input.scheduledOccurrenceAt != null
-  const responseCardsAvailable =
-    privateInteractiveProviderTurn &&
-    (ordinaryOrScheduledInvocation ||
-      privateAutomationRun ||
-      input.input.scheduledInvocationAuthority?.automationId ===
-        MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID)
+  const responseCardsAvailable = privateInteractiveProviderTurn
   const channel = resolvedChannel?.trim().toLowerCase()
-  const groupResponseCardsAvailable =
-    authenticatedGroupProviderTurn && ordinaryOrScheduledInvocation
+  const groupResponseCardsAvailable = authenticatedGroupProviderTurn
   const telegramPresentationResponseCardsAvailable =
     channel === 'telegram' &&
     (responseCardsAvailable || groupResponseCardsAvailable)
@@ -996,8 +975,6 @@ export async function resolveAssistantRouteTurnPlan(
   } = resolveResponseCardAvailability({
     input,
     privateInteractiveProviderTurn,
-    scheduledInvocationScope,
-    ordinaryInboundTurn,
     resolvedChannel,
     authenticatedGroupProviderTurn,
   })
@@ -1349,7 +1326,6 @@ export async function resolveAssistantRouteTurnPlan(
     hostedToolContext: input.hostedToolContext ?? null,
     maintenanceProfile: input.input.maintenanceProfile,
     maintenanceTurn,
-    onboardingGoalCheckinTurn,
     outputOnlyTurn,
     scheduledAutomationId: input.input.scheduledInvocationAuthority?.automationId,
   })
@@ -1401,7 +1377,6 @@ export async function resolveAssistantRouteTurnPlan(
           authenticatedGroupProviderTurn,
           userActionAcceptedInputIds,
           scheduledPhoneCallScope,
-          scheduledInvocationScope,
           currentAudienceDeliveryFields,
           interactivePhoneCallAudience,
         }),

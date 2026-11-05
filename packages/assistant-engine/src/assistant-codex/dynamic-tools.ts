@@ -4282,10 +4282,13 @@ async function executeUsageDiagnosticsTool(
   if (!context?.usageDiagnostics) {
     return toolTextResult(false, 'usage diagnostics are unavailable for this turn', 'unavailable')
   }
-  const scope = context.currentInvocationScope?.()?.conversationScope
+  // Planning offers diagnostics to every private turn, so execution checks the
+  // same authenticated audience instead of an action or occurrence origin.
+  const scope = context.currentConversationScope?.()
+    ?? context.currentInvocationScope?.()?.conversationScope
     ?? context.currentUserActionScope?.()?.conversationScope
   if (scope !== 'direct') {
-    return toolTextResult(false, 'usage diagnostics require a private conversation or private scheduled automation', 'authority_rejected')
+    return toolTextResult(false, 'usage diagnostics require a private conversation', 'authority_rejected')
   }
   try {
     const result = parseHostedUsageDiagnosticsResponse(await context.usageDiagnostics.read(request))
