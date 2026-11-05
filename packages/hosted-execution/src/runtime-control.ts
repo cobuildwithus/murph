@@ -1,3 +1,4 @@
+export { GAME_MISSED_ROOM_MAX_GAMES, gameGroupMissedCheckInPolicySchema, type HostedGameGroupMissedCheckInPolicy } from "./game-group-missed.ts";
 import type { HostedGameChatBootstrapRequest, HostedGameChatBootstrapResponse } from "./game-bootstrap-control.ts";
 export { hostedGameChatBootstrapRequestSchema, hostedGameChatBootstrapResponseSchema } from "./game-bootstrap-control.ts";
 export type { HostedGameChatBootstrapRequest, HostedGameChatBootstrapResponse, HostedGameChatBootstrapResult } from "./game-bootstrap-control.ts";

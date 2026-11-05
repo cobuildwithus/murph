@@ -79,7 +79,7 @@ describe("durable game chat lifecycle", () => {
   it("filters supported templates and non-null references before the bounded drain", async () => {
     await drainGameChatLifecycle({ now });
     expect(m.receipts).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
-      template: { in: ["game_started", "game_rematch", "game_proposal", "game_talk", "game_change_cancelled", "game_change_expired", "game_change_resolved", "game_cancelled", "game_recap", "game_missed", "game_challenge"] },
+      template: { in: ["game_started", "game_rematch", "game_proposal", "game_talk", "game_change_cancelled", "game_change_expired", "game_change_resolved", "game_cancelled", "game_recap", "game_missed", "game_group_missed", "game_challenge"] },
       sourceRef: { not: null },
     }), take: 1 }));
   });
@@ -181,6 +181,13 @@ describe("durable game chat lifecycle", () => {
         memberId: "person-a", firstMissedDate: "2030-03-03", pairFingerprint: expect.stringMatching(/^[a-f0-9]{32}$/u) } });
     expect(notification.instructions).toContain("If the player already explained the miss in this chat, finish without a reply");
     expect(m.discover).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
+  });
+  it("does not fabricate a single-game miss after canonical evidence disappears", async () => {
+    m.receipts.mockResolvedValue([{ ...receipt, template: "game_missed", sourceRef: "game:person-a:2030-03-03", idempotencyKey: "hash:game-missed:game:person-a:2030-03-03" }]);
+    m.missedBatch.mockResolvedValue([]);
+    await drainGameChatLifecycle({ now });
+    expect(m.prepare).not.toHaveBeenCalled();
+    expect(m.receiptUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "skipped", skipReason: "game_lifecycle_superseded" }) }));
   });
   it("drops a rematch notice after acceptance and never discovers or creates a room", async () => {
     m.receipts.mockResolvedValue([{ ...receipt, template: "game_rematch", idempotencyKey: "hash:game-rematch:game" }]);

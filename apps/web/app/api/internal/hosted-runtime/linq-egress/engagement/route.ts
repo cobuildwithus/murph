@@ -92,7 +92,9 @@ export const POST = withJsonError(async (request: Request) => {
   const gameChatPlayers = await readGameProposalDeliveryPlayers(idempotencyKey, userId, expectedResolvedRoute?.target ?? target);
   const rematchTermsVersion = await readGameRematchDeliveryRevision(idempotencyKey, userId);
 
-  const gameAuthority = gameChatPlayers && "memberIds" in gameChatPlayers
+  const gameAuthority = gameChatPlayers && "policy" in gameChatPlayers
+    ? { playerMemberIds: gameChatPlayers.audience.memberIds, audience: gameChatPlayers.audience, groupMissedPolicy: gameChatPlayers.policy }
+    : gameChatPlayers && "memberIds" in gameChatPlayers
     ? { playerMemberIds: gameChatPlayers.memberIds, audience: gameChatPlayers } : { playerMemberIds: gameChatPlayers };
 
   const assertion = await prisma.$transaction(async (tx) => {

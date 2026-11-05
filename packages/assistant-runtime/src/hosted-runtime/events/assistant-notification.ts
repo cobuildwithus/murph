@@ -1,4 +1,4 @@
-import { parseGameRecapEventId } from "@murphai/hosted-execution/runtime-control";
+import { gameGroupMissedCheckInPolicySchema, parseGameRecapEventId } from "@murphai/hosted-execution/runtime-control";
 import { buildHostedGameChatBootstrapPolicy, isHostedGameBootstrapUnavailable } from "./game-chat-bootstrap.ts";
 import type { HostedRuntimeGroupToolPort } from "../platform.ts";
 import { resolveHostedOperatorModelProvider } from "../codex-runtime-env.ts";
@@ -785,12 +785,17 @@ function scopeGameHostExecutionContext(
   groupToolPort: HostedRuntimeGroupToolPort | null | undefined,
 ): AssistantExecutionContext {
   const policy = wake.notification.responsePolicy;
-  if (policy?.kind !== "require_game_recap" && policy?.kind !== "game_missed_check_in") return executionContext;
+  if (policy?.kind !== "require_game_recap" && policy?.kind !== "game_missed_check_in" && policy?.kind !== "game_group_missed_check_in") return executionContext;
   if (wake.eventId !== policy.eventId || wake.notification.route.threadIsDirect !== false) {
     throw new TypeError("Game recap notification authority is invalid.");
   }
   const scope = policy.kind === "require_game_recap"
     ? gameRecapHostedScope(wake.eventId, policy, groupToolPort)
+    : policy.kind === "game_group_missed_check_in"
+    ? (() => {
+        if (policy.roomId !== wake.userId || executionContext.hosted?.memberId !== wake.userId) throw new TypeError("Game check-in room authority is invalid.");
+        return { gameMissedCheckInScope: gameGroupMissedCheckInPolicySchema.parse(policy) };
+      })()
     : gameMissedCheckInHostedScope(wake.eventId, policy);
   return executionContext.hosted
     ? { ...executionContext, hosted: { ...executionContext.hosted, ...scope } }

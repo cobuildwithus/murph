@@ -1,5 +1,5 @@
 import { deliverAssistantGameBootstrapMessage, prepareAssistantGameBootstrap, recoverAssistantGameBootstrapResult } from './game-chat-bootstrap.js'
-import type { HostedGameChatBootstrapResult } from '@murphai/hosted-execution/runtime-control'
+import type { HostedGameChatBootstrapResult, HostedGameGroupMissedCheckInPolicy } from '@murphai/hosted-execution/runtime-control'
 import { resolveUsageOptimizerFeedbackScope, type UsageOptimizerFeedbackScope } from './weekly-usage-optimizer.js'
 import { prepareAssistantFollowUpEvaluationInput } from './follow-ups.js'
 import * as z from '@murphai/contracts/zod-runtime'
@@ -236,6 +236,7 @@ export type AssistantNotificationPromptProfile =
   | 'operator-message'
 
 export type AssistantNotificationResponsePolicy =
+  | HostedGameGroupMissedCheckInPolicy
   | { kind: 'allow_send_or_skip' }
   | { kind: 'require_send' }
   | { kind: 'require_send_exact_text'; text: string }
@@ -479,6 +480,8 @@ export async function sendAssistantNotificationLocal(
       const route = resolveAssistantTurnRoute(messageInput, defaults, resolved)
       let savedGameRecapChatLine: string | null = null
       const gameRecapTurn = hostedExecutionContext?.gameRecapScope != null
+      const groupMissedTurn = responsePolicy.kind === 'game_group_missed_check_in'
+      const textOnlyGameTurn = gameRecapTurn || groupMissedTurn
       const hostedToolContext = hostedExecutionContext
         ? createAssistantHostedToolContext({
             beforeToolExecution: input.beforeToolExecution
@@ -665,12 +668,7 @@ export async function sendAssistantNotificationLocal(
         }
         const providerAuthoredResponse =
           providerResult.providerAuthoredResponse ?? providerResult.response
-        const runtimeOwnsFinalPresentation =
-          providerResult.responseCard !== null &&
-            providerResult.responseCard !== undefined ||
-          providerResult.providerAuthoredResponse !== null &&
-            providerResult.providerAuthoredResponse !== undefined &&
-            providerResult.response !== providerResult.providerAuthoredResponse
+        const runtimeOwnsFinalPresentation = runtimeOwnsNotificationPresentation(providerResult, groupMissedTurn)
         const hasAppendOnlyRuntimePresentation =
           (providerResult.responseCard === null ||
             providerResult.responseCard === undefined) &&
@@ -830,9 +828,9 @@ export async function sendAssistantNotificationLocal(
             dedupeToken: input.deliveryDedupeToken ?? null,
             decisionSubject: decision.subject ?? null,
             input: messageInput,
-            followUpRequest: gameRecapTurn ? null : providerResult.followUpRequest,
-            card: gameRecapTurn ? null : providerResult.responseCard ?? null,
-            media: gameRecapTurn ? [] : responseMedia,
+            followUpRequest: textOnlyGameTurn ? null : providerResult.followUpRequest,
+            card: textOnlyGameTurn ? null : providerResult.responseCard ?? null,
+            media: textOnlyGameTurn ? [] : responseMedia,
             message: responseText,
             session: savedSession,
             sharedPlan,
@@ -892,9 +890,9 @@ export async function sendAssistantNotificationLocal(
           dedupeToken: input.deliveryDedupeToken ?? null,
           decisionSubject: decision.subject ?? null,
           input: messageInput,
-          followUpRequest: gameRecapTurn ? null : providerResult.followUpRequest,
-          card: gameRecapTurn ? null : providerResult.responseCard ?? null,
-          media: gameRecapTurn ? [] : responseMedia,
+          followUpRequest: textOnlyGameTurn ? null : providerResult.followUpRequest,
+          card: textOnlyGameTurn ? null : providerResult.responseCard ?? null,
+          media: textOnlyGameTurn ? [] : responseMedia,
           message: responseText,
           session: providerResult.session,
           sharedPlan,
@@ -2148,10 +2146,15 @@ function resolveAssistantNotificationFirstContactDocIds(input: {
   })
 }
 
+function runtimeOwnsNotificationPresentation(result: ExecutedAssistantProviderTurnResult, groupMissedTurn: boolean): boolean {
+  if (groupMissedTurn) return false
+  return result.responseCard != null || result.providerAuthoredResponse != null && result.response !== result.providerAuthoredResponse
+}
+
 function assertAssistantNotificationSkipAllowed(
   policy: AssistantModelBackedNotificationResponsePolicy,
 ): void {
-  if (policy.kind === 'allow_send_or_skip' || policy.kind === 'game_missed_check_in') {
+  if (policy.kind === 'allow_send_or_skip' || policy.kind === 'game_missed_check_in' || policy.kind === 'game_group_missed_check_in') {
     return
   }
 

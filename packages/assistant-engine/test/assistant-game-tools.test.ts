@@ -244,6 +244,24 @@ describe('game dynamic tools', () => {
 })
 
 describe('game recap dynamic contract', () => {
+  it('normalizes the room batch and permits only its scoped lore and quiet tools', async () => {
+    const scope = { kind: 'game_group_missed_check_in' as const, roomId: 'synthetic-room', eventId: 'game-missed:synthetic-room:group:2030-03-04',
+      firstMissedDate: '2030-03-04', pairFingerprint: 'e'.repeat(32), conversationLaneSeq: '7',
+      batch: [{ gameId: 'group', termsVersion: 1, remainingMemberIds: ['one', 'two'], misses: [{ memberId: 'one', missedDates: ['2030-03-04'] }] }] }
+    const hosted = normalizeAssistantExecutionContext({ hosted: { memberId: scope.roomId, userEnvKeys: [], gameMissedCheckInScope: scope } }).hosted
+    expect(hosted?.gameMissedCheckInScope).toEqual(scope)
+    expect(() => normalizeAssistantExecutionContext({ hosted: { memberId: scope.roomId, userEnvKeys: [], gameMissedCheckInScope: { ...scope, eventId: 'wrong' } } })).toThrow()
+    const vault = await mkdtemp(path.join(tmpdir(), 'group-missed-lore-'))
+    try {
+      const ctx = createAssistantHostedToolContext({ executionContext: hosted,
+        messageInput: { channel: 'linq', vault } as never, session: { binding: { channel: 'linq' }, sessionId: 'synthetic-missed-session' } as never })
+      expect(resolveAssistantGameHostDynamicTools(ctx)).toEqual([MURPH_GAME_LORE_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL])
+      await ctx.replaceGameLore?.('one (Alex): used bit about the missing chapter.')
+      expect(await ctx.readGameLore?.()).toBe('one (Alex): used bit about the missing chapter.')
+      await expect(ctx.replaceGameLore?.('a'.repeat(64 * 1024 + 1))).rejects.toThrow('too large')
+      expect(await readFile(path.join(vault, 'games', `lore-${scope.pairFingerprint}.md`), 'utf8')).toContain('one (Alex)')
+    } finally { await rm(vault, { recursive: true, force: true }) }
+  });
   const recap: HostedGameRecap = { pages: [
     { background: 'paper', blocks: [{ kind: 'headline', text: 'A very specific week' }] },
     { background: 'slate', blocks: [{ kind: 'stat', statValue: '5', text: 'days posted' }] },

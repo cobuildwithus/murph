@@ -425,10 +425,7 @@ resulting avatar. No private photo is shared with the subject or other players.
   Sending happens after commit, with route/session, active participation, block,
   report, real-day and milestone rechecks. Stale or uncertain sends keep claims
   consumed. A blocked peer suppresses completion wording. No content or names
-  enter pushes. Pair missed-day chat stays. The separate group batch producer
-  must revalidate every included game and eligible player through current room
-  authority at publication and final egress, with writable lore limited to
-  room-visible evidence. Until that guarded producer lands, no group batch runs.
+  enter pushes. Missed-day chat is separate from these push milestones.
 - **Excuses.** An excuse explains a missed day in a few words: the phone
   transcribes the voice note on-device and sends only the transcript (1-500
   characters); no audio is uploaded or stored, and it's never replayed. It
@@ -488,6 +485,27 @@ resulting avatar. No private photo is shared with the subject or other players.
   history and the exact pair's lore first and stays quiet when the player already
   explained the miss. This path requires the exact two-player roster, never
   discovers or creates a chat, and permits a no-reply result.
+- **Group missed-day host check-ins.** A group game, including two-person
+  turnout, uses one combined room message per first missed date. Murph names
+  everyone still qualified and their missing tasks/date, warmly and with a light
+  roast. Never shame, joke about bodies or weight, demand an explanation or ask
+  someone else to nudge a player. No "vs.", em dashes or spaced hyphen separators.
+  Murph reads remaining-player room conversation and the original audience's
+  lore, omits each explained miss and stays quiet if none remain. Unjoined
+  invitees and leavers can still receive the room message but are never targets;
+  private task overrides for invitees, private labels, captions and media stay
+  out. Lore may record room-safe facts and used bits with stable member IDs beside
+  names, roughly 200 lines within the existing 64 KiB limit. IDs stay out of copy.
+  The room cutoff is the latest next-day 9am among every eligible scheduled
+  game/player slot in its frozen time zone, even if that person posts. The
+  inclusive two-hour window starts there. Mixed rooms combine authorized pair
+  and group facts from up to twenty games; pair-only timing and copy stay the
+  same. Pre-join, off/open, any-N and incomplete days do not qualify. Corrected
+  misses, terms or room changes, unsafe audiences and any new departure suppress
+  an already-prepared message. Any conversation received since transcript capture
+  also suppresses it, even unrelated chatter. Quiet and suppressed turns consume
+  the daily claim; replay never creates a replacement message. Earlier historical
+  departures do not stop future eligible dates.
 - **Hosted recap.** Settlement reserves one durable recap turn for the bound
   group. The turn reads the finished shared game, a bounded current-room
   transcript and the authorized game audience's lore, then calls `write_recap` with
@@ -1143,9 +1161,13 @@ Group recap lore is read-only: after saving, trusted code appends only
 `Chat line used: <chatLine>` from the canonical sealed/replayed recap, once and
 without its delivery link. That room message uses only room conversation and
 shared state, never app-only captions or photo details. Pair recap and missed-day
-turns keep their existing lore writes. Deploy the runner's read-only policy and
-trusted marker before Web starts emitting group recap lore scope; no old lore
-files are imported.
+turns keep their existing lore writes. Group missed-day turns may also replace
+their original-audience lore because they receive only room conversation and
+shared state; they never merge pair notebooks or different audiences. Deploy
+compatible runner readers before Web emits group recap or missed-day policies.
+Once new envelopes exist, keep compatible readers and final egress as the
+rollback floor. Production group admission stays dark; no old lore files are
+imported and no historical notifications are backfilled.
 
 The verified two-player group may read daily check-in status, totals and recent
 settled results. These are shared metadata, not a bypass of post-to-unlock:

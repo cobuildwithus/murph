@@ -2132,6 +2132,22 @@ unresolved composer audiences, best-effort association, current keyed rosters,
 rotation, outside seats and restrictions. `game-groups-postgres.test.ts` covers
 late verified-address acceptance and seated-only shared projections. The opt-in
 `MURPH_MEASURE_GAME_INPUT=1` assistant `assistant-game-input-measurement.test.ts`
-captures complete first provider input for identical direct/group fixtures against
-`MURPH_GAME_INPUT_BASE`; it reports exact bytes and explicitly records an
-unavailable target tokenizer instead of estimating tokens.
+captures complete first provider input for identical direct/group fixtures and
+the complete group request after `read_game` against `MURPH_GAME_INPUT_BASE`;
+it reports exact bytes/percentages and explicitly records an unavailable target
+tokenizer instead of estimating tokens.
+
+`game-group-missed-check-in-postgres.test.ts` uses the same isolated migrated
+loopback database lane. It proves the twenty-game bound, room keyset pages,
+Tokyo/Los Angeles mixed-room horizons, shared pair/group locks, immutable quiet
+and rewritten receipt claims, encrypted mailbox/receipt rollback and pointer
+recovery, mutation/publication/dispatch races, historical versus new departures,
+conversation watermark invalidation and exact final audience authority.
+`game-missed-check-in.test.ts` owns canonical schedule/join/grace/DST boundaries.
+Hosted-execution's `game-group-missed.test.ts` and Web's delivery-authority suite
+materialize pinned historical readers to exercise both skew directions; the
+engine lore/notification tests and runtime recap-notification suite prove strict
+scope, writable missed lore, unchanged read-only recap lore and text-only output.
+Run each `group hosting parity:` missed-day live journey individually with
+`pnpm test:assistant:live -- --test "<unique name>"` and inspect its actual reply;
+blocked provider runs are Hold evidence, not successful silence.

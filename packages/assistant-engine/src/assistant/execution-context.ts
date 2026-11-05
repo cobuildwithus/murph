@@ -1,4 +1,5 @@
 import type { CompanionPresence } from "@murphai/hosted-execution/companion-presence";
+import { gameGroupMissedCheckInPolicySchema, type HostedGameGroupMissedCheckInPolicy } from '@murphai/hosted-execution/runtime-control'
 import type { AssistantCurrentDeliveryRoute } from '@murphai/operator-config/assistant/current-delivery-route'
 import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
 import type { AssistantAutomationExecutionInspection } from './cron/inspection.js'
@@ -582,7 +583,7 @@ export type AssistantWorkspaceArtifactMaterializer = (
 
 export interface AssistantHostedExecutionContext {
   gameRecapScope?: { gameId: string; eventId: string; pairFingerprint: string; loreAccess?: 'read' } | null
-  gameMissedCheckInScope?: { gameId: string; eventId: string; memberId: string; firstMissedDate: string; pairFingerprint: string } | null
+  gameMissedCheckInScope?: HostedGameGroupMissedCheckInPolicy | { gameId: string; eventId: string; memberId: string; firstMissedDate: string; pairFingerprint: string } | null
   actionApprovalPort?: AssistantHostedActionApprovalPort | null
   assertTurnCommitAuthority?(input: {
     acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
@@ -695,6 +696,7 @@ function normalizeAssistantGameRecapScope(scope: AssistantHostedExecutionContext
 }
 
 function normalizeAssistantGameMissedCheckInScope(scope: AssistantHostedExecutionContext['gameMissedCheckInScope']): NonNullable<AssistantHostedExecutionContext['gameMissedCheckInScope']> | null {
+  if (scope && 'kind' in scope) return gameGroupMissedCheckInPolicySchema.parse(scope)
   const gameId = normalizeNullableString(scope?.gameId)
   const eventId = normalizeNullableString(scope?.eventId)
   const memberId = normalizeNullableString(scope?.memberId)
