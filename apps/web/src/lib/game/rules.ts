@@ -382,19 +382,21 @@ export function needsPostToday(state: RuleState, memberId: string, now: Date): b
 export function settleDueAt(state: RuleState): Date {
   const { lengthDays } = state.game;
   let due = 0;
+  // One index keeps ten-player settlement checks linear in entries.
+  const entries = indexGameEntries(state.entries);
   for (const player of remainingPlayers(state)) {
     if (!player.dayOne) continue;
     const end = dayStartInstant(addDays(player.dayOne, lengthDays), player.timeZone).getTime();
-    due = Math.max(due, end + (graceOpen(state, player, lengthDays - 1) ? GAME_GRACE_MS : 0));
+    due = Math.max(due, end + (graceOpen(state, player, lengthDays - 1, entries) ? GAME_GRACE_MS : 0));
   }
   return new Date(due);
 }
 
 /** A scheduled day that ended without a live post and still has an attempt left. */
-function graceOpen(state: RuleState, player: RulePlayer, dayIndex: number): boolean {
+function graceOpen(state: RuleState, player: RulePlayer, dayIndex: number, entries: RuleEntries = state.entries): boolean {
   return dayIndex >= eligibleFromDay(state, player) && isScheduledDay(state, dayIndex)
-    && !liveEntry(state.entries, player.memberId, dayIndex)
-    && attemptsUsed(state.entries, player.memberId, dayIndex) < GAME_POSTS_PER_DAY;
+    && !liveEntry(entries, player.memberId, dayIndex)
+    && attemptsUsed(entries, player.memberId, dayIndex) < GAME_POSTS_PER_DAY;
 }
 
 /** Day 1 is always a scheduled day: the first date on or after `date` that the schedule counts. */

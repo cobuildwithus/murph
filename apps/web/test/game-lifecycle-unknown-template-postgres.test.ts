@@ -48,7 +48,8 @@ describe.skipIf(!enabled)("game lifecycle drain against PostgreSQL", () => {
       expect(await db.hostedLinqDelivery.findUnique({ where: { id: untouched.id } })).toMatchObject({ status: "awaiting_generation", attemptedAt: untouched.attemptedAt });
     }
   });
-  it("keeps new resolution receipts isolated from the old sweeper, then handles them with the new one", async () => {
+  // Needs git history for the base sweeper; CI checks out one commit, so this runs in the local skew lane.
+  it.skipIf(process.env.MURPH_VERIFY_GAME_SKEW !== "1")("keeps new resolution receipts isolated from the old sweeper, then handles them with the new one", async () => {
     const target = new URL(`../src/lib/game/.plan-a-legacy-lifecycle-${randomUUID()}.ts`, import.meta.url);
     const root = fileURLToPath(new URL("../../../", import.meta.url));
     await writeFile(target, execFileSync("git", ["show", "b2694496c0665990fa0fd283b5041e5018a38d3e:apps/web/src/lib/game/chat-lifecycle.ts"], { cwd: root, encoding: "utf8" }), { flag: "wx" });
