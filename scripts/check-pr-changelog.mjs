@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -185,6 +186,27 @@ function readChangelogItemsById(
   return itemsById;
 }
 
+function readDeletedChangelogItemsById(baseSha, headSha, { cwd } = {}) {
+  const git = (...args) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+  const mergeBase = git("merge-base", baseSha, headSha);
+  const deletedPaths = git(
+    "diff", "--no-renames", "--name-only", "--diff-filter=D",
+    `${mergeBase}..${headSha}`, "--", CHANGELOG_ENTRY_PREFIX,
+  ).split("\n").filter(Boolean);
+  const itemsById = new Map();
+  for (const filePath of deletedPaths) {
+    const fragment = JSON.parse(git("show", `${mergeBase}:${filePath}`));
+    const itemId = fragment?.item?.id;
+    const publishedOn = fragment?.publishedOn;
+    if (typeof itemId !== "string" || typeof publishedOn !== "string"
+      || filePath !== `${CHANGELOG_ENTRY_PREFIX}${publishedOn}/${itemId}.json`) {
+      throw new Error("A deleted changelog fragment path does not match its stable ID and date.");
+    }
+    itemsById.set(itemId, publishedOn);
+  }
+  return itemsById;
+}
+
 function isChangelogContentPath(changedPath) {
   const normalized = changedPath.split(path.sep).join("/");
   return normalized === LEGACY_CHANGELOG_PATH
@@ -349,6 +371,10 @@ async function main() {
 
   const errors = validatePrChangelog({
     changedPaths: readChangedPaths(baseSha, headSha),
+    changelogItemsById: new Map([
+      ...readDeletedChangelogItemsById(baseSha, headSha),
+      ...readChangelogItemsById(),
+    ]),
     prBodyHtml: await renderPrBody(prBody),
   });
   if (errors.length > 0) {
@@ -382,5 +408,6 @@ export {
   isChangelogContentPath,
   parseItemReferences,
   readChangelogItemsById,
+  readDeletedChangelogItemsById,
   validatePrChangelog,
 };

@@ -71,3 +71,8 @@ that same production component and therefore covers unchanged presentation.
 This exception is content-only. A change to changelog rendering, components,
 styles, visuals, or interaction still requires the normal current-branch design
 proof.
+
+For an intentional fragment deletion, declare `Changelog: updated` and list its
+original date and stable item ID. PR evidence resolves deleted fragments from
+the Git merge base; invented IDs, mismatched dates, and unrelated historical
+entries remain invalid. Current entries retain authority when an ID is reused.
