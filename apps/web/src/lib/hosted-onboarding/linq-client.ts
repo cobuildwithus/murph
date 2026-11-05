@@ -549,7 +549,13 @@ export async function sendHostedLinqReadReceipt(input: {
   });
 }
 
-/** Adds one custom-emoji tapback from the line to an inbound message. */
+/** 👍 goes out as iMessage's native Like tapback, not a custom emoji. */
+const HOSTED_LINQ_NATIVE_LIKE_EMOJI = "👍";
+
+/**
+ * Adds one tapback from the line to an inbound message: the native Like for
+ * 👍, a custom-emoji tapback for anything else.
+ */
 export async function addHostedLinqMessageReaction(input: {
   emoji: string;
   messageId: string;
@@ -563,11 +569,13 @@ export async function addHostedLinqMessageReaction(input: {
     request: async (client) => {
       const result = await client.messages.addReaction(
         normalizeRequiredString(input.messageId, "message id"),
-        {
-          custom_emoji: normalizeRequiredString(input.emoji, "emoji"),
-          operation: "add",
-          type: "custom",
-        },
+        input.emoji === HOSTED_LINQ_NATIVE_LIKE_EMOJI
+          ? { operation: "add", type: "like" }
+          : {
+              custom_emoji: normalizeRequiredString(input.emoji, "emoji"),
+              operation: "add",
+              type: "custom",
+            },
         { signal: input.signal },
       ).withResponse();
       return result.response.status;
