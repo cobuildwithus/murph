@@ -54,6 +54,10 @@ export async function reserveGameChatLifecycleTx(input: {
   });
 }
 
+export function gameGroupMissedDayEventId(roomId: string, firstMissedDate: string): string {
+  return `game-missed:${roomId}:group:${firstMissedDate}`;
+}
+
 export function gameMissedDayEventId(gameId: string, memberId: string, firstMissedDate: string): string {
   return `game-missed:${gameId}:${memberId}:${firstMissedDate}`;
 }
@@ -61,35 +65,54 @@ export function gameMissedDayEventId(gameId: string, memberId: string, firstMiss
 /** Two players' due times for one date fall within 26 hours (UTC-12 to UTC+14). */
 const MISSED_DATE_CLAIM_LOOKBACK_MS = 26 * 60 * 60 * 1000;
 
-/** Existing receipts deduplicate one pair/day batch, including concurrent sweeps. */
-export async function reserveGameMissedDayTx(input: {
-  gameId: string; memberId: string; playerMemberIds: readonly string[]; firstMissedDate: string; dueAt: Date; tx: Prisma.TransactionClient;
-}): Promise<boolean> {
-  const { tx, playerMemberIds: players } = input;
-  if (!isPairRoster(players)) return false;
-  await lockGamePair(tx, players[0]!, players[1]!);
-  const active = await tx.game.findMany({ where: { ...gamePairWhere(players), status: "live" }, select: { id: true }, take: GAME_MAX_OPEN_PER_PAIR });
-  const current = await tx.game.findFirst({ where: { id: input.gameId, status: "live", chatContainerMemberId: { not: null } }, select: { chatContainerMemberId: true } });
-  if (!current?.chatContainerMemberId) return false;
-  // A game that settled after this date's first miss came due may already have
-  // claimed it, so it still counts as one of the pair's games for this date.
-  const ended = await tx.game.findMany({ where: { ...gamePairWhere(players), status: "settled", settledAt: { gte: new Date(input.dueAt.getTime() - MISSED_DATE_CLAIM_LOOKBACK_MS) } },
-    select: { id: true }, take: GAME_MAX_OPEN_PER_PAIR });
-  const games = [...active, ...ended].map((game) => game.id);
-  // Keep the single-game identity. With several games, either player's first
-  // due miss claims the pair's one daily message for both players. Look it up
-  // by delivery key: sending rewrites a receipt's source and template, never its key.
-  const [gameIds, memberIds] = games.length > 1 ? [games, players] : [[input.gameId], [input.memberId]];
-  const keys = gameIds.flatMap((gameId) => memberIds.map((memberId) => createHostedLinqDeliveryIdempotencyLookupKey(gameMissedDayEventId(gameId, memberId, input.firstMissedDate))))
-    .filter((key): key is string => key !== null);
+type MissedDayReservation = {
+  firstMissedDate: string; dueAt: Date; tx: Prisma.TransactionClient;
+  beforeClaim?: (tx: Prisma.TransactionClient) => Promise<boolean>;
+} & ({ gameId: string; memberId: string; playerMemberIds: readonly string[]; roomId?: never }
+  | { roomId: string; pairMemberIds: readonly string[] });
+
+/** One claim owner. Verified two-contact rooms use the same pair-before-game lock. */
+export async function reserveGameMissedDayTx(input: MissedDayReservation): Promise<boolean> {
+  const { tx } = input;
+  const group = input.roomId !== undefined;
+  const players = group ? input.pairMemberIds : input.playerMemberIds;
+  if (isPairRoster(players)) await lockGamePair(tx, players[0]!, players[1]!);
+  else if (!group) return false;
+  if (input.beforeClaim && !await input.beforeClaim(tx)) return false;
+  const current = group ? null : await tx.game.findFirst({ where: { id: input.gameId, status: "live", chatContainerMemberId: { not: null } }, select: { chatContainerMemberId: true } });
+  const roomId = group ? input.roomId : current?.chatContainerMemberId;
+  if (!roomId) return false;
+  // Mixed rooms belong to the room collector, even before its cutoff or claim.
+  if (!group && await tx.game.findFirst({ where: { chatContainerMemberId: roomId, maxPlayers: 10, status: "live" }, select: { id: true } })) return false;
+  const games = await missedDayPairClaimGameIds(tx, players, input.dueAt, group);
+  if (!games) return false;
+  const [gameIds, memberIds] = group || games.length > 1 ? [games, players] : [[input.gameId], [input.memberId]];
+  // Immutable hashes survive quiet, settlement and delivery's source/template rewrite.
+  const eventId = group ? gameGroupMissedDayEventId(roomId, input.firstMissedDate) : gameMissedDayEventId(input.gameId, input.memberId, input.firstMissedDate);
+  const keys = [gameGroupMissedDayEventId(roomId, input.firstMissedDate),
+    ...gameIds.flatMap(gameId => memberIds.map(memberId => gameMissedDayEventId(gameId, memberId, input.firstMissedDate)))]
+    .map(createHostedLinqDeliveryIdempotencyLookupKey).filter((key): key is string => key !== null);
   if (await tx.hostedLinqDelivery.findFirst({ where: { idempotencyKey: { in: keys } }, select: { id: true } })) return false;
-  const eventId = gameMissedDayEventId(input.gameId, input.memberId, input.firstMissedDate);
   const key = createHostedLinqDeliveryIdempotencyLookupKey(eventId);
   if (!key) throw new Error("Game missed-day delivery identity is unavailable.");
-  const created = await input.tx.hostedLinqDelivery.createMany({ data: [{ id: buildHostedLinqDeliveryId(key), idempotencyKey: key,
-    source: "game_lifecycle", sourceRef: `${input.gameId}:${input.memberId}:${input.firstMissedDate}`, template: "game_missed",
-    status: "awaiting_generation", targetKind: "thread", payloadOwnerMemberId: current.chatContainerMemberId, attemptedAt: input.dueAt, retryAfterAt: input.dueAt }], skipDuplicates: true });
+  const created = await tx.hostedLinqDelivery.createMany({ data: [{ id: buildHostedLinqDeliveryId(key), idempotencyKey: key,
+    source: "game_lifecycle", sourceRef: group ? `${roomId}:${input.firstMissedDate}` : `${input.gameId}:${input.memberId}:${input.firstMissedDate}`,
+    template: group ? "game_group_missed" : "game_missed", status: "awaiting_generation", targetKind: "thread",
+    payloadOwnerMemberId: roomId, attemptedAt: input.dueAt, retryAfterAt: input.dueAt }], skipDuplicates: true });
   return created.count === 1;
+}
+
+async function missedDayPairClaimGameIds(tx: Prisma.TransactionClient, players: readonly string[], dueAt: Date, group: boolean): Promise<string[] | null> {
+  if (!isPairRoster(players)) return [];
+  const pairWhere = { maxPlayers: 2, ...gamePairWhere(players) };
+  const take = GAME_MAX_OPEN_PER_PAIR + (group ? 1 : 0);
+  // Preserve the pair-only query bounds; the room collector detects overflow.
+  const [active, ended] = await Promise.all([
+    tx.game.findMany({ where: { ...pairWhere, status: "live" }, select: { id: true }, take }),
+    tx.game.findMany({ where: { ...pairWhere, status: "settled", settledAt: { gte: new Date(dueAt.getTime() - MISSED_DATE_CLAIM_LOOKBACK_MS) } }, select: { id: true }, take }),
+  ]);
+  if (group && (active.length > GAME_MAX_OPEN_PER_PAIR || ended.length > GAME_MAX_OPEN_PER_PAIR)) return null;
+  return [...active, ...ended].map(game => game.id);
 }
 
 /** App proposals, including invite negotiation, own one ordinary proposal send. */

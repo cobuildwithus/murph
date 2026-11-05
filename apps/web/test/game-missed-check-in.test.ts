@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { canScheduleMissedDayCheckIn, gameMissedCheckInRuns, firstDatesOfMissRuns, isMissedCheckInDueNow, missedCheckInDueAt, visitGameMissedCheckInPages, type MissedCheckInDay } from "@/src/lib/game/missed-check-in";
+import { canScheduleMissedDayCheckIn, gameMissedCheckInHorizons, gameMissedCheckInRuns, firstDatesOfMissRuns, isMissedCheckInDueNow, missedCheckInDueAt, visitGameMissedCheckInPages, type MissedCheckInDay } from "@/src/lib/game/missed-check-in";
+import type { RuleState } from "@/src/lib/game/rules";
+
+function groupState(): RuleState {
+  return { game: { id: "group", status: "live", createdBy: "person-a", seats: 10, lengthDays: 7,
+    inviteExpiresAt: null, startsOn: null,
+    terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [] }] } },
+    players: ["Asia/Tokyo", "America/Los_Angeles"].map((timeZone, seat) => ({ memberId: `person-${seat}`, seat, dayOne: "2030-03-04", timeZone })), entries: [] };
+}
 
 describe("game missed-day check-ins", () => {
   it("derives batch misses from artifacts, excluding self-reported incomplete days and any-days games", () => {
@@ -15,10 +23,42 @@ describe("game missed-day check-ins", () => {
     expect(gameMissedCheckInRuns(state, now)).toEqual([{ memberId: "person-b", firstMissedDate: "2030-03-04",
       missedDates: ["2030-03-04"], dueAt: now }]);
     state.game.seats = 10;
-    expect(gameMissedCheckInRuns(state, now)).toEqual([]);
+    expect(gameMissedCheckInRuns(state, now)).toEqual([{ memberId: "person-b", firstMissedDate: "2030-03-04", missedDates: ["2030-03-04"], dueAt: now }]);
     state.game.seats = 2;
     state.game.terms.versions[0]!.schedule = { count: 3 };
     expect(gameMissedCheckInRuns(state, now)).toEqual([]);
+  });
+  it.each([false, true])("waits for the western scheduled player's horizon even when they post: %s", posted => {
+    const state = groupState();
+    if (posted) state.entries.push({ id: "post", memberId: "person-1", dayIndex: 0, attempt: 1, kind: "words", mediaKeys: [],
+      incomplete: false, blurHash: null, withdrawnAt: null, receivedAt: new Date("2030-03-05T03:00:00Z") });
+    const horizon = gameMissedCheckInHorizons([state]).get("2030-03-04")!;
+    expect(horizon.toISOString()).toBe("2030-03-05T17:00:00.000Z");
+    expect(gameMissedCheckInRuns(state, new Date("2030-03-05T00:00:00Z")).map(run => run.memberId)).toEqual(["person-0"]);
+    expect(gameMissedCheckInRuns(state, horizon).map(run => run.memberId)).toEqual(posted ? ["person-0"] : ["person-0", "person-1"]);
+  });
+  it("retains game/player zone associations for one member across concurrent games", () => {
+    const early = groupState(); early.players = [early.players[0]!];
+    const late = structuredClone(early); late.players[0]!.timeZone = "America/Los_Angeles";
+    expect(gameMissedCheckInHorizons([early, late]).get("2030-03-04")?.toISOString()).toBe("2030-03-05T17:00:00.000Z");
+  });
+  it("excludes leavers, pre-join days and any-N versions while retaining later scheduled runs", () => {
+    const state = groupState();
+    state.players[0]!.leftAt = new Date("2030-03-04T10:00:00Z");
+    state.players[1]!.joinedAt = new Date("2030-03-05T20:00:00Z");
+    state.game.terms.versions.unshift({ n: 0, fromDay: 0, schedule: { count: 2 }, stakes: [] });
+    state.game.terms.versions[1]!.fromDay = 2;
+    const runs = gameMissedCheckInRuns(state, new Date("2030-03-07T17:00:00Z"));
+    expect(runs).toMatchObject([{ memberId: "person-1", firstMissedDate: "2030-03-06", missedDates: ["2030-03-06"] }]);
+    expect(gameMissedCheckInHorizons([state]).has("2030-03-04")).toBe(false);
+  });
+  it("resolves the room cutoff through DST and includes exactly cutoff plus two hours", () => {
+    const state = groupState();
+    state.players.forEach(player => { player.dayOne = "2030-03-09"; player.timeZone = "America/New_York"; });
+    const dueAt = gameMissedCheckInHorizons([state]).get("2030-03-09")!;
+    expect(dueAt.toISOString()).toBe("2030-03-10T13:00:00.000Z");
+    expect(isMissedCheckInDueNow({ dueAt, now: new Date(dueAt.getTime() + 7_200_000) })).toBe(true);
+    expect(isMissedCheckInDueNow({ dueAt, now: new Date(dueAt.getTime() + 7_200_001) })).toBe(false);
   });
   it("folds consecutive misses and breaks runs on off, incomplete, posted and open days", () => {
     const days: MissedCheckInDay[] = [

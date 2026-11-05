@@ -6022,7 +6022,8 @@ crash or uncertain provider result never releases its claims. Recipients are
 processed sequentially; provider work stays outside transactions. No names or
 content enter pushes. Pair copy continues to derive from permanent
 `hasUnlockedDay`; group completion derives from live submitted artifacts.
-The missed-day query and pure producer both exclude groups.
+Missed-day chat uses the separate canonical room collector described below;
+it does not create additional push receipts.
 
 `POST /api/game/v1/push-route` uses game bearer admission, allowing free players
 to register the existing `companion_push_route` address and explicit alert
@@ -6124,9 +6125,13 @@ policies carry `loreAccess: "read"`: the runner rejects replacement, then after
 an accepted save appends only `Chat line used: <canonical bare chatLine>` from
 the sealed/replayed recap, once, trimming oldest lines to the 64 KiB limit.
 App-only captions and photo details never enter that room chat line or lore.
-Pair recap lore writes and missed-day wakes are unchanged. For group lore,
-deploy the compatible runner before Web emits the new exact-key policy field;
-keep group admission off until then. No migration or old-file import is needed.
+Pair recap lore writes are unchanged. Group missed-day turns may replace their
+original-audience notebook because their input contains only shared state and
+room conversation. They retain stable member IDs beside names, roughly 200 lines
+within the existing 64 KiB bound. Mixed pair/group batches never merge notebooks;
+ambiguous group audience digests withhold the turn. Deploy compatible runner
+readers before Web emits group lore or missed-day policies, keeping group
+admission off. No migration or old-file import is needed.
 
 New runners opt into group responses through the signed `gameMultiplayer=1`
 query parameter on the existing tool route. Unmarked runners retain pair-only
@@ -6381,16 +6386,51 @@ receipts serialize that shared room's first provider create. Funding selects one
 bound eligible game through indexed player rows, preserving one allowance for
 primary and alternate rooms regardless of game count.
 
-The missed-day sweep shards by bound room so a pair's games become due together.
-Existing lifecycle receipts deduplicate the pair/date under the pair lock when
-several games are live. Canonical miss-run derivation excludes incomplete
-artifacts and any-days capacity for both reservation and the batched message.
-One bounded shared turn names the affected tasks and players. Single-game copy
-is preserved, with an explicit notification JSON decision instruction because
-this lore-enabled host turn uses the conversation prompt profile. Rare kickoff, proposal, cancellation, rematch and recap notices
-stay per game, as do the existing per-game daily push receipts. Pair lore remains
-owned by the sorted-pair fingerprint; group lore uses the original audience as
-described above.
+The missed-day sweep shards and keyset-pages bound room identities, completing
+each room before claiming. Pair-only timing, event identities and copy remain
+unchanged. Canonical miss-run derivation supplies both single-game and combined
+messages, excluding incomplete artifacts, any-N days, open/off days, pre-join
+days, leavers and unjoined invitees. A vanished canonical miss suppresses the
+pending notice instead of fabricating evidence.
+
+`group-missed-day.ts` collects at most twenty games (ten pair and ten group),
+detecting overflow before any claim. Immutable `maxPlayers === 10` selects group
+behavior even with two players. For each missed date, the room cutoff is the
+latest next-day 9am among all eligible scheduled game/player slots in their
+frozen zones, including people who posted. The inclusive two-hour window starts
+at that cutoff. Mixed pair/group rooms use this horizon; the pair path cannot
+claim earlier. The shared reservation function takes `lockGamePair` only for a
+verified actual two-contact audience, before any game locks, then consults
+immutable pair and group delivery hashes. One `game_group_missed` receipt keyed
+by `game-missed:<roomId>:group:<firstMissedDate>` survives quiet, retries,
+settlement and uncertain sends.
+
+The encrypted mailbox policy `game_group_missed_check_in` freezes room/date,
+at most twenty game IDs and terms versions, each full remaining-player set and
+canonical misses, the original group lore digest, and a conversation-lane
+watermark. Transcript reads stop at that watermark and include remaining-player
+authors only. Preparation decrypts public names and their task words outside
+transactions; private labels, unjoined overrides, captions and media are absent.
+Publication and final egress acquire contributing game rows in ID order, reload
+structural evidence, and call `readGroupGameChatAuthority`. These locks span
+mailbox publication/receipt advancement or the existing provider-dispatch claim.
+Any new departure, corrected miss, terms/binding change or unsafe audience
+suppresses frozen output. Historical departures before the snapshot are valid.
+The mailbox causal-append lock also protects a conversation watermark recheck:
+new conversation conservatively suppresses the notice, including unrelated
+chatter; notification-lane writes do not. The daily claim remains consumed.
+Recovery reuses the exact mailbox pointer and room batch, never an arbitrary game.
+
+The isolated runner exposes only lore and quiet tools and returns text or skip.
+It omits individually explained misses, stays quiet if all are explained, or
+names all remaining qualified people and missing tasks/date in one warm line.
+No shaming, body/weight jokes, demands for explanations or indirect nudges.
+Old runners reject the strict policy before generation; old Web rejects the
+room-based event even for two-human groups. Unknown templates remain excluded
+before drain limits. Deploy shared readers and runner before the Web producer;
+the compatible reader/egress release is the rollback floor once envelopes exist.
+No migration or backfill. Rare kickoff, proposal, cancellation, rematch and recap
+notices stay per game, as do existing daily push receipts.
 
 For a new room, `chat-bootstrap.ts` prepares a real group container and mailbox
 without a provider thread ID. The group runtime generates one first message.

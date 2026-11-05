@@ -47164,6 +47164,77 @@ describeRealCodex('real Codex game bootstrap e2e', () => {
 })
 
 describeRealCodex('real Codex game progress and photo journeys', () => {
+  it.each([
+    { name: 'group hosting parity: ten-player combined misses', count: 10, explained: 0 },
+    { name: 'group hosting parity: partially explained misses omit those people', count: 10, explained: 2 },
+    { name: 'group hosting parity: all explained misses stay silent', count: 10, explained: 10 },
+    { name: 'group hosting parity: two-person group keeps room-safe writable lore', count: 2, explained: 0 },
+  ])('$name', async ({ name, count, explained }) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-group-missed-e2e-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    const { buildGameMissedDayInstructions, gameGroupMissedCheckInPolicySchema } = await import('@murphai/hosted-execution/runtime-control')
+    const events: unknown[] = []
+    const names = ['Ava', 'Bea', 'Cal', 'Drew', 'Eli', 'Fran', 'Gia', 'Hugo', 'Ivy', 'Jules'].slice(0, count)
+    const members = names.map((_, index) => `player_${index}`)
+    const firstMissedDate = '2030-03-04'
+    const policy = gameGroupMissedCheckInPolicySchema.parse({ kind: 'game_group_missed_check_in', roomId: 'synthetic-group',
+      eventId: `game-missed:synthetic-group:group:${firstMissedDate}`, firstMissedDate, pairFingerprint: 'b'.repeat(32), conversationLaneSeq: '9',
+      batch: [{ gameId: 'game_reading', termsVersion: 1, remainingMemberIds: members,
+        misses: members.map(memberId => ({ memberId, missedDates: [firstMissedDate] })) }] })
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
+      const lorePath = path.join(workingDirectory, 'games', `lore-${policy.pairFingerprint}.md`)
+      await mkdir(path.dirname(lorePath), { recursive: true })
+      await writeFile(lorePath, 'Used bit: the library filed a missing chapter report.\n', 'utf8')
+      // A different audience's notebook must remain untouched.
+      const otherLore = path.join(workingDirectory, 'games', `lore-${'c'.repeat(32)}.md`)
+      await writeFile(otherLore, 'PRIVATE OTHER AUDIENCE\n', 'utf8')
+      const modelTarget = createAssistantModelTarget({ approvalPolicy: 'never',
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND), codexHome: permissionHome.codexHome,
+        model: config.model, modelProvider: config.modelProvider, provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write' })
+      if (!modelTarget) throw new Error('Expected real Codex target.')
+      const result = await sendAssistantNotificationLocal({ onTraceEvent: event => events.push(event.rawEvent),
+        actorId: null, bindingDeliveryTarget: 'synthetic-group-thread', channel: 'linq', identityId: null,
+        deliveryDispatchMode: 'queue-only', deliveryTarget: 'synthetic-group-thread', deliveryIdempotencyKey: policy.eventId, deliveryDedupeToken: policy.eventId,
+        executionContext: { hosted: { defaultTarget: modelTarget, gameMissedCheckInScope: policy, memberId: policy.roomId, userEnvKeys: [] } },
+        instructions: buildGameMissedDayInstructions({ group: true, firstMissedDate,
+          transcript: names.slice(0, explained).map((playerName, index) => ({ playerName, memberId: members[index]!, text: 'I missed my reading post on March 4 because I was travelling. Back to it today.' })),
+          players: names.map((playerName, index) => ({ playerName, memberId: members[index]!, misses: [{ gameId: 'game_reading', task: 'Read a chapter', missedDates: [firstMissedDate] }] })),
+        }),
+        responsePolicy: policy, threadId: 'synthetic-group-thread', threadIsDirect: false,
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env }, turnTrigger: 'manual-deliver', vault: workingDirectory, workingDirectory,
+      })
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      const actions = readCapabilityRoutingActions(events)
+      const loreActions = actions.filter(action => action.kind === 'dynamic' && /(?:^|[.])game_lore$/u.test(action.tool))
+      const operations = loreActions.map(action => action.kind === 'dynamic' ? action.argumentsValue : null)
+      expect(operations).toContainEqual({ operation: 'read' })
+      expect(actions.filter(action => action.kind !== 'dynamic' || !/(?:^|[.])(?:game_lore|finish_without_reply)$/u.test(action.tool))).toEqual([])
+      expect(await readFile(otherLore, 'utf8')).toBe('PRIVATE OTHER AUDIENCE\n')
+      if (explained === count) {
+        expect(result.decision.kind).toBe('skip'); expect(intents).toHaveLength(0); expect(result.response).toBeNull()
+      } else {
+        expect(result.decision.kind).toBe('send_message'); expect(intents).toHaveLength(1)
+        expect(intents[0]?.message).toBe(result.response)
+        for (const person of names.slice(explained)) expect(result.response).toContain(person)
+        for (const person of names.slice(0, explained)) expect(result.response).not.toContain(person)
+        expect(result.response).toMatch(/read|chapter/iu)
+        expect(result.response).toMatch(/yesterday|March 4|4 March|2030-03-04/iu)
+        expect(result.response).toMatch(/miss|no .*post|haven.t.*post/iu)
+        expect(result.response).not.toMatch(/vs\.|—| - |player_|game_reading|shame|lazy|weight|body|why|\?|missing chapter report|PRIVATE OTHER AUDIENCE/iu)
+        expect((result.response ?? '').length).toBeLessThan(700)
+        expect(operations.filter(operation => typeof operation === 'object' && operation !== null && 'operation' in operation && operation.operation === 'replace')).toHaveLength(1)
+        const lore = await readFile(lorePath, 'utf8')
+        for (const member of members.slice(explained)) expect(lore).toContain(member)
+      }
+      process.stdout.write(`[group-hosting-parity] ${JSON.stringify({ scenario: name, reply: result.response, decision: result.decision.kind, intents: intents.length, loreOperations: operations })}\n`)
+    } catch (error) {
+      process.stdout.write(`[group-hosting-parity-failure] ${JSON.stringify({ scenario: name, messages: readCompletedAgentMessages(events) })}\n`)
+      throw error
+    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths]) }
+  }, 360_000)
+
   it('game concurrent missed tasks deliver one combined daily message', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-many-games-missed-e2e-'))

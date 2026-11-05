@@ -1,3 +1,4 @@
+import { gameGroupMissedCheckInPolicySchema } from "./game-group-missed.ts";
 import {
   parseHostedVaultShareDeliveryPayload,
   parseHostedVaultShareRevokePayload,
@@ -1780,6 +1781,8 @@ function parseHostedExecutionAssistantNotificationResponsePolicy(
           `${label}.pairFingerprint`,
         ),
       };
+    case "game_group_missed_check_in":
+      return gameGroupMissedCheckInPolicySchema.parse(record);
     case "game_missed_check_in":
       assertExactHostedExecutionKeys(
         record,

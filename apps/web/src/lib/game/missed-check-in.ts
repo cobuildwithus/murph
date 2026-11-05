@@ -1,4 +1,4 @@
-import { currentTerms, isScheduledDay, liveEntry, type RuleState } from "./rules";
+import { eligibleFromDay, remainingPlayers, termsForDay, isScheduledDay, liveEntry, type RuleState } from "./rules";
 import { addDays, dayStartInstant, GAME_GRACE_MS } from "./time";
 import { resolveFloatingIsoTimestampInTimeZone } from "@murphai/contracts";
 
@@ -53,12 +53,12 @@ export function missedCheckInDueAt(firstMissedDate: string, timeZone: string): D
 
 /** Canonical misses exclude incomplete artifacts and any-days capacity. */
 export function gameMissedCheckInRuns(state: RuleState, now: Date) {
-  if (state.game.seats !== 2 || state.game.status !== "live" || !("days" in currentTerms(state.game.terms).schedule)) return [];
-  return state.players.flatMap((player) => {
+  if (state.game.status !== "live") return [];
+  return remainingPlayers(state).flatMap((player) => {
     if (!player.dayOne) return [];
     const days: MissedCheckInDay[] = Array.from({ length: state.game.lengthDays }, (_, dayIndex) => {
       const date = addDays(player.dayOne!, dayIndex);
-      if (!isScheduledDay(state, dayIndex)) return { date, status: "off" };
+      if (dayIndex < eligibleFromDay(state, player) || !("days" in termsForDay(state.game.terms, dayIndex).schedule) || !isScheduledDay(state, dayIndex)) return { date, status: "off" };
       const entry = liveEntry(state.entries, player.memberId, dayIndex);
       if (entry) return { date, status: entry.incomplete ? "incomplete" : "posted" };
       const closed = now.getTime() >= dayStartInstant(addDays(date, 1), player.timeZone).getTime() + GAME_GRACE_MS;
@@ -66,4 +66,23 @@ export function gameMissedCheckInRuns(state: RuleState, now: Date) {
     });
     return firstDatesOfMissRuns(days).map((run) => ({ ...run, memberId: player.memberId, dueAt: missedCheckInDueAt(run.firstMissedDate, player.timeZone) }));
   });
+}
+
+/** Stable room horizon includes scheduled players who will ultimately post. */
+export function gameMissedCheckInHorizons(states: readonly RuleState[], dates?: ReadonlySet<string>): Map<string, Date> {
+  const horizons = new Map<string, Date>();
+  for (const state of states) {
+    if (state.game.status !== "live") continue;
+    for (const player of remainingPlayers(state)) {
+      if (!player.dayOne) continue;
+      for (let day = eligibleFromDay(state, player); day < state.game.lengthDays; day += 1) {
+        if (!("days" in termsForDay(state.game.terms, day).schedule) || !isScheduledDay(state, day)) continue;
+        const date = addDays(player.dayOne, day);
+        if (dates && !dates.has(date)) continue;
+        const due = missedCheckInDueAt(date, player.timeZone);
+        if (due && (!horizons.has(date) || due > horizons.get(date)!)) horizons.set(date, due);
+      }
+    }
+  }
+  return horizons;
 }

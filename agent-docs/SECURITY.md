@@ -1906,6 +1906,36 @@ Every occurrence requires an OK scheduled read, that exact game's live status
 and the requester in its current players. Missing, ended, departed or unavailable
 state suppresses delivery; another game or another person's request cannot substitute.
 
+Group missed-day turns use that same original-audience lore namespace with
+replacement writes, because their evidence contains only room conversation and
+shared structural state. A mixed room never merges pair lore or different group
+notebooks. Public names are disambiguated once across the room; private labels,
+unjoined task overrides, captions and media never enter the instructions.
+`readGroupGameChatAuthority` remains the sole group authority at collection,
+publication, recovery and final egress, including two-person turnout.
+
+The strict `game_group_missed_check_in` policy in the encrypted mailbox binds
+the exact room/event/date, original-audience digest, bounded twenty-game batch,
+terms versions, full remaining-player sets, canonical misses and conversation
+watermark. Final egress reads this exact envelope outside its transaction;
+caller-supplied batch facts cannot authorize sending. Publication and dispatch
+lock all contributing game rows in ID order through their atomic claims, then
+recheck the canonical batch, binding, rollout/restriction rules and audience.
+Any new departure invalidates, including a nonaffected player; earlier historical
+departures do not. Provider lookup and decryption stay outside these locks.
+The mailbox causal-append lock protects the conversation-lane watermark through
+publication/dispatch. New conversation suppresses even unrelated chatter, while
+notification appends do not. Suppression, quiet, settlement and uncertain sends
+retain the immutable room/date claim. Authorized mixed two-contact rooms share
+the existing pair-before-game reservation lock and consult both receipt families
+by delivery hash even after receipt metadata is rewritten.
+
+Deploy the compatible policy readers and runner before the Web producer. Older
+runners reject the unknown policy before generation and older Web rejects the
+room-based event as missing valid game authority, including two-human groups.
+Keep the compatible reader/egress release as the rollback floor once new
+envelopes exist; keep production group admission dark. No migration or backfill.
+
 
 Game proposals are structural metadata under the canonical game lock. The
 initiating signed-in player agrees by proposing. In pairs, the other identified
