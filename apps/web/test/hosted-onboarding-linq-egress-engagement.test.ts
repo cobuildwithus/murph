@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { buildHostedExecutionAssistantNotificationRequestedWake, createHostedExecutionPrivateAssistantAskCompletionDeliveryKey, buildHostedMemberChannelWelcomeDeliveryIdentity } from "@murphai/hosted-execution";
+import { ASK_TO_OPEN_MURPH_FOR_STALE_APPLE_HEALTH } from "@murphai/hosted-execution/companion-presence";
 import {
   createHostedAssistantConversationIdentifierBlind,
   hashHostedAssistantConversationIdentifier,
@@ -2556,7 +2557,11 @@ describe("hosted Linq egress authority", () => {
     { expectedStatus: 409, recovered: false, reminderAfterDays: 30 },
     { expectedStatus: 409, recovered: false, reminderAfterDays: null },
   ].flatMap((scenario) => ["garmin", "apple_health_kit", "whoop_v2"].map((sourceProviderSlug) => ({
-    ...scenario, sourceProviderSlug,
+    ...scenario,
+    expectedStatus: sourceProviderSlug === "apple_health_kit" && !ASK_TO_OPEN_MURPH_FOR_STALE_APPLE_HEALTH
+      ? 409
+      : scenario.expectedStatus,
+    sourceProviderSlug,
   }))))(
     "revalidates a queued $sourceProviderSlug silence episode at provider entry (recovered=$recovered, wait=$reminderAfterDays)",
     async ({ expectedStatus, recovered, reminderAfterDays, sourceProviderSlug }) => {
