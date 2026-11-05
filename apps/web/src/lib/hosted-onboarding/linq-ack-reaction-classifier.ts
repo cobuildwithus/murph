@@ -24,11 +24,18 @@ export const HOSTED_LINQ_ACK_REACTION_KINDS = [
   "song",
   "calendar",
   "challenge",
+  "do",
   "log",
   "none",
 ] as const;
 export type HostedLinqAckReactionKind =
   typeof HOSTED_LINQ_ACK_REACTION_KINDS[number];
+
+/**
+ * The go-ahead tapback. Linq sends it as iMessage's native Like, not a custom
+ * emoji, so it looks like a person's thumbs up.
+ */
+export const HOSTED_LINQ_ACK_REACTION_LIKE = "👍";
 
 /** Kinds that get a tapback. `log` and `none` never react. */
 export const HOSTED_LINQ_ACK_REACTION_EMOJI: Readonly<
@@ -36,6 +43,7 @@ export const HOSTED_LINQ_ACK_REACTION_EMOJI: Readonly<
 > = {
   calendar: "📅",
   challenge: "🏆",
+  do: HOSTED_LINQ_ACK_REACTION_LIKE,
   look: "👀",
   make: "📝",
   my_data: "📊",
@@ -46,7 +54,7 @@ export const HOSTED_LINQ_ACK_REACTION_EMOJI: Readonly<
 };
 
 const DEVELOPER_CONTEXT =
-  "Murph is a health coach people text over iMessage. Murph can set reminders, read the member's own health data (sleep, heart rate, steps, meals, weight), research questions, make plans and files, look at photos, create images and songs, read and change the member's calendar, and run challenges with friends. You are judging the member's latest message only, using earlier messages as context.";
+  "Murph is a health coach people text over iMessage. Murph can set reminders, read the member's own health data (sleep, heart rate, steps, meals, weight), research questions, make plans and files, look at photos, create images and songs, read and change the member's calendar, run challenges with friends, and update the member's goals, plans, and settings. You are judging the member's latest message only, using earlier messages as context.";
 
 const KIND_DESCRIPTIONS: Readonly<Record<HostedLinqAckReactionKind, string>> = {
   reminder:
@@ -66,8 +74,10 @@ const KIND_DESCRIPTIONS: Readonly<Record<HostedLinqAckReactionKind, string>> = {
     "Read or change the member's calendar: what is scheduled, finding free time, adding events, sending invites.",
   challenge:
     "Start, change, join, leave, or check standings in a challenge or game with other people.",
+  do:
+    "Carry out a change or a go-ahead that fits none of the kinds above: update a goal, target, preference, or setting; swap, move, drop, or cancel something in a plan Murph made; save, send, or delete something; or the member telling Murph to go ahead (sure, please do; yes go ahead) with something Murph offered to do. A bare ok, sounds good, got it, cool, or thanks that only acknowledges is none, and so is a yes that answers a question or reports something already done (yep did it; yes it went fine).",
   log:
-    "Record something the member describes in words that they just did or ate: a meal, a workout, a weigh-in, drinks. A photo of food is look, not log.",
+    "Record something the member describes in words that they just did or ate: a meal, a workout, a weigh-in, drinks, or a short yes confirming they did a habit Murph asked about. A photo of food is look, not log.",
   none:
     "Anything else: chat, thanks, feelings, questions about what Murph can do, quick questions Murph can answer from what it already knows, casual photos (pets, selfies, scenery, memes, art).",
 };

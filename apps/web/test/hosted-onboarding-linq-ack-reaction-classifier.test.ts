@@ -39,6 +39,7 @@ describe("linq ack reaction classifier", () => {
   it("maps reacting kinds to their emoji and keeps log, none, and heavy quiet", () => {
     expect(parseHostedLinqAckReactionDecision(answers("reminder", 0.01))?.emoji).toBe("⏰");
     expect(parseHostedLinqAckReactionDecision(answers("song", 0.2))?.emoji).toBe("🎶");
+    expect(parseHostedLinqAckReactionDecision(answers("do", 0))?.emoji).toBe("👍");
     expect(parseHostedLinqAckReactionDecision(answers("log", 0))?.emoji).toBeNull();
     expect(parseHostedLinqAckReactionDecision(answers("none", 0))?.emoji).toBeNull();
     expect(parseHostedLinqAckReactionDecision(answers("reminder", 0.5))?.emoji).toBeNull();
