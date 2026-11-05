@@ -20082,7 +20082,7 @@ describeRealCodex('real Codex private group Journal capture e2e', () => {
       }])
       const journalCommands = (await readFile(commandLogPath, 'utf8'))
         .split('\n')
-        .filter((command) => command.startsWith('event note add ') && !command.endsWith('--help'))
+        .filter((command) => command.startsWith('event note add ') && !/(?:^|\s)--help(?:\s|$)/u.test(command))
       expect(journalCommands).toHaveLength(2)
       expect(journalCommands.every((command) =>
         command.includes('event note add')
@@ -28651,7 +28651,12 @@ describeRealCodex('real Codex support escalation e2e', () => {
           toolCallCount: calls.length,
         })}\n`,
       )
-      expect(readCapabilityRoutingActions(result.jsonEvents)).toHaveLength(2)
+      // The private prompt sends feedback through its skill; that read is the
+      // only action allowed besides the two calls.
+      expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) =>
+        !(action.kind === 'command'
+          && action.command.includes('$MURPH_ASSISTANT_SKILLS_ROOT/product-feedback/SKILL.md'))
+      )).toHaveLength(2)
       expect(calls, 'one rejected call and one corrected retry').toHaveLength(2)
       const firstCall = calls[0]
       const correctedCall = calls[1]
