@@ -235,20 +235,26 @@ export async function waitForLinqProductionCanaryReply(input: {
       }
       observedCount = Math.min(observedCount + 1, CANARY_REPLY_OBSERVATION_COUNT_MAX);
       const [space, message] = next.value;
-      const fromMurph = space.id === input.spaceId
-        && message.direction === "inbound"
-        && message.platform === "imessage"
-        && message.sender?.id === input.userId
-        && Number.isFinite(message.timestamp.getTime())
-        && message.timestamp.getTime() >= input.notBeforeEpochMs;
-      if (fromMurph && message.content.type === "text") {
-        return { tapbackAt: firstTapbackAt(), text: message.content.text.trim() };
+      if (
+        space.id !== input.spaceId
+        || message.direction !== "inbound"
+        || message.platform !== "imessage"
+        || message.sender?.id !== input.userId
+        || !Number.isFinite(message.timestamp.getTime())
+        || message.timestamp.getTime() < input.notBeforeEpochMs
+      ) {
+        rejectedCount = Math.min(rejectedCount + 1, CANARY_REPLY_OBSERVATION_COUNT_MAX);
+        continue;
       }
-      if (fromMurph && message.content.type === "reaction") {
+      if (message.content.type === "reaction") {
         tapbacks.push({ at: performance.now(), content: message.content });
         continue;
       }
-      rejectedCount = Math.min(rejectedCount + 1, CANARY_REPLY_OBSERVATION_COUNT_MAX);
+      if (message.content.type !== "text") {
+        rejectedCount = Math.min(rejectedCount + 1, CANARY_REPLY_OBSERVATION_COUNT_MAX);
+        continue;
+      }
+      return { tapbackAt: firstTapbackAt(), text: message.content.text.trim() };
     }
   })();
 
