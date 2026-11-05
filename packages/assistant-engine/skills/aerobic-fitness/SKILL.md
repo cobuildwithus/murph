@@ -1,6 +1,6 @@
 ---
 name: aerobic-fitness
-description: Use for VO2 max cardio fitness aerobic capacity zone interpretation wearable cardio markers and fitness trend questions.
+description: Use for reported VO2 max values in text or device screenshots, cardio fitness, aerobic capacity, zone interpretation, and wearable cardio trends.
 ---
 
 # Aerobic Fitness
@@ -22,13 +22,14 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
 
 ## Data First
 
+- When a member reports their VO2 max, typed or in a readable device screenshot (including WHOOP), save it with `vault-cli measurement add --metric estimated-vo2-max --value <value> --unit ml/kg/min --source manual --occurred-at <YYYY-MM-DD> --note "Member-reported VO2 max from <device>"`. Use the date shown by the device, else the member's local today; preserve the device name in the note without inventing one. This is a reported device estimate, not a direct wearable import. Do not wait for wearable sync or ask whether to interpret it before saving. Only say it is saved after a successful vault write receipt; a failed write is not saved.
 - Check the device/source of VO2 estimate, recent workouts, HR zones, pace/power, terrain, heat, altitude, body-weight changes, illness, and training consistency.
 - Prefer repeated comparable efforts over a single watch estimate.
 - Ask whether the user wants interpretation or a plan before generating training.
 
 ## If Context Is Thin
 
-Ask: "Do you want to understand the cardio/VO2 number, or do you want a training plan to improve it?"
+For advice without a reported reading, ask: "Do you want to understand the cardio/VO2 number, or do you want a training plan to improve it?"
 
 ## Practical Levers
 

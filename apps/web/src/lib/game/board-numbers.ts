@@ -17,7 +17,7 @@ export interface BoardComparison {
   baseline: BoardWindowValue; current: BoardWindowValue; delta: number;
   improvement: number; sinceFirstGame: boolean;
 }
-export type BoardNumber = { state: "not_shared" | "pending" | "hidden" } | {
+export type BoardNumber = { state: "not_shared" | "hidden" } | { state: "pending"; reason?: "no_readings" } | {
   state: "available"; unit: string; latest: BoardDayValue; stale: boolean;
   daily: BoardDayValue[]; comparison: BoardComparison | null;
 };
@@ -35,6 +35,7 @@ export function boardNumber(metric: BoardMetric, projection: HostedGroupBoardPro
   window: PairBoard["window"], firstGameOn: string): BoardNumber {
   if (projection.state === "hidden") return { state: "hidden" };
   if (projection.state === "not_granted") return { state: "not_shared" };
+  if (projection.state === "missing") return { state: "pending", reason: "no_readings" };
   if (projection.state !== "available") return { state: "pending" };
   const policy = POLICY[metric];
   const intermittent = metric === "vo2Max" ? resolveMetricDefinition(policy.key)?.trendPolicy : undefined;
@@ -69,13 +70,13 @@ export function boardNumber(metric: BoardMetric, projection: HostedGroupBoardPro
   candidates.sort((a, b) => Number(b.comparable) - Number(a.comparable) || b.dates - a.dates
     || b.latest.date.localeCompare(a.latest.date) || a.source.localeCompare(b.source));
   const selected = candidates[0];
-  if (!selected) return { state: "pending" };
+  if (!selected) return { state: "pending", reason: "no_readings" };
   const { result } = selected;
   const round = (value: number) => Number(value.toFixed(policy.precision));
   const daily = selected.points.map(point => ({ date: point.date, value: round(point.value!) }));
   const delta = result.delta;
   return { state: "available", unit: policy.unit, daily, latest: daily.at(-1)!,
-    stale: selected.latest.date < addDays(window.through, -7),
+    stale: selected.latest.date < addDays(window.through, -(metric === "vo2Max" ? resolveMetricDefinition(policy.key)!.selectionPolicy.staleAfterDays! : 7)),
     comparison: selected.comparable && delta !== null && result.baseline.value !== null && result.comparison.value !== null ? {
       baseline: { from: baselineFrom, through: selected.baselineThrough, value: result.baseline.value, days: result.baseline.daysWithData },
       current: { from: selected.currentFrom, through: selected.latest.date, value: result.comparison.value, days: result.comparison.daysWithData },

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-05",
+  "order": 100,
+  "item": {
+    "id": "vo2-max-tell-murph",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Tell Murph your VO2 max",
+    "summary": "Some wearables, like WHOOP, keep VO2 max in their own app. Text Murph the number or a screenshot and it saves it, so it shows with your numbers and on your game board.",
+    "details": "Murph only says it saved your VO2 max after the save goes through. The board shows the number you told Murph; the device name stays private to you.",
+    "relevanceTags": ["wearables", "assistant"],
+    "sourcePullRequests": []
+  }
+}

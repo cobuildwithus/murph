@@ -2,6 +2,8 @@ Shared demographic memory, generation-18 projection and native action contracts 
 The [backend execution record](exec-plans/completed/2026-11-04-vault-demographics-backend.md) contains local verification evidence for the parent-owned integration.
 
 Pair health board API and scoped sharing are owned by [the iOS game contract](product-specs/ios-game.md#pair-health-board), [game rules](product-specs/weekly-game.md#pair-board-current-run), and [group sharing](product-specs/hosted-group-join-confirmation.md#app-board-sharing).
+Reported VO2 persistence, the additive no-readings reason and local verification
+are recorded in [the backend execution record](exec-plans/completed/2026-11-05-board-vo2-readings.md).
 
 Restored device completion replay preserves serviced assistant wake projections;
 the behavior owner is `../packages/assistant-runtime/README.md` and the proof is

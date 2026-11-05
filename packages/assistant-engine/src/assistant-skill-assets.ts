@@ -89,7 +89,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'aerobic-fitness',
     name: 'aerobic-fitness',
     triggerHint:
-      'Use for VO2 max, cardio fitness estimates, aerobic capacity, zone interpretation, cardiorespiratory health framing, and wearable cardio marker trends. Use running-cardio or competition-training when the user wants a concrete training plan.',
+      'Use for reported VO2 max values (text or device screenshots), cardio fitness estimates, aerobic capacity, zone interpretation, and wearable cardio trends. Use running-cardio or competition-training for a concrete training plan.',
   },
   {
     slug: 'daily-activity',
