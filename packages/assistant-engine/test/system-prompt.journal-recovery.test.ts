@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 
+import { JOURNAL_ICON_IDS } from '@murphai/contracts/journal-presentation'
 import { describe, expect, it } from 'vitest'
 
 import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
@@ -30,6 +31,16 @@ describe('private Journal capture and recovery instructions', () => {
     expect(policy).toContain('Save the reported observation, not an inferred cause or diagnosis')
     expect(policy).toContain('even one the member suggests')
     expect(skill).toContain('same existing event')
+  })
+
+  it('supplies the canonical icon catalog and note command without a help round', async () => {
+    const skill = await readFile(path.join(resolveAssistantSkillsRoot(), 'journal', 'SKILL.md'), 'utf8')
+    const icons = skill.split('Valid ids:')[1]?.split('## Timing')[0] ?? ''
+    expect([...icons.matchAll(/`([^`]+)`/gu)].map((match) => match[1])).toEqual(JOURNAL_ICON_IDS)
+    expect(skill).toContain('`--icon` is optional and defaults to `note`')
+    expect(skill).toContain('vault-cli event note add --title')
+    expect(privateLayers().prompt).not.toContain('vault-cli event note add --help')
+    expect(skill).not.toContain('vault-cli event note add --help')
   })
 
   it('requires record verification and an honest distinction between saves and web visibility', async () => {

@@ -2445,7 +2445,7 @@ text(result.output);
       },
       {
         requestIncludes: [
-          'accept any self-description, partial answer, or skip without pressing or inferring missing details.',
+          'accept self-description, partial answers, or skips without pressing or inferring details.',
         ],
         text: ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
       },
