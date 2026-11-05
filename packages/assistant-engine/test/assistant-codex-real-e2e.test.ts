@@ -471,6 +471,7 @@ describeRealCodex('real natural goal canary journey', () => {
       ])
       const progress: { elapsedMs: number; text: string }[] = []
       const trace: { elapsedMs: number; method: string; type: string | null; tool: string | null; totalTokens: unknown }[] = []
+      const shellCommands: string[] = []
       const startedAt = performance.now()
       const result = await fixture.message(promptFor('goal-proposal'), {
         sessionId, includeEarlySessionOnboarding: true,
@@ -482,6 +483,8 @@ describeRealCodex('real natural goal canary journey', () => {
           if (!method || !['item/started', 'item/completed', 'item/tool/call', 'thread/tokenUsage/updated'].includes(method)) return
           const params = readRecord(raw?.params)
           const item = readRecord(params?.item)
+          const shellCommand = method === 'item/completed' ? readString(item?.command) : null
+          if (shellCommand) shellCommands.push(shellCommand)
           trace.push({ elapsedMs: Math.round(performance.now() - startedAt), method,
             type: readString(item?.type), tool: readString(item?.tool, params?.tool),
             totalTokens: readRecord(readRecord(params?.tokenUsage)?.total)?.totalTokens })
@@ -499,19 +502,40 @@ describeRealCodex('real natural goal canary journey', () => {
         firstVisibleMs: progress[0]?.elapsedMs ?? elapsedMs, elapsedMs, progress,
         cliInvocations: await fixture.commandCount(),
         commandCount: trace.filter((item) => item.method === 'item/started' && item.type === 'commandExecution').length,
-        trace, reply: result.response,
+        trace, reply: result.response, shellCommands,
         commands: (await readFile(path.join(fixture.root, 'commands.jsonl'), 'utf8')).split('\n').filter(Boolean).map((line) => JSON.parse(line)),
       })}\n`)
       expect(progress).toHaveLength(1)
+      const firstRound = trace.find((item) => item.method === 'thread/tokenUsage/updated')
+      expect(progress[0]!.elapsedMs).toBeLessThanOrEqual(firstRound?.elapsedMs ?? 0)
       // Delivery latency is the member-visible invariant; no extra timing tools
       // are added to the model's turn. This matches the canary's 20-second budget.
       expect(progress[0]?.elapsedMs).toBeLessThan(20_000)
       expect(result.response).toMatch(/walk/iu)
       expect(result.response).toMatch(/lunch/iu)
       expect(result.response).toMatch(/twenty|20/iu)
+      expect(result.response).toMatch(/without reminders|no reminders/iu)
+      if (capabilities) {
+        expect(trace.filter((item) => item.type === 'subAgentActivity')).toEqual([])
+        const memory = await readMemoryDocument(fixture.vault)
+        expect(memory.records.filter((record) => /^Preferred display name: Robin$/u.test(record.text))).toHaveLength(1)
+        expect(memory.records.filter((record) => /^Age: 32 \(as of /u.test(record.text))).toHaveLength(1)
+        const commands = expandRecordedVaultCommands((await readFile(path.join(fixture.root, 'commands.jsonl'), 'utf8'))
+          .split('\n').filter(Boolean).map((line) => (JSON.parse(line) as string[]).join(' ')))
+        expect(commands.filter((command) => /^memory set-name Robin(?: |$)/u.test(command))).toHaveLength(1)
+        const demographics = commands.filter((command) => /^memory set-demographics(?: |$)/u.test(command))
+        expect(demographics).toHaveLength(1)
+        expect(demographics[0]).toMatch(/--age 32(?: |$)/u)
+        expect(demographics[0]).toMatch(/--as-of \d{4}-\d{2}-\d{2}(?: |$)/u)
+        expect(commands.filter((command) => /--biological-sex|--birth-year|--date-of-birth/u.test(command))).toEqual([])
+      }
       expect(await listGoals(fixture.vault)).toHaveLength(0)
       expect((await readVaultRawTolerant(fixture.vault)).regimens).toHaveLength(0)
       expect(await listFollowUpAutomations(fixture.vault)).toHaveLength(0)
+      if (capabilities) {
+        expect(trace.filter((item) => item.method === 'thread/tokenUsage/updated').length).toBeLessThanOrEqual(4)
+        expect(shellCommands.filter((command) => command.includes('murph-onboarding/SKILL.md'))).toEqual([])
+      }
     } finally {
       observer.mockRestore()
       await fixture.close()
@@ -687,8 +711,22 @@ describeRealCodex('real natural goal canary journey', () => {
       expect(preview.response).toMatch(/twenty|20/iu)
       expect(await listGoals(fixture.vault)).toHaveLength(0)
       expect((await readVaultRawTolerant(fixture.vault)).regimens).toHaveLength(0)
+      expect(await listFollowUpAutomations(fixture.vault)).toHaveLength(0)
 
       const { result: accepted, commands, progressUpdates: acceptedProgress } = await timedMessage('accept-goal')
+      if (capabilities) {
+        const memory = await readMemoryDocument(fixture.vault)
+        expect(memory.records.filter((record) => /^Preferred display name: Robin$/u.test(record.text))).toHaveLength(1)
+        expect(memory.records.filter((record) => /^Age: 32 \(as of /u.test(record.text))).toHaveLength(1)
+        const commands = expandRecordedVaultCommands((await readFile(path.join(fixture.root, 'commands.jsonl'), 'utf8'))
+          .split('\n').filter(Boolean).map((line) => (JSON.parse(line) as string[]).join(' ')))
+        expect(commands.filter((command) => /^memory set-name Robin(?: |$)/u.test(command))).toHaveLength(1)
+        const demographics = commands.filter((command) => /^memory set-demographics(?: |$)/u.test(command))
+        expect(demographics).toHaveLength(1)
+        expect(demographics[0]).toMatch(/--age 32(?: |$)/u)
+        expect(demographics[0]).toMatch(/--as-of \d{4}-\d{2}-\d{2}(?: |$)/u)
+        expect(commands.filter((command) => /--biological-sex|--birth-year|--date-of-birth/u.test(command))).toEqual([])
+      }
       expect(acceptedProgress).toHaveLength(0)
       expect(commands.filter((command) => /^regimen list(?: |$)/u.test(command))).toEqual([])
       expect(commands.filter((command) => /^commons goal (list|show)(?: |$)/u.test(command) && !isRecordedVaultHelpCommand(command))).toEqual([])
@@ -4800,6 +4838,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           })}\n`,
         )
 
+        expect(result.policyFiles).toContain('SKILL.md')
         expect(deviceWriteActions).toHaveLength(0)
         expect(
           deviceRequests.filter((request) => request.action !== 'list_accounts'),

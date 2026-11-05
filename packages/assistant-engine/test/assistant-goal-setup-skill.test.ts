@@ -67,10 +67,10 @@ describe('assistant goal setup skill', () => {
       "Read the primary owner for the user's visible outcome.",
     )
     expect(prompt).toContain(
-      'explicit achievable-outcome help (`help me ...`/Goals CTA) -> goal-setup before domain/Commons knowledge',
+      'explicit achievable-outcome help (`help me ...`/Goals CTA) -> goal-setup; facts -> domain',
     )
     expect(prompt).toContain('facts -> domain.')
-    expect(prompt).toContain('For a new proposal, run `cat \"$MURPH_ASSISTANT_SKILLS_ROOT/goal-setup/SKILL.md\"` in the first tool round, alongside exactly one brief `murph.send_progress_update`; do not write yet.')
+    expect(prompt).toContain('in the first tool round, alongside exactly one brief `murph.send_progress_update`')
     expect(prompt).toContain('On acceptance, execute its persist section using the loaded instructions and completed research; do not restart setup.')
   })
 
@@ -103,10 +103,10 @@ describe('assistant goal setup skill', () => {
     expect(raw).toContain(
       'vault-cli commons goal show <key-or-slug> --format json',
     )
-    expect(compact).toContain('Before domain/plan work, make one initial search for the requested outcome, not background context or proposed actions.')
+    expect(compact).toContain('Make one initial search for the requested outcome, not background context or proposed actions.')
     expect(compact).toContain('one unique exact title, `goalPhrase`, or alias after normalizing')
     expect(compact).toContain(
-      'completely read every registered owner named by `goal.workflow.ownerSkillIds` before preview or write',
+      'completely read any registered owner named by `goal.workflow.ownerSkillIds` not already loaded',
     )
     expect(compact).toContain(
       'For `habit_plan`, `training_plan`, or other repeated action, load `behavior-followthrough` before questions or preview;',
@@ -137,7 +137,7 @@ describe('assistant goal setup skill', () => {
     expect(raw).toContain('`goal.revision.workflowSpecRevisionId`')
     const composed = compactWhitespace(`${buildPrompt()}\n${raw}`)
     const customStop = 'Complete results with no exact match: commit to a custom private Goal without `commonsGoalRef` and stop public-template discovery for this proposal and acceptance.'
-    expect(composed).toContain('goal-setup before domain/Commons knowledge')
+    expect(composed).toContain('goal-setup; facts -> domain')
     expect(composed).toContain(customStop)
     expect(composed.indexOf(customStop)).toBeLessThan(composed.indexOf('## Pre-question gate'))
     expect(composed.indexOf(customStop)).toBeLessThan(composed.indexOf('## Ownership'))
@@ -301,8 +301,11 @@ describe('assistant goal setup skill', () => {
     expect(compact).toContain('Save one Goal, then one habit regimen linked to its returned id for repeated action; a regimen alone is incomplete.')
     expect(compact).toContain('Keep `--schedule` to timing only (at most 160 characters); put the plan in `--note` (at most 4000 characters).')
     expect(compact).toContain('Do not issue a post-save show solely to verify a successful write.')
-    const batchReads = 'Batch this search with independent Goal/memory reads via `vault-cli batch --compact --format json`; inspect results before dependent work.'
+    const batchReads = "Reuse the router's first-round batch and skill reads, including Commons grounding; do not repeat them."
     expect(compact).toContain(batchReads)
+    expect(compact).toContain('Only dependent lookups (exact public match or plausible private Goal detail) wait for results.')
+    expect(compact).not.toContain('Before domain/plan work')
+    expect(support).toContain('Reuse completed skill, grounding, and context reads from this turn;')
     expect(compact.indexOf(batchReads)).toBeLessThan(compact.indexOf('vault-cli commons goal list'))
     expect(compact).toContain('Read missing details needed for the next action, or canonical owners after a failed or ambiguous write.')
     expect(compact).toContain('For quiet support with regimen receipt `created: true`, skip support inventory and effects for that new id.')

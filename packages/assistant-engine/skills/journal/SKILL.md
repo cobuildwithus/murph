@@ -12,6 +12,14 @@ second note for it.
 
 ## Writing a note
 
+Use this contract directly, without preflight help:
+
+```text
+vault-cli event note add --title "<event>" --note "<detail>" --note-type <type> --occurred-at <local-date-or-ISO-time> --timing <timing> --icon <icon> --tag key-<fact> --tag happened --format json
+```
+
+Choose type, timing, and tags below; replace `happened` for outcomes or plans.
+
 - One `vault-cli event note add` per independent fact. A symptom and a
   completed action are separate entries even when reported together; do not
   bury one in the other's description. Before finishing, check that each clear
@@ -25,8 +33,16 @@ second note for it.
   alone is enough. With no extra detail, use the title as the note; the view
   hides this duplicate. No generic confirmation padding. Chat replies stay in
   the member's language.
-- `--icon`: choose an existing icon from `vault-cli event note add --help`
-  that matches; use `note` when none fits. Never invent an icon id or asset.
+- `--icon` is optional and defaults to `note`. Choose a matching id below or
+  omit it; never invent an id or look up help just for icons.
+  Valid ids: `note`, `bath`, `shower`, `headache`, `fatigue`, `muscle-soreness`,
+  `abdominal-pain`, `nausea`, `congestion`, `activity`, `walking`, `running`,
+  `cycling`, `swimming`, `rowing`, `strength`, `mobility`, `mind-body`,
+  `racket-sports`, `ball-sports`, `combat-sports`, `winter-sports`, `water-sports`,
+  `outdoor-sports`, `golf`, `dance`, `housework`, `yardwork`, `parenting`,
+  `dog-walking`, `travel`, `commute`, `meal`, `medication`, `alcohol`, `recovery`,
+  `wellness`, `sleep`, `caffeine`, `hydration`, `sauna`, `cold-plunge`, `sunlight`,
+  `red-light`, `smoking`, `temperature`, `work`, `screens`, `noise`.
 
 ## Timing
 

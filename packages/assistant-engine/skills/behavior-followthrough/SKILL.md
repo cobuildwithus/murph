@@ -60,6 +60,8 @@ and the support fields that materially affect it are satisfied.
 
 ### Grounding gate before a durable loop
 
+Reuse completed skill, grounding, and context reads from this turn; load only missing decision-changing evidence. An independent identity save need not block a proposal grounded in visible facts.
+
 This gate applies when Murph is helping choose or design a behavior-change or
 support loop. An exact user-directed recurring reminder or check-in whose
 action and timing are already specified may be created under the normal

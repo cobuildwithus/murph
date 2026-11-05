@@ -458,11 +458,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "e9441ba1cdbc1ec36dd765a3d8ffb0bb19023a1223f244dfdc2b7eefa326ba52",
-        "group": "5310158636bd160d61ad8b50b425e4a08880ddbe2d055ad499bbab8643a231ef",
+        "direct": "6c3b1413186ac3a49b38ce055d1cbd25bb6d5ed09010ef4cd596147518685a8c",
+        "group": "5e8717c31c8b36b5a25aeb9ff3ec646ac67609f76b296de49b344416649ee480",
         "maintenance": "52f122f38125b96ccf960ea62ada87ef983f3e1060cdafef33eae3309b970038",
         "outputOnly": "b87c76c464b664e3d9dcbf947b1cd7a3c823dad67b72a8597c8a462e1bd3dd54",
-        "scheduledEmail": "cb549d87257f678235bf8bbeae8e3505c00fa0ee87203723661ddcc68d33ad50",
+        "scheduledEmail": "5749052441aa37a3b6288d5a8c5734dd5f0094a98adae3b92e84bbfdb5e3674f",
       }
     `)
   })
@@ -1935,7 +1935,7 @@ describe('assistant Codex turn planning', () => {
       'Do not read the onboarding skill and do not run `vault-cli assistant onboarding resume-context --format json`.',
     )
     expect(plan.developerInstructions).toContain(
-      `Outside these visible opening exchanges—missing or ambiguous history, established later stages, an immediate request, or an overall pause or decline—read and follow \`${skillRef}\` before interpreting or acting on an onboarding answer or decision to advance, pause, defer, skip, decline, or complete onboarding`,
+      `An immediate request with no onboarding decision goes to the request's owner without loading onboarding. Outside these visible opening exchanges—missing or ambiguous history, established later stages, or an overall pause or decline—read and follow \`${skillRef}\` before interpreting or acting on an onboarding answer or decision to advance, pause, defer, skip, decline, or complete onboarding`,
     )
     expect(plan.developerInstructions).not.toContain(
       `Read and follow \`${skillRef}\` before interpreting or acting on any onboarding answer`,

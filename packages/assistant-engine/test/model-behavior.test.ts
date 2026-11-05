@@ -438,7 +438,7 @@ describe('assistant execution prompt contract', () => {
     expect(skill).toContain('Update the exact existing event')
     expect(directPrompt).toContain('Respect a no-retention request')
     expect(directPrompt).toContain('hypothetical questions are not events')
-    expect(skill).toContain('use `note` when none fits')
+    expect(skill).toContain('`--icon` is optional and defaults to `note`')
     expect(skill).toContain('start one workout')
     expect(directPrompt).not.toContain('Types and Pattern tags')
     expect(directPrompt).not.toContain('scored Pattern outcome')
@@ -1615,7 +1615,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toMatchInlineSnapshot(`"68a1d5108af16ff8649843be4ab7aa231321228a52be79e80f0f3010cfea7c67"`)
-    expect(promptA.cacheMetadata.stableRouteCapabilityPromptHash).toMatchInlineSnapshot(`"3ffe5dc506994dc7c7c93430466ac0589ac9c6c47b0b0047b73b555687c53122"`)
+    expect(promptA.cacheMetadata.stableRouteCapabilityPromptHash).toMatchInlineSnapshot(`"49d56bc5c7b49395ad977a2e3eefb4bd38d4bdb1776e8278296963bfa78cebf9"`)
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
     )
@@ -1675,7 +1675,7 @@ describe('assistant system prompt cache stability', () => {
     expect(openStablePrefix).toEqual(closedStablePrefix)
     expect(openStablePrefix).toContain('Murph skill router:')
     expect(openStablePrefix).toContain(
-      'explicit achievable-outcome help (`help me ...`/Goals CTA) -> goal-setup before domain/Commons knowledge;',
+      'explicit achievable-outcome help (`help me ...`/Goals CTA) -> goal-setup;',
     )
     expect(openStablePrefix).toContain(
       'facts -> domain.',
@@ -1811,7 +1811,7 @@ describe('assistant Murph onboarding guidance', () => {
     }))
 
     expect(prompt).toContain(
-      'explicit achievable-outcome help (`help me ...`/Goals CTA) -> goal-setup before domain/Commons knowledge;',
+      'explicit achievable-outcome help (`help me ...`/Goals CTA) -> goal-setup;',
     )
     expect(prompt).toContain(
       'facts -> domain.',
