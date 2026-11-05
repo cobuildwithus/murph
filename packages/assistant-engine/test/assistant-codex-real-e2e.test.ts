@@ -36337,8 +36337,8 @@ describeRealCodex('real Codex interactive nutrition-card meal recovery e2e', () 
         expect(expandedCommands.filter(command => command.startsWith('memory show '))).toEqual(['memory show --compact'])
         expect(expandedCommands.filter(command => !/^(?:memory show --compact|goal list(?: --compact)?)$/u.test(command))).toEqual([])
         expect(result.message).toMatch(/protein/iu)
-        expect(result.message).toMatch(/suitable|appropriate|reasonable/iu)
-        expect(result.message).not.toMatch(/not suitable|unsuitable/iu)
+        expect(result.message).toMatch(/suitable|appropriate|reasonable|supports/iu)
+        expect(result.message).not.toMatch(/not suitable|unsuitable|does not support|doesn.t support/iu)
         expect(result.message).not.toMatch(/\?/u)
         expect(result.message).not.toMatch(
           /pregnan|breastfeed|eating disorder|kidney|liver|bariatric/iu,
