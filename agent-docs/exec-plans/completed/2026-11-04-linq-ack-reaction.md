@@ -1,6 +1,6 @@
 # Emoji acknowledgment reaction before slow replies
 
-Status: active
+Status: completed
 Created: 2026-11-04
 Updated: 2026-11-04
 
@@ -257,3 +257,4 @@ Response: `audit-packages/plan-linq-ack-reaction.md`.
 - Real-Codex journey: "ack tapback covers the early update and the reply never
   mentions it".
 - Required PR CI and ReviewGPT.
+Completed: 2026-11-04
