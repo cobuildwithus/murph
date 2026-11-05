@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 import { getPrisma } from "@/src/lib/prisma";
@@ -124,6 +124,11 @@ async function mutateGame(tx: Prisma.TransactionClient, id: string, memberId: st
   if (mutation === "settlement") await tx.game.update({ where: { id }, data: { status: "settled", settledAt: now } });
   if (mutation === "correction") await tx.gameEntry.create({ data: { id: randomUUID(), gameId: id, memberId, dayIndex: 0, attempt: 1, kind: "words", receivedAt: now } });
 }
+beforeAll(async () => {
+  if (!enabled) return;
+  // CI runs PostgreSQL files serially in one database; park lifecycle receipts left by earlier suites so this file's global drain sees only its own.
+  await db.hostedLinqDelivery.updateMany({ where: { source: "game_lifecycle", status: { in: ["awaiting_generation", "generation_queued"] } }, data: { retryAfterAt: new Date("9999-01-01T00:00:00Z") } });
+});
 afterEach(async () => {
   proof.afterPrepare = null; proof.signal.mockReset();
   if (!enabled) return;

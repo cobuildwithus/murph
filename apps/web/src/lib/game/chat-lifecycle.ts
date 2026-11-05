@@ -137,7 +137,7 @@ async function processGroupMissedDayIntent(receipt: GameChatIntent, now: Date): 
   const eventId = `game-missed:${parts[1]}:group:${parts[2]}`;
   if (receipt.idempotencyKey !== createHostedLinqDeliveryIdempotencyLookupKey(eventId)) return false;
   return receipt.status === "generation_queued"
-    ? recoverGameNotificationWake(receipt.id, parts[1], eventId, now)
+    ? recoverGameNotificationWake(receipt.id, parts[1], eventId, now, "missed")
     : deliverGroupMissedDayLifecycle(parts[1], parts[2], now);
 }
 
