@@ -1311,9 +1311,9 @@ describe.skipIf(!enabled)("group majority changes", () => {
     expect(await db.gameEvent.findFirst({ where: { gameId: g.game.id, type: "change_expired" } })).toMatchObject({ payload: { proposalId: g.proposalId, reason: "A player left." } });
     const shared = await readGameChatState(g.context.chatContainerMemberId, g.people.map(p => p.id));
     expect(shared.games.map(game => game.id)).toEqual(count === 2 ? [] : [g.game.id]);
-    // A real provider roster change still detaches the surviving game.
+    // Departed players can also exit the text while the surviving game stays available.
     chatProof.rooms.set(g.context.chatContainerMemberId, g.people.filter((_, i) => i !== 1).map(p => p.email));
-    expect((await readGameChatState(g.context.chatContainerMemberId, g.people.map(p => p.id))).games).toEqual([]);
+    expect((await readGameChatState(g.context.chatContainerMemberId, g.people.map(p => p.id))).games.map(game => game.id)).toEqual(count === 2 ? [] : [g.game.id]);
   });
 
   it("applies a duration change from the next unstarted day and retains default task and group word", async () => {
@@ -1370,9 +1370,9 @@ describe.skipIf(!enabled)("group majority changes", () => {
   });
 });
 
-async function leaverChatGame() {
-  const people = await Promise.all([person(), person(), person()]);
-  for (const [i, p] of people.entries()) await ok(p.id, { type: "setProfile", firstName: ["Alex", "Sam", "River"][i], timeZone: "UTC" });
+async function leaverChatGame(count = 3) {
+  const people = await Promise.all(Array.from({ length: count }, () => person()));
+  for (const [i, p] of people.entries()) await ok(p.id, { type: "setProfile", firstName: ["Alex", "Sam", "River", "Taylor"][i], timeZone: "UTC" });
   const room = await exactRoom(people);
   const game = await create(people[0], people.slice(1), { terms: { ...terms, tasks: [{ seat: 2, text: "Private leaver task" }] } });
   for (const p of people.slice(1)) await ok(p.id, join(game.token));
@@ -1382,7 +1382,7 @@ async function leaverChatGame() {
   return { people, room, game, members, context };
 }
 
-async function queuedGroupRecap(g: Awaited<ReturnType<typeof leaverChatGame>>) {
+async function queuedGroupRecap(g: Pick<Awaited<ReturnType<typeof leaverChatGame>>, "game" | "room" | "people" | "members">) {
   const eventId = `game-recap:${g.game.id}`;
   await reserveGameChatLifecycleTx({ gameId: g.game.id, kind: "recap", now: createdAt, tx: db });
   await markGameChatGenerationQueuedTx(eventId, db, g.room);
@@ -1412,7 +1412,174 @@ function prepareGroupLifecycle(room: string) {
   lifecycleProof.mailbox.mockResolvedValue(null);
 }
 
+async function expectSharedGame(room: string, gameId: string, kept: boolean) {
+  const audience = await readGameChatAudience(room);
+  expect((await readGameChatState(room, audience.memberIds)).games.map(game => game.id)).toEqual(kept ? [gameId] : []);
+}
+
 describe.skipIf(!enabled)("group chat after departure", () => {
+  it.each(["game-first", "text-first"])("keeps reads and commands after both departures: %s", async order => {
+    const g = await leaverChatGame();
+    const leave = () => ok(g.people[2].id, { type: "leave", gameId: g.game.id });
+    if (order === "game-first") await leave();
+    chatProof.rooms.set(g.room, g.people.slice(0, 2).map(p => p.email));
+    if (order === "text-first") {
+      await expectSharedGame(g.room, g.game.id, false);
+      const audience = await readGameChatAudience(g.room);
+      expect(await runGameCommand({ ...g.context, chatAudience: audience, actorMemberId: g.people[0].id,
+        now: new Date("2030-03-09T12:00:00Z"), command: { type: "post", gameId: g.game.id, entryId: randomUUID(), kind: "words", text: "A walk" } })).toMatchObject({ ok: false });
+      await leave();
+    }
+    await expectSharedGame(g.room, g.game.id, true);
+    g.context.chatAudience = await readGameChatAudience(g.room);
+    vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://www.example.test");
+    const { prepareGameChatInvite } = await import("@/src/lib/game/chat-membership");
+    expect(await prepareGameChatInvite(`Join https://example.test/g/${g.game.token}`, g.room)).toBeNull();
+    expect(await runGameCommand({ ...g.context, actorMemberId: g.people[0].id, now: new Date("2030-03-09T12:00:00Z"),
+      command: { type: "post", gameId: g.game.id, entryId: randomUUID(), kind: "words", text: "A walk" } })).toMatchObject({ ok: true });
+    // Re-adding an original person is allowed; adding an outsider is not.
+    chatProof.rooms.set(g.room, [...g.people.slice(0, 2).map(p => p.email), "outsider@example.test"]);
+    await expectSharedGame(g.room, g.game.id, false);
+    chatProof.rooms.set(g.room, g.people.map(p => p.email));
+    await expectSharedGame(g.room, g.game.id, true);
+    await db.gameBlock.create({ data: { blockerMemberId: g.people[2].id, blockedMemberId: g.people[0].id } });
+    chatProof.rooms.set(g.room, g.people.slice(0, 2).map(p => p.email));
+    await expectSharedGame(g.room, g.game.id, false);
+  });
+
+  it.each([[2, 3], [3, 2]])("keeps two exits before any read, in order %i then %i", async (first, second) => {
+    const g = await leaverChatGame(4);
+    for (const seat of [first, second]) await ok(g.people[seat].id, { type: "leave", gameId: g.game.id });
+    chatProof.rooms.set(g.room, g.people.slice(0, 2).map(p => p.email));
+    await expectSharedGame(g.room, g.game.id, true);
+    chatProof.rooms.set(g.room, g.people.slice(0, 3).map(p => p.email));
+    await expectSharedGame(g.room, g.game.id, true);
+  });
+
+  it.each([false, true])("keeps an unjoined invitee's exit (registered: %s), but detaches if they join while absent", async registered => {
+    const people = await Promise.all([person(), person()]);
+    const invitee = registered ? await person() : { id: "", email: `${randomUUID()}@example.test` };
+    const room = await exactRoom(registered ? [...people, invitee] : people);
+    chatProof.rooms.set(room, [...people.map(p => p.email), invitee.email]);
+    const game = await create(people[0], [people[1], invitee]);
+    await ok(people[1].id, join(game.token));
+    chatProof.rooms.set(room, people.map(p => p.email));
+    await expectSharedGame(room, game.id, true);
+    prepareGroupLifecycle(room);
+    const { deliverGameChatLifecycle } = await vi.importActual<typeof import("@/src/lib/game/chat-lifecycle")>("@/src/lib/game/chat-lifecycle");
+    expect(await deliverGameChatLifecycle(game.id, "started")).toBe(true);
+    const delivery = { tx: db, containerMemberId: room, audience: await readGameChatAudience(room), deliveryIdempotencyKey: `game-started:${game.id}` };
+    expect(await assertGameProposalDeliveryCurrentTx(delivery)).toBe(true);
+    if (registered) {
+      await ok(invitee.id, join(game.token));
+      await expectSharedGame(room, game.id, false);
+      await expect(assertGameProposalDeliveryCurrentTx(delivery)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    }
+  });
+
+  it("keeps a registered but unaccepted unbound addressee without binding or lending its key to another contact", async () => {
+    const people = await Promise.all([person(), person(), person()]);
+    const invitee = { id: "", email: `${randomUUID()}@example.test` };
+    const room = await exactRoom(people);
+    chatProof.rooms.set(room, [...people.map(p => p.email), invitee.email]);
+    const game = await create(people[0], [...people.slice(1), invitee]);
+    for (const p of people.slice(1)) await ok(p.id, join(game.token));
+    const registered = await person();
+    await db.$transaction(tx => upsertHostedMemberEmailAuthorization({ memberId: registered.id, prisma: tx,
+      verifiedEmail: { address: invitee.email, verifiedAt: createdAt } }));
+    await ok(people[2].id, { type: "leave", gameId: game.id });
+    chatProof.rooms.set(room, [...people.slice(0, 2).map(p => p.email), invitee.email]);
+    await expectSharedGame(room, game.id, true);
+    expect((await gameRow(game.id)).invitees[2]).toMatchObject({ memberId: null, recipientLookupKey: expect.any(String) });
+    await settle(game.id, people[0].id);
+    expect(await readGameRecapMaterial(game.id, room, people.map(p => p.id))).not.toBeNull();
+    prepareGroupLifecycle(room);
+    const { deliverGameChatLifecycle } = await vi.importActual<typeof import("@/src/lib/game/chat-lifecycle")>("@/src/lib/game/chat-lifecycle");
+    expect(await deliverGameChatLifecycle(game.id, "recap")).toBe(true);
+    const sealInput = await queuedGroupRecap({ room, game, people, members: people.map(p => p.id) });
+    expect(await sealGameRecap(sealInput)).toEqual(sealInput.recap);
+    const delivery = { tx: db, containerMemberId: room, audience: await readGameChatAudience(room), deliveryIdempotencyKey: sealInput.eventId };
+    expect(await assertGameProposalDeliveryCurrentTx(delivery)).toBe(true);
+    chatProof.rooms.set(room, [...people.slice(0, 2).map(p => p.email), invitee.email, "unrelated@example.test"]);
+    await expectSharedGame(room, game.id, false);
+    expect(await sealGameRecap(sealInput)).toBeNull();
+    await expect(assertGameProposalDeliveryCurrentTx({ ...delivery, audience: await readGameChatAudience(room) })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+  });
+
+  it("rejects a bound invitee's obsolete phone in a shrunk room", async () => {
+    const people = await Promise.all([person(), person(), person()]);
+    const invited = await person();
+    const oldPhone = "+12025550172";
+    const phoneIdentity = (phone: string) => db.$transaction(tx => upsertHostedMemberIdentity({ ...buildHostedMemberPhoneIdentityFields(phone),
+      memberId: invited.id, prisma: tx, phoneNumberVerifiedAt: createdAt, signupPhoneCodeSendAttemptId: null,
+      signupPhoneCodeSendAttemptStartedAt: null, signupPhoneCodeSentAt: null, signupPhoneNumber: null }));
+    await phoneIdentity(oldPhone);
+    const room = await exactRoom([...people, invited]);
+    chatProof.rooms.set(room, [...people.map(p => p.email), oldPhone]);
+    const game = await create(people[0], [], { invitees: [
+      ...people.slice(1).map((p, i) => ({ seat: i + 1, recipient: { kind: "email" as const, value: p.email }, firstName: "Player" })),
+      { seat: 3, recipient: { kind: "phone", value: oldPhone }, firstName: "Player" },
+    ] });
+    for (const p of people.slice(1)) await ok(p.id, join(game.token));
+    expect((await gameRow(game.id)).invitees[2]).toMatchObject({ memberId: invited.id, recipientLookupKey: expect.any(String) });
+    await expectSharedGame(room, game.id, true);
+    await phoneIdentity("+12025550173");
+    await ok(people[2].id, { type: "leave", gameId: game.id });
+    chatProof.rooms.set(room, [...people.slice(0, 2).map(p => p.email), oldPhone]);
+    await expectSharedGame(room, game.id, false);
+  });
+
+  it("does not grant a departed bearer an addressed seat in the shrunk text", async () => {
+    const g = await leaverChatGame();
+    const bearer = await person();
+    await ok(bearer.id, join(g.game.token));
+    expect((await gameRow(g.game.id)).players.at(-1)?.seat).toBeGreaterThan(9);
+    for (const p of [bearer, g.people[2]]) await ok(p.id, { type: "leave", gameId: g.game.id });
+    chatProof.rooms.set(g.room, g.people.slice(0, 2).map(p => p.email));
+    await expectSharedGame(g.room, g.game.id, true);
+    chatProof.rooms.set(g.room, [...g.people.slice(0, 2).map(p => p.email), bearer.email]);
+    await expectSharedGame(g.room, g.game.id, false);
+  });
+
+  it("rejects a room with only one human", async () => {
+    const g = await leaverChatGame();
+    chatProof.rooms.set(g.room, [g.people[0].email]);
+    await expect(readGroupGameChatAuthority(await gameRow(g.game.id), g.room)).rejects.toThrow("participants have changed");
+  });
+
+  it("rejects a deleted player still present in a shrunk room", async () => {
+    const g = await leaverChatGame(4);
+    await erase(g.people[3].id);
+    await ok(g.people[2].id, { type: "leave", gameId: g.game.id });
+    chatProof.rooms.set(g.room, [g.people[0].email, g.people[1].email, g.people[3].email]);
+    await expectSharedGame(g.room, g.game.id, false);
+    chatProof.rooms.set(g.room, g.people.slice(0, 2).map(p => p.email));
+    await expectSharedGame(g.room, g.game.id, true);
+  });
+
+  it("uses each unbound contact's readable invitation key and fails closed after retirement", async () => {
+    const people = await Promise.all([person(), person(), person()]);
+    const invitee = { id: "", email: `${randomUUID()}@example.test` };
+    const room = await exactRoom(people);
+    chatProof.rooms.set(room, [...people.map(p => p.email), invitee.email]);
+    const game = await create(people[0], [...people.slice(1), invitee]);
+    for (const p of people.slice(1)) await ok(p.id, join(game.token));
+    await ok(people[2].id, { type: "leave", gameId: game.id });
+    chatProof.rooms.set(room, [...people.slice(0, 2).map(p => p.email), invitee.email]);
+    const oldKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS!;
+    const newKey = `v99:${Buffer.alloc(32, 19).toString("base64url")}`;
+    vi.stubEnv("HOSTED_CONTACT_PRIVACY_KEYS", `${oldKeys},${newKey}`);
+    vi.stubEnv("HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION", "v99");
+    await expectSharedGame(room, game.id, true);
+    // Keep verified accounts readable so only the old invitation key loses authority.
+    for (const p of people.slice(0, 2)) await db.$transaction(tx => upsertHostedMemberEmailAuthorization({ memberId: p.id, prisma: tx,
+      verifiedEmail: { address: p.email, verifiedAt: createdAt } }));
+    vi.stubEnv("HOSTED_CONTACT_PRIVACY_KEYS", newKey);
+    const audience = await readGameChatAudience(room);
+    expect(audience.memberIds.sort()).toEqual(people.slice(0, 2).map(p => p.id).sort());
+    expect(await readGroupGameChatAuthority(await gameRow(game.id), room, audience)).toBeNull();
+  });
+
   it("keeps remaining-player reads, funding, check-ins and majority edits while refusing leaver mutations", async () => {
     const g = await leaverChatGame();
     const { handleGameChatTool } = await import("@/src/lib/game/chat-tool");
@@ -1519,14 +1686,23 @@ describe.skipIf(!enabled)("group chat after departure", () => {
     await expect(assertGameProposalDeliveryCurrentTx(delivery)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
 
-  it("projects, validates, enqueues, seals, delivers and regenerates only the remaining recap cohort", async () => {
+  it.each([false, true])("projects, enqueues, seals, delivers and regenerates the remaining recap cohort (exited text: %s)", async exited => {
     const g = await leaverChatGame();
     const kept = await entry(g.game.id, g.people[0].id, 0);
     const gone = await entry(g.game.id, g.people[2].id, 0);
     await ok(g.people[2].id, { type: "leave", gameId: g.game.id });
+    if (exited) {
+      chatProof.rooms.set(g.room, g.people.slice(0, 2).map(p => p.email));
+      g.context.chatAudience = await readGameChatAudience(g.room);
+    }
     await settle(g.game.id, g.people[0].id);
     const material = await readGameRecapMaterial(g.game.id, g.room, g.members);
     expect(material?.players).toEqual(["Alex", "Sam"]);
+    if (exited) {
+      const rematchId = randomUUID();
+      await expect(run(g.people[0].id, { type: "createGame", gameId: rematchId, maxPlayers: 10, previousGameId: g.game.id, terms })).rejects.toThrow("participants have changed");
+      expect(await db.game.findUnique({ where: { id: rematchId } })).toBeNull();
+    }
     expect(material?.entries.map(e => e.entryId)).toEqual([kept.id]);
     expect(JSON.stringify(material)).not.toContain(gone.id);
     expect(JSON.stringify(material)).not.toContain("River");

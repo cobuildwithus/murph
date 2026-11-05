@@ -64,7 +64,7 @@ async function prepareGameChatPlayers(game: Game & { players: GamePlayer[] }, pr
 export async function readGameProposalDeliveryPlayers(key: string | null, containerMemberId: string, target?: string | null): Promise<readonly string[] | GameChatAudience | undefined> {
   const match = /^(game-talk|game-change|game-started|game-rematch|game-change-cancelled|game-change-expired|game-cancelled|game-recap|game-missed|game-challenge):([^:]+)/.exec(key ?? "");
   if (!match) return undefined;
-  const game = await getPrisma().game.findUnique({ where: { id: match[2] }, include: { players: { take: 11 } } });
+  const game = await getPrisma().game.findUnique({ where: { id: match[2] }, include: { invitees: { select: { memberId: true, recipientLookupKey: true } }, players: { take: 11 } } });
   if (game?.maxPlayers !== 10) return requireExactGameChat(containerMemberId);
   const audience = await readGroupGameChatAuthority(game, containerMemberId);
   if (!audience || game.chatContainerMemberId !== containerMemberId || target != null && audience.threadId !== target) throw new Error("Game delivery audience changed.");

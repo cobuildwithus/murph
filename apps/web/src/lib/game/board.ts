@@ -120,7 +120,7 @@ export async function savePairBoardSharing(viewerId: string, otherId: string, in
       if (!current || current.gameId !== binding.gameId || current.groupId !== binding.groupId || current.runtimeMemberId !== binding.runtimeMemberId) throw gameNotFound();
       if (audience) {
         const row = await tx.game.findUnique({ where: { id: binding.gameId },
-          select: { maxPlayers: true, audienceKey: true, chatContainerMemberId: true, status: true, previousGameId: true, createdBy: true, invitees: { take: 2, select: { memberId: true } }, players: { take: 2, select: { memberId: true, leftAt: true, seat: true } } } });
+          select: { maxPlayers: true, audienceKey: true, chatContainerMemberId: true, status: true, previousGameId: true, createdBy: true, invitees: { take: 2, select: { memberId: true, recipientLookupKey: true } }, players: { take: 2, select: { memberId: true, leftAt: true, seat: true } } } });
         const route = await readHostedThreadRouteByThreadIdentity({ channel: "linq", threadId: audience.threadId, prisma: tx });
         if (!row || route?.containerMemberId !== binding.runtimeMemberId || !await gameChatContextCurrent(row, {
           chatContainerMemberId: binding.runtimeMemberId, chatPlayerMemberIds: audience.memberIds, chatAudience: audience,

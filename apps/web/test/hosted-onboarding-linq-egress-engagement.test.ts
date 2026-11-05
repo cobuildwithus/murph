@@ -1988,7 +1988,7 @@ describe("hosted Linq egress authority", () => {
     },
   );
 
-  it.each(["exact", "extra", "missing", "blocked", "departed", "provider-stale", "outside-join", "unjoined-started", "unjoined-recap", "rotation", "added-after-prepare"])("rechecks group game authority through real Linq egress: %s", async scenario => {
+  it.each(["exact", "extra", "missing", "blocked", "departed", "provider-stale", "outside-join", "unjoined-started", "unjoined-recap", "rotation", "added-after-prepare", "shrunk-recap", "outsider-after-shrink"])("rechecks group game authority through real Linq egress: %s", async scenario => {
     const prisma = Object.assign(createPrismaStub({ threadRouteContainerMemberId: "member-1", activeMemberAccess: true }), {
       gameBlock: { findFirst: vi.fn().mockResolvedValue(scenario === "blocked" ? { blockerMemberId: "person-b" } : null) },
       gameReport: { findFirst: vi.fn().mockResolvedValue(null) },
@@ -1998,14 +1998,15 @@ describe("hosted Linq egress authority", () => {
     const people = ["person-a", "person-b", "person-c"];
     prisma.hostedLinqDailyState.findFirst.mockResolvedValue(null);
     prisma.hostedMailboxItem.findFirst.mockResolvedValue(null);
+    const shrunk = scenario === "shrunk-recap" || scenario === "outsider-after-shrink";
     const game = { id: "game", maxPlayers: 10, createdBy: people[0], status: "live", previousGameId: null,
-      chatContainerMemberId: "member-1", invitees: people.slice(1).map(memberId => ({ memberId })),
-      players: people.slice(0, scenario.startsWith("unjoined") ? 2 : 3).map((memberId, seat) => ({ memberId, seat: scenario === "outside-join" && seat === 2 ? 10 : seat, leftAt: scenario === "departed" && seat === 1 ? new Date() : null })) };
+      chatContainerMemberId: "member-1", invitees: people.slice(1).map(memberId => ({ memberId, recipientLookupKey: null })),
+      players: people.slice(0, scenario.startsWith("unjoined") ? 2 : 3).map((memberId, seat) => ({ memberId, seat: scenario === "outside-join" && seat === 2 ? 10 : seat, leftAt: (scenario === "departed" && seat === 1) || (shrunk && seat === 2) ? new Date("2026-01-01T00:00:00Z") : null })) };
     mocks.getPrisma.mockReturnValue(prisma);
     const handles = people.map(id => `${id}@example.test`);
     const { gameAudienceKeys } = await import("@/src/lib/game/audience");
     const key = gameAudienceKeys(handles.map(value => ({ kind: "email" as const, value }))).current;
-    const current = { ...game, audienceKey: key, ...(scenario === "unjoined-recap" ? { status: "settled", settledAt: new Date() } : { status: "live" }) };
+    const current = { ...game, audienceKey: key, ...(scenario === "unjoined-recap" || shrunk ? { status: "settled", settledAt: new Date() } : { status: "live" }) };
     prisma.game.findFirst.mockResolvedValue(current);
     Object.assign(prisma.game, { findUnique: vi.fn().mockResolvedValue(current) });
     if (scenario === "rotation") {
@@ -2015,7 +2016,7 @@ describe("hosted Linq egress authority", () => {
       vi.stubEnv("HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION", "v99");
     }
     Object.assign(prisma, { hostedThreadContainer: { findUnique: vi.fn().mockResolvedValue({ participants: people.map(participantMemberId => ({ participantMemberId })) }) } });
-    const roster = scenario === "extra" ? [...handles, "outsider@example.test"] : scenario === "missing" ? handles.slice(0, 2) : handles;
+    const roster = scenario === "extra" ? [...handles, "outsider@example.test"] : scenario === "missing" || shrunk ? handles.slice(0, 2) : handles;
     vi.spyOn(await import("@/src/lib/hosted-routing/assistant-notification-destination"), "readHostedThreadContainerLinqRouteAuthorities").mockImplementation(vi.fn().mockResolvedValue({ authorities: new Map([["member-1", { threadId: "chat-authorized-group", containerMemberId: "member-1", channel: "linq" }]]) }));
     vi.spyOn(await import("@/src/lib/hosted-onboarding/linq-client"), "getHostedLinqChatSummary").mockImplementation(async () => ({ isGroup: true, handlesComplete: scenario !== "provider-stale", handles: [
       { handle: "+15555550100", isMe: true, status: "active" }, ...roster.map(handle => ({ handle, isMe: false, status: "active" })),
@@ -2028,12 +2029,16 @@ describe("hosted Linq egress authority", () => {
       expect(await delivery.readGameProposalDeliveryPlayers("game-started:game", "member-1", "chat-authorized-group")).toBeTruthy();
       roster.push("outsider@example.test");
     }
-    const eventId = scenario === "unjoined-recap" ? "game-recap:game" : "game-started:game";
+    const eventId = scenario === "unjoined-recap" || shrunk ? "game-recap:game" : "game-started:game";
+    if (shrunk) {
+      expect(await delivery.readGameProposalDeliveryPlayers(eventId, "member-1", "chat-authorized-group")).toBeTruthy();
+      if (scenario === "outsider-after-shrink") roster.push("outsider@example.test");
+    }
     const response = await postHostedLinqEgressEngagement(new Request("https://internal.example.test/engagement", {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ authorityCheckOnly: false, answeredMailboxItemIds: [], idempotencyKey: eventId, target: "chat-authorized-group", targetKind: "thread" }),
     }));
-    if (["exact", "unjoined-started", "unjoined-recap", "rotation"].includes(scenario)) {
+    if (["exact", "unjoined-started", "unjoined-recap", "rotation", "shrunk-recap"].includes(scenario)) {
       expect(response.status).toBe(200);
       expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledOnce();
     } else {

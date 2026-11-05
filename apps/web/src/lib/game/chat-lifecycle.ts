@@ -201,7 +201,7 @@ function lifecycleStatuses(kind: GameChatLifecycleKind): string[] {
   return kind === "rematch" ? ["invited"] : kind === "recap" ? ["settled"] : kind === "missed" ? ["live"] : kind === "change_expired" ? ["live", "negotiating", "settled", "void"] : kind === "cancelled" ? ["void"] : kind === "started" ? ["live"] : ["live", "negotiating"];
 }
 
-type GameChatLifecycleRecord = Game & { players: Array<{ memberId: string | null; seat: number; leftAt: Date | null }>; invitees: Array<{ memberId: string | null }> };
+type GameChatLifecycleRecord = Game & { players: Array<{ memberId: string | null; seat: number; leftAt: Date | null }>; invitees: Array<{ memberId: string | null; recipientLookupKey: string | null }> };
 
 function lifecyclePlayerMemberIds(game: GameChatLifecycleRecord | null, kind: GameChatLifecycleKind): string[] {
   if (game?.maxPlayers === 10) return game.players.flatMap(player => player.memberId && !player.leftAt ? [player.memberId] : []);
@@ -423,7 +423,7 @@ async function enqueueGameLifecycle(input: {
   const appended = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     if (bound.externalThreadRouteAuthority) await assertHostedAssistantNotificationRouteAuthority({ authority: bound.externalThreadRouteAuthority, prisma: tx });
     const current = await tx.game.findFirst({ where: { id: input.gameId, status: { in: lifecycleStatuses(input.kind) }, chatContainerMemberId: input.containerMemberId },
-      include: { players: { take: 11 } } });
+      include: { invitees: { select: { memberId: true, recipientLookupKey: true } }, players: { take: 11 } } });
     if (!current || (input.kind === "rematch" && isGameInviteExpired(current, new Date()))) return null;
     if (input.kind === "talk" && !await readCurrentGameTalk(tx, input.gameId, input.eventId.split(":")[2], new Date())) return null;
     if (current.maxPlayers === 10 && !isCurrentGroupGameChatLifecycle(current, input.kind)) return null;
