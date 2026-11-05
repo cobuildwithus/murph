@@ -295,3 +295,22 @@ it.skipIf(process.env.MURPH_VERIFY_GAME_SKEW !== "1")("Plan A preserves the prev
     expect(JSON.stringify(hostedGameToolResponseSchema.parse(response(game)))).toBe(JSON.stringify(previous.hostedGameToolResponseSchema.parse(response(game))));
   } finally { await rm(target, { force: true }); }
 });
+
+it.skipIf(process.env.MURPH_VERIFY_GAME_SKEW !== "1")("keeps group Prove it corrections compatible in both runner/Web directions", async () => {
+  const target = new URL(`../src/.game-talk-skew-${randomUUID()}.ts`, import.meta.url);
+  const root = fileURLToPath(new URL("../../../", import.meta.url));
+  await writeFile(target, execFileSync("git", ["show", "b2694496c0665990fa0fd283b5041e5018a38d3e:packages/hosted-execution/src/game-tools.ts"], { cwd: root, encoding: "utf8" }), { flag: "wx" });
+  try {
+    const old = await import(target.href) as typeof import("../src/game-tools.ts");
+    const correction = { action: "update_game", origin, update: { operation: "mark_incomplete", gameId: game.id, date: "2030-04-01" } };
+    const group = response({ ...game, maxPlayers: 10, pendingInviteeCount: 2 });
+    for (const reader of [old, { hostedGameToolRequestSchema, hostedGameToolResponseSchema }]) {
+      expect(reader.hostedGameToolRequestSchema.parse(correction)).toEqual(correction);
+      expect(reader.hostedGameToolResponseSchema.parse(group)).toEqual(group);
+      for (const extra of [{ actorMemberId: "another" }, { memberId: "another" }, { invitationSeat: 2 }, { note: "private" }]) {
+        expect(reader.hostedGameToolRequestSchema.safeParse({ ...correction, update: { ...correction.update, ...extra } }).success).toBe(false);
+      }
+      expect(reader.hostedGameToolResponseSchema.safeParse(response({ ...game, maxPlayers: 10, talkNote: "private" })).success).toBe(false);
+    }
+  } finally { await rm(target, { force: true }); }
+});

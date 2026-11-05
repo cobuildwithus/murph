@@ -34,6 +34,7 @@ async function execute(args: unknown, ctx = context()) {
 describe('game dynamic tools', () => {
   it.each([
     { label: 'pair only', games: [{ status: 'live' }], group: false, pair: true },
+    { label: 'pair history in a larger room', games: [{ status: 'settled' }], group: true, pair: true, roster: 3 },
     { label: 'group only', games: [{ status: 'live', maxPlayers: 10 }], group: true, pair: false },
     { label: 'two-person group', games: [{ status: 'invited', maxPlayers: 10 }], group: true, pair: true, roster: 2 },
     { label: 'live pair and invited group', games: [{ status: 'live' }, { status: 'invited', maxPlayers: 10 }], group: true, pair: true },
@@ -45,6 +46,9 @@ describe('game dynamic tools', () => {
     for (const guidance of [GAME_SHARED_SETUP_GUIDANCE, GAME_SHARED_CHOICE_POLL_GUIDANCE, GAME_REMINDER_GUIDANCE]) expect(text.split(guidance)).toHaveLength(2)
     expect(text.includes(GAME_PAIR_CHAT_GUIDANCE)).toBe(pair)
     expect(text.includes(GAME_GROUP_MODE_GUIDANCE)).toBe(group)
+    for (const rule of ['A consented Talk note may name its author; it accepts no invitation and changes no terms.', 'In Prove it, only the accused may concede their own day; never judge evidence or ask for a group verdict.']) {
+      expect(text.split(rule)).toHaveLength(group ? 2 : 1)
+    }
     expect(text).not.toMatch(/before 20:00|short first day|person-to-person nudges/u)
   })
 

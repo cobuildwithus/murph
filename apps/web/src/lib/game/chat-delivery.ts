@@ -1,4 +1,5 @@
 import "server-only";
+import { prepareGameTalkAudience, type GameNoticeAudience } from "./talk";
 
 import { isPairRoster, hasGameIdentity, gameMemberIds } from "./roster";
 
@@ -9,6 +10,7 @@ import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { assertHostedAssistantNotificationRouteAuthority, bindHostedAssistantNotificationDestination, resolveHostedAssistantNotificationDestination } from "../hosted-routing/assistant-notification-destination";
 import { getPrisma } from "../prisma";
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { readPendingGameChange } from "./change-words";
 import { isGameOn } from "./access";
 import type { GamePendingChange } from "./contract";
@@ -90,7 +92,7 @@ async function prepareGameChatPlayers(game: Game & { players: GamePlayer[] }, pr
 }
 
 /** Revalidate the audience outside the existing provider dispatch transaction. */
-export async function readGameProposalDeliveryPlayers(key: string | null, containerMemberId: string, target?: string | null): Promise<readonly string[] | GameChatAudience | NonNullable<Awaited<ReturnType<typeof readGroupMissedDayDeliveryAuthority>>> | undefined> {
+export async function readGameProposalDeliveryPlayers(key: string | null, containerMemberId: string, target?: string | null): Promise<readonly string[] | GameNoticeAudience | NonNullable<Awaited<ReturnType<typeof readGroupMissedDayDeliveryAuthority>>> | undefined> {
   if (/^game-missed:[^:]+:group:/u.test(key ?? "")) {
     const authority = await readGroupMissedDayDeliveryAuthority(key!, containerMemberId, target);
     if (!authority) throw new Error("Game missed-day authority is unavailable.");
@@ -101,8 +103,13 @@ export async function readGameProposalDeliveryPlayers(key: string | null, contai
   const game = await getPrisma().game.findUnique({ where: { id: match[2] }, include: { invitees: { select: { memberId: true, recipientLookupKey: true } }, players: { take: 11 } } });
   if (game?.maxPlayers !== 10) return requireExactGameChat(containerMemberId);
   const audience = await readGroupGameChatAuthority(game, containerMemberId);
-  if (!audience || game.chatContainerMemberId !== containerMemberId || target != null && audience.threadId !== target) throw new Error("Game delivery audience changed.");
-  return audience;
+  if (!audience || game.chatContainerMemberId !== containerMemberId || target != null && audience.threadId !== target) {
+    if (match[1] === "game-talk" || match[1] === "game-challenge") throw hostedOnboardingError({ code: "GAME_CHANGE_SUPERSEDED",
+      httpStatus: 409, message: "This game notice is no longer current.", retryable: false });
+    throw new Error("Game delivery audience changed.");
+  }
+  const talk = /^game-talk:([^:]+):([^:]+)$/u.exec(key ?? "");
+  return talk ? prepareGameTalkAudience(getPrisma(), talk[1], talk[2], audience) : audience;
 }
 
 

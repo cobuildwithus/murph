@@ -99,8 +99,9 @@ describe("weekly game views: tickets", () => {
     );
   });
 
-  it("projects case state for both players while preserving hidden-post omissions", () => {
+  it.each([2, 10] as const)("projects case state and hidden-post omissions at maxPlayers=%s", seats => {
     const state = liveState();
+    state.game.seats = seats;
     state.game.chatContainerMemberId = "room";
     const now = noonOnDay(state, LEO, 0);
     const posted = entry(AVA, 0, 1);

@@ -81,3 +81,12 @@ export async function verifiedGameContactKeys(tx: Prisma.TransactionClient, acto
   return contacts.filter(contact => createHostedLinqParticipantContactLookupKeyReadCandidates(contact).some(key => key === phone?.phoneLookupKey || key === email?.verifiedEmailLookupKey))
     .flatMap(createHostedLinqParticipantContactLookupKeyReadCandidates);
 }
+
+/** Direct bindings win; otherwise the lowest addressed seat with current contact proof wins. */
+export function addressedGameInvite<T extends { seat: number; memberId: string | null; recipientLookupKey: string | null }>(
+  invitees: readonly T[], actor: string, verifiedKeys: readonly string[],
+): T | undefined {
+  const seats = [...invitees].sort((a, b) => a.seat - b.seat);
+  return seats.find(invitee => invitee.memberId === actor)
+    ?? seats.find(invitee => invitee.memberId === null && invitee.recipientLookupKey !== null && verifiedKeys.includes(invitee.recipientLookupKey));
+}

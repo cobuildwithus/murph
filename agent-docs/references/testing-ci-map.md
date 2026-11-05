@@ -2117,13 +2117,25 @@ recovery suites green. Membership tests cover 2/3/10-person exact, extra, missin
 ambiguous and incomplete provider handles. Engagement-route tests prove stale
 roster, departure and block rejection at final egress.
 
+Group Prove it/Talk proof extends the same group PostgreSQL fixtures with
+independent budgets, competing cases, exact note identities, nine invitation-seat
+quotas, deletion/acceptance serialization and stale publication/final claim.
+Keep pair Talk, API, service, account-deletion and unknown-template suites green.
+The known-template old Web reader test demonstrates why group admission stays
+off until all Web readers understand compound Talk references. Run each new live
+journey individually: `group Prove it opens one named factual case without a group verdict`,
+`group Prove it accused concedes only their own day`,
+`group Prove it refuses another player conceding for the accused`,
+`group Talk relays a waiting invitee note without accepting`, and
+`group Talk relays an invitee note into an already live game`.
+
 Run hosted-execution game-tools-compatibility/game-chat-notifications tests,
 assistant-engine assistant-game-tools/game-chat-bootstrap tests, Cloudflare
 group-tool-port tests, and the focused live journey named in the engine README.
 Run Linq thread-route/webhook/graph-boundary suites when inbound preparation or
 association changes. The frozen old consumer compatibility test uses the PR 4
 base contract and proves both deploy-skew directions; run it locally with
-`MURPH_VERIFY_GAME_GROUP_SKEW=1` (shallow routine CI skips historical objects). Runner changes require
+`MURPH_VERIFY_GAME_SKEW=1` (shallow routine CI skips historical objects). Runner changes require
 production bundle assembly (local absolute caps) and exact-base Linux CI growth
 proof before merge. Local-only parent review cannot supply exact-head CI evidence.
 

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getPrisma } from "@/src/lib/prisma";
 import { upsertHostedMemberEmailAuthorization } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import { upsertHostedMemberIdentity } from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
@@ -132,6 +132,8 @@ async function erase(memberId: string) {
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 afterAll(async () => {
   if (!enabled) return;
+  const ownedGames = await db.game.findMany({ where: { wordsOwnerMemberId: { in: ids } }, select: { id: true } });
+  await db.hostedLinqDelivery.deleteMany({ where: { source: "game_lifecycle", OR: ownedGames.flatMap(game => [{ sourceRef: game.id }, { sourceRef: { startsWith: `${game.id}:` } }]) } });
   // Delete the large synthetic entry fixture in one set before roster cascades.
   await db.gameEntry.deleteMany({ where: { memberId: { in: ids } } });
   await db.game.deleteMany({ where: { wordsOwnerMemberId: { in: ids } } });
@@ -176,7 +178,7 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     await ok(joined.id, join(game.token, "UTC", 3));
     const context = await groupContext(game.id, [starter, joined, invited]);
     const before = await readGame(game.id, starter.id, true);
-    expect(before?.terms.tasks).toEqual([
+    expect(before?.terms.tasks.slice().sort((a, b) => a.seat - b.seat)).toEqual([
       { seat: 0, text: terms.defaultTask }, { seat: 1, text: terms.defaultTask },
     ]);
     expect((await readGame(game.id, joined.id, true))?.terms).toEqual(before!.terms);
@@ -196,7 +198,7 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     await ok(joined.id, join(game.token));
     await db.gameInvitee.delete({ where: { gameId_seat: { gameId: game.id, seat: 3 } } });
     const before = await readGame(game.id, starter.id, true);
-    expect(before?.terms.tasks).toEqual([
+    expect(before?.terms.tasks.slice().sort((a, b) => a.seat - b.seat)).toEqual([
       { seat: 0, text: terms.defaultTask }, { seat: 1, text: terms.defaultTask },
     ]);
     const tasks = before!.terms.tasks.filter(task => task.text !== before!.terms.defaultTask);
@@ -2155,4 +2157,358 @@ describe.skipIf(!enabled)("group app change parity", () => {
     expect(lifecycleProof.signal).toHaveBeenCalled();
   });
 
+});
+
+// Plan B composes the existing roster, crypto and lifecycle fixtures.
+const caseNow = new Date("2030-03-09T12:00:00Z");
+async function talkGroup(size = 4, live = false) {
+  const people = await Promise.all(Array.from({ length: size }, () => person()));
+  for (const [index, p] of people.entries()) await ok(p.id, { type: "setProfile", firstName: `Player${index}`, timeZone: "UTC" });
+  const group = await create(people[0], people.slice(1));
+  const context = await groupContext(group.id, people);
+  if (live) await ok(people[1].id, join(group.token), caseNow);
+  prepareGroupLifecycle(context.chatContainerMemberId);
+  const command = (index: number, proposalId = randomUUID()): Extract<GameCommand, { type: "negotiate" }> & { note: string; change?: never } => ({ type: "negotiate", token: group.token,
+    proposalId, termsVersion: 1, timeZone: "UTC", note: `Could we discuss an outdoor prize, from Player${index}?` });
+  return { group, people, context, command };
+}
+async function talkReceipt(gameId: string, proposalId: string) {
+  const { createHostedLinqDeliveryIdempotencyLookupKey } = await import("@/src/lib/hosted-onboarding/linq-observability-identifiers");
+  return db.hostedLinqDelivery.findUniqueOrThrow({ where: { idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(`game-talk:${gameId}:${proposalId}`)! } });
+}
+async function groupPhoto(gameId: string, memberId: string) {
+  return db.gameEntry.create({ data: { id: randomUUID(), gameId, memberId, dayIndex: 0, attempt: 1, kind: "photo", mediaKeys: [], receivedAt: caseNow } });
+}
+
+describe.skipIf(!enabled)("group Prove it and Talk", () => {
+  it("accepts nine independent notes without joining and recovers exact receipts in reverse order", async () => {
+    const f = await talkGroup(10);
+    const before = await gameRow(f.group.id);
+    const commands = f.people.slice(1).map((_, i) => f.command(i + 1));
+    for (const [i, command] of commands.entries()) expect(await run(f.people[i + 1].id, command)).toMatchObject({ ok: true });
+    const after = await gameRow(f.group.id);
+    expect(after).toEqual(before);
+    expect(await db.gameEvent.count({ where: { gameId: f.group.id, type: "talk_requested" } })).toBe(9);
+    const { readGameTalkReceiptIdentity } = await import("@/src/lib/game/talk");
+    const { deliverGameChatLifecycle } = await vi.importActual<typeof import("@/src/lib/game/chat-lifecycle")>("@/src/lib/game/chat-lifecycle");
+    for (const [i, command] of [...commands.entries()].reverse()) {
+      const receipt = await talkReceipt(f.group.id, command.proposalId);
+      expect(receipt.sourceRef).toBe(`${f.group.id}:${command.proposalId}`);
+      expect(await readGameTalkReceiptIdentity(db, receipt)).toEqual({ gameId: f.group.id, proposalId: command.proposalId, eventId: `game-talk:${f.group.id}:${command.proposalId}` });
+      expect(await deliverGameChatLifecycle(f.group.id, "talk", command.proposalId, createdAt)).toBe(true);
+      const instructions = lifecycleProof.prepare.mock.lastCall![0].envelope.notification.instructions;
+      expect(instructions).toContain(`Player${i + 1}`);
+      expect(instructions).toContain(command.note);
+      expect(instructions).not.toMatch(/Teammate|termsWords|https?:|private/);
+    }
+    expect(lifecycleProof.append).toHaveBeenCalledTimes(9);
+    lifecycleProof.mailbox.mockResolvedValue({ id: "synthetic-recovered-note", consumedAt: null });
+    for (const command of commands) expect(await deliverGameChatLifecycle(f.group.id, "talk", command.proposalId, createdAt)).toBe(true);
+    expect(lifecycleProof.append).toHaveBeenCalledTimes(9);
+    expect(lifecycleProof.signal).toHaveBeenCalledTimes(18);
+    expect(await gameRow(f.group.id)).toEqual(before);
+  });
+
+  it("serializes the quota, preserves immutable replay and projects only the author's status", async () => {
+    const f = await talkGroup();
+    const { readInvitePreview } = await import("@/src/lib/game/service");
+    expect(await readInvitePreview(f.group.token, true, f.people[1].id)).toMatchObject({ supportsTalk: true, canTalk: true });
+    expect(await readInvitePreview(f.group.token, true)).toMatchObject({ canTalk: false });
+    const commands = [f.command(1), f.command(1)];
+    const results = await Promise.all(commands.map(command => run(f.people[1].id, command)));
+    expect(results.filter(result => result.ok)).toHaveLength(1);
+    expect(results.filter(result => !result.ok)).toMatchObject([{ error: { code: "INVITE_USED" } }]);
+    const command = commands[results.findIndex(result => result.ok)];
+    expect(await readInvitePreview(f.group.token, true, f.people[1].id)).toMatchObject({ canTalk: false, talkDelivery: "pending" });
+    expect(await readInvitePreview(f.group.token, true, f.people[2].id)).not.toHaveProperty("talkDelivery");
+    expect(await readInvitePreview(f.group.token, true)).not.toHaveProperty("talkDelivery");
+    const event = await db.gameEvent.findUniqueOrThrow({ where: { commandKey: `game-change:${f.group.id}:${command.proposalId}` } });
+    await ok(f.people[1].id, join(f.group.token));
+    expect(await run(f.people[1].id, { ...command, note: "A different note", termsVersion: 99 })).toMatchObject({ ok: true });
+    expect(await db.gameEvent.findUnique({ where: { id: event.id } })).toEqual(event);
+    const { deliverGameChatLifecycle } = await vi.importActual<typeof import("@/src/lib/game/chat-lifecycle")>("@/src/lib/game/chat-lifecycle");
+    expect(await deliverGameChatLifecycle(f.group.id, "talk", command.proposalId, createdAt)).toBe(false);
+    expect(await readInvitePreview(f.group.token, true, f.people[1].id)).toMatchObject({ canTalk: false, talkDelivery: "failed" });
+    await db.game.update({ where: { id: f.group.id }, data: { status: "settled" } });
+    expect(await readInvitePreview(f.group.token, true, f.people[1].id)).toEqual({ status: "used", talkDelivery: "failed" });
+    await db.game.update({ where: { id: f.group.id }, data: { status: "void" } });
+    expect(await readInvitePreview(f.group.token, true, f.people[1].id)).toMatchObject({ status: "expired", talkDelivery: "failed" });
+    await db.gamePlayer.update({ where: { gameId_memberId: { gameId: f.group.id, memberId: f.people[1].id } }, data: { leftAt: caseNow } });
+    expect(await readInvitePreview(f.group.token, true, f.people[1].id)).toBeNull();
+  });
+
+  it("keeps an unseated author's note current when someone else activates the game", async () => {
+    const f = await talkGroup(); const command = f.command(2);
+    await ok(f.people[2].id, command);
+    await ok(f.people[1].id, join(f.group.token));
+    const { deliverGameChatLifecycle } = await vi.importActual<typeof import("@/src/lib/game/chat-lifecycle")>("@/src/lib/game/chat-lifecycle");
+    expect(await deliverGameChatLifecycle(f.group.id, "talk", command.proposalId, createdAt)).toBe(true);
+    const { readGameProposalDeliveryPlayers } = await import("@/src/lib/game/chat-delivery");
+    const eventId = `game-talk:${f.group.id}:${command.proposalId}`;
+    const audience = await readGameProposalDeliveryPlayers(eventId, f.context.chatContainerMemberId);
+    if (!audience || Array.isArray(audience)) throw new Error("Expected group audience");
+    expect(await db.$transaction(tx => assertGameProposalDeliveryCurrentTx({ tx, containerMemberId: f.context.chatContainerMemberId,
+      deliveryIdempotencyKey: eventId, audience: audience as Awaited<ReturnType<typeof readGameChatAudience>>, now: createdAt }))).toBe(true);
+  });
+
+  it.each(["join", "terms", "end", "delete"])("suppresses a prepared note when %s wins the game lock", async change => {
+    const f = await talkGroup(4, true); const command = f.command(2);
+    await ok(f.people[2].id, command, caseNow);
+    const eventId = `game-talk:${f.group.id}:${command.proposalId}`;
+    const { readGameProposalDeliveryPlayers } = await import("@/src/lib/game/chat-delivery");
+    const audience = await readGameProposalDeliveryPlayers(eventId, f.context.chatContainerMemberId);
+    if (!audience || !("contacts" in audience)) throw new Error("Expected prepared group audience");
+    lifecycleProof.prepare.mockImplementationOnce(async () => {
+      if (change === "join") await ok(f.people[2].id, join(f.group.token), caseNow);
+      if (change === "terms") await agreeTerms(f.context, f.people[0].id, f.people[1].id, { type: "editTerms", gameId: f.group.id,
+        expectedTermsVersion: 1, terms: { ...terms, stakes: [{ kind: "prize", item: "Pick the next picnic" }] } }, caseNow);
+      if (change === "end") await db.$transaction(async tx => { await tx.$queryRaw`SELECT id FROM game WHERE id = ${f.group.id} FOR UPDATE`; await tx.game.update({ where: { id: f.group.id }, data: { status: "settled" } }); });
+      if (change === "delete") await erase(f.people[2].id);
+      return {};
+    });
+    const { deliverGameChatLifecycle } = await vi.importActual<typeof import("@/src/lib/game/chat-lifecycle")>("@/src/lib/game/chat-lifecycle");
+    expect(await deliverGameChatLifecycle(f.group.id, "talk", command.proposalId, caseNow)).toBe(false);
+    expect(lifecycleProof.append).not.toHaveBeenCalled();
+    expect(await talkReceipt(f.group.id, command.proposalId)).toMatchObject({ status: "skipped" });
+    await expect(db.$transaction(tx => assertGameProposalDeliveryCurrentTx({ tx, deliveryIdempotencyKey: eventId,
+      containerMemberId: f.context.chatContainerMemberId, audience, now: caseNow }))).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+  });
+
+  it("scrubs an unseated deleted author without changing other notes, pending terms or the seat quota", async () => {
+    const f = await talkGroup(4, true); const own = f.command(2), other = f.command(3);
+    await db.gameInvitee.update({ where: { gameId_seat: { gameId: f.group.id, seat: 2 } }, data: { memberId: null } });
+    await ok(f.people[2].id, own, caseNow); await ok(f.people[3].id, other, caseNow);
+    const before = await gameRow(f.group.id);
+    const otherEvent = await db.gameEvent.findUnique({ where: { commandKey: `game-change:${f.group.id}:${other.proposalId}` } });
+    await erase(f.people[2].id);
+    const after = await gameRow(f.group.id);
+    expect(after.pendingChange).toEqual(before.pendingChange); expect(after.recapEncrypted).toBe(before.recapEncrypted);
+    expect(after.players).toEqual(before.players); expect(after.status).toBe(before.status);
+    expect(await db.gameEvent.findUnique({ where: { commandKey: `game-change:${f.group.id}:${own.proposalId}` } })).toMatchObject({ actor: "system", payload: { v: 2, invitationSeat: 2, noteEncrypted: null } });
+    expect(await db.gameEvent.findUnique({ where: { id: otherEvent!.id } })).toEqual(otherEvent);
+    expect(await talkReceipt(f.group.id, own.proposalId)).toMatchObject({ status: "skipped" });
+    // A fresh account can prove the same formerly unbound invitation, but its accepted seat stays spent.
+    const replacement = await person();
+    await db.$transaction(tx => upsertHostedMemberEmailAuthorization({ memberId: replacement.id, prisma: tx,
+      verifiedEmail: { address: f.people[2].email, verifiedAt: caseNow } }));
+    const { readInvitePreview } = await import("@/src/lib/game/service");
+    expect(await readInvitePreview(f.group.token, true, replacement.id)).toMatchObject({ canTalk: false });
+    expect(await run(replacement.id, f.command(2), caseNow)).toMatchObject({ ok: false,
+      error: { code: "INVITE_USED", message: "You've already sent a note for this invitation." } });
+  });
+
+  it("requires addressed proof and profile, rejects outsiders and keeps bearer joins unchanged", async () => {
+    const f = await talkGroup(); const outsider = await person();
+    expect(await run(outsider.id, f.command(1))).toMatchObject({ ok: false, error: { code: "INVITE_USED" } });
+    expect(await run(f.people[0].id, f.command(0))).toMatchObject({ ok: false });
+    expect(await run(f.people[1].id, { ...f.command(1), termsVersion: 2 })).toMatchObject({ ok: false, error: { code: "TERMS_CHANGED" } });
+    expect(await run(f.people[1].id, { type: "negotiate", token: f.group.token, proposalId: randomUUID(), termsVersion: 1, timeZone: "UTC", change: { kind: "edit", lengthDays: 9 } })).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
+    await db.gameInvitee.update({ where: { gameId_seat: { gameId: f.group.id, seat: 1 } }, data: { memberId: null } });
+    expect(await run(f.people[1].id, f.command(1))).toMatchObject({ ok: true });
+    expect(await run(outsider.id, join(f.group.token))).toMatchObject({ ok: true });
+  });
+
+  it("keeps Talk availability and admission closed after profile or verified-contact loss", async () => {
+    const f = await talkGroup(); const actor = f.people[1];
+    const { readInvitePreview } = await import("@/src/lib/game/service");
+    await db.gameProfile.delete({ where: { memberId: actor.id } });
+    expect(await readInvitePreview(f.group.token, true, actor.id)).toMatchObject({ canTalk: false });
+    expect(await run(actor.id, f.command(1))).toMatchObject({ ok: false });
+    await ok(actor.id, { type: "setProfile", firstName: "Sam", timeZone: "UTC" });
+    await db.gameInvitee.update({ where: { gameId_seat: { gameId: f.group.id, seat: 1 } }, data: { memberId: null } });
+    await db.hostedMemberEmailAuthorization.deleteMany({ where: { memberId: actor.id } });
+    expect(await readInvitePreview(f.group.token, true, actor.id)).toMatchObject({ canTalk: false });
+    expect(await run(actor.id, f.command(1))).toMatchObject({ ok: false, error: { code: "INVITE_USED" } });
+    await db.$transaction(tx => upsertHostedMemberEmailAuthorization({ memberId: actor.id, prisma: tx,
+      verifiedEmail: { address: actor.email, verifiedAt: createdAt } }));
+    expect(await readInvitePreview(f.group.token, true, actor.id)).toMatchObject({ canTalk: true });
+    expect(await run(actor.id, f.command(1))).toMatchObject({ ok: true });
+  });
+
+  it("keeps unjoined challengers and hidden, incomplete or reported group photos ineligible", async () => {
+    const f = await talkGroup(3, true);
+    const target = await groupPhoto(f.group.id, f.people[1].id);
+    const command = { type: "challenge" as const, gameId: f.group.id, entryId: target.id };
+    expect(await run(f.people[2].id, command, caseNow)).toMatchObject({ ok: false });
+    expect(await run(f.people[0].id, command, caseNow)).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
+    await groupPhoto(f.group.id, f.people[0].id);
+    await db.gameEntry.update({ where: { id: target.id }, data: { incomplete: true } });
+    expect(await run(f.people[0].id, command, caseNow)).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
+    await db.gameEntry.update({ where: { id: target.id }, data: { incomplete: null } });
+    await ok(f.people[0].id, { type: "report", reportId: randomUUID(), gameId: f.group.id, entryId: target.id, about: "post", reason: "other" }, caseNow);
+    expect(await run(f.people[0].id, command, caseNow)).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
+    expect(await db.gameEvent.count({ where: { gameId: f.group.id, type: "challenged" } })).toBe(0);
+  });
+
+  it("serializes competing cases, gives independent budgets and refunds departure without reopening an entry", async () => {
+    const f = await talkGroup(4, true); await ok(f.people[2].id, join(f.group.token), caseNow);
+    const photos = await Promise.all(f.people.slice(0, 3).map(p => groupPhoto(f.group.id, p.id)));
+    const commands = [0, 2].map(index => ({ actor: f.people[index].id, command: { type: "challenge" as const, gameId: f.group.id, entryId: photos[1].id } }));
+    const results = await Promise.all(commands.map(({ actor, command }) => run(actor, command, caseNow)));
+    expect(results.filter(r => r.ok)).toHaveLength(1);
+    expect(results.filter(r => !r.ok)).toMatchObject([{ error: { code: "INVALID_REQUEST" } }]);
+    const winner = commands[results.findIndex(r => r.ok)];
+    expect(await run(winner.actor, winner.command, caseNow)).toMatchObject({ ok: true });
+    expect((await readGame(f.group.id, winner.actor, true))?.canChallenge).toBe(false);
+    const accused = await readGame(f.group.id, f.people[1].id, true);
+    expect(accused?.days[0].mine?.challenge).toMatchObject({ status: "open", byYou: false });
+    expect(await run(f.people[1].id, { type: "challenge", gameId: f.group.id, entryId: photos[0].id }, caseNow)).toMatchObject({ ok: true });
+    await ok(f.people[1].id, { type: "leave", gameId: f.group.id }, caseNow);
+    expect((await readGame(f.group.id, winner.actor, true))?.canChallenge).toBe(true);
+    expect(await run(winner.actor, winner.command, caseNow)).toMatchObject({ ok: true });
+    expect(await db.gameEvent.count({ where: { gameId: f.group.id, type: "challenged" } })).toBe(2);
+  });
+
+  it("revalidates app challenge room authority before spending and uses inherited shared facts", async () => {
+    const f = await talkGroup(4, true);
+    await Promise.all(f.people.slice(0, 2).map(p => groupPhoto(f.group.id, p.id)));
+    const target = await db.gameEntry.findFirstOrThrow({ where: { gameId: f.group.id, memberId: f.people[1].id } });
+    chatProof.rooms.set(f.context.chatContainerMemberId, [...f.people.map(p => p.email), "outsider@example.test"]);
+    expect(await run(f.people[0].id, { type: "challenge", gameId: f.group.id, entryId: target.id }, caseNow)).toMatchObject({ ok: false, error: { code: "CHAT_UNAVAILABLE" } });
+    expect(await db.gameEvent.count({ where: { gameId: f.group.id, type: "challenged" } })).toBe(0);
+    chatProof.rooms.set(f.context.chatContainerMemberId, f.people.map(p => p.email));
+    // A structural revision inherits the earlier default task words.
+    const row = await gameRow(f.group.id);
+    const stored = row.terms as { v: number; versions: Array<{ n: number; fromDay: number }> };
+    const { sealGameText } = await import("@/src/lib/game/crypto");
+    const termsWordsEncrypted = await sealGameText({ memberId: row.wordsOwnerMemberId, table: "game", rowId: row.id, field: "terms_words" },
+      JSON.stringify({ v: 1, versions: [{ n: 1, defaultTask: "Take a walk", tasks: [{ seat: 1, text: "Private rehab override" }], stakes: [] }] }));
+    if (!termsWordsEncrypted) throw new Error("Expected sealed terms words");
+    await db.game.update({ where: { id: f.group.id }, data: { terms: { ...stored,
+      versions: [...stored.versions, { ...stored.versions[0], n: 2, fromDay: 0 }] }, termsWordsEncrypted } });
+    await ok(f.people[0].id, { type: "challenge", gameId: f.group.id, entryId: target.id }, caseNow);
+    const { readGameChallengeCase, readGameChallengeInstructions } = await import("@/src/lib/game/service");
+    const current = await readGameChallengeCase(db, f.group.id, target.id, caseNow);
+    const instructions = await readGameChallengeInstructions(current!);
+    expect(instructions).toContain("Take a walk"); expect(instructions).toContain("Player0"); expect(instructions).toContain("Player1");
+    expect(instructions).not.toMatch(/Teammate|caption|https?:|mediaKey|Private rehab override/);
+  });
+});
+
+describe.skipIf(!enabled)("group exact notice ordering", () => {
+  beforeEach(async () => {
+    // Keep the injected provider failure on this notice, outside the missed-day pre-sweep.
+    vi.spyOn(await import("@/src/lib/game/service"), "reserveDueGameMissedDayCheckIns").mockResolvedValue(0);
+  });
+
+  it("retries provider outages but skips a changed challenge audience during recovery", async () => {
+    const f = await talkGroup(3, true);
+    const photos = await Promise.all(f.people.slice(0, 2).map(p => groupPhoto(f.group.id, p.id)));
+    await ok(f.people[0].id, { type: "challenge", gameId: f.group.id, entryId: photos[1].id }, caseNow);
+    const receipt = await db.hostedLinqDelivery.findFirstOrThrow({ where: { sourceRef: `${f.group.id}:${photos[1].id}`, template: "game_challenge" } });
+    const { drainGameChatLifecycle } = await vi.importActual<typeof import("@/src/lib/game/chat-lifecycle")>("@/src/lib/game/chat-lifecycle");
+    const recover = async () => {
+      await db.hostedLinqDelivery.update({ where: { id: receipt.id }, data: { attemptedAt: new Date("1600-01-01"), retryAfterAt: new Date(0) } });
+      return drainGameChatLifecycle({ prisma: db, now: caseNow });
+    };
+    expect(await recover()).toMatchObject({ attempted: 1, queued: 1 });
+    lifecycleProof.mailbox.mockResolvedValue({ id: "synthetic-challenge", consumedAt: null });
+    const provider = vi.spyOn(await import("@/src/lib/hosted-onboarding/linq-client"), "getHostedLinqChatSummary");
+    provider.mockRejectedValueOnce(new Error("Temporary provider outage"));
+    expect(await recover()).toMatchObject({ attempted: 1, queued: 0, deferred: 1 });
+    expect(await db.hostedLinqDelivery.findUnique({ where: { id: receipt.id } })).toMatchObject({ status: "generation_queued" });
+    provider.mockRestore();
+    chatProof.rooms.set(f.context.chatContainerMemberId, [...f.people.map(p => p.email), "outsider@example.test"]);
+    expect(await recover()).toMatchObject({ attempted: 1, queued: 0 });
+    expect(await db.hostedLinqDelivery.findUnique({ where: { id: receipt.id } })).toMatchObject({ status: "skipped" });
+    expect(lifecycleProof.append).toHaveBeenCalledOnce();
+    expect(lifecycleProof.signal).toHaveBeenCalledOnce();
+  });
+
+  it.each(["concession", "retake", "withdrawal", "departure", "end"])("suppresses prepared challenge publication and final dispatch after %s", async change => {
+    const f = await talkGroup(4, true); await ok(f.people[2].id, join(f.group.token), caseNow);
+    const photos = await Promise.all(f.people.slice(0, 3).map(p => groupPhoto(f.group.id, p.id)));
+    await ok(f.people[0].id, { type: "challenge", gameId: f.group.id, entryId: photos[1].id }, caseNow);
+    const eventId = `game-challenge:${f.group.id}:${photos[1].id}`;
+    const { createHostedLinqDeliveryIdempotencyLookupKey } = await import("@/src/lib/hosted-onboarding/linq-observability-identifiers");
+    const key = createHostedLinqDeliveryIdempotencyLookupKey(eventId)!;
+    const audience = await readGameChatAudience(f.context.chatContainerMemberId);
+    const changeFirst = async () => {
+      if (change === "concession") expect(await runGameCommand({ ...f.context, actorMemberId: f.people[1].id, now: caseNow,
+        command: { type: "setDayCompletion", gameId: f.group.id, date: "2030-03-09", incomplete: true } })).toMatchObject({ ok: true });
+      if (change === "withdrawal") await ok(f.people[1].id, { type: "withdraw", gameId: f.group.id, entryId: photos[1].id }, caseNow);
+      if (change === "departure") await ok(f.people[1].id, { type: "leave", gameId: f.group.id }, caseNow);
+      if (change === "end" || change === "retake") await db.$transaction(async tx => {
+        await tx.$queryRaw`SELECT id FROM game WHERE id = ${f.group.id} FOR UPDATE`;
+        if (change === "end") await tx.game.update({ where: { id: f.group.id }, data: { status: "settled" } });
+        else {
+          await tx.gameEntry.update({ where: { id: photos[1].id }, data: { withdrawnAt: caseNow, withdrawnReason: "replaced" } });
+          await tx.gameEntry.create({ data: { ...photos[1], id: randomUUID(), attempt: 2 } });
+        }
+      });
+    };
+    lifecycleProof.prepare.mockImplementationOnce(async () => { await changeFirst(); return {}; });
+    await db.hostedLinqDelivery.update({ where: { idempotencyKey: key }, data: { attemptedAt: new Date("1800-01-01"), retryAfterAt: null } });
+    const { drainGameChatLifecycle } = await vi.importActual<typeof import("@/src/lib/game/chat-lifecycle")>("@/src/lib/game/chat-lifecycle");
+    await drainGameChatLifecycle({ prisma: db, now: caseNow });
+    expect(lifecycleProof.prepare).toHaveBeenCalledOnce();
+    expect(lifecycleProof.append).not.toHaveBeenCalled();
+    expect(await db.hostedLinqDelivery.findUnique({ where: { idempotencyKey: key } })).toMatchObject({ status: "skipped" });
+    await expect(db.$transaction(tx => assertGameProposalDeliveryCurrentTx({ tx, deliveryIdempotencyKey: eventId,
+      containerMemberId: f.context.chatContainerMemberId, audience, now: caseNow }))).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+  });
+
+  it.each([false, true])("serializes unseated note acceptance behind account deletion, unbound=%s", async unbound => {
+    const f = await talkGroup(4, true); const actor = f.people[2].id; const command = f.command(2);
+    if (unbound) await db.gameInvitee.update({ where: { gameId_seat: { gameId: f.group.id, seat: 2 } }, data: { memberId: null } });
+    const preparedDeletion = await prepareGameAccountDeletion({ memberIds: [actor], prisma: db });
+    const { lockHostedMemberRow } = await import("@/src/lib/hosted-onboarding/shared");
+    const crypto = await import("@/src/lib/game/crypto");
+    const original = crypto.sealGameText;
+    let preparationReady: () => void = () => {};
+    const prepared = new Promise<void>(resolve => { preparationReady = resolve; });
+    vi.spyOn(crypto, "sealGameText").mockImplementation(async (target, text) => {
+      const result = await original(target, text);
+      if (target.field === `talk_note:${command.proposalId}`) preparationReady();
+      return result;
+    });
+    let acceptance: ReturnType<typeof run> | undefined;
+    await db.$transaction(async tx => {
+      await lockHostedMemberRow(tx, actor);
+      acceptance = run(actor, command, caseNow);
+      await prepared;
+      await applyGameAccountDeletionTx({ memberIds: [actor], tx, prepared: preparedDeletion, now: caseNow });
+      await tx.hostedMember.delete({ where: { id: actor } });
+    });
+    expect(await acceptance).toMatchObject({ ok: false, error: { code: "PLAYER_UNAVAILABLE" } });
+    expect(await db.gameEvent.count({ where: { gameId: f.group.id, actor } })).toBe(0);
+    expect(await db.gameEvent.count({ where: { commandKey: `game-change:${f.group.id}:${command.proposalId}` } })).toBe(0);
+  });
+
+  it("rejects mismatched receipt identity, event type and author before opening note content", async () => {
+    const f = await talkGroup(); const command = f.command(2); await ok(f.people[2].id, command);
+    const { readGameTalkReceiptIdentity, readCurrentGameTalk } = await import("@/src/lib/game/talk");
+    const receipt = await talkReceipt(f.group.id, command.proposalId);
+    expect(await readGameTalkReceiptIdentity(db, { ...receipt, sourceRef: `${f.group.id}:${randomUUID()}` })).toBeNull();
+    expect(await readGameTalkReceiptIdentity(db, { ...receipt, sourceRef: f.group.id })).toBeNull();
+    const commandKey = `game-change:${f.group.id}:${command.proposalId}`;
+    await db.gameEvent.update({ where: { commandKey }, data: { type: "change_proposed" } });
+    expect(await readCurrentGameTalk(db, f.group.id, command.proposalId, createdAt)).toBeNull();
+    await db.gameEvent.update({ where: { commandKey }, data: { type: "talk_requested", actor: f.people[3].id } });
+    expect(await readCurrentGameTalk(db, f.group.id, command.proposalId, createdAt)).toBeNull();
+  });
+
+  it("uses per-game duplicate-name cohorts and deliberately includes a consenting unseated author", async () => {
+    const f = await talkGroup(4, true); await ok(f.people[2].id, join(f.group.token), caseNow);
+    for (const p of f.people) await ok(p.id, { type: "setProfile", firstName: "Sam", timeZone: "UTC" });
+    await ok(f.people[2].id, { type: "leave", gameId: f.group.id }, caseNow);
+    const overlapping = await create(f.people[0], f.people.slice(1));
+    await db.game.update({ where: { id: overlapping.id }, data: { chatContainerMemberId: f.context.chatContainerMemberId } });
+    await ok(f.people[2].id, join(overlapping.token), caseNow);
+    const photos = await Promise.all(f.people.slice(0, 2).map(p => groupPhoto(f.group.id, p.id)));
+    await ok(f.people[0].id, { type: "challenge", gameId: f.group.id, entryId: photos[1].id }, caseNow);
+    const { readGameChallengeCase, readGameChallengeInstructions, readGameChatProfiles } = await import("@/src/lib/game/service");
+    const projection = await readGameChatState(f.context.chatContainerMemberId, f.people.map(p => p.id));
+    expect(projection.games).toHaveLength(2);
+    const shared = projection.games.find(g => g.id === f.group.id)!;
+    const instructions = await readGameChallengeInstructions((await readGameChallengeCase(db, f.group.id, photos[1].id, caseNow))!);
+    const facts = JSON.parse(instructions!.split("\n").at(-1)!);
+    expect(facts.challengerName).toBe(shared.players.find(p => p.memberId === f.people[0].id)?.firstName);
+    expect(facts.accusedName).toBe(shared.players.find(p => p.memberId === f.people[1].id)?.firstName);
+    const command = f.command(3); await ok(f.people[3].id, command, caseNow);
+    const { deliverGameChatLifecycle } = await vi.importActual<typeof import("@/src/lib/game/chat-lifecycle")>("@/src/lib/game/chat-lifecycle");
+    expect(await deliverGameChatLifecycle(f.group.id, "talk", command.proposalId, caseNow)).toBe(true);
+    const cohort = await readGameChatProfiles([f.people[0].id, f.people[1].id, f.people[3].id]);
+    expect(lifecycleProof.prepare.mock.lastCall![0].envelope.notification.instructions).toContain(JSON.stringify(cohort.find(p => p.memberId === f.people[3].id)!.firstName));
+  });
 });

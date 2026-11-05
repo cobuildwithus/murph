@@ -38,7 +38,7 @@ describe("Prove it rules", () => {
     expect(canChallengeGame(state(), [], "a", now)).toBe(true);
   });
 
-  it.each(["locked", "reported", "own", "incomplete", "withdrawn", "absent", "artifact", "excuse", "outside-game", "group", "unbound", "departed", "ended", "due"])("rejects an ineligible target: %s", scenario => {
+  it.each(["locked", "reported", "own", "incomplete", "withdrawn", "absent", "artifact", "excuse", "outside-game", "unbound", "departed", "ended", "due"])("rejects an ineligible target: %s", scenario => {
     const s = state();
     const hidden = new Set<string>();
     if (scenario === "locked") s.entries.shift();
@@ -51,7 +51,6 @@ describe("Prove it rules", () => {
     if (scenario === "artifact") target.kind = "heart_rate";
     if (scenario === "excuse") target.attempt = 0;
     if (scenario === "outside-game") target.dayIndex = 7;
-    if (scenario === "group") s.game.seats = 10;
     if (scenario === "unbound") s.game.chatContainerMemberId = null;
     if (scenario === "departed") s.players[1].leftAt = now;
     if (scenario === "ended") s.game.status = "settled";
@@ -108,4 +107,24 @@ describe("Prove it rules", () => {
     expect(gameChallengeStatus(s, challenge, now)).toBe("stood");
     expect(canChallengeGame(s, [], "a", now)).toBe(false);
   });
+  it("keeps per-player group budgets across opponents, including a two-person remainder", () => {
+    const s = state(); s.game.seats = 10;
+    s.players.push({ ...s.players[1], memberId: "c", seat: 2 });
+    s.entries.push(entry("c"));
+    expect(decide(s).payload.entryId).toBe("b");
+    expect(() => decideChallenge(s, [challenge], { memberId: "a", entryId: "c", now, createdAt: now, visibleEntryIds: visibleEntryIds(s, "a", new Set()) })).toThrow(/used/);
+    expect(canChallengeGame(s, [challenge], "c", now)).toBe(true);
+    s.players[1].leftAt = now;
+    expect(gameChallengeStatus(s, challenge, now)).toBe("void");
+    expect(canChallengeGame(s, [challenge], "a", now)).toBe(true);
+    s.players[1].leftAt = null; s.players[0].leftAt = now;
+    expect(gameChallengeStatus(s, challenge, now)).toBe("void");
+  });
+
+  it("allows an old eligible group photo and closes twelve hours after case creation", () => {
+    const s = state(); s.game.seats = 10;
+    s.entries[1].receivedAt = new Date(now.getTime() - 36 * 60 * 60 * 1000);
+    expect(decide(s).payload.deadlineAt).toBe(gameChallengeDeadline(now).toISOString());
+  });
+
 });

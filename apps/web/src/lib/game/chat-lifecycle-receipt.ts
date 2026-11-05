@@ -41,6 +41,7 @@ export async function reserveGameChatLifecycleTx(input: {
   kind: Exclude<GameChatLifecycleKind, "challenge">;
   proposalId?: string;
   regenerationId?: string;
+  groupTalk?: boolean;
   now: Date;
   tx: Pick<Prisma.TransactionClient, "hostedLinqDelivery">;
 }): Promise<void> {
@@ -48,7 +49,7 @@ export async function reserveGameChatLifecycleTx(input: {
   if (!key) throw new Error("Game lifecycle delivery identity is unavailable.");
   await input.tx.hostedLinqDelivery.createMany({
     data: [{ id: buildHostedLinqDeliveryId(key), idempotencyKey: key,
-      source: "game_lifecycle", sourceRef: (input.kind === "change_cancelled" || input.kind === "change_expired" || input.kind === "change_resolved") ? `${input.gameId}:${input.proposalId}` : input.regenerationId ? `${input.gameId}:${input.regenerationId}` : input.gameId, template: `game_${input.kind}`,
+      source: "game_lifecycle", sourceRef: (input.kind === "change_cancelled" || input.kind === "change_expired" || input.kind === "change_resolved" || input.kind === "talk" && input.groupTalk) ? `${input.gameId}:${input.proposalId}` : input.regenerationId ? `${input.gameId}:${input.regenerationId}` : input.gameId, template: `game_${input.kind}`,
       status: "awaiting_generation", targetKind: "thread", attemptedAt: input.now }],
     skipDuplicates: true,
   });
