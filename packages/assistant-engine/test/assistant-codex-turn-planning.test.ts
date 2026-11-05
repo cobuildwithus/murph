@@ -1326,13 +1326,9 @@ describe('assistant Codex turn planning', () => {
     expect(scheduledNewsletterPlan.assistantPreferredElevenLabsVoiceId).toBe(
       resolveAssistantVoiceOptionElevenLabsVoiceId('upbeat'),
     )
+    // A private automation run may attach a card, like an ordinary turn.
     expect(scheduledNewsletterPlan.dynamicTools.map((tool) => tool.name)).toEqual(
-      ordinaryToolNames.filter((name) =>
-        name !== 'attach_sleep_card' &&
-        name !== 'attach_response_card' &&
-        name !== 'attach_exercise_routine_card' &&
-        name !== 'attach_telegram_rich_content'
-      ),
+      ordinaryToolNames,
     )
 
     const onboardingGoalCheckinPlan = await resolveAssistantRouteTurnPlan({
@@ -3516,18 +3512,8 @@ describe('assistant Codex turn planning', () => {
     expect(maintenance.dynamicTools.map((tool) => tool.name)).not.toContain('labs')
     expect(maintenance.systemPrompt).not.toContain('Lab test discovery:')
     expect(scheduled.dynamicTools.map((tool) => tool.name)).toContain('labs')
-    expect(scheduled.dynamicTools.map((tool) => tool.name)).not.toContain(
-      'attach_response_card',
-    )
     expect(scheduled.dynamicTools.map((tool) => tool.name)).toEqual(
-      direct.dynamicTools
-        .map((tool) => tool.name)
-        .filter((name) =>
-          name !== 'attach_sleep_card' &&
-          name !== 'attach_response_card' &&
-          name !== 'attach_exercise_routine_card' &&
-          name !== 'attach_telegram_rich_content'
-        ),
+      direct.dynamicTools.map((tool) => tool.name),
     )
     expect(scheduled.systemPrompt).toContain('Lab test discovery:')
     expect(outputOnly.dynamicTools.map((tool) => tool.name)).not.toContain('labs')
@@ -5118,6 +5104,62 @@ describe('assistant Codex turn planning', () => {
         expect(toolNames).toContain('create_clinical_records_connect_link')
         expect(toolNames).toContain('attach_response_card')
       }
+    },
+  )
+
+  it.each([
+    ['direct', true, true],
+    ['group', false, false],
+  ] as const)(
+    'offers response cards, but no other scheduled tools, to a %s automation run without occurrence authority',
+    async (_scope, threadIsDirect, cardsAvailable) => {
+      planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(null)
+      planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+        supportsNativeResume: false,
+      })
+      // A device-activity run is a local cron job: it has an occurrence but
+      // no scheduled invocation authority.
+      const plan = await resolveAssistantRouteTurnPlan({
+        acceptedInputItems: [],
+        executionContext: {
+          hosted: { memberId: 'member-device-activity-run', userEnvKeys: [] },
+        },
+        hostedToolContext: {
+          ...createHostedToolContext(),
+          phoneCalls: { start: vi.fn(), status: vi.fn(), stop: vi.fn() },
+        },
+        input: {
+          ...createMessageInput(),
+          channel: 'linq',
+          scheduledInvocationAuthority: null,
+          scheduledOccurrenceAt: '2026-11-05T15:17:05.711Z',
+          threadIsDirect,
+          turnTrigger: 'automation-cron',
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-11-05',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan: createSharedPlan({}, {
+          channel: 'linq',
+          threadIsDirect,
+          threadId: threadIsDirect ? 'linq-direct-thread' : 'linq-group-thread',
+        }),
+      })
+
+      const toolNames = plan.dynamicTools.map((tool) => tool.name)
+      expect(toolNames.includes('attach_sleep_card')).toBe(cardsAvailable)
+      expect(toolNames.includes('attach_response_card')).toBe(cardsAvailable)
+      expect(toolNames).not.toContain('create_phone_call')
+      expect(toolNames).not.toContain('create_calendar_link')
     },
   )
 

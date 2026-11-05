@@ -57,6 +57,13 @@ export function formatSleepCardDuration(minutes: number): string {
   return hours === 0 ? `${remainder}m` : remainder === 0 ? `${hours}h` : `${hours}h ${remainder}m`;
 }
 
+/** Stage times in the card's bar read like a clock, "4h36" and "1h05", to save room. Under an hour keeps its unit: "28m". */
+export function formatSleepCardStageDuration(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return hours === 0 ? `${remainder}m` : remainder === 0 ? `${hours}h` : `${hours}h${String(remainder).padStart(2, "0")}`;
+}
+
 export function formatSleepCardClock(clock: string): string {
   const [hour, minute] = clock.split(":");
   const hours = Number(hour);

@@ -762,9 +762,16 @@ function resolveResponseCardAvailability({
   const ordinaryOrScheduledInvocation =
     scheduledInvocationScope !== null ||
     (ordinaryInboundTurn && input.input.scheduledInvocationAuthority == null)
+  // A card only shapes the reply, so every private automation run may attach
+  // one, including a device-activity run, which is a local cron job without
+  // occurrence authority of its own. Its other scheduled tools stay gated.
+  const privateAutomationRun =
+    input.input.turnTrigger === 'automation-cron' &&
+    input.input.scheduledOccurrenceAt != null
   const responseCardsAvailable =
     privateInteractiveProviderTurn &&
     (ordinaryOrScheduledInvocation ||
+      privateAutomationRun ||
       input.input.scheduledInvocationAuthority?.automationId ===
         MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID)
   const channel = resolvedChannel?.trim().toLowerCase()
