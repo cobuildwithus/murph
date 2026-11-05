@@ -26,6 +26,7 @@ import {
   writeWarmTurnStarted,
 } from "./assistant-codex-runtime.harness.ts";
 
+import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   initializeVault,
@@ -68,6 +69,68 @@ import {
 } from '../src/assistant-codex-events.ts'
 
 describe('assistant codex event shaping', () => {
+  it.each([
+    { resume: true, rollout: 'file', contents: 'Synthetic rollout: ✓\n' },
+    { resume: true, rollout: 'file', contents: '' },
+    { resume: true, rollout: 'missing', contents: '' },
+    { resume: true, rollout: 'directory', contents: '' },
+    { resume: false, rollout: 'file', contents: 'Synthetic rollout: ✓\n' },
+  ])('captures rollout bytes only for a resumed regular file ($resume, $rollout, $contents)', async ({ resume, rollout, contents }) => {
+    const workingDirectory = await createTempDir('assistant-codex-timing-work-')
+    const codexHome = await createTempDir('assistant-codex-timing-home-')
+    const threadId = '00000000-0000-4000-8000-000000000025'
+    const rolloutPath = path.join(codexHome, `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${threadId}.jsonl`)
+    await mkdir(path.dirname(rolloutPath), { recursive: true })
+    if (rollout === 'file') {
+      await writeFile(rolloutPath, contents)
+    } else if (rollout === 'directory') {
+      await mkdir(rolloutPath)
+    }
+    const timingEvents: Record<string, unknown>[] = []
+    mockWarmCodexProcess([], 31_980, async (child) => {
+      const initialize = await waitForRpcMethod(child, 'initialize')
+      child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+      const threadRequest = await waitForRpcMethod(child, resume ? 'thread/resume' : 'thread/start')
+      child.stdout.write(jsonLine({
+        id: threadRequest.id,
+        result: {
+          approvalPolicy: 'never',
+          cwd: workingDirectory,
+          thread: { id: threadId, path: rolloutPath },
+        },
+      }))
+      const turnStart = await waitForRpcMethod(child, 'turn/start')
+      child.stdout.write(jsonLine({ id: turnStart.id, result: { turn: { id: 'turn-timing' } } }))
+      writeCompletedTurn(child, threadId, 'turn-timing')
+    })
+
+    const result = await executeCodexAppServerTurn({
+      codexHome,
+      workingDirectory,
+      prompt: 'Reply once.',
+      ...(resume ? { resumeSessionId: threadId } : {}),
+      onTraceEvent: (event) => {
+        const rawEvent = asRecord(event.rawEvent)
+        if (rawEvent.type === 'assistant.codex.app_server_timing') {
+          timingEvents.push(rawEvent)
+        }
+      },
+    })
+
+    expect(result.turnId).toBe('turn-timing')
+    const threadTiming = timingEvents.find((event) => event.codexTimingStage === (resume ? 'thread-resumed' : 'thread-started'))
+    expect(threadTiming).toBeDefined()
+    if (resume && rollout === 'file') {
+      expect(threadTiming).toHaveProperty('codexTimingRolloutBytes', Buffer.byteLength(contents))
+    } else {
+      expect(threadTiming).not.toHaveProperty('codexTimingRolloutBytes')
+    }
+    for (const event of timingEvents.filter((event) => event.codexTimingStage !== 'thread-resumed')) {
+      expect(event).not.toHaveProperty('codexTimingRolloutBytes')
+    }
+    expect(JSON.stringify(timingEvents)).not.toContain(rolloutPath)
+  })
+
   it('accepts new thread metadata and excludes raw provider usage metadata from persisted events', async () => {
     const workingDirectory = await createTempDir('assistant-codex-protocol-upgrade-work-')
     const codexHome = await createTempDir('assistant-codex-protocol-upgrade-home-')

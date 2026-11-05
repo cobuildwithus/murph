@@ -1057,6 +1057,14 @@ function readHostedAssistantCodexAppServerTimingTrace(
     "codexTimingElapsedMs",
     readHostedAssistantProviderDiagnosticNonnegativeNumber(record, "codexTimingElapsedMs"),
   );
+  if (stage === "thread-resumed") {
+    const rolloutBytes = readHostedAssistantProviderDiagnosticNonnegativeNumber(record, "codexTimingRolloutBytes");
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      "codexTimingRolloutBytes",
+      Number.isSafeInteger(rolloutBytes) ? rolloutBytes : undefined,
+    );
+  }
   maybeSetHostedAssistantProviderDiagnosticDetail(
     details,
     "codexTimingProviderActionCount",

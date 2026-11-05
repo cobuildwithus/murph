@@ -790,6 +790,31 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-thread-id");
     expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");
 
+    for (const rolloutBytes of [0, 4096, undefined, null, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity, "4096"]) {
+      const rolloutEntry = emitHostedAssistantProviderTraceLog({
+        event: {
+          rawEvent: {
+            schema: "murph.assistant-codex-app-server-timing.v1",
+            type: "assistant.codex.app_server_timing",
+            codexTimingStage: "thread-resumed",
+            ...(rolloutBytes === undefined ? {} : { codexTimingRolloutBytes: rolloutBytes }),
+            rolloutRelativePath: "sessions/PRIVATE_ROLLOUT.jsonl",
+            threadPath: "/tmp/PRIVATE_ROLLOUT.jsonl",
+          },
+        },
+        wake,
+      });
+      expect(rolloutEntry).not.toBeNull();
+      if (rolloutBytes === 0 || rolloutBytes === 4096) {
+        expect(rolloutEntry?.redacted).toHaveProperty("codexTimingRolloutBytes", rolloutBytes);
+      } else {
+        expect(rolloutEntry?.redacted).not.toHaveProperty("codexTimingRolloutBytes");
+      }
+      expect(JSON.stringify(rolloutEntry)).not.toContain("PRIVATE_ROLLOUT");
+      expect(rolloutEntry?.redacted).not.toHaveProperty("rolloutRelativePath");
+      expect(rolloutEntry?.redacted).not.toHaveProperty("threadPath");
+    }
+
     const invalidReasonEntry = emitHostedAssistantProviderTraceLog({
       details: { requestId: "req_123" },
       event: {

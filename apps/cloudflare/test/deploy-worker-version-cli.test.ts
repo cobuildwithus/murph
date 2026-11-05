@@ -31,9 +31,12 @@ vi.mock("../scripts/prepare-container-deploy-image.ts", () => imageMocks);
 const releaseMocks = vi.hoisted(() => ({
   stageHostedRunnerRelease: vi.fn(), readWorkerVersion: vi.fn(), readRecentWorkerVersionIds: vi.fn(), removeRetiredInferenceSecrets: vi.fn(), assertDrained: vi.fn(), retireApplication: vi.fn(), assertCapacity: vi.fn(), runSmokeHostedDeploy: vi.fn(), admitApplication: vi.fn(), assertApplicationReady: vi.fn(),
 }));
-vi.mock("../scripts/stage-runner-release.ts", () => ({
+vi.mock("../scripts/stage-runner-release.ts", async () => ({
+  ...await vi.importActual<typeof import("../scripts/stage-runner-release.ts")>("../scripts/stage-runner-release.ts"),
   stageHostedRunnerRelease: releaseMocks.stageHostedRunnerRelease,
 }));
+const orderMocks = vi.hoisted(() => ({ assertReleaseNotBehindLive: vi.fn() }));
+vi.mock("../scripts/deploy-release-order.ts", () => orderMocks);
 vi.mock("../scripts/runner-release-provider.ts", () => ({ createRunnerReleaseProvider: () => releaseMocks }));
 vi.mock("../scripts/smoke-hosted-deploy.shared.ts", () => ({ runSmokeHostedDeploy: releaseMocks.runSmokeHostedDeploy }));
 const receiptMocks = vi.hoisted(() => ({
@@ -71,6 +74,31 @@ const recoveryEnv = {
 };
 
 describe("runDeployWorkerVersionCli", () => {
+  it("refuses a release the live runner already contains before any upload or native mutation", async () => {
+    const live = "2".repeat(40);
+    releaseMocks.readWorkerVersion.mockImplementation(async (_worker, id) => ({ id, resources: { bindings: [{
+      name: "HOSTED_EXECUTION_RUNNER_DEPLOYMENT", type: "plain_text", text: JSON.stringify({
+        active: { bank: "primary", id: "live-release", releaseSha: live, bundleFingerprint: "a".repeat(64), sourceFingerprint: "b".repeat(64) },
+        candidate: null, previous: null,
+      }),
+    }] } }));
+    orderMocks.assertReleaseNotBehindLive.mockRejectedValue(new Error("refusing to roll production back"));
+    await expect(syntheticDeployment()).rejects.toThrow("refusing to roll production back");
+    expect(orderMocks.assertReleaseNotBehindLive).toHaveBeenCalledExactlyOnceWith({
+      releaseSha: "1".repeat(40), liveReleaseSha: live, checkoutDir: "/tmp/repo/apps/cloudflare",
+    });
+    expect(imageMocks.prepareHostedContainerDeployImage).not.toHaveBeenCalled();
+    expect(wranglerMocks.runWranglerLoggedCaptured).not.toHaveBeenCalled();
+    expect(wranglerMocks.runWranglerLogged).not.toHaveBeenCalled();
+    expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
+    expect(releaseMocks.retireApplication).not.toHaveBeenCalled();
+  });
+
+  it("passes no live release when the live record predates release SHAs", async () => {
+    await syntheticDeployment();
+    expect(orderMocks.assertReleaseNotBehindLive).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ liveReleaseSha: null }));
+  });
+
   it("rejects unsafe Images variants before publishing or activating a Worker", async () => {
     gameImageMocks.admit.mockRejectedValue(new Error("Game Images admission failed"));
     await expect(syntheticDeployment()).rejects.toThrow("Game Images admission failed");
@@ -197,6 +225,7 @@ describe("runDeployWorkerVersionCli", () => {
     fileMocks.writeFile.mockReset().mockResolvedValue(undefined);
     webProtocolMocks.admit.mockReset().mockResolvedValue(undefined);
     gameImageMocks.admit.mockReset().mockResolvedValue(undefined);
+    orderMocks.assertReleaseNotBehindLive.mockReset().mockResolvedValue(undefined);
     releaseMocks.stageHostedRunnerRelease.mockReset();
     releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
       retirements: [], configPath, promotionConfigPath: `${configPath}.promote`,
