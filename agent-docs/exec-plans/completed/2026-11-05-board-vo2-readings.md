@@ -25,7 +25,8 @@ Use the catalog's 45-day VO2 freshness policy and the existing aerobic skill.
 
 - Empty, unreadable and unusable shares; one reported value with no comparison.
 - Typed/device-image reports, displayed date or local today, receipt before saved.
-- Real CLI write through query, grantor projection and browser replica.
+- The CLI measurement-add write (in-process, via vault-usecases) through query,
+  grantor projection and browser replica.
 - Whole query, assistant-engine and assistant-runtime suites; Web board tests;
   Web and package typechecks, generated artifact checks and parent diff review.
 - The parent explicitly deferred changelog authoring and real-Codex journeys.

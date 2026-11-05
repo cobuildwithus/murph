@@ -1,11 +1,9 @@
-import { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 
 import { initializeVault } from "@murphai/core";
+import { addMeasurementDraftRecord, buildMeasurementEventDraft } from "@murphai/vault-usecases/measurements";
 import { getHostedVaultShareDailyMetricProjectionSpec } from "@murphai/hosted-execution/vault-share";
 import { listMetricPoints, readVault } from "@murphai/query";
 import { createBrowserVaultQueryClient, createBrowserVaultReplica, parseBrowserVaultReplica } from "@murphai/query/browser";
@@ -20,14 +18,19 @@ it("projects a vault-cli member-reported VO2 write into metric points, shares an
   vi.setSystemTime(new Date("2026-11-05T18:00:00.000Z"));
   try {
     await initializeVault({ vaultRoot, timezone: "America/New_York" });
-    const { stdout } = await promisify(execFile)(process.execPath, [
-      fileURLToPath(new URL("../../cli/dist/bin.js", import.meta.url)),
-      "measurement", "add", "--vault", vaultRoot,
-      "--metric", "estimated-vo2-max", "--value", "52", "--unit", "ml/kg/min",
-      "--source", "manual", "--occurred-at", "2026-11-04",
-      "--note", "Member-reported VO2 max from WHOOP", "--format", "json",
-    ], { encoding: "utf8" });
-    const receipt = JSON.parse(stdout);
+    // The same draft and write `vault-cli measurement add --metric estimated-vo2-max
+    // --value 52 --unit ml/kg/min --source manual --occurred-at 2026-11-04 --note ...`
+    // runs (packages/cli/src/commands/measurement.ts), without the built CLI binary.
+    const note = "Member-reported VO2 max from WHOOP";
+    const receipt = await addMeasurementDraftRecord({
+      vault: vaultRoot,
+      draft: buildMeasurementEventDraft({
+        occurredAt: "2026-11-04T17:00:00.000Z",
+        note,
+        source: "manual",
+        measurements: [{ metric: "estimated-vo2-max", value: 52, unit: "ml/kg/min", note }],
+      }),
+    });
     expect(receipt).toMatchObject({
       created: true, kind: "measurement", occurredAt: "2026-11-04T17:00:00.000Z",
       note: "Member-reported VO2 max from WHOOP",
