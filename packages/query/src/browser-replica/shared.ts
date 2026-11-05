@@ -1,6 +1,7 @@
 import type { CanonicalRecordClass } from "../canonical-entities.ts";
 import type {
   ExperimentOutcome,
+  MemoryDemographics,
   CompanionMealsProjection,
 } from "@murphai/contracts";
 import {
@@ -241,6 +242,9 @@ export interface BrowserVaultMetricGoalProgressRow {
 }
 
 export interface BrowserVaultReplica {
+  /** Absent before generation 18, or when memory could not be read: unknown.
+   * No canonical memory text is exported. */
+  demographics?: MemoryDemographics;
   assistantSummary: BrowserVaultAssistantSummary;
   entities: BrowserVaultEntity[];
   /** Absent only on replicas produced before canonical outcome projection shipped. */
@@ -269,6 +273,7 @@ export interface BrowserVaultReplica {
 
 type BrowserVaultLegacyCompatibleCoreReplica = Pick<
   BrowserVaultReplica,
+  | "demographics"
   | "assistantSummary"
   | "entities"
   | "generatedAt"
@@ -318,6 +323,7 @@ export type BrowserVaultLabsReplica = BrowserVaultCoreReplica & Pick<
 >;
 
 export interface CreateBrowserVaultReplicaInput {
+  demographics?: MemoryDemographics;
   experimentOutcomes?: readonly ExperimentOutcome[];
   generatedAt?: string;
   metricPoints: readonly MetricPoint[];

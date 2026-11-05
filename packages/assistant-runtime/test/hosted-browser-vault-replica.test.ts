@@ -32,6 +32,84 @@ beforeEach(() => {
 });
 
 describe("hosted browser-vault replica refresh preparation", () => {
+  it("projects only resolved demographics and hashes only the recognized memory input", async () => {
+    const { setMemoryDemographics, upsertMemory, readMemoryDemographics } = await import("@murphai/core");
+    const { createHostedBrowserVaultReplicaForSourceState, hashHostedBrowserVaultReplicaSources } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const { splitBrowserVaultReplica, parseBrowserVaultReplica, parseBrowserVaultReplicaShards, assembleBrowserVaultReplicaShards } = await import("@murphai/query/browser-replica-client");
+    const root = await mkdtemp(path.join(os.tmpdir(), "demographics-replica-"));
+    try {
+      const empty = await hashHostedBrowserVaultReplicaSources(root);
+      await upsertMemory(root, { section: "Identity", text: "Date of birth: 1986-07-12" });
+      await setMemoryDemographics(root, { biologicalSex: "female" });
+      const changed = await hashHostedBrowserVaultReplicaSources(root);
+      expect(changed.hash).not.toBe(empty.hash);
+      await upsertMemory(root, { section: "Preferences", text: "Private unrelated preference" });
+      expect(await hashHostedBrowserVaultReplicaSources(root)).toEqual(changed);
+      const replica = await createHostedBrowserVaultReplicaForSourceState({ vaultRoot: root, sourceStateHash: changed.hash });
+      expect(replica.generation).toBe(18);
+      expect(replica.demographics).toEqual(await readMemoryDemographics(root));
+      const shards = await splitBrowserVaultReplica(replica);
+      const decoded = await parseBrowserVaultReplicaShards(JSON.parse(JSON.stringify(shards)));
+      expect(assembleBrowserVaultReplicaShards(decoded).demographics).toEqual(replica.demographics);
+      expect(parseBrowserVaultReplica(replica).demographics).toEqual(replica.demographics);
+      const serialized = JSON.stringify(shards);
+      for (const secret of ["1986-07-12", "Date of birth", "Private unrelated preference", "Biological sex:"]) expect(serialized).not.toContain(secret);
+      // A year against the saved DOB is rejected and changes nothing.
+      expect((await setMemoryDemographics(root, { birthYear: 1980 })).status).toBe("rejected");
+      expect((await hashHostedBrowserVaultReplicaSources(root)).hash).toBe(changed.hash);
+      await setMemoryDemographics(root, { biologicalSex: "male" });
+      expect((await hashHostedBrowserVaultReplicaSources(root)).hash).not.toBe(changed.hash);
+    } finally { await rm(root, { force: true, recursive: true }); }
+  });
+
+  it("projects unreadable memory as unknown without failing the refresh", async () => {
+    const { createHostedBrowserVaultReplicaForSourceState, hashHostedBrowserVaultReplicaSources } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const root = await mkdtemp(path.join(os.tmpdir(), "demographics-unreadable-"));
+    try {
+      await mkdir(path.join(root, "bank"), { recursive: true });
+      await writeFile(path.join(root, "bank/memory.md"), "broken memory");
+      const hashed = await hashHostedBrowserVaultReplicaSources(root);
+      const replica = await createHostedBrowserVaultReplicaForSourceState({ vaultRoot: root, sourceStateHash: hashed.hash });
+      expect(replica.generation).toBe(18);
+      expect(replica.demographics).toBeUndefined();
+    } finally { await rm(root, { force: true, recursive: true }); }
+  });
+
+  it.each(["construction", "write"] as const)("defers a demographics change during %s before publication", async stage => {
+    const { setMemoryDemographics } = await import("@murphai/core");
+    const root = await mkdtemp(path.join(os.tmpdir(), "demographics-race-"));
+    if (stage === "construction") {
+      vi.doMock("@murphai/query/browser-replica-server", async importOriginal => {
+        const actual = await importOriginal<typeof import("@murphai/query/browser-replica-server")>();
+        return { ...actual, async createBrowserVaultReplica(input: Parameters<typeof actual.createBrowserVaultReplica>[0]) {
+          const replica = await actual.createBrowserVaultReplica(input);
+          await setMemoryDemographics(root, { birthYear: 1981 });
+          return replica;
+        } };
+      });
+    }
+    const { refreshHostedBrowserVaultReplicaFromRuntime } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const publishRef = vi.fn();
+    const write = vi.fn(async ({ replica }: { replica: unknown }) => {
+      const ref = createReplicaRefFromReplica(replica);
+      if (stage === "write") await setMemoryDemographics(root, { birthYear: 1981 });
+      return ref;
+    });
+    try {
+      await setMemoryDemographics(root, { birthYear: 1986 });
+      const result = await refreshHostedBrowserVaultReplicaFromRuntime({ vaultRoot: root,
+        platform: createPlatform({ browserVaultReplicaPort: { publishRef, write } }),
+        workspace: createWorkspaceState(),
+      });
+      expect(result.status).toBe("deferred_source_changed");
+      expect(write).toHaveBeenCalledTimes(stage === "write" ? 1 : 0);
+      expect(publishRef).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock("@murphai/query/browser-replica-server");
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
   it("builds lab and metric rows from projection points while readVault stays sparse", async () => {
     const {
       getQueryProjectionStatus,

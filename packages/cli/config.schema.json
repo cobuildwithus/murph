@@ -3797,6 +3797,55 @@
                     }
                   }
                 },
+                "set-demographics": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "compact": {
+                          "description": "Return the mutation outcome and exact affected record without the full memory document.",
+                          "type": "boolean"
+                        },
+                        "birthYear": {
+                          "description": "Explicit birth year; omit to preserve.",
+                          "type": "integer",
+                          "minimum": 1900,
+                          "maximum": 9999
+                        },
+                        "age": {
+                          "description": "Stated age; requires --as-of and excludes --birth-year.",
+                          "type": "integer",
+                          "minimum": 13,
+                          "maximum": 120
+                        },
+                        "asOf": {
+                          "description": "Source statement date, not the processing date.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "biologicalSex": {
+                          "description": "Only explicitly stated biological sex.",
+                          "type": "string",
+                          "enum": [
+                            "female",
+                            "male"
+                          ]
+                        },
+                        "clearBirth": {
+                          "description": "Explicitly clear all birth facts, including saved DOB.",
+                          "type": "boolean"
+                        },
+                        "clearSex": {
+                          "description": "Explicitly clear biological sex.",
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                },
                 "upsert": {
                   "type": "object",
                   "additionalProperties": false,

@@ -990,6 +990,19 @@ describe("iMessage mini-app routes", () => {
     expect(mocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
   });
 
+  it("keeps demographics outside the Messages credential's workout-only scope", async () => {
+    const response = await memberActionRoute.POST(jsonRequest(
+      "https://example.test/api/device-sync/companion/imessage-mini-app/member-actions",
+      MESSAGES_TOKEN, "POST", {
+        ...validMemberActionRequest(),
+        action: { kind: "demographics.set", version: 1, patch: { birthYear: 1986 } },
+      },
+    ));
+    expect(response.status).toBe(400);
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
   it("rejects an action-id collision without signaling the runtime", async () => {
     mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mockResolvedValueOnce({
       dedupeConflict: true,

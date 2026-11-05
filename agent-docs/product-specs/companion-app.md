@@ -404,6 +404,17 @@ production evidence.
 - Apple AI data-sharing disclosure (above).
 - Bundle identifier: `ai.withmurph.app` proposed.
 
+## Shared demographic facts
+
+Birth facts and explicitly stated biological sex are canonical Identity memory,
+shared by private chat and native saves. The native app reads the narrow saved
+projection through Numbers and writes through the closed `demographics.set`
+member action. Gender is separate, age remains dated/approximate, and reads
+never wake the runtime. The [private numbers and demographic API contract](ios-meals.md#shared-demographics)
+owns sparse fields, explicit clearing, immutable retries, terminal polling,
+generation-18 admission and rollback requirements. Native UI remains in the
+separate app repository.
+
 ## Repo Placement
 
 The native app lives in its own Swift/Xcode repository beside this monorepo.
