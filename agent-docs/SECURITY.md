@@ -1840,10 +1840,14 @@ existing accounting and provider access checks.
 ## Weekly game chat authority
 
 Group room authority belongs to `readGroupGameChatAuthority`: complete provider
-handles with exactly one active Murph handle must match the original keyed
-addressed audience (2–10 people), using rotation read candidates and current
-Linq routing. Remaining players must have identities in addressed seats 0–9.
-Departures preserve access while the original provider audience stays intact.
+handles with exactly one active Murph handle and current Linq routing must match
+the original keyed audience or prove a subset of at least two people. Remaining
+players must have identities in addressed seats 0–9 and, for a subset, resolve
+in the current text. Each subset contact must resolve to an addressed player
+(left or not) or bound invitee, or match its own unbound invitation's lookup read
+candidates, even if registered. Bound invitation keys grant nothing; null
+identities never match. Adding anyone outside the original audience or losing
+a remaining player from the text detaches the game.
 Deleting the room owner removes its binding. Resolve verified accounts where
 they exist and check restrictions over their union with all extant player IDs,
 including leavers. Unresolved handles are valid audience evidence and do not

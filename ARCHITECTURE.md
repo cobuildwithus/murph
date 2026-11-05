@@ -6006,13 +6006,18 @@ never claims invitees; later link messages naturally retry it.
 `readGroupGameChatAuthority` is the sole group room check for association,
 shared reads, commands, lifecycle enqueue and final egress. It requires a current
 Linq route, a complete provider roster with exactly one active Murph handle,
-rotating keyed equality with the original addressed audience, and remaining
-players with identities in addressed seats (0–9). A departure keeps the room; a
-leaver exiting the group text changes its audience and detaches it. Deleting the
-room owner removes the room and clears the binding; ownership is not transferred.
+remaining players with identities in addressed seats (0–9), and either rotating
+keyed equality with the original addressed audience or a proven subset with at
+least two people and every remaining player still resolved in the text. Each
+subset contact must resolve to an addressed player (left or not) or bound
+invitee, or match its own unbound invitation's lookup read keys, whether or not
+it resolves. Bound invitation keys grant nothing. Adding anyone outside the
+original audience or losing a remaining player from the text detaches the game.
+Deleting the room owner removes the room and clears the binding; ownership is
+not transferred.
 Resolved verified room members plus all extant player IDs, including leavers,
-are checked for blocks, suspension and revoked consent. Unresolved handles are
-allowed; account membership is not audience evidence. A stored binding never
+are checked for blocks, suspension and revoked consent. Unresolved handles need original audience
+proof; resolving an account alone grants nothing. A stored binding never
 permits retargeting.
 Runtime funding checks remaining addressed players and requires one in the room
 roster. It never grants projection or delivery authority.

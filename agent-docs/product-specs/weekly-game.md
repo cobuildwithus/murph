@@ -94,9 +94,15 @@ additional capability flag is needed; production group admission stays dark.
 A pre-settlement leave is silent, preserves evidence and excludes the player
 from prizes, debts and new app content. A leaver still in the group text sees
 Murph’s later shared messages and can call read_game, but cannot mutate the game.
-Leaving a waiting invitation voids it, as does an active game falling below two
-remaining players. Group blocks mask content symmetrically without changing
-scores or ending the game. Explicit player reports identify their subject;
+People can also exit the text while at least two humans remain: each current
+contact must resolve to an originally addressed player or bound invitee, or
+match that contact's own unbound invitation key, even after registration.
+Bound invitations grant only their member; their old contact keys grant nothing.
+Adding anyone outside the original audience or losing a still-playing person
+from the text detaches the game. Creation and Same again still require the exact
+audience. Leaving a waiting invitation voids it, as does an active game falling
+below two remaining players. Group blocks mask content symmetrically without
+changing scores or ending the game. Explicit player reports identify their subject;
 posts remain counted when their reporter hides them.
 
 Exactly one winner's prize is shared by a proper subset tied for the highest

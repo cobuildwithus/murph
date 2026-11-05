@@ -212,22 +212,36 @@ async function readGameChatHandleAudience(threadId: string) {
   const resolved = await lookupHostedGroupParticipantMemberIdsByHandles({ handles: contacts.map(contact => contact.value), prisma });
   const phoneKeys = contacts.filter(contact => contact.kind === "phone").flatMap(createHostedLinqParticipantContactLookupKeyReadCandidates);
   const verified = phoneKeys.length ? await prisma.hostedMemberIdentity.findMany({ where: { phoneLookupKey: { in: phoneKeys }, phoneNumberVerifiedAt: { not: null } }, select: { memberId: true, phoneLookupKey: true } }) : [];
-  const memberIds = contacts.flatMap(contact => {
-    const memberId = resolved.get(contact.value);
-    if (!memberId) return [];
-    if (contact.kind === "phone" && !verified.some(identity => identity.memberId === memberId && createHostedLinqParticipantContactLookupKeyReadCandidates(contact).includes(identity.phoneLookupKey ?? ""))) return [];
-    return [memberId];
+  const resolvedContacts = contacts.map(contact => {
+    const memberId = resolved.get(contact.value) ?? null;
+    const verifiedMemberId = contact.kind === "phone" && !verified.some(identity => identity.memberId === memberId && createHostedLinqParticipantContactLookupKeyReadCandidates(contact).includes(identity.phoneLookupKey ?? "")) ? null : memberId;
+    return { contact, memberId: verifiedMemberId };
   });
+  const memberIds = resolvedContacts.flatMap(({ memberId }) => memberId ? [memberId] : []);
   // Two handles resolving to one person are ambiguous audience evidence.
   if (new Set(memberIds).size !== memberIds.length) throw new Error("Game chat identity is ambiguous.");
-  return { memberIds, contacts, keys: gameAudienceKeys(contacts), threadId };
+  return { memberIds, contacts, resolvedContacts, keys: gameAudienceKeys(contacts), threadId };
 }
 
 export type GameChatAudience = Awaited<ReturnType<typeof readGameChatHandleAudience>>;
 type GroupRoomGame = { maxPlayers: number; audienceKey: string | null; chatContainerMemberId: string | null;
+  invitees: readonly { memberId: string | null; recipientLookupKey: string | null }[];
   players: readonly { memberId: string | null; seat: number; leftAt: Date | null }[] };
 
-/** The single group-room authority: exact keyed handles, addressed seats and account restrictions.
+/** Each contact proves its own original invitation; bound invitation keys grant nothing. */
+function isGroupGameAudienceSubset(game: GroupRoomGame, audience: GameChatAudience): boolean {
+  if (audience.contacts.length < 2) return false;
+  const addressedMembers = new Set([
+    ...game.players.filter(player => player.seat >= 0 && player.seat <= 9).map(player => player.memberId),
+    ...game.invitees.map(invitee => invitee.memberId),
+  ].filter((memberId): memberId is string => memberId !== null));
+  const unboundKeys = new Set(game.invitees.flatMap(invitee => invitee.memberId === null && invitee.recipientLookupKey !== null ? [invitee.recipientLookupKey] : []));
+  return audience.resolvedContacts.every(({ contact, memberId }) => memberId !== null && addressedMembers.has(memberId)
+    || createHostedLinqParticipantContactLookupKeyReadCandidates(contact).some(key => unboundKeys.has(key)))
+    && game.players.every(player => player.leftAt !== null || player.memberId !== null && audience.memberIds.includes(player.memberId));
+}
+
+/** The single group-room authority: exact or original subset audience, addressed seats and restrictions.
  * Prepare provider evidence outside transactions; pass it for database-only revalidation under locks.
  * A null binding is allowed only to the association/create owner, never as send permission.
  */
@@ -235,7 +249,7 @@ export async function readGroupGameChatAuthority(game: GroupRoomGame, containerM
   prepared?: GameChatAudience, prisma: Prisma.TransactionClient = getPrisma()): Promise<GameChatAudience | null> {
   if (game.maxPlayers !== 10 || !game.audienceKey || game.chatContainerMemberId && game.chatContainerMemberId !== containerMemberId) return null;
   const audience = prepared ?? await readGameChatAudience(containerMemberId);
-  if (!audience.keys.candidates.includes(game.audienceKey)) return null;
+  if (!audience.keys.candidates.includes(game.audienceKey) && !isGroupGameAudienceSubset(game, audience)) return null;
   const route = await readHostedThreadRouteByThreadIdentity({ channel: "linq", threadId: audience.threadId, prisma });
   if (route?.containerMemberId !== containerMemberId) return null;
   if (game.players.some(player => !player.leftAt && (!player.memberId || player.seat < 0 || player.seat > 9))) return null;
@@ -286,7 +300,7 @@ function preparedGameRoom(room: string, audience: Awaited<ReturnType<typeof read
   return { room, async revalidate(tx: Prisma.TransactionClient) {
     await assertHostedThreadRouteEgressAuthority({ authority: audience.route, prisma: tx });
     if (!await readGroupGameChatAuthority({ maxPlayers: 10, audienceKey: audienceKeys.find(key => audience.keys.candidates.includes(key)) ?? null,
-      chatContainerMemberId: room, players: [] }, room, audience, tx)) throw new Error("Game chat sharing is unavailable.");
+      chatContainerMemberId: room, players: [], invitees: [] }, room, audience, tx)) throw new Error("Game chat sharing is unavailable.");
   } };
 }
 
@@ -348,10 +362,11 @@ async function bindGameInviteRoomTx(input: Parameters<typeof associateGameChatIn
   if (!prepared) return;
   if (prepared.threadId !== input.threadId || !prepared.memberIds.includes(senderMemberId)) { inviteFailure("sender_unavailable"); return; }
   await tx.$queryRaw`SELECT id FROM game WHERE id = ${prepared.gameId} FOR UPDATE`;
-  const current = await tx.game.findUnique({ where: { id: prepared.gameId }, include: { players: true } });
+  const current = await tx.game.findUnique({ where: { id: prepared.gameId }, include: { players: true, invitees: { select: { memberId: true, recipientLookupKey: true } } } });
   if (!current || current.inviteTokenHash !== prepared.inviteTokenHash || !["invited", "live"].includes(current.status)
     || current.createdBy !== senderMemberId && !current.players.some(player => player.memberId === senderMemberId && !player.leftAt)) { inviteFailure("invitation_unavailable"); return; }
-  if (!await readGroupGameChatAuthority(current, containerMemberId, prepared, tx)) { inviteFailure("authority_unavailable"); return; }
+  if (!current.audienceKey || !prepared.keys.candidates.includes(current.audienceKey)
+    || !await readGroupGameChatAuthority(current, containerMemberId, prepared, tx)) { inviteFailure("authority_unavailable"); return; }
   await tx.game.update({ where: { id: current.id }, data: { chatContainerMemberId: containerMemberId } });
 }
 
