@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-05",
+  "order": 100,
+  "item": {
+    "id": "game-chat-photo-full-size",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Chat photos count as your check-in",
+    "summary": "When Murph offers to use a photo you sent in your game's group chat as your check-in, saying yes now saves it, including full-size iPhone photos.",
+    "details": "Murph saves a copy the same size as a photo posted from the app, turned the right way up and without camera details such as location.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": [4586]
+  }
+}

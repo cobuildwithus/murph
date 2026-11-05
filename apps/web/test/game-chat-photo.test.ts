@@ -6,6 +6,7 @@ vi.mock("../src/lib/game/service", () => ({ readGamePhotoPostingStateTx: m.posti
 vi.mock("../src/lib/game/media", async (original) => ({ ...await original<typeof import("../src/lib/game/media")>(), putGameMedia: m.put }));
 vi.mock("../src/lib/game/chat-photo-media", async (original) => ({ ...await original<typeof import("../src/lib/game/chat-photo-media")>(), downloadGameChatPhoto: m.download }));
 import { handleGameChatPhoto } from "../src/lib/game/chat-photo";
+import { GameChatPhotoImportError } from "../src/lib/game/chat-photo-media";
 import type { HostedExecutionConversationMessageWake } from "@murphai/hosted-execution/contracts";
 const now = new Date("2030-03-04T12:00:00Z");
 const ref = "ain_" + "a".repeat(32), yesRef = "ain_" + "b".repeat(32);
@@ -104,9 +105,17 @@ describe("game photo accepted-source bridge", () => {
     expect(await handleGameChatPhoto(input("save"))).toMatchObject({ error: "photo_check_in_unavailable" });
     expect(m.run).not.toHaveBeenCalled();
   });
-  it("reports unavailable bytes without claiming a save", async () => {
-    m.download.mockRejectedValueOnce(new Error("expired"));
+  it("reports unavailable bytes without claiming a save and logs only the fixed reason", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    m.download.mockRejectedValueOnce(new GameChatPhotoImportError("too_large")).mockRejectedValueOnce(new Error("https://cdn.example.test/secret"));
+    expect(await handleGameChatPhoto(input("save"))).toMatchObject({ error: "photo_unavailable_resend_or_use_app" });
     expect(await handleGameChatPhoto(input("save"))).toMatchObject({ error: "photo_unavailable_resend_or_use_app" });
     expect(m.run).not.toHaveBeenCalled();
+    expect(warn.mock.calls.map(([, details]) => details)).toEqual([
+      expect.objectContaining({ warning: "game.chat.photo-import", reason: "too_large" }),
+      expect.objectContaining({ warning: "game.chat.photo-import", reason: "store" }),
+    ]);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("secret");
+    warn.mockRestore();
   });
 });
