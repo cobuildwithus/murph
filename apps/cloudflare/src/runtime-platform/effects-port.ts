@@ -481,6 +481,7 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
     deliveryBlockCode?: unknown;
     deliveryPosture?: unknown;
     progressUpdateSuppressed?: unknown;
+    ackReaction?: unknown;
     providerDispatchClaimed?: unknown;
     resolvedRoute?: unknown;
   };
@@ -508,6 +509,10 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
   }
   if (response.progressUpdateSuppressed === true) {
     result.progressUpdateSuppressed = true;
+  }
+  const ackReaction = typeof response.ackReaction === "string" ? response.ackReaction.trim() : "";
+  if (ackReaction && ackReaction.length <= 16) {
+    result.ackReaction = ackReaction;
   }
 
   const resolvedRoute = parseHostedExecutionResolvedLinqDeliveryRoute(response.resolvedRoute);

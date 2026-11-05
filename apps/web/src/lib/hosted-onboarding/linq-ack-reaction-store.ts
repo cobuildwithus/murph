@@ -4,6 +4,8 @@ import { acquireHostedLinqChatOwnershipLockTx } from "../hosted-routing/linq-cha
 import {
   createHostedLinqChatLookupKey,
   createHostedLinqChatLookupKeyReadCandidates,
+  createHostedLinqMessageLookupKey,
+  createHostedLinqMessageLookupKeyReadCandidates,
 } from "./contact-privacy";
 
 /**
@@ -22,6 +24,15 @@ import {
  * - `reacted_at` marks Linq accepting the tapback. Only a confirmed tapback
  *   suppresses a runtime progress update.
  * - `heavy_at` silences the rest of the burst after a heavy message.
+ * - `message_lookup_key` and `reaction` say which member message the
+ *   reservation is for and with which emoji, so Murph's own
+ *   `react_to_message` can skip a message that already has a tapback.
+ *
+ * A reservation belongs to the current burst for at most
+ * `HOSTED_LINQ_ACK_REACTION_BURST_MAX_AGE_MS`: a turn that ends without any
+ * outbound (a reaction-only reply whose reaction was skipped, or a plain
+ * finish-without-reply) would otherwise keep the burst open and cost the
+ * member's next message its tapback and progress note.
  *
  * Claims and heavy marks take the same chat ownership lock as the engagement
  * route's dispatch fence, so a claim and a progress send serialize. Every
@@ -32,6 +43,8 @@ import {
 
 type HostedLinqAckReactionClient = Pick<PrismaClient, "$transaction">;
 type HostedLinqAckReactionTx = Pick<Prisma.TransactionClient, "$executeRaw" | "$queryRaw">;
+
+export const HOSTED_LINQ_ACK_REACTION_BURST_MAX_AGE_MS = 120_000;
 
 const HOSTED_LINQ_ACK_REACTION_TX_OPTIONS = { maxWait: 500, timeout: 1_500 } as const;
 const HOSTED_LINQ_ACK_REACTION_LOCK_TIMEOUT = "300ms";
@@ -49,6 +62,15 @@ function lastOutboundSql(candidates: readonly string[]): Prisma.Sql {
     FROM hosted_linq_delivery d
     WHERE d.linq_chat_lookup_key IN (${Prisma.join(candidates)})
   )`;
+}
+
+/**
+ * Where the current burst starts: Murph's last outbound, but never earlier
+ * than the max burst age before `now` (the app clock that writes claimed_at).
+ */
+function burstStartSql(candidates: readonly string[], now: Date): Prisma.Sql {
+  const oldest = new Date(now.getTime() - HOSTED_LINQ_ACK_REACTION_BURST_MAX_AGE_MS);
+  return Prisma.sql`GREATEST(${lastOutboundSql(candidates)}, ${oldest})`;
 }
 
 /** Murph has not sent anything to the chat since the message arrived. */
@@ -81,16 +103,20 @@ async function withBoundedTransaction<T>(input: {
  */
 export async function claimHostedLinqAckReaction(input: {
   linqChatId: string;
+  messageId: string;
   messageReceivedAt: Date;
   now?: () => Date;
   prisma: HostedLinqAckReactionClient;
+  reaction: string;
 }): Promise<Date | null> {
   const keys = resolveKeys(input.linqChatId);
-  if (!keys) return null;
+  const messageKey = createHostedLinqMessageLookupKey(input.messageId);
+  if (!keys || !messageKey) return null;
   return withBoundedTransaction({
     linqChatId: input.linqChatId,
     prisma: input.prisma,
     run: async (tx) => {
+      const claimedAt = input.now?.() ?? new Date();
       const [state] = await tx.$queryRaw<Array<{ fresh: boolean; taken: boolean }>>`
         SELECT
           ${noOutboundSinceSql(keys.candidates, input.messageReceivedAt)} AS fresh,
@@ -98,7 +124,7 @@ export async function claimHostedLinqAckReaction(input: {
             SELECT 1 FROM hosted_linq_ack_reaction s
             WHERE s.linq_chat_lookup_key IN (${Prisma.join(keys.candidates)})
               AND (
-                s.claimed_at > COALESCE(${lastOutboundSql(keys.candidates)}, '-infinity'::timestamp)
+                s.claimed_at > ${burstStartSql(keys.candidates, claimedAt)}
                 OR s.heavy_at > COALESCE(${lastOutboundSql(keys.candidates)}, '-infinity'::timestamp)
               )
           ) AS taken
@@ -106,12 +132,16 @@ export async function claimHostedLinqAckReaction(input: {
       if (!state?.fresh || state.taken) {
         return null;
       }
-      const claimedAt = input.now?.() ?? new Date();
       await tx.$executeRaw`
-        INSERT INTO hosted_linq_ack_reaction AS s (linq_chat_lookup_key, claimed_at, reacted_at, updated_at)
-        VALUES (${keys.key}, ${claimedAt}, NULL, ${claimedAt})
+        INSERT INTO hosted_linq_ack_reaction AS s
+          (linq_chat_lookup_key, claimed_at, reacted_at, message_lookup_key, reaction, updated_at)
+        VALUES (${keys.key}, ${claimedAt}, NULL, ${messageKey}, ${input.reaction}, ${claimedAt})
         ON CONFLICT (linq_chat_lookup_key) DO UPDATE
-          SET claimed_at = EXCLUDED.claimed_at, reacted_at = NULL, updated_at = EXCLUDED.updated_at
+          SET claimed_at = EXCLUDED.claimed_at,
+            reacted_at = NULL,
+            message_lookup_key = EXCLUDED.message_lookup_key,
+            reaction = EXCLUDED.reaction,
+            updated_at = EXCLUDED.updated_at
       `;
       return claimedAt;
     },
@@ -203,6 +233,7 @@ export async function releaseHostedLinqAckReaction(input: {
  */
 export async function isHostedLinqAckReactionCoveringCurrentBurst(input: {
   linqChatId: string;
+  now?: () => Date;
   prisma: HostedLinqAckReactionTx;
 }): Promise<boolean> {
   const keys = resolveKeys(input.linqChatId);
@@ -212,8 +243,34 @@ export async function isHostedLinqAckReactionCoveringCurrentBurst(input: {
       SELECT 1 FROM hosted_linq_ack_reaction s
       WHERE s.linq_chat_lookup_key IN (${Prisma.join(keys.candidates)})
         AND s.reacted_at IS NOT NULL
-        AND s.claimed_at > COALESCE(${lastOutboundSql(keys.candidates)}, '-infinity'::timestamp)
+        AND s.claimed_at > ${burstStartSql(keys.candidates, input.now?.() ?? new Date())}
     ) AS covered
   `;
   return rows[0]?.covered === true;
+}
+
+/**
+ * The emoji Linq accepted as Web's tapback on this exact member message, or
+ * null. Only a confirmed tapback counts: a reservation can still end with
+ * nothing sent, and Murph's own reaction must not be skipped for it. Callers
+ * run it inside their own transaction.
+ */
+export async function readHostedLinqAckReactionOnMessage(input: {
+  linqChatId: string;
+  messageId: string;
+  prisma: HostedLinqAckReactionTx;
+}): Promise<string | null> {
+  const keys = resolveKeys(input.linqChatId);
+  const messageKeys = createHostedLinqMessageLookupKeyReadCandidates(input.messageId);
+  if (!keys || messageKeys.length === 0) return null;
+  const rows = await input.prisma.$queryRaw<Array<{ reaction: string | null }>>`
+    SELECT s.reaction
+    FROM hosted_linq_ack_reaction s
+    WHERE s.linq_chat_lookup_key IN (${Prisma.join(keys.candidates)})
+      AND s.message_lookup_key IN (${Prisma.join(messageKeys)})
+      AND s.claimed_at IS NOT NULL
+      AND s.reacted_at IS NOT NULL
+    LIMIT 1
+  `;
+  return rows[0]?.reaction?.trim() || null;
 }

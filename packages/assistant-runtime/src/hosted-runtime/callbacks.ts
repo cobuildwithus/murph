@@ -6229,7 +6229,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   assistantAskCompletionExpiresAt?: string;
   assistantAskFallback?: boolean;
   authorityCheckOnly: boolean;
-  deliveryPurpose?: "progress_update" | null;
+  deliveryPurpose?: "progress_update" | "reaction" | null;
   directRecipientPhoneNumber: string | null;
   effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement"> | null;
   expectedResolvedRoute?: HostedExecutionResolvedLinqDeliveryRoute;
@@ -6408,9 +6408,52 @@ function assertHostedAssistantLinqProviderDispatchClaim(input: {
   }
 }
 
+/**
+ * Asks Web, when Murph calls `react_to_message`, whether Linq already accepted
+ * Web's "on it" tapback on this exact member message. iMessage keeps one
+ * tapback per sender per message, so a second reaction would replace it.
+ * Read-only (authority-only engagement, no dispatch fence). Returns the emoji
+ * or null; errors fall open so the reaction is queued as before. The caller
+ * bounds the wait.
+ */
+export async function readHostedAssistantLinqMessageAckReaction(input: {
+  context: HostedAssistantLinqDeliveryContext;
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement"> | null;
+  signal?: AbortSignal | null;
+}): Promise<string | null> {
+  const target = input.context.target?.trim();
+  const messageId = input.context.replyToMessageId?.trim();
+  if (!target || !messageId || input.context.threadIsDirect !== true) {
+    return null;
+  }
+  try {
+    const result = await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+      authorityCheckOnly: true,
+      deliveryPurpose: "reaction",
+      directRecipientPhoneNumber: normalizeHostedLinqDirectRecipient(
+        input.context.directRecipientPhoneNumber,
+      ),
+      effectsPort: input.effectsPort,
+      fromPhoneNumber: normalizeHostedLinqDirectRecipient(input.context.fromPhoneNumber),
+      homeRouteFallbackAllowed: false,
+      idempotencyKey: null,
+      intentId: null,
+      replyToMessageId: messageId,
+      signal: input.signal ?? null,
+      target,
+      targetKind: "thread",
+    });
+    return typeof result.ackReaction === "string" && result.ackReaction.trim()
+      ? result.ackReaction.trim()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function readHostedAssistantLinqDeliveryPurposeField(
-  deliveryPurpose: "progress_update" | null | undefined,
-): { deliveryPurpose?: "progress_update" } {
+  deliveryPurpose: "progress_update" | "reaction" | null | undefined,
+): { deliveryPurpose?: "progress_update" | "reaction" } {
   return deliveryPurpose ? { deliveryPurpose } : {};
 }
 
@@ -6420,7 +6463,7 @@ function readHostedAssistantLinqDeliveryPurposeField(
  */
 function assertHostedAssistantProgressUpdateNotAcknowledged(input: {
   authorityCheckOnly: boolean;
-  deliveryPurpose?: "progress_update" | null;
+  deliveryPurpose?: "progress_update" | "reaction" | null;
   result: HostedRuntimeLinqRecentInboundEngagementResult;
 }): void {
   if (

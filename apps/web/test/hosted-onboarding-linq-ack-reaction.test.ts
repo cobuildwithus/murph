@@ -148,7 +148,9 @@ describe("runHostedLinqAckReactionBestEffort", () => {
     await run({ addReaction });
     expect(store.claimHostedLinqAckReaction).toHaveBeenCalledWith(expect.objectContaining({
       linqChatId: "chat-1",
+      messageId: "msg-1",
       messageReceivedAt: receivedAt,
+      reaction: "⏰",
     }));
     expect(addReaction).toHaveBeenCalledWith(expect.objectContaining({ emoji: "⏰", messageId: "msg-1" }));
     expect(store.confirmHostedLinqAckReaction).toHaveBeenCalledWith(expect.objectContaining({ claimedAt }));

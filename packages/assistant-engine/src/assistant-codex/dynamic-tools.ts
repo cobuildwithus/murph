@@ -3912,13 +3912,10 @@ async function dispatchMurphDynamicToolRequest(
         if (!target) {
           return toolTextResult(false, 'message target unavailable', 'authority_rejected')
         }
-        return {
-          ...toolTextResult(true, 'reaction queued'),
-          reactionPatch: {
-            reaction: input.request.reaction,
-            targetInputId: target.targetInputId,
-          },
-        }
+        return buildReactToMessageToolResult({
+          reaction: input.request.reaction,
+          target,
+        })
       }
     case 'select-reply-target':
       {
@@ -8196,12 +8193,36 @@ function parseSelectReplyTargetArguments(
   }
 }
 
+/**
+ * Queues Murph's reaction, unless Web's "on it" tapback already sits on that
+ * message: iMessage keeps one tapback per sender per message, so a second
+ * reaction would replace it. The skip is a success and sets no final action.
+ */
+function buildReactToMessageToolResult<Reaction extends string>(input: {
+  reaction: Reaction
+  target: { ackReaction?: string; targetInputId: string }
+}) {
+  if (input.target.ackReaction) {
+    return toolTextResult(
+      true,
+      `no reaction sent: this message already has your ${input.target.ackReaction} tapback from when it arrived, and a second one would replace it. Carry on; if a reaction was going to be your whole reply, finish without reply.`,
+    )
+  }
+  return {
+    ...toolTextResult(true, 'reaction queued'),
+    reactionPatch: {
+      reaction: input.reaction,
+      targetInputId: input.target.targetInputId,
+    },
+  }
+}
+
 async function authorizeDynamicToolMessageTarget(input: {
   action: 'native-reply' | 'reaction'
   authorizer: AssistantAcceptedMessageTargetAuthorizer | null
   deliveryContextOrdinal: number | null
   messageRef: string
-}): Promise<{ targetInputId: string } | null> {
+}): Promise<{ ackReaction?: string; targetInputId: string } | null> {
   if (
     !input.authorizer ||
     input.deliveryContextOrdinal === null ||

@@ -235,6 +235,7 @@ import {
   drainHostedPreparedAssistantDeliveries,
   prepareHostedAssistantDeliveryEffectsForDispatch,
   queueHostedAssistantPendingMessageVolumeReceiptsForVault,
+  readHostedAssistantLinqMessageAckReaction,
   resolveHostedAssistantDeliveryIntentState,
   resolveHostedAssistantOutboxNextWakeAt,
 } from "../src/hosted-runtime/callbacks.ts";
@@ -12574,6 +12575,69 @@ describe("hosted runtime callbacks", () => {
     ]);
     expect(providerFetch).not.toHaveBeenCalled();
     expect(recordDeliveryOutcome).not.toHaveBeenCalled();
+  });
+
+  describe("Web tapback lookup for Murph's own react_to_message", () => {
+    const directContext = {
+      directRecipientPhoneNumber: "+15550100001",
+      fromPhoneNumber: null,
+      replyToMessageId: "linq_msg_1",
+      routeAuthority: null,
+      service: "iMessage",
+      target: "linq_chat_home",
+      threadIsDirect: true,
+    };
+
+    it("asks authority-only with the reaction purpose for the exact message and returns the emoji", async () => {
+      const assertRecentInbound = vi.fn(async (request: {
+        authorityCheckOnly: boolean;
+        deliveryPurpose?: string | null;
+        target?: string | null;
+        targetKind?: "explicit" | "participant" | "thread" | null;
+      }) => ({
+        ackReaction: "⏰",
+        resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request),
+      }));
+
+      await expect(readHostedAssistantLinqMessageAckReaction({
+        context: directContext,
+        effectsPort: { assertLinqRecentInboundEngagement: assertRecentInbound },
+      })).resolves.toBe("⏰");
+
+      expect(assertRecentInbound).toHaveBeenCalledOnce();
+      expect(assertRecentInbound.mock.calls[0]![0]).toMatchObject({
+        authorityCheckOnly: true,
+        deliveryPurpose: "reaction",
+        directRecipientPhoneNumber: "+15550100001",
+        homeRouteFallbackAllowed: false,
+        replyToMessageId: "linq_msg_1",
+        target: "linq_chat_home",
+        targetKind: "thread",
+      });
+    });
+
+    it.each([
+      ["Web reports no tapback", async () => ({ resolvedRoute: null })],
+      ["Web is down", async () => { throw new Error("web unavailable"); }],
+    ])("falls open to no tapback when %s", async (_label, impl) => {
+      await expect(readHostedAssistantLinqMessageAckReaction({
+        context: directContext,
+        effectsPort: { assertLinqRecentInboundEngagement: vi.fn(impl) as never },
+      })).resolves.toBeNull();
+    });
+
+    it.each([
+      ["a group thread", { threadIsDirect: false }],
+      ["no message id", { replyToMessageId: null }],
+      ["no chat", { target: null }],
+    ])("never asks for %s", async (_label, override) => {
+      const assertRecentInbound = vi.fn();
+      await expect(readHostedAssistantLinqMessageAckReaction({
+        context: { ...directContext, ...override },
+        effectsPort: { assertLinqRecentInboundEngagement: assertRecentInbound },
+      })).resolves.toBeNull();
+      expect(assertRecentInbound).not.toHaveBeenCalled();
+    });
   });
 
   it("rechecks Linq authority after capability lookup before the card mutation", async () => {

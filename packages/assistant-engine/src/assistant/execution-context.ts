@@ -628,6 +628,15 @@ export interface AssistantHostedExecutionContext {
   memberId: string
   progressDeliveryDependencies?: AssistantHostedProgressDeliveryDependencies
   productFeedbackCandidateSink?: AssistantHostedProductFeedbackCandidateSink | null
+  /**
+   * Hosted Linq only: the emoji Web's "on it" tapback already put on this
+   * accepted member message, or null. Consulted before Murph's own
+   * `react_to_message` so a second reaction never replaces it.
+   */
+  readLinqMessageAckReaction?: ((input: {
+    signal: AbortSignal
+    targetInputId: string
+  }) => Promise<string | null>) | null
   providerFetch?: typeof fetch | null
   phoneCalls?: AssistantPhoneCallPort | null
   publicInternetFetch?: typeof fetch | null
@@ -844,6 +853,7 @@ export function normalizeAssistantExecutionContext(
       ...optionalHostedField('usageRecorder', usageRecorder),
       memberId,
       ...optionalHostedField('progressDeliveryDependencies', progressDeliveryDependencies),
+      ...readHostedLinqMessageAckReactionField(hosted),
       ...optionalHostedField('phoneCalls', phoneCalls),
       ...(typeof hosted.providerFetch === 'function'
         ? { providerFetch: hosted.providerFetch }
@@ -869,6 +879,14 @@ export function normalizeAssistantExecutionContext(
 
 // Normalized capabilities and metadata are omitted, not emitted as undefined.
 // Callers retain the field order and keep raw accessor/function checks explicit.
+function readHostedLinqMessageAckReactionField(
+  hosted: AssistantHostedExecutionContext,
+): Pick<AssistantHostedExecutionContext, 'readLinqMessageAckReaction'> {
+  return typeof hosted.readLinqMessageAckReaction === 'function'
+    ? { readLinqMessageAckReaction: hosted.readLinqMessageAckReaction }
+    : {}
+}
+
 function optionalHostedField<Key extends keyof AssistantHostedExecutionContext>(
   key: Key,
   value: AssistantHostedExecutionContext[Key],
