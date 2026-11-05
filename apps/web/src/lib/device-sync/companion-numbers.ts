@@ -16,6 +16,7 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { requireActiveHostedMemberAuthFromBearerToken } from "../hosted-onboarding/request-auth";
 import { readHostedWorkspace } from "../hosted-workspace/store";
 import { getPrisma } from "../prisma";
+import { lastSettledStepDay } from "../settled-step-day";
 
 const metrics = {
   restingHeartRate: { key: "resting-heart-rate", unit: "bpm", precision: 0 },
@@ -59,15 +60,17 @@ export async function readCompanionNumbers(request: Request) {
   // Core already carries the canonical vault zone, even when there are no meals.
   const timeZone = client.replica.meals?.timeZone;
   if (!timeZone) throw numbersUnavailable();
-  const through = toLocalDayKey(new Date(), timeZone);
+  const now = new Date();
+  const through = toLocalDayKey(now, timeZone);
   const window = { from: addDaysToIsoDate(through, -89), through };
+  const stepsWindow = { ...window, through: lastSettledStepDay(now, timeZone) };
   return {
     timeZone, savedAt: client.replica.generatedAt, freshness, window,
     demographics,
     numbers: {
       restingHeartRate: presentNumber(client, metrics.restingHeartRate, window),
       sleep: presentNumber(client, metrics.sleep, window),
-      steps: presentNumber(client, metrics.steps, window),
+      steps: presentNumber(client, metrics.steps, stepsWindow),
       vo2Max: presentNumber(client, metrics.vo2Max, window),
     },
   };

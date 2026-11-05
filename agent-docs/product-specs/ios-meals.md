@@ -342,6 +342,10 @@ Each is null when no usable daily value exists in the window; otherwise it has:
   dates per window. VO2 uses its existing intermittent median/two-date policy
   within those same requested bounds. Missing dates are never filled.
 
+Steps alone end at the last settled day (the local date eight hours ago, minus
+one day) for daily values, latest, `stale` and the current comparison week;
+the window start and top-level response window stay unchanged.
+
 Normalization and comparison use the public health-metrics primitives. Arithmetic
 uses unrounded canonical values; wire values and delta are rounded to integers
 for heart rate, sleep and steps, and one decimal for VO2. Delta keeps the raw
