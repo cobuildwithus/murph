@@ -151,6 +151,12 @@ export function sourceFamilyScore(family: WearableCandidateSourceFamily): number
   }
 }
 
+export function isActivitySummaryResource(resourceType: string | null | undefined): boolean {
+  const normalized = normalizeLowercaseString(resourceType);
+  return Boolean(normalized)
+    && ["activity", "cycle", "summary"].some((token) => normalized?.includes(token));
+}
+
 export function resourceTypeScore(
   metric: WearableMetricKey,
   resourceType: string | null | undefined,
@@ -168,10 +174,7 @@ export function resourceTypeScore(
     return 4;
   }
 
-  if (
-    ACTIVITY_METRIC_KEYS.has(metric)
-    && (normalized.includes("activity") || normalized.includes("cycle") || normalized.includes("summary"))
-  ) {
+  if (ACTIVITY_METRIC_KEYS.has(metric) && isActivitySummaryResource(normalized)) {
     return 4;
   }
 

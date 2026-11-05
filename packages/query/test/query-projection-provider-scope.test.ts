@@ -1029,3 +1029,43 @@ function isoDateDaysBefore(anchorDate: string, daysBefore: number): string {
   const date = new Date(Date.UTC(year, month - 1, day - daysBefore));
   return date.toISOString().slice(0, 10);
 }
+
+test("stored activity summaries take a worn device's steps while per-source rows stay separate", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-worn-steps-"));
+  const date = "2026-04-03";
+  const eventLedgerPath = path.join(vaultRoot, "ledger/events/2026/2026-04.jsonl");
+  const stepsEvent = (source: string, sourceType: string, value: number, recordedAt: string) => ({
+    schemaVersion: "murph.event.v1",
+    id: `evt_worn_steps_${source.replaceAll("-", "_")}`,
+    kind: "observation",
+    occurredAt: `${date}T00:00:00Z`,
+    recordedAt,
+    dayKey: date,
+    source: "device",
+    title: `${source} steps`,
+    metric: "steps",
+    value,
+    unit: "count",
+    dataOrigin: { version: 1, aggregatorProvider: "junction", sourceProviderSlug: source, sourceType },
+    externalRef: { system: "junction", resourceType: `junction-${source}-activity` },
+  });
+
+  try {
+    await mkdir(path.dirname(eventLedgerPath), { recursive: true });
+    await writeFile(eventLedgerPath, `${[
+      stepsEvent("garmin", "watch", 9_000, `${date}T20:00:00Z`),
+      stepsEvent("apple-health-kit", "multiple_sources", 12_000, `${date}T23:00:00Z`),
+    ].map((event) => JSON.stringify(event)).join("\n")}\n`, "utf8");
+    await rebuildQueryProjection(vaultRoot);
+
+    const stepsFor = async (providers?: string[]) =>
+      (await summarizeWearableActivityRuntime(vaultRoot, { date, ...(providers ? { providers } : {}) }))[0]
+        ?.steps.selection.value;
+
+    assert.equal(await stepsFor(), 9_000);
+    assert.equal(await stepsFor(["garmin"]), 9_000);
+    assert.equal(await stepsFor(["apple-health-kit"]), 12_000);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
