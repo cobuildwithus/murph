@@ -153,7 +153,7 @@ describe("private game Images", () => {
     vi.spyOn(bucket, "delete").mockImplementation(async (key) => { await held; return remove(key); });
     const after: Promise<unknown>[] = [];
     const store = createGameImageStore({
-      deploymentOrigin, bucket, images: p.images, userId: "member_leo", waitUntil: work => { after.push(work); },
+      deploymentOrigin, bucket, images: p.images, userId: "member_leo", executionCtx: { waitUntil: work => { after.push(work); } },
     });
     const receipts = () => [...bucket.objects.keys()].filter(key => key.startsWith("game-image-uploads/"));
     await store.upload(mediaId, bytes);

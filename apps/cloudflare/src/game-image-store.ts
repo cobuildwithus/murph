@@ -33,8 +33,8 @@ type Pointer = { schema: "murph.game-image.v1"; imageId: string; byteLength: num
  */
 export function createGameImageStore(input: {
   bucket: R2BucketLike; images: GameImagesBinding; userId: string; deploymentOrigin: string;
-  /** Work that may finish after the reply (the Worker's `waitUntil`); awaited when absent. */
-  waitUntil?: (work: Promise<unknown>) => void;
+  /** The Worker's context: its `waitUntil` lets work finish after the reply. Awaited when absent. */
+  executionCtx?: { waitUntil(work: Promise<unknown>): void };
 }) {
   const origin = requireDeploymentOrigin(input.deploymentOrigin);
   const pointerKey = async (mediaId: string) =>
@@ -102,7 +102,7 @@ export function createGameImageStore(input: {
       // finish after the reply: a receipt left behind makes account deletion
       // wait, as after any ambiguous upload, and never leaves an image behind.
       const cleared = remove(receipt);
-      if (input.waitUntil) input.waitUntil(cleared);
+      if (input.executionCtx) input.executionCtx.waitUntil(cleared);
       else await cleared;
     },
     async delivery(mediaId: string, variant: GameImageVariant) {
