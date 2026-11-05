@@ -12527,6 +12527,55 @@ describe("hosted runtime callbacks", () => {
     expect(recordDeliveryOutcome).toHaveBeenCalledOnce();
   });
 
+  it("skips a progress update at provider entry when Web says the burst already got a tapback", async () => {
+    const assertRecentInbound = vi.fn(async (request: {
+      authorityCheckOnly: boolean;
+      deliveryPurpose?: string | null;
+      target?: string | null;
+      targetKind?: "explicit" | "participant" | "thread" | null;
+    }) => request.authorityCheckOnly
+      ? buildClaimedLinqEngagementResult(request)
+      : {
+          progressUpdateSuppressed: true,
+          resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request),
+        });
+    const providerFetch = vi.fn<typeof fetch>();
+    const recordDeliveryOutcome = vi.fn(async () => undefined);
+    const dependencies = createHostedAssistantProgressDeliveryDependencies({
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: {
+        LINQ_API_BASE_URL: "https://api.linq.example/api/partner/v3",
+        LINQ_API_TOKEN: "linq-actual-runtime-token",
+      },
+      providerFetch,
+    });
+
+    await expect(dependencies.sendLinq!({
+      directRecipientPhoneNumber: null,
+      fromPhoneNumber: null,
+      homeRouteFallbackAllowed: true,
+      idempotencyKey: "assistant-outbox:turn-1:progress:0",
+      message: "Pulling your sleep data now.",
+      target: "linq_chat_home",
+      targetKind: "thread",
+      threadIsDirect: true,
+    })).rejects.toMatchObject({ code: "ASSISTANT_PROGRESS_UPDATE_ACKNOWLEDGED" });
+
+    // One ack read: Web answers only at the fenced provider-entry call.
+    expect(assertRecentInbound.mock.calls.map(([request]) => ({
+      authorityCheckOnly: request.authorityCheckOnly,
+      deliveryPurpose: request.deliveryPurpose ?? null,
+    }))).toEqual([
+      { authorityCheckOnly: true, deliveryPurpose: null },
+      { authorityCheckOnly: false, deliveryPurpose: "progress_update" },
+    ]);
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(recordDeliveryOutcome).not.toHaveBeenCalled();
+  });
+
   it("rechecks Linq authority after capability lookup before the card mutation", async () => {
     const idempotencyKey = "assistant-outbox:card-authority-revoked";
     const events: string[] = [];

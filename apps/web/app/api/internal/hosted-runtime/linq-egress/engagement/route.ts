@@ -29,6 +29,9 @@ import {
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
 import { readOptionalJsonObject } from "@/src/lib/http";
+import { isHostedLinqAckReactionCoveringCurrentBurst } from "@/src/lib/hosted-onboarding/linq-ack-reaction-store";
+import type { Prisma } from "@prisma/client";
+
 import { getPrisma } from "@/src/lib/prisma";
 import {
   acquireHostedLinqChatOwnershipLockTx,
@@ -188,6 +191,7 @@ export const POST = withJsonError(async (request: Request) => {
         asserted: finalAuthority,
         deliveryBlockCode: health.policy.code,
         deliveryPosture: null,
+        progressUpdateSuppressed: false,
         providerDispatchClaimed: null,
       };
     }
@@ -228,35 +232,21 @@ export const POST = withJsonError(async (request: Request) => {
         asserted: finalAuthority,
         deliveryBlockCode: "automation_engagement_paused" as const,
         deliveryPosture: null,
+        progressUpdateSuppressed: false,
         providerDispatchClaimed: null,
       };
     }
 
-    let providerDispatchClaimed: boolean | null = null;
-    if (
-      !authorityCheckOnly
-      && assistantAskAuthority?.assistantAskFallbackRequired !== true
-    ) {
-      if (!idempotencyKey) {
-        throw hostedOnboardingError({
-          code: "HOSTED_LINQ_PROVIDER_DISPATCH_IDEMPOTENCY_REQUIRED",
-          httpStatus: 400,
-          message: "Hosted Linq provider dispatch requires an idempotency key.",
-          retryable: false,
-        });
-      }
-      const claim = await recordHostedLinqRuntimeProviderDispatchFenceTx({
-        idempotencyKey,
-        linqChatId: finalAuthority.resolvedRoute.targetKind === "participant"
-          ? null
-          : finalAuthority.resolvedRoute.target,
-        phoneNumber: finalAuthority.resolvedRoute.fromPhoneNumber,
-        prisma: tx,
-        sourceRef: intentId ?? idempotencyKey,
-        targetKind: finalAuthority.resolvedRoute.targetKind,
-      });
-      providerDispatchClaimed = claim.claimed;
-    }
+    const dispatch = await claimHostedLinqEngagementProviderDispatchTx({
+      assistantAskFallbackRequired:
+        assistantAskAuthority?.assistantAskFallbackRequired === true,
+      authorityCheckOnly,
+      deliveryPurpose: body.deliveryPurpose,
+      idempotencyKey,
+      intentId,
+      resolvedRoute: finalAuthority.resolvedRoute,
+      tx,
+    });
     return {
       assistantAskFallbackRequired:
         assistantAskAuthority?.assistantAskFallbackRequired === true,
@@ -265,7 +255,7 @@ export const POST = withJsonError(async (request: Request) => {
       deliveryPosture: health.policy.posture === "normal"
         ? null
         : health.policy.posture,
-      providerDispatchClaimed,
+      ...dispatch,
     };
   });
 
@@ -285,8 +275,61 @@ export const POST = withJsonError(async (request: Request) => {
     ...(assertion.providerDispatchClaimed === null
       ? {}
       : { providerDispatchClaimed: assertion.providerDispatchClaimed }),
+    ...(assertion.progressUpdateSuppressed ? { progressUpdateSuppressed: true } : {}),
   });
 });
+
+/**
+ * Records the provider-dispatch fence for a final (non-authority-only) call.
+ * A progress update is skipped instead, with no fence, when Linq already
+ * accepted the Web tapback for this direct chat's current burst. This runs in
+ * the caller's transaction under the chat ownership lock, so it serializes
+ * with tapback claims. Older runners omit `deliveryPurpose` and keep today's
+ * behavior.
+ */
+async function claimHostedLinqEngagementProviderDispatchTx(input: {
+  assistantAskFallbackRequired: boolean;
+  authorityCheckOnly: boolean;
+  deliveryPurpose: unknown;
+  idempotencyKey: string | null;
+  intentId: string | null;
+  resolvedRoute: HostedExecutionResolvedLinqDeliveryRoute;
+  tx: Prisma.TransactionClient;
+}): Promise<{ progressUpdateSuppressed: boolean; providerDispatchClaimed: boolean | null }> {
+  if (input.authorityCheckOnly || input.assistantAskFallbackRequired) {
+    return { progressUpdateSuppressed: false, providerDispatchClaimed: null };
+  }
+  if (
+    input.deliveryPurpose === "progress_update"
+    && input.resolvedRoute.targetKind === "thread"
+    && input.resolvedRoute.threadIsDirect
+    && await isHostedLinqAckReactionCoveringCurrentBurst({
+      linqChatId: input.resolvedRoute.target,
+      prisma: input.tx,
+    })
+  ) {
+    return { progressUpdateSuppressed: true, providerDispatchClaimed: null };
+  }
+  if (!input.idempotencyKey) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_PROVIDER_DISPATCH_IDEMPOTENCY_REQUIRED",
+      httpStatus: 400,
+      message: "Hosted Linq provider dispatch requires an idempotency key.",
+      retryable: false,
+    });
+  }
+  const claim = await recordHostedLinqRuntimeProviderDispatchFenceTx({
+    idempotencyKey: input.idempotencyKey,
+    linqChatId: input.resolvedRoute.targetKind === "participant"
+      ? null
+      : input.resolvedRoute.target,
+    phoneNumber: input.resolvedRoute.fromPhoneNumber,
+    prisma: input.tx,
+    sourceRef: input.intentId ?? input.idempotencyKey,
+    targetKind: input.resolvedRoute.targetKind,
+  });
+  return { progressUpdateSuppressed: false, providerDispatchClaimed: claim.claimed };
+}
 
 function readOptionalBodyString(value: unknown): string | null {
   const normalized = typeof value === "string" ? value.trim() : "";

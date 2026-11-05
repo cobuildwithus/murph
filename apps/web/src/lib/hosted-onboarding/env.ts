@@ -99,6 +99,8 @@ export interface HostedOnboardingEnvironment {
   inviteTtlHours: number;
   isProduction: boolean;
   linqApiBaseUrl: string;
+  /** Decisions API key for the "on it" tapback; null unless HOSTED_LINQ_ACK_REACTIONS=on. */
+  linqAckReactionOpenAiApiKey?: string | null;
   linqApiToken: string | null;
   linqConversationPhoneNumbers: readonly string[];
   linqFirstContactAdmissionMode: HostedLinqFirstContactAdmissionMode;
@@ -143,6 +145,13 @@ export function readHostedOnboardingEnvironment(
     ),
     isProduction,
     linqApiBaseUrl: linq.apiBaseUrl,
+    // Off unless explicitly "on": the runner that skips clashing progress
+    // updates must be live before Web starts reacting.
+    linqAckReactionOpenAiApiKey:
+      readEnv(source, "HOSTED_LINQ_ACK_REACTIONS") === "on"
+        ? readEnv(source, "HOSTED_LINQ_ACK_REACTION_OPENAI_API_KEY")
+          ?? readEnv(source, "OPENAI_API_KEY")
+        : null,
     linqApiToken: linq.apiToken,
     linqConversationPhoneNumbers: readHostedLinqConversationPhoneNumbers(source),
     linqFirstContactAdmissionMode: readHostedLinqFirstContactAdmissionMode(source),

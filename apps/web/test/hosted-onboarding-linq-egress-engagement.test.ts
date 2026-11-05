@@ -367,6 +367,39 @@ describe("hosted Linq egress authority", () => {
   });
 
   it.each([
+    ["covered progress entry", { deliveryPurpose: "progress_update" }, true, true],
+    ["uncovered progress entry", { deliveryPurpose: "progress_update" }, false, false],
+    ["ordinary provider entry", {}, true, false],
+    ["progress authority-only check", { authorityCheckOnly: true, deliveryPurpose: "progress_update" }, true, false],
+  ] as const)("answers the tapback burst question only for a %s", async (_label, body, covered, suppressed) => {
+    const prisma = createPrismaStub({ homeChatId: "chat-home" });
+    const ackQueries: string[] = [];
+    prisma.$queryRaw.mockImplementation(async (strings: TemplateStringsArray | string) => {
+      const sql = typeof strings === "string" ? strings : strings.join("?");
+      if (sql.includes("hosted_linq_ack_reaction")) {
+        ackQueries.push(sql);
+        return [{ covered }];
+      }
+      return [];
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+    captureRouteAuthorityLogs();
+
+    const response = await postHostedLinqEgressEngagement(routeAuthorityRequest({ target: "chat-home", ...body }));
+
+    expect(response.status).toBe(200);
+    const json = await response.json();
+    expect(json).toMatchObject({ ok: true, resolvedRoute: { target: "chat-home", threadIsDirect: true } });
+    expect(json.progressUpdateSuppressed).toBe(suppressed ? true : undefined);
+    expect(ackQueries).toHaveLength(
+      !("authorityCheckOnly" in body) && "deliveryPurpose" in body ? 1 : 0,
+    );
+    const dispatches = !suppressed && !("authorityCheckOnly" in body);
+    expect(json.providerDispatchClaimed).toBe(dispatches ? true : undefined);
+    expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledTimes(dispatches ? 1 : 0);
+  });
+
+  it.each([
     ["current", "route_projection_chat_missing", null, false, null],
     ["pending", "route_projection_chat_missing", null, false, null],
     ["current", "route_projection_chat_missing", " \t ", false, "+15550100999"],

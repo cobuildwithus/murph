@@ -21,6 +21,7 @@ import type {
   AssistantTurnSharedPlan,
 } from '../src/assistant/service-contracts.js'
 import {
+  ASSISTANT_PROGRESS_UPDATE_ACKNOWLEDGED_CODE,
   MAX_PROGRESS_UPDATES_PER_TURN,
 } from '../src/assistant/progress-constants.js'
 import {
@@ -207,6 +208,38 @@ describe('assistant turn progress', () => {
       source: 'model',
     })
     expect(deliver).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports a tapback-covered progress update as skipped, even when wrapped', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const acknowledged = Object.assign(new Error('already reacted'), {
+      code: ASSISTANT_PROGRESS_UPDATE_ACKNOWLEDGED_CODE,
+    })
+    const deliver = vi.fn()
+      .mockRejectedValueOnce(acknowledged)
+      .mockRejectedValueOnce(new Error('dispatch failed', { cause: acknowledged }))
+    const progress = createAssistantProgressDelivery({
+      deliver,
+      messageInput: createMessageInput(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+      turnId: 'turn-progress',
+    })
+
+    await expect(progress.send('Pulling your sleep data now.')).resolves.toEqual({
+      kind: 'skipped',
+      reason: 'acknowledged',
+      source: 'model',
+    })
+    await expect(progress.send('Still digging.')).resolves.toEqual({
+      kind: 'skipped',
+      reason: 'acknowledged',
+      source: 'model',
+    })
+    expect(warn).not.toHaveBeenCalledWith(
+      expect.stringContaining('progress update delivery'),
+      expect.anything(),
+    )
   })
 
   it('can be closed so later progress sends fail without delivery', async () => {

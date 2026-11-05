@@ -17,6 +17,7 @@ import {
   deliverAssistantProgressUpdate,
 } from './delivery-service.js'
 import {
+  ASSISTANT_PROGRESS_UPDATE_ACKNOWLEDGED_CODE,
   MAX_PROGRESS_UPDATES_PER_TURN,
   shouldCreateAssistantProgressDelivery,
 } from './progress-constants.js'
@@ -66,7 +67,7 @@ export type AssistantProgressDeliveryResult =
   | { kind: 'sent'; source: AssistantProgressDeliverySource }
   | {
       kind: 'skipped'
-      reason: 'duplicate' | 'empty' | 'limit' | 'unavailable'
+      reason: 'acknowledged' | 'duplicate' | 'empty' | 'limit' | 'unavailable'
       source: AssistantProgressDeliverySource
     }
   | { kind: 'failed'; source: AssistantProgressDeliverySource }
@@ -314,21 +315,45 @@ export function createAssistantProgressDelivery(input: {
           source,
         }
       } catch (error) {
-        warnAssistantBestEffortFailure({
-          error,
-          operation: 'progress update delivery',
-        })
-        logOutcome('failed: delivery threw')
-        return {
-          kind: 'failed',
-          source,
-        }
+        return readAssistantProgressDeliveryFailure({ error, logOutcome, source })
       }
     },
     close() {
       abortController.abort()
     },
   }
+}
+
+/**
+ * A hosted send that Web skipped because the member's burst already got an
+ * "on it" tapback is a handled skip, not a delivery failure.
+ */
+function readAssistantProgressDeliveryFailure(input: {
+  error: unknown
+  logOutcome: (outcome: string) => void
+  source: AssistantProgressDeliverySource
+}): AssistantProgressDeliveryResult {
+  if (hasAssistantErrorCode(input.error, ASSISTANT_PROGRESS_UPDATE_ACKNOWLEDGED_CODE)) {
+    input.logOutcome('skipped: acknowledged')
+    return { kind: 'skipped', reason: 'acknowledged', source: input.source }
+  }
+  warnAssistantBestEffortFailure({
+    error: input.error,
+    operation: 'progress update delivery',
+  })
+  input.logOutcome('failed: delivery threw')
+  return { kind: 'failed', source: input.source }
+}
+
+function hasAssistantErrorCode(error: unknown, code: string): boolean {
+  let current: unknown = error
+  for (let depth = 0; depth < 5 && current && typeof current === 'object'; depth += 1) {
+    if ((current as { code?: unknown }).code === code) {
+      return true
+    }
+    current = (current as { cause?: unknown }).cause
+  }
+  return false
 }
 
 export function buildAssistantProductFeedbackIdempotencyKey(input: {

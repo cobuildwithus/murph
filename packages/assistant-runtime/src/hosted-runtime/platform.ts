@@ -417,6 +417,8 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   assistantAskCompletionExpiresAt?: string | null;
   assistantAskFallback?: boolean | null;
   authorityCheckOnly: boolean;
+  /** "progress_update" lets Web skip a progress note a tapback already covers. */
+  deliveryPurpose?: "progress_update" | null;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
   homeRouteFallbackAllowed?: boolean | null;
@@ -432,6 +434,8 @@ export interface HostedRuntimeLinqRecentInboundEngagementResult {
   assistantAskFallbackRequired?: boolean | null;
   deliveryBlockCode?: HostedRuntimeLinqDeliveryBlockCode | null;
   deliveryPosture?: HostedRuntimeLinqDeliveryPosture | null;
+  /** Web already sent an "on it" tapback for this burst; skip the progress note. */
+  progressUpdateSuppressed?: boolean | null;
   providerDispatchClaimed?: boolean | null;
   resolvedRoute?: HostedExecutionResolvedLinqDeliveryRoute | null;
 }

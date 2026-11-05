@@ -549,6 +549,35 @@ export async function sendHostedLinqReadReceipt(input: {
   });
 }
 
+/** Adds one custom-emoji tapback from the line to an inbound message. */
+export async function addHostedLinqMessageReaction(input: {
+  emoji: string;
+  messageId: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}): Promise<{
+  ok: boolean;
+  status: number;
+}> {
+  return requestHostedLinqNoContentStatus({
+    request: async (client) => {
+      const result = await client.messages.addReaction(
+        normalizeRequiredString(input.messageId, "message id"),
+        {
+          custom_emoji: normalizeRequiredString(input.emoji, "emoji"),
+          operation: "add",
+          type: "custom",
+        },
+        { signal: input.signal },
+      ).withResponse();
+      return result.response.status;
+    },
+    signal: input.signal,
+    timeoutMessage: "Linq message reaction timed out.",
+    timeoutMs: input.timeoutMs,
+  });
+}
+
 export async function startHostedLinqChatTypingIndicator(input: {
   chatId: string;
   signal?: AbortSignal;

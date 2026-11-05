@@ -1,5 +1,6 @@
 import { prepareGameChatInvite } from "../game/chat-membership";
 import { queueHostedLinqHomeContactCardAfterDelivery } from "./linq-contact-card-delivery";
+import { maybeScheduleHostedLinqAckReaction } from "./linq-ack-reaction";
 import { handleHostedLinqPollWebhook } from "../hosted-polls/linq-webhook";
 import type {
   Prisma,
@@ -1020,6 +1021,17 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     // that handoff settles, run the original activation continuation, which
     // also owns pending group-join confirmation reconciliation.
     await runPendingInstantStartActivationWake();
+    maybeScheduleHostedLinqAckReaction({
+      currentInboundReply,
+      event: planningEvent,
+      instantFirstTurnOwnsReply: instantFirstTurnOwnsFinalPlan,
+      prisma,
+      response: plan.response,
+      scheduleAfterResponse: input.scheduleAfterResponse,
+      wakeHandoff,
+      wakeHandoffResult,
+      webhookReceivedAt: input.webhookReceivedAt,
+    });
     const sendReadReceipt = () => maybeSendHostedLinqIngressReadReceipt({
       currentInboundReply,
       plan,

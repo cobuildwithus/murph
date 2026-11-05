@@ -28,6 +28,7 @@
     "device:reconnect-link": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/create-device-reconnect-link.ts",
     "clinical-records:providers:import": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/import-epic-clinical-provider-directory.ts",
     "linq:sync-lines": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/sync-hosted-linq-lines.ts",
+    "linq:ack-reaction-eval": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/linq-ack-reaction-eval.ts",
     "linq:production-canary": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/run-production-conversation-canary.ts",
     "linq:backfill-thread-route-accounts": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/backfill-hosted-thread-route-account-projections.ts",
     "privacy:backfill-phone-calls": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/backfill-hosted-phone-call-private-content.ts",
