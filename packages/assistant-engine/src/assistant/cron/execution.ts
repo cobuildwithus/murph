@@ -853,6 +853,7 @@ export async function executeClaimedAssistantCronJob(
         })
         const scheduledInvocationAuthority =
           resolveAssistantCronScheduledInvocationAuthority({
+            deviceActivityParent: deviceActivityAuthority,
             job: input.job,
             occurrenceAt,
             trigger: input.trigger,
@@ -2202,21 +2203,28 @@ function resolveAssistantCronAutomationTargetOverride(
 }
 
 export function resolveAssistantCronScheduledInvocationAuthority(input: {
+  deviceActivityParent?: Pick<DeviceActivityParentAuthority, 'automationId' | 'route'> | null
   job: ResolvedAssistantCronJob
   occurrenceAt: string
   trigger: AssistantCronTrigger
 }): HostedRuntimeScheduledAutomationAuthority | null {
-  if (
-    input.trigger !== 'scheduled' ||
-    input.job.kind !== 'canonical' ||
-    input.job.source.kind !== 'automation'
-  ) {
+  if (input.trigger !== 'scheduled') {
     return null
   }
-  return {
-    automationId: input.job.source.automationId,
-    occurrenceAt: input.occurrenceAt,
-  }
+  // A device-activity run is a local job acting for its verified, active
+  // parent automation. In a private chat it gets that automation's occurrence
+  // authority, the same as a clock-scheduled run, so tools such as the sleep
+  // card are offered. Group routes keep none: local cron turns get no group
+  // capability.
+  const automationId =
+    input.job.kind === 'canonical' && input.job.source.kind === 'automation'
+      ? input.job.source.automationId
+      : input.job.kind === 'local' && input.deviceActivityParent?.route?.threadIsDirect === true
+        ? input.deviceActivityParent.automationId
+        : null
+  return automationId === null
+    ? null
+    : { automationId, occurrenceAt: input.occurrenceAt }
 }
 
 function resolveAssistantCronScheduledGroupEmailAuthority(input: {

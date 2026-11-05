@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { assistantResponseCardMatchesConversationAudience, assistantResponseCardSchema } from "../src/assistant.ts";
-import { buildSleepSummaryAppCardEnvelopeV8, parseSleepSummaryAppCardEnvelopeV8, sleepSummaryResponseCardV1Schema, formatSleepCardClock, formatSleepCardDuration } from "../src/sleep-summary-card.ts";
+import { buildSleepSummaryAppCardEnvelopeV8, parseSleepSummaryAppCardEnvelopeV8, sleepSummaryResponseCardV1Schema, formatSleepCardClock, formatSleepCardDuration, formatSleepCardStageDuration } from "../src/sleep-summary-card.ts";
 
 const complete = {
   kind: "sleep_summary", version: 1, localDate: "2026-11-03", bedtime: "00:18", wakeTime: "08:02", totalSleepMinutes: 436,
@@ -45,6 +45,7 @@ describe("sleep summary wire contract", () => {
   });
   it("formats deterministic compact durations and clocks", () => {
     expect([0, 28, 60, 436].map(formatSleepCardDuration)).toEqual(["0m", "28m", "1h", "7h 16m"]);
+    expect([28, 65, 120, 276].map(formatSleepCardStageDuration)).toEqual(["28m", "1h05", "2h", "4h36"]);
     expect(["00:18", "08:02", "12:00", "23:59"].map(formatSleepCardClock)).toEqual(["12:18 AM", "8:02 AM", "12:00 PM", "11:59 PM"]);
   });
 });

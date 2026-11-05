@@ -2891,7 +2891,18 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
-  it('uses automation id fallback when device activity parent listener path changes', async () => {
+  it.each([
+    { threadIsDirect: false, scheduledInvocationAuthority: null },
+    {
+      threadIsDirect: true,
+      // A private run acts for its parent automation's occurrence, so it is
+      // offered the same scheduled tools, such as the sleep card.
+      scheduledInvocationAuthority: {
+        automationId: 'automation-device-activity-renamed-listener',
+        occurrenceAt: '2026-04-08T08:59:30.000Z',
+      },
+    },
+  ])('uses automation id fallback when device activity parent listener path changes (direct: $threadIsDirect)', async ({ threadIsDirect, scheduledInvocationAuthority }) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T09:00:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
@@ -2919,7 +2930,7 @@ describe('assistant cron runtime orchestration', () => {
         identityId: null,
         participantId: null,
         threadId: null,
-        threadIsDirect: false,
+        threadIsDirect,
       },
       schedule: {
         kind: 'deviceActivity',
@@ -2987,7 +2998,7 @@ describe('assistant cron runtime orchestration', () => {
     const resolveScheduledLinqRoute = vi.fn().mockResolvedValue({
       deliveryPosture: 'recover',
       target: 'linq_chat_device_activity',
-      threadIsDirect: false,
+      threadIsDirect,
     })
     await expect(
       processDueAssistantCronJobsLocal({
@@ -3028,7 +3039,8 @@ describe('assistant cron runtime orchestration', () => {
         },
         outboxAutomationContextReferences:
           parentAutomation.contextReferences,
-        threadIsDirect: false,
+        scheduledInvocationAuthority,
+        threadIsDirect,
         instructions: expect.stringContaining(
           `- automationId: ${parentAutomationId}`,
         ),
@@ -3042,7 +3054,7 @@ describe('assistant cron runtime orchestration', () => {
     )
     expect(resolveScheduledLinqRoute).toHaveBeenCalledWith(
       expect.objectContaining({
-        homeRouteFallbackAllowed: false,
+        homeRouteFallbackAllowed: threadIsDirect,
         target: 'linq_chat_device_activity',
         targetKind: 'explicit',
       }),

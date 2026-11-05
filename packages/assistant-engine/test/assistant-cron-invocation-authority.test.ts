@@ -34,6 +34,36 @@ describe("scheduled automation invocation authority", () => {
     }
   });
 
+  it("binds a private device-activity run to its verified parent automation", () => {
+    const parent = {
+      automationId: "automation_whoop_sleep",
+      route: { threadIsDirect: true },
+    };
+    expect(resolveAssistantCronScheduledInvocationAuthority({
+      deviceActivityParent: parent as never,
+      job: { kind: "local" } as never,
+      occurrenceAt,
+      trigger: "scheduled",
+    })).toEqual({
+      automationId: "automation_whoop_sleep",
+      occurrenceAt,
+    });
+    for (const route of [{ threadIsDirect: false }, {}, null]) {
+      expect(resolveAssistantCronScheduledInvocationAuthority({
+        deviceActivityParent: { ...parent, route } as never,
+        job: { kind: "local" } as never,
+        occurrenceAt,
+        trigger: "scheduled",
+      })).toBeNull();
+    }
+    expect(resolveAssistantCronScheduledInvocationAuthority({
+      deviceActivityParent: parent as never,
+      job: { kind: "local" } as never,
+      occurrenceAt,
+      trigger: "manual",
+    })).toBeNull();
+  });
+
   it("does not mint authority for manual runs, local jobs, or non-automation records", () => {
     expect(resolveAssistantCronScheduledInvocationAuthority({
       job: automationJob({ kind: "cron", expression: "0 9 * * 1" }) as never,

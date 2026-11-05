@@ -1,6 +1,7 @@
 import {
   formatSleepCardClock,
   formatSleepCardDuration,
+  formatSleepCardStageDuration,
   type SleepSummaryResponseCardV1,
 } from "@murphai/contracts";
 import {
@@ -54,7 +55,7 @@ function segments(card: SleepSummaryResponseCardV1): { bar: Segment[]; text: Sta
 function stageMinimumWidth(label: string, minutes: number, text: StageText): number {
   if (label === "AWAKE") return 10;
   if (label === "ASLEEP") return 18 + label.length * 7;
-  const duration = formatSleepCardDuration(minutes).length;
+  const duration = formatSleepCardStageDuration(minutes).length;
   if (text === "labeled") return Math.max(18 + label.length * 7, 24 + duration * 7);
   if (text === "valueOnly") return 16 + duration * 7;
   return 6;
@@ -123,7 +124,7 @@ export function SleepSummaryCardImage({ card }: { card: SleepSummaryResponseCard
       </div>
       <div aria-label="Sleep stages" style={{ display: "flex", gap: px(2), height: px(40), flexShrink: 0 }}>
         {bar.map((segment, index) => {
-          const duration = formatSleepCardDuration(segment.minutes);
+          const duration = formatSleepCardStageDuration(segment.minutes);
           // The heading already shows the total, so the one block without
           // stages carries only its name, matching the native card.
           const isAsleep = segment.label === "ASLEEP";
@@ -132,7 +133,7 @@ export function SleepSummaryCardImage({ card }: { card: SleepSummaryResponseCard
           const leftRadius = px(index === 0 ? 10 : 3);
           const rightRadius = px(index === bar.length - 1 ? 10 : 3);
           return (
-            <div key={segment.label} aria-label={`${segment.label} ${duration}`} data-sleep-segment={segment.label} style={{
+            <div key={segment.label} aria-label={`${segment.label} ${formatSleepCardDuration(segment.minutes)}`} data-sleep-segment={segment.label} style={{
               display: "flex", flexDirection: "column", justifyContent: "center",
               width: px(segment.width), height: px(40), flexShrink: 0, overflow: "hidden",
               paddingLeft: showValue || isAsleep ? px(segment.label === "DEEP" ? 9 : 8) : 0,

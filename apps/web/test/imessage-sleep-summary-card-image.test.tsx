@@ -24,6 +24,8 @@ const variants = [
   { name: "tiny-stages", card: { ...complete, stages: { deepMinutes: 1, remMinutes: 1, lightMinutes: 434 }, awakeMinutes: 1 } },
   // A long night whose shortest stage once lost its name while the others kept theirs.
   { name: "long-night", card: { ...complete, totalSleepMinutes: 517, stages: { deepMinutes: 113, remMinutes: 129, lightMinutes: 275 }, awakeMinutes: 34 } },
+  // Every stage over an hour, so each block shows clock-style times such as "4h36".
+  { name: "hour-stages", card: { ...complete, totalSleepMinutes: 477, score: 89, stages: { deepMinutes: 96, remMinutes: 106, lightMinutes: 275 }, awakeMinutes: 12 } },
 ];
 const stageText = (markup: string, label: string) =>
   markup.match(new RegExp(`data-sleep-segment="${label}"[^>]*>(.*?)</div></div>`, "u"))?.[1] ?? null;
