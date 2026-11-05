@@ -2174,13 +2174,19 @@ describe("hosted Linq egress authority", () => {
       prisma.hostedMailboxItem.findFirst.mockResolvedValue(null);
       const proposal = { v: 1, id: scenario === "replaced" ? "replacement" : "proposal", proposedByMemberId: "person-a", expectedTermsVersion: 1,
         change: { kind: "edit", lengthDays: 14 }, effectiveFromDay: 0, startsOn: null, deliveryStatus: "queued" };
-      prisma.game.findFirst.mockResolvedValue({
-        id: "game", createdBy: "person-a", status: ["recap", "regenerated-recap"].includes(scenario) ? "settled" : "live", lengthDays: 7, inviteExpiresAt: null, startsOn: null,
+      const game = {
+        id: "game", createdBy: "person-a", maxPlayers: 2, status: ["recap", "regenerated-recap"].includes(scenario) ? "settled" : "live", lengthDays: 7, inviteExpiresAt: null, startsOn: null,
+        chatContainerMemberId: "member-1", devClockOffsetMs: null, invitees: [], events: [],
         pendingChange: ["cancelled", "refusal"].includes(scenario) ? null : proposal,
         terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: [0, 1, 2, 3, 4] }, stakes: [] }] },
-        players: ["person-a", "person-b"].map((memberId, seat) => ({ memberId, seat, timeZone: "UTC",
+        players: ["person-a", "person-b"].map((memberId, seat) => ({ memberId, seat, leftAt: null, timeZone: "UTC",
           dayOne: new Date(scenario === "expired" ? "2000-01-01T00:00:00Z" : Date.now() + 86_400_000) })),
-      });
+      };
+      prisma.game.findFirst.mockResolvedValue(game);
+      // Proposal authority loads canonical state under the game lock; resolution notices read their recorded event.
+      prisma.game.findMany.mockResolvedValue([game]);
+      prisma.game.findUnique.mockResolvedValue(game);
+      prisma.gameEvent.findUnique.mockResolvedValue({ gameId: "game", type: "change_expired", payload: { proposalId: "proposal", reason: "A check-in arrived first." } });
       mocks.readGameProposalDeliveryPlayers.mockResolvedValue(scenario === "other-audience" ? ["person-a", "person-c"] : ["person-a", "person-b"]);
       if (scenario === "line-blocked") {
         const line = await prisma.hostedLinqLine.findFirst();
@@ -2889,8 +2895,9 @@ function createPrismaStub(input: {
   const prisma = {
     $executeRaw: vi.fn().mockResolvedValue(1),
     $queryRaw: vi.fn().mockResolvedValue([]),
-    game: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) },
+    game: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]), findUnique: vi.fn().mockResolvedValue(null) },
     gameEntry: { findMany: vi.fn().mockResolvedValue([]) },
+    gameEvent: { findUnique: vi.fn().mockResolvedValue(null) },
     deviceConnectionSource: {
       findUnique: vi.fn().mockResolvedValue(null),
     },

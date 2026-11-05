@@ -246,3 +246,23 @@ it("accepts group edit IDs and bounded majority responses without widening pair 
   expect(hostedGameToolRequestSchema.safeParse(pair).success).toBe(false);
   expect(hostedGameToolRequestSchema.safeParse({ ...pair, update: { ...pair.update, change: { kind: "edit", tasks: tasks.slice(0, 3) } } }).success).toBe(false);
 });
+
+
+it.skipIf(process.env.MURPH_VERIFY_GAME_GROUP_SKEW !== "1")("Plan A preserves the previous group wire and pair bytes in both directions", async () => {
+  const root = fileURLToPath(new URL("../../../", import.meta.url));
+  const target = new URL(`../src/.game-plan-a-legacy-${randomUUID()}.ts`, import.meta.url);
+  await writeFile(target, execFileSync("git", ["show", "b2694496c0665990fa0fd283b5041e5018a38d3e:packages/hosted-execution/src/game-tools.ts"], { cwd: root, encoding: "utf8" }), { flag: "wx" });
+  try {
+    const previous = await import(target.href) as typeof import("../src/game-tools.ts");
+    const ask = { action: "update_game", origin, update: { operation: "propose", gameId: game.id,
+      proposalId: "proposal_earlier", expectedTermsVersion: 1, change: { kind: "start_now" } } };
+    expect(previous.hostedGameToolRequestSchema.parse(ask)).toEqual(hostedGameToolRequestSchema.parse(ask));
+    const pending = response({ ...game, maxPlayers: 10, pendingChange: { id: "proposal_earlier", proposedByMemberId: "player_first",
+      expectedTermsVersion: 1, change: { kind: "start_now" }, startsOn: "2030-04-01", effectiveFromDay: 0,
+      origin: "app", deliveryStatus: "queued", votes: [{ memberId: "player_first", vote: "yes" }], yesNeeded: 1 } });
+    expect(previous.hostedGameToolResponseSchema.parse(pending)).toEqual(hostedGameToolResponseSchema.parse(pending));
+    const refused = { action: "update_game", result: { status: "rejected", error: "Start now is unavailable." } };
+    expect(hostedGameToolResponseSchema.parse(refused)).toEqual(previous.hostedGameToolResponseSchema.parse(refused));
+    expect(JSON.stringify(hostedGameToolResponseSchema.parse(response(game)))).toBe(JSON.stringify(previous.hostedGameToolResponseSchema.parse(response(game))));
+  } finally { await rm(target, { force: true }); }
+});

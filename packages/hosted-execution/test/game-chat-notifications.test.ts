@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hostedGameChatStateSchema } from "../src/game-tools.ts";
-import { GAME_LIVE_LORE_GUIDANCE, GAME_PRIZE_WORDS, buildGameTalkInstructions, buildGameChangeExpiredInstructions, buildGameChangeCancelledInstructions, buildGameInviteCancelledInstructions, buildGameKickoffInstructions, buildGameMissedDayInstructions, buildGameProposalInstructions, buildGameRecapInstructions, buildGameRematchInstructions } from "../src/game-chat-notifications.ts";
+import { GAME_LIVE_LORE_GUIDANCE, GAME_PRIZE_WORDS, buildGameTalkInstructions, buildGameChangeResolvedInstructions, buildGameChangeExpiredInstructions, buildGameChangeCancelledInstructions, buildGameInviteCancelledInstructions, buildGameKickoffInstructions, buildGameMissedDayInstructions, buildGameProposalInstructions, buildGameRecapInstructions, buildGameRematchInstructions } from "../src/game-chat-notifications.ts";
 
 describe("game v1 notification instructions", () => {
   it("relays the note as user data without inventing terms or acceptance", () => {
@@ -237,4 +237,24 @@ it("gives group recaps room continuity, shared voice and read-only lore with eli
   expect(pair).toContain("update the pair lore");
   expect(pair).toContain("Chat line used:");
   for (const phrase of ["game lore", "only room conversation and shared game state", "personal memory, private contact labels", "memberId next to the name", "memberIds never appear in messages"]) expect(GAME_LIVE_LORE_GUIDANCE).toContain(phrase);
+});
+
+
+describe("group change notice facts", () => {
+  const room = { tasks: ["Walk"], otherGames: [{ status: "live", tasks: ["Read"] }], startedAfterAnother: false };
+  it("uses the shared pending shape and asks only for the remaining yeses", () => {
+    const message = buildGameProposalInstructions({ change: { kind: "edit", defaultTask: "Walk", tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Read" }], lengthDays: 14 },
+      startsOn: null, votes: [{ memberId: "member_a", vote: "yes" }], yesNeeded: 2 }, { group: true, proposerName: "Alex", recipientName: "the players", lengthDays: 7, room });
+    expect(message).toContain('"yesNeeded":2'); expect(message).toContain('"lengthDays":14');
+    expect(message).not.toContain("both players"); expect(message).not.toContain("member_a");
+    expect(message).toContain("waiting, not applied");
+  });
+  it("keeps group outcomes request-specific after the game ends", () => {
+    for (const message of [buildGameChangeCancelledInstructions(room, true), buildGameChangeExpiredInstructions("The playing roster changed.", room, true),
+      buildGameChangeResolvedInstructions({ applied: true, reason: "A majority approved.", tally: { yes: 3, no: 1, total: 4 }, changeKind: "start_now", startsOn: "2030-03-06" }, room)]) {
+      expect(message).toContain('"thisGameTasks":["Walk"]');
+      expect(message).not.toMatch(/both players|when the partner agreed|requested from the app/u);
+      expect(message).toMatch(/earlier/u);
+    }
+  });
 });

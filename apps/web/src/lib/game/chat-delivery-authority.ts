@@ -3,12 +3,12 @@ import "server-only";
 import { groupGameRecapPlayers } from "./recap-cohort";
 import { readCurrentGameTalk } from "./talk";
 
-import { isPairRoster, hasGameIdentity } from "./roster";
+import { isPairRoster } from "./roster";
 import { parseGameRecapEventId } from "@murphai/hosted-execution/runtime-control";
 import { Prisma } from "@prisma/client";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
-import { isGameChangeExpired, parsePendingGameChange } from "./changes";
-import { isGameInviteExpired, parseStoredTerms } from "./rules";
+import { gameResolutionNoticeKind, parseGameResolutionNotice, readGameChangeResolution } from "./change-resolution";
+import { isGameInviteExpired } from "./rules";
 import { readGroupGameChatAuthority, type GameChatAudience, sameGamePlayers } from "./chat-membership";
 
 /** Returns true only for the current proposal and proven audience; stale outbox work cannot announce a replaced edit. */
@@ -29,7 +29,7 @@ export async function assertGameProposalDeliveryCurrentTx(input: {
   const missed = /^game-missed:([^:]+):([^:]+):(\d{4}-\d{2}-\d{2})$/u.exec(key);
   if (missed) return assertGameMissedDeliveryCurrentTx(input, missed[1], missed[2]);
   if (key.startsWith("game-cancelled:")) return assertGameCancelledDeliveryCurrentTx(input);
-  if (key.startsWith("game-change-cancelled:") || key.startsWith("game-change-expired:")) return assertGameChangeResolvedDeliveryCurrentTx(input);
+  if (key.startsWith("game-change-cancelled:") || key.startsWith("game-change-expired:") || key.startsWith("game-change-resolved:")) return assertGameChangeResolvedDeliveryCurrentTx(input);
   const rematch = /^game-rematch:([^:]+)$/.exec(key);
   if (rematch) return assertGameRematchDeliveryCurrentTx(input, rematch[1]);
   const lifecycle = /^game-started:([^:]+)$/.exec(key);
@@ -94,20 +94,12 @@ async function assertGameChangeProposalDeliveryCurrentTx(
 ): Promise<true> {
   const match = /^game-change:([^:]+):([^:]+)$/.exec(key);
   if (!match) return stale();
-  const game = await input.tx.game.findFirst({
-    where: { id: match[1], chatContainerMemberId: input.containerMemberId, status: { in: ["live", "negotiating"] } },
-    include: { invitees: true, players: { take: 11 } },
-  });
-  const pending = parsePendingGameChange(game?.pendingChange);
-  if (!game || isGameInviteExpired(game, input.now ?? new Date())
-    || !pending || pending.id !== match[2] || !isPairRoster(game.players)) return stale();
-  if (!await deliveryAudienceCurrent(input, game, input.playerMemberIds ?? [])) return stale();
-  const expired = game.status === "live" && isGameChangeExpired({
-    entries: [],
-    game: { id: game.id, createdBy: game.createdBy, status: "live", seats: 2, lengthDays: game.lengthDays, terms: parseStoredTerms(game.terms), inviteExpiresAt: game.inviteExpiresAt, startsOn: game.startsOn?.toISOString().slice(0, 10) ?? null },
-    players: game.players.filter(hasGameIdentity).map((player) => ({ memberId: player.memberId, seat: player.seat, timeZone: player.timeZone, dayOne: player.dayOne?.toISOString().slice(0, 10) ?? null })),
-  }, pending, input.now ?? new Date());
-  if (expired) stale();
+  // The caller retains this lock through the provider dispatch-fence commit.
+  await input.tx.$queryRaw`SELECT id FROM game WHERE id = ${match[1]} FOR UPDATE`;
+  const { readCurrentGameChange } = await import("./service");
+  const current = await readCurrentGameChange(input.tx, match[1], match[2], input.now ?? new Date());
+  if (!current || current.row.chatContainerMemberId !== input.containerMemberId
+    || !await deliveryAudienceCurrent(input, current.row, input.playerMemberIds ?? [])) return stale();
   return true;
 }
 
@@ -140,14 +132,12 @@ async function assertGameCancelledDeliveryCurrentTx(input: Parameters<typeof ass
   return true;
 }
 async function assertGameChangeResolvedDeliveryCurrentTx(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0]): Promise<true> {
-  const cancelled = /^game-change-(cancelled|expired):([^:]+):([^:]+)$/.exec(input.deliveryIdempotencyKey ?? "");
-  if (!cancelled) return stale();
-  const game = await input.tx.game.findFirst({
-    where: { id: cancelled[2], chatContainerMemberId: input.containerMemberId, status: { in: cancelled[1] === "expired" ? ["live", "negotiating", "settled", "void"] : ["live", "negotiating"] },
-      events: { some: { type: `change_${cancelled[1]}`, commandKey: `game-change-resolved:${cancelled[2]}:${cancelled[3]}` } } },
-    include: { invitees: true, players: { take: 11 } },
-  });
-  if (!game || !await deliveryAudienceCurrent(input, game, input.playerMemberIds ?? [])) return stale();
+  const notice = parseGameResolutionNotice(input.deliveryIdempotencyKey ?? "");
+  if (!notice) return stale();
+  const resolution = await readGameChangeResolution(input.tx, notice.gameId, notice.proposalId);
+  if (!resolution || gameResolutionNoticeKind(resolution.outcome) !== notice.kind
+    || resolution.game.chatContainerMemberId !== input.containerMemberId
+    || !await deliveryAudienceCurrent(input, resolution.game, input.playerMemberIds ?? [])) return stale();
   return true;
 }
 async function assertGameStartedDeliveryCurrentTx(

@@ -7,7 +7,6 @@
  */
 
 import type {
-  GameChangeControls,
   GameDayOtherStatus,
   GameDayView,
   GameEntryView,
@@ -26,6 +25,7 @@ import type {
 } from "./contract";
 import {
   currentTerms,
+  remainingPlayers,
   groupTaskOverrideSeats,
   canChallengeGame,
   gameChallengeStatus,
@@ -66,7 +66,6 @@ import { pendingGameChangeView, gameChangeControls } from "./changes";
 import { firstOpenSeat, isPairRoster } from "./roster";
 
 const GAME_MEDIA_PATH = "/api/game/v1/media/";
-const CLOSED_CHANGE_CONTROLS: GameChangeControls = { canStartNow: false, canEdit: false, canEditSchedule: false, canEditStartDate: false, canEditTasks: false, canEditStakes: false, editableFromDay: null };
 export const GAME_HISTORY_PREVIEW_LIMIT = 6;
 
 export function gameMediaUrl(key: string): string {
@@ -189,6 +188,8 @@ export function termsView(state: RuleState, words: TermWords, multiplayer = fals
 }
 
 function groupTasksView(state: RuleState, words: TermWords["versions"][number]) {
+  if (state.game.status === "live") return remainingPlayers(state).map(player => ({ seat: player.seat,
+    text: words.tasks.find(task => task.seat === player.seat)?.text ?? words.defaultTask ?? "" }));
   const admitted = state.game.admittedSeats ?? state.players.map(player => player.seat);
   const overrideSeats = groupTaskOverrideSeats(state.game, words.tasks);
   return [
@@ -341,9 +342,9 @@ export function buildGameView(input: GameViewInput): GameView {
   return {
     ...(input.multiplayer ? { maxPlayers: game.seats === 10 ? 10 as const : 2 as const, invitedCount: game.invitees?.length ?? 1,
       permissions: permissions(input), ...(game.seats === 10 ? { group: groupView(input) } : {}) } : {}),
-    // Group changes are voted on in the group chat; the app has no group change controls.
-    changeControls: game.seats === 10 ? CLOSED_CHANGE_CONTROLS : gameChangeControls(state, input.now, input.pendingChange ?? null),
-    pendingChange: game.seats === 10 ? null : pendingGameChangeView(state, input.pendingChange ?? null, input.now),
+    // Live groups share pending asks across app and chat; controls belong to the viewer.
+    changeControls: gameChangeControls(state, input.now, input.pendingChange ?? null, input.viewerId),
+    pendingChange: pendingGameChangeView(state, input.pendingChange ?? null, input.now),
     ...(input.talkDelivery ? { talkDelivery: input.talkDelivery } : {}),
     ...(input.recapWatched ? { recapWatched: true as const } : {}),
     days: game.status === "negotiating" ? [] : dayViews(input, players, entries),

@@ -1,13 +1,13 @@
 import { GAME_STAKE_KINDS, type GameChange, type GameChangeControls, type GamePendingChange, type GameSchedule } from "./contract";
 import { parseGameChange } from "./command";
 import { isRecord } from "../primitives";
-import { currentTerms, gameDayOne, dayIndexAt, decideStartNow, firstScheduledDate, GameRuleError, GAME_MIN_LENGTH_DAYS, GAME_MAX_LENGTH_DAYS, GAME_MAX_START_DAYS_OUT, isGameDue, remainingPlayers, reject, validSchedule, validNewStakes, type StoredStake, type RuleState, type NewTerms, type TermWords } from "./rules";
+import { calendarPlayers, hasGameCheckInAttempt, currentTerms, gameDayOne, dayIndexAt, decideStartNow, firstScheduledDate, GameRuleError, GAME_MIN_LENGTH_DAYS, GAME_MAX_LENGTH_DAYS, GAME_MAX_START_DAYS_OUT, isGameDue, remainingPlayers, reject, validSchedule, validNewStakes, type StoredStake, type RuleState, type NewTerms, type TermWords } from "./rules";
 import { isPairRoster } from "./roster";
 import { acceptanceStartDate, addDays, gameLocalDate, weekdayOf } from "./time";
 
 /** First day that neither player has begun. The previous days retain their terms. */
 export function firstUnstartedGameDay(state: RuleState, now: Date): number {
-  return Math.max(0, ...state.players.map((player) => (dayIndexAt(player, now) ?? -1) + 1));
+  return Math.max(0, ...calendarPlayers(state).map((player) => (dayIndexAt(player, now) ?? -1) + 1));
 }
 
 const START_DATE_LOCKED = "The start date locks once someone checks in.";
@@ -21,26 +21,32 @@ function changeFromDay(state: RuleState, change: GameChange, now: Date, canMoveS
   return movesStartDate(change) && canMoveStart ? 0 : firstUnstartedGameDay(state, now);
 }
 
-export function gameChangeControls(state: RuleState, now: Date, pending: Pick<GamePendingChange, "id"> | null): GameChangeControls {
+export function gameChangeControls(state: RuleState, now: Date, pending: Pick<GamePendingChange, "id"> | null, viewerId?: string): GameChangeControls {
   const day = firstUnstartedGameDay(state, now);
-  // Negotiation is still a two-person agreement policy.
-  const live = state.game.seats === 10 ? state.game.status === "live"
-    : state.game.seats === 2 && ["live", "negotiating"].includes(state.game.status) && isPairRoster(state.players);
+  const live = canRequestGameChange(state, viewerId);
   // Once either player's last day is over, the game is done for changes.
   const editable = live && !pending && !isGameDue(state, now) && day <= state.game.lengthDays;
   const enabled = editable && day < GAME_MAX_LENGTH_DAYS;
   return {
-    canStartNow: state.game.seats === 2 && enabled && day === 0 && startNowMovesDayOne(state, now),
+    canStartNow: enabled && day === 0 && startNowMovesDayOne(state, now),
     canEdit: editable,
     canEditSchedule: enabled && day < state.game.lengthDays && (day === 0 || "days" in currentTerms(state.game.terms).schedule),
     // Until anyone posts, Day 1 can still move, even after it has begun.
-    canEditStartDate: enabled && (day === 0 || state.entries.length === 0),
+    canEditStartDate: enabled && (state.game.seats === 10 ? !hasGameCheckInAttempt(state) : day === 0 || state.entries.length === 0),
     // Tasks lock once either player's Day 1 begins; the prize or dare stays
     // open, with the other player's yes, until the game is due.
     canEditTasks: editable && day === 0,
     canEditStakes: editable,
     editableFromDay: editable ? Math.min(day, state.game.lengthDays) : null,
   };
+}
+
+function canRequestGameChange(state: RuleState, viewerId?: string): boolean {
+  if (state.game.seats === 10) {
+    const players = remainingPlayers(state);
+    return state.game.status === "live" && players.length >= 2 && (viewerId === undefined || players.some(player => player.memberId === viewerId));
+  }
+  return state.game.seats === 2 && ["live", "negotiating"].includes(state.game.status) && isPairRoster(state.players);
 }
 
 /** Proposal words are sealed before the transaction and atomically applied on agreement. */
@@ -123,8 +129,12 @@ function readPendingDeliveryState(value: Record<string, unknown>): Pick<GamePend
 
 /** Start now must move Day 1 earlier; Day 1 never lands on an unscheduled day. */
 function startNowMovesDayOne(state: RuleState, now: Date): boolean {
-  const dayOne = gameDayOne(state.players);
-  return state.game.status !== "live" || !dayOne || gameDayOne(decideStartNow(state, now).players)! < dayOne;
+  const dayOne = gameDayOne(calendarPlayers(state));
+  try {
+    if (state.game.seats === 10) return gameDayOne(decideStartNow(state, now).players)! < dayOne!;
+    return state.game.status !== "live" || !dayOne || gameDayOne(decideStartNow(state, now).players)! < dayOne;
+  }
+  catch (error) { if (error instanceof GameRuleError) return false; throw error; }
 }
 
 /** The game ended or its terms moved on since the proposal. */
@@ -136,6 +146,7 @@ export function isGameChangeOutdated(state: RuleState, pending: StoredGamePendin
 /** Why the other player's agreement would refuse this change now, or null while it can still apply. */
 export function gameChangeRefusal(state: RuleState, pending: StoredGamePendingChange, now: Date): string | null {
   const approver = remainingPlayers(state).find((player) => player.memberId !== pending.proposedByMemberId) ?? state.players[0];
+  if (!approver) return "This game is no longer open for changes.";
   try {
     decideApprovedGameChange(state, approver.memberId, pending, now);
     return null;
@@ -163,9 +174,7 @@ function decideChange(state: RuleState, actor: string, change: GameChange, now: 
   if (!controls.canEdit) reject("GAME_NOT_LIVE", "This game is no longer open for changes.");
   const effectiveFromDay = changeFromDay(state, change, now, controls.canEditStartDate);
   if (change.kind === "start_now") {
-    if (!controls.canStartNow) reject("DAY_CLOSED", effectiveFromDay === 0 ? "The game already starts on its next scheduled day." : "This game has already started.");
-    const start = decideStartNow(state.game.status === "negotiating" ? { ...state, game: { ...state.game, status: "live" } } : state, now);
-    return { change, effectiveFromDay: 0, startsOn: gameDayOne(start.players) };
+    return decideEarlierStartChange(state, change, now, controls, effectiveFromDay);
   }
   assertEditableWords(state, change, controls, sealedWords);
   // A new prize or dare replaces the whole game's, so it needs no future day.
@@ -182,6 +191,13 @@ function decideChange(state: RuleState, actor: string, change: GameChange, now: 
   return { change: { ...change, ...(change.schedule ? { schedule } : {}) }, effectiveFromDay, startsOn: startsOn && firstScheduledDate(startsOn, schedule) };
 }
 
+function decideEarlierStartChange(state: RuleState, change: GameChange, now: Date, controls: GameChangeControls, effectiveFromDay: number): GameChangeDecision {
+  if (state.game.seats === 10 && hasGameCheckInAttempt(state)) reject("DAY_CLOSED", "The start date locks once someone checks in.");
+  if (!controls.canStartNow) reject("DAY_CLOSED", effectiveFromDay === 0 ? "The game already starts on its next scheduled day." : "This game has already started.");
+  const start = decideStartNow(state.game.status === "negotiating" ? { ...state, game: { ...state.game, status: "live" } } : state, now);
+  return { change, effectiveFromDay: 0, startsOn: gameDayOne(start.players) };
+}
+
 /** Key order, absent fields and weekday order do not matter. */
 export function isSameGameChange(left: GameChange, right: GameChange): boolean {
   const canonical = (change: GameChange) => JSON.stringify(change, (_, value: unknown) =>
@@ -191,14 +207,14 @@ export function isSameGameChange(left: GameChange, right: GameChange): boolean {
 }
 
 /** Only an app request already queued or sent needs a separate cancellation notice, unless Murph's reply in the bound chat already gave it. */
-export function gameChangeCancellationNeedsNotice(pending: Pick<GamePendingChange, "origin" | "deliveryStatus">, decision: "approve" | "decline" | "cancel", answeredInBoundChat = false): boolean {
-  return !answeredInBoundChat && decision === "cancel" && pending.origin === "app" && ["queued", "sent"].includes(pending.deliveryStatus);
+export function gameChangeCancellationNeedsNotice(pending: Pick<GamePendingChange, "origin" | "deliveryStatus">, decision: "approve" | "decline" | "cancel", answeredInBoundChat = false, group = false): boolean {
+  return !answeredInBoundChat && decision === "cancel" && (group && pending.origin === "chat" || pending.origin === "app" && ["queued", "sent"].includes(pending.deliveryStatus));
 }
 
 /** Rejudge the proposal under the acceptance clock, retaining its requested date. */
 export function decideApprovedGameChange(state: RuleState, actor: string, pending: StoredGamePendingChange, now: Date): GameChangeDecision {
   const fixedStart = pending.change.kind === "start_now" || typeof pending.change.startsOn === "string";
-  if (fixedStart && pending.startsOn !== null && state.players.some((player) => gameLocalDate(now, player.timeZone) > pending.startsOn!)) {
+  if (fixedStart && pending.startsOn !== null && calendarPlayers(state).some((player) => gameLocalDate(now, player.timeZone) > pending.startsOn!)) {
     reject("CHANGE_EXPIRED", "The proposed start date has passed. Propose a new date.");
   }
   if (pending.change.kind === "edit" && pending.change.lengthDays !== undefined && pending.change.lengthDays <= firstUnstartedGameDay(state, now)) {
@@ -208,7 +224,11 @@ export function decideApprovedGameChange(state: RuleState, actor: string, pendin
   // the date still never moves once someone has checked in.
   if (movesStartDate(pending.change) && !gameChangeControls(state, now, null).canEditStartDate) reject("DAY_CLOSED", START_DATE_LOCKED);
   const agreedStart = pending.change.kind === "edit" && typeof pending.change.startsOn === "string" ? pending.startsOn ?? pending.change.startsOn : undefined;
-  return decideChange(state, actor, pending.change, now, pending, agreedStart);
+  const decision = decideChange(state, actor, pending.change, now, pending, agreedStart);
+  if (state.game.seats === 10 && pending.change.kind === "start_now") {
+    if (!pending.startsOn || decision.startsOn !== pending.startsOn) reject("CHANGE_EXPIRED", "The requested earlier date is no longer available. Ask for a new date.");
+  }
+  return decision;
 }
 
 /**
@@ -216,7 +236,7 @@ export function decideApprovedGameChange(state: RuleState, actor: string, pendin
  * start, or a new schedule before play, lands on a scheduled day.
  */
 export function agreedDayOne(state: RuleState, pending: StoredGamePendingChange, fromDay: number, schedule: GameSchedule, startsOn: string | null): string | null {
-  const dayOne = gameDayOne(state.players);
+  const dayOne = gameDayOne(calendarPlayers(state));
   const rescheduled = fromDay === 0 && pending.change.kind === "edit" && pending.change.schedule !== undefined;
   const from = startsOn ?? (rescheduled ? dayOne : null);
   const next = from && firstScheduledDate(from, schedule);
@@ -238,7 +258,7 @@ export function pendingGameChangeView(state: RuleState, pending: GamePendingChan
 
 /** Before play, Day 1 moves to a scheduled day; once play starts, the rest of the game must keep one. */
 function assertScheduledDayLeft(state: RuleState, fromDay: number, lengthDays: number, schedule: ReturnType<typeof validSchedule>): void {
-  const dayOne = gameDayOne(state.players);
+  const dayOne = gameDayOne(calendarPlayers(state));
   if (fromDay === 0 || !dayOne || "count" in schedule) return;
   for (let day = fromDay; day < lengthDays; day += 1) {
     if (schedule.days.includes(weekdayOf(addDays(dayOne, day)))) return;
@@ -267,11 +287,11 @@ function changedStartDate(state: RuleState, change: Extract<GameChange, { kind: 
   if (change.startsOn === undefined) return null;
   if (!canEdit) reject("DAY_CLOSED", START_DATE_LOCKED);
   if (agreedStart !== undefined) return agreedStart;
-  const latestToday = state.players.map((player) => gameLocalDate(now, player.timeZone)).sort().at(-1)!;
+  const latestToday = calendarPlayers(state).map((player) => gameLocalDate(now, player.timeZone)).sort().at(-1)!;
   if (change.startsOn !== null && (change.startsOn < latestToday || change.startsOn > addDays(latestToday, GAME_MAX_START_DAYS_OUT))) {
     reject("INVALID_REQUEST", `Choose a start date from today to ${GAME_MAX_START_DAYS_OUT} days out.`);
   }
-  return change.startsOn ?? (state.game.status === "negotiating" ? null : state.players.map((player) => acceptanceStartDate(now, player.timeZone)).sort().at(-1)!);
+  return change.startsOn ?? (state.game.status === "negotiating" ? null : calendarPlayers(state).map((player) => acceptanceStartDate(now, player.timeZone)).sort().at(-1)!);
 }
 
 function parseStoredStake(value: unknown): StoredStake {

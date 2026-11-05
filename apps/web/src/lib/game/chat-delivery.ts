@@ -16,6 +16,8 @@ import { buildGameProposalInstructions } from "@murphai/hosted-execution/runtime
 export { buildGameProposalInstructions } from "@murphai/hosted-execution/runtime-control";
 import { openGameTexts } from "./crypto";
 import { isGameInviteExpired } from "./rules";
+import { pendingGameChangeView } from "./changes";
+import { assertGameProposalDeliveryCurrentTx } from "./chat-delivery-authority";
 
 import { bindPairGameChat, findExistingGameChat, readGroupGameChatAuthority, type GameChatAudience, requireExactChat, requireExactGameChat } from "./chat-membership";
 export { isExactGameChat, requireExactGameChat } from "./chat-membership";
@@ -25,7 +27,8 @@ import { markGameChatGenerationQueuedTx } from "./chat-lifecycle-receipt";
 /** Called after the game transaction. All provider and crypto work stays outside game locks. */
 export async function deliverGameChangeProposal(gameId: string, proposalId: string, now = new Date()): Promise<boolean> {
   const prisma = getPrisma();
-  const game = await prisma.game.findUnique({ where: { id: gameId }, include: { players: { orderBy: { seat: "asc" }, take: 3 } } });
+  const game = await prisma.game.findUnique({ where: { id: gameId }, include: { invitees: true, players: { orderBy: { seat: "asc" }, take: 11 } } });
+  if (game?.maxPlayers === 10) return deliverGroupChangeProposal(gameId, proposalId, now);
   const proposal = game ? await readPendingGameChange(game) : null;
   if (!game || !["live", "negotiating"].includes(game.status) || isGameInviteExpired(game, now)
     || !proposal || proposal.id !== proposalId || !isPairRoster(game.players)) return false;
@@ -40,6 +43,31 @@ export async function deliverGameChangeProposal(gameId: string, proposalId: stri
   if (!containerMemberId || !destination) return (await prepareGameChatBootstrap(gameId, `game-change:${gameId}:${proposal.id}`, message)) !== null;
   await requireExactChat(containerMemberId, phones);
   return enqueueProposal(gameId, proposal, containerMemberId, message);
+}
+
+async function deliverGroupChangeProposal(gameId: string, proposalId: string, now: Date): Promise<boolean> {
+  const prisma = getPrisma();
+  const { readCurrentGameChange, readGameChatProfiles, readGameNoticeRoom } = await import("./service");
+  const current = await readCurrentGameChange(prisma, gameId, proposalId, now);
+  if (!current || !isGameOn(current.row)) return false;
+  const game = current.row;
+  const proposal = await readPendingGameChange(game);
+  if (!proposal || proposal.origin === "chat") return false;
+  if (proposal.deliveryStatus === "sent") return true;
+  if (!game.chatContainerMemberId) return false;
+  const audience = await readGroupGameChatAuthority(game, game.chatContainerMemberId);
+  if (!audience) return false;
+  const players = current.state.players.filter(player => !player.leftAt);
+  const [profiles, room] = await Promise.all([
+    readGameChatProfiles(players.map(player => player.memberId)),
+    readGameNoticeRoom(gameId, players.map(player => player.memberId), game.chatContainerMemberId),
+  ]);
+  const shared = pendingGameChangeView(current.state, proposal, current.now)!;
+  const message = buildGameProposalInstructions(shared, {
+    proposerName: profiles.find(profile => profile.memberId === proposal.proposedByMemberId)?.firstName ?? "A player",
+    recipientName: "the remaining players", lengthDays: game.lengthDays, group: true, room,
+  });
+  return enqueueProposal(gameId, shared, game.chatContainerMemberId, message, audience);
 }
 
 async function prepareGameChatPlayers(game: Game & { players: GamePlayer[] }, proposal: GamePendingChange): Promise<{ phones: string[]; message: string }> {
@@ -62,7 +90,7 @@ async function prepareGameChatPlayers(game: Game & { players: GamePlayer[] }, pr
 
 /** Revalidate the audience outside the existing provider dispatch transaction. */
 export async function readGameProposalDeliveryPlayers(key: string | null, containerMemberId: string, target?: string | null): Promise<readonly string[] | GameChatAudience | undefined> {
-  const match = /^(game-talk|game-change|game-started|game-rematch|game-change-cancelled|game-change-expired|game-cancelled|game-recap|game-missed|game-challenge):([^:]+)/.exec(key ?? "");
+  const match = /^(game-talk|game-change|game-started|game-rematch|game-change-cancelled|game-change-expired|game-change-resolved|game-cancelled|game-recap|game-missed|game-challenge):([^:]+)/.exec(key ?? "");
   if (!match) return undefined;
   const game = await getPrisma().game.findUnique({ where: { id: match[2] }, include: { invitees: { select: { memberId: true, recipientLookupKey: true } }, players: { take: 11 } } });
   if (game?.maxPlayers !== 10) return requireExactGameChat(containerMemberId);
@@ -72,7 +100,7 @@ export async function readGameProposalDeliveryPlayers(key: string | null, contai
 }
 
 
-async function enqueueProposal(gameId: string, proposal: GamePendingChange, containerMemberId: string, message: string): Promise<boolean> {
+async function enqueueProposal(gameId: string, proposal: GamePendingChange, containerMemberId: string, message: string, audience?: GameChatAudience): Promise<boolean> {
   const prisma = getPrisma();
   const key = `game-change:${gameId}:${proposal.id}`;
   const existing = await readHostedMailboxItemByDedupeKey({ dedupeKey: key, userId: containerMemberId, prisma });
@@ -90,6 +118,7 @@ async function enqueueProposal(gameId: string, proposal: GamePendingChange, cont
   }) });
   const appended = await prisma.$transaction(async (tx) => {
     if (bound.externalThreadRouteAuthority) await assertHostedAssistantNotificationRouteAuthority({ authority: bound.externalThreadRouteAuthority, prisma: tx });
+    if (audience) await assertGameProposalDeliveryCurrentTx({ deliveryIdempotencyKey: key, containerMemberId, audience, tx });
     // Only update delivery metadata. A hydrated proposal can contain task and
     // stake words; rewriting it would replace their sealed canonical storage.
     const changed = await tx.$executeRaw`UPDATE game

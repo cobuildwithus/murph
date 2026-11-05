@@ -65,31 +65,57 @@ invitees keep their seats. Bearer joiners use separate seats, and ten total
 admissions includes departures. There is no rejoin. Late joiners share the
 existing calendar and can score only from their local joining day, capped by
 the common schedule. While invited, the starter alone can edit full terms
-directly. Once live, any remaining seated player can ask for a change in the
-bound group chat with `edit_terms`, full terms, the current terms version and a
-new proposal ID. More than half of the remaining players must say yes, including
+directly. Once live, any remaining seated player can ask for a change from the
+app or bound group chat with full terms, the current terms version and a new
+proposal ID. New app asks require a proven bound room for their announcement.
+More than half of the remaining players must say yes, including
 the proposer. Each person can answer only for themselves; their yes or no is
 final for that ask. Repeating the same answer is a no-op, even after resolution.
 One ask waits at a time, and only its proposer can cancel it. Unjoined invitees
 and departed players do not count. A late join adds an undecided voter; a
-departure clears the ask because it changes who votes.
+departure clears the ask because it changes who votes. App votes and chat votes
+use the same locked tally. Historical same-vote retries remain replayable.
 
 Group changes use the pair edit delta, pending JSON and approved terms writer.
 Tasks lock once Day 1 begins, the start date at the first check-in, and the prize
 when the game is due. Length and weekday schedule edits start at the next
-unstarted day; an any-days target locks once play starts. Start now is unavailable.
+unstarted day; an any-days target locks once play starts. Start now is a majority
+request available only in live groups with at least two remaining players,
+before every remaining player's original Day 1 and before any check-in attempt.
+Withdrawn attempts and posted history retained after account deletion still
+lock it; excuses do not. The candidate is the latest remaining player's local
+today, advanced to the next scheduled date, and must precede the current Day 1.
+Approval revalidates that exact requested date without silently moving it.
+It advances the terms and calendar without another started event or kickoff.
 An agreed start date runs from the latest player's today to 60 days out and moves
 Day 1 for everyone; stale joins must read the new terms before accepting.
-Chat reads expose seated votes and yeses still needed. The app permits direct
-edits only while invited and has no group voting or pending-change projection.
+App and chat reads expose remaining seated votes and yeses still needed.
+Unjoined invitees retain invitations and cannot vote; stale acceptance must
+refresh the terms version. Controls are closed for invitees and leavers.
 Cancelling the game stays starter-only until the first check-in, while not due.
 Terms reports target the latest applied change's proposer, falling back to the
 starter for initial terms, for both pairs and groups.
 
-Deploy this change to Web before the runner. Old runners omit the required
-live-group proposal ID and receive a refusal; old Web rejects the new field.
-Brief refusals during either version window are accepted. No migration or
-additional capability flag is needed; production group admission stays dark.
+Every first vote rechecks freshness under the game lock. One transaction-level
+resolution writer clears terminal asks, records `game-change-resolved:<g>:<p>`
+with structural reason and tally, and reserves any notice. Reads, settlement,
+acceptance, departure and retained-game account deletion use that owner too.
+App proposals receive one pending announcement. A deciding app vote receives
+one `change_resolved` outcome; a bound-chat reply suppresses the extra notice.
+Cancelling a conversational ask outside that chat receives a cancellation
+notice. Departure expires it with neutral roster-change copy, even if the game
+voids, without naming the leaver or claiming the game continues. Historical
+notices describe only that ask, using its canonical resolution and authorized
+shared task for disambiguation, even after settlement or a later ask.
+
+Deploy complete Web readers and writers, then the runner, then iOS. Existing
+signed `gameMultiplayer=1` and `X-Murph-Game-Multiplayer: 1` remain the capability
+boundaries; immutable `maxPlayers === 10` selects group rules even with two
+remaining players. Old runners parse the existing pending shape but may refuse
+Start now; old Web rejects unsupported requests. Missing availability means
+unavailable. New resolution receipts establish the updated Web rollback floor:
+forward-fix acceptance while preserving recovery. No new request operation,
+status or notification response policy is needed; group admission stays dark.
 
 A pre-settlement leave is silent, preserves evidence and excludes the player
 from prizes, debts and new app content. A leaver still in the group text sees
@@ -124,20 +150,35 @@ empty strings; clients render `parties`. Player reports name `reportedMemberId`;
 post reports derive their author and terms reports target the starter.
 
 `POST /api/game/v1/games/:id/leave` and
-`PUT /api/game/v1/games/:id/terms` with `{expectedTermsVersion, terms}` use the
-existing locked commands. Group creation accepts transient addressed recipients,
-`groupWord`, `defaultTask` and sparse invitation-seat overrides. Groups never
-negotiate or use Start now. Creating with a chat container still rejects.
+`PUT /api/game/v1/games/:id/terms` use the existing locked commands. Invited
+starter edits use `{expectedTermsVersion, terms}` and remain immediate. Live
+edits also require `proposalId` and create a majority ask. Group creation accepts
+transient addressed recipients, `groupWord`, `defaultTask` and sparse
+invitation-seat overrides. Groups never negotiate. Creating with a chat container
+still rejects.
 
-Group app terms keep the effective task for every admitted seat and append stored
-overrides for unjoined seats accepted by the edit validator. Both derive override
-eligibility from `groupTaskOverrideSeats`: current invitation seats, plus seat 0
-when a rematch retained a starter override. Removed invitation seats are omitted.
-All players receive the same seat-number/task-text projection; these are shared
-game terms, with no invitation identity or private pending label. Editors return
-every override they retain; omitting an override still removes it. Chat continues
-to expose only admitted players' tasks, and link previews expose the default task
-plus authenticated `yourTask`, never the sparse override list.
+The live editable terms contract now contains only the shared default and
+remaining-player tasks. Clients round-trip those fields; canonical preparation
+preserves hidden unjoined/departed overrides and rejects explicit writes to
+hidden seats. It compares the prepared remaining member/seat set under the game
+lock; a departure during preparation returns a refreshable conflict. Invited
+starter editing retains broader invitation-seat authority, including removing
+and restoring overrides. Link previews retain the default and authenticated
+`yourTask`, never sparse overrides or private pending labels.
+
+Start now uses `POST /api/game/v1/games/:id/changes` with
+`{proposalId, expectedTermsVersion, change:{kind:"start_now"}}` when
+`changeControls.canStartNow` is true. Live full-term editing uses
+`changeControls.canEdit`; `permissions.canEditTerms` still means direct invited
+editing. `POST /api/game/v1/games/:id/changes/:proposalId` accepts only
+`{decision:"approve"|"decline"}`; path and authentication supply identity.
+`DELETE` on that path cancels for the proposer. Pair votes remain chat-only.
+`pendingChange` retains `id`, `proposedByMemberId`, `change`, `startsOn`,
+`effectiveFromDay`, `votes` and `yesNeeded`. A remaining nonproposer with no
+recorded answer may vote. Render the request as waiting until the returned game
+confirms application. Delivery uses the existing pending/queued/sent/failed/
+conversation statuses and retryability; conversation reserves no separate
+announcement. Refresh on `CHANGE_PENDING`, `TERMS_CHANGED` or `CHANGE_EXPIRED`.
 
 Open capable previews include `maxPlayers`, `group`, nullable `expiresAt` and
 `dayOne`. Authenticated addressed invitees also receive `yourTask`.
