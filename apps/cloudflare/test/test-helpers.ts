@@ -34,9 +34,10 @@ export class MemoryEncryptedR2Bucket {
         };
   }
 
-  async put(key: string, value: string): Promise<void> {
+  async put(key: string, value: string): Promise<unknown> {
     this.objects.set(key, value);
     this.uploadedAt.set(key, new Date());
+    return { key };
   }
 
   async delete(key: string | string[]): Promise<void> {

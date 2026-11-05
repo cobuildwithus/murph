@@ -17,9 +17,14 @@ class IndexBucket extends MemoryEncryptedR2Bucket {
     const keys = [...this.objects.keys()].filter(key => key.startsWith(prefix));
     return { objects: keys.slice(0, limit).map(key => ({ key })), truncated: keys.length > limit };
   }
-  override async put(key: string, value: string, options?: { onlyIf?: unknown }): Promise<void> {
-    if (options?.onlyIf && this.objects.has(key)) return;
-    return super.put(key, value);
+  readonly reads: string[] = [];
+  override async get(key: string) {
+    this.reads.push(key);
+    return super.get(key);
+  }
+  // Like R2: the stored object, or null when an `onlyIf` condition failed.
+  override async put(key: string, value: string, options?: { onlyIf?: unknown }): Promise<unknown> {
+    return options?.onlyIf && this.objects.has(key) ? null : super.put(key, value);
   }
 }
 
@@ -113,6 +118,10 @@ describe("private game Images", () => {
     const bucket = new IndexBucket(), p = provider();
     const store = createGameImageStore({ deploymentOrigin, bucket, images: p.images, userId: "member_leo" });
     await store.upload(mediaId, bytes);
+    const [pointerKey] = [...bucket.objects.keys()];
+    // A won conditional write is its own confirmation: the pointer is read
+    // once before the upload (is it already stored?) and never again.
+    expect(bucket.reads.filter(key => key === pointerKey)).toHaveLength(1);
     await store.upload(mediaId, bytes);
     expect(p.upload).toHaveBeenCalledTimes(1);
     expect(p.upload.mock.calls[0]?.[1]).toMatchObject({ requireSignedURLs: true });

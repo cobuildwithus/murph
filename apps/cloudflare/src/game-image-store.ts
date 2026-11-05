@@ -79,15 +79,18 @@ export function createGameImageStore(input: { bucket: R2BucketLike; images: Game
         throw new Error("Game image privacy was not confirmed.");
       }
       const pointer: Pointer = { byteLength: bytes.length, imageId: uploaded.id, schema: "murph.game-image.v1" };
-      // R2 conditional creation elects one winner for concurrent retries.
-      // A lost/ambiguous response leaves an owner-tagged image that account
-      // deletion also finds independently of the pointer.
-      await input.bucket.put(await pointerKey(mediaId), JSON.stringify(pointer), {
+      // R2 conditional creation elects one winner for concurrent retries, and
+      // its answer says whether this upload won: only a lost (or unanswered)
+      // race reads the winner. A lost/ambiguous response leaves an
+      // owner-tagged image that account deletion also finds without the pointer.
+      const created = await input.bucket.put(await pointerKey(mediaId), JSON.stringify(pointer), {
         httpMetadata: { contentType: "application/json" }, onlyIf: { etagDoesNotMatch: "*" },
       });
-      const winner = await read(mediaId);
-      if (winner?.imageId !== uploaded.id) await input.images.hosted.image(uploaded.id).delete();
-      if (!winner) throw new Error("Game image storage was not confirmed.");
+      if (!created) {
+        const winner = await read(mediaId);
+        if (winner?.imageId !== uploaded.id) await input.images.hosted.image(uploaded.id).delete();
+        if (!winner) throw new Error("Game image storage was not confirmed.");
+      }
       await remove(receipt);
     },
     async delivery(mediaId: string, variant: GameImageVariant) {
