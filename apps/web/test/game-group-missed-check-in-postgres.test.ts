@@ -9,6 +9,7 @@ import { sealGameText } from "@/src/lib/game/crypto";
 import { readGameChatTranscript } from "@/src/lib/game/chat-tool";
 import { reserveGameMissedDayTx, gameGroupMissedDayEventId, gameMissedDayEventId } from "@/src/lib/game/chat-lifecycle-receipt";
 import { drainGameChatLifecycle } from "@/src/lib/game/chat-lifecycle";
+import { GameChatAudienceError } from "@/src/lib/game/chat-membership";
 import { readGroupMissedDayDeliveryAuthority, prepareGroupMissedDay, reserveGroupGameMissedDay, isGroupMissedDayBatchCurrentTx } from "@/src/lib/game/group-missed-day";
 import { assertGameProposalDeliveryCurrentTx } from "@/src/lib/game/chat-delivery-authority";
 import { readGameProposalDeliveryPlayers } from "@/src/lib/game/chat-delivery";
@@ -17,24 +18,30 @@ import { recordHostedLinqRuntimeProviderDispatchFenceTx } from "@/src/lib/hosted
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import { createHostedEmailLookupKey, createHostedExternalThreadIdentityLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { upsertHostedMemberIdentity } from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
 import { upsertHostedMemberEmailAuthorization } from "@/src/lib/hosted-onboarding/hosted-member-store";
+import { buildHostedMemberPhoneIdentityFields } from "@/src/lib/hosted-onboarding/member-identity-fields";
 
 // Same synthetic provider and local KMS boundaries as game-groups-postgres.
-const proof = vi.hoisted(() => ({ rooms: new Map<string, string[]>(), chatFailures: new Map<string, unknown>(), signal: vi.fn(), afterPrepare: null as null | (() => Promise<void>) }));
-vi.mock("@/src/lib/hosted-onboarding/linq-client", async original => ({ ...await original<object>(),
-  getHostedLinqChatSummary: async ({ chatId }: { chatId: string }) => {
-    if (proof.chatFailures.has(chatId)) throw proof.chatFailures.get(chatId);
+const proof = vi.hoisted(() => ({ rooms: new Map<string, string[]>(), chatFailures: new Map<string, unknown>(), parsedChats: new Set<string>(), realRoutes: new Set<string>(), signal: vi.fn(), afterPrepare: null as null | (() => Promise<void>) }));
+vi.mock("@/src/lib/hosted-onboarding/linq-client", async original => {
+  const actual = await original<typeof import("@/src/lib/hosted-onboarding/linq-client")>();
+  return { ...actual, getHostedLinqChatSummary: async (input: Parameters<typeof actual.getHostedLinqChatSummary>[0]) => {
+    if (proof.chatFailures.has(input.chatId)) throw proof.chatFailures.get(input.chatId);
+    if (proof.parsedChats.has(input.chatId)) return actual.getHostedLinqChatSummary(input);
     return { isGroup: true, handlesComplete: true,
-      handles: [{ handle: "+15555550100", isMe: true, status: "active" }, ...(proof.rooms.get(chatId) ?? []).map(handle => ({ handle, isMe: false, status: "active" }))] };
-  },
-}));
-vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", async original => ({ ...await original<object>(),
-  readHostedThreadContainerLinqRouteAuthorities: async ({ containerMemberIds }: { containerMemberIds: string[] }) => ({ authorities: new Map(containerMemberIds.map(id => [id,
-    { channel: "linq", threadId: id, containerMemberId: id, accountLookupKey: "synthetic-line" }])) }),
+      handles: [{ handle: "+15555550100", isMe: true, status: "active" }, ...(proof.rooms.get(input.chatId) ?? []).map(handle => ({ handle, isMe: false, status: "active" }))] };
+  } };
+});
+vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", async original => { const actual = await original<typeof import("@/src/lib/hosted-routing/assistant-notification-destination")>(); return { ...actual,
+  readHostedThreadContainerLinqRouteAuthorities: async (input: Parameters<typeof actual.readHostedThreadContainerLinqRouteAuthorities>[0]) => input.containerMemberIds.some(id => proof.realRoutes.has(id))
+    ? actual.readHostedThreadContainerLinqRouteAuthorities(input)
+    : { nonLinqContainerMemberIds: new Set<string>(), unavailableContainerMemberIds: new Set<string>(), authorities: new Map(input.containerMemberIds.map(id => [id,
+      { channel: "linq" as const, threadId: id, containerMemberId: id, accountLookupKey: "synthetic-line" }])) },
   resolveHostedAssistantNotificationDestination: async ({ memberId }: { memberId: string }) => ({ conversationShape: "thread-container",
     route: { channel: "linq", threadId: memberId, threadIsDirect: false, actorId: null, identityId: null, delivery: { kind: "thread", target: memberId } } }),
   bindHostedAssistantNotificationDestination: ({ destination }: { destination: { route: unknown } }) => ({ route: destination.route }),
-}));
+}; });
 vi.mock("@/src/lib/hosted-onboarding/linq-line-store", async original => ({ ...await original<object>(), readHostedLinqIncomingLineState: async () => ({ kind: "assignable" }) }));
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: proof.signal }));
 vi.mock("@/src/lib/hosted-mailbox/store", async original => {
@@ -104,6 +111,58 @@ async function shardRooms(count: number) {
   expect(rooms).toHaveLength(count);
   return rooms.map(room => room.id);
 }
+type Fixture = Awaited<ReturnType<typeof fixture>>;
+/** One drain with a broken room first in its shard: the next room still claims and an older delivery still publishes. */
+async function drainPastBrokenRoom(reason: string, breakRoom: (f: Fixture) => unknown) {
+  const [badId, healthyId, pendingId] = await shardRooms(3);
+  const bad = await fixture(3, badId), healthy = await fixture(3, healthyId), pending = await fixture(3, pendingId);
+  await bad.addGame(); await healthy.addGame();
+  expect(await reserveGroupGameMissedDay(pending.roomId, [await pending.addGame()], now)).toBe(1);
+  const pendingEvent = gameGroupMissedDayEventId(pending.roomId, date);
+  // Oldest in the drain, so this delivery rather than the sweep's fresh reservation takes the batch.
+  await db.hostedLinqDelivery.update({ where: { id: (await receipt(pendingEvent)).id }, data: { attemptedAt: new Date(0) } });
+  await breakRoom(bad);
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+  expect(await drainGameChatLifecycle({ now })).toMatchObject({ attempted: 1, queued: 1 });
+
+  expect((await receipt(pendingEvent)).status).toBe("generation_queued");
+  expect((await receipt(gameGroupMissedDayEventId(healthy.roomId, date))).status).toBe("awaiting_generation");
+  expect(await db.hostedLinqDelivery.count({ where: { payloadOwnerMemberId: bad.roomId } })).toBe(0);
+  expect(await db.hostedMailboxItem.count({ where: { userId: bad.roomId } })).toBe(0);
+  expect(warn).toHaveBeenCalledWith(expect.any(String), { warning: "game.missed-day.room-skipped", reason });
+  const logged = JSON.stringify(warn.mock.calls);
+  for (const value of [bad.roomId, ...bad.people.flatMap(person => [person.id, person.email]), ...proof.rooms.get(bad.roomId)!]) expect(logged).not.toContain(value);
+  return bad;
+}
+/** The pass rejects with the plain failure, so nothing reports this room as skipped. */
+async function expectPassStopped(f: Fixture, message: string) {
+  const failure = await drainGameChatLifecycle({ now }).then(() => null, (error: unknown) => error);
+  expect(failure).toBeInstanceOf(Error);
+  expect(failure).not.toBeInstanceOf(GameChatAudienceError);
+  expect(failure).toMatchObject({ message });
+  expect(await db.hostedLinqDelivery.count({ where: { payloadOwnerMemberId: f.roomId } })).toBe(0);
+}
+/** Serves this room's chat read through the real Linq client and parser. */
+function parsedChat(roomId: string, payload: unknown) {
+  vi.stubEnv("LINQ_API_TOKEN", "synthetic-token");
+  proof.parsedChats.add(roomId);
+  const read = vi.fn(async () => Response.json(payload));
+  vi.stubGlobal("fetch", read);
+  return read;
+}
+function chatHandles(f: Fixture) {
+  return [{ handle: "+15555550100", is_me: true, status: "active" }, ...f.people.map(person => ({ handle: person.email, is_me: false, status: "active" }))];
+}
+/** A second member behind one handle mid key rotation: each lookup key is unique, and reads match both. */
+async function secondMemberBehind(write: (memberId: string) => Promise<unknown>) {
+  const id = `missed_person_${randomUUID()}`;
+  members.push(id);
+  await db.hostedMember.create({ data: { id } });
+  vi.stubEnv("HOSTED_CONTACT_PRIVACY_KEYS", `${process.env.HOSTED_CONTACT_PRIVACY_KEYS!},v99:${Buffer.alloc(32, 19).toString("base64url")}`);
+  vi.stubEnv("HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION", "v99");
+  await write(id);
+}
 async function receipt(eventId: string) { return db.hostedLinqDelivery.findUniqueOrThrow({ where: { idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(eventId)! } }); }
 async function publish(roomId: string, ids: string[], at = now) {
   expect(await reserveGroupGameMissedDay(roomId, ids, at)).toBe(1);
@@ -141,7 +200,8 @@ beforeAll(async () => {
   await db.hostedLinqDelivery.updateMany({ where: { source: "game_lifecycle", status: { in: ["awaiting_generation", "generation_queued"] } }, data: { retryAfterAt: new Date("9999-01-01T00:00:00Z") } });
 });
 afterEach(async () => {
-  proof.afterPrepare = null; proof.signal.mockReset(); proof.chatFailures.clear(); vi.restoreAllMocks();
+  proof.afterPrepare = null; proof.signal.mockReset(); proof.chatFailures.clear(); proof.parsedChats.clear(); proof.realRoutes.clear();
+  vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.unstubAllGlobals();
   if (!enabled) return;
   await db.hostedLinqDelivery.deleteMany({ where: { OR: [{ payloadOwnerMemberId: { in: members } }, { idempotencyKey: { in: events.map(event => createHostedLinqDeliveryIdempotencyLookupKey(event)!) } }] } });
   await db.game.deleteMany({ where: { id: { in: games } } });
@@ -219,30 +279,67 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect((await readGroupMissedDayDeliveryAuthority(gameGroupMissedDayEventId(f.roomId, date), f.roomId))?.policy.batch).toHaveLength(2);
   });
 
-  it("skips a room with one person left in the text, while the rest of its shard and pending deliveries proceed", async () => {
-    const [badId, healthyId, pendingId] = await shardRooms(3);
-    const bad = await fixture(3, badId), healthy = await fixture(3, healthyId), pending = await fixture(3, pendingId);
-    await bad.addGame(); await healthy.addGame();
-    expect(await reserveGroupGameMissedDay(pending.roomId, [await pending.addGame()], now)).toBe(1);
-    const pendingEvent = gameGroupMissedDayEventId(pending.roomId, date);
-    // Oldest in the drain, so this delivery rather than the sweep's fresh reservation takes the batch.
-    await db.hostedLinqDelivery.update({ where: { id: (await receipt(pendingEvent)).id }, data: { attemptedAt: new Date(0) } });
-    proof.rooms.set(bad.roomId, [bad.people[0]!.email]);
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-    expect(await drainGameChatLifecycle({ now })).toMatchObject({ attempted: 1, queued: 1 });
-
-    expect((await receipt(pendingEvent)).status).toBe("generation_queued");
-    expect((await receipt(gameGroupMissedDayEventId(healthy.roomId, date))).status).toBe("awaiting_generation");
-    expect(await db.hostedLinqDelivery.count({ where: { payloadOwnerMemberId: bad.roomId } })).toBe(0);
-    expect(await db.hostedMailboxItem.count({ where: { userId: bad.roomId } })).toBe(0);
-    expect(warn).toHaveBeenCalledWith(expect.any(String), { warning: "game.missed-day.room-skipped", reason: "participants_changed" });
-    const logged = JSON.stringify(warn.mock.calls);
-    for (const value of [bad.roomId, ...bad.people.flatMap(person => [person.id, person.email])]) expect(logged).not.toContain(value);
+  it("skips a room with one person left in the text, and its next shard visit retries", async () => {
+    const bad = await drainPastBrokenRoom("participants_changed", f => { proof.rooms.set(f.roomId, [f.people[0]!.email]); });
     // Nothing was recorded, so the room's next shard visit inside the window claims normally.
     proof.rooms.set(bad.roomId, bad.people.map(person => person.email));
     await reserveDueGameMissedDayCheckIns(new Date(now.getTime() + 60 * 60_000));
     expect((await receipt(gameGroupMissedDayEventId(bad.roomId, date))).status).toBe("awaiting_generation");
+  });
+
+  it("skips a room the provider readably reports is not a group", async () => {
+    await drainPastBrokenRoom("participants_changed", f => { parsedChat(f.roomId, { is_group: false, handles: chatHandles(f) }); });
+  });
+
+  it("skips a room whose only route is on another channel", async () => {
+    await drainPastBrokenRoom("route_unavailable", async f => {
+      proof.realRoutes.add(f.roomId);
+      await db.hostedThreadRoute.updateMany({ where: { containerMemberId: f.roomId }, data: { channel: "telegram" } });
+    });
+  });
+
+  it("skips a room whose email handle resolves to two members", async () => {
+    await drainPastBrokenRoom("identity_ambiguous", f => secondMemberBehind(id => db.$transaction(tx => upsertHostedMemberEmailAuthorization({
+      memberId: id, prisma: tx, verifiedEmail: { address: f.people[0]!.email, verifiedAt: now } }))));
+  });
+
+  it("skips a room whose phone handle resolves to two members", async () => {
+    const phone = "+12025550172";
+    const claimPhone = (memberId: string) => db.$transaction(tx => upsertHostedMemberIdentity({ ...buildHostedMemberPhoneIdentityFields(phone), memberId, prisma: tx,
+      phoneNumberVerifiedAt: now, signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null, signupPhoneCodeSentAt: null, signupPhoneNumber: null }));
+    await drainPastBrokenRoom("identity_ambiguous", async f => {
+      await claimPhone(f.people[0]!.id); await secondMemberBehind(claimPhone);
+      proof.rooms.set(f.roomId, [phone, ...f.people.map(person => person.email)]);
+    });
+  });
+
+  it("stops the pass when the real route reader cannot open a room's route", async () => {
+    const [roomId] = await shardRooms(1), f = await fixture(3, roomId);
+    await f.addGame(); proof.realRoutes.add(f.roomId);
+    const open = vi.spyOn(await import("@/src/lib/hosted-routing/thread-delivery-route"), "openHostedThreadDeliveryRoute").mockRejectedValue(new Error("Synthetic KMS outage."));
+    await expectPassStopped(f, "Game chat route is unavailable.");
+    expect(open).toHaveBeenCalledOnce();
+  });
+
+  it("stops the pass on a bound room with no route row, which deletion never leaves behind", async () => {
+    const [roomId] = await shardRooms(1), f = await fixture(3, roomId);
+    await f.addGame(); proof.realRoutes.add(f.roomId);
+    await db.hostedThreadRoute.deleteMany({ where: { containerMemberId: f.roomId } });
+    await expectPassStopped(f, "Game chat route is unavailable.");
+  });
+
+  it.each([
+    ["a wrong-typed is_group", (f: Fixture) => ({ is_group: "true", handles: chatHandles(f) })],
+    ["no is_group", (f: Fixture) => ({ handles: chatHandles(f) })],
+    ["handles that are not a list", () => ({ is_group: true, handles: "none" })],
+    ["one unparseable handle", (f: Fixture) => ({ is_group: true, handles: [...chatHandles(f), { handle: "" }] })],
+    ["an unparseable handle in a non-group", (f: Fixture) => ({ is_group: false, handles: [...chatHandles(f), { handle: "" }] })],
+  ] as const)("stops the pass on a provider response with %s", async (_shape, payload) => {
+    const [roomId] = await shardRooms(1), f = await fixture(3, roomId);
+    await f.addGame();
+    const read = parsedChat(f.roomId, payload(f));
+    await expectPassStopped(f, "The game's chat participants have changed.");
+    expect(read).toHaveBeenCalledOnce();
   });
 
   it.each([

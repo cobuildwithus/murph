@@ -191,7 +191,7 @@ function normalizeChatHandle(value: string): string | null {
   return normalized ? `${kind}:${normalized}` : null;
 }
 
-/** This room's audience can't be proven, so nothing may be sent. The fixed reason is safe to log. */
+/** This room is proven unsendable, so nothing may be sent. The fixed reason is safe to log. */
 export class GameChatAudienceError extends Error {
   constructor(readonly reason: "route_unavailable" | "participants_changed" | "line_unavailable" | "identity_ambiguous", message: string) { super(message); }
 }
@@ -201,7 +201,9 @@ export async function readGameChatAudience(containerMemberId: string) {
   const prisma = getPrisma();
   const routes = await readHostedThreadContainerLinqRouteAuthorities({ containerMemberIds: [containerMemberId], prisma });
   const route = routes.authorities.get(containerMemberId);
-  if (!route) throw new GameChatAudienceError("route_unavailable", "Game chat route is unavailable.");
+  // "Unavailable" includes a failed open (database or KMS), which proves nothing about the room.
+  if (!route) throw routes.unavailableContainerMemberIds.has(containerMemberId)
+    ? new Error("Game chat route is unavailable.") : new GameChatAudienceError("route_unavailable", "Game chat route is unavailable.");
   return { ...await readGameChatHandleAudience(route.threadId), route };
 }
 
@@ -210,6 +212,8 @@ async function readGameChatHandleAudience(threadId: string) {
   const chat = await getHostedLinqChatSummary({ chatId: threadId, timeoutMs: 3_000 });
   const active = chat.handles.filter(handle => handle.status === null || handle.status.toLowerCase() === "active");
   const handles = active.filter(handle => !handle.isMe).map(handle => handle.handle);
+  // An unreadable payload proves nothing about the room; only a readable mismatch is a room fact.
+  if (chat.handlesComplete !== true) throw new Error("The game's chat participants have changed.");
   if (!isExactGameChat(chat, handles)) throw new GameChatAudienceError("participants_changed", "The game's chat participants have changed.");
   const line = await readHostedLinqIncomingLineState({ phoneNumberLookupKeys: createHostedPhoneLookupKeyReadCandidates(active.find(handle => handle.isMe)?.handle), prisma });
   if (line.kind !== "assignable" && line.kind !== "at_risk") throw new GameChatAudienceError("line_unavailable", "Game chat sending line is unavailable.");

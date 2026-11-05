@@ -2,6 +2,7 @@ import "server-only";
 
 import { Prisma } from "@prisma/client";
 import { GAME_MISSED_ROOM_MAX_GAMES, gameGroupMissedCheckInPolicySchema, type HostedGameGroupMissedCheckInPolicy } from "@murphai/hosted-execution/runtime-control";
+import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { logHostedOnboardingWarning } from "../hosted-onboarding/logging";
 import { getPrisma } from "../prisma";
 import { acquireHostedMailboxCausalAppendLockTx, readHostedMailboxMaxSeqByLane, readHostedMailboxWakeByDedupeKey } from "../hosted-mailbox/store";
@@ -51,10 +52,14 @@ function freezeBatch(games: Games, firstMissedDate: string, now: Date): HostedGa
   })).sort((a, b) => a.gameId.localeCompare(b.gameId));
 }
 
-/** A room we can't prove gets no check-in and waits for its next shard. Outages and defects still stop the sweep. */
+const AMBIGUOUS_IDENTITY_CODES = ["HOSTED_MEMBER_IDENTITY_LOOKUP_AMBIGUOUS", "HOSTED_MEMBER_VERIFIED_EMAIL_LOOKUP_AMBIGUOUS"];
+
+/** A room proven unsendable gets no check-in and waits for its next shard. Outages, defects and unreadable responses still stop the sweep. */
 function skipUnprovableRoom(error: unknown): null {
-  if (!(error instanceof GameChatAudienceError)) throw error;
-  logHostedOnboardingWarning("game.missed-day.room-skipped", { reason: error.reason });
+  const reason = error instanceof GameChatAudienceError ? error.reason
+    : isHostedOnboardingError(error) && AMBIGUOUS_IDENTITY_CODES.includes(error.code) ? "identity_ambiguous" : null;
+  if (!reason) throw error;
+  logHostedOnboardingWarning("game.missed-day.room-skipped", { reason });
   return null;
 }
 
