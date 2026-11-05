@@ -250,7 +250,6 @@ describe("hosted deploy automation helpers", () => {
         };
         max_instances: number;
         rollout_active_grace_period: number;
-        rollout_step_percentage: number[];
         ssh: { enabled: boolean };
       }>;
       durable_objects: {
@@ -328,8 +327,7 @@ describe("hosted deploy automation helpers", () => {
         image_build_context: "..",
         instance_type: "standard-1",
         max_instances: 648,
-        rollout_active_grace_period: 0,
-        rollout_step_percentage: [10, 25, 50, 100],
+        rollout_active_grace_period: 1200,
         ssh: { enabled: false },
       },
       {
@@ -338,7 +336,7 @@ describe("hosted deploy automation helpers", () => {
         image_build_context: "..",
         instance_type: "standard-1",
         max_instances: 0,
-        rollout_active_grace_period: 0,
+        rollout_active_grace_period: 1200,
         ssh: { enabled: false },
       },
       {
@@ -348,7 +346,6 @@ describe("hosted deploy automation helpers", () => {
         instance_type: "standard-1",
         max_instances: 1,
         rollout_active_grace_period: 0,
-        rollout_step_percentage: [100],
         ssh: { enabled: false },
       },
       {
@@ -358,15 +355,14 @@ describe("hosted deploy automation helpers", () => {
         image_build_context: "..",
         instance_type: "standard-1",
         max_instances: 100,
-        rollout_active_grace_period: 0,
-        rollout_step_percentage: [10, 25, 50, 100],
+        rollout_active_grace_period: 1200,
         ssh: { enabled: false },
       },
       {
         class_name: "SmallRunnerContainer",
         image: "../../../Dockerfile.cloudflare-hosted-runner", image_build_context: "..",
         instance_type: "standard-1", max_instances: 0,
-        rollout_active_grace_period: 0, ssh: { enabled: false },
+        rollout_active_grace_period: 1200, ssh: { enabled: false },
       },
     ]);
     expect(config.durable_objects.bindings).toEqual([

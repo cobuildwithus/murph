@@ -24,7 +24,7 @@ async function retainedConfig(directory: string): Promise<string> {
     migrations: scaffold.migrations,
     containers: classes.map(class_name => ({ class_name, image,
       instance_type: { vcpu: 2, memory_mib: 6144, disk_mb: 6000 }, max_instances: 10,
-      rollout_active_grace_period: 300, rollout_step_percentage: [100], ssh: { enabled: false } })),
+      rollout_active_grace_period: 300, ssh: { enabled: false } })),
   }));
   return configPath;
 }

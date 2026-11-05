@@ -8,8 +8,7 @@ import {
 } from "../scripts/deploy-automation.js";
 import { parseJsoncObject } from "./helpers/jsonc.js";
 
-const EXPECTED_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD = 0;
-const EXPECTED_CONTAINER_ROLLOUT_STEP_PERCENTAGE = [10, 25, 50, 100];
+const EXPECTED_MEMBER_ROLLOUT_ACTIVE_GRACE_PERIOD = 1200;
 const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
   CF_PUBLIC_BASE_URL: "https://murph-hosted.cobuildwithus.workers.dev",
   HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION:
@@ -66,21 +65,14 @@ describe("Cloudflare container rollout config", () => {
     });
     expect(config.vars).not.toHaveProperty("CF_CONTAINER_MAX_INSTANCES");
     expect(config.vars).not.toHaveProperty("CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES");
-    for (const container of containers) {
-      if (container.max_instances === 0) {
-        expect(container).not.toHaveProperty("rollout_step_percentage");
-      } else {
-        const steps = container.rollout_step_percentage!;
-        expect(steps).toEqual([10, 25, 50, 100].slice(-Math.min(container.max_instances, 4)));
-        expect(steps.length).toBeLessThanOrEqual(container.max_instances);
-      }
-    }
+    // The deploy CLI requests the rollout plan; Wrangler config carries none.
+    for (const container of containers) expect(container).not.toHaveProperty("rollout_step_percentage");
     expect(config.containers).toEqual(expect.arrayContaining([
       expect.objectContaining({ class_name: "StandbyRunnerContainer", constraints: { regions: ["ENAM"] } }),
     ]));
   });
 
-  it("renders native rollout steps without extra connection-age protection", () => {
+  it("protects recently connected member shells while the isolated smoke shell rolls at once", () => {
     const environment = readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
@@ -88,50 +80,19 @@ describe("Cloudflare container rollout config", () => {
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
     });
     const renderedConfig = buildHostedWranglerDeployConfig(environment) as {
-      containers: Array<{
-        class_name: string;
-        rollout_active_grace_period?: number;
-        rollout_step_percentage?: number[];
-      }>;
+      containers: Array<{ class_name: string; rollout_active_grace_period?: number }>;
     };
 
     expect(renderedConfig.containers.map(container => ({
       class_name: container.class_name,
       grace: container.rollout_active_grace_period,
     }))).toEqual([
-      "RunnerContainer", "NextRunnerContainer", "DeploySmokeRunnerContainer",
-      "StandbyRunnerContainer", "SmallRunnerContainer",
-    ].map(class_name => ({ class_name, grace: EXPECTED_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD })));
-    expect(renderedConfig.containers[0]).toMatchObject({
-      rollout_active_grace_period: EXPECTED_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD,
-      rollout_step_percentage: EXPECTED_CONTAINER_ROLLOUT_STEP_PERCENTAGE,
-    });
-  });
-
-  it("renders a single deploy-smoke rollout step for the one-instance smoke container", () => {
-    const environment = readHostedDeployAutomationEnvironment({
-      CF_BUNDLES_BUCKET: "hosted-bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-      CF_WORKER_NAME: "hosted-worker",
-      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
-    });
-    const renderedConfig = buildHostedWranglerDeployConfig(environment) as {
-      containers: Array<{
-        class_name: string;
-        max_instances: number;
-        rollout_step_percentage?: number[];
-      }>;
-    };
-
-    const smoke = renderedConfig.containers.find((container) => container.class_name === "DeploySmokeRunnerContainer");
-    expect(smoke).toMatchObject({
-      class_name: "DeploySmokeRunnerContainer",
-      max_instances: 1,
-      rollout_step_percentage: [100],
-    });
-    expect(smoke?.rollout_step_percentage).toHaveLength(
-      smoke?.max_instances ?? 0,
-    );
+      { class_name: "RunnerContainer", grace: EXPECTED_MEMBER_ROLLOUT_ACTIVE_GRACE_PERIOD },
+      { class_name: "NextRunnerContainer", grace: EXPECTED_MEMBER_ROLLOUT_ACTIVE_GRACE_PERIOD },
+      { class_name: "DeploySmokeRunnerContainer", grace: 0 },
+      { class_name: "StandbyRunnerContainer", grace: EXPECTED_MEMBER_ROLLOUT_ACTIVE_GRACE_PERIOD },
+      { class_name: "SmallRunnerContainer", grace: EXPECTED_MEMBER_ROLLOUT_ACTIVE_GRACE_PERIOD },
+    ]);
   });
 
   it("keeps the checked-in wrangler scaffold aligned with the rendered rollout defaults", async () => {

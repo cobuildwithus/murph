@@ -196,10 +196,11 @@ requires this separate activation; normal version uploads cannot apply deletion.
    running the serving proof; edge propagation uses the existing bounded retries.
    Failure leaves the serving image untouched and the pending pair available for
    same-artifact recovery.
-5. Update the serving application in place and submit a native rolling rollout.
-   Gradual mode is the default in every context, including production, and sends
-   the configured 10/25/50/100 cumulative percentage targets; explicit immediate
-   mode sends one 100-percent step. Neither mode is an atomic switch.
+5. Update the serving application in place and submit a native rolling rollout
+   with one 100-percent step. Gradual mode, the default in every context, keeps
+   the member application's 20-minute connection-age grace, so recently connected
+   shells finish their conversation before replacement. Explicit immediate mode
+   stages zero grace and replaces every shell now. Neither mode is an atomic switch.
 6. Wait for completed native distribution, then run signed smoke against the
    target image and serving namespace. A final Worker-only activation removes the
    old image from admission while preserving configured pristine standby inventory.
@@ -209,9 +210,12 @@ requires this separate activation; normal version uploads cannot apply deletion.
 Cloudflare sends SIGTERM and allows up to fifteen minutes for a selected process
 to exit before replacement. Its active grace period is connection-age eligibility,
 not an application checkpoint deadline. Existing runner shutdown, checkpoint,
-write-fence, and process-generation checks remain required. Native replacement
-can temporarily interrupt a member process; this procedure does not promise a
-continuously warm shell during deployment. See the official
+write-fence, and process-generation checks remain required. A shell younger than
+the grace is skipped until it is older; most stop first through the conversation
+idle TTL and start on the new image. A shell in continuous use past the grace is
+still replaced, so this procedure reduces but does not eliminate interrupted warm
+shells. The convergence wait allows the grace plus 25 minutes for drain, startup
+and observation. See the official
 [rollout contract](https://developers.cloudflare.com/containers/configuration/rollouts/).
 
 ### Production rollout policy
@@ -238,8 +242,9 @@ release, an explicit immediate transition where the owner contract requires it,
 and normal convergence proof. Keep the first-writer instructions below for those
 transitions; immediate minimizes the mixed window but does not eliminate it.
 
-These are native automatic percentage steps, not application-health approvals
-between cohorts and not a maximum-unavailable guarantee. A failed job or smoke
+The single step is not an application-health approval and not a
+maximum-unavailable guarantee; connection-age grace, not percentage cohorts,
+paces replacement. A failed job or smoke
 does not stop an already accepted automatic rollout. Native manual progression
 needs separate hosted hold/retry proof before it can provide that additional
 control. No manual scheduler or automatic rollback is introduced here.
@@ -2618,28 +2623,34 @@ That command:
 - prepares the stable native runner base image with Docker's local cache; production deploy paths force that build from source, while hosted-local E2E lanes may reuse the GHCR-published runner base image when the source fingerprint matches the current checkout
 - publishes the compatible Worker through Wrangler version commands, proves the isolated artifact behavior, and updates the serving image through native gradual rollout by default; explicit immediate and Worker-only releases use the same guarded owner
 
-Fresh deployment configuration uses zero additional connection-age grace for
-runner containers, matching Cloudflare's default. Native 10/25/50/100 percentage
-targets and the separate SIGTERM checkpoint/drain path remain unchanged. A
-recently connected runner may therefore be selected for replacement sooner;
-connection age is not a checkpoint deadline. Pristine standby preparation remains
-enabled during the mixed-image window. The isolated `DeploySmokeRunnerContainer`
-uses zero grace and one 100-percent step. The private workflow's
-`container_rollout` input defaults to gradual; immediate targets 100 percent in
-one step. Both image modes can interrupt a selected process and require recovery.
+Deployment configuration gives member runner applications 1,200 seconds of
+connection-age grace (twice the default ten-minute conversation idle TTL). Over
+the week before this change, every rollout-stopped member shell was younger than
+20 minutes. The deploy CLI requests one 100-percent step, and Wrangler config
+carries no step plan. Grace can apply again at each step, so multiple steps can
+multiply the wait. The separate SIGTERM checkpoint/drain path is unchanged.
+Pristine standby preparation remains enabled during the mixed-image window. The
+isolated `DeploySmokeRunnerContainer` keeps zero grace. The private workflow's
+`container_rollout` input defaults to gradual. Immediate stages zero member grace
+for hotfixes and releases whose old shells must be gone quickly. A pending
+candidate can only be retried in the mode that staged it, because grace is part
+of its execution identity. Both image modes can interrupt a selected process and
+require recovery.
 
 Apply changed grace only from a stable release: grace is part of the admitted
 execution identity, so an existing pending candidate must finish through its
 exact retry path before changing that target. Worker-only releases and retained
 applications preserve their observed native grace, image and resources.
 
-After an authorized full rollout, verify zero native grace on the serving and
-small applications, completed matching rollouts, and post-promotion smoke with
+After an authorized full rollout, verify the staged native grace on the serving
+application (retained applications keep their observed grace), completed matching rollouts, and post-promotion smoke with
 the promoted Worker context and configured standby target. Measure standby loss
 through restored ready inventory, including refill after promotion; compare like
 rollout modes and observe checkpoint failures, shutdown rejections and recovery.
-Removing this optional wait does not establish a fixed deployment duration or a
-measured fourfold improvement.
+Grace lengthens a gradual rollout by up to 20 minutes whenever a young shell,
+including a fresh standby, is running. Measure interrupted warm shells as rollout
+`shutdown_signal` checkpoints followed by a member message within the idle TTL,
+not as cold turns that overlap a deploy window.
 
 Worker replacement is checkpoint-safe at the runtime fence rather than through rollout timing alone. The snapshot-session handshake has one six-second total deadline; the runtime starts its first exact durable upload-session heartbeat immediately after that response, then keeps serialized attempts on a two-second start-to-start cadence throughout publication. `UserRunner` retains the fence and retries after one second only for that exact attempt and lease generation while its heartbeat is less than 10 seconds old and completion is absent. Successful foreground preemption bypasses this preservation and stops heartbeat liveness before detached cleanup. After Web accepts the checkpoint, the runtime stops heartbeating and best-effort marks completion; marker failure falls back to stale-heartbeat expiry. Other starts remain immediate; live snapshots have no artificial publication deadline, while a dead runtime can defer replacement for the 10-second liveness window plus at most one additional retry interval (one second) after its final heartbeat.
 

@@ -24,20 +24,23 @@ export interface StagedRunnerRelease {
   workerOnly: boolean;
 }
 
-/** The renderer declares one budget; live authority chooses its physical namespace. */
-function memberContainer(config: Record<string, unknown>, className: string): Record<string, unknown> {
+/**
+ * The renderer declares one budget; live authority chooses its physical namespace.
+ * An immediate release also replaces recently connected member shells.
+ */
+function memberContainer(config: Record<string, unknown>, className: string, immediate: boolean): Record<string, unknown> {
   if (!Array.isArray(config.containers)) throw invalid();
   const budget = config.containers.find((entry: unknown) => isObjectRecord(entry) && entry.class_name === "RunnerContainer");
   const target = config.containers.find((entry: unknown) => isObjectRecord(entry) && entry.class_name === className);
   if (!isObjectRecord(budget) || !isObjectRecord(target)) throw invalid();
-  return { ...target, max_instances: budget.max_instances,
-    rollout_step_percentage: budget.rollout_step_percentage };
+  return { ...target, max_instances: budget.max_instances, ...(immediate ? { rollout_active_grace_period: 0 } : {}) };
 }
 
 /** Pending image identity survives publication before the first native mutation. */
 export async function readReusableHostedRunnerImage(input: {
   config: Record<string, unknown>;
   currentVersion: unknown;
+  immediate?: boolean;
   releaseSha: string;
   listApplications: ListCloudflareContainerApplications;
 }): Promise<string | null> {
@@ -46,7 +49,7 @@ export async function readReusableHostedRunnerImage(input: {
   const release = deployment.candidate ?? deployment.active;
   if (!release.releaseSha || !release.executionIdentity) return null;
   const className = release.bank === "primary" ? "RunnerContainer" : "NextRunnerContainer";
-  const container = memberContainer(input.config, className);
+  const container = memberContainer(input.config, className, !!input.immediate);
   if (!isObjectRecord(input.config.vars)) throw invalid();
   if (!matchesRunnerArtifact(release, { releaseSha: input.releaseSha,
     bundleFingerprint: input.config.vars.HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT,
@@ -71,6 +74,7 @@ export async function stageHostedRunnerRelease(input: {
   configPath: string;
   currentVersion: unknown;
   currentVersionId: string;
+  immediate?: boolean;
   retainServingRunner?: boolean;
   releaseSha: string;
   listApplications: ListCloudflareContainerApplications;
@@ -94,7 +98,7 @@ export async function stageHostedRunnerRelease(input: {
   const entries = await Promise.all(config.containers.map(async (value: unknown) => {
     if (!isObjectRecord(value)) throw invalid();
     const className = requiredString(value.class_name);
-    const rendered = className === activeClass ? memberContainer(config, className) : value;
+    const rendered = className === activeClass ? memberContainer(config, className, !!input.immediate) : value;
     const name = applicationName(config, rendered);
     const live = await readNativeApplication(input.listApplications, name);
     if (live && (!isObjectRecord(live.configuration) || !Number.isSafeInteger(live.max_instances)
@@ -151,15 +155,12 @@ export async function stageHostedRunnerRelease(input: {
 function retainNativeContainer(rendered: Record<string, unknown>, live: Record<string, unknown>, maxInstances: unknown = live.max_instances): Record<string, unknown> {
   if (!isObjectRecord(live.configuration)) throw invalid();
   const resources = runnerApplicationResources(live.configuration);
-  const { rollout_step_percentage: steps, constraints: _constraints, ...rest } = rendered;
+  const { constraints: _constraints, ...rest } = rendered;
   const constraints = isObjectRecord(live.constraints) ? live.constraints : {};
   return { ...rest, image: requiredString(live.configuration.image), max_instances: maxInstances,
     instance_type: { vcpu: resources.vcpu, memory_mib: resources.memoryMiB, disk_mb: resources.diskMB },
     rollout_active_grace_period: live.rollout_active_grace_period,
     ...(Array.isArray(constraints.regions) ? { constraints: { regions: constraints.regions } } : {}),
-    ...(Number(maxInstances) > 0 && steps !== undefined
-      ? { rollout_step_percentage: Array.isArray(steps) ? steps.slice(-Number(maxInstances)) : steps }
-      : {}),
   };
 }
 
