@@ -10,6 +10,7 @@ import { prepareGameAccountDeletion, applyGameAccountDeletionTx } from "@/src/li
 import { readHostedMailboxWakeByDedupeKey } from "@/src/lib/hosted-mailbox/store";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import * as crypto from "@/src/lib/game/crypto";
+import { readGameTalkReceiptIdentity } from "@/src/lib/game/talk";
 
 const m = vi.hoisted(() => ({ create: vi.fn(), signal: vi.fn(), lineKey: "", first: "", phones: true, expanded: false }));
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (original) => ({ ...await original<typeof import("@/src/lib/hosted-crypto/domain-root-store")>(),
@@ -119,6 +120,8 @@ describe.skipIf(!enabled)("talk it over PostgreSQL", () => {
     expect(await f.db.gameEvent.count({ where: { gameId: f.gameId, type: "talk_requested" } })).toBe(1);
     expect(await f.db.gameEvent.count({ where: { gameId: f.gameId, type: "negotiation_joined" } })).toBe(1);
     expect(await f.db.hostedLinqDelivery.findMany({ where: { sourceRef: f.gameId }, select: { template: true, status: true } })).toEqual([{ template: "game_talk", status: "awaiting_generation" }]);
+    expect(await readGameTalkReceiptIdentity(f.db, await receipt(f))).toEqual({ gameId: f.gameId, proposalId: f.proposalId, eventId: f.eventId });
+    expect(await readGameTalkReceiptIdentity(f.db, { ...await receipt(f), idempotencyKey: key(`game-talk:${f.gameId}:${randomUUID()}`) })).toBeNull();
     expect(await readGame(f.gameId, f.first)).not.toHaveProperty("talkDelivery");
     expect((await readHome(f.second)).games[0].talkDelivery).toBe("pending");
     for (const [status, expected] of [["accepted", "sent"], ["delivered", "sent"], ["failed", "failed"], ["skipped", "failed"]]) {

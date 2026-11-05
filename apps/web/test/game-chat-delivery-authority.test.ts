@@ -157,3 +157,20 @@ describe("game proposal provider dispatch authority", () => {
   });
 
 });
+
+it("chooses the same addressed seat independent of row order and never uses a bound contact key for another person", async () => {
+  const { addressedGameInvite } = await import("@/src/lib/game/audience");
+  const rows = [{ seat: 3, memberId: null, recipientLookupKey: "email" }, { seat: 2, memberId: null, recipientLookupKey: "phone" },
+    { seat: 1, memberId: "actor", recipientLookupKey: "obsolete" }];
+  expect(addressedGameInvite(rows, "actor", ["phone", "email"])?.seat).toBe(1);
+  expect(addressedGameInvite([...rows].reverse(), "new", ["phone", "email"])?.seat).toBe(2);
+  expect(addressedGameInvite(rows, "new", ["obsolete"])).toBeUndefined();
+  expect(addressedGameInvite(rows, "new", [])).toBeUndefined();
+});
+
+it("retains a redacted group's accepted-note quota metadata and rejects unsupported payload versions", async () => {
+  const { parseGameTalkPayload } = await import("@/src/lib/game/talk");
+  const payload = { v: 2, proposalId: "note_synthetic", invitationSeat: 3, termsVersion: 1, noteEncrypted: null };
+  expect(parseGameTalkPayload(payload)).toEqual(payload);
+  for (const change of [{ v: 3 }, { invitationSeat: 10 }, { termsVersion: 0 }, { noteEncrypted: "" }]) expect(parseGameTalkPayload({ ...payload, ...change })).toBeNull();
+});

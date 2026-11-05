@@ -258,3 +258,14 @@ describe("group change notice facts", () => {
     }
   });
 });
+
+describe("group Talk notice", () => {
+  it("uses only the consenting author's name and note, without pair agreement copy", () => {
+    const text = buildGameTalkInstructions({ group: true, requesterName: "Ava", note: "Can we discuss another prize?" });
+    expect(text).toContain("whole group exactly one question");
+    expect(text).toContain("note changes no terms and accepts no invitation");
+    expect(text).not.toContain("Say that nothing has changed and nobody has agreed yet");
+    expect(JSON.parse(text.split("\n").at(-1)!)).toEqual({ requester: "Ava", note: "Can we discuss another prize?" });
+    expect(text).not.toMatch(/recipient|currentTerms|defaultTask/);
+  });
+});

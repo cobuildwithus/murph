@@ -119,7 +119,7 @@ it.each(["mark_incomplete", "restore_day"])("accepts %s only with a date and no 
   expect(hostedGameToolResponseSchema.parse(payload)).toEqual(payload);
 });
 
-it.skipIf(process.env.MURPH_VERIFY_GAME_INCOMPLETE_SKEW !== "1")("keeps old-runtime responses compatible while Web accepts the next runtime's corrections", async () => {
+it.skipIf(process.env.MURPH_VERIFY_GAME_SKEW !== "1")("keeps old-runtime responses compatible while Web accepts the next runtime's corrections", async () => {
   const target = new URL(`../src/.game-incomplete-skew-${randomUUID()}.ts`, import.meta.url);
   const root = fileURLToPath(new URL("../../../", import.meta.url));
   const source = execFileSync("git", ["show", "b64002efb9:packages/hosted-execution/src/game-tools.ts"], { cwd: root, encoding: "utf8" });
@@ -182,7 +182,7 @@ it("round-trips setup through the runtime parser and rejects extra authority and
 
 
 // Historical-reader proof needs the base Git object; ordinary CI may be shallow.
-it.skipIf(process.env.MURPH_VERIFY_GAME_SETUP_SKEW !== "1")("fences the setup roster for the deployed strict response reader", async () => {
+it.skipIf(process.env.MURPH_VERIFY_GAME_SKEW !== "1")("fences the setup roster for the deployed strict response reader", async () => {
   const target = new URL(`../src/.game-setup-skew-${randomUUID()}.ts`, import.meta.url);
   const root = fileURLToPath(new URL("../../../", import.meta.url));
   await writeFile(target, execFileSync("git", ["show", "0edefc73dc:packages/hosted-execution/src/game-tools.ts"], { cwd: root, encoding: "utf8" }), { flag: "wx" });
@@ -207,7 +207,7 @@ it.skipIf(process.env.MURPH_VERIFY_GAME_SETUP_SKEW !== "1")("fences the setup ro
 });
 
 // Historical objects are an explicit local proof; shallow routine CI skips this lane.
-it.skipIf(process.env.MURPH_VERIFY_GAME_GROUP_SKEW !== "1")("accepts old Web pair responses and keeps group responses away from the released strict runner", async () => {
+it.skipIf(process.env.MURPH_VERIFY_GAME_SKEW !== "1")("accepts old Web pair responses and keeps group responses away from the released strict runner", async () => {
   const root = fileURLToPath(new URL("../../../", import.meta.url));
   const target = new URL(`../src/.game-pr5-legacy-${randomUUID()}.ts`, import.meta.url);
   await writeFile(target, execFileSync("git", ["show", "3049da7b47522b748834c896b24f66b1bfeef77c:packages/hosted-execution/src/game-tools.ts"], { cwd: root, encoding: "utf8" }), { flag: "wx" });
@@ -248,7 +248,7 @@ it("accepts group edit IDs and bounded majority responses without widening pair 
 });
 
 
-it.skipIf(process.env.MURPH_VERIFY_GAME_GROUP_SKEW !== "1")("Plan A preserves the previous group wire and pair bytes in both directions", async () => {
+it.skipIf(process.env.MURPH_VERIFY_GAME_SKEW !== "1")("Plan A preserves the previous group wire and pair bytes in both directions", async () => {
   const root = fileURLToPath(new URL("../../../", import.meta.url));
   const target = new URL(`../src/.game-plan-a-legacy-${randomUUID()}.ts`, import.meta.url);
   await writeFile(target, execFileSync("git", ["show", "b2694496c0665990fa0fd283b5041e5018a38d3e:packages/hosted-execution/src/game-tools.ts"], { cwd: root, encoding: "utf8" }), { flag: "wx" });
@@ -264,5 +264,24 @@ it.skipIf(process.env.MURPH_VERIFY_GAME_GROUP_SKEW !== "1")("Plan A preserves th
     const refused = { action: "update_game", result: { status: "rejected", error: "Start now is unavailable." } };
     expect(hostedGameToolResponseSchema.parse(refused)).toEqual(previous.hostedGameToolResponseSchema.parse(refused));
     expect(JSON.stringify(hostedGameToolResponseSchema.parse(response(game)))).toBe(JSON.stringify(previous.hostedGameToolResponseSchema.parse(response(game))));
+  } finally { await rm(target, { force: true }); }
+});
+
+it.skipIf(process.env.MURPH_VERIFY_GAME_SKEW !== "1")("keeps group Prove it corrections compatible in both runner/Web directions", async () => {
+  const target = new URL(`../src/.game-talk-skew-${randomUUID()}.ts`, import.meta.url);
+  const root = fileURLToPath(new URL("../../../", import.meta.url));
+  await writeFile(target, execFileSync("git", ["show", "b2694496c0665990fa0fd283b5041e5018a38d3e:packages/hosted-execution/src/game-tools.ts"], { cwd: root, encoding: "utf8" }), { flag: "wx" });
+  try {
+    const old = await import(target.href) as typeof import("../src/game-tools.ts");
+    const correction = { action: "update_game", origin, update: { operation: "mark_incomplete", gameId: game.id, date: "2030-04-01" } };
+    const group = response({ ...game, maxPlayers: 10, pendingInviteeCount: 2 });
+    for (const reader of [old, { hostedGameToolRequestSchema, hostedGameToolResponseSchema }]) {
+      expect(reader.hostedGameToolRequestSchema.parse(correction)).toEqual(correction);
+      expect(reader.hostedGameToolResponseSchema.parse(group)).toEqual(group);
+      for (const extra of [{ actorMemberId: "another" }, { memberId: "another" }, { invitationSeat: 2 }, { note: "private" }]) {
+        expect(reader.hostedGameToolRequestSchema.safeParse({ ...correction, update: { ...correction.update, ...extra } }).success).toBe(false);
+      }
+      expect(reader.hostedGameToolResponseSchema.safeParse(response({ ...game, maxPlayers: 10, talkNote: "private" })).success).toBe(false);
+    }
   } finally { await rm(target, { force: true }); }
 });

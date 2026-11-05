@@ -46,3 +46,13 @@ describe.skipIf(!enabled)("game lifecycle drain against PostgreSQL", () => {
     }
   });
 });
+
+it.skipIf(!enabled)("terminally rejects a known Talk template with a mismatched compound identity", async () => {
+  const db = getPrisma();
+  const gameId = randomUUID(), proposalId = randomUUID();
+  const wrong = receipt({ eventId: `game-talk:${gameId}:${randomUUID()}`, sourceRef: `${gameId}:${proposalId}`, template: "game_talk", attemptedAt: new Date("1700-01-01") });
+  await db.hostedLinqDelivery.create({ data: wrong });
+  expect(await drainGameChatLifecycle({ prisma: db })).toMatchObject({ attempted: 1, queued: 0 });
+  expect(await db.hostedLinqDelivery.findUnique({ where: { id: wrong.id } })).toMatchObject({ status: "skipped", skipReason: "game_lifecycle_superseded" });
+  await db.hostedLinqDelivery.delete({ where: { id: wrong.id } });
+});

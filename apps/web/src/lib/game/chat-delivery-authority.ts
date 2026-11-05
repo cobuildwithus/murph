@@ -1,7 +1,7 @@
 import "server-only";
 
 import { groupGameRecapPlayers } from "./recap-cohort";
-import { readCurrentGameTalk } from "./talk";
+import { readCurrentGameTalk, type GameNoticeAudience } from "./talk";
 
 import { isPairRoster } from "./roster";
 import { parseGameRecapEventId } from "@murphai/hosted-execution/runtime-control";
@@ -9,14 +9,14 @@ import { Prisma } from "@prisma/client";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { gameResolutionNoticeKind, parseGameResolutionNotice, readGameChangeResolution } from "./change-resolution";
 import { isGameInviteExpired } from "./rules";
-import { readGroupGameChatAuthority, type GameChatAudience, sameGamePlayers } from "./chat-membership";
+import { readGroupGameChatAuthority, sameGamePlayers } from "./chat-membership";
 
 /** Returns true only for the current proposal and proven audience; stale outbox work cannot announce a replaced edit. */
 export async function assertGameProposalDeliveryCurrentTx(input: {
   deliveryIdempotencyKey: string | null;
   containerMemberId: string;
   playerMemberIds?: readonly string[];
-  audience?: GameChatAudience;
+  audience?: GameNoticeAudience;
   tx: Prisma.TransactionClient;
   now?: Date;
 }): Promise<boolean> {
@@ -41,9 +41,12 @@ export async function assertGameProposalDeliveryCurrentTx(input: {
 async function assertGameTalkDeliveryCurrentTx(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], key: string): Promise<true> {
   const match = /^game-talk:([^:]+):([^:]+)$/u.exec(key);
   if (!match) return stale();
-  const current = await readCurrentGameTalk(input.tx, match[1], match[2], input.now ?? new Date());
+  await input.tx.$queryRaw`SELECT id FROM game WHERE id = ${match[1]} FOR UPDATE`;
+  const candidate = await input.tx.game.findUnique({ where: { id: match[1] }, select: { maxPlayers: true } });
+  if (candidate?.maxPlayers === 10 && !input.audience) return stale();
+  const current = await readCurrentGameTalk(input.tx, match[1], match[2], input.now ?? new Date(), input.audience);
   if (!current || current.game.chatContainerMemberId !== input.containerMemberId
-    || !sameGamePlayers(current.game.players.map(player => player.memberId), input.playerMemberIds ?? [])) return stale();
+    || current.game.maxPlayers !== 10 && !sameGamePlayers(current.game.players.map(player => player.memberId), input.playerMemberIds ?? [])) return stale();
   return true;
 }
 
@@ -57,8 +60,9 @@ async function assertGameChallengeDeliveryCurrentTx(input: Parameters<typeof ass
   const players = current?.state.players.filter(player => !player.leftAt).map(player => player.memberId) ?? [];
   const entry = current?.state.entries.find(entry => entry.id === match[2]);
   if (!current || current.status !== "open" || current.row.chatContainerMemberId !== input.containerMemberId
-    || !isPairRoster(players) || !players.includes(current.challenge.actor) || !entry || entry.memberId === current.challenge.actor
-    || !players.includes(entry.memberId) || !sameGamePlayers(players, input.playerMemberIds ?? [])) return stale();
+    || (current.row.maxPlayers !== 10 && !isPairRoster(players)) || !players.includes(current.challenge.actor) || !entry || entry.memberId === current.challenge.actor
+    || !players.includes(entry.memberId) || entry.incomplete
+    || !await deliveryAudienceCurrent(input, current.row, input.playerMemberIds ?? [])) return stale();
   return true;
 }
 

@@ -651,10 +651,14 @@ Research scout and Personal Patterns are retired managed automations. Their immu
 
 Group game tools consume the capable hosted-execution contract and choose group
 instructions from immutable `maxPlayers: 10`, including a two-person turnout.
-Only the starter edits terms before Day 1; group instructions prohibit change
-requests, Start now, person-to-person nudges and missed-person shaming. Stable
-numbered first names disambiguate seated people. Unjoined addressees appear
-only as a count; tools preserve their private task overrides during starter edits. Shared recaps require one kind
+The starter edits while invited; live group asks require more than half of
+remaining players to agree. Start now is a majority ask only when
+`changeControls.canStartNow` is true; it never accepts invitees. Group copy never uses vs., nudges through another person, shaming or
+body/weight jokes. Per-game remaining-player names disambiguate shared state and
+Prove it facts. Only the accused may concede their own day; Murph never judges
+evidence or asks the room for a verdict. Unjoined people appear as a count except
+a consenting Talk author's profile name and submitted note. Talk accepts no
+invitation and changes no terms. Tools preserve private unjoined task overrides. Shared recaps require one kind
 superlative per eligible person. They read authorized room-audience game lore
 and the bounded transcript for callbacks about eligible memberIds, excluding
 private material, leavers and unjoined people. `loreAccess: "read"` forbids lore

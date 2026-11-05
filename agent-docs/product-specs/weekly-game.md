@@ -51,8 +51,8 @@ group chat for the preparation/binding/egress boundary. The create response
 returns `composer: { murphPhoneNumber }` only when preparation selects that path;
 the app supplies the selected people and invite link to Messages. The verified
 starter’s invite message binds by exact keyed provider handles even before
-relatives join Murph. Binding never claims seats. Unjoined people appear only as
-a count in chat; they do not block text kickoff or recap.
+relatives join Murph. Binding never claims seats. Unjoined people appear as a count in shared game state; a consenting Talk
+author may be named with their submitted note. They do not block text kickoff or recap.
 
 Runner compatibility is consumer-first: deploy Web, then the Cloudflare runner.
 The new runner opts in with signed `gameMultiplayer=1`; old runners remain
@@ -154,8 +154,8 @@ post reports derive their author and terms reports target the starter.
 starter edits use `{expectedTermsVersion, terms}` and remain immediate. Live
 edits also require `proposalId` and create a majority ask. Group creation accepts
 transient addressed recipients, `groupWord`, `defaultTask` and sparse
-invitation-seat overrides. Groups never negotiate. Creating with a chat container
-still rejects.
+invitation-seat overrides. Groups accept pre-join Talk notes without negotiating
+or claiming a seat. Creating with a chat container still rejects.
 
 The live editable terms contract now contains only the shared default and
 remaining-player tasks. Clients round-trip those fields; canonical preparation
@@ -690,15 +690,19 @@ delete and report review. Privacy Policy/version changes ship separately.
 
 ## Prove it
 
-In a live two-player game, a player can challenge the opponent's visible photo
-post. Both players must remain in the game, the game must have its bound shared
+In a live pair or group game, a remaining player can challenge another
+remaining player's visible photo post. The challenger and accused must be distinct, the game must have its bound shared
 chat, and canonical settlement must not yet be due. The target must be a current,
 non-withdrawn photo attempt on a game day that counts, not a self-reported
 incomplete day. The ordinary `visibleEntryIds` projection owns eligibility:
-locked, reported and blocked content cannot be challenged. Group games and
-non-photo artifacts are outside this feature.
+locked, reported and blocked content cannot be challenged. Non-photo artifacts
+are outside this feature. Group app admission revalidates its bound room through
+`readGroupGameChatAuthority` before spending the case; immutable `maxPlayers: 10`
+selects group policy even with only two remaining players.
 
-Each player has one Prove it per game. An open case or a case that stood spends
+Each player has one Prove it per game, across all opponents. Group departure
+voids cases involving that person and refunds a surviving challenger; unrelated
+cases continue. An open case or a case that stood spends
 it. Withdrawal or replacement voids the case and returns it. A later
 `day_marked_incomplete` event by the accused for the target day concedes the case
 and returns it permanently. The concession event's id must be greater than the
@@ -707,7 +711,7 @@ the returned budget. A restored day can have a new case on a new entry, while a
 retry against the original entry remains a no-op.
 
 The stored `deadlineAt` is the accepted event's `createdAt` plus twelve hours.
-It is the maximum answer window. A settled, void or canonically due game closes
+It is the maximum answer window, with no photo-age cutoff. A settled, void or canonically due game closes
 an unconceded case early as `stood`. Explaining a post in chat does not mutate
 the case or score. Only the accused can mark the day as not counting through
 the existing self-reported incomplete-day command. Murph never judges a photo.
@@ -734,7 +738,7 @@ identity. A retry never reserves a second notice or re-spends returned budget.
 The additive view fields are:
 
 - `GameView.canChallenge?: boolean`: current servers emit whether this viewer
-  has an unspent challenge in a live, bound, not-due pair. Entry eligibility is
+  has an unspent challenge in a live, bound, not-due pair or capable group. Entry eligibility is
   checked separately; clients must also require the opponent's unlocked photo,
   no `incomplete`, and no `challenge`.
 - `GameEntryView.challenge?: { status: "open" | "stood"; deadlineAt: string;
@@ -776,12 +780,14 @@ concession ordering, never notice identity. No migration is needed.
 The drain uses `require_send` and only the game's already-bound chat. It never
 discovers or creates a room for a case. One shared projection governs budget,
 view state, drain eligibility and final provider claim. A concession, retake,
-withdrawal, expiry or game end supersedes pending work; a changed binding or
-audience blocks dispatch. The claim locks the game before checking that the
-case remains open. Quiet rooms retain the existing game-notice exemption and
+withdrawal, group departure, expiry or game end supersedes pending work; a changed binding or
+audience blocks dispatch. Publication and final claim share the exact-notice
+validator under the game lock, after route authority. The app challenge writer
+prepares and revalidates the group room before spending a case. Quiet rooms retain the existing game-notice exemption and
 repeated dispatch claims the same delivery only once.
 
-Instructions contain shared profile names, the target day's task, day number,
+Instructions contain shared profile names, the target day's inherited task
+(the shared default for groups, never a private per-seat override), day number,
 and the server receipt time and proof deadline as weekday and clock time in the
 accused's time zone (the zone itself is not named). They contain no media URLs
 or keys, private contact labels, or capture-to-post gap. The notice is two or
@@ -943,6 +949,7 @@ Start dates lock once either player checks in. These edits never
 rewrite check-ins or existing tickets.
 
 Pair invite previews advertise `supportsTalk: true`; older servers omit it.
+The following seat-claiming behavior is pair-only.
 An invitee can choose Talk it over and send a cleaned note of 1–500 characters
 instead of a concrete change. This claims their seat without accepting or
 creating a pending change. Shared-word moderation checks abuse, so an objection
@@ -954,6 +961,39 @@ It creates or reuses the pair's exact room. The author's game view derives
 `talkDelivery` from the receipt as pending, sent or failed; other players do not
 receive that field. The usual proposal, approval, cancellation and Shake on it
 paths handle the rest. The original invite deadline still applies.
+
+Group Talk uses the same `/invites/:token/negotiate` note request and nullable
+command envelope. An authenticated, profiled, verified addressed invitee who
+holds no current or departed seat may send one cleaned, moderated note while
+the game is invited or live/not due, with current terms and presence in the
+bound authorized room. Token possession alone grants no speaking authority.
+No seat, invitation acceptance, pending change, status or calendar is mutated.
+One accepted note per actor and invitation seat, at most nine total, is permanent
+quota; a new proposal ID cannot bypass it. Replaying the accepted ID verifies
+event type and author and never changes the original note or spends quota again.
+
+Capable group previews expose `supportsTalk` and `canTalk`; missing `canTalk`
+means unavailable. After acceptance it is false even after failed delivery.
+Only the author receives receipt-derived `talkDelivery` as pending/sent/failed,
+including used and expired previews; leavers keep null/404. Anonymous readers
+and other invitees get no status or note. Label the action “Send to the group”
+and explain sharing before submission; joining is a separate action.
+
+Each request has its own receipt and recovery identity. Another invitee joining
+may activate the game without suppressing the note. Author joining/leaving,
+changed terms, game end or author deletion suppress unsent work. Murph faithfully
+paraphrases the consenting author's note by profile name and asks the group one
+question. The note changes no terms and accepts no invitation; it never says
+nobody has agreed or invents a counteroffer. Notices stay text-only and disclose
+no private task overrides, labels, captions or media.
+
+Deploy complete Web readers and Web-executed notice builders with group admission
+off, then runner guidance and iOS. Keep `MURPH_GAME_GROUPS_ENABLED=false` through
+mixed Web versions: an old sweeper recognizes `game_talk` but skips its new
+compound reference. Enable only after all readers understand both formats. Once
+produced, the new Web reader is the rollback floor; stop acceptance by forward
+fix while retaining readers. No new hosted operation, policy discriminator or
+runner capability is required. Production group admission remains dark.
 
 An invitee can choose Suggest changes and submit concrete alternative rules
 without accepting the original challenge. Both players see a negotiating game

@@ -37,6 +37,30 @@ reply owns the announcement. A deciding app vote receives one outcome notice.
 Deploy Web, then runner, then this UI while group admission stays dark. Updated
 Web resolution-receipt readers form the rollback floor once receipts exist.
 
+## Group Prove it and Talk
+
+Send `X-Murph-Game-Multiplayer: 1`; pair responses retain their existing bytes.
+For immutable `maxPlayers: 10`, Prove it uses the existing
+`POST /games/:id/challenges` `{entryId}` and `{ok:true, game:GameView|null}`.
+Offer it only with `canChallenge`, another remaining player's unlocked photo,
+no incomplete flag and no challenge badge. Server eligibility remains final.
+Visible entries, including the accused's own, carry `challenge: {status:
+"open"|"stood", deadlineAt, byYou}`. Preserve `409 CHALLENGE_USED`; refresh
+stale cases. Only the accused's accepted chat message can mark their day
+incomplete with `update_game mark_incomplete`; `restore_day` restores score
+without undoing the concession. No app concession route is added.
+
+Authenticated group invite previews include optional `canTalk`; absence means
+unavailable. Submit the existing `/invites/:token/negotiate` request with
+`{proposalId, termsVersion, timeZone, note}` and reuse its ID on retry. Success
+may contain `game:null`; refresh the invitation, without entering joined-player
+state. “Send to the group” must explain note/name sharing before submission.
+Joining stays separate. Only the author receives optional `talkDelivery` as
+pending, sent or failed, including minimal used/expired previews. A leaver still
+receives null/404. Once accepted, `canTalk` stays false even after terminal failure;
+a fresh ID never grants another note. Anonymous and other-invitee previews carry
+no status or note. These additions are group-only; pair fields are unchanged.
+
 ## Off-day entry refusal
 
 `POST /api/game/v1/games/:id/entries` returns HTTP 409:

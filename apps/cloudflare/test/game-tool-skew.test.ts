@@ -11,8 +11,8 @@ import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 // Opt-in history-dependent proof: exercise the exact previous parser rather
 // than committing a duplicate snapshot or pretending new/new covers skew.
 const baseline = "35bc378f24df6b94f6ccce244c42d1ffb72195a4";
-describe.skipIf(process.env.MURPH_VERIFY_GAME_SKEW !== "1")("game tool legacy response skew", () => {
-  it("rejects an unknown new response without replay even when Web already applied it", async () => {
+describe("game tool legacy response skew", () => {
+  it.skipIf(process.env.MURPH_VERIFY_GAME_SKEW !== "1")("rejects an unknown new response without replay even when Web already applied it", async () => {
     const parserUrl = new URL(`../../../packages/hosted-execution/src/parsers/.game-skew-${randomUUID()}.ts`, import.meta.url);
     const root = fileURLToPath(new URL("../../../", import.meta.url));
     const source = execFileSync("git", ["show", `${baseline}:packages/hosted-execution/src/parsers/runtime-control.ts`], { cwd: root, encoding: "utf8", maxBuffer: 1024 * 1024 });
@@ -56,4 +56,21 @@ it.each(["old Web refusal", "new Web pending"])("Plan A transport preserves %s w
   expect(await port.request({ action: "update_game", origin: { kind: "accepted_input", assistantInputId: "ain_" + "a".repeat(32) },
     update: { operation: "propose", gameId: "game_synthetic", proposalId: "proposal_synthetic", expectedTermsVersion: 1, change: { kind: "start_now" } } })).toEqual(response);
   expect(fetchImpl).toHaveBeenCalledOnce();
+});
+
+describe("group Talk and Prove it transport", () => {
+  it("carries only the accepted-message correction and returns an old Web refusal without retry", async () => {
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({ HOSTED_WEB_BASE_URL: "https://web.example.test" }));
+    const response = { action: "update_game", result: { status: "rejected", error: "NOT_A_PLAYER: Only the acting player can correct their day." } };
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json(response));
+    const port = createHostedRuntimeGroupToolPort({ boundUserId: "container_synthetic", fetchImpl, timeoutMs: 2_000,
+      transport: { callbackSigning: environment.webCallbackSigning, mode: "direct", webControlBaseUrl: "https://web.example.test", workspaceCheckpointBridge: null } });
+    const request = { action: "update_game" as const, origin: { kind: "accepted_input" as const, assistantInputId: "ain_" + "a".repeat(32) },
+      update: { operation: "mark_incomplete" as const, gameId: "game_synthetic", date: "2030-04-01" } };
+    expect(await port.request(request)).toEqual(response);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    // Talk is a Web-authored require_send notice, never a new runner write operation.
+    expect(() => parsers.parseHostedRuntimeGroupToolRequest({ ...request, update: { ...request.update, operation: "talk", note: "A private note" } })).toThrow();
+    expect(() => parsers.parseHostedRuntimeGroupToolRequest({ ...request, update: { ...request.update, memberId: "someone_else" } })).toThrow();
+  });
 });

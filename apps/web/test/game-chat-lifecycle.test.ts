@@ -7,16 +7,16 @@ const m = vi.hoisted(() => ({
   missedBatch: vi.fn(), reserveMissed: vi.fn(), recapMaterial: vi.fn(), recapMessages: vi.fn(), transcript: vi.fn(), room: vi.fn(),
 }));
 vi.mock("../src/lib/prisma", () => {
-  const db = { gameEvent: { findUnique: m.event }, hostedLinqDelivery: { findMany: (input: { where: { payloadSchema?: string } }) => input.where.payloadSchema ? m.frozen(input) : m.receipts(input), updateMany: m.receiptUpdate }, game: { findUnique: m.game, findFirst: m.current, updateMany: m.bind } };
+  const db = { $queryRaw: vi.fn().mockResolvedValue([{ id: "game" }]), gameEvent: { findUnique: m.event }, hostedLinqDelivery: { findMany: (input: { where: { payloadSchema?: string } }) => input.where.payloadSchema ? m.frozen(input) : m.receipts(input), updateMany: m.receiptUpdate }, game: { findUnique: m.game, findFirst: m.current, updateMany: m.bind } };
   return { getPrisma: () => ({ ...db, $transaction: async (fn: (tx: typeof db) => unknown) => fn(db) }) };
 });
 vi.mock("../src/lib/game/service", () => ({ readGameChatState: m.state, readGameNoticeRoom: m.room, readGameMissedCheckInBatch: m.missedBatch, readGameRematchNotice: m.rematchNotice,
   readGameChallengeCase: m.challengeCase, readGameChallengeInstructions: m.challengeInstructions, readCurrentGameChange: m.currentChange,
   readGameRecapMaterial: m.recapMaterial, reserveDueGameMissedDayCheckIns: m.reserveMissed }));
 vi.mock("../src/lib/game/chat-tool", () => ({ readGameRecapChatMessages: m.recapMessages, readGameChatTranscript: m.transcript }));
-vi.mock("../src/lib/game/chat-membership", () => ({ bindPairGameChat: async (_id: string, _players: string[], candidate: string | null) => candidate, findExistingGameChat: m.discover, requireExactChat: m.exact, readGroupGameChatAuthority: m.groupAuthority }));
+vi.mock("../src/lib/game/chat-membership", async original => ({ ...await original<typeof import("../src/lib/game/chat-membership")>(), bindPairGameChat: async (_id: string, _players: string[], candidate: string | null) => candidate, findExistingGameChat: m.discover, requireExactChat: m.exact, readGroupGameChatAuthority: m.groupAuthority }));
 vi.mock("../src/lib/game/chat-bootstrap", () => ({ prepareGameChatBootstrap: m.bootstrap, reconcileFrozenGameChatBootstrapReceipt: m.recover }));
-vi.mock("../src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: m.proposal }));
+vi.mock("../src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: m.proposal, readGameProposalDeliveryPlayers: async () => ["person-a", "person-b"] }));
 vi.mock("../src/lib/hosted-onboarding/hosted-member-identity-store", () => ({ readHostedMemberIdentity: m.identity }));
 vi.mock("../src/lib/hosted-onboarding/linq-observability-identifiers", () => ({ createHostedLinqDeliveryIdempotencyLookupKey: (key: string) => `hash:${key}` }));
 vi.mock("../src/lib/hosted-onboarding/linq-delivery-store", () => ({ buildHostedLinqDeliveryId: (key: string) => key }));
@@ -66,7 +66,7 @@ describe("durable game chat lifecycle", () => {
   it.each(["awaiting_generation", "generation_queued"])("queues or recovers one bound Prove it notice: %s", async status => {
     const eventId = "game-challenge:game:entry";
     m.receipts.mockResolvedValue([{ ...receipt, status, sourceRef: "game:entry", template: "game_challenge", idempotencyKey: `hash:${eventId}` }]);
-    m.challengeCase.mockResolvedValue({ row: game, state: { players: players.map(memberId => ({ memberId })) },
+    m.challengeCase.mockResolvedValue({ row: game, state: { players: players.map(memberId => ({ memberId })), entries: [{ id: "entry", memberId: players[1] }] },
       challenge: { actor: players[0] }, status: "open" });
     const instructions = buildGameChallengeInstructions({ challengerName: "Maya", accusedName: "Sam", dayNumber: 1, task: "Read a chapter",
       postedAt: now, deadlineAt: new Date(now.getTime() + 12 * 3_600_000), timeZone: "UTC" });

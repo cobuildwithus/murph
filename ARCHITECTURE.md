@@ -5595,22 +5595,26 @@ Postgres state tables are the truth: `game_profile`, `game_contact_label`,
 `game_event`, an append-only history (ids, numbers and fixed server-authored
 refusal reasons only). Change proposal identities use its nullable unique
 `command_key` for replay after resolution. `game.max_players` is immutable size
-policy (2 or 10). `MURPH_GAME_GROUPS_ENABLED` in `access.ts` gates group creation
-and joining only: off unless `true` in production, on by default elsewhere.
+policy (2 or 10). `MURPH_GAME_GROUPS_ENABLED` in `access.ts` gates group creation, joining and new Talk notes: off unless `true` in production, on by default elsewhere.
 Persisted groups remain readable, settle and support deletion with admission off.
 
-Pair Prove it cases append a `challenged` event and reserve a lifecycle receipt
-under the existing game write lock. `game-challenge:<gameId>:<entryId>` owns
-replay, mailbox and delivery identity. The pure case projection in `rules.ts`
-is shared by budget, views, drain recovery and the final provider claim; the
-claim locks the game before rechecking an open case and its bound exact pair.
-An accused/day incomplete event with a greater event id permanently concedes
-the case, including after score restoration. Reads batch challenge rows across
-selected pair games; unique entry identities bound them by two players times
-two attempts times game length, and SQL returns only the latest concession id
-per case. Shared profile/task decryption and notice generation happen outside
-the transaction. The weekly game spec owns eligibility, wire fields, deadline
-semantics and the lifecycle-template-filter rollback floor.
+Pair and group Prove it cases append a `challenged` event and reserve one
+`game-challenge:<gameId>:<entryId>` lifecycle receipt under the game lock.
+The pure rules projection owns each player's one spent case across opponents.
+Withdrawal, replacement and group departure void the case; a later accused-owned
+incomplete event permanently concedes it, even after score restoration. Cases
+are bounded by admitted players (two or ten), two attempts and game length;
+the batched query returns only the latest accused/day concession id per case.
+App group admission prepares the bound provider audience before locking and
+revalidates it through `readGroupGameChatAuthority` before spending the case.
+Notice facts contain only profile names from that game's remaining-player cohort,
+the target day's inherited task (the shared default for groups), day, posting time and deadline.
+Private task overrides, app views, labels, captions, excuses, replies and media never enter notices.
+The exact-notice delivery validator locks the game after route authority and
+rechecks the case and prepared room for both mailbox publication and final claim.
+Mailbox append and receipt transition commit together. Crypto/provider work stays
+outside transactions; stale work is skipped, unavailable providers remain retryable.
+The weekly game spec owns eligibility, wire fields and deadline semantics.
 
 `http/capability.ts` reads `X-Murph-Game-Multiplayer: 1`; the command boundary,
 reads, public invite preview and media reads pass it to the existing service.
@@ -6134,8 +6138,9 @@ responses and writes, including two-person games whose immutable maxPlayers is
 For the original multiplayer contract, deploy Web first, then the Cloudflare
 runner bundle; old warm runners remain pair-only. Group lore requires the
 runner-first order above. Keep group admission off. The engine selects group guidance from
-maxPlayers, permits only starter edit_terms before Day 1, and never offers Start
-now, change requests or person-to-person nudging for groups.
+immutable maxPlayers. Only the starter edits while invited; live changes need a
+majority, including Start now when canStartNow is true. These asks never accept
+invitees. Group guidance prohibits person-to-person nudging.
 
 ### Weekly game chat changes
 
@@ -6188,8 +6193,16 @@ original challenge. The original invite expiry bounds abandoned negotiation and
 releases that game's slot.
 
 The HTTP negotiate command accepts exactly one concrete change or a cleaned
-1–500 character talk note. A note claims the invitee's seat with status
-`negotiating` and no pending change. Its `talk_requested` event holds only the
+1–500 character talk note. A pair note claims the invitee's seat with status
+`negotiating` and no pending change. Groups accept only notes on this route and
+never join, bind an invitation, clear a proposal or change calendars through Talk.
+Their v2 event adds invitation seat and current terms version. Member locking and
+missing/suspended revalidation precede the game lock; profile, addressed proof,
+room presence, state and quota are rechecked under those locks. The shared
+addressed-invitation primitive prefers direct binding, then the lowest verified
+unbound seat; join retains its separate bearer fallback. Accepted events spend
+one note per actor and invitation seat, at most nine per game, even after redaction.
+The `talk_requested` event contains this acceptance metadata and the
 author-owned encrypted note, bound to `game`, the game ID and
 `talk_note:<proposalId>`. The event uses the ordinary
 `game-change:<gameId>:<proposalId>` replay key. Shared-word moderation checks
@@ -6300,16 +6313,37 @@ group admission dark. Cancellation
 never changes the agreed rules or starts a negotiating challenge. Started context offers optional first-few-days
 reminders without scheduling them; later opt-in must read current rules.
 
-Talk reserves `game_talk` with delivery key `game-talk:<gameId>:<proposalId>`
-and source reference equal to the game ID. Immediate delivery and the minute
-sweep share the lifecycle dispatcher. Generation and egress require an unexpired
-negotiating pair with its original talk event. A later concrete proposal does
-not stale the talk; its pending bootstrap keeps the talk first in the room.
-Frozen first messages reconcile their original text and key like proposals.
-Account deletion voids the pair game before any note decrypt; the sweep retires
-its pending receipt. App views batch the author's talk events and receipts in
-two reads, for negotiating games only, to derive `talkDelivery` without another
-mutable game field.
+Talk reserves `game_talk` with delivery key `game-talk:<gameId>:<proposalId>`.
+Legacy pairs retain game-only source references. Group references include the
+proposal ID; the reader reconstructs and verifies the hashed delivery key before
+loading the exact `talk_requested` command event and author. It never chooses a
+game's latest or first group note. Pair currentness remains an unexpired
+negotiating pair; a later proposal does not stale its note or replace its frozen
+bootstrap. A group note remains current in invited/live games when its author is
+still an addressed, profiled, active, verified unseated room member, its seat is
+free, its terms match and the game is not due. Another player's join alone does
+not suppress it. Author join/departure/deletion, changed terms or game end does.
+Both publication and final claim use the same game-locked currentness validator.
+Web builds the instructions before publishing, using only the consenting author's
+profile name and submitted note. This deliberate disclosure never includes
+private invitation labels, task overrides or a personal GameView.
+
+App views derive the author's `talkDelivery` from accepted events and receipts;
+capable group invite previews compose it after open/used/expired availability.
+Leavers retain null/404. Group `canTalk` is false once quota is spent. Account
+deletion redacts exact author-bound note fields before anonymizing actors and
+skips their unsent receipts without mutating unrelated proposals or recaps.
+Acceptance metadata remains the quota owner. SECURITY.md records the existing
+room-owned mailbox/pending-copy retirement gap.
+
+Deploy complete Web readers, sweepers and builders with
+`MURPH_GAME_GROUPS_ENABLED=false`, then the runner guidance, then iOS. Enable
+admission only after every Web reader understands the format; the old known-template
+sweeper would skip compound Talk references. This Web reader is the rollback
+floor after the first group receipt: use forward fixes to stop admission while
+preserving readers/recovery. Both runner directions retain the existing signed
+multiplayer capability, game schemas and require_send policy; no new operation
+or notification discriminator is introduced. Production admission stays dark.
 
 `chat-lifecycle.ts` drains one due intent and one frozen recovery per existing minute
 onboarding sweep. Discovery makes at most twenty serial 3-second roster reads

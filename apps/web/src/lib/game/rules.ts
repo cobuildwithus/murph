@@ -233,16 +233,17 @@ export function gameChallengeDeadline(createdAt: Date): Date {
 
 /** Restoring score never erases a concession or spends the returned budget. */
 export function gameChallengeStatus(state: RuleState, challenge: RuleChallenge, now: Date): GameChallengeStatus {
-  if (challenge.concessionEventId !== null && challenge.concessionEventId > challenge.id) return "conceded";
   const entry = state.entries.find(entry => entry.id === challenge.entryId);
+  if (state.game.seats === 10 && [challenge.actor, entry?.memberId].some(id => !remainingPlayers(state).some(player => player.memberId === id))) return "void";
+  if (challenge.concessionEventId !== null && challenge.concessionEventId > challenge.id) return "conceded";
   if (!entry || entry.withdrawnAt !== null || liveEntry(state.entries, entry.memberId, entry.dayIndex)?.id !== entry.id) return "void";
   return state.game.status !== "live" || isGameDue(state, now) || now >= challenge.deadlineAt ? "stood" : "open";
 }
 
 export function canChallengeGame(state: RuleState, challenges: readonly RuleChallenge[], memberId: string, now: Date): boolean {
   const players = remainingPlayers(state);
-  return state.game.seats === 2 && state.game.status === "live" && Boolean(state.game.chatContainerMemberId)
-    && isPairRoster(players) && players.some(player => player.memberId === memberId) && !isGameDue(state, now)
+  return state.game.status === "live" && Boolean(state.game.chatContainerMemberId)
+    && (state.game.seats === 10 ? players.length >= 2 : isPairRoster(players)) && players.some(player => player.memberId === memberId) && !isGameDue(state, now)
     && !challenges.some(challenge => challenge.actor === memberId && ["open", "stood"].includes(gameChallengeStatus(state, challenge, now)));
 }
 
@@ -251,12 +252,13 @@ export function decideChallenge(state: RuleState, challenges: readonly RuleChall
   memberId: string; entryId: string; visibleEntryIds: ReadonlySet<string>; now: Date; createdAt: Date;
 }): { commandKey: string; payload: { v: 1; entryId: string; deadlineAt: string } } {
   requireLivePlayer(state, input.memberId);
-  if (state.game.seats !== 2 || !isPairRoster(remainingPlayers(state))) reject("INVALID_REQUEST", "Prove it is available in two-player games.");
+  if (state.game.seats !== 10 && !isPairRoster(remainingPlayers(state))) reject("INVALID_REQUEST", "Prove it is available in two-player games.");
   if (isGameDue(state, input.now)) reject("GAME_NOT_LIVE", "This game has ended.");
   if (!state.game.chatContainerMemberId) reject("CHAT_UNAVAILABLE", "This game needs its shared chat first.");
   const entry = state.entries.find(entry => entry.id === input.entryId);
   if (!entry || entry.memberId === input.memberId || entry.kind !== "photo" || entry.attempt <= 0
     || entry.withdrawnAt !== null || entry.incomplete || entry.dayIndex < 0 || entry.dayIndex >= state.game.lengthDays
+    || liveEntry(state.entries, entry.memberId, entry.dayIndex)?.id !== entry.id
     || !state.players.some(player => player.memberId === entry.memberId && !player.leftAt)
     || !input.visibleEntryIds.has(entry.id)) reject("INVALID_REQUEST", "Choose an opponent's visible photo post that counts.");
   if (!canChallengeGame(state, challenges, input.memberId, input.now)) reject("CHALLENGE_USED", "You've used your Prove it for this game.");

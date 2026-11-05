@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PUT as profile } from "../app/api/game/v1/me/profile/route";
 import { POST as create } from "../app/api/game/v1/games/route";
 import { POST as negotiate } from "../app/api/game/v1/invites/[token]/negotiate/route";
+import { GET as previewInvite } from "../app/api/game/v1/invites/[token]/route";
 import { POST as accept } from "../app/api/game/v1/invites/[token]/accept/route";
 import { POST as start } from "../app/api/game/v1/dev/games/[id]/start-now/route";
 import { POST as advance } from "../app/api/game/v1/dev/games/[id]/advance-day/route";
@@ -113,7 +114,9 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
     vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "http://localhost:3237");
   });
   afterAll(async () => {
+    await getPrisma().hostedLinqDelivery.deleteMany({ where: { source: "game_lifecycle", payloadOwnerMemberId: { in: memberIds } } });
     await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: memberIds } } });
+    await getPrisma().hostedThreadContainer.deleteMany({ where: { memberId: { in: memberIds } } });
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: memberIds } } });
     await rm(mediaDir, { recursive: true, force: true });
     vi.unstubAllEnvs();
@@ -134,6 +137,72 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
     expect(talked.players.find(player => player.isMe)).toMatchObject({ seat: 1, memberId: tokenMember.get(invitee) });
     expect(await game(negotiate(request(invitee, body), context))).toMatchObject({ status: "negotiating" });
     expect(await getPrisma().gameEvent.count({ where: { gameId, type: "talk_requested" } })).toBe(1);
+  });
+
+  it.each([false, true])("keeps group Talk event-only behind the capability and exposes only the author's receipt, unbound=%s", async unbound => {
+    const starter = await member("Ava"), invitee = await member("Sam"), other = await member("Maya");
+    const tokens = [starter, invitee, other];
+    const people = tokens.map(token => tokenMember.get(token)!);
+    const { upsertHostedMemberEmailAuthorization } = await import("@/src/lib/hosted-onboarding/hosted-member-store");
+    for (const id of people) await getPrisma().$transaction(tx => upsertHostedMemberEmailAuthorization({ memberId: id, prisma: tx,
+      verifiedEmail: { address: `${id}@example.test`, verifiedAt: new Date() } }));
+    const groupRequest = (token: string, body?: unknown, method = "POST") => {
+      const result = request(token, body, method);
+      result.headers.set("X-Murph-Game-Multiplayer", "1");
+      return result;
+    };
+    const db = getPrisma(), gameId = randomUUID(), room = randomUUID();
+    memberIds.push(room);
+    const lines = await import("@/src/lib/hosted-onboarding/linq-line-store");
+    const composer = vi.spyOn(lines, "listHostedLinqHealthyProactiveLines").mockResolvedValue([{
+      phoneNumber: "+15555550100", phoneNumberLookupKey: "synthetic-line", phoneNumberHint: "0100", assignmentWeight: 1,
+      maxNewConversationsPerDay: 10, proactiveConversationCount: 0, proactiveConversationDayUtc: null,
+    }]);
+    const created = await game(create(groupRequest(starter, { gameId, maxPlayers: 10, groupWord: "Crew",
+      invitees: people.slice(1).map((id, index) => ({ seat: index + 1, firstName: "Private label", recipient: { kind: "email", value: `${id}@example.test` } })),
+      terms: { defaultTask: "Read", tasks: [], schedule: { count: 3 }, stakes: [{ kind: "prize", item: "Coffee" }] } }))).finally(() => composer.mockRestore());
+    await db.hostedMember.create({ data: { id: room } });
+    await db.hostedThreadContainer.create({ data: { memberId: room, ownerMemberId: people[0] } });
+    const { createHostedExternalThreadIdentityLookupKey } = await import("@/src/lib/hosted-onboarding/contact-privacy");
+    await db.hostedThreadRoute.create({ data: { channel: "linq", containerMemberId: room, threadLookupKey: `thread-${room}`,
+      threadIdentityLookupKey: createHostedExternalThreadIdentityLookupKey({ channel: "linq", threadId: room })! } });
+    await db.game.update({ where: { id: gameId }, data: { chatContainerMemberId: room } });
+    if (unbound) await db.gameInvitee.update({ where: { gameId_seat: { gameId, seat: 1 } }, data: { memberId: null } });
+    const routes = await import("@/src/lib/hosted-routing/assistant-notification-destination");
+    const linq = await import("@/src/lib/hosted-onboarding/linq-client");
+    const route = vi.spyOn(routes, "readHostedThreadContainerLinqRouteAuthorities").mockResolvedValue({ nonLinqContainerMemberIds: new Set(), unavailableContainerMemberIds: new Set(), authorities: new Map([[room,
+      { channel: "linq", threadId: room, containerMemberId: room, accountLookupKey: "synthetic-line" }]]) });
+    const summary = vi.spyOn(linq, "getHostedLinqChatSummary").mockResolvedValue({ isGroup: true, handlesComplete: true,
+      handles: [{ handle: "+15555550100", isMe: true, status: "active" }, ...people.map(id => ({ handle: `${id}@example.test`, isMe: false, status: "active" }))] });
+    const line = vi.spyOn(lines, "readHostedLinqIncomingLineState").mockResolvedValue({ kind: "assignable", phoneNumberLookupKey: "synthetic-line" });
+    try {
+      const context = { params: Promise.resolve({ token: created.inviteToken! }) };
+      const body = { proposalId: randomUUID(), termsVersion: 1, timeZone: "UTC", note: "Could we discuss another prize?" };
+      const before = await db.game.findUniqueOrThrow({ where: { id: gameId }, include: { players: true, invitees: true } });
+      const unavailable = await previewInvite(request(invitee, undefined, "GET"), context);
+      expect(unavailable.status).toBe(404);
+      const available = await previewInvite(groupRequest(invitee, undefined, "GET"), context);
+      expect(await available.json()).toMatchObject({ preview: { supportsTalk: true, canTalk: true } });
+      const legacy = await negotiate(request(invitee, body), context);
+      expect(legacy.status).toBe(404);
+      const result = await negotiate(groupRequest(invitee, { ...body, token: "wrong-token", actorMemberId: people[0] }), context);
+      expect(result.status).toBe(200);
+      const response = await result.json();
+      if (unbound) expect(response).toEqual({ ok: true, game: null });
+      else {
+        expect(response).toMatchObject({ ok: true, game: { status: "invited", permissions: { canJoin: true, canLeave: false } } });
+        expect(response.game.players.some((player: { isMe: boolean }) => player.isMe)).toBe(false);
+      }
+      expect(await db.game.findUniqueOrThrow({ where: { id: gameId }, include: { players: true, invitees: true } })).toEqual(before);
+      expect(await db.gameEvent.findFirst({ where: { gameId, type: "talk_requested" } })).toMatchObject({ actor: people[1], payload: { v: 2, invitationSeat: 1 } });
+      const own = await previewInvite(groupRequest(invitee, undefined, "GET"), context);
+      expect(await own.json()).toMatchObject({ preview: { canTalk: false, talkDelivery: "pending" } });
+      const peer = await previewInvite(groupRequest(other, undefined, "GET"), context);
+      expect((await peer.json()).preview).not.toHaveProperty("talkDelivery");
+      const anonymousRequest = new Request("http://localhost/api/game/v1", { headers: { "X-Murph-Game-Multiplayer": "1" } });
+      const anonymous = await previewInvite(anonymousRequest, context);
+      expect((await anonymous.json()).preview).not.toHaveProperty("talkDelivery");
+    } finally { route.mockRestore(); summary.mockRestore(); line.mockRestore(); }
   });
 
   it("creates a long dare, accepts, posts, advances and settles with the new app fields", async () => {

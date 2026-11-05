@@ -185,7 +185,7 @@ describe("generated game chat bootstrap", () => {
   });
   it.each(["accept", "cancel", "expire"])("reconciles a frozen talk with proposal policy after %s", async (transition) => {
     const talkId = `game-talk:${gameId}:proposal_talk`;
-    const talk = { ...game(), status: "negotiating", events: [{ actor: "person_b", commandKey: `game-change:${gameId}:proposal_talk`,
+    const talk = { ...game(), status: "negotiating", events: [{ type: "talk_requested", actor: "person_b", commandKey: `game-change:${gameId}:proposal_talk`,
       payload: { v: 1, proposalId: "proposal_talk", noteEncrypted: "sealed" } }] };
     m.game.mockResolvedValue(talk);
     m.wake.mockResolvedValue({ kind: "assistant.notification.requested", notification: { gameChatBootstrap: { gameId, eventId: talkId }, route: { delivery: { kind: "bootstrap", target: "room" } } } });

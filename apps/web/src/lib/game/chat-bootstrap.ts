@@ -100,7 +100,7 @@ async function readOtherPendingBootstrap(memberId: string, eventId: string, pris
   const games = await prisma.game.findMany({ where: { chatContainerMemberId: memberId, status: { in: ["live", "negotiating"] } },
     select: { id: true, maxPlayers: true, status: true, inviteExpiresAt: true, pendingChange: true,
       players: { select: { memberId: true, leftAt: true }, take: 3 },
-      events: { where: { type: "talk_requested" }, select: { actor: true, commandKey: true, payload: true }, take: 1 } }, take: GAME_MAX_OPEN_PER_PAIR });
+      events: { where: { type: "talk_requested" }, select: { type: true, actor: true, commandKey: true, payload: true }, take: 1 } }, take: GAME_MAX_OPEN_PER_PAIR });
   const keys = games.flatMap((game) => {
     const proposal = parsePendingGameChange(game.pendingChange);
     const talk = currentGameTalkRequest(game, new Date());

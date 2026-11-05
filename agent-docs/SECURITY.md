@@ -1873,8 +1873,12 @@ join claims the seat after matching memberId or verified contact read keys and
 checking legal/profile prerequisites. A savepoint protects ordinary ingestion
 from association statement failures. Diagnostics contain fixed reason codes only.
 Groups have no automatic bootstrap producer and cannot silently change rooms.
-Only remaining players have names, status and authored evidence in shared
-projections; invitees with no player row appear only as counts. Private pending
+Shared game projections name only remaining players using a per-game naming
+cohort; unjoined invitees appear as counts. A group Talk notice is the narrow
+consented exception: its unseated author shares their own profile name and
+submitted note, never a private invite label. Challenge notices use the same
+remaining-player cohort and the target day's shared default task, never private
+task overrides, a challenger's personal GameView, captions, excuses, private replies or media. Private pending
 labels stay with the starter. Final lifecycle egress repeats the authority
 check and verifies the provider target. Lifecycle notices and recap links contain text only. Any group
 report withholds the shared recap, including media and quotes. Recaps may read
@@ -1888,6 +1892,24 @@ read-only in the runner because recap evidence includes app-only posts. Trusted
 code records only the accepted canonical bare room chat line, once, within the
 existing 64 KiB limit; that line must use room-visible evidence only.
 
+
+Group Talk takes the author member lock before the game lock and rechecks active
+membership, profile, current verified addressed invitation and bound room presence.
+One accepted event per author and seat is the quota, even if its content is later
+redacted. Exact compound receipt identity and event type/author govern recovery;
+pair game-only references remain readable. Publication and dispatch share the
+same locked currentness validator and `readGroupGameChatAuthority`. Preparation
+of provider evidence, contact keys, names and sealed mailbox content happens
+outside transactions. Stale notes/cases are terminally skipped; provider failures
+retain their receipt for recovery. Deletion scrubs author-bound note fields before
+actor anonymization and skips the exact unsent receipt; a deleted author cannot
+pass final egress. Note-only authors do not own unrelated game terms or recaps.
+
+Follow-up: pair and group Talk already copied into a room-owned mailbox or
+imported runtime pending state is not erased by deleting its unseated author.
+Final egress denies the stale notice, but exact-note mailbox content retirement
+and runtime pending removal need a separately scoped revocation path. This work
+does not claim to erase those copies or retract delivered consented history.
 
 Game proposals are structural metadata under the canonical game lock. The
 initiating signed-in player agrees by proposing. In pairs, the other identified

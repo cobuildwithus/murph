@@ -581,6 +581,8 @@ export type GameInvitePreview =
       dayOne?: string | null;
       supportsNegotiation?: boolean;
       supportsTalk?: boolean;
+      canTalk?: boolean;
+      talkDelivery?: "pending" | "sent" | "failed";
       lengthDays?: number;
       inviterFirstName: string;
       /**
@@ -595,8 +597,8 @@ export type GameInvitePreview =
       startsOn: string | null;
       expiresAt: string | null;
     }
-  | { status: "used" }
-  | { status: "expired"; reason?: "cancelled"; inviterFirstName?: string };
+  | { status: "used"; talkDelivery?: "pending" | "sent" | "failed" }
+  | { status: "expired"; reason?: "cancelled"; inviterFirstName?: string; talkDelivery?: "pending" | "sent" | "failed" };
 
 export type GameErrorCode =
   | "REPLY_USED"

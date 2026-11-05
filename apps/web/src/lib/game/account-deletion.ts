@@ -4,6 +4,8 @@ import { Prisma, type Game, type GamePlayer, type GameInvitee } from "@prisma/cl
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { isRecord } from "../primitives";
 import { toPrismaJsonObject } from "../device-sync/prisma-store/prisma-json";
+import { parseGameTalkPayload } from "./talk";
+import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 import { labelTarget, openGameTexts, sealGameText } from "./crypto";
 import { GAME_ROSTER_CHANGE_REASON, resolveGroupGameChangeTx } from "./change-resolution";
 
@@ -40,7 +42,7 @@ function participantOf(memberIds: readonly string[]): Prisma.GameWhereInput {
     { players: { some: { memberId: { in: [...memberIds] } } } },
     { wordsOwnerMemberId: { in: [...memberIds] } },
     { createdBy: { in: [...memberIds] } },
-    { invitees: { some: { memberId: { in: [...memberIds] } } }, OR: [
+    { maxPlayers: 2, invitees: { some: { memberId: { in: [...memberIds] } } }, OR: [
       { status: "invited" }, { status: "void", players: { some: { leftAt: { not: null } } } },
     ] },
   ] };
@@ -113,7 +115,11 @@ export async function applyGameAccountDeletionTx(input: { memberIds: readonly st
   const { tx } = input;
   const leaving = [...input.memberIds];
   const discovered = await readAffectedGames(tx, leaving);
-  const ids = [...new Set([...input.prepared.games.map(game => game.id), ...discovered.map(game => game.id)])].sort();
+  // Unseated note authors own only their note, never another player's terms or recap.
+  const notes = await tx.gameEvent.findMany({ where: { actor: { in: leaving }, type: "talk_requested", game: { maxPlayers: 10 } },
+    select: { id: true, gameId: true, actor: true, commandKey: true, payload: true }, take: GAME_DELETION_LIMIT + 1 });
+  if (notes.length > GAME_DELETION_LIMIT) throw new Error("Account deletion note set exceeds its bound.");
+  const ids = [...new Set([...input.prepared.games.map(game => game.id), ...discovered.map(game => game.id), ...notes.map(note => note.gameId)])].sort();
   if (ids.length) await tx.$queryRaw`SELECT id FROM game WHERE id = ANY(${ids}::text[]) ORDER BY id FOR UPDATE`;
   const current = await readAffectedGames(tx, leaving);
   const prepared = new Map(input.prepared.games.map(game => [game.id, game]));
@@ -145,10 +151,26 @@ export async function applyGameAccountDeletionTx(input: { memberIds: readonly st
     for (const departure of plan.departures) await tx.gameEvent.create({ data: { actor: "system", gameId: row.id,
       payload: { v: 1, calledOff: active, seat: departure.seat }, type: "player_left" } });
   }
+  await redactTalkNotesTx(tx, notes, input.now);
   // Cancelled/expired invitations need no crypto plan, but keep no lookup or label.
   await tx.gameInvitee.updateMany({ where: { memberId: { in: leaving } }, data: { memberId: null, recipientLookupKey: null, pendingLabel: Prisma.DbNull } });
   await tx.gameEvent.updateMany({ where: { actor: { in: leaving } }, data: { actor: "system" } });
   return { calledOff, deleted, kept: current.length - deleted };
+}
+
+/** Redact by accepted identity before anonymization, preserving the spent quota. */
+async function redactTalkNotesTx(tx: Prisma.TransactionClient, notes: readonly {
+  id: bigint; gameId: string; actor: string; commandKey: string | null; payload: Prisma.JsonValue;
+}[], now: Date): Promise<void> {
+  for (const note of notes) {
+    const payload = parseGameTalkPayload(note.payload);
+    if (!payload || note.commandKey !== `game-change:${note.gameId}:${payload.proposalId}`) continue;
+    await tx.gameEvent.updateMany({ where: { id: note.id, actor: note.actor, type: "talk_requested", commandKey: note.commandKey },
+      data: { payload: { ...payload, noteEncrypted: null } } });
+    const key = createHostedLinqDeliveryIdempotencyLookupKey(`game-talk:${note.gameId}:${payload.proposalId}`);
+    if (key) await tx.hostedLinqDelivery.updateMany({ where: { idempotencyKey: key, status: { in: ["awaiting_generation", "generation_queued"] } },
+      data: { status: "skipped", skippedAt: now, retryAfterAt: null, skipReason: "game_lifecycle_superseded" } });
+  }
 }
 
 /** Keep seat identities and each surviving viewer's encrypted labels together. */
