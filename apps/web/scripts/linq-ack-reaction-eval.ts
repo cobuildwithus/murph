@@ -61,7 +61,8 @@ async function classify(message: Message): Promise<Timed> {
       signal: AbortSignal.timeout(HOSTED_LINQ_ACK_REACTION_CLASSIFY_TIMEOUT_MS),
     });
   } catch (error) {
-    if ((error as { name?: string }).name !== "TimeoutError") throw error;
+    // The SDK reports the abort as APIUserAbortError; a bare fetch as TimeoutError.
+    if (!["APIUserAbortError", "TimeoutError"].includes((error as { name?: string }).name ?? "")) throw error;
     decision = null;
   }
   if (decision === null && performance.now() - startedAt < HOSTED_LINQ_ACK_REACTION_CLASSIFY_TIMEOUT_MS) {

@@ -1,10 +1,9 @@
+import OpenAI, { APIError, APIUserAbortError } from "openai";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   buildHostedLinqAckReactionDecisionsRequest,
   classifyHostedLinqAckReaction,
-  HostedLinqAckReactionClassifierError,
-  HOSTED_LINQ_ACK_REACTION_DECISIONS_URL,
   parseHostedLinqAckReactionDecision,
   stepHostedLinqAckReactionBurst,
 } from "@/src/lib/hosted-onboarding/linq-ack-reaction-classifier";
@@ -64,29 +63,40 @@ describe("linq ack reaction classifier", () => {
       .toEqual({ emoji: null, heavy: true });
   });
 
-  it("posts to the Decisions API with the key and abort signal, and throws on HTTP errors", async () => {
-    const signal = new AbortController().signal;
-    const fetchImpl = vi.fn<typeof fetch>()
+  it("posts through the OpenAI SDK with the key and abort signal, and never retries", async () => {
+    const fetchStub = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json(answers("my_data", 0)))
-      .mockResolvedValueOnce(new Response("busy", { status: 429 }));
+      .mockResolvedValueOnce(Response.json({ error: { message: "busy" } }, { status: 429 }));
+    const client = new OpenAI({ apiKey: "sk-test", fetch: fetchStub, maxRetries: 0 });
+    const message = { imageUrls: [], text: "how did i sleep" };
 
     const decision = await classifyHostedLinqAckReaction({
       apiKey: "sk-test",
-      fetchImpl,
-      message: { imageUrls: [], text: "how did i sleep" },
-      signal,
+      client,
+      message,
+      signal: new AbortController().signal,
     });
     expect(decision).toMatchObject({ emoji: "📊", kind: "my_data" });
-    const [url, init] = fetchImpl.mock.calls[0]!;
-    expect(url).toBe(HOSTED_LINQ_ACK_REACTION_DECISIONS_URL);
-    expect(init?.signal).toBe(signal);
+    const [url, init] = fetchStub.mock.calls[0]!;
+    expect(String(url)).toBe("https://api.openai.com/v1/decisions");
     expect(new Headers(init?.headers).get("authorization")).toBe("Bearer sk-test");
+    expect(JSON.parse(String(init?.body))).toMatchObject({ model: "gpt-6-luna" });
 
     await expect(classifyHostedLinqAckReaction({
       apiKey: "sk-test",
-      fetchImpl,
-      message: { imageUrls: [], text: "how did i sleep" },
-      signal,
-    })).rejects.toBeInstanceOf(HostedLinqAckReactionClassifierError);
+      client,
+      message,
+      signal: new AbortController().signal,
+    })).rejects.toBeInstanceOf(APIError);
+    expect(fetchStub).toHaveBeenCalledTimes(2);
+
+    const aborted = new AbortController();
+    aborted.abort();
+    await expect(classifyHostedLinqAckReaction({
+      apiKey: "sk-test",
+      client,
+      message,
+      signal: aborted.signal,
+    })).rejects.toBeInstanceOf(APIUserAbortError);
   });
 });

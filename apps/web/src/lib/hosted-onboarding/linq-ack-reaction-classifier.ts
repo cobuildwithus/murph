@@ -7,8 +7,8 @@
  * change it only with a fresh eval run.
  */
 
-export const HOSTED_LINQ_ACK_REACTION_DECISIONS_URL =
-  "https://api.openai.com/v1/decisions";
+import OpenAI from "openai";
+
 export const HOSTED_LINQ_ACK_REACTION_MODEL = "gpt-6-luna";
 export const HOSTED_LINQ_ACK_REACTION_HEAVY_THRESHOLD = 0.5;
 /** Production drops a decision slower than this; the live eval uses it too. */
@@ -178,35 +178,43 @@ export function stepHostedLinqAckReactionBurst(
   };
 }
 
+type HostedLinqAckReactionOpenAiClient = Pick<OpenAI, "post">;
+
+let cachedClient: { apiKey: string; client: HostedLinqAckReactionOpenAiClient } | null = null;
+
+/** One SDK client per key: no retries, and the 3 s budget doubles as its timeout. */
+function readHostedLinqAckReactionOpenAiClient(apiKey: string): HostedLinqAckReactionOpenAiClient {
+  if (cachedClient?.apiKey !== apiKey) {
+    cachedClient = {
+      apiKey,
+      client: new OpenAI({
+        apiKey,
+        maxRetries: 0,
+        timeout: HOSTED_LINQ_ACK_REACTION_CLASSIFY_TIMEOUT_MS,
+      }),
+    };
+  }
+  return cachedClient.client;
+}
+
+/**
+ * The installed SDK has no Decisions resource yet, so this posts through the
+ * SDK's generic request path. HTTP errors throw the SDK's `APIError`, and an
+ * abort throws `APIUserAbortError`.
+ */
 export async function classifyHostedLinqAckReaction(input: {
   apiKey: string;
-  fetchImpl?: typeof fetch;
+  client?: HostedLinqAckReactionOpenAiClient;
   message: HostedLinqAckReactionMessage;
   signal: AbortSignal;
 }): Promise<HostedLinqAckReactionDecision | null> {
-  const response = await (input.fetchImpl ?? fetch)(
-    HOSTED_LINQ_ACK_REACTION_DECISIONS_URL,
-    {
-      body: JSON.stringify(buildHostedLinqAckReactionDecisionsRequest(input.message)),
-      headers: {
-        authorization: `Bearer ${input.apiKey}`,
-        "content-type": "application/json",
-      },
-      method: "POST",
-      signal: input.signal,
-    },
-  );
-  if (!response.ok) {
-    throw new HostedLinqAckReactionClassifierError(response.status);
-  }
-  return parseHostedLinqAckReactionDecision(await response.json());
-}
-
-export class HostedLinqAckReactionClassifierError extends Error {
-  constructor(readonly status: number) {
-    super(`OpenAI Decisions request failed with HTTP ${status}.`);
-    this.name = "HostedLinqAckReactionClassifierError";
-  }
+  const client = input.client ?? readHostedLinqAckReactionOpenAiClient(input.apiKey);
+  const response = await client.post<unknown>("/decisions", {
+    body: buildHostedLinqAckReactionDecisionsRequest(input.message),
+    maxRetries: 0,
+    signal: input.signal,
+  });
+  return parseHostedLinqAckReactionDecision(response);
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {
