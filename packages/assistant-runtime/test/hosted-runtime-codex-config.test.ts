@@ -530,6 +530,12 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
       && config.indexOf("\nproject_root_markers = []\n") < config.search(/^\[/mu),
     "project_root_markers = [] must be a top-level Codex config key",
   );
+  // Top-level so Codex skips vault AGENTS.md discovery entirely.
+  assert.ok(
+    config.indexOf("\nproject_doc_max_bytes = 0\n") !== -1
+      && config.indexOf("\nproject_doc_max_bytes = 0\n") < config.search(/^\[/mu),
+    "project_doc_max_bytes = 0 must be a top-level Codex config key",
+  );
   assert.doesNotMatch(config, /^model_provider = "openai"$/mu);
   assert.doesNotMatch(config, /\[model_providers\."openai"\]/u);
   assert.match(config, /\[model_providers\."hosted-openai"\]/u);
@@ -2267,6 +2273,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "check_for_update_on_startup = false",
       "allow_login_shell = false",
       "project_root_markers = []",
+      "project_doc_max_bytes = 0",
       "",
       '[model_providers."hosted-openai"]',
       'name = "OpenAI"',
