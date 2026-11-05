@@ -102,15 +102,7 @@ async function processGameChatIntent(receipt: GameChatIntent, now: Date, prisma:
   if (receipt.template === "game_group_missed") return processGroupMissedDayIntent(receipt, now);
   if (receipt.template === "game_talk") return deliverGameTalk(receipt.sourceRef!, undefined, now, receipt);
   if (receipt.template === "game_challenge") return processGameChallengeIntent(receipt, now, prisma);
-  if (receipt.template === "game_missed") {
-    const parts = /^([^:]+):([^:]+):(\d{4}-\d{2}-\d{2})$/u.exec(receipt.sourceRef ?? "");
-    if (!parts) return false;
-    const [, gameId, memberId, firstMissedDate] = parts;
-    const eventId = gameMissedDayEventId(gameId, memberId, firstMissedDate);
-    return receipt.status === "generation_queued"
-      ? recoverGameNotificationWake(receipt.id, gameId, eventId, now, "missed")
-      : deliverGameMissedDayLifecycle(gameId, memberId, firstMissedDate, now);
-  }
+  if (receipt.template === "game_missed") return processPairMissedDayIntent(receipt, now);
   if (["game_change_cancelled", "game_change_expired", "game_change_resolved"].includes(receipt.template ?? "")) {
     const kind = receipt.template === "game_change_resolved" ? "change_resolved" : receipt.template === "game_change_expired" ? "change_expired" : "change_cancelled";
     const parts = /^([^:]+):([^:]+)$/.exec(receipt.sourceRef ?? "");
@@ -129,6 +121,16 @@ async function processGameChatIntent(receipt: GameChatIntent, now: Date, prisma:
   return receipt.status === "generation_queued"
     ? recoverGameNotificationWake(receipt.id, gameId, gameChatLifecycleEventId(gameId, kind), now, kind)
     : deliverGameChatLifecycle(gameId, kind, undefined, now);
+}
+
+async function processPairMissedDayIntent(receipt: GameChatIntent, now: Date): Promise<boolean> {
+  const parts = /^([^:]+):([^:]+):(\d{4}-\d{2}-\d{2})$/u.exec(receipt.sourceRef ?? "");
+  if (!parts) return false;
+  const [, gameId, memberId, firstMissedDate] = parts;
+  const eventId = gameMissedDayEventId(gameId, memberId, firstMissedDate);
+  return receipt.status === "generation_queued"
+    ? recoverGameNotificationWake(receipt.id, gameId, eventId, now, "missed")
+    : deliverGameMissedDayLifecycle(gameId, memberId, firstMissedDate, now);
 }
 
 async function processGroupMissedDayIntent(receipt: GameChatIntent, now: Date): Promise<boolean> {
