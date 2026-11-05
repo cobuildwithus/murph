@@ -474,6 +474,23 @@ async function resolutionInstructions(game: Pick<Game, "id" | "maxPlayers">, kin
     tally: resolution.tally, changeKind: resolution.changeKind, startsOn: resolution.startsOn }, room);
 }
 
+/** Rechecks, inside the append transaction, that the notice still describes the current game and room. */
+async function isGameLifecycleAppendCurrentTx(input: Parameters<typeof enqueueGameLifecycle>[0], tx: Prisma.TransactionClient): Promise<boolean> {
+  if (input.groupMissedPolicy) return !!input.audience && await isGroupMissedDayBatchCurrentTx(input.groupMissedPolicy, input.audience, tx, input.now ?? new Date());
+  const current = await tx.game.findFirst({ where: { id: input.gameId, status: { in: lifecycleStatuses(input.kind, input.game.maxPlayers) }, chatContainerMemberId: input.containerMemberId },
+    include: { invitees: { select: { memberId: true, recipientLookupKey: true } }, players: { take: 11 } } });
+  if (!current || (input.kind === "rematch" && isGameInviteExpired(current, new Date()))) return false;
+  if (input.kind === "rematch" && current.maxPlayers === 10 && currentTerms(parseStoredTerms(current.terms)).n !== input.termsVersion) return false;
+  if (input.kind === "talk" && !await readCurrentGameTalk(tx, input.gameId, input.eventId.split(":")[2], new Date())) return false;
+  if (current.maxPlayers === 10 && !isCurrentGroupGameChatLifecycle(current, input.kind)) return false;
+  const notice = parseGameResolutionNotice(input.eventId);
+  if (notice) {
+    const resolution = await readGameChangeResolution(tx, input.gameId, notice.proposalId);
+    if (!resolution || gameResolutionNoticeKind(resolution.outcome) !== input.kind) return false;
+  }
+  return !input.audience || Boolean(await readGroupGameChatAuthority(current, input.containerMemberId, input.audience, tx));
+}
+
 async function enqueueGameLifecycle(input: {
   game: Pick<Game, "maxPlayers" | "audienceKey">;
   audience?: GameChatAudience;
@@ -518,24 +535,7 @@ async function enqueueGameLifecycle(input: {
   const appended = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     if (input.kind === "rematch" && input.game.maxPlayers === 10) await tx.$queryRaw`SELECT id FROM game WHERE id = ${input.gameId} FOR UPDATE`;
     if (bound.externalThreadRouteAuthority) await assertHostedAssistantNotificationRouteAuthority({ authority: bound.externalThreadRouteAuthority, prisma: tx });
-    if (input.groupMissedPolicy) {
-      if (!input.audience || !await isGroupMissedDayBatchCurrentTx(input.groupMissedPolicy, input.audience, tx, input.now ?? new Date())) return null;
-      const result = await appendPreparedHostedMailboxEnvelopeTx({ prepared, tx });
-      await markGameChatGenerationQueuedTx(input.eventId, tx, input.containerMemberId);
-      return result;
-    }
-    const current = await tx.game.findFirst({ where: { id: input.gameId, status: { in: lifecycleStatuses(input.kind, input.game.maxPlayers) }, chatContainerMemberId: input.containerMemberId },
-      include: { invitees: { select: { memberId: true, recipientLookupKey: true } }, players: { take: 11 } } });
-    if (!current || (input.kind === "rematch" && isGameInviteExpired(current, new Date()))) return null;
-    if (input.kind === "rematch" && current.maxPlayers === 10 && currentTerms(parseStoredTerms(current.terms)).n !== input.termsVersion) return null;
-    if (input.kind === "talk" && !await readCurrentGameTalk(tx, input.gameId, input.eventId.split(":")[2], new Date())) return null;
-    if (current.maxPlayers === 10 && !isCurrentGroupGameChatLifecycle(current, input.kind)) return null;
-    const notice = parseGameResolutionNotice(input.eventId);
-    if (notice) {
-      const resolution = await readGameChangeResolution(tx, input.gameId, notice.proposalId);
-      if (!resolution || gameResolutionNoticeKind(resolution.outcome) !== input.kind) return null;
-    }
-    if (input.audience && !await readGroupGameChatAuthority(current, input.containerMemberId, input.audience, tx)) return null;
+    if (!await isGameLifecycleAppendCurrentTx(input, tx)) return null;
     const result = await appendPreparedHostedMailboxEnvelopeTx({ prepared, tx });
     await markGameChatGenerationQueuedTx(input.eventId, tx, input.containerMemberId);
     return result;
