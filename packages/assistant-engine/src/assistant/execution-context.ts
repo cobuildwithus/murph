@@ -696,12 +696,14 @@ function normalizeAssistantGameRecapScope(scope: AssistantHostedExecutionContext
 }
 
 function normalizeAssistantGameMissedCheckInScope(scope: AssistantHostedExecutionContext['gameMissedCheckInScope']): NonNullable<AssistantHostedExecutionContext['gameMissedCheckInScope']> | null {
-  if (scope && 'kind' in scope) return gameGroupMissedCheckInPolicySchema.parse(scope)
-  const gameId = normalizeNullableString(scope?.gameId)
-  const eventId = normalizeNullableString(scope?.eventId)
-  const memberId = normalizeNullableString(scope?.memberId)
-  const firstMissedDate = normalizeNullableString(scope?.firstMissedDate)
-  const pairFingerprint = normalizeNullableString(scope?.pairFingerprint)
+  // Production pair policies also carry kind (game_missed_check_in); only the group kind selects the group schema.
+  if ((scope as { kind?: unknown } | null | undefined)?.kind === 'game_group_missed_check_in') return gameGroupMissedCheckInPolicySchema.parse(scope)
+  const pair = scope as Partial<Record<'gameId' | 'eventId' | 'memberId' | 'firstMissedDate' | 'pairFingerprint', string>> | null | undefined
+  const gameId = normalizeNullableString(pair?.gameId)
+  const eventId = normalizeNullableString(pair?.eventId)
+  const memberId = normalizeNullableString(pair?.memberId)
+  const firstMissedDate = normalizeNullableString(pair?.firstMissedDate)
+  const pairFingerprint = normalizeNullableString(pair?.pairFingerprint)
   return gameId && eventId && memberId && firstMissedDate && pairFingerprint
     ? { gameId, eventId, memberId, firstMissedDate, pairFingerprint }
     : null

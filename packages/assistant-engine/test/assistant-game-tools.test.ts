@@ -244,6 +244,17 @@ describe('game dynamic tools', () => {
 })
 
 describe('game recap dynamic contract', () => {
+  it('keeps the production pair missed-day policy, which also carries kind, on the pair path', () => {
+    // The runtime hands the whole parsed response policy to the engine; a kind field alone must not select the group schema.
+    const pair = { kind: 'game_missed_check_in' as const, gameId: 'pair-game', eventId: 'game-missed:pair-game:member-a:2030-03-04',
+      memberId: 'member-a', firstMissedDate: '2030-03-04', pairFingerprint: 'f'.repeat(32) }
+    const hosted = normalizeAssistantExecutionContext({ hosted: { memberId: 'pair-room', userEnvKeys: [], gameMissedCheckInScope: pair as never } }).hosted
+    const { kind: _kind, ...fields } = pair
+    expect(hosted?.gameMissedCheckInScope).toEqual(fields)
+    const ctx = createAssistantHostedToolContext({ executionContext: hosted,
+      messageInput: { channel: 'linq', vault: '/synthetic' } as never, session: { binding: { channel: 'linq' }, sessionId: 'synthetic-pair-missed' } as never })
+    expect(resolveAssistantGameHostDynamicTools(ctx)).toEqual([MURPH_GAME_LORE_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL])
+  })
   it('normalizes the room batch and permits only its scoped lore and quiet tools', async () => {
     const scope = { kind: 'game_group_missed_check_in' as const, roomId: 'synthetic-room', eventId: 'game-missed:synthetic-room:group:2030-03-04',
       firstMissedDate: '2030-03-04', pairFingerprint: 'e'.repeat(32), conversationLaneSeq: '7',
