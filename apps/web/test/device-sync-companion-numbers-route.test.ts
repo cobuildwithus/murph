@@ -37,6 +37,7 @@ const replicaRef = {
 };
 const from = "2026-08-07";
 const through = "2026-11-04";
+const yearFrom = "2025-11-05";
 const stepsThrough = "2026-11-03";
 const request = (query = "") => new Request(`https://app.example.test/api/device-sync/companion/numbers${query}`);
 let shards: BrowserVaultReplicaShardSet;
@@ -72,7 +73,9 @@ function fixture(metricRows?: BrowserVaultMetricRow[]): BrowserVaultReplica {
       row("estimated-vo2-max", addDaysToIsoDate(from, 6), 44.2, "mL/kg/min"),
       row("estimated-vo2-max", addDaysToIsoDate(through, -6), 46.34, "mL/kg/min"),
       row("estimated-vo2-max", through, 48.34, "mL/kg/min"),
-      row("steps", addDaysToIsoDate(from, -1), 100, "count"),
+      // Older than the 90 days the change counts from, but on the chart.
+      row("steps", addDaysToIsoDate(from, -30), 300, "count"),
+      row("steps", addDaysToIsoDate(through, -365), 100, "count"),
       row("steps", through, 100, "count"),
       row("steps", addDaysToIsoDate(through, 1), 200, "count"),
       row("body-weight", through, 70, "kg"),
@@ -115,7 +118,7 @@ it("serves only the documented four saved series and comparison fields, includin
   expect(response.headers.get("cache-control")).toBe("no-store");
   const body = await response.json();
   expect(Object.keys(body)).toEqual(["timeZone", "savedAt", "freshness", "window", "demographics", "numbers"]);
-  expect(body).toMatchObject({ timeZone: "America/New_York", savedAt, freshness: "fresh", window: { from, through } });
+  expect(body).toMatchObject({ timeZone: "America/New_York", savedAt, freshness: "fresh", window: { from: yearFrom, through } });
   expect(Object.keys(body.numbers)).toEqual(["restingHeartRate", "sleep", "steps", "vo2Max"]);
   for (const [name, unit, baseline, current, delta] of [
     ["restingHeartRate", "bpm", 61, 58, -3], ["sleep", "minutes", 420, 450, 30], ["steps", "steps", 7000, 8000, 1000],
@@ -124,6 +127,7 @@ it("serves only the documented four saved series and comparison fields, includin
     expect(body.numbers[name]).toEqual({
       unit, latest: { date: metricThrough, value: current }, stale: false,
       daily: [
+        ...name === "steps" ? [{ date: addDaysToIsoDate(from, -30), value: 300 }] : [],
         ...[0, 1, 2, 3].map(offset => ({ date: addDaysToIsoDate(from, offset), value: baseline })),
         ...[3, 2, 1, 0].map(offset => ({ date: addDaysToIsoDate(metricThrough, -offset), value: current })),
       ],
@@ -154,11 +158,11 @@ it("serves only the documented four saved series and comparison fields, includin
 it("uses local today across midnight and DST, retaining canonical daily dates", async () => {
   vi.setSystemTime(new Date("2026-11-05T02:00:00Z"));
   const body = await (await GET(request())).json();
-  expect(body.window).toEqual({ from, through });
-  expect(body.numbers.steps.daily).toHaveLength(8);
+  expect(body.window).toEqual({ from: yearFrom, through });
+  expect(body.numbers.steps.daily).toHaveLength(9);
   shards = await splitBrowserVaultReplica({ ...fixture(), meals: { schemaVersion: 1, timeZone: "Asia/Tokyo", days: [] } });
   const east = await (await GET(request())).json();
-  expect(east.window).toEqual({ from: "2026-08-08", through: "2026-11-05" });
+  expect(east.window).toEqual({ from: "2025-11-06", through: "2026-11-05" });
   expect(east.numbers.steps.latest).toEqual({ date: "2026-11-04", value: 100 });
 });
 
@@ -175,7 +179,7 @@ it.each([
     row("resting-heart-rate", "2026-11-05", 59, "bpm"),
   ]));
   const body = await (await GET(request())).json();
-  expect(body.window).toEqual({ from: "2026-08-08", through: "2026-11-05" });
+  expect(body.window).toEqual({ from: "2025-11-06", through: "2026-11-05" });
   expect(body.numbers.steps).toMatchObject({
     latest: { date: settledThrough, value: time === "07:00:00" ? 8000 : 4000 }, stale: false,
     comparison: {
@@ -283,11 +287,11 @@ it("requires distinct covered dates, ignores summary/comparator rows, and keeps 
   expect(body.numbers.sleep).toBeNull();
 });
 
-it("uses catalog stale thresholds and returns null for data outside the 90-day window or unsupported units", async () => {
+it("uses catalog stale thresholds and returns null for data older than a year or in unsupported units", async () => {
   shards = await splitBrowserVaultReplica(fixture([
     row("resting-heart-rate", addDaysToIsoDate(through, -15), 60, "bpm"),
     row("total-sleep-minutes", addDaysToIsoDate(through, -14), 420, "minutes"),
-    row("steps", addDaysToIsoDate(from, -1), 8000, "count"),
+    row("steps", addDaysToIsoDate(through, -365), 8000, "count"),
     row("steps", stepsThrough, 8000, "km"),
     row("estimated-vo2-max", addDaysToIsoDate(through, -45), 45, "mL/kg/min"),
   ]));

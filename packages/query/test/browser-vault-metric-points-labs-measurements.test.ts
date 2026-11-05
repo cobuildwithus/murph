@@ -27,6 +27,30 @@ import {
 type CanonicalEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
 type CreateReplicaInput = Omit<Parameters<typeof createBrowserVaultReplica>[0], "metricPoints">;
 
+test("reported VO2 aliases become daily Numbers readings while other measurements remain events", async () => {
+  const vault = createVaultReadModel({
+    entities: [createEvent("evt_reported_vo2", "measurement", {
+      occurredAt: "2026-05-02T12:00:00.000Z",
+      attributes: { source: "manual", measurements: [
+        { metric: "vo2-max", value: 52, unit: "ml/kg/min", note: "Member-reported VO2 max from WHOOP" },
+        { metric: "weight", value: 72, unit: "kg" },
+      ] },
+    })],
+    metadata: null, vaultRoot: "browser://vault",
+  });
+  const points = buildMetricProjection(vault).metricPoints;
+  assert.equal(points.find(point => point.metricKey === "estimated-vo2-max")?.grain, "day");
+  assert.equal(points.find(point => point.metricKey === "body-weight")?.grain, "event");
+  const replica = await createBrowserVaultReplica({ vault, metricPoints: points,
+    generatedAt: "2026-05-02T13:00:00.000Z", sourceBundleHash: "f".repeat(64) });
+  const rows = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica)).metrics.series({
+    metricKey: "estimated-vo2-max", grain: "day", from: "2026-05-01", to: "2026-05-02",
+  });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.value, 52);
+  assert.equal(rows[0]?.sourceLabel, "Manual");
+});
+
 async function createBrowserVaultReplicaFromVault(input: CreateReplicaInput) {
   return createBrowserVaultReplica({
     ...input,

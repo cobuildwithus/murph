@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { downloadGameChatPhoto, gamePhotoAttachment } from "../src/lib/game/chat-photo-media";
+import sharp from "sharp";
+import { downloadGameChatPhoto, GAME_CHAT_PHOTO_MAX_DOWNLOAD_BYTES, gamePhotoAttachment } from "../src/lib/game/chat-photo-media";
 import { GAME_MEDIA_MAX_BYTES } from "../src/lib/game/media";
 import type { HostedExecutionConversationMessageWake } from "@murphai/hosted-execution/contracts";
 const metadata = vi.hoisted(() => vi.fn());
@@ -22,23 +23,46 @@ describe("game photo import boundary", () => {
     await expect(downloadGameChatPhoto(source)).rejects.toThrow();
     expect(fetch).not.toHaveBeenCalled();
   });
-  it.each([{ id: "another-attachment" }, { content_type: "image/png" }, { size_bytes: GAME_MEDIA_MAX_BYTES + 1 }])("rejects mismatched or excessive provider metadata: %j", async (change) => {
+  it.each([{ id: "another-attachment" }, { content_type: "image/png" }, { size_bytes: GAME_CHAT_PHOTO_MAX_DOWNLOAD_BYTES + 1 }])("rejects mismatched or excessive provider metadata: %j", async (change) => {
     metadata.mockResolvedValue({ ...attachment, ...change });
     const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
     await expect(downloadGameChatPhoto(source)).rejects.toThrow();
     expect(fetch).not.toHaveBeenCalled();
   });
   it("bounds streamed bytes and disables redirects without forwarding provider credentials", async () => {
-    const fake = vi.fn<typeof fetch>(async () => new Response(new Uint8Array(GAME_MEDIA_MAX_BYTES + 1)));
+    const fake = vi.fn<typeof fetch>(async () => new Response(new Uint8Array(GAME_CHAT_PHOTO_MAX_DOWNLOAD_BYTES + 1)));
     vi.stubGlobal("fetch", fake);
-    await expect(downloadGameChatPhoto(source)).rejects.toThrow("too large");
+    await expect(downloadGameChatPhoto(source)).rejects.toThrow("too_large");
     expect(metadata).toHaveBeenCalledWith(source.attachmentId);
     expect(fake).toHaveBeenCalledWith(attachment.download_url, expect.objectContaining({ redirect: "error", cache: "no-store" }));
     expect(fake.mock.calls[0]?.[1]).not.toHaveProperty("headers");
   });
-  it("rejects mislabeled content and returns validated image bytes", async () => {
+  it("rejects mislabeled or undecodable content", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response("not an image")).mockResolvedValueOnce(new Response(new Uint8Array([255,216,255,0]))));
     await expect(downloadGameChatPhoto(source)).rejects.toThrow("format");
-    expect((await downloadGameChatPhoto(source)).bytes).toEqual(new Uint8Array([255,216,255,0]));
+    await expect(downloadGameChatPhoto(source)).rejects.toThrow("decode");
+  });
+  it("fits a full-size camera JPEG to an upright app-sized photo without camera metadata", async () => {
+    // A detailed 24 MP sideways camera file, larger than game media accepts.
+    const camera = await sharp({ create: { width: 5712, height: 4284, channels: 3, background: "#808080", noise: { type: "gaussian", mean: 128, sigma: 40 } } })
+      .jpeg({ quality: 70 }).withMetadata({ orientation: 6 }).toBuffer();
+    expect(camera.byteLength).toBeGreaterThan(GAME_MEDIA_MAX_BYTES);
+    expect(camera.byteLength).toBeLessThan(GAME_CHAT_PHOTO_MAX_DOWNLOAD_BYTES);
+    metadata.mockResolvedValue({ ...attachment, size_bytes: camera.byteLength });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array(camera))));
+    const photo = await downloadGameChatPhoto(source);
+    expect(photo.contentType).toBe("image/jpeg");
+    expect(photo.bytes.byteLength).toBeLessThanOrEqual(GAME_MEDIA_MAX_BYTES);
+    const stored = await sharp(photo.bytes).metadata();
+    expect({ format: stored.format, width: stored.width, height: stored.height, exif: stored.exif, orientation: stored.orientation })
+      .toEqual({ format: "jpeg", width: 1536, height: 2048, exif: undefined, orientation: undefined });
+  });
+  it("passes a HEIC photo through only when it already fits", async () => {
+    const heic = (size: number) => { const bytes = new Uint8Array(size); bytes.set(new TextEncoder().encode("\0\0\0\x18ftypheic"), 0); return bytes; };
+    const heicSource = { ...source, contentType: "image/heic" as const };
+    metadata.mockResolvedValue({ ...attachment, content_type: "image/heic" });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(heic(64))).mockResolvedValueOnce(new Response(heic(GAME_MEDIA_MAX_BYTES + 1))));
+    expect(await downloadGameChatPhoto(heicSource)).toEqual({ bytes: heic(64), contentType: "image/heic" });
+    await expect(downloadGameChatPhoto(heicSource)).rejects.toThrow("too_large");
   });
 });

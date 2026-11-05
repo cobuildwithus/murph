@@ -137,12 +137,16 @@ and four `numbers`, always in this order:
 | `steps` | `steps-days.v0` | steps | increase |
 | `vo2Max` | `vo2-max-days.v0` | ml/kg/min | increase |
 
-A number is `{ state: "not_shared" | "pending" | "hidden" }`, or
+A number is `{ state: "not_shared" | "hidden" }`,
+`{ state: "pending", reason?: "no_readings" }`, or
 `{ state: "available", unit, latest: { date, value }, stale, daily, comparison }`.
 Daily points are ascending, one per date, with gaps omitted. Daily values round
 to integers except VO2 (one decimal); window means retain their precision.
-`stale` means the latest date precedes `window.through` by more than seven days.
-Missing or legacy publications remain pending. A viewer outside the sharing
+`stale` means the latest date precedes `window.through` by more than seven days,
+except VO2 uses its catalog freshness limit (45 days). A readable grant with
+zero usable readings returns pending with `reason: "no_readings"`; unreadable
+or legacy publications remain plain pending. The state vocabulary stays fixed
+for shipped clients, which ignore the additive reason key. A viewer outside the sharing
 group sees the other person's numbers as hidden and may intentionally enroll.
 Both people's numbers come only from the same authorized shared snapshots.
 

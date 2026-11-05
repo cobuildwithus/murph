@@ -631,8 +631,9 @@ export interface AssistantHostedExecutionContext {
   productFeedbackCandidateSink?: AssistantHostedProductFeedbackCandidateSink | null
   /**
    * Hosted Linq only: the emoji Web's "on it" tapback already put on this
-   * accepted member message, or null. Consulted before Murph's own
-   * `react_to_message` so a second reaction never replaces it.
+   * accepted member message, or null. Consulted by Murph's own
+   * `react_to_message`, whose reaction replaces it, so Murph knows what was
+   * there.
    */
   readLinqMessageAckReaction?: ((input: {
     signal: AbortSignal

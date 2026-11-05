@@ -62,16 +62,19 @@ export async function readCompanionNumbers(request: Request) {
   if (!timeZone) throw numbersUnavailable();
   const now = new Date();
   const through = toLocalDayKey(now, timeZone);
-  const window = { from: addDaysToIsoDate(through, -89), through };
+  // Charts reach back a year, all the saved replica keeps. The change still
+  // counts from the first week of the last 90 days.
+  const window = { from: addDaysToIsoDate(through, -364), through };
+  const baselineFrom = addDaysToIsoDate(through, -89);
   const stepsWindow = { ...window, through: lastSettledStepDay(now, timeZone) };
   return {
     timeZone, savedAt: client.replica.generatedAt, freshness, window,
     demographics,
     numbers: {
-      restingHeartRate: presentNumber(client, metrics.restingHeartRate, window),
-      sleep: presentNumber(client, metrics.sleep, window),
-      steps: presentNumber(client, metrics.steps, stepsWindow),
-      vo2Max: presentNumber(client, metrics.vo2Max, window),
+      restingHeartRate: presentNumber(client, metrics.restingHeartRate, window, baselineFrom),
+      sleep: presentNumber(client, metrics.sleep, window, baselineFrom),
+      steps: presentNumber(client, metrics.steps, stepsWindow, baselineFrom),
+      vo2Max: presentNumber(client, metrics.vo2Max, window, baselineFrom),
     },
   };
 }
@@ -114,6 +117,7 @@ function presentNumber(
   client: BrowserVaultMetricSeriesCapableQueryClient,
   metric: (typeof metrics)[keyof typeof metrics],
   window: { from: string; through: string },
+  baselineFrom: string,
 ) {
   const definition = resolveMetricDefinition(metric.key)!;
   const round = (value: number) => Number(value.toFixed(metric.precision));
@@ -134,7 +138,7 @@ function presentNumber(
   const comparison = selectMetricWindowComparison({
     metricKey: metric.key,
     points: points.map(point => ({ ...point, metricKey: metric.key, unit: definition.canonicalUnit })),
-    baselineWindow: { start: window.from, end: addDaysToIsoDate(window.from, 6) },
+    baselineWindow: { start: baselineFrom, end: addDaysToIsoDate(baselineFrom, 6) },
     comparisonWindow: { start: addDaysToIsoDate(window.through, -6), end: window.through },
     statistic: intermittent ? definition.trendPolicy?.aggregation : "mean",
     minimumPoints: intermittent ? definition.trendPolicy?.minimumPoints : 4,

@@ -466,6 +466,8 @@ function measurementMetricPoints(entity: CanonicalEntity, sourceKind: MetricSour
       confidence: eventConfidence(entity),
       context: { qualifiers: readQualifiers(record?.qualifiers) },
       entity,
+      // Reported VO2 estimates are dated readings consumed by daily shares and Numbers.
+      grain: resolveMetricDefinition(metric)?.key === "estimated-vo2-max" ? "day" : undefined,
       index,
       metric,
       sourceKind,

@@ -48,8 +48,10 @@ import {
 } from '../src/assistant/generated-delivery-files.ts'
 
 
-const TAPPED_SKIP_TEXT =
-  'no reaction sent: this message already has your ⏰ tapback from when it arrived, and a second one would replace it. Carry on; if a reaction was going to be your whole reply, finish without reply.'
+const TAPPED_REPLACE_TEXT =
+  'reaction queued; it replaces the ⏰ tapback you put on this message when it arrived (one tapback per message). No need to mention it.'
+const SAME_TAPBACK_SKIP_TEXT =
+  'no reaction sent: this message already has your 👍 tapback from when it arrived. Carry on; if a reaction was going to be your whole reply, finish without reply.'
 
 describe('steered final segments', () => {
   type ScriptedSteeredFinalStep =
@@ -1636,7 +1638,7 @@ describe('steered final segments', () => {
     ])
   })
 
-  it('queues no reaction on a message that already has the Web tapback, so a reaction-only reply finishes quietly', async () => {
+  it('replaces the Web tapback with Murph\'s reaction and tells Murph which emoji was there', async () => {
     const tappedRef = `ain_${'7'.repeat(32)}`
     const authorizeAcceptedMessageTarget = vi.fn(async (input: {
       action: 'native-reply' | 'participant-effect' | 'reaction'
@@ -1645,11 +1647,11 @@ describe('steered final segments', () => {
     }) => ({ ackReaction: '⏰', targetInputId: input.messageRef }))
     const result = await runScriptedSteeredFinalSegmentsTurn([
       {
-        expectedText: TAPPED_SKIP_TEXT,
+        expectedText: TAPPED_REPLACE_TEXT,
         id: 98,
         kind: 'react-to-message',
         messageRef: tappedRef,
-        reaction: 'thumbs_up',
+        reaction: 'heart',
       },
       {
         expectedText: 'finished without reply',
@@ -1662,35 +1664,37 @@ describe('steered final segments', () => {
       action: 'reaction',
       messageRef: tappedRef,
     }))
-    expect(result.reactions).toEqual([])
+    expect(result.reactions).toEqual([
+      { deliveryContextOrdinal: 0, reaction: 'heart', targetInputId: tappedRef },
+    ])
     expect(result.finalAction).toEqual({ kind: 'none' })
     expect(result.finalMessage).toBe('')
   })
 
-  it('still sends the text answer after skipping a reaction on a tapped message', async () => {
+  it('skips a thumbs up on a message that already has the native 👍 tapback and still sends the text answer', async () => {
     const tappedRef = `ain_${'8'.repeat(32)}`
     const result = await runScriptedSteeredFinalSegmentsTurn([
       {
-        expectedText: TAPPED_SKIP_TEXT,
+        expectedText: SAME_TAPBACK_SKIP_TEXT,
         id: 100,
         kind: 'react-to-message',
         messageRef: tappedRef,
-        reaction: 'heart',
+        reaction: 'thumbs_up',
       },
       completedItemEvent({
         id: 'assistant-after-skip',
         type: 'assistant_message',
-        message: 'Your 7am reminder is set.',
+        message: 'Your step goal is now 9,000.',
       }),
     ], {
       authorizeAcceptedMessageTarget: async (input) => ({
-        ackReaction: '⏰',
+        ackReaction: '👍',
         targetInputId: input.messageRef,
       }),
     })
 
     expect(result.reactions).toEqual([])
-    expect(result.finalMessage).toBe('Your 7am reminder is set.')
+    expect(result.finalMessage).toBe('Your step goal is now 9,000.')
   })
 
   it('returns no final text or outbound progress for a commentary-only turn', async () => {

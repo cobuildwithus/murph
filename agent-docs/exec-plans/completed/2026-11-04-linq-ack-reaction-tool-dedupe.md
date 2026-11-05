@@ -170,3 +170,14 @@ you are the best 🙏" on a tapped message) passed 3 of 3: one
 text.
 Updated: 2026-11-05
 Completed: 2026-11-05
+
+## Follow-up: Murph's reaction may replace the tapback (owner, 2026-11-05)
+
+The owner prefers that Murph can react over the Web tapback, as long as Murph
+knows what the original was. `react_to_message` now always queues a
+different reaction and its result says "it replaces the ⏰ tapback you put on
+this message when it arrived … No need to mention it." The one skip left is
+the same reaction (thumbs_up over Web's native 👍 Like), which would change
+nothing in iMessage. Web, the engagement route, the runtime lookup and the
+2-minute burst cap are unchanged. Real Codex journey 3/3: ❤️ queued over ⏰,
+`finish_without_reply`, no text.

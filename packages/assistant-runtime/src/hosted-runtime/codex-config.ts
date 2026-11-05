@@ -583,8 +583,14 @@ export function buildHostedCodexConfigToml(input: {
     // ancestor in the runner image is a project root. Codex still probes every
     // ancestor for a `.git` marker through its sandboxed filesystem helper on
     // each thread start and cold resume. With no markers the vault stays the
-    // only AGENTS.md / project-config directory, so this only skips probes.
+    // only project-config directory, so this only skips probes.
     "project_root_markers = []",
+    // Murph supplies every instruction itself and never writes AGENTS.md into
+    // a vault, so project-doc discovery only finds nothing. Each probe goes
+    // through the sandboxed filesystem helper on thread start and cold resume,
+    // which made it most of Codex thread setup. A vault file must not become
+    // model instructions either.
+    "project_doc_max_bytes = 0",
     "",
     ...providerConfigLines,
     ...buildMurphHostedPermissionProfileTomlLines(),

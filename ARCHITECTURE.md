@@ -6527,9 +6527,14 @@ MIME type; canonical mailbox payloads deliberately omit download URLs. Offers
 perform no provider lookup. Saving refreshes the locator through the bounded
 Linq SDK boundary outside the transaction, verifies its exact ID and MIME, and
 keeps that locator request-local. It rejects other senders/rooms/days and
-downloads at most 4 MiB from the fixed Linq CDN with
-redirects disabled, then stores the bytes through the canonical member-owned
-private Cloudflare Images path outside the transaction. No model-controlled URL,
+downloads at most 20 MiB, the runner's Linq bound, from the fixed Linq CDN with
+redirects disabled. A chat photo is the full camera file (a 24 MP iPhone JPEG
+is 5 to 10 MB), while game media holds at most 4 MiB, so JPEG is re-encoded
+like an app upload: upright, at most 2048 px on the long edge, without camera
+metadata such as location. Prebuilt sharp cannot decode HEIC, so HEIC passes
+through only when it already fits. The result is stored through the canonical
+member-owned private Cloudflare Images path outside the transaction. A failed
+import logs one fixed reason code, never a locator or bytes. No model-controlled URL,
 member ID or raw filesystem path crosses this tool boundary. Ordinary `runGameCommand(post)` owns the write and checks the
 expected day/replaced entry under its game lock. The source-derived entry ID
 makes retries idempotent; a historical withdrawn source is never reported as a

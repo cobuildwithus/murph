@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   messages: [] as Array<[Record<string, unknown>, Record<string, unknown>]>,
   next: vi.fn(),
   now: [] as number[],
-  sendResults: [] as boolean[],
+  sendResults: [] as unknown[],
   spaceSend: vi.fn(),
   stop: vi.fn(),
   delay: vi.fn(),
@@ -250,6 +250,39 @@ describe("production conversation canary runner", () => {
     expect(report).toHaveBeenCalledWith({ latencyMs: proposalLatencyMs, senderSendMs: 0, stage: "goal-proposal", turn: 4 });
     expect(mocks.spaceSend).toHaveBeenCalledTimes(4);
     expect(mocks.stop).toHaveBeenCalledOnce();
+  });
+
+  it("counts Murph's tapback on the sent message as the first visible reply when the text comes later", async () => {
+    // Prod 2026-11-05: 📝 about 3 s after the goal-proposal send, the progress
+    // text skipped as acknowledged, and the proposal text at 52 s.
+    prepareCompleteConversation({
+      proposalLatencyMs: 52_000,
+      proposalTapback: { latencyMs: 3_000, targetId: "msg_goal_proposal" },
+    });
+
+    const result = await runLinqProductionCanary(TEST_ENV);
+    expect(result.turns[3]).toEqual({
+      firstVisible: "tapback",
+      latencyMs: 3_000,
+      replyMs: 52_000,
+      senderSendMs: 0,
+      stage: "goal-proposal",
+      turn: 4,
+    });
+    expect(result.canonicalOutcome).toEqual({ baselineGoalCount: 0, savedGoalCount: 1, proposalGoalCount: 0 });
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(5);
+  });
+
+  it("ignores a tapback on another message and still enforces the reply budget", async () => {
+    prepareCompleteConversation({
+      proposalLatencyMs: 52_000,
+      proposalTapback: { latencyMs: 3_000, targetId: "msg_earlier_turn" },
+    });
+
+    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toHaveProperty(
+      "name",
+      "reply-latency-budget-exceeded; turn=4; metric=send_to_reply; elapsed_ms=52000; budget_ms=40000",
+    );
   });
 
   it.each([20_000, 30_000, 39_999])("allows an acceptance reply after %i ms and completes the canonical save check", async (acceptanceLatencyMs) => {
@@ -955,21 +988,37 @@ function mockCanaryObservationClock(): { elapsedMs(): number; advance(durationMs
   return { elapsedMs: () => elapsedMs, advance };
 }
 
-function prepareCompleteConversation(input: { proposalLatencyMs?: number; acceptanceLatencyMs?: number } = {}): void {
+function prepareCompleteConversation(input: {
+  acceptanceLatencyMs?: number;
+  proposalLatencyMs?: number;
+  /** Murph's tapback lands this long after the goal-proposal send, before its text. */
+  proposalTapback?: { latencyMs: number; targetId: string };
+} = {}): void {
   const proposalReplyAt = 3_000 + (input.proposalLatencyMs ?? 1_000);
+  const tapback = input.proposalTapback;
   mocks.now = [
     0, 0, 1_000, 1_000, 1_000, 2_000, 2_000, 2_000, 3_000,
-    3_000, 3_000, proposalReplyAt,
+    // Goal proposal: send start, send done, [tapback], text reply.
+    3_000, ...(tapback ? [3_000 + tapback.latencyMs] : []), 3_000, proposalReplyAt,
     proposalReplyAt, proposalReplyAt, proposalReplyAt + (input.acceptanceLatencyMs ?? 1_000),
   ];
-  mocks.sendResults = [true, true, true, true, true];
-  mocks.messages = [
+  mocks.sendResults = [true, true, true, tapback ? { id: "msg_goal_proposal" } : true, true];
+  const replies = [
     MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
     MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.casual,
     "What would you most like to improve about your health?",
     "How about a twenty-minute walk before lunch on weekdays?",
     "Your walking plan is set for tomorrow.",
   ].map((text) => inboundMessage({ text }));
+  if (tapback) {
+    replies.splice(3, 0, inboundTapback({ emoji: "📝", targetId: tapback.targetId }));
+  }
+  mocks.messages = replies;
+}
+
+function inboundTapback(input: { emoji: string; targetId: string }): [Record<string, unknown>, Record<string, unknown>] {
+  const [space, message] = inboundMessage({ text: "" });
+  return [space, { ...message, content: { emoji: input.emoji, target: { id: input.targetId }, type: "reaction" } }];
 }
 
 function outcomeResponse(outcome: { ready: boolean; totalGoalCount?: number; matchingGoalCount: number; matchingGoalIdCount: number }): Response {
