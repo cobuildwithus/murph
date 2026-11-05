@@ -15,7 +15,22 @@ import {
   VAULT_LAYOUT,
   type ExperimentOutcome,
   type ExperimentFrontmatter,
+  type MemoryDemographics,
 } from "@murphai/contracts";
+
+import { readMemoryDemographics } from "@murphai/core";
+
+/**
+ * Memory that can't be read projects as unknown (no field), so one bad memory
+ * file never stops the numbers, meals and labs the replica also carries.
+ */
+async function readReplicaDemographics(vaultRoot: string): Promise<MemoryDemographics | null> {
+  try {
+    return await readMemoryDemographics(vaultRoot);
+  } catch {
+    return null;
+  }
+}
 
 import type {
   CanonicalEntity,
@@ -199,6 +214,7 @@ export async function createHostedBrowserVaultReplicaForSourceState(input: {
 
   input.onRefreshStep?.("replica_construction_projection");
   return await createBrowserVaultReplica({
+    demographics: (await readReplicaDemographics(input.vaultRoot)) ?? undefined,
     experimentOutcomes: outcomeProjection.outcomes,
     generatedAt: input.generatedAt,
     metricPoints,
@@ -577,6 +593,8 @@ export async function hashHostedBrowserVaultReplicaSources(
   const digest = createHash("sha256");
   digest.update("murph.hosted-browser-vault-source.v1\0");
   digest.update(canonicalSourceResult.value.hash);
+  digest.update("\0demographics\0");
+  digest.update(JSON.stringify(await readReplicaDemographics(vaultRoot)));
   digest.update("\0");
 
   for (const source of outcomeProjection.sources) {

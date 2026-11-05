@@ -619,6 +619,25 @@ describe("weekly game: schedules and scoring", () => {
 });
 
 describe("weekly game: dev time travel and start now", () => {
+  it("uses the remaining group's calendar for weekdays after an earlier start", () => {
+    const state = live(invited({ days: [0] }, [WINNER_GETS], "2026-10-19"));
+    state.game.seats = 10;
+    state.players.unshift({ ...state.players[0], memberId: "departed", seat: 3, leftAt: JOIN_AT, dayOne: "2026-10-18" });
+    expect(isScheduledDay(state, 0)).toBe(true);
+    expect(isScheduledDay(state, 1)).toBe(false);
+  });
+
+  it("requires an earlier valid original group calendar and retains historical attempt locks", () => {
+    const pair = live(invited(EVERY_DAY, [WINNER_GETS], "2026-10-25"));
+    const group = { ...pair, game: { ...pair.game, seats: 10 as const } };
+    expect(decideStartNow(group, JOIN_AT).players.map(player => player.dayOne)).toEqual(["2026-10-16", "2026-10-16"]);
+    expect(codeOf(() => decideStartNow({ ...group, hasPostedAttempt: true }, JOIN_AT))).toBe("DAY_CLOSED");
+    expect(codeOf(() => decideStartNow({ ...group, players: group.players.slice(0, 1) }, JOIN_AT))).toBe("GAME_NOT_LIVE");
+    expect(codeOf(() => decideStartNow({ ...group, players: group.players.map(player => ({ ...player, dayOne: null })) }, JOIN_AT))).toBe("DAY_CLOSED");
+    const monday = live(invited({ days: [0] }, [WINNER_GETS], "2026-10-19"));
+    expect(codeOf(() => decideStartNow({ ...monday, game: { ...monday.game, seats: 10 } }, JOIN_AT))).toBe("DAY_CLOSED");
+  });
+
   it("starts today (over any picked date) only before anyone has", () => {
     const state = live(invited(EVERY_DAY, [WINNER_GETS], "2026-10-25"));
     const started = decideStartNow(state, JOIN_AT);

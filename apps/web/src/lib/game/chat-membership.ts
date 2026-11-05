@@ -237,8 +237,7 @@ function isGroupGameAudienceSubset(game: GroupRoomGame, audience: GameChatAudien
   ].filter((memberId): memberId is string => memberId !== null));
   const unboundKeys = new Set(game.invitees.flatMap(invitee => invitee.memberId === null && invitee.recipientLookupKey !== null ? [invitee.recipientLookupKey] : []));
   return audience.resolvedContacts.every(({ contact, memberId }) => memberId !== null && addressedMembers.has(memberId)
-    || createHostedLinqParticipantContactLookupKeyReadCandidates(contact).some(key => unboundKeys.has(key)))
-    && game.players.every(player => player.leftAt !== null || player.memberId !== null && audience.memberIds.includes(player.memberId));
+    || createHostedLinqParticipantContactLookupKeyReadCandidates(contact).some(key => unboundKeys.has(key)));
 }
 
 /** The single group-room authority: exact or original subset audience, addressed seats and restrictions.
@@ -252,7 +251,7 @@ export async function readGroupGameChatAuthority(game: GroupRoomGame, containerM
   if (!audience.keys.candidates.includes(game.audienceKey) && !isGroupGameAudienceSubset(game, audience)) return null;
   const route = await readHostedThreadRouteByThreadIdentity({ channel: "linq", threadId: audience.threadId, prisma });
   if (route?.containerMemberId !== containerMemberId) return null;
-  if (game.players.some(player => !player.leftAt && (!player.memberId || player.seat < 0 || player.seat > 9))) return null;
+  if (game.players.some(player => !player.leftAt && (!player.memberId || !audience.memberIds.includes(player.memberId) || player.seat < 0 || player.seat > 9))) return null;
   const restricted = [...new Set([...audience.memberIds, ...game.players.flatMap(player => player.memberId ? [player.memberId] : [])])];
   return await hasGameChatRestriction(prisma, restricted) ? null : audience;
 }

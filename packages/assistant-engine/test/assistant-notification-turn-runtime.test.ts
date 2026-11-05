@@ -4305,6 +4305,24 @@ test('sendAssistantNotificationLocal rejects an empty context handoff response b
   expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
 })
 
+test.each(['send_message', 'skip'] as const)('group missed-day notifications isolate tools and deliver text only: %s', async kind => {
+  const policy = { kind: 'game_group_missed_check_in' as const, eventId: 'game-missed:synthetic-group:group:2030-03-04', roomId: 'synthetic-group',
+    firstMissedDate: '2030-03-04', pairFingerprint: 'a'.repeat(32), conversationLaneSeq: '7',
+    batch: [{ gameId: 'game_synthetic', termsVersion: 1, remainingMemberIds: ['one', 'two'], misses: [{ memberId: 'one', missedDates: ['2030-03-04'] }] }] }
+  const providerResult = createProviderResult({ response: JSON.stringify({ kind, privateSummary: 'Synthetic miss decision.', ...(kind === 'send_message' ? { text: 'Alex, your reading post is missing from yesterday.' } : {}) }),
+    responseCard: DAILY_NUTRITION_CARD, responseMedia: [{ filename: 'private.mp3', kind: 'voice_memo', transcript: 'private', transport: { attachmentId: 'forbidden', kind: 'linq_attachment' } }] })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } = await loadNotificationTurnHarness({ providerResult, turnId: `group-missed-${kind}` })
+  const result = await sendAssistantNotificationLocal({ channel: 'linq', deliveryIdempotencyKey: policy.eventId, deliveryTarget: 'synthetic-game-thread',
+    executionContext: { hosted: { memberId: policy.roomId, userEnvKeys: [], gameMissedCheckInScope: policy } },
+    instructions: 'Read room lore and skip explained misses.', responsePolicy: policy, threadId: 'synthetic-game-thread', threadIsDirect: false, vault: '/synthetic-vault' })
+  expect(result.decision.kind).toBe(kind)
+  if (kind === 'skip') expect(deliverMessage).not.toHaveBeenCalled()
+  else expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({ message: 'Alex, your reading post is missing from yesterday.', card: null, media: [] }))
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(expect.objectContaining({ profile: {
+    nativeResumePolicy: 'disabled', promptProfile: 'conversation', threadScope: 'isolated-thread', toolProfile: 'game-host-turn',
+  } }))
+})
+
 test.each(['game-recap:game_synthetic', 'game-recap:game_synthetic:synthetic_request'])('game recap notifications deliver and persist the accepted chat line exactly: %s', async (eventId) => {
   const savedChatLine = '  Ava won the mat jurisdiction case, 3–2.  \nWatch the recap: https://recaps.murph.test/recap/game_synthetic'
   const beforeDelivery = vi.fn()

@@ -46,6 +46,39 @@ export const memorySectionValues = [
 
 export const memorySectionSchema = z.enum(memorySectionValues);
 
+export const memoryDemographicsPatchSchema = z.object({
+  birthYear: z.number().int().min(1900).max(9999).nullable().optional(),
+  age: z.number().int().min(13).max(120).nullable().optional(),
+  biologicalSex: z.enum(["female", "male"]).nullable().optional(),
+}).strict().superRefine((value, context) => {
+  if (value.birthYear !== undefined && value.age !== undefined) {
+    context.addIssue({ code: "custom", message: "Supply birthYear or age, never both." });
+  }
+  if (value.birthYear === undefined && value.age === undefined && value.biologicalSex === undefined) {
+    context.addIssue({ code: "custom", message: "Supply at least one demographic field." });
+  }
+});
+
+export const memoryDemographicsSchema = z.object({
+  birthYear: z.number().int().nullable(),
+  birthYearPrecision: z.enum(["exact", "approximate"]).nullable(),
+  biologicalSex: z.enum(["female", "male"]).nullable(),
+  status: z.enum(["resolved", "unresolved"]),
+  revision: z.string().regex(/^[a-f0-9]{64}$/u),
+}).strict();
+
+export type MemoryDemographics = z.infer<typeof memoryDemographicsSchema>;
+export type MemoryDemographicsPatch = z.infer<typeof memoryDemographicsPatchSchema>;
+export type SetMemoryDemographicsInput = MemoryDemographicsPatch & { asOf?: string; now?: Date };
+
+// One marker is sufficient while the serialized member-action mailbox retains
+// the request until its post-checkpoint outcome. Generic memory edits preserve it.
+const memoryDemographicsActionSchema = z.object({
+  actionId: z.string().uuid(),
+  payloadHash: z.string().regex(/^[a-f0-9]{64}$/u),
+  status: z.enum(["applied", "unchanged", "rejected"]),
+}).strict();
+
 const canonicalMemoryRecordIdSchema = z.string().refine(
   (value) => isContractId(value, ID_PREFIXES.memory),
   {
@@ -68,6 +101,7 @@ export const memoryDocumentFrontmatterSchema = withContractMetadata(
       schemaVersion: z.literal(memoryDocumentSchemaVersion),
       title: z.string().min(1).default("Memory"),
       updatedAt: z.string().min(1),
+      lastDemographicsAction: memoryDemographicsActionSchema.optional(),
     })
     .strict(),
   "@murphai/contracts/frontmatter-memory.schema.json",
@@ -252,7 +286,50 @@ export function createMemoryRecordId(
   return generateContractId(ID_PREFIXES.memory);
 }
 
-export function upsertMemoryRecord(
+export function upsertMemoryRecord(input: MemoryDocument, next: UpsertMemoryRecordInput): {
+  created: boolean; document: MemoryDocument; record: MemoryRecord;
+} {
+  normalizeMemoryRecordId(input.records, next.recordId ?? null);
+  const text = normalizeMemoryText(next.text);
+  const kind = memoryDemographicKind(text);
+  const existing = input.records.find(record => record.id === next.recordId);
+  const previousKind = existing ? memoryDemographicKind(existing.text) : null;
+  if (previousKind !== null && previousKind !== kind) {
+    throw new Error("Replace a demographic record with the same kind, or forget it explicitly.");
+  }
+  if (kind === null) return upsertMemoryRecordRaw(input, next);
+  const fact = parseMemoryDemographic(text);
+  if (next.section !== "Identity" || !fact) {
+    throw new Error("Save birth year, age or biological sex with `vault-cli memory set-demographics`.");
+  }
+  if (fact.kind === "dob") {
+    // A newer full date supersedes an older year or dated age.
+    const result = upsertMemoryRecordRaw(input, next);
+    result.document.records = result.document.records.filter(record => {
+      const other = memoryDemographicKind(record.text);
+      return other !== "age" && other !== "year";
+    });
+    return result;
+  }
+  const base = existing && previousKind === null
+    ? { frontmatter: input.frontmatter, records: input.records.filter(record => record.id !== existing.id) }
+    : input;
+  const document = setMemoryDemographics(base, {
+    now: next.now,
+    ...(fact.kind === "sex" ? { biologicalSex: fact.sex }
+      : fact.kind === "year" ? { birthYear: fact.year }
+      : { age: fact.age, asOf: fact.asOf }),
+  });
+  const record = document.records.find(record => memoryDemographicKind(record.text) === kind)
+    ?? document.records.find(record => kind === "year" && memoryDemographicKind(record.text) === "dob");
+  if (!record) throw new Error("The demographic write did not produce canonical evidence.");
+  return {
+    document: { frontmatter: document.frontmatter, records: document.records },
+    record, created: !existing && !input.records.some(previous => previous.id === record.id),
+  };
+}
+
+function upsertMemoryRecordRaw(
   input: MemoryDocument,
   next: UpsertMemoryRecordInput,
 ): {
@@ -278,6 +355,7 @@ export function upsertMemoryRecord(
     });
   const existingIndex = input.records.findIndex((record) => record.id === nextRecordId);
   const existingRecord = existingIndex >= 0 ? input.records[existingIndex] ?? null : null;
+  const demographicKind = memoryDemographicKind(normalizedText);
   const record: MemoryRecord = memoryRecordSchema.parse({
     id: nextRecordId,
     section: next.section,
@@ -288,7 +366,8 @@ export function upsertMemoryRecord(
     sourcePath: existingRecord?.sourcePath ?? memoryDocumentRelativePath,
   });
 
-  const records = input.records.filter((entry) => entry.id !== nextRecordId);
+  const records = input.records.filter((entry) => entry.id !== nextRecordId
+    && (demographicKind === null || memoryDemographicKind(entry.text) !== demographicKind));
   const insertionIndex = findMemoryInsertionIndex(records, record.section);
   records.splice(insertionIndex, 0, record);
 
@@ -377,7 +456,9 @@ export function forgetMemoryRecord(
   }
 
   const record = input.records[index] ?? null;
-  const records = input.records.filter((entry) => entry.id !== next.recordId);
+  const kind = record ? memoryDemographicKind(record.text) : null;
+  const records = input.records.filter((entry) => entry.id !== next.recordId
+    && (kind === null || memoryDemographicKind(entry.text) !== kind));
 
   return {
     document: {
@@ -415,6 +496,138 @@ export function buildMemoryPromptBlock(input: MemoryDocument): string | null {
     "Memory lives in the canonical vault and is safe to rely on for durable user context.",
     `Memory:\n${sections.join("\n\n")}`,
   ].join("\n\n");
+}
+
+type MemoryDemographicKind = "dob" | "year" | "age" | "sex";
+type MemoryDemographic =
+  | { kind: "dob"; year: number }
+  | { kind: "year"; year: number }
+  | { kind: "age"; year: number; age: number; asOf: string }
+  | { kind: "sex"; sex: "female" | "male" };
+
+function memoryDemographicKind(text: string): MemoryDemographicKind | null {
+  if (/^Date of birth\s*:/iu.test(text)) return "dob";
+  if (/^Birth year\s*:/iu.test(text)) return "year";
+  if (/^Age\s*:/iu.test(text)) return "age";
+  if (/^Biological sex\s*:/iu.test(text)) return "sex";
+  return null;
+}
+
+function validDemographicDate(value: string): boolean {
+  const date = new Date(`${value}T00:00:00Z`);
+  return /^\d{4}-\d{2}-\d{2}$/u.test(value) && Number.isFinite(date.getTime())
+    && date.toISOString().slice(0, 10) === value;
+}
+
+function parseMemoryDemographic(text: string): MemoryDemographic | null {
+  const dob = /^Date of birth: (\d{4}-\d{2}-\d{2})$/u.exec(text)?.[1];
+  if (dob && validDemographicDate(dob) && Number(dob.slice(0, 4)) >= 1900) {
+    return { kind: "dob", year: Number(dob.slice(0, 4)) };
+  }
+  const year = /^Birth year: (\d{4})$/u.exec(text)?.[1];
+  if (year && Number(year) >= 1900) return { kind: "year", year: Number(year) };
+  const age = /^Age: (\d{1,3}) \(as of (\d{4}-\d{2}-\d{2})\)$/u.exec(text);
+  if (age?.[1] && age[2] && validDemographicDate(age[2])
+    && Number(age[1]) >= 13 && Number(age[1]) <= 120) {
+    return { kind: "age", year: Number(age[2].slice(0, 4)) - Number(age[1]), age: Number(age[1]), asOf: age[2] };
+  }
+  const sex = /^Biological sex: (female|male)$/u.exec(text)?.[1];
+  return sex === "female" || sex === "male" ? { kind: "sex", sex } : null;
+}
+
+/** Only constrained evidence enters the projection; gender and prose never do. */
+export async function resolveMemoryDemographics(input: MemoryDocument): Promise<MemoryDemographics> {
+  const records = input.records.filter(record => memoryDemographicKind(record.text) !== null);
+  const facts = new Map<MemoryDemographicKind, MemoryDemographic>();
+  let invalidBirth = false;
+  let invalidSex = false;
+  for (const record of records) {
+    const kind = memoryDemographicKind(record.text)!;
+    const fact = parseMemoryDemographic(record.text);
+    if (!fact || record.section !== "Identity" || facts.has(kind)) {
+      if (kind === "sex") invalidSex = true;
+      else invalidBirth = true;
+    }
+    if (fact) facts.set(kind, fact);
+  }
+  const birth = resolveMemoryBirthFacts(facts, invalidBirth);
+  const sex = facts.get("sex");
+  const selected = records.map(({ id, section, text, createdAt, updatedAt }) =>
+    ({ id, section, text, createdAt, updatedAt })).sort((a, b) => a.id.localeCompare(b.id));
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(selected)));
+  return {
+    birthYear: birth.year,
+    birthYearPrecision: birth.precision,
+    biologicalSex: invalidSex || sex?.kind !== "sex" ? null : sex.sex,
+    status: birth.invalid || invalidSex ? "unresolved" : "resolved",
+    revision: Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join(""),
+  };
+}
+
+function resolveMemoryBirthFacts(facts: ReadonlyMap<MemoryDemographicKind, MemoryDemographic>, invalid: boolean): {
+  year: number | null; precision: "exact" | "approximate" | null; invalid: boolean;
+} {
+  const years = [...facts.values()].flatMap(fact => fact.kind === "dob" || fact.kind === "year" ? [fact.year] : []);
+  const age = facts.get("age");
+  const approximate = age?.kind === "age" ? age.year : null;
+  const exact = years[0] ?? null;
+  // At the source date, age N permits the current-year estimate or one year earlier.
+  const disagreesWithAge = exact !== null && approximate !== null
+    && exact !== approximate && exact !== approximate - 1;
+  if (invalid || new Set(years).size > 1 || disagreesWithAge) {
+    return { year: null, precision: null, invalid: true };
+  }
+  if (exact !== null) return { year: exact, precision: "exact", invalid: false };
+  return { year: approximate, precision: approximate === null ? null : "approximate", invalid: false };
+}
+
+/** Validates the patch at admission time without making replay depend on today's year. */
+export function validateMemoryDemographicsPatch(input: unknown, now = new Date()): MemoryDemographicsPatch {
+  const patch = memoryDemographicsPatchSchema.parse(input);
+  if (patch.birthYear != null && patch.birthYear > now.getUTCFullYear()) {
+    throw new Error("Birth year must not be in the future.");
+  }
+  return patch;
+}
+
+export function setMemoryDemographics(
+  input: MemoryDocument,
+  next: SetMemoryDemographicsInput,
+): MemoryDocument {
+  const { now = new Date(), asOf, ...fields } = next;
+  const patch = validateMemoryDemographicsPatch(fields, now);
+  const date = asOf ?? now.toISOString().slice(0, 10);
+  if (!validDemographicDate(date)) throw new Error("Age needs a valid source statement date.");
+  let document = input;
+  const remove = (kinds: MemoryDemographicKind[]) => {
+    const records = document.records.filter(record => !kinds.includes(memoryDemographicKind(record.text)!));
+    if (records.length !== document.records.length) document = { ...document, records };
+  };
+  const put = (kind: MemoryDemographicKind, text: string) => {
+    const existing = document.records.filter(record => memoryDemographicKind(record.text) === kind);
+    if (existing.length === 1 && existing[0]?.section === "Identity" && existing[0].text === text) return;
+    document = upsertMemoryRecordRaw(document, {
+      section: "Identity", text, now, recordId: existing[0]?.id,
+    }).document;
+  };
+  if (patch.birthYear === null || patch.age === null) remove(["dob", "year", "age"]);
+  else if (patch.birthYear !== undefined) {
+    remove(["age"]);
+    const dobs = document.records.filter(record => memoryDemographicKind(record.text) === "dob");
+    const dob = dobs.length === 1 && dobs[0]?.section === "Identity" ? parseMemoryDemographic(dobs[0].text) : null;
+    if (dob?.kind === "dob" && dob.year === patch.birthYear) remove(["year"]);
+    else put("year", `Birth year: ${patch.birthYear}`);
+  } else if (patch.age !== undefined) {
+    // A newer stated age supersedes an older bare year; a full DOB stays and
+    // must agree within the age's one-year window.
+    remove(["year"]);
+    put("age", `Age: ${patch.age} (as of ${date})`);
+  }
+  if (patch.biologicalSex === null) remove(["sex"]);
+  else if (patch.biologicalSex !== undefined) put("sex", `Biological sex: ${patch.biologicalSex}`);
+  return document === input ? input : {
+    records: document.records, frontmatter: { ...document.frontmatter, updatedAt: now.toISOString() },
+  };
 }
 
 export function formatMemoryDisplayNameRecordText(displayName: string): string {
@@ -615,6 +828,12 @@ function renderMemoryFrontmatter(
     `schemaVersion: ${frontmatter.schemaVersion}`,
     `title: ${renderMemoryFrontmatterValue(frontmatter.title)}`,
     `updatedAt: ${renderMemoryFrontmatterValue(frontmatter.updatedAt)}`,
+    ...(frontmatter.lastDemographicsAction === undefined ? [] : [
+      "lastDemographicsAction:",
+      `  actionId: ${frontmatter.lastDemographicsAction.actionId}`,
+      `  payloadHash: ${frontmatter.lastDemographicsAction.payloadHash}`,
+      `  status: ${frontmatter.lastDemographicsAction.status}`,
+    ]),
     "---",
     body,
   ].join("\n");

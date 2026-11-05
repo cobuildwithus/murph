@@ -169,6 +169,16 @@ To refresh the shipped schema artifact from the built CLI entrypoint during pack
 pnpm --dir packages/cli gen:config-schema
 ```
 
+`vault-cli memory set-demographics --age 39 --as-of 2025-12-31` saves the
+member's dated statement. Use `--birth-year 1986` for an explicit year and
+`--biological-sex female|male` only for explicitly stated biological sex.
+Omit fields to preserve them; `--clear-birth` clears all birth facts and
+`--clear-sex` clears sex. A conflicting saved DOB returns a rejected,
+unresolved receipt; a year never invents DOB month/day. Generic Identity
+memory corrections share this validation. The existing memory family is wired
+through the command registrar, manifest, lazy dispatcher and family routing;
+regenerate schema/types/skill hash with the command above after changes.
+
 ## Maintainer notes
 
 The package exports only the root CLI runtime entrypoint and exposes the `vault-cli` binary. Assistant helper APIs stay in workspace-private owner packages such as `@murphai/assistant-engine` and are bundled into the public tarball when the CLI runtime needs them.

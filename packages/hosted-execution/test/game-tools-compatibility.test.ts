@@ -5,8 +5,37 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseHostedRuntimeGroupToolRequest, parseHostedRuntimeGroupToolResponse } from "../src/parsers/runtime-control.ts";
 import { hostedGameToolRequestSchema, hostedGameToolResponseSchema } from "../src/game-tools.ts";
+import { parseHostedExecutionEvent } from "../src/parsers.ts";
 
 const origin = { kind: "accepted_input", assistantInputId: "ain_synthetic" };
+
+const rematchNotice = (termsVersion: unknown = 1) => ({ kind: "assistant.notification.requested", userId: "synthetic_room", notification: {
+  instructions: "Synthetic compact comparison", responsePolicy: { kind: "require_game_rematch", gameId: "game_synthetic", eventId: "game-rematch:game_synthetic", termsVersion },
+  route: { actorId: null, channel: "linq", delivery: { kind: "explicit", target: "synthetic_chat" }, identityId: null, threadId: "synthetic_chat", threadIsDirect: false },
+} });
+
+it("requires exact group rematch revision authority", () => {
+  expect(parseHostedExecutionEvent(rematchNotice())).toMatchObject(rematchNotice());
+  for (const revision of [undefined, null, 0, -1, 1.5, "1"]) {
+    const event = rematchNotice(); event.notification.responsePolicy.termsVersion = revision;
+    expect(() => parseHostedExecutionEvent(event)).toThrow();
+  }
+  const event = rematchNotice(); event.notification.responsePolicy.eventId = "game-rematch:other";
+  expect(() => parseHostedExecutionEvent(event)).toThrow();
+});
+
+it.skipIf(process.env.MURPH_VERIFY_GAME_SKEW !== "1")("old runners reject revision-bound group rematches before generation", async () => {
+  const root = fileURLToPath(new URL("../../../", import.meta.url));
+  const target = new URL(`../src/.game-rematch-skew-${randomUUID()}.ts`, import.meta.url);
+  await writeFile(target, execFileSync("git", ["show", "b2694496c0665990fa0fd283b5041e5018a38d3e:packages/hosted-execution/src/parsers.ts"], { cwd: root, encoding: "utf8" }), { flag: "wx" });
+  try {
+    const legacy = await import(target.href) as typeof import("../src/parsers.ts");
+    expect(() => legacy.parseHostedExecutionEvent(rematchNotice())).toThrow(/kind/u);
+    const pair = rematchNotice();
+    const legacyPair = { ...pair, notification: { ...pair.notification, responsePolicy: { kind: "require_send" } } };
+    expect(legacy.parseHostedExecutionEvent(legacyPair)).toEqual(parseHostedExecutionEvent(legacyPair));
+  } finally { await rm(target, { force: true }); }
+});
 const game = {
   id: "game_synthetic", status: "live", lengthDays: 7, startsOn: "2030-04-01",
   terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Read" }], schedule: { days: [0, 1, 2, 3, 4] }, stakes: [{ kind: "winner_gets", item: "Choose the next game" }] },
@@ -119,7 +148,7 @@ it.each(["mark_incomplete", "restore_day"])("accepts %s only with a date and no 
   expect(hostedGameToolResponseSchema.parse(payload)).toEqual(payload);
 });
 
-it.skipIf(process.env.MURPH_VERIFY_GAME_INCOMPLETE_SKEW !== "1")("keeps old-runtime responses compatible while Web accepts the next runtime's corrections", async () => {
+it.skipIf(process.env.MURPH_VERIFY_GAME_SKEW !== "1")("keeps old-runtime responses compatible while Web accepts the next runtime's corrections", async () => {
   const target = new URL(`../src/.game-incomplete-skew-${randomUUID()}.ts`, import.meta.url);
   const root = fileURLToPath(new URL("../../../", import.meta.url));
   const source = execFileSync("git", ["show", "b64002efb9:packages/hosted-execution/src/game-tools.ts"], { cwd: root, encoding: "utf8" });
@@ -182,7 +211,7 @@ it("round-trips setup through the runtime parser and rejects extra authority and
 
 
 // Historical-reader proof needs the base Git object; ordinary CI may be shallow.
-it.skipIf(process.env.MURPH_VERIFY_GAME_SETUP_SKEW !== "1")("fences the setup roster for the deployed strict response reader", async () => {
+it.skipIf(process.env.MURPH_VERIFY_GAME_SKEW !== "1")("fences the setup roster for the deployed strict response reader", async () => {
   const target = new URL(`../src/.game-setup-skew-${randomUUID()}.ts`, import.meta.url);
   const root = fileURLToPath(new URL("../../../", import.meta.url));
   await writeFile(target, execFileSync("git", ["show", "0edefc73dc:packages/hosted-execution/src/game-tools.ts"], { cwd: root, encoding: "utf8" }), { flag: "wx" });
@@ -207,7 +236,7 @@ it.skipIf(process.env.MURPH_VERIFY_GAME_SETUP_SKEW !== "1")("fences the setup ro
 });
 
 // Historical objects are an explicit local proof; shallow routine CI skips this lane.
-it.skipIf(process.env.MURPH_VERIFY_GAME_GROUP_SKEW !== "1")("accepts old Web pair responses and keeps group responses away from the released strict runner", async () => {
+it.skipIf(process.env.MURPH_VERIFY_GAME_SKEW !== "1")("accepts old Web pair responses and keeps group responses away from the released strict runner", async () => {
   const root = fileURLToPath(new URL("../../../", import.meta.url));
   const target = new URL(`../src/.game-pr5-legacy-${randomUUID()}.ts`, import.meta.url);
   await writeFile(target, execFileSync("git", ["show", "3049da7b47522b748834c896b24f66b1bfeef77c:packages/hosted-execution/src/game-tools.ts"], { cwd: root, encoding: "utf8" }), { flag: "wx" });
@@ -245,4 +274,24 @@ it("accepts group edit IDs and bounded majority responses without widening pair 
   const pair = { action: "update_game", origin, update: { operation: "propose", gameId: game.id, expectedTermsVersion: 1, proposalId: "proposal_pair", change: pendingChange.change } };
   expect(hostedGameToolRequestSchema.safeParse(pair).success).toBe(false);
   expect(hostedGameToolRequestSchema.safeParse({ ...pair, update: { ...pair.update, change: { kind: "edit", tasks: tasks.slice(0, 3) } } }).success).toBe(false);
+});
+
+
+it.skipIf(process.env.MURPH_VERIFY_GAME_SKEW !== "1")("Plan A preserves the previous group wire and pair bytes in both directions", async () => {
+  const root = fileURLToPath(new URL("../../../", import.meta.url));
+  const target = new URL(`../src/.game-plan-a-legacy-${randomUUID()}.ts`, import.meta.url);
+  await writeFile(target, execFileSync("git", ["show", "b2694496c0665990fa0fd283b5041e5018a38d3e:packages/hosted-execution/src/game-tools.ts"], { cwd: root, encoding: "utf8" }), { flag: "wx" });
+  try {
+    const previous = await import(target.href) as typeof import("../src/game-tools.ts");
+    const ask = { action: "update_game", origin, update: { operation: "propose", gameId: game.id,
+      proposalId: "proposal_earlier", expectedTermsVersion: 1, change: { kind: "start_now" } } };
+    expect(previous.hostedGameToolRequestSchema.parse(ask)).toEqual(hostedGameToolRequestSchema.parse(ask));
+    const pending = response({ ...game, maxPlayers: 10, pendingChange: { id: "proposal_earlier", proposedByMemberId: "player_first",
+      expectedTermsVersion: 1, change: { kind: "start_now" }, startsOn: "2030-04-01", effectiveFromDay: 0,
+      origin: "app", deliveryStatus: "queued", votes: [{ memberId: "player_first", vote: "yes" }], yesNeeded: 1 } });
+    expect(previous.hostedGameToolResponseSchema.parse(pending)).toEqual(hostedGameToolResponseSchema.parse(pending));
+    const refused = { action: "update_game", result: { status: "rejected", error: "Start now is unavailable." } };
+    expect(hostedGameToolResponseSchema.parse(refused)).toEqual(previous.hostedGameToolResponseSchema.parse(refused));
+    expect(JSON.stringify(hostedGameToolResponseSchema.parse(response(game)))).toBe(JSON.stringify(previous.hostedGameToolResponseSchema.parse(response(game))));
+  } finally { await rm(target, { force: true }); }
 });

@@ -477,13 +477,16 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
 
   const result: HostedRuntimeLinqRecentInboundEngagementResult = {};
   const response = value as {
+    gameRematchAuthorityChecked?: unknown;
     assistantAskFallbackRequired?: unknown;
     deliveryBlockCode?: unknown;
     deliveryPosture?: unknown;
     progressUpdateSuppressed?: unknown;
+    ackReaction?: unknown;
     providerDispatchClaimed?: unknown;
     resolvedRoute?: unknown;
   };
+  if (response.gameRematchAuthorityChecked === true) result.gameRematchAuthorityChecked = true;
   if (typeof response.assistantAskFallbackRequired === "boolean") {
     result.assistantAskFallbackRequired = response.assistantAskFallbackRequired;
   }
@@ -508,6 +511,10 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
   }
   if (response.progressUpdateSuppressed === true) {
     result.progressUpdateSuppressed = true;
+  }
+  const ackReaction = typeof response.ackReaction === "string" ? response.ackReaction.trim() : "";
+  if (ackReaction && ackReaction.length <= 16) {
+    result.ackReaction = ackReaction;
   }
 
   const resolvedRoute = parseHostedExecutionResolvedLinqDeliveryRoute(response.resolvedRoute);

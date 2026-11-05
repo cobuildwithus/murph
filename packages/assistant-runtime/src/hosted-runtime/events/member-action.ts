@@ -3,6 +3,7 @@ import type {
 } from "@murphai/hosted-execution";
 import { deleteMealRecord } from "@murphai/vault-usecases/records";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
+import { setMemoryDemographics } from "@murphai/core";
 import {
   applyLiveWorkoutMemberAction,
   readLiveWorkoutCardSnapshot,
@@ -19,6 +20,24 @@ export async function executeHostedMemberActionWake(input: {
   wake: HostedExecutionMemberActionRequestedWake;
 }): Promise<HostedMailboxOutcome> {
   switch (input.wake.request.action.kind) {
+    case "demographics.set": {
+      const request = input.wake.request;
+      const result = await setMemoryDemographics(input.vaultRoot, {
+        ...input.wake.request.action.patch,
+        memberAction: { actionId: request.actionId, requestedAt: request.requestedAt },
+      });
+      return createNoopMailboxEffect({
+        conversationMetrics: null,
+        mailboxLane: "member-action",
+        postCheckpointRecord: {
+          kind: "member-action.outcome-recorded",
+          outcome: {
+            actionId: request.actionId, completedAt: new Date().toISOString(),
+            schemaVersion: 1, status: result.status, reason: result.reason,
+          },
+        },
+      });
+    }
     case "meal.names.repair": {
       // Retired operator action: drain old Web dispatches and restored requests
       // through the ordinary checkpoint owner without model, meal, or usage work.

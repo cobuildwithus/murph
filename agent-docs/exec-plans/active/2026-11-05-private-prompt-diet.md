@@ -101,15 +101,24 @@ private turns.
   the group-only game suites (group prompt is byte-identical and game skills
   are untouched). Failures rerun on main to separate regressions from existing
   failures.
-- Harness: journeys that stage a subset of skills now also stage the nine
-  skills the private prompt names on every turn, as production ships every
-  public skill.
+- Harness: journeys that stage a subset of skills now also stage the skills
+  their private prompt names, as production ships every public skill.
 - Provider input before/after for direct and group.
+
+## Outcome of the live sweep
+
+530 private-prompt journeys on gpt-6.1-sol: 493 pass on the final head, 14
+fail the same way on `main`, 4 are flaky on both, and 21 speed-benchmark rows
+need a dataset that is not available locally. The sweep sent common cases back
+into the resident prompt: exact-time or dictated reminders, explicit style
+changes, voice memos and meal names keep short resident rules, and only the
+harder cases send the model to a skill. Hot paths stay resident; rare or
+complex procedures live behind a trigger.
 
 ## Progress
 
 - [x] Plan
 - [x] Prompt and skill edits
-- [ ] Deterministic tests
-- [ ] Live journeys
+- [x] Deterministic tests
+- [x] Live journeys
 - [ ] PR, ReviewGPT, CI, merge, runner deploy

@@ -107,6 +107,17 @@ export interface RuleState {
   game: RuleGame;
   players: RulePlayer[];
   entries: RuleEntry[];
+  /** Derived from durable posted history; deletion cannot reopen group calendars. */
+  hasPostedAttempt?: boolean;
+}
+
+export function hasGameCheckInAttempt(state: RuleState): boolean {
+  return state.hasPostedAttempt === true || state.entries.some(entry => entry.attempt > 0);
+}
+
+/** Departed group seats retain history, but never own the current calendar. */
+export function calendarPlayers(state: RuleState): RulePlayer[] {
+  return state.game.seats === 10 ? remainingPlayers(state) : state.players;
 }
 
 /** Invocation-local lookup; preserves source order and withdrawn attempts. */
@@ -257,6 +268,11 @@ export function currentTerms(terms: StoredTerms): StoredTermsVersion {
   return terms.versions[terms.versions.length - 1];
 }
 
+/** Scalar edits inherit the latest encrypted words at or before their revision. */
+export function effectiveTermWords(words: TermWords, revision: number): TermWords["versions"][number] {
+  return [...words.versions].reverse().find(candidate => candidate.n <= revision) ?? words.versions[0];
+}
+
 /** The rules a given day was played under: the latest version from that day. */
 export function termsForDay(terms: StoredTerms, dayIndex: number): StoredTermsVersion {
   let version = terms.versions[0];
@@ -294,7 +310,7 @@ export function dayIndexAt(player: RulePlayer, now: Date): number | null {
 export function isScheduledDay(state: RuleState, dayIndex: number): boolean {
   const schedule = termsForDay(state.game.terms, dayIndex).schedule;
   if ("count" in schedule) return true;
-  const dayOne = gameDayOne(state.players);
+  const dayOne = gameDayOne(calendarPlayers(state));
   if (!dayOne) return false;
   return schedule.days.includes(weekdayOf(addDays(dayOne, dayIndex)));
 }
@@ -371,19 +387,21 @@ export function needsPostToday(state: RuleState, memberId: string, now: Date): b
 export function settleDueAt(state: RuleState): Date {
   const { lengthDays } = state.game;
   let due = 0;
+  // One index keeps ten-player settlement checks linear in entries.
+  const entries = indexGameEntries(state.entries);
   for (const player of remainingPlayers(state)) {
     if (!player.dayOne) continue;
     const end = dayStartInstant(addDays(player.dayOne, lengthDays), player.timeZone).getTime();
-    due = Math.max(due, end + (graceOpen(state, player, lengthDays - 1) ? GAME_GRACE_MS : 0));
+    due = Math.max(due, end + (graceOpen(state, player, lengthDays - 1, entries) ? GAME_GRACE_MS : 0));
   }
   return new Date(due);
 }
 
 /** A scheduled day that ended without a live post and still has an attempt left. */
-function graceOpen(state: RuleState, player: RulePlayer, dayIndex: number): boolean {
+function graceOpen(state: RuleState, player: RulePlayer, dayIndex: number, entries: RuleEntries = state.entries): boolean {
   return dayIndex >= eligibleFromDay(state, player) && isScheduledDay(state, dayIndex)
-    && !liveEntry(state.entries, player.memberId, dayIndex)
-    && attemptsUsed(state.entries, player.memberId, dayIndex) < GAME_POSTS_PER_DAY;
+    && !liveEntry(entries, player.memberId, dayIndex)
+    && attemptsUsed(entries, player.memberId, dayIndex) < GAME_POSTS_PER_DAY;
 }
 
 /** Day 1 is always a scheduled day: the first date on or after `date` that the schedule counts. */
@@ -543,7 +561,7 @@ export function decideJoin(
   if (claimed && (game.status === "invited" || game.status === "live")) return { kind: "already-joined" };
   assertJoinOpen(state, input, claimed);
   const seat = admissionSeat(state, input, claimed);
-  const joiner: RulePlayer = { memberId: input.memberId, seat, timeZone: input.timeZone, dayOne: gameDayOne(state.players), joinedAt: input.now };
+  const joiner: RulePlayer = { memberId: input.memberId, seat, timeZone: input.timeZone, dayOne: gameDayOne(calendarPlayers(state)), joinedAt: input.now };
   if (group && game.status === "live") return { kind: "join", seat, startedAt: input.now, activates: false, players: [{ ...joiner, dayOne: joiner.dayOne! }] };
   return { kind: "join", seat, startedAt: input.now, ...(group ? { activates: true } : {}),
     ...scheduleFor(state, [...remainingPlayers(state).filter(player => player.memberId !== input.memberId), joiner],
@@ -744,12 +762,19 @@ export function decideWithdraw(
  * the player behind starts tomorrow. Only before anyone has started.
  */
 export function decideStartNow(state: RuleState, now: Date): Schedule {
-  if (state.game.seats !== 2) reject("INVALID_REQUEST", "The starter can edit group terms until someone checks in.");
+  const players = calendarPlayers(state);
+  if (state.game.seats === 10) {
+    if (state.game.status !== "live" || players.length < 2) reject("GAME_NOT_LIVE", "At least two players must join before asking to start earlier.");
+    if (hasGameCheckInAttempt(state)) reject("DAY_CLOSED", "The start date locks once someone checks in.");
+    if (players.some(player => !player.dayOne)) reject("DAY_CLOSED", "Refresh the game before asking to start earlier.");
+  }
   if (state.game.status !== "live") reject("GAME_NOT_LIVE", "Both players have to shake on it first.");
-  if (state.players.some((player) => (dayIndexAt(player, now) ?? -1) >= 0)) {
+  if (players.some((player) => (dayIndexAt(player, now) ?? -1) >= 0)) {
     reject("INVALID_REQUEST", "This game already started.");
   }
-  return scheduleFor(state, state.players, (player) => gameLocalDate(now, player.timeZone));
+  const schedule = scheduleFor(state, players, (player) => gameLocalDate(now, player.timeZone));
+  if (state.game.seats === 10 && gameDayOne(schedule.players)! >= gameDayOne(players)!) reject("DAY_CLOSED", "The game already starts on its next scheduled day.");
+  return schedule;
 }
 
 export const GAME_DEV_ADVANCE_MAX_DAYS = GAME_MAX_LENGTH_DAYS;

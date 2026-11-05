@@ -7,7 +7,7 @@ import { buildHostedMemberPhoneIdentityFields } from "@/src/lib/hosted-onboardin
 import { createHostedEmailLookupKey, createHostedExternalThreadIdentityLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { areGameGroupsEnabled } from "@/src/lib/game/access";
 import { gameAudienceKeys, gameGroupLoreFingerprint } from "@/src/lib/game/audience";
-import { runGameCommand, readGame, readHome, readGameChatState, runGameChatUpdate, readGameRecapMaterial, sealGameRecap, authorizeMediaRead } from "@/src/lib/game/service";
+import { runGameCommand, readGame, readHome, readGameChatState, readGameRematchNotice, runGameChatUpdate, readGameRecapMaterial, sealGameRecap, authorizeMediaRead } from "@/src/lib/game/service";
 import { assertGameProposalDeliveryCurrentTx } from "@/src/lib/game/chat-delivery-authority";
 import { readGameChatFundingRooms } from "@/src/lib/game/chat-access";
 import { requestGameRecapRegeneration } from "@/src/lib/game/recap-regeneration";
@@ -18,7 +18,7 @@ import type { HostedGameRecap, HostedGameUpdate } from "@murphai/hosted-executio
 import { hostedGameChatStateSchema } from "@murphai/hosted-execution/runtime-control";
 import { openGameTexts } from "@/src/lib/game/crypto";
 import { parseStoredResult, canRedeemGroupTicket } from "@/src/lib/game/rules";
-import { dayStartInstant, GAME_GRACE_MS } from "@/src/lib/game/time";
+import { dayStartInstant, gameLocalDate, GAME_GRACE_MS } from "@/src/lib/game/time";
 import { prepareGameAccountDeletion, applyGameAccountDeletionTx } from "@/src/lib/game/account-deletion";
 import type { GameCommand, GameTerms } from "@/src/lib/game/command";
 import type { GameSchedule } from "@/src/lib/game/contract";
@@ -162,7 +162,7 @@ describe("group admission switch and audience keys", () => {
 });
 
 describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
-  it("round-trips an unjoined invitee's task through agreed prize edits and allows invited removal", async () => {
+  it("preserves hidden invitation tasks through live editable round-trips and allows invited removal", async () => {
     const [starter, joined, invited] = await Promise.all([person(), person(), person()]);
     const ownTask = { seat: 2, text: "Read a chapter" };
     const game = await create(starter, [joined, invited], { terms: { ...terms, tasks: [ownTask] } });
@@ -177,10 +177,10 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     const context = await groupContext(game.id, [starter, joined, invited]);
     const before = await readGame(game.id, starter.id, true);
     expect(before?.terms.tasks).toEqual([
-      { seat: 0, text: terms.defaultTask }, { seat: 1, text: terms.defaultTask }, ownTask,
+      { seat: 0, text: terms.defaultTask }, { seat: 1, text: terms.defaultTask },
     ]);
     expect((await readGame(game.id, joined.id, true))?.terms).toEqual(before!.terms);
-    // The editor sends every non-default task, including seats outside its roster.
+    // The live editor sends only visible tasks; the server preserves hidden overrides.
     const tasks = before!.terms.tasks.filter(task => task.text !== before!.terms.defaultTask);
     await agreeTerms(context, starter.id, joined.id, { type: "editTerms", gameId: game.id, expectedTermsVersion: before!.terms.n,
       terms: { ...terms, tasks, stakes: [{ kind: "prize", item: "Pick the next movie" }] } });
@@ -197,7 +197,7 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     await db.gameInvitee.delete({ where: { gameId_seat: { gameId: game.id, seat: 3 } } });
     const before = await readGame(game.id, starter.id, true);
     expect(before?.terms.tasks).toEqual([
-      { seat: 0, text: terms.defaultTask }, { seat: 1, text: terms.defaultTask }, ownTask,
+      { seat: 0, text: terms.defaultTask }, { seat: 1, text: terms.defaultTask },
     ]);
     const tasks = before!.terms.tasks.filter(task => task.text !== before!.terms.defaultTask);
     const context = await groupContext(game.id, [starter, joined, invited, removed]);
@@ -514,7 +514,7 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     expect(await run(b.id, { type: "cancelInvite", gameId: game.id })).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
     await ok(b.id, join(game.token));
     expect(await run(a.id, { type: "proposeChange", gameId: game.id, proposalId: randomUUID(), expectedTermsVersion: 1, change: { kind: "start_now" } }))
-      .toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
+      .toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
     await ok(a.id, { type: "cancelInvite", gameId: game.id });
     expect((await gameRow(game.id)).status).toBe("void");
   });
@@ -1199,6 +1199,102 @@ async function majorityGame(seated = 4, unjoined = 0) {
 }
 
 describe.skipIf(!enabled)("group majority changes", () => {
+  it.each([
+    { scalar: "duration", starter: 0 }, { scalar: "duration", starter: 1 },
+    { scalar: "schedule", starter: 0 }, { scalar: "schedule", starter: 1 },
+  ])("Same again inherits words after a real $scalar-only change with starter $starter", async ({ scalar, starter }) => {
+    const g = await majorityGame(3, 1);
+    const before = await gameRow(g.game.id);
+    const edit = g.edit();
+    edit.terms.stakes = [{ kind: "prize", item: "Choose our next outing" }];
+    if (scalar === "duration") edit.terms.lengthDays = 12;
+    else edit.terms.schedule = { days: [0, 2, 4] };
+    expect(await g.send(0, edit)).toMatchObject({ ok: true });
+    expect(await g.vote(1, "approve")).toMatchObject({ ok: true });
+    const changed = await gameRow(g.game.id);
+    expect(changed.termsWordsEncrypted).toBe(before.termsWordsEncrypted);
+    expect(changed.terms).toMatchObject({ versions: [{ n: 2 }] });
+    await settle(g.game.id, g.people[0].id);
+    const copied = await create(g.people[starter], [], { previousGameId: g.game.id });
+    const row = await gameRow(copied.id);
+    expect(row.lengthDays).toBe(scalar === "duration" ? 12 : 10);
+    expect(row.terms).toMatchObject({ versions: [{ n: 1, schedule: scalar === "schedule" ? { days: [0, 2, 4] } : { count: 10 } }] });
+    const notice = await readGameRematchNotice(copied.id, g.people.map(p => p.id));
+    expect(notice).toMatchObject({ maxPlayers: 10, termsVersion: 1, comparison: { sameGame: true } });
+    expect(JSON.stringify(notice)).not.toContain("Private invitation task");
+  });
+
+  it("Same again takes v3 words through a v1-word, v2-scalar, v3-word, v4-scalar sequence", async () => {
+    const g = await majorityGame(3, 1);
+    for (let revision = 1; revision <= 3; revision++) {
+      const edit = g.edit({ expectedTermsVersion: revision, proposalId: randomUUID() });
+      edit.terms = { ...edit.terms, lengthDays: revision === 3 ? 14 : 12,
+        stakes: [{ kind: "prize", item: revision >= 2 ? "Choose a concert" : "Choose our next outing" }] };
+      expect(await g.send(0, edit)).toMatchObject({ ok: true });
+      expect(await g.send(1, { operation: "approve", gameId: g.game.id, proposalId: edit.proposalId! })).toMatchObject({ ok: true });
+    }
+    const prior = await gameRow(g.game.id);
+    const [plain] = await openGameTexts([{ table: "game", field: "terms_words", rowId: prior.id, memberId: prior.wordsOwnerMemberId, value: prior.termsWordsEncrypted }]);
+    expect(JSON.parse(plain!).versions.map((words: { n: number }) => words.n)).toEqual([1, 3]);
+    await settle(g.game.id, g.people[0].id);
+    const copied = await create(g.people[1], [], { previousGameId: g.game.id });
+    const notice = await readGameRematchNotice(copied.id, g.people.map(p => p.id));
+    expect(notice).toMatchObject({ comparison: { sameGame: true }, terms: { lengthDays: 14, stakes: [{ item: "Choose a concert" }] } });
+  });
+
+  it.each([false, true])("copies then edits group Same again once with private overrides; joined in between: %s", async joined => {
+    const g = await majorityGame(3, 1);
+    await settle(g.game.id, g.people[0].id);
+    const gameId = randomUUID();
+    const requested = { lengthDays: 12, startsOn: "2030-03-15", defaultTask: "Read a chapter", tasks: [{ memberId: g.people[1].id, text: "Read a chapter" }],
+      schedule: { days: [0, 2, 4] }, stakes: [{ kind: "prize" as const, item: "Choose the concert" }] };
+    const send = (update: HostedGameUpdate) => runGameChatUpdate({ ...g.context, actorMemberId: g.people[1].id, now: createdAt, update });
+    expect(await send({ operation: "create", gameId, previousGameId: g.game.id, terms: { ...requested, tasks: g.people.map(p => ({ memberId: p.id, text: "Read a chapter" })) } })).toMatchObject({ ok: true });
+    expect(await gameRow(gameId)).toMatchObject({ maxPlayers: 10, lengthDays: 10, startsOn: null });
+    if (joined) {
+      const view = await readGame(gameId, g.people[1].id, true);
+      await ok(g.people[0].id, join(view!.inviteToken!));
+      requested.tasks.push({ memberId: g.people[0].id, text: "Read a chapter" });
+    }
+    const proposalId = randomUUID();
+    const firstEdit = await send({ operation: "edit_terms", gameId, expectedTermsVersion: 1, proposalId, terms: requested });
+    if (joined) {
+      expect(firstEdit).toMatchObject({ ok: false });
+      expect(await send({ operation: "edit_terms", gameId, expectedTermsVersion: 1, proposalId: randomUUID(), terms: {
+        ...requested, startsOn: "2030-03-01", defaultTask: "Take a walk", tasks: requested.tasks.map(task => ({ ...task, text: "Take a walk" })), schedule: { count: 10 },
+      } })).toMatchObject({ ok: true });
+    } else expect(firstEdit).toMatchObject({ ok: true });
+    const row = await gameRow(gameId);
+    expect(row.lengthDays).toBe(joined ? 10 : 12);
+    if (joined) expect(row.pendingChange).not.toBeNull();
+    else expect(row.startsOn?.toISOString().slice(0, 10)).toBe("2030-03-15");
+    const [plain] = await openGameTexts([{ table: "game", field: "terms_words", rowId: row.id, memberId: row.wordsOwnerMemberId, value: row.termsWordsEncrypted }]);
+    expect(plain).toContain("Private invitation task");
+    expect(await db.game.count({ where: { previousGameId: g.game.id } })).toBe(1);
+  });
+
+  it.each(["task", "prize", "date"])("fences prepared and generated rematch facts after a %s edit without another receipt", async changed => {
+    const g = await majorityGame(3, 1);
+    await settle(g.game.id, g.people[0].id);
+    const copied = await create(g.people[1], [], { previousGameId: g.game.id });
+    const notice = await readGameRematchNotice(copied.id, g.people.map(p => p.id));
+    expect(notice).toMatchObject({ termsVersion: 1 });
+    const delivery = { tx: db, containerMemberId: g.context.chatContainerMemberId, audience: g.context.chatAudience, deliveryIdempotencyKey: `game-rematch:${copied.id}`, rematchTermsVersion: 1 };
+    expect(await assertGameProposalDeliveryCurrentTx(delivery)).toBe(true);
+    await expect(assertGameProposalDeliveryCurrentTx({ ...delivery, rematchTermsVersion: null })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    const { startsOn: _start, ...copiedTerms } = terms;
+    await ok(g.people[1].id, { type: "editTerms", gameId: copied.id, expectedTermsVersion: 1, terms: { ...copiedTerms,
+      ...(changed === "date" ? { startsOn: "2030-03-15" } : {}),
+      stakes: changed === "prize" ? [{ kind: "prize", item: "Choose a concert" }] : terms.stakes,
+      tasks: [{ seat: 3, text: changed === "task" ? "Hidden new assignment" : "Private invitation task" }],
+    } });
+    await expect(assertGameProposalDeliveryCurrentTx(delivery)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    const updated = await readGameRematchNotice(copied.id, g.people.map(p => p.id));
+    expect(updated).toMatchObject({ termsVersion: 2, startsOn: changed === "date" ? "2030-03-15" : null,
+      comparison: { sameGame: changed === "date", individualTasksChanged: changed === "task" } });
+    expect(JSON.stringify(updated)).not.toContain("Hidden new assignment");
+    expect(await db.hostedLinqDelivery.count({ where: { sourceRef: copied.id, template: "game_rematch" } })).toBe(1);
+  });
   it("lets a non-starter propose full terms, keeps private words, and applies with the deciding voter", async () => {
     const g = await majorityGame(4, 1);
     const edit = g.edit();
@@ -1214,7 +1310,7 @@ describe.skipIf(!enabled)("group majority changes", () => {
     expect(pending).toMatchObject({ yesNeeded: 2, votes: [{ memberId: g.people[1].id, vote: "yes" }], change: { defaultTask: "Walk outside",
       tasks: [{ seat: 0, text: "Read" }, ...[1, 2, 3].map(seat => ({ seat, text: "Walk outside" }))] } });
     expect(JSON.stringify(pending)).not.toContain("Private invitation task");
-    expect(await readGame(g.game.id, g.people[0].id, true)).toMatchObject({ pendingChange: null, permissions: { canEditTerms: false },
+    expect(await readGame(g.game.id, g.people[0].id, true)).toMatchObject({ pendingChange: { id: g.proposalId, yesNeeded: 2 }, permissions: { canEditTerms: false },
       changeControls: { canStartNow: false, canEdit: false, canEditSchedule: false, canEditStartDate: false, canEditTasks: false, canEditStakes: false, editableFromDay: null } });
     for (const decision of ["approve", "decline"] as const) expect(await g.vote(1, decision)).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST", message: "You already count as a yes." } });
     expect(await g.vote(4, "approve")).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
@@ -1259,7 +1355,7 @@ describe.skipIf(!enabled)("group majority changes", () => {
     expect(await g.vote(2, "decline")).toMatchObject({ ok: true });
     expect(await g.shared()).toMatchObject({ pendingChange: null, terms: { n: 1 } });
     expect(await db.gameEvent.findUnique({ where: { commandKey: `game-change-resolved:${g.game.id}:${g.proposalId}` } })).toMatchObject({ type: "change_declined", payload: { v: 1, proposalId: g.proposalId } });
-    expect((await db.gameEvent.findFirst({ where: { gameId: g.game.id, type: "change_declined" } }))?.payload).toEqual({ v: 1, proposalId: g.proposalId });
+    expect((await db.gameEvent.findFirst({ where: { gameId: g.game.id, type: "change_declined" } }))?.payload).toMatchObject({ v: 1, proposalId: g.proposalId, tally: { yes: 1, no: 2, total: 4 } });
     expect(await g.vote(1, "decline")).toMatchObject({ ok: true });
     expect(await g.vote(1, "approve")).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
     expect(await db.gameEvent.count({ where: { gameId: g.game.id, type: "change_voted" } })).toBe(2);
@@ -1276,12 +1372,12 @@ describe.skipIf(!enabled)("group majority changes", () => {
     expect(await g.send(0, g.edit({ proposalId: randomUUID() }))).toMatchObject({ ok: true });
   });
 
-  it("refuses app edits, old runners, pair propose and unchanged full terms on a live group", async () => {
+  it("refuses old runners, pair deltas and unchanged full terms on a live group", async () => {
     const g = await majorityGame(2);
     const command: GameCommand = { type: "editTerms", gameId: g.game.id, expectedTermsVersion: 1, proposalId: g.proposalId, terms };
-    expect(await run(g.people[0].id, command)).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER", message: "Agree on changes in the group chat with Murph." } });
+    expect(await run(g.people[0].id, command)).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST", message: "Nothing changed." } });
     expect(await run(g.people[0].id, { type: "proposeChange", gameId: g.game.id, proposalId: randomUUID(), expectedTermsVersion: 1, change: { kind: "edit", lengthDays: 12 } }))
-      .toMatchObject({ ok: false, error: { code: "INVALID_REQUEST", message: "Agree on changes in the group chat with Murph." } });
+      .toMatchObject({ ok: false, error: { code: "INVALID_REQUEST", message: "Use full terms to request a group edit." } });
     expect(await g.send(0, g.edit({ proposalId: undefined }))).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST", message: expect.stringContaining("proposalId") } });
     expect(await g.send(0, { operation: "propose", gameId: g.game.id, proposalId: g.proposalId, expectedTermsVersion: 1, change: { kind: "edit", lengthDays: 12 } }))
       .toMatchObject({ ok: false, error: { code: "INVALID_REQUEST", message: expect.stringContaining("edit_terms") } });
@@ -1308,7 +1404,7 @@ describe.skipIf(!enabled)("group majority changes", () => {
     expect(await g.send(0, g.edit())).toMatchObject({ ok: true });
     await ok(g.people[1].id, { type: "leave", gameId: g.game.id });
     expect(await gameRow(g.game.id)).toMatchObject({ pendingChange: null, status: count === 2 ? "void" : "live" });
-    expect(await db.gameEvent.findFirst({ where: { gameId: g.game.id, type: "change_expired" } })).toMatchObject({ payload: { proposalId: g.proposalId, reason: "A player left." } });
+    expect(await db.gameEvent.findFirst({ where: { gameId: g.game.id, type: "change_expired" } })).toMatchObject({ payload: { proposalId: g.proposalId, reason: "The playing roster changed, so that request was cleared without applying it." } });
     const shared = await readGameChatState(g.context.chatContainerMemberId, g.people.map(p => p.id));
     expect(shared.games.map(game => game.id)).toEqual(count === 2 ? [] : [g.game.id]);
     // Departed players can also exit the text while the surviving game stays available.
@@ -1770,4 +1866,293 @@ describe.skipIf(!enabled)("group chat after departure", () => {
     expect(row.recapEncrypted).toBeNull();
     expect(await readGameRecapMaterial(g.game.id, g.room, g.members.slice(1))).not.toBeNull();
   });
+});
+
+
+describe.skipIf(!enabled)("group app change parity", () => {
+  const start = (g: Awaited<ReturnType<typeof majorityGame>>, proposalId = g.proposalId): GameCommand => ({
+    type: "proposeChange", gameId: g.game.id, proposalId, expectedTermsVersion: 1, change: { kind: "start_now" },
+  });
+  const appVote = (g: Awaited<ReturnType<typeof majorityGame>>, index: number, decision: "approve" | "decline" | "cancel", now = createdAt) =>
+    run(g.people[index].id, { type: "respondChange", gameId: g.game.id, proposalId: g.proposalId, decision }, now);
+  const resolutions = (g: Awaited<ReturnType<typeof majorityGame>>) => db.gameEvent.findMany({ where: { commandKey: `game-change-resolved:${g.game.id}:${g.proposalId}` } });
+
+  it("announces an app Start now ask once, counts app/chat votes and advances only the live calendar", async () => {
+    const g = await majorityGame(4, 1);
+    const { devStartNow } = await import("@/src/lib/game/service");
+    await expect(devStartNow(g.game.id, g.people[0].id, true)).rejects.toMatchObject({ error: { code: "INVALID_REQUEST" } });
+    const at = new Date(), earlier = gameLocalDate(at, "UTC");
+    expect(await run(g.people[0].id, start(g), at)).toMatchObject({ ok: true, game: { pendingChange: { origin: "app", yesNeeded: 2, startsOn: earlier } } });
+    expect(await run(g.people[0].id, start(g), at)).toMatchObject({ ok: true });
+    expect(await run(g.people[1].id, start(g), at)).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
+    expect(await appVote(g, 1, "approve", at)).toMatchObject({ ok: true, game: { pendingChange: { yesNeeded: 1 } } });
+    expect(await appVote(g, 2, "approve", at)).toMatchObject({ ok: true, game: { pendingChange: null, terms: { n: 2 } } });
+    expect(await appVote(g, 1, "approve", at)).toMatchObject({ ok: true });
+    expect(await db.gameEvent.count({ where: { gameId: g.game.id, type: "started" } })).toBe(1);
+    expect(await db.hostedLinqDelivery.count({ where: { sourceRef: g.game.id, template: "game_proposal" } })).toBe(1);
+    expect(await db.hostedLinqDelivery.count({ where: { sourceRef: `${g.game.id}:${g.proposalId}`, template: "game_change_resolved" } })).toBe(1);
+    expect(await resolutions(g)).toMatchObject([{ type: "change_applied", payload: { tally: { yes: 3, no: 0, total: 4 }, startsOn: earlier } }]);
+    expect((await gameRow(g.game.id)).players.every(player => player.dayOne?.toISOString().startsWith(earlier))).toBe(true);
+    expect(await run(g.people[4].id, join(g.game.token), at)).toMatchObject({ ok: false, error: { code: "TERMS_CHANGED" } });
+    await ok(g.people[4].id, join(g.game.token, "UTC", 2), at);
+    expect((await gameRow(g.game.id)).players.at(-1)?.dayOne?.toISOString()).toBe(`${earlier}T00:00:00.000Z`);
+  });
+
+  it("requires a bound room for an app ask and never starts an invited group", async () => {
+    const people = [await person(), await person()];
+    const game = await create(people[0], [people[1]]);
+    const command: GameCommand = { type: "proposeChange", gameId: game.id, expectedTermsVersion: 1, proposalId: randomUUID(), change: { kind: "start_now" } };
+    await groupContext(game.id, people);
+    expect(await run(people[0].id, command)).toMatchObject({ ok: false, error: { code: "GAME_NOT_LIVE" } });
+    await ok(people[1].id, join(game.token));
+    await db.game.update({ where: { id: game.id }, data: { chatContainerMemberId: null } });
+    expect(await run(people[0].id, command)).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
+    expect(await db.gameEvent.count({ where: { gameId: game.id, type: "change_proposed" } })).toBe(0);
+  });
+
+  it("keeps a departed starter's old calendar out of previews, chat and late acceptance", async () => {
+    const g = await majorityGame(3, 1);
+    await ok(g.people[0].id, { type: "leave", gameId: g.game.id });
+    const at = new Date(), earlier = gameLocalDate(at, "UTC");
+    expect(await run(g.people[1].id, start(g), at)).toMatchObject({ ok: true });
+    expect(await appVote(g, 2, "approve", at)).toMatchObject({ ok: true });
+    const row = await gameRow(g.game.id);
+    expect(row.players[0].dayOne?.toISOString()).toBe("2030-03-09T00:00:00.000Z");
+    const { readInvitePreview } = await import("@/src/lib/game/service");
+    expect(await readInvitePreview(g.game.token, true, g.people[3].id)).toMatchObject({ status: "open", dayOne: earlier });
+    expect(await g.shared()).toMatchObject({ startsOn: earlier });
+    await ok(g.people[3].id, join(g.game.token, "UTC", 2), at);
+    expect((await gameRow(g.game.id)).players[3].dayOne?.toISOString()).toBe(`${earlier}T00:00:00.000Z`);
+  });
+
+  it.each(["approve", "decline"] as const)("expires a stale first %s before recording a vote and replays earlier votes", async decision => {
+    const g = await majorityGame(4);
+    const edit = g.edit(); edit.terms.startsOn = "2030-03-10";
+    expect(await g.send(0, edit)).toMatchObject({ ok: true });
+    expect(await appVote(g, 1, "decline")).toMatchObject({ ok: true });
+    await entry(g.game.id, g.people[0].id, 0);
+    expect(await appVote(g, 2, decision)).toMatchObject({ ok: false, error: { code: "CHANGE_EXPIRED" } });
+    expect(await resolutions(g)).toMatchObject([{ type: "change_expired", payload: { reason: "The start date locks once someone checks in." } }]);
+    expect(await db.gameEvent.count({ where: { gameId: g.game.id, type: "change_voted" } })).toBe(1);
+    expect(await appVote(g, 1, "decline")).toMatchObject({ ok: true });
+  });
+
+  it.each(["app", "chat"] as const)("rejects a departed task basis prepared through %s", async source => {
+    const g = await majorityGame(3);
+    const command: GameCommand = { type: "editTerms", gameId: g.game.id, proposalId: g.proposalId, expectedTermsVersion: 1,
+      terms: { ...terms, defaultTask: "Walk outside", tasks: [{ seat: 2, text: "Read" }] } };
+    let release!: () => void; let prepared!: () => void;
+    const ready = new Promise<void>(resolve => { prepared = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const context = { ...(source === "chat" ? g.context : {}), actorMemberId: g.people[0].id, multiplayer: true, now: createdAt,
+      beforeMutationTx: async () => { prepared(); await gate; } };
+    const writing = source === "chat" ? runGameChatUpdate({ ...context, update: g.edit({ terms: { ...g.edit().terms,
+      defaultTask: "Walk outside", tasks: g.people.map((p, i) => ({ memberId: p.id, text: i === 2 ? "Read" : "Walk outside" })) } }) })
+      : runGameCommand({ ...context, command });
+    await ready;
+    await ok(g.people[2].id, { type: "leave", gameId: g.game.id });
+    release();
+    expect(await writing).toMatchObject({ ok: false, error: { code: "TERMS_CHANGED" } });
+    expect(await db.gameEvent.count({ where: { gameId: g.game.id, type: "change_proposed" } })).toBe(0);
+    expect(await db.hostedLinqDelivery.count({ where: { sourceRef: g.game.id, template: "game_proposal" } })).toBe(0);
+  });
+
+  it.each([false, true])("orders a terminal no against the first public check-in, post first=%s", async postFirst => {
+    const g = await majorityGame(4);
+    const edit = g.edit(); edit.terms.startsOn = "2030-03-10";
+    expect(await g.send(0, edit)).toMatchObject({ ok: true });
+    expect(await appVote(g, 1, "decline")).toMatchObject({ ok: true });
+    let release!: () => void, acquired!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const ready = new Promise<void>(resolve => { acquired = resolve; });
+    const action = (post: boolean, first: boolean) => runGameCommand({ actorMemberId: g.people[post ? 0 : 2].id,
+      multiplayer: true, now: new Date("2030-03-09T12:00:00Z"), beforeMutationTx: async tx => {
+        if (first) { await tx.$queryRaw`SELECT id FROM game WHERE id = ${g.game.id} FOR UPDATE`; acquired(); await gate; }
+      }, command: post ? { type: "post", gameId: g.game.id, entryId: randomUUID(), kind: "words", text: "Done", mediaKeys: [] }
+        : { type: "respondChange", gameId: g.game.id, proposalId: g.proposalId, decision: "decline" } });
+    const first = action(postFirst, true);
+    await ready;
+    const second = action(!postFirst, false);
+    release();
+    const results = await Promise.all([first, second]);
+    expect(results[0]).toMatchObject({ ok: true });
+    expect(results[1]).toMatchObject(postFirst ? { ok: false, error: { code: "CHANGE_EXPIRED" } } : { ok: true });
+    expect(await resolutions(g)).toMatchObject([{ type: postFirst ? "change_expired" : "change_declined" }]);
+    expect(await db.gameEvent.count({ where: { gameId: g.game.id, type: "change_voted" } })).toBe(postFirst ? 1 : 2);
+    expect((await gameRow(g.game.id)).pendingChange).toBeNull();
+  });
+
+  it.each(["read", "accept", "leave"] as const)("resolves a pending ask once when %s settles the group", async trigger => {
+    const g = await majorityGame(2, 1);
+    expect(await g.send(0, g.edit())).toMatchObject({ ok: true });
+    const due = new Date("2030-04-01T12:00:00Z");
+    if (trigger === "read") {
+      await db.game.update({ where: { id: g.game.id }, data: { devClockOffsetMs: BigInt(due.getTime() - Date.now()) } });
+      await readGame(g.game.id, g.people[0].id, true);
+    } else if (trigger === "accept") {
+      expect(await run(g.people[2].id, join(g.game.token), due)).toMatchObject({ ok: false });
+    } else await settle(g.game.id, g.people[0].id, due);
+    expect(await resolutions(g)).toMatchObject([{ type: "change_expired", payload: { reason: "The game ended before that request could apply." } }]);
+    expect((await gameRow(g.game.id)).pendingChange).toBeNull();
+    expect(await db.hostedLinqDelivery.count({ where: { sourceRef: `${g.game.id}:${g.proposalId}`, template: "game_change_expired" } })).toBe(1);
+  });
+
+  it("preserves hidden overrides in app writes, rejects explicit hidden writes and withholds invitee controls", async () => {
+    const g = await majorityGame(3, 1);
+    const command: GameCommand = { type: "editTerms", gameId: g.game.id, proposalId: g.proposalId, expectedTermsVersion: 1,
+      terms: { ...terms, tasks: [{ seat: 3, text: "Changed hidden task" }], lengthDays: 12 } };
+    expect(await run(g.people[0].id, command)).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
+    const visible = await readGame(g.game.id, g.people[0].id, true);
+    expect(JSON.stringify(visible?.terms)).not.toContain("Private invitation task");
+    expect(await run(g.people[0].id, { ...command, terms: { ...terms, tasks: visible!.terms.tasks, defaultTask: "Walk outside", lengthDays: 12 } })).toMatchObject({ ok: true });
+    expect(await appVote(g, 1, "approve")).toMatchObject({ ok: true });
+    const row = await gameRow(g.game.id);
+    const [plain] = await openGameTexts([{ table: "game", field: "terms_words", rowId: row.id, memberId: row.wordsOwnerMemberId, value: row.termsWordsEncrypted }]);
+    expect(plain).toContain("Private invitation task");
+    await ok(g.people[2].id, { type: "leave", gameId: g.game.id });
+    expect(await readGame(g.game.id, g.people[3].id, true)).toMatchObject({ changeControls: { canEdit: false, canStartNow: false } });
+  });
+
+  it.each([false, true])("retains historical attempts after account deletion, withdrawn=%s", async withdrawn => {
+    const people = [await person("Pacific/Honolulu"), await person("Pacific/Honolulu"), await person("Pacific/Kiritimati")];
+    const game = await create(people[0], people.slice(1), { terms: { ...terms, schedule: { days: [0, 1, 2, 3, 4, 5, 6] } } });
+    for (const [i, player] of people.slice(1).entries()) await ok(player.id, join(game.token, i === 0 ? "Pacific/Honolulu" : "Pacific/Kiritimati"));
+    const context = await groupContext(game.id, people);
+    const at = new Date("2030-03-09T00:30:00Z"), entryId = randomUUID();
+    await ok(people[2].id, { type: "post", gameId: game.id, entryId, kind: "words", text: "Done", mediaKeys: [] }, at);
+    if (withdrawn) await ok(people[2].id, { type: "withdraw", gameId: game.id, entryId }, at);
+    await erase(people[2].id);
+    expect(await db.gameEntry.count({ where: { gameId: game.id } })).toBe(0);
+    const state = await readGameChatState(context.chatContainerMemberId, people.map(p => p.id), people[0].id);
+    expect(state.games[0]?.changeControls).toMatchObject({ canStartNow: false, canEditStartDate: false });
+    expect(await run(people[0].id, { type: "proposeChange", gameId: game.id, proposalId: randomUUID(), expectedTermsVersion: 1, change: { kind: "start_now" } }, at)).toMatchObject({ ok: false });
+    // An older accepted request is still refused at the deciding-vote boundary.
+    const proposalId = randomUUID();
+    await db.game.update({ where: { id: game.id }, data: { pendingChange: { v: 1, id: proposalId, proposedByMemberId: people[0].id, expectedTermsVersion: 1,
+      change: { kind: "start_now" }, startsOn: "2030-03-08", effectiveFromDay: 0, origin: "chat", deliveryStatus: "conversation", votes: { [people[0].id]: "yes" } } } });
+    expect(await run(people[1].id, { type: "respondChange", gameId: game.id, proposalId, decision: "approve" }, at)).toMatchObject({ ok: false, error: { code: "CHANGE_EXPIRED" } });
+  });
+
+  it.each([2, 3])("records one neutral departure resolution on retained deletion with %i players", async count => {
+    const g = await majorityGame(count);
+    expect(await g.send(0, g.edit())).toMatchObject({ ok: true });
+    await erase(g.people[count - 1].id);
+    expect(await resolutions(g)).toMatchObject([{ type: "change_expired", payload: { reason: "The playing roster changed, so that request was cleared without applying it." } }]);
+    expect(await db.hostedLinqDelivery.count({ where: { sourceRef: `${g.game.id}:${g.proposalId}`, template: "game_change_expired" } })).toBe(1);
+  });
+
+  it("does not duplicate a read_game expiry followed by an answered replacement", async () => {
+    const g = await majorityGame(3);
+    const edit = g.edit(); edit.terms.startsOn = "2030-03-10";
+    expect(await g.send(0, edit)).toMatchObject({ ok: true });
+    await entry(g.game.id, g.people[0].id, 0);
+    await g.shared();
+    expect(await g.send(0, g.edit({ proposalId: randomUUID() }))).toMatchObject({ ok: true });
+    expect(await resolutions(g)).toMatchObject([{ type: "change_expired" }]);
+    expect(await db.hostedLinqDelivery.count({ where: { sourceRef: `${g.game.id}:${g.proposalId}`, template: "game_change_expired" } })).toBe(0);
+  });
+  it("requires remaining-player presence even when original provider handles are unchanged", async () => {
+    const people = [await person(), await person(), await person()];
+    const oldPhone = "+12025550174";
+    const phone = (value: string) => db.$transaction(tx => upsertHostedMemberIdentity({ ...buildHostedMemberPhoneIdentityFields(value),
+      memberId: people[2].id, prisma: tx, phoneNumberVerifiedAt: createdAt, signupPhoneCodeSendAttemptId: null,
+      signupPhoneCodeSendAttemptStartedAt: null, signupPhoneCodeSentAt: null, signupPhoneNumber: null }));
+    await phone(oldPhone);
+    const room = await exactRoom(people); chatProof.rooms.set(room, [people[0].email, people[1].email, oldPhone]);
+    const game = await create(people[0], [], { invitees: [
+      { seat: 1, recipient: { kind: "email", value: people[1].email }, firstName: "Player" },
+      { seat: 2, recipient: { kind: "phone", value: oldPhone }, firstName: "Player" },
+    ] });
+    for (const person of people.slice(1)) await ok(person.id, join(game.token));
+    await db.game.update({ where: { id: game.id }, data: { chatContainerMemberId: room } });
+    const proposalId = randomUUID();
+    const command: GameCommand = { type: "proposeChange", gameId: game.id, proposalId, expectedTermsVersion: 1, change: { kind: "start_now" } };
+    expect(await run(people[0].id, command, new Date())).toMatchObject({ ok: true });
+    await phone("+12025550175");
+    const audience = await readGameChatAudience(room);
+    expect(await readGroupGameChatAuthority(await gameRow(game.id), room, audience)).toBeNull();
+    expect((await readGameChatState(room, people.map(p => p.id))).games).toEqual([]);
+    expect(await run(people[0].id, { ...command, proposalId: randomUUID() })).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
+    expect(await runGameChatUpdate({ actorMemberId: people[1].id, multiplayer: true, chatContainerMemberId: room,
+      chatPlayerMemberIds: audience.memberIds, chatAudience: audience, beforeMutationTx: async () => {}, now: createdAt,
+      update: { operation: "approve", gameId: game.id, proposalId } })).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
+    await expect(db.$transaction(tx => assertGameProposalDeliveryCurrentTx({ tx, containerMemberId: room, audience,
+      deliveryIdempotencyKey: `game-change:${game.id}:${proposalId}`, now: createdAt }))).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    await phone(oldPhone);
+    expect(await readGroupGameChatAuthority(await gameRow(game.id), room)).not.toBeNull();
+  });
+
+  it.each(["vote", "departure", "post", "join"] as const)("serializes the final dispatch claim with %s in both lock orders", async mutation => {
+    for (const claimFirst of [false, true]) {
+      const g = await majorityGame(2, 1);
+      // The new joiner's date has already passed the requested earlier date.
+      const at = new Date();
+      await db.gamePlayer.updateMany({ where: { gameId: g.game.id }, data: { timeZone: "Pacific/Honolulu" } });
+      await db.gameProfile.update({ where: { memberId: g.people[2].id }, data: { timeZone: "Pacific/Kiritimati" } });
+      expect(await run(g.people[0].id, start(g), at)).toMatchObject({ ok: true });
+      let release!: () => void, acquired!: () => void;
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      const ready = new Promise<void>(resolve => { acquired = resolve; });
+      const audience = await readGameChatAudience(g.context.chatContainerMemberId);
+      const claim = () => db.$transaction(async tx => {
+        await assertGameProposalDeliveryCurrentTx({ tx, audience, containerMemberId: g.context.chatContainerMemberId,
+          deliveryIdempotencyKey: `game-change:${g.game.id}:${g.proposalId}`, now: at });
+        if (claimFirst) { acquired(); await gate; }
+        await tx.gameEvent.create({ data: { gameId: g.game.id, actor: "system", type: "test_dispatch_claim", payload: {} } });
+      });
+      const mutate = () => runGameCommand({ actorMemberId: g.people[mutation === "join" ? 2 : 1].id, multiplayer: true, now: at,
+        beforeMutationTx: async tx => {
+          if (!claimFirst) { await tx.$queryRaw`SELECT id FROM game WHERE id = ${g.game.id} FOR UPDATE`; acquired(); await gate; }
+        }, command: mutation === "vote" ? { type: "respondChange", gameId: g.game.id, proposalId: g.proposalId, decision: "approve" }
+          : mutation === "departure" ? { type: "leave", gameId: g.game.id }
+          : mutation === "join" ? join(g.game.token, "Pacific/Kiritimati")
+          // The post case uses the public command below.
+          : { type: "respondChange", gameId: g.game.id, proposalId: g.proposalId, decision: "cancel" } });
+      const post = () => runGameCommand({ actorMemberId: g.people[1].id, multiplayer: true, now: new Date("2030-03-09T22:00:00Z"),
+        beforeMutationTx: async tx => {
+          if (!claimFirst) { await tx.$queryRaw`SELECT id FROM game WHERE id = ${g.game.id} FOR UPDATE`; acquired(); await gate; }
+        }, command: { type: "post", gameId: g.game.id, entryId: randomUUID(), kind: "words", text: "Done", mediaKeys: [] } });
+      const mutationWork = () => mutation === "post" ? post() : mutate();
+      const first = claimFirst ? claim() : mutationWork();
+      await ready;
+      const second = claimFirst ? mutationWork() : claim();
+      const observed = second.then(value => ({ value }), error => ({ error }));
+      release(); await first;
+      const result = await observed;
+      if (claimFirst) expect(result).not.toHaveProperty("error");
+      else expect(result).toMatchObject({ error: { code: "GAME_CHANGE_SUPERSEDED" } });
+      expect(await db.gameEvent.count({ where: { gameId: g.game.id, type: "test_dispatch_claim" } })).toBe(claimFirst ? 1 : 0);
+    }
+  });
+
+  it.each(["settled", "void", "later ask"] as const)("delivers historical resolution after %s with canonical disambiguation and recovery", async transition => {
+    const g = await majorityGame(2);
+    prepareGroupLifecycle(g.context.chatContainerMemberId);
+    expect(await g.send(0, g.edit())).toMatchObject({ ok: true });
+    if (transition === "void") await ok(g.people[1].id, { type: "leave", gameId: g.game.id });
+    else expect(await appVote(g, 0, "cancel")).toMatchObject({ ok: true });
+    if (transition === "settled") await settle(g.game.id, g.people[0].id);
+    if (transition === "later ask") expect(await g.send(0, g.edit({ proposalId: randomUUID() }))).toMatchObject({ ok: true });
+    const other = await create(g.people[0], [g.people[1]], { terms: { ...terms, defaultTask: "Read a chapter" } });
+    await ok(g.people[1].id, join(other.token));
+    await db.game.update({ where: { id: other.id }, data: { chatContainerMemberId: g.context.chatContainerMemberId } });
+    const { deliverGameChatLifecycle, drainGameChatLifecycle } = await vi.importActual<typeof import("@/src/lib/game/chat-lifecycle")>("@/src/lib/game/chat-lifecycle");
+    const kind = transition === "void" ? "change_expired" : "change_cancelled";
+    expect(await deliverGameChatLifecycle(g.game.id, kind, g.proposalId)).toBe(true);
+    const instructions = lifecycleProof.prepare.mock.calls.at(-1)![0].envelope.notification.instructions;
+    expect(instructions).toContain("Take a walk"); expect(instructions).toContain("Read a chapter");
+    expect(instructions).not.toContain("Private invitation task");
+    await expect(db.$transaction(tx => assertGameProposalDeliveryCurrentTx({ tx, audience: g.context.chatAudience,
+      containerMemberId: g.context.chatContainerMemberId, deliveryIdempotencyKey: `game-${kind.replace("_", "-")}:${g.game.id}:${g.proposalId}` }))).resolves.toBe(true);
+    if (transition === "void") expect(await readGameChatFundingRooms({ memberIds: [g.context.chatContainerMemberId], now: new Date(), prisma: db })).toEqual(new Map([[g.context.chatContainerMemberId, g.context.chatContainerMemberId]]));
+    lifecycleProof.mailbox.mockResolvedValue({ id: "synthetic-notice", consumedAt: null });
+    // Isolate this receipt from unrelated test games' pending work.
+    const receipt = await db.hostedLinqDelivery.findFirstOrThrow({ where: { sourceRef: `${g.game.id}:${g.proposalId}`, template: `game_${kind}` } });
+    await db.hostedLinqDelivery.update({ where: { id: receipt.id }, data: { attemptedAt: new Date(0), retryAfterAt: new Date(0) } });
+    const before = lifecycleProof.append.mock.calls.length;
+    expect((await drainGameChatLifecycle()).queued).toBe(1);
+    expect(lifecycleProof.append).toHaveBeenCalledTimes(before);
+    expect(lifecycleProof.signal).toHaveBeenCalled();
+  });
+
 });

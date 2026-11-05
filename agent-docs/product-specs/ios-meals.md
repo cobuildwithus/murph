@@ -314,14 +314,15 @@ the same selection to session creation and decoding. It never wakes or refreshes
 the runtime and adds no persisted projection.
 
 The response has exactly `timeZone`, `savedAt` (replica generation timestamp),
-`freshness`, `window: { from, through }`, and `numbers`. The window is 90 inclusive
+`freshness`, `window: { from, through }`, `demographics`, and `numbers`. The window is 90 inclusive
 local dates ending today in the vault's canonical zone, already saved in core's
 `meals.timeZone` even for members with no meals. Legacy replicas without that zone
 return retryable 503 `NUMBERS_PROJECTION_UNAVAILABLE`; there is no UTC fallback.
 `freshness` uses the same age/generation assessment as Journal. A missing replica,
-missing replica object or empty session returns exactly
-`{ "numbers": null, "freshness": "stale" }`. Missing requested buckets or unreadable
-saved data return the same retryable 503. Unknown query parameters return 400
+missing legacy replica object or legacy empty session returns exactly
+`{ "numbers": null, "demographics": null, "freshness": "stale" }`. Missing requested buckets or unreadable
+saved data return the same retryable 503. A known generation-18 reference with a
+missing object or empty session also returns 503 instead of implying absence. Unknown query parameters return 400
 `NUMBERS_INVALID_REQUEST` before replica I/O.
 
 `numbers` has exactly `restingHeartRate`, `sleep`, `steps`, `vo2Max`, in that order.
@@ -341,11 +342,104 @@ Each is null when no usable daily value exists in the window; otherwise it has:
   dates per window. VO2 uses its existing intermittent median/two-date policy
   within those same requested bounds. Missing dates are never filled.
 
+Steps alone end at the last settled day (the local date eight hours ago, minus
+one day) for daily values, latest, `stale` and the current comparison week;
+the window start and top-level response window stay unchanged.
+
 Normalization and comparison use the public health-metrics primitives. Arithmetic
 uses unrounded canonical values; wire values and delta are rounded to integers
 for heart rate, sleep and steps, and one decimal for VO2. Delta keeps the raw
 current-minus-baseline direction. No source IDs, labels, health context, meals,
 notes, lab rows or metric-selection metadata appear in this response.
+
+### Shared demographics
+
+Numbers includes this field for generation-18-or-newer saved projections:
+
+```json
+{
+  "demographics": {
+    "birthYear": 1986,
+    "birthYearPrecision": "exact",
+    "biologicalSex": "female",
+    "status": "resolved"
+  }
+}
+```
+
+`birthYear` is an integer or null; precision is `exact`, `approximate`, or null;
+sex is `female`, `male`, or null; status is `resolved` or `unresolved`. A dated
+age derives its approximate year from the statement date, not processing time.
+Null fields in a resolved object mean absent in that snapshot. Unresolved means
+recognized evidence is malformed, duplicated or contradictory; do not silently
+replace it with a fallback. Preserve resolved fields independently. Gender is
+never a sex fallback. Neither DOB month/day, revision nor other memory appears
+in this response. The whole `demographics` field is null when unknown: a
+pre-generation-18 projection, no saved snapshot, or memory the runtime could
+not read. The app then falls back to the phone; Numbers never fails because of
+demographics. A saved snapshot can lag
+chat writes; refetching observes convergence and is not action completion.
+
+`PUT /api/device-sync/companion/demographics` accepts at most 1 KiB of JSON, no
+query parameters, and this strict sparse body:
+
+```json
+{
+  "actionId": "d8653d1f-fb8d-400b-8efe-d3fbdc9f9830",
+  "requestedAt": "2026-11-04T12:00:00.000Z",
+  "birthYear": 1986,
+  "biologicalSex": "female"
+}
+```
+
+At least one demographic field is required. Use `birthYear` (1900 through the
+current UTC year) or `age` (integer 13 through 120), never both, including null.
+Sex accepts only `female`, `male`, or null. Omission preserves; null clears.
+A null birthYear or age clears every birth basis, including DOB. For age,
+requestedAt's calendar date is the original statement date. Store and retry the
+same actionId, requestedAt and fields. A new member statement uses a new UUID.
+The response is HTTP 202, `{ "accepted": true, "actionId": "..." }`, after durable
+mailbox admission. This does not confirm the canonical write. Changed payload or
+timestamp under the same ID returns 409 `MEMBER_ACTION_ID_CONFLICT`; invalid
+fields return 400 `DEMOGRAPHICS_INVALID_REQUEST` (oversize is 413).
+
+Admission requires both the saved reference and decoded core to have generation
+18 or newer with demographics, otherwise retryable 503
+`DEMOGRAPHICS_PROJECTION_UNAVAILABLE`. It rechecks native auth, active access and
+current consent under the existing admission lock. Messages setup is unnecessary;
+Messages extension credentials do not gain demographic write authority.
+
+`GET /api/device-sync/companion/member-actions/<actionId>` uses the same native
+bearer/current-consent boundary and no query parameters. It reads only the
+member-scoped existing outcome, rechecks authority, and never wakes the runtime.
+Pending is `{ "actionId": "...", "schemaVersion": 1, "status": "pending" }`.
+A demographics terminal outcome is:
+
+```json
+{
+  "actionId": "d8653d1f-fb8d-400b-8efe-d3fbdc9f9830",
+  "schemaVersion": 1,
+  "completedAt": "2026-11-04T12:00:01.000Z",
+  "status": "applied",
+  "reason": null
+}
+```
+
+Terminal status is `applied`, `unchanged`, or `rejected`. A demographics rejection
+has `reason: "demographics_unresolved"`; successful outcomes have null reason.
+An explicit year or age contradicting an existing DOB changes nothing and returns
+that rejection; the DOB is corrected in chat or cleared explicitly.
+An exact replay preserves the original terminal status even after a later chat
+correction. There is no expectedRevision/CAS field. Canonical write order owns
+new statements. Poll the terminal outcome to finish saving, then refetch numbers.
+The generic native outcome adapter can also return an existing action's optional
+`result`; demographics does not emit one. Unknown IDs return pending without
+revealing another member's action. All responses use `Cache-Control: no-store`.
+
+Deploy memory and outcome readers before generation-18 producer/consumer, then
+Web and the native client. The memory replay marker decoder and demographics
+action/outcome decoder remain a rollback floor. Native UI, HealthKit upload
+choices and age-band calculations are owned by the separate app repository.
 
 ### Edit with Murph
 

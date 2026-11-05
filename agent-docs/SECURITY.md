@@ -1854,8 +1854,10 @@ existing accounting and provider access checks.
 Group room authority belongs to `readGroupGameChatAuthority`: complete provider
 handles with exactly one active Murph handle and current Linq routing must match
 the original keyed audience or prove a subset of at least two people. Remaining
-players must have identities in addressed seats 0–9 and, for a subset, resolve
-in the current text. Each subset contact must resolve to an addressed player
+players must have identities in addressed seats 0–9 and resolve in the current
+text on both exact and subset paths. Exact rooms may retain tombstoned departed
+contacts; original handle equality cannot substitute for remaining-player
+identity evidence. Each subset contact must resolve to an addressed player
 (left or not) or bound invitee, or match its own unbound invitation's lookup read
 candidates, even if registered. Bound invitation keys grant nothing; null
 identities never match. Adding anyone outside the original audience or losing
@@ -1873,8 +1875,15 @@ from association statement failures. Diagnostics contain fixed reason codes only
 Groups have no automatic bootstrap producer and cannot silently change rooms.
 Only remaining players have names, status and authored evidence in shared
 projections; invitees with no player row appear only as counts. Private pending
-labels stay with the starter. Final lifecycle egress repeats the authority
-check and verifies the provider target. Lifecycle notices and recap links contain text only. Any group
+labels stay with the starter. Rematch comparison decrypts canonical assignments
+inside Web and emits only shared scalar changes and a generic individual-task
+change flag, never unjoined assignments or labels. Publication and final rematch
+egress compare the immutable mailbox terms revision under the game lock. An
+unsupported revision policy or missing Web authority acknowledgement fails closed,
+including a two-human group room. One receipt owns the invitation. A revision
+fence does not prove consent after delivery: changed visible terms need renewed
+individual agreement; private task review stays in the addressed app invitation.
+Final lifecycle egress repeats the authority check and verifies the provider target. Lifecycle notices and recap links contain text only. Any group
 report withholds the shared recap, including media and quotes. Recaps may read
 only the authorized room-audience game lore, never private memory or contact
 labels. Group lore keys derive from the stored original audience, not the room
@@ -1884,21 +1893,74 @@ or photo details. Person notes retain memberIds beside names, but messages omit
 IDs and recap callbacks include only eligible players. Group recap lore is
 read-only in the runner because recap evidence includes app-only posts. Trusted
 code records only the accepted canonical bare room chat line, once, within the
-existing 64 KiB limit; that line must use room-visible evidence only.
+existing 64 KiB limit; that line must use room-visible evidence only. A separate
+group missed-day batch may grant writable lore only for authorized room-visible
+evidence, never app captions or media. Its producer and final egress must use
+`readGroupGameChatAuthority` for every included game and current eligible person;
+a room identifier alone grants no authority. Current missed-day production remains
+pair-only until that guarded batch path is deployed.
+
+A kickoff reminder offer supplies no consent. Existing automation saves bind the
+requesting member, exact game, chosen local time and timezone, and bounded duration.
+Every occurrence requires an OK scheduled read, that exact game's live status
+and the requester in its current players. Missing, ended, departed or unavailable
+state suppresses delivery; another game or another person's request cannot substitute.
+
+Group missed-day turns use that same original-audience lore namespace with
+replacement writes, because their evidence contains only room conversation and
+shared structural state. A mixed room never merges pair lore or different group
+notebooks. Public names are disambiguated once across the room; private labels,
+unjoined task overrides, captions and media never enter the instructions.
+`readGroupGameChatAuthority` remains the sole group authority at collection,
+publication, recovery and final egress, including two-person turnout.
+
+The strict `game_group_missed_check_in` policy in the encrypted mailbox binds
+the exact room/event/date, original-audience digest, bounded twenty-game batch,
+terms versions, full remaining-player sets, canonical misses and conversation
+watermark. Final egress reads this exact envelope outside its transaction;
+caller-supplied batch facts cannot authorize sending. Publication and dispatch
+lock all contributing game rows in ID order through their atomic claims, then
+recheck the canonical batch, binding, rollout/restriction rules and audience.
+Any new departure invalidates, including a nonaffected player; earlier historical
+departures do not. Provider lookup and decryption stay outside these locks.
+The mailbox causal-append lock protects the conversation-lane watermark through
+publication/dispatch. New conversation suppresses even unrelated chatter, while
+notification appends do not. Suppression, quiet, settlement and uncertain sends
+retain the immutable room/date claim. Authorized mixed two-contact rooms share
+the existing pair-before-game reservation lock and consult both receipt families
+by delivery hash even after receipt metadata is rewritten.
+
+Deploy the compatible policy readers and runner before the Web producer. Older
+runners reject the unknown policy before generation and older Web rejects the
+room-based event as missing valid game authority, including two-human groups.
+Keep the compatible reader/egress release as the rollback floor once new
+envelopes exist; keep production group admission dark. No migration or backfill.
 
 
 Game proposals are structural metadata under the canonical game lock. The
 initiating signed-in player agrees by proposing. In pairs, the other identified
 player may approve or decline; in live groups, each remaining seated player
 answers only for themselves once per proposal and a strict majority applies it.
-Only the proposer may cancel. Live group edits require bound chat authority;
-the app permits direct group edits only while the starter is alone. Chat tools resolve
+Only the proposer may cancel. Live app asks require authenticated remaining-player
+membership and proven bound room authority; direct edits remain invited-starter
+only. Chat and app share hidden-override preservation and the locked proposal
+writer. Live editable projections exclude unjoined/departed task overrides;
+explicit hidden-seat writes fail. The prepared remaining member/seat basis must
+still match under lock. Chat tools resolve
 identity from a current accepted group message and revalidate the runtime fence,
 route and exact game binding inside the mutation transaction. Fresh provider
 rosters guard shared reads; private contact labels, entries, excuses, photos and
 invite tokens never enter the chat projection. Group-only game eligibility does
 not grant personal AI access and cannot override suspension, consent withdrawal
 or the game rollout gate. Existing group usage limits remain enforced.
+Final proposal dispatch holds the game lock through its provider claim and uses
+canonical rule state, including historical posted attempts after entry deletion.
+Resolution receipts contain structural facts only. Their keyed reader validates
+the original ask at generation, recovery and egress, without treating later
+settlement or a replacement ask as revocation. Disambiguation uses authorized
+shared task terms, never private labels, hidden overrides, captions or media.
+Departure expiry never identifies the leaver. A notice grants only the existing
+bound-room funding window, including void-game cancellation/expiry recovery.
 
 The protected checkpoint assessment also accepts an optional sealed
 `mailboxInspection` request in `assess` mode, with a distinct sealed request

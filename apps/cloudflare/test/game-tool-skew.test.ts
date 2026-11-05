@@ -37,3 +37,23 @@ describe.skipIf(process.env.MURPH_VERIFY_GAME_SKEW !== "1")("game tool legacy re
     }
   });
 });
+
+
+it.each(["old Web refusal", "new Web pending"])("Plan A transport preserves %s without replaying the mutation", async phase => {
+  const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({ HOSTED_WEB_BASE_URL: "https://web.example.test" }));
+  const response = phase === "old Web refusal" ? { action: "update_game", result: { status: "rejected", error: "Start now is unavailable." } }
+    : { action: "update_game", result: { status: "ok", state: { games: [{
+      id: "game_synthetic", maxPlayers: 10, status: "live", lengthDays: 7, startsOn: "2030-03-09",
+      players: [0, 1].map(seat => ({ memberId: `member_${seat}`, seat, firstName: "Player", dayOne: "2030-03-09", timeZone: "UTC" })),
+      terms: { n: 1, fromDay: 0, defaultTask: "Walk", tasks: [0, 1].map(seat => ({ seat, text: "Walk" })), schedule: { count: 7 }, stakes: [{ kind: "prize", item: "Lunch" }] },
+      changeControls: { canStartNow: false, canEdit: false, canEditSchedule: false, canEditStartDate: false, editableFromDay: null },
+      pendingChange: { id: "proposal_synthetic", proposedByMemberId: "member_0", expectedTermsVersion: 1, change: { kind: "start_now" }, startsOn: "2030-03-01",
+        effectiveFromDay: 0, origin: "chat", deliveryStatus: "conversation", votes: [{ memberId: "member_0", vote: "yes" }], yesNeeded: 1 },
+    }] } } };
+  const fetchImpl = vi.fn<typeof fetch>(async () => Response.json(response));
+  const port = createHostedRuntimeGroupToolPort({ boundUserId: "container_synthetic", fetchImpl, timeoutMs: 2_000,
+    transport: { callbackSigning: environment.webCallbackSigning, mode: "direct", webControlBaseUrl: "https://web.example.test", workspaceCheckpointBridge: null } });
+  expect(await port.request({ action: "update_game", origin: { kind: "accepted_input", assistantInputId: "ain_" + "a".repeat(32) },
+    update: { operation: "propose", gameId: "game_synthetic", proposalId: "proposal_synthetic", expectedTermsVersion: 1, change: { kind: "start_now" } } })).toEqual(response);
+  expect(fetchImpl).toHaveBeenCalledOnce();
+});

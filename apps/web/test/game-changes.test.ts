@@ -285,13 +285,13 @@ describe("group change rules", () => {
     expect(() => parsePendingGameChange({ v: 1, ...pending(), votes: { member_0: "maybe" } })).toThrow("malformed");
   });
 
-  it("uses pair locks and due cutoffs for groups, with no Start now", () => {
+  it("uses calendar locks and due cutoffs for groups, including Start now", () => {
     const s = group();
     for (const now of [BEFORE, DURING, new Date("2026-11-09T08:00:00Z"), new Date("2026-11-10T08:00:00Z")]) {
       const pair = { ...s, game: { ...s.game, seats: 2 }, players: s.players.slice(0, 2) };
-      expect(gameChangeControls(s, now, null)).toEqual({ ...gameChangeControls(pair, now, null), canStartNow: false });
+      expect(gameChangeControls(s, now, null)).toEqual(gameChangeControls(pair, now, null));
     }
-    expect(() => decideGameChange(s, "member_0", { kind: "start_now" }, BEFORE)).toThrow();
+    expect(decideGameChange(s, "member_0", { kind: "start_now" }, BEFORE)).toMatchObject({ startsOn: "2026-11-02" });
     expect(gameChangeControls(s, BEFORE, pending()).canEdit).toBe(false);
     expect(decideGameChange(s, "member_1", { kind: "edit", startsOn: "2026-11-06" }, DURING)).toMatchObject({ effectiveFromDay: 0 });
     expect(() => decideGameChange(s, "member_1", { kind: "edit", tasks: [] }, DURING)).toThrow("Tasks lock");
@@ -301,6 +301,55 @@ describe("group change rules", () => {
     s.entries.push({ id: "entry_first", memberId: "member_0", dayIndex: 0, kind: "words", attempt: 1, mediaKeys: [], receivedAt: DURING, blurHash: null, withdrawnAt: null });
     expect(gameChangeControls(s, DURING, null).canEditStartDate).toBe(false);
     expect(() => decideGameChange(s, "member_1", { kind: "edit", startsOn: "2026-11-06" }, DURING)).toThrow("start date locks");
+  });
+
+  it("keeps Start now live-only, viewer-scoped, scheduled and free of historical attempts", () => {
+    const s = group(2);
+    expect(gameChangeControls(s, BEFORE, null, "member_0").canStartNow).toBe(true);
+    expect(gameChangeControls(s, BEFORE, null, "unjoined").canEdit).toBe(false);
+    s.game.status = "invited";
+    expect(gameChangeControls(s, BEFORE, null).canStartNow).toBe(false);
+    s.game.status = "live";
+    s.players[1].leftAt = BEFORE;
+    expect(gameChangeControls(s, BEFORE, null).canStartNow).toBe(false);
+    s.players[1].leftAt = null;
+    const dayOne = s.players[1].dayOne;
+    s.players[1].dayOne = null;
+    expect(gameChangeControls(s, BEFORE, null).canStartNow).toBe(false);
+    s.players[1].dayOne = dayOne;
+    s.game.terms.versions[0].schedule = { days: [1] };
+    expect(gameChangeControls(s, BEFORE, null).canStartNow).toBe(false);
+    s.game.terms.versions[0].schedule = { days: [0, 1, 2, 3, 4] };
+    s.hasPostedAttempt = true;
+    expect(gameChangeControls(s, BEFORE, null)).toMatchObject({ canStartNow: false, canEditStartDate: false });
+    s.hasPostedAttempt = false;
+    s.entries = [{ id: "withdrawn", memberId: "member_0", attempt: 1, dayIndex: 0, kind: "words", mediaKeys: [], receivedAt: BEFORE, withdrawnAt: BEFORE, blurHash: null }];
+    expect(gameChangeControls(s, BEFORE, null).canStartNow).toBe(false);
+    s.entries[0].attempt = 0; s.entries[0].kind = "excuse";
+    expect(gameChangeControls(s, BEFORE, null).canStartNow).toBe(true);
+  });
+
+  it("excludes leavers from dates and refuses to silently move the requested date after a join", () => {
+    const s = group(3);
+    s.players.forEach(player => { player.dayOne = "2030-03-09"; player.timeZone = "Pacific/Honolulu"; });
+    s.players[2].leftAt = BEFORE; s.players[2].timeZone = "Pacific/Kiritimati"; s.players[2].dayOne = "2030-03-01";
+    s.game.terms.versions[0].schedule = { days: [0, 1, 2, 3, 4, 5, 6] };
+    const now = new Date("2030-03-08T23:30:00Z");
+    expect(firstUnstartedGameDay(s, now)).toBe(0);
+    const request = { id: "earlier", proposedByMemberId: "member_0", expectedTermsVersion: 1, deliveryStatus: "conversation" as const,
+      ...decideGameChange(s, "member_0", { kind: "start_now" }, now) };
+    expect(request.startsOn).toBe("2030-03-08");
+    expect(decideApprovedGameChange(s, "member_1", request, now).startsOn).toBe(request.startsOn);
+    s.players.push({ memberId: "late", seat: 3, dayOne: "2030-03-09", timeZone: "Pacific/Kiritimati" });
+    expect(isGameChangeExpired(s, request, now)).toBe(true);
+    expect(() => decideApprovedGameChange(s, "member_1", request, now)).toThrow();
+  });
+
+  it("notifies outside-chat cancellation of a conversational group ask only", () => {
+    const ask = { origin: "chat" as const, deliveryStatus: "conversation" as const };
+    expect(gameChangeCancellationNeedsNotice(ask, "cancel", false, true)).toBe(true);
+    expect(gameChangeCancellationNeedsNotice(ask, "cancel", true, true)).toBe(false);
+    expect(gameChangeCancellationNeedsNotice(ask, "cancel", false, false)).toBe(false);
   });
 
   it("normalizes full terms into only the changed fields and rejects semantic no-ops", () => {

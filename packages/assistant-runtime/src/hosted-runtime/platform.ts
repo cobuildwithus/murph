@@ -418,7 +418,11 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   assistantAskFallback?: boolean | null;
   authorityCheckOnly: boolean;
   /** "progress_update" lets Web skip a progress note a tapback already covers. */
-  deliveryPurpose?: "progress_update" | null;
+  /**
+   * `progress_update`: skip a progress note the burst tapback already covers.
+   * `reaction`: report Web's tapback on `replyToMessageId` as `ackReaction`.
+   */
+  deliveryPurpose?: "progress_update" | "reaction" | null;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
   homeRouteFallbackAllowed?: boolean | null;
@@ -431,11 +435,14 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
 }
 
 export interface HostedRuntimeLinqRecentInboundEngagementResult {
+  gameRematchAuthorityChecked?: boolean;
   assistantAskFallbackRequired?: boolean | null;
   deliveryBlockCode?: HostedRuntimeLinqDeliveryBlockCode | null;
   deliveryPosture?: HostedRuntimeLinqDeliveryPosture | null;
   /** Web already sent an "on it" tapback for this burst; skip the progress note. */
   progressUpdateSuppressed?: boolean | null;
+  /** The emoji Linq accepted as Web's tapback on `replyToMessageId`. */
+  ackReaction?: string | null;
   providerDispatchClaimed?: boolean | null;
   resolvedRoute?: HostedExecutionResolvedLinqDeliveryRoute | null;
 }

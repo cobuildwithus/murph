@@ -296,7 +296,7 @@ const commandGroups: Readonly<Record<string, string>> = {
   "meal": "add|closeout-work|delete|edit|import-json|list|manifest|nutrients|remove-photo|show|totals",
   "measurement": "add|entry list|import-json|list|manifest|show",
   "medication": "history add",
-  "memory": "forget|set-name|show|update|upsert",
+  "memory": "forget|set-demographics|set-name|show|update|upsert",
   "model": "",
   "profile": "set|show",
   "protocol": "import-json|list|show",

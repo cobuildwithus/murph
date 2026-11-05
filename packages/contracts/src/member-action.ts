@@ -1,5 +1,6 @@
 import * as z from "./zod-runtime.ts";
 import { companionMealIdSchema } from "./companion-meals.ts";
+import { memoryDemographicsPatchSchema } from "./memory.ts";
 import {
   workoutSessionPresentationV1Schema,
   workoutSessionCardV1Bounds,
@@ -485,7 +486,14 @@ const legacyMealNamesRepairResultSchema = z.object({
   invalid: z.number().int().min(0), changed: z.number().int().min(0),
 }).strict();
 
+export const demographicsSetMemberActionV1Schema = z.object({
+  kind: z.literal("demographics.set"),
+  version: z.literal(1),
+  patch: memoryDemographicsPatchSchema,
+}).strict();
+
 export const memberActionV1Schema = z.discriminatedUnion("kind", [
+  demographicsSetMemberActionV1Schema,
   // Decode queued/restored legacy requests only; the runner consumes this as a
   // no-op. Keep until old producers and retained snapshots have drained.
   z.object({ kind: z.literal("meal.names.repair"), version: z.literal(1), batch: z.number().int().min(0).max(100000) }).strict(),
@@ -501,6 +509,11 @@ export const memberActionIdV1Schema = z
   .length(memberActionV1Bounds.actionId)
   .regex(UUID_PATTERN, "Expected a UUID action identity.");
 
+export const companionDemographicsRequestSchema = memoryDemographicsPatchSchema.safeExtend({
+  actionId: memberActionIdV1Schema,
+  requestedAt: z.isoDateTime({ offset: true }),
+});
+
 export const memberActionRequestV1Schema = z
   .object({
     action: memberActionV1Schema,
@@ -515,6 +528,7 @@ export type MemberActionRequestV1 = z.infer<
 >;
 
 export const memberActionRejectionReasonV1Schema = z.enum([
+  "demographics_unresolved",
   "meal_not_found",
   "meal_changed",
   "multiple_active_workouts",

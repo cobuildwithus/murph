@@ -1,7 +1,8 @@
+export { GAME_MISSED_ROOM_MAX_GAMES, gameGroupMissedCheckInPolicySchema, type HostedGameGroupMissedCheckInPolicy } from "./game-group-missed.ts";
 import type { HostedGameChatBootstrapRequest, HostedGameChatBootstrapResponse } from "./game-bootstrap-control.ts";
 export { hostedGameChatBootstrapRequestSchema, hostedGameChatBootstrapResponseSchema } from "./game-bootstrap-control.ts";
 export type { HostedGameChatBootstrapRequest, HostedGameChatBootstrapResponse, HostedGameChatBootstrapResult } from "./game-bootstrap-control.ts";
-export { GAME_PRIZE_WORDS, GAME_LIVE_LORE_GUIDANCE, buildGameProposalInstructions, buildGameTalkInstructions, buildGameKickoffInstructions, buildGameRematchInstructions, buildGameChangeCancelledInstructions, buildGameChangeExpiredInstructions, buildGameInviteCancelledInstructions, buildGameMissedDayInstructions, buildGameRecapInstructions } from "./game-chat-notifications.ts";
+export { GAME_PRIZE_WORDS, GAME_LIVE_LORE_GUIDANCE, buildGameProposalInstructions, buildGameTalkInstructions, buildGameKickoffInstructions, buildGameRematchInstructions, buildGameChangeCancelledInstructions, buildGameChangeExpiredInstructions, buildGameChangeResolvedInstructions, buildGameInviteCancelledInstructions, buildGameMissedDayInstructions, buildGameRecapInstructions } from "./game-chat-notifications.ts";
 export type { GameNoticeRoom } from "./game-chat-notifications.ts";
 import type { HostedGameToolRequest, HostedGameToolResponse } from "./game-tools.ts";
 export { parseGameRecapEventId, hostedGameToolRequestSchema, hostedGameToolResponseSchema, hostedGameUpdateSchema, hostedGameChatStateSchema, hostedGamePhotoSchema, hostedGameRecapSchema } from "./game-tools.ts";

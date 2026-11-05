@@ -56,7 +56,9 @@ a count in chat; they do not block text kickoff or recap.
 
 Runner compatibility is consumer-first: deploy Web, then the Cloudflare runner.
 The new runner opts in with signed `gameMultiplayer=1`; old runners remain
-pair-only against new Web, and new runners retain pair behavior against old Web.
+pair-only against new Web, and new runners retain pair read and mutation
+compatibility against old Web. Rematch egress has the additional acknowledgement
+floor described below.
 Do not enable production group admission as part of this deployment.
 
 A group addresses one to nine recipients and admits its starter immediately.
@@ -65,31 +67,57 @@ invitees keep their seats. Bearer joiners use separate seats, and ten total
 admissions includes departures. There is no rejoin. Late joiners share the
 existing calendar and can score only from their local joining day, capped by
 the common schedule. While invited, the starter alone can edit full terms
-directly. Once live, any remaining seated player can ask for a change in the
-bound group chat with `edit_terms`, full terms, the current terms version and a
-new proposal ID. More than half of the remaining players must say yes, including
+directly. Once live, any remaining seated player can ask for a change from the
+app or bound group chat with full terms, the current terms version and a new
+proposal ID. New app asks require a proven bound room for their announcement.
+More than half of the remaining players must say yes, including
 the proposer. Each person can answer only for themselves; their yes or no is
 final for that ask. Repeating the same answer is a no-op, even after resolution.
 One ask waits at a time, and only its proposer can cancel it. Unjoined invitees
 and departed players do not count. A late join adds an undecided voter; a
-departure clears the ask because it changes who votes.
+departure clears the ask because it changes who votes. App votes and chat votes
+use the same locked tally. Historical same-vote retries remain replayable.
 
 Group changes use the pair edit delta, pending JSON and approved terms writer.
 Tasks lock once Day 1 begins, the start date at the first check-in, and the prize
 when the game is due. Length and weekday schedule edits start at the next
-unstarted day; an any-days target locks once play starts. Start now is unavailable.
+unstarted day; an any-days target locks once play starts. Start now is a majority
+request available only in live groups with at least two remaining players,
+before every remaining player's original Day 1 and before any check-in attempt.
+Withdrawn attempts and posted history retained after account deletion still
+lock it; excuses do not. The candidate is the latest remaining player's local
+today, advanced to the next scheduled date, and must precede the current Day 1.
+Approval revalidates that exact requested date without silently moving it.
+It advances the terms and calendar without another started event or kickoff.
 An agreed start date runs from the latest player's today to 60 days out and moves
 Day 1 for everyone; stale joins must read the new terms before accepting.
-Chat reads expose seated votes and yeses still needed. The app permits direct
-edits only while invited and has no group voting or pending-change projection.
+App and chat reads expose remaining seated votes and yeses still needed.
+Unjoined invitees retain invitations and cannot vote; stale acceptance must
+refresh the terms version. Controls are closed for invitees and leavers.
 Cancelling the game stays starter-only until the first check-in, while not due.
 Terms reports target the latest applied change's proposer, falling back to the
 starter for initial terms, for both pairs and groups.
 
-Deploy this change to Web before the runner. Old runners omit the required
-live-group proposal ID and receive a refusal; old Web rejects the new field.
-Brief refusals during either version window are accepted. No migration or
-additional capability flag is needed; production group admission stays dark.
+Every first vote rechecks freshness under the game lock. One transaction-level
+resolution writer clears terminal asks, records `game-change-resolved:<g>:<p>`
+with structural reason and tally, and reserves any notice. Reads, settlement,
+acceptance, departure and retained-game account deletion use that owner too.
+App proposals receive one pending announcement. A deciding app vote receives
+one `change_resolved` outcome; a bound-chat reply suppresses the extra notice.
+Cancelling a conversational ask outside that chat receives a cancellation
+notice. Departure expires it with neutral roster-change copy, even if the game
+voids, without naming the leaver or claiming the game continues. Historical
+notices describe only that ask, using its canonical resolution and authorized
+shared task for disambiguation, even after settlement or a later ask.
+
+Deploy complete Web readers and writers, then the runner, then iOS. Existing
+signed `gameMultiplayer=1` and `X-Murph-Game-Multiplayer: 1` remain the capability
+boundaries; immutable `maxPlayers === 10` selects group rules even with two
+remaining players. Old runners parse the existing pending shape but may refuse
+Start now; old Web rejects unsupported requests. Missing availability means
+unavailable. New resolution receipts establish the updated Web rollback floor:
+forward-fix acceptance while preserving recovery. No new request operation,
+status or notification response policy is needed; group admission stays dark.
 
 A pre-settlement leave is silent, preserves evidence and excludes the player
 from prizes, debts and new app content. A leaver still in the group text sees
@@ -111,7 +139,32 @@ settlement, after the last remaining competitor's local final day and applicable
 grace. Any surviving participant eligible at settlement can mark the shared
 prize done while a recipient and debtor survive. Same again copies the original
 addressed audience and terms, including task-seat remapping, and is available
-only to someone who both played and belongs to that audience.
+only to someone who both played and belongs to that audience. Scalar-only edits
+inherit the latest preceding encrypted word version, so a duration or schedule
+change does not prevent Same again. Changing the starter remaps assignments by
+person, including private sparse overrides.
+
+The group invitation says same game only when default task, effective individual
+tasks, prize, schedule, duration and check-in kind match the previous final rules.
+It states a requested new start date separately. Web sends compact comparison
+facts, never the full private state. Hidden assignment changes are described as
+changed individual tasks with private app review, without names or values. Fresh
+invitations invent no previous game. Every person accepts only for themselves;
+previous play, presence, another yes or a poll vote supplies no consent.
+
+The comparison carries the canonical terms revision. Edits between preparation,
+publication and final send make that work stale under the existing single
+`game-rematch:<gameId>` owner. A date-only edit also invalidates it. An already
+sent offer is different: a subsequent fresh read showing changed terms requires
+Murph to explain visible differences and obtain agreement before joining. Private
+assignment differences require reviewing one's own addressed app invitation.
+
+Deploy the rematch policy readers and Web's authority acknowledgement before new
+notices. Old runners reject `require_game_rematch` before generation; updated
+runners refuse a rematch send when old Web omits the acknowledgement, including
+rooms with only two humans. This also pauses pair rematch egress during that
+incompatible window, without changing pair API bytes. Keep those compatible
+readers/egress as the rollback floor. No migration or historical backfill.
 
 ### Multiplayer app contract
 
@@ -124,20 +177,35 @@ empty strings; clients render `parties`. Player reports name `reportedMemberId`;
 post reports derive their author and terms reports target the starter.
 
 `POST /api/game/v1/games/:id/leave` and
-`PUT /api/game/v1/games/:id/terms` with `{expectedTermsVersion, terms}` use the
-existing locked commands. Group creation accepts transient addressed recipients,
-`groupWord`, `defaultTask` and sparse invitation-seat overrides. Groups never
-negotiate or use Start now. Creating with a chat container still rejects.
+`PUT /api/game/v1/games/:id/terms` use the existing locked commands. Invited
+starter edits use `{expectedTermsVersion, terms}` and remain immediate. Live
+edits also require `proposalId` and create a majority ask. Group creation accepts
+transient addressed recipients, `groupWord`, `defaultTask` and sparse
+invitation-seat overrides. Groups never negotiate. Creating with a chat container
+still rejects.
 
-Group app terms keep the effective task for every admitted seat and append stored
-overrides for unjoined seats accepted by the edit validator. Both derive override
-eligibility from `groupTaskOverrideSeats`: current invitation seats, plus seat 0
-when a rematch retained a starter override. Removed invitation seats are omitted.
-All players receive the same seat-number/task-text projection; these are shared
-game terms, with no invitation identity or private pending label. Editors return
-every override they retain; omitting an override still removes it. Chat continues
-to expose only admitted players' tasks, and link previews expose the default task
-plus authenticated `yourTask`, never the sparse override list.
+The live editable terms contract now contains only the shared default and
+remaining-player tasks. Clients round-trip those fields; canonical preparation
+preserves hidden unjoined/departed overrides and rejects explicit writes to
+hidden seats. It compares the prepared remaining member/seat set under the game
+lock; a departure during preparation returns a refreshable conflict. Invited
+starter editing retains broader invitation-seat authority, including removing
+and restoring overrides. Link previews retain the default and authenticated
+`yourTask`, never sparse overrides or private pending labels.
+
+Start now uses `POST /api/game/v1/games/:id/changes` with
+`{proposalId, expectedTermsVersion, change:{kind:"start_now"}}` when
+`changeControls.canStartNow` is true. Live full-term editing uses
+`changeControls.canEdit`; `permissions.canEditTerms` still means direct invited
+editing. `POST /api/game/v1/games/:id/changes/:proposalId` accepts only
+`{decision:"approve"|"decline"}`; path and authentication supply identity.
+`DELETE` on that path cancels for the proposer. Pair votes remain chat-only.
+`pendingChange` retains `id`, `proposedByMemberId`, `change`, `startsOn`,
+`effectiveFromDay`, `votes` and `yesNeeded`. A remaining nonproposer with no
+recorded answer may vote. Render the request as waiting until the returned game
+confirms application. Delivery uses the existing pending/queued/sent/failed/
+conversation statuses and retryability; conversation reserves no separate
+announcement. Refresh on `CHANGE_PENDING`, `TERMS_CHANGED` or `CHANGE_EXPIRED`.
 
 Open capable previews include `maxPlayers`, `group`, nullable `expiresAt` and
 `dayOne`. Authenticated addressed invitees also receive `yourTask`.
@@ -357,7 +425,7 @@ resulting avatar. No private photo is shared with the subject or other players.
   Sending happens after commit, with route/session, active participation, block,
   report, real-day and milestone rechecks. Stale or uncertain sends keep claims
   consumed. A blocked peer suppresses completion wording. No content or names
-  enter pushes. Pair missed-day chat stays; groups have no missed-day producer.
+  enter pushes. Missed-day chat is separate from these push milestones.
 - **Excuses.** An excuse explains a missed day in a few words: the phone
   transcribes the voice note on-device and sends only the transcript (1-500
   characters); no audio is uploaded or stored, and it's never replayed. It
@@ -417,6 +485,27 @@ resulting avatar. No private photo is shared with the subject or other players.
   history and the exact pair's lore first and stays quiet when the player already
   explained the miss. This path requires the exact two-player roster, never
   discovers or creates a chat, and permits a no-reply result.
+- **Group missed-day host check-ins.** A group game, including two-person
+  turnout, uses one combined room message per first missed date. Murph names
+  everyone still qualified and their missing tasks/date, warmly and with a light
+  roast. Never shame, joke about bodies or weight, demand an explanation or ask
+  someone else to nudge a player. No "vs.", em dashes or spaced hyphen separators.
+  Murph reads remaining-player room conversation and the original audience's
+  lore, omits each explained miss and stays quiet if none remain. Unjoined
+  invitees and leavers can still receive the room message but are never targets;
+  private task overrides for invitees, private labels, captions and media stay
+  out. Lore may record room-safe facts and used bits with stable member IDs beside
+  names, roughly 200 lines within the existing 64 KiB limit. IDs stay out of copy.
+  The room cutoff is the latest next-day 9am among every eligible scheduled
+  game/player slot in its frozen time zone, even if that person posts. The
+  inclusive two-hour window starts there. Mixed rooms combine authorized pair
+  and group facts from up to twenty games; pair-only timing and copy stay the
+  same. Pre-join, off/open, any-N and incomplete days do not qualify. Corrected
+  misses, terms or room changes, unsafe audiences and any new departure suppress
+  an already-prepared message. Any conversation received since transcript capture
+  also suppresses it, even unrelated chatter. Quiet and suppressed turns consume
+  the daily claim; replay never creates a replacement message. Earlier historical
+  departures do not stop future eligible dates.
 - **Hosted recap.** Settlement reserves one durable recap turn for the bound
   group. The turn reads the finished shared game, a bounded current-room
   transcript and the authorized game audience's lore, then calls `write_recap` with
@@ -804,7 +893,18 @@ zero.
 Players can also propose a new duration (3–365 days) or weekdays.
 Their tap records their agreement. When the invitation is accepted, Murph
 introduces the agreed challenge in one natural message and offers optional
-reminders for the first few days. Acceptance never schedules reminders.
+reminders for the first few days. Acceptance never schedules reminders. Groups
+use the same offer after the second acceptance activates play; other addressed
+people may still join. A strictly earlier live game suppresses a later kickoff's
+offer. Simultaneous starts each offer, and settled games do not suppress it.
+There is no room reminder claim. A bare yes needs a time and number of days;
+one person or a majority cannot consent for another. Existing automations save
+only the requesting member's exact game/member IDs, time, timezone and bounded
+duration. Each occurrence requires an OK scheduled read, that exact game's live
+status and the requester in its current players, then derives their name and task.
+It stays quiet for ended, departed, unavailable or missing targets and never
+substitutes another game. Rematch invitations do not
+repeat the kickoff offer.
 Murph reuses an exact existing chat with the
 two players and Murph, or automatically creates one from their verified phone
 numbers. When several eligible rooms exist, it prefers the most recently active
@@ -926,12 +1026,15 @@ Resetting a proposed date to the default is explicit (`startsOn: null`), distinc
 from omitting a date change. The original seven-day invite expiry also bounds
 unfinished negotiation. Each negotiation counts toward the pair's ten-open-games cap.
 
-## Setup in a two-person chat
+## Setup in a game chat
 
 Either person can ask Murph to set up a game in a chat containing exactly those
-two members and Murph. In a larger room it makes no game write and explains
-that games are one-on-one: use a chat with just the two players and Murph, or
-start in the app. The accepted message's signed sender is always the actor.
+two members and Murph. A larger authorized room creates a group challenge.
+Fresh creation in a two-human room remains a pair, while Same again preserves
+the previous game's immutable group mode even with two humans present. The
+accepted message's signed sender is always the actor. Group creation and rematch
+require the original exact audience; later reads and delivery use the existing
+subset-room authority.
 
 Murph gathers each person's task (or the same task for both), one prize for the
 winner or dare for the loser, schedule, length and optional Day 1. It asks only
@@ -939,7 +1042,10 @@ for missing choices and states the defaults: seven days, every day. App limits
 apply: 3–365 days, task/stake text up to 200 characters, named weekdays or any N
 days over the entire game, and a picked date tomorrow through 60 days out.
 Omitting the date uses acceptance time, including the existing 03:00–15:00
-start-today window and schedule alignment. Start now uses the existing mutually
+start-today window (03:00 inclusive, 15:00 exclusive) and schedule alignment.
+Before 03:00, acceptance selects the new calendar date opening at 03:00,
+rather than the short remainder of the previous game day.
+Start now uses the existing mutually
 agreed change only when offered. New games store `checkInKind: any`.
 
 Both players need their existing GameProfile first name and time zone. Murph
@@ -966,7 +1072,10 @@ a new game leaves other games alone. Ambiguous new-versus-change asks need one
 clarification.
 
 Setup and poll guidance is returned by the engine on each successful ordinary
-`read_game`, alongside the existing multiple-game selection guidance. The initial
+`read_game`, alongside the existing multiple-game selection guidance. Shared setup
+and the poll paragraph appear once, followed by scoped rules for every pair/group
+mode present, including settled groups. Rules apply to the selected game's
+maxPlayers, never the number currently seated. The initial
 tool descriptions contain only brief triggers; recap reads do not receive setup
 guidance. New-game creation never targets an existing game, and an ambiguous
 new-versus-change ask is clarified even when several existing games fit.
@@ -978,6 +1087,16 @@ Poll guidance owned by that read result:
 > proposing terms from the winner; a tie
 > needs a choice. Do not stack polls, poll one person’s own task or a simple
 > yes/no, or repeat options after creating the poll.
+
+Group setup preserves the exact task/prize wording and the same limits, random
+retry-safe IDs and default-date explanation. Its invitation states complete
+shared terms and requests individual agreement. Group Same again copies the
+previous game first; requested changes then use the starter's invited edit.
+If someone joins in between, use the existing live majority path and describe
+only the returned state. Never create another game as recovery. A successful
+bound-chat cancellation stays quiet in the ordinary turn; the lifecycle notice
+says the earlier challenge was called off without claiming it was app-only or
+had not started. The starter can cancel before any check-in while not due.
 
 ### Play again in iMessage
 
@@ -1042,9 +1161,13 @@ Group recap lore is read-only: after saving, trusted code appends only
 `Chat line used: <chatLine>` from the canonical sealed/replayed recap, once and
 without its delivery link. That room message uses only room conversation and
 shared state, never app-only captions or photo details. Pair recap and missed-day
-turns keep their existing lore writes. Deploy the runner's read-only policy and
-trusted marker before Web starts emitting group recap lore scope; no old lore
-files are imported.
+turns keep their existing lore writes. Group missed-day turns may also replace
+their original-audience lore because they receive only room conversation and
+shared state; they never merge pair notebooks or different audiences. Deploy
+compatible runner readers before Web emits group recap or missed-day policies.
+Once new envelopes exist, keep compatible readers and final egress as the
+rollback floor. Production group admission stays dark; no old lore files are
+imported and no historical notifications are backfilled.
 
 The verified two-player group may read daily check-in status, totals and recent
 settled results. These are shared metadata, not a bypass of post-to-unlock:

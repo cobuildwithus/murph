@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hostedGameChatStateSchema } from "../src/game-tools.ts";
-import { GAME_LIVE_LORE_GUIDANCE, GAME_PRIZE_WORDS, buildGameTalkInstructions, buildGameChangeExpiredInstructions, buildGameChangeCancelledInstructions, buildGameInviteCancelledInstructions, buildGameKickoffInstructions, buildGameMissedDayInstructions, buildGameProposalInstructions, buildGameRecapInstructions, buildGameRematchInstructions } from "../src/game-chat-notifications.ts";
+import { GAME_LIVE_LORE_GUIDANCE, GAME_PRIZE_WORDS, buildGameTalkInstructions, buildGameChangeResolvedInstructions, buildGameChangeExpiredInstructions, buildGameChangeCancelledInstructions, buildGameInviteCancelledInstructions, buildGameKickoffInstructions, buildGameMissedDayInstructions, buildGameProposalInstructions, buildGameRecapInstructions, buildGameRematchInstructions } from "../src/game-chat-notifications.ts";
 
 describe("game v1 notification instructions", () => {
   it("relays the note as user data without inventing terms or acceptance", () => {
@@ -104,7 +104,7 @@ describe("game v1 notification instructions", () => {
     }] }).games;
     const kickoff = buildGameKickoffInstructions({ kind: "started", game: game! });
     for (const instructions of [proposal, kickoff]) expect(instructions).toContain(GAME_PRIZE_WORDS);
-    expect(GAME_PRIZE_WORDS).toContain("owes you breakfast in bed.");
+    expect(GAME_PRIZE_WORDS).toContain("say who owes whom");
     for (const word of ["ticket", "bet", "wager", "stake", "winnings", "cash in"]) expect(GAME_PRIZE_WORDS).toContain(word);
   });
   it("snapshots the recap and missed-day prompt boundaries", () => {
@@ -213,7 +213,7 @@ it("composes shared-evidence superlatives guidance without requiring legacy writ
 });
 
 
-it("keeps group kickoff and recap distinct from pair consent and reminders", () => {
+it("shares the kickoff reminder offer while preserving group consent", () => {
   const game = hostedGameChatStateSchema.parse({ games: [{ id: "game_group", maxPlayers: 10, status: "live", lengthDays: 7, startsOn: null,
     players: [0, 1].map(seat => ({ memberId: `player_${seat}`, seat, firstName: `Alex (${seat + 1})`, timeZone: "UTC", dayOne: "2030-03-06" })),
     terms: { n: 1, fromDay: 0, defaultTask: "Walk", tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Walk" }], schedule: { count: 5 }, stakes: [] },
@@ -221,20 +221,70 @@ it("keeps group kickoff and recap distinct from pair consent and reminders", () 
   }] }).games[0];
   const kickoff = buildGameKickoffInstructions({ kind: "started", game });
   expect(kickoff).toContain("Only seated players have accepted");
+  expect(kickoff).toContain("Lower scorers owe one shared prize");
   expect(kickoff).not.toContain("Both players have agreed");
-  expect(kickoff).not.toContain("Briefly offer reminders");
+  expect(kickoff).toContain("Briefly offer reminders");
+  for (const startedAfterAnother of [false, true]) {
+    const prompt = buildGameKickoffInstructions({ kind: "started", game, room: { tasks: ["Walk"], otherGames: [{ status: "live", tasks: ["Read"] }], startedAfterAnother } });
+    expect(prompt.includes("Briefly offer reminders")).toBe(!startedAfterAnother);
+    expect(prompt.includes("Skip the reminder offer")).toBe(startedAfterAnother);
+    expect(prompt).toContain("do not create, schedule or claim any reminders");
+  }
   const recap = buildGameRecapInstructions([], undefined, true);
   expect(recap).toContain("one kind superlative");
   expect(recap).toContain("Never shame");
 });
 
+it("keeps group cancellation truthful for invited or live challenges without changing pair copy", () => {
+  const group = buildGameInviteCancelledInstructions(true);
+  expect(group).toContain("earlier group challenge was called off");
+  expect(group).not.toMatch(/both players|from the app|before it started|live game was stopped/u);
+  expect(buildGameInviteCancelledInstructions()).toContain("from the app before it started");
+});
+
+it.each([null, true, false])("uses compact group rematch facts and individual consent (%s)", sameGame => {
+  const input = { maxPlayers: 10 as const, requester: "Alex", termsVersion: 4, startsOn: "2030-03-12",
+    comparison: sameGame === null ? null : { sameGame, changes: sameGame ? [] : [{ field: "lengthDays", previous: 7, current: 12 }], individualTasksChanged: !sameGame },
+    terms: { defaultTask: "Walk", tasks: [{ seat: 0, text: "Walk" }], stakes: [], schedule: { count: 5 }, lengthDays: 12, checkInKind: "any" } };
+  const prompt = buildGameRematchInstructions(input);
+  expect(JSON.parse(prompt.split("\n").at(-1)!)).toEqual(input);
+  expect(prompt).toContain("Each addressed person accepts only for themselves");
+  expect(prompt).toContain("Name who is asking to play");
+  if (sameGame !== null) expect(prompt).toContain("before/after wording");
+  expect(prompt).toContain("private invitation in the app");
+  expect(prompt).toContain("Do not offer or schedule reminders");
+  expect(prompt).toContain("Never nudge someone through another person");
+  expect(prompt).not.toMatch(/Both players|tasksByMember|privateLabel/u);
+  expect(prompt.includes("Do not invent a previous game")).toBe(sameGame === null);
+});
+
 it("gives group recaps room continuity, shared voice and read-only lore with eligible-player protections", () => {
   const transcript = [{ playerName: "Alex (2)", text: "The stairs have unionized." }];
   const prompt = buildGameRecapInstructions(transcript, undefined, true);
-  for (const phrase of [JSON.stringify(transcript), "murph.game_lore (read only)", "running bits and callbacks to earlier games", "eligible players by memberId", "Never reuse a bit or chat line listed as used", "dry, warm, specific, a little roasty, never mean", "pages with an arc", "headlines carry the story", "Show their posts", "3 to 7", "one kind superlative per eligible player", "Omit scoreLine", "duplicate-name suffixes", "all-way tie has no prize obligation", "Never shame", "single out a missing person", "No inference from unavailable entries", "Never feature or quote leavers or unjoined people, including inside an eligible player's words", "Quote only returned words exactly", "never app-only captions or photo details"]) expect(prompt).toContain(phrase);
+  for (const phrase of [JSON.stringify(transcript), "murph.game_lore (read only)", "running bits and callbacks to earlier games", "eligible players by memberId", "Never reuse a bit or chat line listed as used", "dry, warm, specific, a little roasty, never mean", "pages with an arc", "headlines carry the story", "Show their posts", "3 to 7", "one kind superlative per eligible player", "Omit scoreLine", "duplicate-name suffixes", "all-way tie has no prize obligation", "Never shame", "Eligible players may be named", "No inference from unavailable entries", "Never feature or quote leavers or unjoined people, including inside an eligible player's words", "Quote only returned words exactly", "never app-only captions or photo details"]) expect(prompt).toContain(phrase);
   expect(prompt).not.toMatch(/older lore|update.*lore|add.*bits used|Chat line used:|anything worth remembering/u);
   const pair = buildGameRecapInstructions(transcript);
   expect(pair).toContain("update the pair lore");
   expect(pair).toContain("Chat line used:");
   for (const phrase of ["game lore", "only room conversation and shared game state", "personal memory, private contact labels", "memberId next to the name", "memberIds never appear in messages"]) expect(GAME_LIVE_LORE_GUIDANCE).toContain(phrase);
+});
+
+
+describe("group change notice facts", () => {
+  const room = { tasks: ["Walk"], otherGames: [{ status: "live", tasks: ["Read"] }], startedAfterAnother: false };
+  it("uses the shared pending shape and asks only for the remaining yeses", () => {
+    const message = buildGameProposalInstructions({ change: { kind: "edit", defaultTask: "Walk", tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Read" }], lengthDays: 14 },
+      startsOn: null, votes: [{ memberId: "member_a", vote: "yes" }], yesNeeded: 2 }, { group: true, proposerName: "Alex", recipientName: "the players", lengthDays: 7, room });
+    expect(message).toContain('"yesNeeded":2'); expect(message).toContain('"lengthDays":14');
+    expect(message).not.toContain("both players"); expect(message).not.toContain("member_a");
+    expect(message).toContain("waiting, not applied");
+  });
+  it("keeps group outcomes request-specific after the game ends", () => {
+    for (const message of [buildGameChangeCancelledInstructions(room, true), buildGameChangeExpiredInstructions("The playing roster changed.", room, true),
+      buildGameChangeResolvedInstructions({ applied: true, reason: "A majority approved.", tally: { yes: 3, no: 1, total: 4 }, changeKind: "start_now", startsOn: "2030-03-06" }, room)]) {
+      expect(message).toContain('"thisGameTasks":["Walk"]');
+      expect(message).not.toMatch(/both players|when the partner agreed|requested from the app/u);
+      expect(message).toMatch(/earlier/u);
+    }
+  });
 });

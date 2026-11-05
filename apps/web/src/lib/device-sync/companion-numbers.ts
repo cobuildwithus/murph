@@ -16,6 +16,7 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { requireActiveHostedMemberAuthFromBearerToken } from "../hosted-onboarding/request-auth";
 import { readHostedWorkspace } from "../hosted-workspace/store";
 import { getPrisma } from "../prisma";
+import { lastSettledStepDay } from "../settled-step-day";
 
 const metrics = {
   restingHeartRate: { key: "resting-heart-rate", unit: "bpm", precision: 0 },
@@ -24,7 +25,7 @@ const metrics = {
   vo2Max: { key: "estimated-vo2-max", unit: "ml/kg/min", precision: 1 },
 } as const;
 const requestedShards = ["core", "metricsIndex"] as const;
-const emptyNumbers = { numbers: null, freshness: "stale" } as const;
+const emptyNumbers = { numbers: null, demographics: null, freshness: "stale" } as const;
 
 function numbersUnavailable() {
   return hostedOnboardingError({
@@ -49,17 +50,27 @@ export async function readCompanionNumbers(request: Request) {
   await assertBrowserVaultMemberAuthority({ memberId: auth.member.id, prisma });
   if (!snapshot) return emptyNumbers;
   const { client, freshness } = snapshot;
+  // Null means unknown (an older replica, or memory unread): the app falls
+  // back to the phone. Never the revision or any memory text.
+  const projected = client.replica.demographics;
+  const demographics = projected ? {
+    birthYear: projected.birthYear, birthYearPrecision: projected.birthYearPrecision,
+    biologicalSex: projected.biologicalSex, status: projected.status,
+  } : null;
   // Core already carries the canonical vault zone, even when there are no meals.
   const timeZone = client.replica.meals?.timeZone;
   if (!timeZone) throw numbersUnavailable();
-  const through = toLocalDayKey(new Date(), timeZone);
+  const now = new Date();
+  const through = toLocalDayKey(now, timeZone);
   const window = { from: addDaysToIsoDate(through, -89), through };
+  const stepsWindow = { ...window, through: lastSettledStepDay(now, timeZone) };
   return {
     timeZone, savedAt: client.replica.generatedAt, freshness, window,
+    demographics,
     numbers: {
       restingHeartRate: presentNumber(client, metrics.restingHeartRate, window),
       sleep: presentNumber(client, metrics.sleep, window),
-      steps: presentNumber(client, metrics.steps, window),
+      steps: presentNumber(client, metrics.steps, stepsWindow),
       vo2Max: presentNumber(client, metrics.vo2Max, window),
     },
   };

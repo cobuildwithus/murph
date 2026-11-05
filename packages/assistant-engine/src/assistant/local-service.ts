@@ -1479,7 +1479,17 @@ export async function sendAssistantMessageLocal(
                 }),
                 vault: currentInput.vault,
               })
-              return { targetInputId: target.targetInputId }
+              const ackReaction = authorizationInput.action === 'reaction'
+                && target.deliveryMessageReactionsAvailable === true
+                ? await readAssistantLinqMessageAckReaction({
+                    reader: hostedExecutionContext?.readLinqMessageAckReaction ?? null,
+                    targetInputId: target.targetInputId,
+                  })
+                : null
+              return {
+                ...(ackReaction ? { ackReaction } : {}),
+                targetInputId: target.targetInputId,
+              }
             } catch (error) {
               if (
                 error instanceof VaultCliError &&
@@ -3369,5 +3379,37 @@ function buildActiveTurnInput(input: {
       input.acceptedInput.userMessageContent === undefined
         ? input.input.userMessageContent
         : input.acceptedInput.userMessageContent,
+  }
+}
+
+const ASSISTANT_LINQ_ACK_REACTION_LOOKUP_TIMEOUT_MS = 1_500
+
+/**
+ * Bounded, fail-open read of Web's tapback on the reaction target. Any error
+ * or a stall past 1.5 s returns null, so the reaction is queued as before.
+ */
+async function readAssistantLinqMessageAckReaction(input: {
+  reader: ((input: { signal: AbortSignal; targetInputId: string }) => Promise<string | null>) | null
+  targetInputId: string
+}): Promise<string | null> {
+  if (!input.reader) {
+    return null
+  }
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      input.reader({ signal: controller.signal, targetInputId: input.targetInputId }),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => {
+          controller.abort()
+          resolve(null)
+        }, ASSISTANT_LINQ_ACK_REACTION_LOOKUP_TIMEOUT_MS)
+      }),
+    ])
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
   }
 }

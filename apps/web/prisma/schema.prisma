@@ -2316,6 +2316,8 @@ model HostedLinqAckReaction {
   claimedAt         DateTime? @map("claimed_at")
   reactedAt         DateTime? @map("reacted_at")
   heavyAt           DateTime? @map("heavy_at")
+  messageLookupKey  String?   @map("message_lookup_key")
+  reaction          String?   @map("reaction")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
   @@map("hosted_linq_ack_reaction")

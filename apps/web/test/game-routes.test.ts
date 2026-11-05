@@ -357,6 +357,9 @@ describe("weekly game routes", () => {
       ["DELETE /games/:id/changes/:proposalId", () => routes.cancelChange.DELETE(
         writeRequest("DELETE", `/games/${GAME_ID}/changes/proposal_1`, { decision: "approve" }), params({ id: GAME_ID, proposalId: "proposal_1" })),
         { type: "respondChange", gameId: GAME_ID, proposalId: "proposal_1", decision: "cancel" }],
+      ["POST /games/:id/changes/:proposalId", () => routes.cancelChange.POST(
+        writeRequest("POST", `/games/${GAME_ID}/changes/proposal_1`, { decision: "approve", actorMemberId: "intruder", gameId: "wrong", proposalId: "wrong", origin: "chat", votes: { intruder: "yes" } }), params({ id: GAME_ID, proposalId: "proposal_1" })),
+        { type: "respondChange", gameId: GAME_ID, proposalId: "proposal_1", decision: "approve" }],
       ["POST /games/:id/changes", () => routes.changes.POST(
         writeRequest("POST", `/games/${GAME_ID}/changes`, { gameId: "wrong_game", type: "respondChange", proposalId: "proposal_1", expectedTermsVersion: 1, change: { kind: "start_now" } }), params({ id: GAME_ID })),
         { type: "proposeChange", gameId: GAME_ID, proposalId: "proposal_1", expectedTermsVersion: 1, change: { kind: "start_now" } }],
@@ -411,6 +414,13 @@ describe("weekly game routes", () => {
       );
 
       expect(mocks.runGameCommand.mock.calls[0][0].command).toMatchObject({ token: "tok_1", type: "join" });
+    });
+
+    it.each(["cancel", "yes", null])("rejects %s on the vote POST without issuing a command", async decision => {
+      const response = await routes.cancelChange.POST(writeRequest("POST", `/games/${GAME_ID}/changes/proposal_1`, { decision }), params({ id: GAME_ID, proposalId: "proposal_1" }));
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+      expect(mocks.runGameCommand).not.toHaveBeenCalled();
     });
 
     it("caps the body at 64 KB", async () => {
@@ -475,6 +485,8 @@ describe("weekly game routes", () => {
         writeRequest("PUT", `/players/${AVA}/photo`, { photoKey: null }), params({ memberId: AVA })),
       "PUT /me/profile": () => routes.profile.PUT(writeRequest("PUT", "/me/profile", { firstName: "Leo", timeZone: "UTC" })),
       "DELETE /games/:id": () => routes.game.DELETE(writeRequest("DELETE", `/games/${GAME_ID}`), params({ id: GAME_ID })),
+      "POST /games/:id/changes/:proposalId": () => routes.cancelChange.POST(
+        writeRequest("POST", `/games/${GAME_ID}/changes/proposal_1`, { decision: "approve" }), params({ id: GAME_ID, proposalId: "proposal_1" })),
       "DELETE /games/:id/changes/:proposalId": () => routes.cancelChange.DELETE(
         writeRequest("DELETE", `/games/${GAME_ID}/changes/proposal_1`), params({ id: GAME_ID, proposalId: "proposal_1" })),
       "DELETE /games/:id/entries/:entryId": () => routes.entry.DELETE(

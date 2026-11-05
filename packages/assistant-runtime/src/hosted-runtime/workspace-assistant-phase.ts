@@ -120,6 +120,7 @@ import {
   drainHostedPreparedAssistantDeliveries,
   prepareHostedAssistantDeliveryEffectsForDispatch,
   queueHostedAssistantPendingMessageVolumeReceiptsForVault,
+  readHostedAssistantLinqMessageAckReaction,
   resetHostedPreparedAssistantDeliveryEffects,
   resolveHostedAssistantOutboxNextWakeAt,
   type HostedAssistantDeliveryPreparation,
@@ -439,6 +440,34 @@ async function resolveHostedAssistantInputIdsTurnCommitLinqContexts(input: {
     contexts.push(context);
   }
   return contexts;
+}
+
+/**
+ * Web's tapback on the accepted member message Murph wants to react to. The
+ * input event carries the real Linq chat and message ids (its conversation
+ * thread id is blinded). Null for anything but a direct Linq message.
+ */
+async function readHostedAssistantInputLinqAckReaction(input: {
+  effectsPort: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["effectsPort"];
+  memberId: string;
+  signal: AbortSignal;
+  targetInputId: string;
+  vaultRoot: string;
+}): Promise<string | null> {
+  const context = readHostedAssistantInputLinqDeliveryContext({
+    event: await readAssistantInputEvent({
+      inputId: input.targetInputId,
+      vault: input.vaultRoot,
+    }),
+    memberId: input.memberId,
+  });
+  return context
+    ? readHostedAssistantLinqMessageAckReaction({
+        context,
+        effectsPort: input.effectsPort,
+        signal: input.signal,
+      })
+    : null;
 }
 
 function resolveHostedCurrentLinqDeliveryContexts(
@@ -1731,6 +1760,14 @@ export async function runHostedWorkspaceAssistantPhase(
         ...(clinicalRecordsConnectLinkTool ? { clinicalRecordsConnectLinkTool } : {}),
         physicalNotes: input.runtime.platform.physicalNotes ?? null,
         phoneCalls: input.runtime.platform.phoneCalls ?? null,
+        readLinqMessageAckReaction: ({ signal, targetInputId }) =>
+          readHostedAssistantInputLinqAckReaction({
+            effectsPort: input.runtime.platform.effectsPort,
+            memberId: input.request.userId,
+            signal,
+            targetInputId,
+            vaultRoot: input.restored.vaultRoot,
+          }),
         progressDeliveryDependencies: createHostedAssistantProgressDeliveryDependencies({
           effectsPort: input.runtime.platform.effectsPort,
           forwardedEnv: input.runtime.forwardedEnv,
