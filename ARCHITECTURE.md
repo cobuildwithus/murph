@@ -2698,6 +2698,59 @@ package is not presented as a timeless product claim. One-time acquisition,
 reconciliation, and remap tooling is operational research rather than deployed
 application code.
 
+## Canonical Memory Demographics
+
+`bank/memory.md` owns constrained Identity records for `Date of birth: YYYY-MM-DD`,
+`Birth year: YYYY`, `Age: N (as of YYYY-MM-DD)` and `Biological sex: female|male`.
+Contracts owns their resolver, validator and formatter; core applies sparse
+patches under the existing memory lock in one audited canonical write. Omission
+preserves a field; null clears it (a birth clear removes every birth basis).
+Generic upsert/update uses the same policy, rejects malformed replacements or
+section moves, and forgetting removes that recognized kind, including duplicates.
+A newer statement supersedes an older, less precise one: a supplied year
+replaces dated age, a stated age replaces a bare year, and a DOB replaces both.
+An agreeing existing DOB is preserved without a mirrored year, and a stated age
+must agree with a saved DOB within its one-year window.
+Gender and arbitrary prose never supply biological sex or a birth fact.
+
+DOB and explicit years are exact. Dated age derives an approximate year from the
+source statement date, with the expected one-year uncertainty. Duplicate or
+malformed recognized records remain unresolved. Each unaffected field can still
+resolve. Missing memory is known empty. An unreadable or structurally invalid
+memory document projects as unknown (no field), so it never stops the replica's
+numbers, meals and labs from refreshing. The revision hashes only recognized records
+and their metadata, never unrelated memory or the replay marker; it is an input
+fingerprint, not a compare-and-swap token or statement chronology.
+
+Generation 18 Browser Vault core carries only the resolved fields and revision.
+The runtime reads them through core and includes their fingerprint in all three
+source stability checks (before build, after build, before publication). Memory
+remains `querySource: "none"`. Numbers omits revision and never exports DOB
+month/day or memory text. Null fields mean absent in this saved snapshot, with
+ordinary eventual convergence and no wake on reads; a null `demographics` means
+unknown, and Numbers keeps its existing empty and stale fallbacks.
+
+Native `demographics.set` uses the existing encrypted member-action mailbox.
+Both reference and decoded projection must be generation 18 or newer at
+admission. Native session, active access and current consent remain authoritative.
+The client retains actionId, requestedAt and payload for retries; collisions
+return 409. The core write atomically retains one last action ID, payload digest
+and terminal status in memory frontmatter, preserved by generic and chat writes.
+The serialized mailbox retains that request until its post-checkpoint outcome,
+so exact replay returns the original status without reapplying over a later chat
+correction. New statements apply in canonical write order. A statement that
+would leave birth facts in conflict (a year or age against a saved DOB) changes
+nothing, returns `rejected / demographics_unresolved`, and leaves the DOB to an
+explicit correction. Native outcome reads use `readMemberActionStatus`;
+Messages credentials retain their workout-only admission scope.
+
+Deploy compatible memory/outcome readers first, then the generation-18 producer
+and consumer together, then native Web adapters and the client. Retain the new
+memory frontmatter decoder, action decoder, rejection reason and consumer as the
+rollback floor while their canonical documents, mailbox items or snapshots exist.
+There is no profile table, new retry ledger, importer promotion, or LLM backfill.
+Wire contracts live in [iOS Meals and private numbers](agent-docs/product-specs/ios-meals.md#private-numbers).
+
 ## Trust Boundaries
 
 - Web owns four authenticated, staggered hourly Vercel retention routes instead of one cross-domain sweep: nonce retention at minute 5, ordinary primary-database retention at minute 20, external account/computer provider cleanup at minute 35, and runtime-signal plus diagnostic-log maintenance at minute 50. Only the nonce route has an 800-second duration; the other three are capped at 300 seconds. No route invokes another owner, so a Kernel/browser, account-provider, runtime-signal, or diagnostic-database failure cannot prevent callback nonce catch-up.

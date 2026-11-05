@@ -47874,3 +47874,62 @@ describeRealCodex('fresh next-day reminder language', () => {
     finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
   }, 600_000)
 })
+
+
+describeRealCodex('real Codex canonical demographics', () => {
+  it('saves dated age and explicit biological sex without inferring it from gender', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await prepareRealCodexOnboardingDirectory()
+    const commandLogPath = path.join(workingDirectory, 'demographics-commands.log')
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'America/New_York' })
+      await writeFile(path.join(workingDirectory, 'vault-cli'), [
+        '#!/bin/sh', 'set -eu',
+        `printf '%s\n' "$*" >> "$MURPH_ONBOARDING_TEST_COMMAND_LOG"`,
+        'exec "$MURPH_ONBOARDING_TEST_NODE" --import "$MURPH_ONBOARDING_TEST_LOADER" "$MURPH_ONBOARDING_TEST_CLI" "$@" --vault "$MURPH_ONBOARDING_TEST_VAULT"', '',
+      ].join('\n'), { mode: 0o700 })
+      const turnInput = buildRealCodexOnboardingTurnInput({ config, workingDirectory })
+      const execute = (prompt: string) => executeRealCodexAppServerTurn({
+        ...turnInput,
+        developerInstructions: buildDirectConversationDeveloperInstructions(false, null, [], '2026-01-02T12:00:00.000Z'),
+        dynamicTools: [],
+        env: { ...turnInput.env,
+          MURPH_ONBOARDING_TEST_COMMAND_LOG: commandLogPath,
+          MURPH_ONBOARDING_TEST_NODE: process.execPath,
+          MURPH_ONBOARDING_TEST_LOADER: VAULT_E2E_TSX_LOADER,
+          MURPH_ONBOARDING_TEST_CLI: VAULT_E2E_CLI_ENTRYPOINT,
+          MURPH_ONBOARDING_TEST_VAULT: workingDirectory,
+          TSX_TSCONFIG_PATH: path.resolve(path.dirname(VAULT_E2E_CLI_ENTRYPOINT), '../../../tsconfig.base.json'),
+        }, prompt,
+      })
+      const first = await execute('Please remember that I was 39 on 2025-12-31. My gender is woman.')
+      await waitForWarmCodexBackgroundWork()
+      const firstMemory = await readMemoryDocument(workingDirectory)
+      expect(firstMemory.records.map(record => record.text)).toContain('Age: 39 (as of 2025-12-31)')
+      expect(firstMemory.records.some(record => record.text.startsWith('Biological sex:'))).toBe(false)
+      expect(firstMemory.records.some(record => record.text.startsWith('Date of birth:') || record.text.startsWith('Birth year:'))).toBe(false)
+      const second = await execute('My biological sex is female. Please save that without changing my saved age.')
+      await waitForWarmCodexBackgroundWork()
+      const memory = await readMemoryDocument(workingDirectory)
+      expect(memory.records.filter(record => record.text.startsWith('Biological sex:')).map(record => record.text)).toEqual(['Biological sex: female'])
+      expect(memory.records.filter(record => record.text.startsWith('Age:')).map(record => record.text)).toEqual(['Age: 39 (as of 2025-12-31)'])
+      const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
+      const saves = expandRecordedVaultCommands(commands).filter(command => /^memory set-demographics(?: |$)/u.test(command) && !isRecordedVaultHelpCommand(command))
+      process.stdout.write(`[demographics-live saves] ${JSON.stringify(saves.map(redactRealCodexDiagnosticText))}\n`)
+      expect(saves).toHaveLength(2)
+      expect((await readCanonicalAuditRecords(workingDirectory)).filter(record => record.commandName === 'core.setMemoryDemographics')).toHaveLength(2)
+      expect(saves[0]).toMatch(/--age(?:=| )39/u)
+      expect(saves[0]).toContain('2025-12-31')
+      expect(saves[0]).not.toContain('--biological-sex')
+      expect(saves[1]).toMatch(/--biological-sex(?:=| )female/u)
+      for (const [phase, result] of [['dated-age', first], ['explicit-sex', second]] as const) {
+        expect(result.finalMessage.length).toBeLessThan(450)
+        expect(result.finalMessage).not.toMatch(/saved (?:your )?(?:birthday|date of birth)|from your gender|inferred|endpoint|replica/iu)
+        process.stdout.write(`[demographics-live ${phase}] ${result.finalMessage.trim()}\n`)
+      }
+    } finally {
+      await stopWarmCodexAppServer('demographics-e2e-complete')
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})

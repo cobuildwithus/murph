@@ -537,3 +537,22 @@ function createCurrentOutcome(sequence: number): ExperimentOutcome {
     },
   };
 }
+
+
+test("demographics survives split, parse and assemble without collapsing legacy absence to known-null", async () => {
+  const legacy = createReplica();
+  legacy.generation = 17;
+  delete legacy.demographics;
+  const old = assembleBrowserVaultCoreReplica(parseBrowserVaultCoreShard((await splitBrowserVaultReplica(legacy)).core));
+  assert.equal("demographics" in old, false);
+  for (const status of ["resolved", "unresolved"] as const) {
+    const current = { ...legacy, generation: 18, demographics: {
+      birthYear: null, birthYearPrecision: null, biologicalSex: null, status, revision: "a".repeat(64),
+    } };
+    const shards = await splitBrowserVaultReplica(current);
+    const parsed = await parseBrowserVaultReplicaShards(JSON.parse(JSON.stringify(shards)));
+    assert.deepEqual(assembleBrowserVaultReplicaShards(parsed).demographics, current.demographics);
+    assert.deepEqual(assembleBrowserVaultCoreReplica(parsed.core).demographics, current.demographics);
+    assert.deepEqual(parseBrowserVaultReplica(current).demographics, current.demographics);
+  }
+});

@@ -7,6 +7,7 @@ import {
   memoryDocumentSnapshotSchema,
   memoryRecordSchema,
   memorySectionSchema,
+  memoryDemographicsSchema,
   type MemorySection,
 } from "@murphai/contracts";
 import {
@@ -16,6 +17,7 @@ import {
   MemoryRecordNotFoundError,
   readMemoryDocument,
   setMemoryDisplayName,
+  setMemoryDemographics,
   updateMemory,
   upsertMemory,
 } from "@murphai/core";
@@ -198,6 +200,40 @@ export function registerMemoryCommands(cli: Cli.Cli) {
           created: result.created,
           memory: result.record,
         };
+      });
+    },
+  });
+
+  memory.command("set-demographics", {
+    description: "Save explicitly stated birth year, dated age, or biological sex in Identity memory. Never infer sex from gender.",
+    options: memoryMutationOptionsSchema.extend({
+      birthYear: z.number().int().min(1900).max(9999).optional().describe("Explicit birth year; omit to preserve."),
+      age: z.number().int().min(13).max(120).optional().describe("Stated age; requires --as-of and excludes --birth-year."),
+      asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional().describe("Source statement date, not the processing date."),
+      biologicalSex: z.enum(["female", "male"]).optional().describe("Only explicitly stated biological sex."),
+      clearBirth: z.boolean().optional().describe("Explicitly clear all birth facts, including saved DOB."),
+      clearSex: z.boolean().optional().describe("Explicitly clear biological sex."),
+    }),
+    output: z.object({
+      status: z.enum(["applied", "unchanged", "rejected"]),
+      reason: z.literal("demographics_unresolved").nullable(),
+      demographics: memoryDemographicsSchema,
+    }),
+    async run({ options }) {
+      return runMemoryCommand(async () => {
+        if ((options.age !== undefined && !options.asOf)
+          || (options.clearBirth && (options.age !== undefined || options.birthYear !== undefined))
+          || (options.clearSex && options.biologicalSex !== undefined)) {
+          throw new VaultCliError("invalid_option", "Age requires --as-of; clearing excludes a replacement value.", {
+            retryable: false, stage: "validation",
+          });
+        }
+        return setMemoryDemographics(options.vault, {
+          birthYear: options.clearBirth ? null : options.birthYear,
+          age: options.age,
+          biologicalSex: options.clearSex ? null : options.biologicalSex,
+          asOf: options.asOf,
+        });
       });
     },
   });

@@ -30,7 +30,7 @@ import { GET } from "../app/api/device-sync/companion/numbers/route";
 
 const savedAt = "2026-11-04T18:00:00.000Z";
 const replicaRef = {
-  byteLength: 128, dataVersion: "d".repeat(64), generatedAt: savedAt, generation: 17,
+  byteLength: 128, dataVersion: "d".repeat(64), generatedAt: savedAt, generation: 18,
   keyId: "browser-vault-replica:d", objectKey: "users/browser-vault-replicas/opaque/replica.json",
   replicaSchema: "murph.browser-vault-replica", runtimeRootKeyId: "udrk:runtime:test-root",
   schema: "murph.hosted-browser-vault-replica-ref.v1", sourceBundleHash: "a".repeat(64),
@@ -62,7 +62,7 @@ function fixture(metricRows?: BrowserVaultMetricRow[]): BrowserVaultReplica {
   ]);
   return {
     assistantSummary: { highlights: [], latestDate: through }, entities: [],
-    generatedAt: savedAt, generation: 17, labResultRows: [],
+    generatedAt: savedAt, generation: 18, labResultRows: [],
     meals: { schemaVersion: 1, timeZone: "America/New_York", days: [] },
     metricGoalProgressRows: [], metricSelectionRows: [],
     metricRows: metricRows ?? [
@@ -76,6 +76,7 @@ function fixture(metricRows?: BrowserVaultMetricRow[]): BrowserVaultReplica {
       row("body-weight", through, 70, "kg"),
     ].reverse(),
     policy: { id: "health-vault-browser", bodyPreviewChars: 280, excludedFamilies: [], includedFamilies: [], metricLookbackDays: 365 },
+    demographics: { birthYear: 1986, birthYearPrecision: "exact", biologicalSex: "female", status: "resolved", revision: "f".repeat(64) },
     schema: "murph.browser-vault-replica", searchRows: [],
     source: { dataVersion: replicaRef.dataVersion, sourceBundleHash: replicaRef.sourceBundleHash },
     sourceHealthRows: [], timelineRows: [], weeklySampleSummaries: [],
@@ -111,7 +112,7 @@ it("serves only the documented four saved series and comparison fields, includin
   expect(response.status).toBe(200);
   expect(response.headers.get("cache-control")).toBe("no-store");
   const body = await response.json();
-  expect(Object.keys(body)).toEqual(["timeZone", "savedAt", "freshness", "window", "numbers"]);
+  expect(Object.keys(body)).toEqual(["timeZone", "savedAt", "freshness", "window", "demographics", "numbers"]);
   expect(body).toMatchObject({ timeZone: "America/New_York", savedAt, freshness: "fresh", window: { from, through } });
   expect(Object.keys(body.numbers)).toEqual(["restingHeartRate", "sleep", "steps", "vo2Max"]);
   for (const [name, unit, baseline, current, delta] of [
@@ -166,13 +167,14 @@ it.each(["age", "generation"])("returns saved stale data without refreshing (%s)
   expect(body.numbers.restingHeartRate.latest.value).toBe(58);
 });
 
-it.each(["missing ref", "missing object", "empty session"])("returns the Journal-style empty response for %s", async cause => {
+it.each(["missing ref", "missing object", "empty session"])("returns the Journal-style empty response for legacy %s", async cause => {
+  mocks.workspace.mockResolvedValue({ browserVaultReplicaRef: { ...replicaRef, generation: 17 }, version: "v1" });
   if (cause === "missing ref") mocks.workspace.mockResolvedValue(null);
   if (cause === "missing object") mocks.control.mockRejectedValue(new CloudflareHostedControlBrowserVaultReplicaNotFoundError());
   if (cause === "empty session") mocks.control.mockResolvedValue({ state: "empty" });
   const response = await GET(request());
   expect(response.status).toBe(200);
-  expect(await response.json()).toEqual({ numbers: null, freshness: "stale" });
+  expect(await response.json()).toEqual({ numbers: null, demographics: null, freshness: "stale" });
   expect(mocks.decode).not.toHaveBeenCalled();
   if (cause === "missing ref") expect(mocks.control).not.toHaveBeenCalled();
 });
@@ -265,4 +267,43 @@ it("uses catalog stale thresholds and returns null for data outside the 90-day w
   expect(body.numbers.steps).toBeNull();
   vi.setSystemTime(new Date("2026-11-05T19:00:00Z"));
   expect((await (await GET(request())).json()).numbers.vo2Max.stale).toBe(true);
+});
+
+
+it("returns only resolved fields without the memory revision or DOB", async () => {
+  const body = await (await GET(request())).json();
+  expect(body.demographics).toEqual({ birthYear: 1986, birthYearPrecision: "exact", biologicalSex: "female", status: "resolved" });
+  expect(JSON.stringify(body)).not.toContain("revision");
+});
+
+it("distinguishes legacy absence, known-null and unresolved fields", async () => {
+  const replica = fixture();
+  replica.generation = 17;
+  delete replica.demographics;
+  shards = await splitBrowserVaultReplica(parseBrowserVaultReplica(replica));
+  expect((await (await GET(request())).json()).demographics).toBeNull();
+  for (const status of ["resolved", "unresolved"] as const) {
+    replica.generation = 18;
+    replica.demographics = { birthYear: null, birthYearPrecision: null, biologicalSex: null, status, revision: "e".repeat(64) };
+    shards = await splitBrowserVaultReplica(parseBrowserVaultReplica(replica));
+    expect((await (await GET(request())).json()).demographics).toEqual({ birthYear: null, birthYearPrecision: null, biologicalSex: null, status });
+  }
+  // Memory the runtime couldn't read: the numbers still come back, with
+  // demographics unknown so the app falls back to the phone.
+  delete replica.demographics;
+  shards = await splitBrowserVaultReplica(parseBrowserVaultReplica(replica));
+  const unknown = await GET(request());
+  expect(unknown.status).toBe(200);
+  const body = await unknown.json();
+  expect(body.demographics).toBeNull();
+  expect(body.numbers).not.toBeNull();
+});
+
+
+it.each(["missing object", "empty session"])("keeps the empty answer for a generation-18 %s, demographics unknown", async cause => {
+  if (cause === "missing object") mocks.control.mockRejectedValue(new CloudflareHostedControlBrowserVaultReplicaNotFoundError());
+  else mocks.control.mockResolvedValue({ state: "empty" });
+  const response = await GET(request());
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ numbers: null, demographics: null, freshness: "stale" });
 });

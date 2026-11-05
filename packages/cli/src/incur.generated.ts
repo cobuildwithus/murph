@@ -194,6 +194,7 @@ declare module 'incur' {
       'measurement show': { args: { id: string }; options: { requestId?: string } }
       'medication history add': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; stoppedOn?: string; schedule?: string; substance?: string; dose?: number; unit?: string; group?: string; note?: string; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[]; startedOn: string } }
       'memory forget': { args: { memoryId: string }; options: { compact?: boolean } }
+      'memory set-demographics': { args: {}; options: { compact?: boolean; birthYear?: number; age?: number; asOf?: string; biologicalSex?: "female" | "male"; clearBirth?: boolean; clearSex?: boolean } }
       'memory set-name': { args: { displayName: string }; options: { compact?: boolean } }
       'memory show': { args: { memoryId?: string }; options: { recordOnly?: boolean; compact?: boolean } }
       'memory update': { args: { memoryId: string; text: string }; options: { compact?: boolean; section?: "Identity" | "Preferences" | "Instructions" | "Context" } }

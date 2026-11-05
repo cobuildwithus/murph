@@ -211,7 +211,7 @@ test("memory show returns onboarding demographic context from the complete canon
   const saved = await runInProcessJsonCli(cli, [
     "memory",
     "upsert",
-    "Age: 16",
+    "Age: 16 (as of 2026-11-04)",
     "--section",
     "Identity",
     "--vault",
@@ -236,7 +236,7 @@ test("memory show returns onboarding demographic context from the complete canon
         };
       }
     ).document.records.map(({ section, text }) => ({ section, text })),
-    [{ section: "Identity", text: "Age: 16" }],
+    [{ section: "Identity", text: "Age: 16 (as of 2026-11-04)" }],
   );
 });
 
@@ -965,4 +965,24 @@ test("memory command module does not register a search subcommand", async () => 
 
   assert.equal(exitCode, 1);
   assert.match(output.join("").trim(), /'search' is not a command for 'vault-cli memory'/u);
+});
+
+
+test("memory set-demographics saves dated age and explicit sex, preserves omitted fields, and clears explicitly", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-demographics-cli-");
+  cleanupPaths.push(parentRoot);
+  const cli = Cli.create("vault-cli", { description: "memory test cli", version: "0.0.0-test" });
+  registerMemoryCommands(cli);
+  const run = (...options: string[]) => runInProcessJsonCli(cli, ["memory", "set-demographics", "--vault", vaultRoot, ...options]);
+  const saved = await run("--age", "39", "--as-of", "2025-12-31", "--biological-sex", "female");
+  assert.equal(saved.envelope.ok, true);
+  assert.deepEqual((await readMemoryDocumentFromCore(vaultRoot)).records.map(record => record.text), ["Age: 39 (as of 2025-12-31)", "Biological sex: female"]);
+  const retry = await run("--age", "39", "--as-of", "2025-12-31");
+  assert.equal(retry.envelope.ok, true);
+  assert.equal((retry.envelope.data as { status: string }).status, "unchanged");
+  const cleared = await run("--clear-sex");
+  assert.equal(cleared.envelope.ok, true);
+  assert.deepEqual((await readMemoryDocumentFromCore(vaultRoot)).records.map(record => record.text), ["Age: 39 (as of 2025-12-31)"]);
+  const invalid = await run("--age", "39");
+  assert.equal(invalid.envelope.ok, false);
 });
