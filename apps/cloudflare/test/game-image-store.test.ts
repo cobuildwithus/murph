@@ -136,6 +136,34 @@ describe("private game Images", () => {
     expect(p.sign).toHaveBeenLastCalledWith({ variant: "gamephoto", expiresIn: 300 });
   });
 
+  it("returns a stored copy without waiting on the inspection that ran alongside it", async () => {
+    const bucket = new IndexBucket(), p = provider();
+    const store = createGameImageStore({ deploymentOrigin, bucket, images: p.images, userId: "member_leo" });
+    await store.upload(mediaId, bytes);
+    p.info.mockRejectedValueOnce(new Error("synthetic inspection outage"));
+    await expect(store.upload(mediaId, bytes)).resolves.toBeUndefined();
+    expect(p.upload).toHaveBeenCalledTimes(1);
+  });
+
+  it("replies once the pointer is stored and clears its receipt after the reply", async () => {
+    const bucket = new IndexBucket(), p = provider();
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const remove = bucket.delete.bind(bucket);
+    vi.spyOn(bucket, "delete").mockImplementation(async (key) => { await held; return remove(key); });
+    const after: Promise<unknown>[] = [];
+    const store = createGameImageStore({
+      deploymentOrigin, bucket, images: p.images, userId: "member_leo", waitUntil: work => { after.push(work); },
+    });
+    const receipts = () => [...bucket.objects.keys()].filter(key => key.startsWith("game-image-uploads/"));
+    await store.upload(mediaId, bytes);
+    await expect(store.stat(mediaId)).resolves.toEqual({ byteLength: bytes.length });
+    expect(receipts()).toHaveLength(1);
+    release();
+    await Promise.all(after);
+    expect(receipts()).toHaveLength(0);
+  });
+
   it("signs provider-valid variants accepted by deployment admission", async () => {
     const bucket = new IndexBucket(), p = provider();
     const store = createGameImageStore({ deploymentOrigin, bucket, images: p.images, userId: "member_leo" });
