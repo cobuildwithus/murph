@@ -7762,6 +7762,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         ok: true,
         ...(body.authorityCheckOnly === false
           ? {
+              gameRematchAuthorityChecked: true,
               deliveryPosture: "cautious",
               providerDispatchClaimed: true,
             }
@@ -7816,6 +7817,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       targetKind: "thread",
     })).resolves.toEqual({
       deliveryPosture: "cautious",
+      gameRematchAuthorityChecked: true,
       providerDispatchClaimed: true,
       resolvedRoute: {
         conversationThreadId: null,

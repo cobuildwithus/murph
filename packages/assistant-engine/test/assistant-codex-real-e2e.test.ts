@@ -48343,3 +48343,284 @@ describeRealCodex('real Codex canonical demographics', () => {
     }
   }, 360_000)
 })
+
+type HostingGame = import('@murphai/hosted-execution/runtime-control').HostedGameChatState['games'][number]
+type HostingState = import('@murphai/hosted-execution/runtime-control').HostedGameChatState
+type HostingUpdate = import('@murphai/hosted-execution/runtime-control').HostedGameUpdate
+type HostingReminder = Extract<AssistantHostedAutomationToolRequest, { action: 'save' }>
+const hostingInputId = 'ain_' + 'd'.repeat(32)
+function hostingGame(extra: Partial<HostingGame> = {}): HostingGame {
+  return { id: 'game_hosting_group', maxPlayers: 10, status: 'live', lengthDays: 7, startsOn: '2030-03-07', pendingInviteeCount: 1,
+    players: ['Alex', 'Sam'].map((firstName, seat) => ({ memberId: `player_${seat}`, firstName, seat, dayOne: '2030-03-07', timeZone: seat ? 'Europe/London' : 'America/New_York' })),
+    terms: { n: 1, fromDay: 0, defaultTask: 'Walk outside', tasks: [{ seat: 0, text: 'Walk outside' }, { seat: 1, text: 'Walk outside' }], schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: 'prize', item: 'Choose lunch' }] },
+    pendingChange: null, changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: true, canEditTasks: true, canEditStakes: true, editableFromDay: 0 }, ...extra }
+}
+
+async function runHostingOccurrence(input: { config: RealCodexE2eConfig; workingDirectory: string; instructions: string; automationId: string; reminder: HostingReminder;
+  groupTool: import('../src/assistant/execution-context.js').AssistantHostedGroupTool }) {
+  const permissionHome = await materializeRealCodexHostedPermissionHome(input.config)
+  try {
+    vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true })
+    vi.setSystemTime(new Date('2030-03-08T01:00:00Z'))
+    const modelTarget = createAssistantModelTarget({ approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
+      codexHome: permissionHome.codexHome, model: input.reminder.assistantTargetOverride?.model ?? input.config.model,
+      modelProvider: input.config.modelProvider, provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write' })
+    if (!modelTarget) throw new Error('Expected scheduled model target')
+    const result = await sendAssistantNotificationLocal({
+      actorId: null, bindingDeliveryTarget: 'hosting-room', channel: 'linq', deliveryDispatchMode: 'queue-only', deliveryTarget: 'hosting-room',
+      deliveryIdempotencyKey: `automation:${input.automationId}:2030-03-08T01:00:00Z`,
+      executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'hosting-container', userEnvKeys: [], groupTool: input.groupTool } },
+      identityId: null, instructions: input.instructions, threadId: 'hosting-room', threadIsDirect: false,
+      scheduledInvocationAuthority: { automationId: input.automationId, occurrenceAt: '2030-03-08T01:00:00Z' },
+      scheduledOccurrenceAt: '2030-03-08T01:00:00Z', scheduledAutomationScheduleKind: input.reminder.schedule.kind,
+      turnEnvironment: { currentWorkingDirectory: input.workingDirectory, env: input.config.env }, turnTrigger: 'automation-cron', vault: input.workingDirectory, workingDirectory: input.workingDirectory,
+    })
+    expect(await listAssistantOutboxIntents(input.workingDirectory)).toHaveLength(result.decision.kind === 'send_message' ? 1 : 0)
+    return { finalMessage: result.response ?? '' }
+  } finally { vi.useRealTimers(); await removeRealCodexTemporaryPaths(permissionHome.temporaryPaths) }
+}
+
+async function runHostingTurn(input: { name: string; prompt: string; state: HostingState; actor?: number; scheduled?: HostingReminder; unavailable?: boolean; update?: (update: HostingUpdate) => void; save?: boolean }) {
+  const config = await resolveRealCodexE2eConfig()
+  const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-hosting-proof-'))
+  const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
+  const { MURPH_AUTOMATION_TOOL } = await import('../src/assistant-codex/dynamic-tools/automation.js')
+  const { hostedGameToolResponseSchema } = await import('@murphai/hosted-execution/runtime-control')
+  const calls: import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest[] = []
+  const saves: Extract<AssistantHostedAutomationToolRequest, { action: 'save' }>[] = []
+  const groupTool: import('../src/assistant/execution-context.js').AssistantHostedGroupTool = { request: async request => {
+    calls.push(request)
+    if (request.action === 'update_game') { if (!input.update) throw new Error('No game mutation authorized'); input.update(request.update) }
+    else if (request.action !== 'read_game') throw new Error('No other game effect authorized')
+    return hostedGameToolResponseSchema.parse({ action: request.action, result: input.unavailable ? { status: 'unavailable' } : { status: 'ok', state: input.state } })
+  } }
+  try {
+    await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
+    let prompt = `${input.prompt}\nCurrent accepted speaker: ${input.actor === 1 ? 'Sam' : 'Alex'}. Message ref: ${hostingInputId}. Occurred at: 2030-03-06T12:00:00Z.`
+    let automationId = 'automation_hosting'
+    if (input.scheduled) {
+      const saved = input.scheduled
+      await upsertAutomation({ continuityPolicy: 'preserve', createOnly: true, instructions: saved.instructions, title: saved.title,
+        schedule: saved.schedule, status: 'active', vaultRoot: workingDirectory, activeUntil: saved.activeUntil, assistantTargetOverride: saved.assistantTargetOverride,
+        route: { channel: 'linq', deliveryTarget: 'hosting-room', threadIsDirect: false, identityId: null, participantId: null, threadId: 'hosting-room' }, now: new Date('2030-03-06T12:00:00Z') })
+      const source = (await listCanonicalAssistantCronRecords(workingDirectory))[0]
+      if (!source || source.kind !== 'automation') throw new Error('Expected the saved group reminder.')
+      automationId = source.automationId
+      const runtimeState = createAssistantCronCanonicalRuntimeRecord({ jobId: resolveCanonicalAssistantCronJobId(source), now: '2030-03-08T01:00:00Z' })
+      const job = projectCanonicalAssistantCronJob({ source, runtimeState })
+      prompt = buildAssistantCronExecutionInstructions({ job, kind: 'canonical', runtimeState, source }, { automationId, contextReferences: [] }, '2030-03-08T01:00:00Z')
+    }
+    const result = input.scheduled
+      ? await runHostingOccurrence({ config, workingDirectory, instructions: prompt, automationId, reminder: input.scheduled, groupTool })
+      : await executeRealCodexAppServerTurn({
+      allowFinishWithoutReply: true, groupConversation: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+      codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
+      developerInstructions: buildAssistantSystemPrompt({ assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantHostedAutomationAvailable: true,
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group', currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T12:00:00.000Z', currentTimeZone: 'UTC',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null }),
+      dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_AUTOMATION_TOOL, ...resolveMurphDynamicTools({}).filter(tool => tool.name === 'finish_without_reply')],
+      hostedToolContext: {
+        computerToolsAvailable: false, vaultFileSendAvailable: false, currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No media') },
+        currentUserActionScope: () => ({ conversationId: 'hosting-room', inboundMailboxItemIds: [], recipientKey: 'hosting-recipient', acceptedInputIds: [hostingInputId], originSessionId: 'hosting-session', conversationScope: 'group' }),
+        currentInvocationScope: () => ({ conversationScope: 'group', origin: { kind: 'accepted_input', assistantInputId: hostingInputId, sessionId: 'hosting-session' } }),
+        groupTool,
+        automationTool: { request: async request => {
+          if (!input.save || request.action !== 'save') throw new Error('No automation write authorized')
+          saves.push(request)
+          const saved = await upsertAutomation({ continuityPolicy: request.continuityPolicy ?? 'preserve', createOnly: true, instructions: request.instructions, title: request.title,
+            schedule: request.schedule, status: 'active', vaultRoot: workingDirectory, activeUntil: request.activeUntil, assistantTargetOverride: request.assistantTargetOverride,
+            route: { channel: 'linq', deliveryTarget: 'hosting-room', threadIsDirect: false, identityId: null, participantId: null, threadId: 'hosting-room' }, now: new Date('2030-03-06T12:00:00Z') })
+          return { action: 'save', automationId: saved.record.automationId, created: true, effectiveTimeZone: request.schedule.kind === 'cron' || request.schedule.kind === 'dailyLocal' ? request.schedule.timeZone ?? 'UTC' : 'UTC',
+            lookupId: saved.record.automationId, occurrenceProjection: { status: 'resolved', nextOccurrenceAt: input.actor === 1 ? '2030-03-07T21:00:00Z' : '2030-03-08T01:00:00Z' }, routeBinding: 'current_conversation', schedule: saved.record.schedule, status: 'active', updatedAt: saved.record.updatedAt }
+        } },
+      },
+      prompt,
+      reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+    })
+    const reply = result.finalMessage.trim()
+    process.stdout.write(`[plan-D ${input.name}] ${JSON.stringify({ reply, calls: calls.map(call => call.action === 'update_game' ? call.update : call.action), saves })}\n`)
+    expect(reply).not.toMatch(/—|\s-\s|\bvs\.|player_|game_hosting|proposalId/iu)
+    expect(calls[0]?.action).toBe('read_game')
+    return { reply, calls, saves }
+  } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
+}
+
+describeRealCodex('plan D ordinary group hosting', () => {
+  it.each([false, true])('plan D Same again copies then edits requested terms with intervening join %s', async joined => {
+    const previous = hostingGame({ status: 'settled' })
+    const state: HostingState = { games: [previous], players: previous.players.map(player => ({ memberId: player.memberId, firstName: player.firstName, timeZone: player.timeZone, isSender: player.seat === 1 })) }
+    let created: HostingGame | undefined
+    const result = await runHostingTurn({ name: `copy-edit-${joined}`, actor: 1, state,
+      prompt: 'Sam: Murph, Same again with this original group, but for 12 days starting March 12, my task Read a chapter, and the prize Choose a concert. Set that up.',
+      update: update => {
+        if (update.operation === 'create') {
+          expect(created).toBeUndefined(); expect(update.previousGameId).toBe(previous.id)
+          created = hostingGame({ id: update.gameId, status: joined ? 'live' : 'invited', startsOn: null,
+            players: [previous.players[1]!, ...(joined ? [previous.players[0]!] : [])].map((player, seat) => ({ ...player, seat })) })
+          state.games = [created, previous]
+        } else {
+          expect(update.operation).toBe('edit_terms'); if (update.operation !== 'edit_terms' || !created) throw new Error('Expected copy then edit')
+          expect(update.gameId).toBe(created.id); expect(update.terms).toMatchObject({ lengthDays: 12, startsOn: '2030-03-12', stakes: [{ kind: 'prize', item: 'Choose a concert' }] })
+          expect(update.terms.tasks).toContainEqual({ memberId: 'player_1', text: 'Read a chapter' })
+          if (joined) {
+            expect(update.proposalId).toBeTruthy()
+            created.pendingChange = { id: update.proposalId!, proposedByMemberId: 'player_1', expectedTermsVersion: 1, origin: 'chat', deliveryStatus: 'conversation', startsOn: '2030-03-12', effectiveFromDay: 0,
+              change: { kind: 'edit', lengthDays: 12 }, yesNeeded: 1, votes: [{ memberId: 'player_1', vote: 'yes' }] }
+          } else {
+            created.lengthDays = 12; created.startsOn = '2030-03-12'; created.terms = { ...created.terms, n: 2, tasks: [{ seat: 0, text: 'Read a chapter' }], stakes: [{ kind: 'prize', item: 'Choose a concert' }] }
+          }
+        }
+      } })
+    expect(result.calls.filter(call => call.action === 'update_game').map(call => call.update.operation)).toEqual(['create', 'edit_terms'])
+    expect(result.reply).toMatch(/12/); expect(result.reply).toMatch(joined ? /agree|yes|ask|Alex|waiting/iu : /chapter|concert/iu)
+  }, 360_000)
+  it.each(['visible', 'hidden'] as const)('plan D stale rematch yes requires renewed agreement for %s changes', async change => {
+    const game = hostingGame({ status: 'invited', players: hostingGame().players.slice(0, 1) })
+    game.terms.n = 2
+    if (change === 'visible') game.terms.stakes = [{ kind: 'prize', item: 'Choose dinner' }]
+    const result = await runHostingTurn({ name: `stale-${change}`, actor: 1, state: { games: [game] }, prompt: `Earlier Murph offered Same again: Walk outside, every day for seven days, prize Choose lunch. ${change === 'hidden' ? 'Alex then said they changed an individual task in the invitation; its private assignment is not shown in shared chat.' : ''} Sam now answers that earlier offer: Yes, I am in, Murph.` })
+    expect(result.calls.map(call => call.action)).toEqual(['read_game'])
+    expect(result.reply).toMatch(change === 'visible' ? /dinner/iu : /app|private|invitation/iu)
+    expect(result.reply).not.toMatch(/you.re in|accepted|joined|started|now live/iu)
+  }, 360_000)
+
+  it.each(['invited', 'settled'] as const)('plan D mixed room preserves live pair change guidance beside %s group', async status => {
+    const pair = hostingGame({ id: 'game_hosting_pair', maxPlayers: undefined })
+    const result = await runHostingTurn({ name: `mixed-${status}`, state: { games: [pair, hostingGame({ status })] },
+      prompt: 'Alex: Murph, for our two-person walking game with Sam, ask Sam to make it 12 days instead of 7. Leave the group challenge alone.',
+      update: update => { expect(update).toMatchObject({ operation: 'propose', gameId: pair.id, expectedTermsVersion: 1, change: { kind: 'edit', lengthDays: 12 } }); pair.pendingChange = { id: 'proposal_hosting', proposedByMemberId: 'player_0', expectedTermsVersion: 1, origin: 'chat', deliveryStatus: 'conversation', startsOn: null, effectiveFromDay: 0, change: { kind: 'edit', lengthDays: 12 } } } })
+    expect(result.calls.filter(call => call.action === 'update_game')).toHaveLength(1)
+    expect(result.reply).toMatch(/Sam/iu); expect(result.reply).toMatch(/12/); expect(result.reply).toMatch(/\?/u)
+  }, 360_000)
+
+  it('plan D live group cancellation has one lifecycle announcement and no ordinary reply', async () => {
+    const game = hostingGame()
+    const result = await runHostingTurn({ name: 'cancel-live', state: { games: [game] }, prompt: 'Alex, the starter: Murph, call off this group challenge. Nobody has checked in and it is not due.',
+      update: update => { expect(update).toEqual({ operation: 'cancel_game', gameId: game.id }); game.status = 'void' } })
+    expect(result.calls.map(call => call.action)).toEqual(['read_game', 'update_game']); expect(result.reply).toBe('')
+  }, 360_000)
+
+  it.each(['bare yes', 'on behalf'] as const)('plan D reminder consent refuses missing authority from %s', async scenario => {
+    const result = await runHostingTurn({ name: scenario, state: { games: [hostingGame()] }, prompt: scenario === 'bare yes'
+      ? 'Murph introduced this group walking challenge and offered task reminders for the first few days. Alex: Yes please, Murph.'
+      : 'Alex: Murph, set up task reminders for Sam in this group walking challenge at 8 pm London time for its first three days. Sam has not requested reminders.' })
+    expect(result.saves).toHaveLength(0); expect(result.calls.every(call => call.action === 'read_game')).toBe(true)
+    expect(result.reply).toMatch(scenario === 'bare yes' ? /time|when/iu : /Sam/iu)
+    if (scenario === 'bare yes') expect(result.reply).toMatch(/days|how many/iu)
+  }, 360_000)
+
+  it('plan D reminders retain each requester and recheck every occurrence', async () => {
+    const saves: Extract<AssistantHostedAutomationToolRequest, { action: 'save' }>[] = []
+    const reminderGame = () => {
+      const game = hostingGame()
+      game.players.push({ memberId: 'player_2', firstName: 'Riley', seat: 2, dayOne: '2030-03-07', timeZone: 'UTC' })
+      game.terms.tasks.push({ seat: 2, text: 'Walk outside' })
+      return game
+    }
+    for (const actor of [0, 1]) {
+      const game = reminderGame()
+      const result = await runHostingTurn({ name: `save-${actor}`, save: true, actor, state: { games: [game], players: game.players.map(player => ({ memberId: player.memberId, firstName: player.firstName, timeZone: player.timeZone, isSender: player.seat === actor })) },
+        prompt: `${actor ? 'Sam' : 'Alex'}: Murph, remind only me here to do my task in this group challenge for its first three days, March 7 through March 9, at ${actor ? '9 pm Europe/London' : '8 pm America/New_York'}.` })
+      const occurrences: string[] = []
+      let first: HostingReminder | undefined
+      let firstAt = ''
+      for (const saved of result.saves) {
+        expect(saved.instructions).toContain(game.id); expect(saved.instructions).toContain(`player_${actor}`)
+        expect(saved.instructions).toContain('read_game'); expect(saved.instructions).toMatch(/skip|quiet|do not send/iu)
+        const zone = actor ? 'Europe/London' : 'America/New_York'
+        if (saved.schedule.kind !== 'at' && saved.schedule.kind !== 'cron' && saved.schedule.kind !== 'dailyLocal') throw new Error('Expected a clock-time reminder')
+        if (saved.schedule.kind === 'at') expect(saved.instructions).toContain(zone)
+        else { expect(saved.schedule).toMatchObject({ timeZone: zone }); expect(saved.activeUntil).toMatch(/2030-03-(?:09|10)/u) }
+        let next = computeAssistantCronNextRunAt(saved.schedule, new Date('2030-03-06T12:00:00Z'))
+        if (next && (!firstAt || next < firstAt)) { first = saved; firstAt = next }
+        for (let count = 0; next && count < 4 && (!saved.activeUntil || Date.parse(next) < Date.parse(saved.activeUntil)); count++) {
+          occurrences.push(next)
+          next = computeAssistantCronNextRunAt(saved.schedule, new Date(next))
+        }
+      }
+      expect(occurrences.sort()).toEqual(actor
+        ? ['2030-03-07T21:00:00.000Z', '2030-03-08T21:00:00.000Z', '2030-03-09T21:00:00.000Z']
+        : ['2030-03-08T01:00:00.000Z', '2030-03-09T01:00:00.000Z', '2030-03-10T01:00:00.000Z'])
+      expect(first).toBeDefined(); saves.push(first!)
+    }
+    for (const status of ['task changed', 'departed', 'cancelled', 'settled', 'expanded room', 'unavailable', 'missing game'] as const) {
+      const game = reminderGame()
+      if (status === 'task changed') { game.terms.tasks[0]!.text = 'Read a chapter'; game.terms.n = 2 }
+      if (status === 'departed') { game.players = game.players.slice(1); game.terms.tasks = game.terms.tasks.slice(1) }
+      if (status === 'cancelled') game.status = 'void'
+      if (status === 'settled') game.status = 'settled'
+      const result = await runHostingTurn({ name: `occurrence-${status}`, scheduled: saves[0]!, unavailable: status === 'expanded room' || status === 'unavailable',
+        state: { games: status === 'missing game' ? [hostingGame({ id: 'game_hosting_other' })] : [game] }, prompt: saves[0]!.instructions })
+      expect(result.calls.length).toBeGreaterThan(0); expect(result.calls.length).toBeLessThanOrEqual(2)
+      for (const call of result.calls) {
+        // A bounded room-metadata read grants no substitute game or mutation authority.
+        if (call.action === 'read_current') expect(call).toEqual({ action: 'read_current' })
+        else expect(call).toMatchObject({ action: 'read_game', includePlayers: true,
+          origin: { kind: 'automation_occurrence', occurrenceAt: '2030-03-08T01:00:00Z' } })
+      }
+      if (status === 'task changed') { expect(result.reply).toMatch(/Alex/iu); expect(result.reply).toMatch(/read.*chapter/iu); expect(result.reply).not.toMatch(/walk/iu) }
+      else expect(result.reply).toBe('')
+    }
+  }, 900_000)
+})
+
+
+describeRealCodex('plan D group lifecycle copy', () => {
+  it.each(['first kickoff', 'later kickoff', 'simultaneous kickoff', 'live cancellation', 'same rematch', 'changed rematch', 'fresh invitation'] as const)('plan D notification %s', async scenario => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-hosting-notice-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    const { buildGameKickoffInstructions, buildGameRematchInstructions, buildGameInviteCancelledInstructions } = await import('@murphai/hosted-execution/runtime-control')
+    const game = hostingGame()
+    const kickoff = scenario.includes('kickoff')
+    const rematch = scenario.includes('rematch') || scenario === 'fresh invitation'
+    const eventId = `${kickoff ? 'game-started' : rematch ? 'game-rematch' : 'game-cancelled'}:${game.id}`
+    const reminderRequests: AssistantHostedAutomationToolRequest[] = []
+    const instructions = kickoff ? buildGameKickoffInstructions({ kind: 'started', game,
+      ...(scenario === 'first kickoff' ? {} : { room: { tasks: ['Walk outside'], otherGames: [{ status: 'live', tasks: ['Read a chapter'] }], startedAfterAnother: scenario === 'later kickoff' } }) })
+      : rematch ? buildGameRematchInstructions({ maxPlayers: 10, termsVersion: 2, requester: 'Alex', startsOn: '2030-03-12',
+        terms: { defaultTask: 'Walk outside', tasks: [{ seat: 0, text: 'Walk outside' }], stakes: [{ kind: 'prize', item: 'Choose lunch' }], schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, lengthDays: scenario === 'changed rematch' ? 12 : 7, checkInKind: 'any' },
+        comparison: scenario === 'fresh invitation' ? null : { sameGame: scenario === 'same rematch', individualTasksChanged: scenario === 'changed rematch',
+          changes: scenario === 'changed rematch' ? [{ field: 'lengthDays', previous: 7, current: 12 }] : [] } })
+        : buildGameInviteCancelledInstructions(true)
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
+      const modelTarget = createAssistantModelTarget({ approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
+        codexHome: permissionHome.codexHome, model: config.model, modelProvider: config.modelProvider, provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write' })
+      if (!modelTarget) throw new Error('Expected real Codex target')
+      const result = await sendAssistantNotificationLocal({
+        actorId: null, bindingDeliveryTarget: 'hosting-room', channel: 'linq', deliveryDispatchMode: 'queue-only', deliveryTarget: 'hosting-room',
+        deliveryIdempotencyKey: eventId, deliveryDedupeToken: eventId,
+        responsePolicy: rematch ? { kind: 'require_game_rematch', gameId: game.id, eventId, termsVersion: 2 } : { kind: 'require_send' },
+        executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'hosting-container', userEnvKeys: [],
+          createAutomationTool: () => ({ request: async request => { reminderRequests.push(request); throw new Error('An offer is not consent') } }) } },
+        identityId: null, instructions, threadId: 'hosting-room', threadIsDirect: false,
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env }, turnTrigger: 'manual-deliver', vault: workingDirectory, workingDirectory,
+      })
+      const reply = result.response ?? ''
+      process.stdout.write(`[plan-D notification ${scenario}] ${JSON.stringify({ reply, decision: result.decision.kind })}\n`)
+      expect(result.decision.kind).toBe('send_message'); expect(result.deliveryOutcome?.kind).toBe('queued')
+      expect(await listAssistantOutboxIntents(workingDirectory)).toHaveLength(1)
+      expect(reminderRequests).toEqual([]); expect((await listAutomations({ vaultRoot: workingDirectory })).items).toEqual([])
+      expect(reply).not.toMatch(/—|\s-\s|\bvs\.|everyone.*agreed|both players|game_hosting|termsVersion|override/iu)
+      if (kickoff) {
+        expect(reply).toMatch(/walk/iu); expect(reply).toMatch(/join/iu)
+        expect(reply).not.toMatch(/not specified|unspecified|unclear who/iu)
+        if (scenario === 'later kickoff') expect(reply).not.toMatch(/remind|what time|how many days/iu)
+        else { expect(reply).toMatch(/remind/iu); expect(reply).toMatch(/time/iu); expect(reply).toMatch(/how many|number of days/iu) }
+      } else if (rematch) {
+        expect(reply).toMatch(/Alex/iu); expect(reply).toMatch(/March 12/iu); expect(reply).toMatch(/yes|accept|agree|join/iu)
+        expect(reply).not.toMatch(/remind|everyone.*in|all.*accepted/iu)
+        expect(reply).not.toMatch(/majority path|voting in a poll|being here/iu)
+        expect(reply.length).toBeLessThan(450)
+        if (scenario === 'same rematch') expect(reply).toMatch(/same game/iu)
+        else if (scenario === 'changed rematch') { expect(reply).toMatch(/12/); expect(reply).toMatch(/7/); expect(reply).toMatch(/individual tasks|personal tasks/iu); expect(reply).toMatch(/app|private/iu); expect(reply).not.toMatch(/same game/iu) }
+        else { expect(reply).toMatch(/walk/iu); expect(reply).not.toMatch(/again|same game|previous|rematch/iu) }
+      } else {
+        expect(reply).toMatch(/called off|cancelled|canceled/iu)
+        expect(reply).not.toMatch(/before.*start|from.*app|remind|\?/iu)
+      }
+    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths]) }
+  }, 360_000)
+})

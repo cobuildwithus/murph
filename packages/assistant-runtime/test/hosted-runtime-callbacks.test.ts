@@ -15321,6 +15321,25 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
+  it.each(["pair", "two-human group", "larger group"])("refuses rematch dispatch through older Web without its revision acknowledgement: %s", async () => {
+    const idempotencyKey = "game-rematch:game_synthetic";
+    const effect = createEffect({ bindingDeliveryTarget: "linq_chat_123", channel: "linq", idempotencyKey, threadIsDirect: false, transportIdempotent: true });
+    const assertRecentInbound = vi.fn(async (request) => ({ providerDispatchClaimed: true, resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request) }));
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      try {
+        await dependencies.sendLinq({ idempotencyKey, message: "Same again?", replyToMessageId: null, target: "linq_chat_123", targetKind: "thread" });
+      } catch (error) {
+        expect(error).toMatchObject({ code: "ASSISTANT_GAME_REMATCH_AUTHORITY_UNAVAILABLE" });
+        return createDispatchResult({ delivery: null, status: "failed" }, { code: error instanceof VaultCliError ? error.code : null, message: "Missing rematch authority" });
+      }
+      throw new Error("Older Web must fail closed");
+    });
+    await drainHostedPreparedAssistantDeliveries({ assistantDeliveryEffects: [effect], effectsPort: createHostedRuntimeEffectsPortStub({ assertLinqRecentInboundEngagement: assertRecentInbound }),
+      providerFetch: vi.fn<typeof fetch>(), vaultRoot: HOSTED_WAKE.vaultRoot, wake: HOSTED_WAKE.wake });
+    expect(assertRecentInbound).toHaveBeenCalledOnce();
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+  });
+
   it("fails a fixed-source Linq notification instead of moving it to the current home route", async () => {
     const effect = createEffect({
       bindingDeliveryKind: null,

@@ -1035,6 +1035,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       terms: { ...TERMS, tasks: [{ seat: 0, text: "10 min abs" }, { seat: 1, text: "100 pushups" }] }, type: "createGame" });
     const notice = await readGameRematchNotice(rematch!.id, [challenger, invitee]);
     expect(notice).not.toBeNull();
+    if (!notice || "maxPlayers" in notice) throw new Error("Expected pair rematch facts");
     expect(notice!.previous.tasksByMember).toEqual({ [challenger]: "100 pushups", [invitee]: "10 min abs" });
     expect(notice!.rematch.tasksByMember).toEqual(notice!.previous.tasksByMember);
     expect(notice!.players).toEqual([{ memberId: invitee, name: "Invitee", requester: true }, { memberId: challenger, name: "Challenger", requester: false }]);

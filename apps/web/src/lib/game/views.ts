@@ -26,6 +26,7 @@ import type {
 import {
   currentTerms,
   remainingPlayers,
+  effectiveTermWords,
   groupTaskOverrideSeats,
   canChallengeGame,
   gameChallengeStatus,
@@ -174,7 +175,7 @@ export function stakeItem(words: TermWords, key: string): string {
 /** Released task/stake fields are projected here from versioned canonical terms. */
 export function termsView(state: RuleState, words: TermWords, multiplayer = false): GameTermsVersion {
   const version = currentTerms(state.game.terms);
-  const versionWords = [...words.versions].reverse().find((candidate) => candidate.n <= version.n) ?? words.versions[0];
+  const versionWords = effectiveTermWords(words, version.n);
   return {
     ...(multiplayer && versionWords.defaultTask !== undefined ? { defaultTask: versionWords.defaultTask } : {}),
     checkInKind: version.checkInKind ?? "photo",
