@@ -238,6 +238,18 @@ release, an explicit immediate transition where the owner contract requires it,
 and normal convergence proof. Keep the first-writer instructions below for those
 transitions; immediate minimizes the mixed window but does not eliminate it.
 
+Release order: a workflow run resolves public `main` when it starts, and its gates
+can outlast a later run's, so a run started earlier can reach the serialized
+deploy job after a newer release went live. Before any upload, image work, or
+activation, the deploy CLI compares the bundle's public release SHA with the
+serving runner release's `releaseSha`. It refuses when the live release already
+contains this one (a strict Git ancestor), and also stops if it cannot fetch or
+compare those commits. Equal SHAs (reruns and recovery), newer or diverged
+releases, and live records that predate release SHAs proceed. The check fetches
+commit objects only into a scratch repository, so the shallow deploy checkout is
+untouched. Intentional rollbacks still go through a revert on `main` or an
+explicitly approved Cloudflare rollback, never by redeploying an old run.
+
 These are native automatic percentage steps, not application-health approvals
 between cohorts and not a maximum-unavailable guarantee. A failed job or smoke
 does not stop an already accepted automatic rollout. Native manual progression
