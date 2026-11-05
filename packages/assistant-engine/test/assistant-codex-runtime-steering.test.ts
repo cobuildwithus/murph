@@ -47,6 +47,10 @@ import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
 } from '../src/assistant/generated-delivery-files.ts'
 
+
+const TAPPED_SKIP_TEXT =
+  'no reaction sent: this message already has your ⏰ tapback from when it arrived, and a second one would replace it. Carry on; if a reaction was going to be your whole reply, finish without reply.'
+
 describe('steered final segments', () => {
   type ScriptedSteeredFinalStep =
     | {
@@ -1630,6 +1634,63 @@ describe('steered final segments', () => {
         targetInputId: reactionRef,
       },
     ])
+  })
+
+  it('queues no reaction on a message that already has the Web tapback, so a reaction-only reply finishes quietly', async () => {
+    const tappedRef = `ain_${'7'.repeat(32)}`
+    const authorizeAcceptedMessageTarget = vi.fn(async (input: {
+      action: 'native-reply' | 'participant-effect' | 'reaction'
+      deliveryContextOrdinal: number
+      messageRef: string
+    }) => ({ ackReaction: '⏰', targetInputId: input.messageRef }))
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        expectedText: TAPPED_SKIP_TEXT,
+        id: 98,
+        kind: 'react-to-message',
+        messageRef: tappedRef,
+        reaction: 'thumbs_up',
+      },
+      {
+        expectedText: 'finished without reply',
+        id: 99,
+        kind: 'finish-without-reply',
+      },
+    ], { authorizeAcceptedMessageTarget })
+
+    expect(authorizeAcceptedMessageTarget).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'reaction',
+      messageRef: tappedRef,
+    }))
+    expect(result.reactions).toEqual([])
+    expect(result.finalAction).toEqual({ kind: 'none' })
+    expect(result.finalMessage).toBe('')
+  })
+
+  it('still sends the text answer after skipping a reaction on a tapped message', async () => {
+    const tappedRef = `ain_${'8'.repeat(32)}`
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        expectedText: TAPPED_SKIP_TEXT,
+        id: 100,
+        kind: 'react-to-message',
+        messageRef: tappedRef,
+        reaction: 'heart',
+      },
+      completedItemEvent({
+        id: 'assistant-after-skip',
+        type: 'assistant_message',
+        message: 'Your 7am reminder is set.',
+      }),
+    ], {
+      authorizeAcceptedMessageTarget: async (input) => ({
+        ackReaction: '⏰',
+        targetInputId: input.messageRef,
+      }),
+    })
+
+    expect(result.reactions).toEqual([])
+    expect(result.finalMessage).toBe('Your 7am reminder is set.')
   })
 
   it('returns no final text or outbound progress for a commentary-only turn', async () => {

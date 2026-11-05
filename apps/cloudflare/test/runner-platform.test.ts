@@ -7897,6 +7897,52 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(result && result.progressUpdateSuppressed).toBe(expected);
   });
 
+  it.each([
+    ["⏰", "⏰"],
+    [" 👍 ", "👍"],
+    ["", undefined],
+    [42, undefined],
+    ["x".repeat(40), undefined],
+  ] as const)("forwards the reaction purpose and passes through only a short tapback emoji (%#)", async (ackReaction, expected) => {
+    const bodies: unknown[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      bodies.push(await request.json());
+      return new Response(JSON.stringify({
+        ackReaction,
+        ok: true,
+        resolvedRoute: {
+          conversationThreadId: null,
+          directRecipientPhoneNumber: null,
+          fromPhoneNumber: "+15550002",
+          target: "chat_123",
+          targetKind: "thread",
+          threadIsDirect: true,
+        },
+      }), { headers: { "content-type": "application/json" }, status: 200 });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    const result = await platform.effectsPort.assertLinqRecentInboundEngagement!({
+      authorityCheckOnly: true,
+      deliveryPurpose: "reaction",
+      replyToMessageId: "msg_123",
+      target: "chat_123",
+      targetKind: "thread",
+    });
+
+    expect(bodies[0]).toMatchObject({ authorityCheckOnly: true, deliveryPurpose: "reaction", replyToMessageId: "msg_123" });
+    expect(result && result.ackReaction).toBe(expected);
+  });
+
   it.each([undefined, { target: "chat_legacy", targetKind: "thread", threadIsDirect: true }, { conversationThreadId: null, directRecipientPhoneNumber: "+15550100001", fromPhoneNumber: null, target: "chat_group", targetKind: "thread", threadIsDirect: false }])("does not synthesize a Linq route from legacy or invalid response fields %#", async (resolvedRoute) => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({

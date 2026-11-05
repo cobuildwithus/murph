@@ -224,8 +224,10 @@ export async function runHostedLinqAckReactionBestEffort(input: {
     }
     claimedAt = await claimHostedLinqAckReaction({
       linqChatId: input.linqChatId,
+      messageId: input.messageId,
       messageReceivedAt: input.messageReceivedAt,
       prisma: input.prisma,
+      reaction: decision.emoji,
     });
   } catch (error) {
     finish("store_error", { error });

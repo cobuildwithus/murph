@@ -367,6 +367,42 @@ describe("hosted Linq egress authority", () => {
   });
 
   it.each([
+    ["Murph's reaction check on a tapped message", { authorityCheckOnly: true, deliveryPurpose: "reaction", replyToMessageId: "msg-1" }, "chat-home", {}, "⏰"],
+    ["reaction check on an untapped message", { authorityCheckOnly: true, deliveryPurpose: "reaction", replyToMessageId: "msg-2" }, "chat-home", {}, null],
+    ["reaction check without a message", { authorityCheckOnly: true, deliveryPurpose: "reaction" }, "chat-home", {}, undefined],
+    ["reaction check on a group thread", { authorityCheckOnly: true, deliveryPurpose: "reaction", replyToMessageId: "msg-1" }, "chat-group", { threadRouteContainerMemberId: "member-1" }, undefined],
+    ["progress check", { authorityCheckOnly: true, deliveryPurpose: "progress_update", replyToMessageId: "msg-1" }, "chat-home", {}, undefined],
+    ["ordinary provider entry", { replyToMessageId: "msg-1" }, "chat-home", {}, undefined],
+  ] as const)("reports Web's tapback only for %s", async (_label, body, target, routeOptions, stored) => {
+    const prisma = createPrismaStub({ homeChatId: "chat-home", ...routeOptions });
+    const ackQueries: string[] = [];
+    prisma.$queryRaw.mockImplementation(async (strings: TemplateStringsArray | string) => {
+      const sql = typeof strings === "string" ? strings : strings.join("?");
+      if (sql.includes("hosted_linq_ack_reaction")) {
+        ackQueries.push(sql);
+        return stored ? [{ reaction: stored }] : [];
+      }
+      return [];
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+    captureRouteAuthorityLogs();
+
+    const response = await postHostedLinqEgressEngagement(routeAuthorityRequest({ target, ...body }));
+
+    expect(response.status).toBe(200);
+    const json = await response.json();
+    expect(json).toMatchObject({ ok: true, resolvedRoute: { target } });
+    expect(json.ackReaction).toBe(stored ?? undefined);
+    expect(ackQueries).toHaveLength(stored === undefined ? 0 : 1);
+    expect(ackQueries.every((sql) => sql.includes("reacted_at IS NOT NULL"))).toBe(true);
+    if ("authorityCheckOnly" in body) {
+      // Read-only: the check never opens a provider dispatch fence.
+      expect(json.providerDispatchClaimed).toBeUndefined();
+      expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each([
     ["covered progress entry", { deliveryPurpose: "progress_update" }, true, true],
     ["uncovered progress entry", { deliveryPurpose: "progress_update" }, false, false],
     ["ordinary provider entry", {}, true, false],

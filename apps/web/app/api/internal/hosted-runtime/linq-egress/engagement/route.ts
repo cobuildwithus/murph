@@ -29,7 +29,10 @@ import {
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
 import { readOptionalJsonObject } from "@/src/lib/http";
-import { isHostedLinqAckReactionCoveringCurrentBurst } from "@/src/lib/hosted-onboarding/linq-ack-reaction-store";
+import {
+  isHostedLinqAckReactionCoveringCurrentBurst,
+  readHostedLinqAckReactionOnMessage,
+} from "@/src/lib/hosted-onboarding/linq-ack-reaction-store";
 import type { Prisma } from "@prisma/client";
 
 import { getPrisma } from "@/src/lib/prisma";
@@ -191,6 +194,7 @@ export const POST = withJsonError(async (request: Request) => {
         asserted: finalAuthority,
         deliveryBlockCode: health.policy.code,
         deliveryPosture: null,
+        ackReaction: null,
         progressUpdateSuppressed: false,
         providerDispatchClaimed: null,
       };
@@ -232,6 +236,7 @@ export const POST = withJsonError(async (request: Request) => {
         asserted: finalAuthority,
         deliveryBlockCode: "automation_engagement_paused" as const,
         deliveryPosture: null,
+        ackReaction: null,
         progressUpdateSuppressed: false,
         providerDispatchClaimed: null,
       };
@@ -248,6 +253,12 @@ export const POST = withJsonError(async (request: Request) => {
       tx,
     });
     return {
+      ackReaction: await readHostedLinqEngagementAckReactionTx({
+        deliveryPurpose: body.deliveryPurpose,
+        replyToMessageId,
+        resolvedRoute: finalAuthority.resolvedRoute,
+        tx,
+      }),
       assistantAskFallbackRequired:
         assistantAskAuthority?.assistantAskFallbackRequired === true,
       asserted: finalAuthority,
@@ -275,9 +286,46 @@ export const POST = withJsonError(async (request: Request) => {
     ...(assertion.providerDispatchClaimed === null
       ? {}
       : { providerDispatchClaimed: assertion.providerDispatchClaimed }),
-    ...(assertion.progressUpdateSuppressed ? { progressUpdateSuppressed: true } : {}),
+    ...readHostedLinqAckEngagementResponseFields(assertion),
   });
 });
+
+/** Tapback facts for the runtime; absent fields keep older runners unchanged. */
+function readHostedLinqAckEngagementResponseFields(assertion: {
+  ackReaction: string | null;
+  progressUpdateSuppressed: boolean;
+}): { ackReaction?: string; progressUpdateSuppressed?: true } {
+  return {
+    ...(assertion.ackReaction ? { ackReaction: assertion.ackReaction } : {}),
+    ...(assertion.progressUpdateSuppressed ? { progressUpdateSuppressed: true as const } : {}),
+  };
+}
+
+/**
+ * Before Murph reacts to a member message itself (`react_to_message`), the
+ * runtime asks with `deliveryPurpose: "reaction"` whether Linq already
+ * accepted Web's tapback on that exact message in this direct chat. Read-only.
+ */
+async function readHostedLinqEngagementAckReactionTx(input: {
+  deliveryPurpose: unknown;
+  replyToMessageId: string | null;
+  resolvedRoute: HostedExecutionResolvedLinqDeliveryRoute;
+  tx: Prisma.TransactionClient;
+}): Promise<string | null> {
+  if (
+    input.deliveryPurpose !== "reaction"
+    || !input.replyToMessageId
+    || input.resolvedRoute.targetKind !== "thread"
+    || !input.resolvedRoute.threadIsDirect
+  ) {
+    return null;
+  }
+  return readHostedLinqAckReactionOnMessage({
+    linqChatId: input.resolvedRoute.target,
+    messageId: input.replyToMessageId,
+    prisma: input.tx,
+  });
+}
 
 /**
  * Records the provider-dispatch fence for a final (non-authority-only) call.

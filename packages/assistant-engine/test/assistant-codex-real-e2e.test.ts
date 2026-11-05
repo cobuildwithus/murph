@@ -194,6 +194,7 @@ import {
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
+  MURPH_REACT_TO_MESSAGE_TOOL,
   MURPH_GROUP_CHAT_TOOL,
   MURPH_GROUP_DATA_TOOL,
   MURPH_GROUP_EMAIL_TOOL,
@@ -714,6 +715,73 @@ describeRealCodex('real natural goal canary journey', () => {
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
     }
   }, 600_000)
+})
+
+// Web's "on it" tapback already sits on the member's message; Murph's own
+// react_to_message must not replace it, and the turn still ends cleanly.
+describeRealCodex('real Codex reaction on an already-tapped message', () => {
+  it('ack tapback dedupe skips the second reaction and finishes without mentioning it', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-ack-dedupe-'))
+    const messageRef = `ain_${'9'.repeat(32)}`
+    const now = '2030-04-01T16:00:00.000Z'
+    const authorizations: Array<{ action: string; messageRef: string }> = []
+    try {
+      const conversation = { accountId: null, actorId: 'synthetic-sender', actorIsSelf: false,
+        source: 'linq', threadId: 'synthetic-private-chat', threadIsDirect: true } as const
+      const sourceMetadata = { kind: 'linq', externalThreadRouteAuthorityPresent: false, senderHandle: '+15555550100',
+        partCount: 1, reactionEligible: true, replyToMessageId: null, service: 'iMessage' } as const
+      const prompt = buildAssistantAutoReplyPrompt([{
+        actorIsSelf: false, attachmentDescriptors: [],
+        attachmentEvidence: { attachments: [], optionalInboxCaptureId: null, reasonCode: null, source: null, status: 'not_attempted', updatedAt: null },
+        conversation, inputId: messageRef, occurredAt: now, receivedAt: now,
+        projection: null, replyContext: null, replyTarget: null, source: 'linq', telegramMetadata: null,
+        sourceMetadata, text: 'perfect, thank you so much!! you are the best 🙏',
+      }], { timeZone: 'America/New_York' })
+      if (prompt.kind !== 'ready') throw new Error('Expected an accepted direct message.')
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        authorizeAcceptedMessageTarget: async (input) => {
+          authorizations.push({ action: input.action, messageRef: input.messageRef })
+          return input.messageRef === messageRef
+            ? { ackReaction: '👍', targetInputId: messageRef }
+            : null
+        },
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildDirectConversationDeveloperInstructions(),
+        dynamicTools: [MURPH_REACT_TO_MESSAGE_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL],
+        env: config.env,
+        hostedToolContext: {
+          computerToolsAvailable: false, vaultFileSendAvailable: false,
+          currentAssistantInputId: () => messageRef,
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => ({ filename: 'unused', status: 'denied' as const }),
+        } satisfies AssistantHostedToolContext,
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: prompt.prompt, reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const reactCalls = actions.filter((action) => action.kind === 'dynamic' && action.tool === MURPH_REACT_TO_MESSAGE_TOOL.name)
+      const finished = actions.some((action) => action.kind === 'dynamic' && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name)
+      process.stdout.write(`[ack-dedupe-live] ${JSON.stringify({ authorizations, finished, finalMessage: result.finalMessage, reactCalls: reactCalls.length, reactions: result.reactions })}\n`)
+      // The model reached for a reaction, was told the message already has
+      // one, and no second tapback was queued.
+      expect(reactCalls.length).toBeGreaterThanOrEqual(1)
+      expect(authorizations).toContainEqual({ action: 'reaction', messageRef })
+      expect(result.reactions).toEqual([])
+      // Reaction-only turn: it ends quietly, or with text that never talks
+      // about the tapback mechanics.
+      if (finished) {
+        expect(result.finalAction).toEqual({ kind: 'none' })
+      } else {
+        expect(result.finalMessage).not.toMatch(/emoji|react|tapback|thumbs|👍|already/iu)
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 300_000)
 })
 
 describeRealCodex('real clinical document extraction journeys', () => {
