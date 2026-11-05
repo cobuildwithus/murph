@@ -7088,8 +7088,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                       if (!workspace) throw new Error("Meal media retry requires a durable workspace.");
                       const next = mergeHostedMealMediaRetry(workspace, retryAt);
                       signal.throwIfAborted();
+                      // Carry this invocation's wake. The committed one may be the
+                      // due wake the pass just serviced; rebasing onto it re-armed
+                      // that wake on every retry and looped the runner.
                       const checkpoint = await checkpointRuntimeRedactedStatus({ reason: "canonical_runtime_commit",
-                        redactedStatus: checkpointRequestBuilder.readRedactedStatus(), workspace: next });
+                        redactedStatus: checkpointRequestBuilder.readRedactedStatus(), workspace: next,
+                        nextWakeAt: pendingWake.nextWakeAt, nextWakeReason: pendingWake.nextWakeReason });
                       signal.throwIfAborted();
                       rebaseCommittedWorkspace(checkpoint.workspace);
                     },
@@ -7451,7 +7455,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       };
 
       await prepareInitialForegroundState();
-      runtimeStateDirty = await needsHostedMealMediaCheckpoint({ dirty: runtimeStateDirty, recoveryFailed: canonicalWriteReceiptRecoveryFailed, vaultRoot: restored.vaultRoot });
+      runtimeStateDirty = await needsHostedMealMediaCheckpoint({ armIdleCheckpoint: ensureIdleCheckpointTimerAfterDirtyWork,
+        dirty: runtimeStateDirty, recoveryFailed: canonicalWriteReceiptRecoveryFailed, vaultRoot: restored.vaultRoot });
       while (await prepareNextRuntimeCheckpoint()) {
         const initialCheckpointWakeLatencySeed = pendingCheckpointWakeLatencySeed;
         pendingCheckpointWakeLatencySeed = null;
