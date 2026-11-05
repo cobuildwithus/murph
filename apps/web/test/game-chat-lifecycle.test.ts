@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const m = vi.hoisted(() => ({
-  challengeCase: vi.fn(), challengeInstructions: vi.fn(),
+  groupAuthority: vi.fn(), challengeCase: vi.fn(), challengeInstructions: vi.fn(),
   event: vi.fn(), receipts: vi.fn(), frozen: vi.fn(), recover: vi.fn(), receiptUpdate: vi.fn(), game: vi.fn(), current: vi.fn(), bind: vi.fn(),
   state: vi.fn(), rematchNotice: vi.fn(), identity: vi.fn(), discover: vi.fn(), exact: vi.fn(), bootstrap: vi.fn(), proposal: vi.fn(),
   destination: vi.fn(), mailbox: vi.fn(), prepare: vi.fn(), append: vi.fn(), signal: vi.fn(), route: vi.fn(),
@@ -14,7 +14,7 @@ vi.mock("../src/lib/game/service", () => ({ readGameChatState: m.state, readGame
   readGameChallengeCase: m.challengeCase, readGameChallengeInstructions: m.challengeInstructions,
   readGameRecapMaterial: m.recapMaterial, reserveDueGameMissedDayCheckIns: m.reserveMissed }));
 vi.mock("../src/lib/game/chat-tool", () => ({ readGameRecapChatMessages: m.recapMessages, readGameChatTranscript: m.transcript }));
-vi.mock("../src/lib/game/chat-membership", () => ({ bindPairGameChat: async (_id: string, _players: string[], candidate: string | null) => candidate, findExistingGameChat: m.discover, requireExactChat: m.exact }));
+vi.mock("../src/lib/game/chat-membership", () => ({ bindPairGameChat: async (_id: string, _players: string[], candidate: string | null) => candidate, findExistingGameChat: m.discover, requireExactChat: m.exact, readGroupGameChatAuthority: m.groupAuthority }));
 vi.mock("../src/lib/game/chat-bootstrap", () => ({ prepareGameChatBootstrap: m.bootstrap, reconcileFrozenGameChatBootstrapReceipt: m.recover }));
 vi.mock("../src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: m.proposal }));
 vi.mock("../src/lib/hosted-onboarding/hosted-member-identity-store", () => ({ readHostedMemberIdentity: m.identity }));
@@ -28,6 +28,7 @@ vi.mock("../src/lib/hosted-routing/assistant-notification-destination", () => ({
   assertHostedAssistantNotificationRouteAuthority: m.route,
 }));
 import { deliverGameChatLifecycle, drainGameChatLifecycle } from "../src/lib/game/chat-lifecycle";
+import { gameGroupLoreFingerprint, gamePairLoreFingerprint } from "../src/lib/game/audience";
 import { buildGameChallengeInstructions } from "../src/lib/game/challenge";
 const now = new Date("2030-03-04T12:00:00Z");
 const players = ["person-a", "person-b"];
@@ -116,9 +117,23 @@ describe("durable game chat lifecycle", () => {
     const notification = m.prepare.mock.calls[0][0].envelope.notification;
     expect(notification).not.toHaveProperty("gameRecap");
     expect(notification.deliveryIdempotencyKey).toBe(eventId);
-    expect(notification.responsePolicy).toMatchObject({ kind: "require_game_recap", gameId: "game", eventId, pairFingerprint: expect.stringMatching(/^[a-f0-9]{32}$/u) });
+    expect(notification.responsePolicy).toEqual({ kind: "require_game_recap", gameId: "game", eventId, pairFingerprint: gamePairLoreFingerprint(players) });
     expect(notification.instructions).toContain("murph.write_recap");
     expect(notification.instructions).toContain("The bounded room transcript.");
+    expect(m.discover).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
+  });
+  it("queues group recaps with the original-audience key and read-only lore, failing closed without it", async () => {
+    const audienceKey = "synthetic-original-audience";
+    const groupGame = { ...game, maxPlayers: 10, audienceKey, status: "settled", settledAt: now,
+      players: [...players.map((memberId, seat) => ({ memberId, seat, leftAt: null })), { memberId: "departed", seat: 2, leftAt: new Date(now.getTime() - 1000) }] };
+    m.groupAuthority.mockResolvedValue({ keys: { current: "rotated-key", candidates: [audienceKey, "rotated-key"] } });
+    m.game.mockResolvedValue(groupGame); m.current.mockResolvedValue(groupGame);
+    expect(await deliverGameChatLifecycle("game", "recap")).toBe(true);
+    expect(m.prepare.mock.calls[0][0].envelope.notification.responsePolicy).toEqual({ kind: "require_game_recap", gameId: "game", eventId: "game-recap:game", pairFingerprint: gameGroupLoreFingerprint(audienceKey), loreAccess: "read" });
+    expect(m.prepare.mock.calls[0][0].envelope.notification.instructions).toContain("The bounded room transcript.");
+    m.prepare.mockClear(); m.game.mockResolvedValue({ ...groupGame, audienceKey: null });
+    expect(await deliverGameChatLifecycle("game", "recap")).toBe(false);
+    expect(m.prepare).not.toHaveBeenCalled();
     expect(m.discover).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
   });
   it("batches daily misses across tasks and players into one shared turn", async () => {

@@ -6035,19 +6035,39 @@ leave the starter.
 Group recaps use remaining players, excluding leavers from authored evidence.
 The cohort requires at least two remaining identities and no departure at or
 after settlement, for reads, enqueue, sealing, delivery and regeneration. Recaps
-exclude private labels and lore and are withheld if any report makes sharing
-unsafe. Duplicate first names receive stable numbered labels. Every eligible
-person gets one kind superlative. The hard shame validator rejects
+exclude private material and are withheld if any report makes sharing unsafe.
+They read the bounded eligible-author room transcript and authorized game lore
+for callbacks about eligible memberIds only, never featuring leavers or unjoined
+people even inside another player’s words. Duplicate first names receive numbered
+labels. Every eligible person gets one kind superlative. The hard shame validator rejects
 clearly negative labels while allowing praise such as “never missed a day”; the
 prompt prohibits singling out missing people. Lifecycle messages and recap links
 are text-only, so unjoined relatives cannot receive player media attachments.
+
+Group lore lives in the room vault at `games/lore-<fingerprint>.md`. Its key is
+32 hex characters of SHA-256 over `murph-group-game-lore-v1\0` plus the stored
+`game.audienceKey`, so joins, departures and Same again preserve continuity,
+while a new audience gets a separate notebook. Pair keys remain unchanged;
+immutable `maxPlayers` selects the namespace, never player count. Both live
+read paths offer lore only with a live game and one common key across every
+returned game, including invited and settled games. Audience keys stay Web-only.
+Group lore records room conversation and shared state only, with memberIds beside
+person names for durable attribution; IDs never enter messages. Group recap
+policies carry `loreAccess: "read"`: the runner rejects replacement, then after
+an accepted save appends only `Chat line used: <canonical bare chatLine>` from
+the sealed/replayed recap, once, trimming oldest lines to the 64 KiB limit.
+App-only captions and photo details never enter that room chat line or lore.
+Pair recap lore writes and missed-day wakes are unchanged. For group lore,
+deploy the compatible runner before Web emits the new exact-key policy field;
+keep group admission off until then. No migration or old-file import is needed.
 
 New runners opt into group responses through the signed `gameMultiplayer=1`
 query parameter on the existing tool route. Unmarked runners retain pair-only
 responses and writes, including two-person games whose immutable maxPlayers is
 10. New runners accept old pair responses; old Web ignores the query parameter.
-Deploy Web first, then the Cloudflare runner bundle; old warm runners remain
-pair-only. Keep group admission off. The engine selects group guidance from
+For the original multiplayer contract, deploy Web first, then the Cloudflare
+runner bundle; old warm runners remain pair-only. Group lore requires the
+runner-first order above. Keep group admission off. The engine selects group guidance from
 maxPlayers, permits only starter edit_terms before Day 1, and never offers Start
 now, change requests or person-to-person nudging for groups.
 
@@ -6242,8 +6262,9 @@ artifacts and any-days capacity for both reservation and the batched message.
 One bounded shared turn names the affected tasks and players. Single-game copy
 is preserved, with an explicit notification JSON decision instruction because
 this lore-enabled host turn uses the conversation prompt profile. Rare kickoff, proposal, cancellation, rematch and recap notices
-stay per game, as do the existing per-game daily push receipts. Lore remains
-owned by the sorted-pair fingerprint.
+stay per game, as do the existing per-game daily push receipts. Pair lore remains
+owned by the sorted-pair fingerprint; group lore uses the original audience as
+described above.
 
 For a new room, `chat-bootstrap.ts` prepares a real group container and mailbox
 without a provider thread ID. The group runtime generates one first message.

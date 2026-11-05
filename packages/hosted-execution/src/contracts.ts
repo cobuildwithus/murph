@@ -255,6 +255,7 @@ export type HostedExecutionAssistantNotificationResponsePolicy =
       eventId: string;
       gameId: string;
       pairFingerprint: string;
+      loreAccess?: "read";
     }
   | {
       kind: "game_missed_check_in";

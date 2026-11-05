@@ -655,6 +655,11 @@ Only the starter edits terms before Day 1; group instructions prohibit change
 requests, Start now, person-to-person nudges and missed-person shaming. Stable
 numbered first names disambiguate seated people. Unjoined addressees appear
 only as a count; tools preserve their private task overrides during starter edits. Shared recaps require one kind
-superlative per eligible person and exclude private lore. The focused real-Codex
+superlative per eligible person. They read authorized room-audience game lore
+and the bounded transcript for callbacks about eligible memberIds, excluding
+private material, leavers and unjoined people. `loreAccess: "read"` forbids lore
+replacement during group recaps. After a successful recap write, trusted code
+records the canonical bare `recap.chatLine` once as `Chat line used:`, trimming
+oldest lines to 64 KiB. Pair recap lore writes stay unchanged. The focused real-Codex
 journey `group game addressed acceptance with duplicate first names` exercises
 production prompt builders, read_game and canonical approve arguments.

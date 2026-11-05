@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-const m = vi.hoisted(() => ({ audience: vi.fn(), groupAuthority: vi.fn(), exact: vi.fn(), runtime: vi.fn(), access: vi.fn(), wake: vi.fn(), route: vi.fn(), sender: vi.fn(), game: vi.fn(), run: vi.fn(), read: vi.fn(), profiles: vi.fn(), players: vi.fn(), photo: vi.fn(), recapMaterial: vi.fn(), sealRecap: vi.fn(), mailbox: vi.fn(), decodeMailbox: vi.fn() }));
-vi.mock("../src/lib/prisma", () => ({ getPrisma: () => ({ game: { findFirst: m.game }, $transaction: (fn: (tx: object) => unknown) => fn({ game: { findFirst: m.game } }), hostedMailboxItem: { findMany: m.mailbox } }) }));
+const m = vi.hoisted(() => ({ audience: vi.fn(), groupAuthority: vi.fn(), exact: vi.fn(), runtime: vi.fn(), access: vi.fn(), wake: vi.fn(), route: vi.fn(), sender: vi.fn(), game: vi.fn(), loreRows: vi.fn(), run: vi.fn(), read: vi.fn(), profiles: vi.fn(), players: vi.fn(), photo: vi.fn(), recapMaterial: vi.fn(), sealRecap: vi.fn(), mailbox: vi.fn(), decodeMailbox: vi.fn() }));
+vi.mock("../src/lib/prisma", () => ({ getPrisma: () => ({ game: { findFirst: m.game, findMany: m.loreRows }, $transaction: (fn: (tx: object) => unknown) => fn({ game: { findFirst: m.game } }), hostedMailboxItem: { findMany: m.mailbox } }) }));
 vi.mock("../src/lib/hosted-execution/runtime-owner", () => ({ requireHostedRuntimeCallbackTx: m.runtime }));
 vi.mock("../src/lib/hosted-mailbox/runtime-access", () => ({ requireHostedRuntimeActiveAccessForUpdateTx: m.access }));
 vi.mock("../src/lib/hosted-mailbox/store", () => ({
@@ -24,6 +24,7 @@ vi.mock("../src/lib/game/service", () => ({
   sealGameRecap: m.sealRecap,
 }));
 vi.mock("../src/lib/game/chat-photo", () => ({ handleGameChatPhoto: m.photo }));
+import { gameGroupLoreFingerprint, gamePairLoreFingerprint } from "../src/lib/game/audience";
 import { handleGameChatTool } from "../src/lib/game/chat-tool";
 const group = "container_synthetic";
 const actor = "player_synthetic";
@@ -37,6 +38,7 @@ describe("game chat tool authority", () => {
   afterEach(() => vi.unstubAllEnvs());
   beforeEach(() => {
     vi.resetAllMocks(); vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://recaps.murph.test"); m.players.mockResolvedValue([actor, "other_synthetic"]); m.exact.mockResolvedValue([actor, "other_synthetic"]); m.wake.mockResolvedValue(wake()); m.sender.mockResolvedValue(actor); m.game.mockResolvedValue({ id: "game_synthetic", invitees: [], players: [{ memberId: actor }, { memberId: "other_synthetic" }] }); m.read.mockResolvedValue({ games: [] }); m.mailbox.mockResolvedValue([]); m.decodeMailbox.mockResolvedValue([]);
+    m.loreRows.mockResolvedValue([{ id: "game_synthetic", maxPlayers: 2, audienceKey: null }]);
     m.run.mockResolvedValue({ ok: true, game: { privateRelationship: "synthetic-private", entries: ["private-image"], reply: { text: "synthetic-private-reply", audio: "private-reply-audio" } } });
   });
   it("keeps app replies out of tool responses and read_game", async () => {
@@ -237,9 +239,47 @@ describe("game chat tool authority", () => {
       terms: { n: 1, fromDay: 0, tasks: [], schedule: { count: 3 }, stakes: [] }, players: [], pendingChange: null,
       changeControls: { canStartNow: false, canEdit: false, canEditSchedule: false, canEditStartDate: false, editableFromDay: null } };
     m.read.mockResolvedValue({ games: [game] });
-    expect((await handleGameChatTool(read)).result).toMatchObject({ status: "ok", loreGuidance: expect.stringContaining("murph.game_lore"), loreFingerprint: expect.stringMatching(/^[a-f0-9]{32}$/u) });
+    expect((await handleGameChatTool(read)).result).toMatchObject({ status: "ok", loreGuidance: expect.stringContaining("murph.game_lore"), loreFingerprint: gamePairLoreFingerprint([actor, "other_synthetic"]) });
     m.read.mockResolvedValue({ games: [{ ...game, status: "settled" }] });
     expect((await handleGameChatTool(read)).result).not.toHaveProperty("loreGuidance");
+  });
+  it.each(["accepted_input", "automation_occurrence"])("resolves group lore from every authorized game for %s reads", async kind => {
+    const audienceKey = "synthetic-original-audience";
+    const audience = { memberIds: [actor, "other_synthetic"], threadId: "chat_synthetic", contacts: [{ kind: "email", value: "a@example.test" }, { kind: "email", value: "b@example.test" }], keys: { current: "rotated-key", candidates: ["rotated-key", audienceKey] } };
+    m.audience.mockResolvedValue(audience);
+    const request = { ...read, multiplayer: true, request: { action: "read_game" as const, origin: kind === "accepted_input" ? origin : { kind: "automation_occurrence" as const, automationId: "automation_synthetic", occurrenceAt: "2030-04-01T20:00:00Z" } } };
+    const game = { id: "game_synthetic", maxPlayers: 10, status: "live", startsOn: null, lengthDays: 7,
+      terms: { n: 1, fromDay: 0, tasks: [], schedule: { count: 3 }, stakes: [] },
+      players: audience.memberIds.map((memberId, seat) => ({ memberId, seat, firstName: "Alex", timeZone: "UTC", dayOne: "2030-04-01" })), pendingChange: null,
+      changeControls: { canStartNow: false, canEdit: false, canEditSchedule: false, canEditStartDate: false, editableFromDay: null } };
+    const row = { id: game.id, maxPlayers: 10, audienceKey };
+    m.read.mockResolvedValue({ games: [game] }); m.loreRows.mockResolvedValue([row]);
+    const expected = { loreGuidance: expect.stringContaining("murph.game_lore"), loreFingerprint: gameGroupLoreFingerprint(audienceKey) };
+    const result = await handleGameChatTool(request);
+    expect(result.result).toMatchObject(expected);
+    expect(JSON.stringify(result)).not.toContain(audienceKey);
+    expect(m.loreRows).toHaveBeenLastCalledWith({ where: { id: { in: [game.id] } }, select: { id: true, maxPlayers: true, audienceKey: true }, take: 1 });
+    // A departure changes the visible seats, not the original-audience key.
+    m.read.mockResolvedValue({ games: [{ ...game, players: game.players.slice(0, 1) }] });
+    expect((await handleGameChatTool(request)).result).toMatchObject(expected);
+    // Rematches and earlier games for the same audience share the notebook.
+    m.read.mockResolvedValue({ games: [game, { ...game, id: "earlier", status: "settled" }] });
+    m.loreRows.mockResolvedValue([row, { ...row, id: "earlier" }]);
+    expect((await handleGameChatTool(request)).result).toMatchObject(expected);
+    for (const rows of [[{ ...row, audienceKey: null }], []]) {
+      m.read.mockResolvedValue({ games: [game] }); m.loreRows.mockResolvedValue(rows);
+      expect((await handleGameChatTool(request)).result).not.toHaveProperty("loreFingerprint");
+    }
+    // Every status participates: a live pair plus an invited group is ambiguous.
+    m.read.mockResolvedValue({ games: [{ ...game, maxPlayers: undefined }, { ...game, id: "invited", status: "invited", players: game.players.slice(0, 1) }] });
+    m.loreRows.mockResolvedValue([{ ...row, maxPlayers: 2, audienceKey: null }, { ...row, id: "invited" }]);
+    const mixed = await handleGameChatTool(request);
+    expect(mixed.result).not.toHaveProperty("loreFingerprint");
+    expect(mixed.result).not.toHaveProperty("loreGuidance");
+    m.read.mockResolvedValue({ games: [{ ...game, status: "settled" }] });
+    m.loreRows.mockClear();
+    expect((await handleGameChatTool(request)).result).not.toHaveProperty("loreFingerprint");
+    expect(m.loreRows).not.toHaveBeenCalled();
   });
   it.each(["", ":synthetic_request"])("validates, saves and replays a recap without scoreLine", async (suffix) => {
     const recap = {

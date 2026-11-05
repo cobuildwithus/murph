@@ -413,7 +413,7 @@ resulting avatar. No private photo is shared with the subject or other players.
   discovers or creates a chat, and permits a no-reply result.
 - **Hosted recap.** Settlement reserves one durable recap turn for the bound
   group. The turn reads the finished shared game, a bounded current-room
-  transcript and the exact pair's lore, then calls `write_recap` with
+  transcript and the authorized game audience's lore, then calls `write_recap` with
   three to seven story pages from the fixed page kit and `chatLine`. The prompt
   requests three to six pages, opening on the tasks and prize in plain words,
   with stats only when the number itself is funny. App feedback and game
@@ -851,7 +851,7 @@ games where the speaker has a post that date; for a change, the games it would
 actually change. If exactly one fits, Murph acts on it. If several fit, Murph
 asks one short question naming only those games and changes nothing. Only the
 speaker's own words choose a game, never whichever game came up last. Progress
-is described by task; lore stays pair-owned. Kickoffs, changes, cancellations
+is described by task; lore stays with its game audience. Kickoffs, changes, cancellations
 and recaps remain per game.
 
 Until agreement, the current terms stay in force. Changes apply from the first
@@ -1015,17 +1015,30 @@ no broader membership disclosure or new native GameView field is needed.
 
 ## Progress and photos in chat
 
-While a live game is bound to the room, ordinary group turns maintain one
-pair-owned workspace file selected by an opaque sorted-pair fingerprint. It
-persists across rematches for that pair and is treated as absent for other pairs,
-records dated word-for-word excuses, running bits, firsts, streaks, comebacks
-and which bits Murph already used. The dedicated game-lore tool owns access and
-never accepts a path or player identity; game storage does not duplicate the file. Keep it near 200 lines and trim
-the oldest lines first. Turns without a live game in that room do not receive
-permission to create or update game lore. Missed-day and recap turns read it
-before composing, and update it only from game or conversation evidence. After
-a recap save, Murph records the exact group copy as
-`Chat line used: <chatLine>` alongside the bits used and facts worth retaining.
+While a live game is bound to the room, ordinary turns maintain a room-vault
+game-lore notebook. Pairs retain their sorted-pair key; group challenges use the
+stored original audience, preserving continuity across joins, departures and
+rematches without sharing with a different audience. A turn gets lore only if
+at least one game is live and every returned game, of any status, has the same
+key. The tool accepts neither paths nor identities. Keep dated excuses, running
+bits, firsts, streaks, comebacks and used bits near 200 lines, trimming oldest
+first within 64 KiB. Group notes contain only room conversation and shared game
+state, never personal memory, private labels or captions and photo details not
+said in the room. Person notes carry memberId beside the name because display
+suffixes can change; IDs never appear in messages.
+
+Group recaps read this lore and the bounded eligible-author transcript for running
+bits and callbacks about eligible memberIds only. They share the pair recap's
+dry, warm, specific voice, story arc, headlines and photos, with 3 to 7 pages
+and one kind superlative per eligible person. Never feature leavers or unjoined
+people, even inside another player's words, or reuse a used bit or chat line.
+Group recap lore is read-only: after saving, trusted code appends only
+`Chat line used: <chatLine>` from the canonical sealed/replayed recap, once and
+without its delivery link. That room message uses only room conversation and
+shared state, never app-only captions or photo details. Pair recap and missed-day
+turns keep their existing lore writes. Deploy the runner's read-only policy and
+trusted marker before Web starts emitting group recap lore scope; no old lore
+files are imported.
 
 The verified two-player group may read daily check-in status, totals and recent
 settled results. These are shared metadata, not a bypass of post-to-unlock:

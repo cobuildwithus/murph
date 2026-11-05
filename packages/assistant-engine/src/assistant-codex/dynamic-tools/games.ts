@@ -33,7 +33,7 @@ export const MURPH_WRITE_RECAP_TOOL = {
 } as const
 export const MURPH_GAME_LORE_TOOL = {
   namespace: 'murph', name: 'game_lore',
-  description: 'Read or replace the bound game pair’s lore when instructed. Returns current lore or save confirmation.',
+  description: 'Read or replace game lore when instructed. Returns current lore or save confirmation.',
   inputSchema: { type: 'object', additionalProperties: false, required: ['operation'], properties: {
     operation: { enum: ['read', 'replace'] }, content: { type: 'string' },
   } },
@@ -167,6 +167,10 @@ async function executeTrustedGameRecapWrite(input: {
     .slice(-100)
   const result = await input.tool.request({ action: 'write_recap', origin: input.origin, recap: input.recap, priorChatLines })
   const payload = result.result
+  if (payload.status === 'ok' && input.context?.currentGameRecapScope?.()?.loreAccess === 'read'
+    && 'recap' in payload && payload.recap) {
+    await input.context.appendGameRecapChatLine?.(payload.recap.chatLine)
+  }
   if (payload.status === 'ok' && 'chatLine' in payload && typeof payload.chatLine === 'string') {
     input.context?.recordSavedGameRecapChatLine?.(payload.chatLine)
   }
@@ -180,18 +184,21 @@ async function executeGameLoreTool(input: {
   request: Extract<GameDynamicRequest, { action: 'game_lore' }>
   context: AssistantHostedToolContext | null
 }) {
-  if (!input.context?.readGameLore || !input.context?.replaceGameLore) return toolTextResult(false, 'Pair lore is unavailable for this turn.', 'authority_rejected')
+  if (!input.context?.readGameLore || !input.context?.replaceGameLore) return toolTextResult(false, 'Game lore is unavailable for this turn.', 'authority_rejected')
+  if (input.request.operation === 'replace' && input.context.currentGameRecapScope?.()?.loreAccess === 'read') {
+    return toolTextResult(false, 'Game lore is read-only for this recap.', 'authority_rejected')
+  }
   try {
     if (input.request.operation === 'read') return toolTextResult(true, await input.context.readGameLore())
     await input.context.replaceGameLore(input.request.content ?? '')
-    return toolTextResult(true, 'ok: pair lore replaced')
+    return toolTextResult(true, 'ok: game lore replaced')
   } catch (error) {
-    return toolTextResult(false, 'Pair lore could not be accessed.', 'handler_exception', error)
+    return toolTextResult(false, 'Game lore could not be accessed.', 'handler_exception', error)
   }
 }
 
 /** With several games in one room, a move acts on the one game it can mean, or asks once. */
-export const GAME_SELECTION_GUIDANCE = '\nSeveral games share this chat. A day correction, change, answer to an ask, or photo offer or save acts on exactly one gameId. First keep only the games it can apply to: for marking a day not done, games where the speaker has a post that date; for restoring a day, games where that date does not show as posted, since a day marked not done reads as unposted; for a change, games it would actually change; for a yes or no, the asks waiting on the speaker; for an unsolicited photo offer, the speaker’s games whose task it shows; for an explicit save, the game they name or the photo offer waiting on them. Only the speaker’s own words pick among those: task words in this message or the one they just sent, or their answer to your question. Never pick by which game came up last, a recent notice, the other player’s messages, or the newest or first game. If exactly one game fits, act on it. If several fit, make no update_game or game_photo call: ask once, in one short question naming only those games by their tasks, as in “Which game, steps or plank?”, then act on the answer. The photo rules still decide whether a photo gets any reply or save: a photo they keep quiet stays quiet. Discuss progress per named task; lore remains shared by the pair.'
+export const GAME_SELECTION_GUIDANCE = '\nSeveral games share this chat. A day correction, change, answer to an ask, or photo offer or save acts on exactly one gameId. First keep only the games it can apply to: for marking a day not done, games where the speaker has a post that date; for restoring a day, games where that date does not show as posted, since a day marked not done reads as unposted; for a change, games it would actually change; for a yes or no, the asks waiting on the speaker; for an unsolicited photo offer, the speaker’s games whose task it shows; for an explicit save, the game they name or the photo offer waiting on them. Only the speaker’s own words pick among those: task words in this message or the one they just sent, or their answer to your question. Never pick by which game came up last, a recent notice, the other player’s messages, or the newest or first game. If exactly one game fits, act on it. If several fit, make no update_game or game_photo call: ask once, in one short question naming only those games by their tasks, as in “Which game, steps or plank?”, then act on the answer. The photo rules still decide whether a photo gets any reply or save: a photo they keep quiet stays quiet. Discuss progress per named task; lore belongs to the game audience.'
 
 async function executeOrdinaryGameTool(input: {
   request: Extract<GameDynamicRequest, { action: 'read_game' | 'update_game' | 'game_photo' }>

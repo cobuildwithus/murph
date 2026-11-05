@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hostedGameChatStateSchema } from "../src/game-tools.ts";
-import { GAME_LIVE_LORE_GUIDANCE, GAME_PRIZE_WORDS, buildGameTalkInstructions, buildGameChangeExpiredInstructions, buildGameChangeCancelledInstructions, buildGameInviteCancelledInstructions, buildGameKickoffInstructions, buildGameMissedDayInstructions, buildGameProposalInstructions, buildGameRecapInstructions, buildGameRematchInstructions, gameLiveLoreGuidanceForState } from "../src/game-chat-notifications.ts";
+import { GAME_LIVE_LORE_GUIDANCE, GAME_PRIZE_WORDS, buildGameTalkInstructions, buildGameChangeExpiredInstructions, buildGameChangeCancelledInstructions, buildGameInviteCancelledInstructions, buildGameKickoffInstructions, buildGameMissedDayInstructions, buildGameProposalInstructions, buildGameRecapInstructions, buildGameRematchInstructions } from "../src/game-chat-notifications.ts";
 
 describe("game v1 notification instructions", () => {
   it("relays the note as user data without inventing terms or acceptance", () => {
@@ -136,7 +136,7 @@ describe("game v1 notification instructions", () => {
       liveLoreGuidance: GAME_LIVE_LORE_GUIDANCE,
     }).toMatchInlineSnapshot(`
       {
-        "liveLoreGuidance": "This room has a live game. Use murph.game_lore to keep about 200 lines of brief dated pair lore from current chat and game evidence—verbatim excuses, trash talk, firsts, streaks, comebacks, running and used bits—trimming oldest first.",
+        "liveLoreGuidance": "This room has a live game. Use murph.game_lore to keep about 200 lines of brief dated game lore from current chat and game evidence: verbatim excuses, trash talk, firsts, streaks, comebacks, running and used bits; trim oldest first. In group challenges, record only room conversation and shared game state, never personal memory, private contact labels, or captions and photo details not said in the room; person notes keep memberId next to the name because suffixes change, but memberIds never appear in messages.",
         "missedCanSkip": true,
         "missedData": {
           "firstMissedDate": "2030-03-04",
@@ -204,15 +204,6 @@ describe("game v1 notification instructions", () => {
     }
     expect(buildGameKickoffInstructions({ kind: "started", game: game! })).toContain("Briefly offer reminders");
   });
-  it("adds lore guidance only when the bound shared state has a live game", () => {
-    const live = hostedGameChatStateSchema.parse({ games: [{
-      id: "game_synthetic", status: "live", startsOn: null, lengthDays: 7, terms: { n: 1, fromDay: 0, tasks: [], schedule: { count: 3 }, stakes: [] }, players: [], pendingChange: null,
-      changeControls: { canStartNow: false, canEdit: false, canEditSchedule: false, canEditStartDate: false, editableFromDay: null },
-    }] });
-    expect(gameLiveLoreGuidanceForState(live)).toBe(GAME_LIVE_LORE_GUIDANCE);
-    expect(gameLiveLoreGuidanceForState({ games: live.games.map((game) => ({ ...game, status: "settled" as const })) })).toBeUndefined();
-    expect(gameLiveLoreGuidanceForState({ games: [] })).toBeUndefined();
-  });
 });
 
 
@@ -222,7 +213,7 @@ it("composes shared-evidence superlatives guidance without requiring legacy writ
 });
 
 
-it("keeps group kickoff and recap distinct from pair consent, reminders and lore", () => {
+it("keeps group kickoff and recap distinct from pair consent and reminders", () => {
   const game = hostedGameChatStateSchema.parse({ games: [{ id: "game_group", maxPlayers: 10, status: "live", lengthDays: 7, startsOn: null,
     players: [0, 1].map(seat => ({ memberId: `player_${seat}`, seat, firstName: `Alex (${seat + 1})`, timeZone: "UTC", dayOne: "2030-03-06" })),
     terms: { n: 1, fromDay: 0, defaultTask: "Walk", tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Walk" }], schedule: { count: 5 }, stakes: [] },
@@ -232,8 +223,18 @@ it("keeps group kickoff and recap distinct from pair consent, reminders and lore
   expect(kickoff).toContain("Only seated players have accepted");
   expect(kickoff).not.toContain("Both players have agreed");
   expect(kickoff).not.toContain("Briefly offer reminders");
-  expect(gameLiveLoreGuidanceForState({ games: [game] })).toBeUndefined();
   const recap = buildGameRecapInstructions([], undefined, true);
   expect(recap).toContain("one kind superlative");
   expect(recap).toContain("Never shame");
+});
+
+it("gives group recaps room continuity, shared voice and read-only lore with eligible-player protections", () => {
+  const transcript = [{ playerName: "Alex (2)", text: "The stairs have unionized." }];
+  const prompt = buildGameRecapInstructions(transcript, undefined, true);
+  for (const phrase of [JSON.stringify(transcript), "murph.game_lore (read only)", "running bits and callbacks to earlier games", "eligible players by memberId", "Never reuse a bit or chat line listed as used", "dry, warm, specific, a little roasty, never mean", "pages with an arc", "headlines carry the story", "Show their posts", "3 to 7", "one kind superlative per eligible player", "Omit scoreLine", "duplicate-name suffixes", "all-way tie has no prize obligation", "Never shame", "single out a missing person", "No inference from unavailable entries", "Never feature or quote leavers or unjoined people, including inside an eligible player's words", "Quote only returned words exactly", "never app-only captions or photo details"]) expect(prompt).toContain(phrase);
+  expect(prompt).not.toMatch(/older lore|update.*lore|add.*bits used|Chat line used:|anything worth remembering/u);
+  const pair = buildGameRecapInstructions(transcript);
+  expect(pair).toContain("update the pair lore");
+  expect(pair).toContain("Chat line used:");
+  for (const phrase of ["game lore", "only room conversation and shared game state", "personal memory, private contact labels", "memberId next to the name", "memberIds never appear in messages"]) expect(GAME_LIVE_LORE_GUIDANCE).toContain(phrase);
 });

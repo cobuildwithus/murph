@@ -1755,11 +1755,15 @@ function parseHostedExecutionAssistantNotificationResponsePolicy(
     case "require_game_recap":
       assertExactHostedExecutionKeys(
         record,
-        ["eventId", "gameId", "kind", "pairFingerprint"],
+        ["eventId", "gameId", "kind", "pairFingerprint", "loreAccess"],
         label,
       );
+      if (record.loreAccess !== undefined && record.loreAccess !== "read") {
+        throw new TypeError(`${label}.loreAccess must be read.`);
+      }
       return {
         kind,
+        ...(record.loreAccess === "read" ? { loreAccess: "read" as const } : {}),
         eventId: requireString(record.eventId, `${label}.eventId`),
         gameId: requireString(record.gameId, `${label}.gameId`),
         pairFingerprint: requireString(

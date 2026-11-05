@@ -6,7 +6,7 @@ import { upsertHostedMemberIdentity } from "@/src/lib/hosted-onboarding/hosted-m
 import { buildHostedMemberPhoneIdentityFields } from "@/src/lib/hosted-onboarding/member-identity-fields";
 import { createHostedEmailLookupKey, createHostedExternalThreadIdentityLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { areGameGroupsEnabled } from "@/src/lib/game/access";
-import { gameAudienceKeys } from "@/src/lib/game/audience";
+import { gameAudienceKeys, gameGroupLoreFingerprint } from "@/src/lib/game/audience";
 import { runGameCommand, readGame, readHome, readGameChatState, runGameChatUpdate, readGameRecapMaterial, sealGameRecap, authorizeMediaRead } from "@/src/lib/game/service";
 import { assertGameProposalDeliveryCurrentTx } from "@/src/lib/game/chat-delivery-authority";
 import { readGameChatFundingRooms } from "@/src/lib/game/chat-access";
@@ -995,7 +995,7 @@ describe.skipIf(!enabled)("exact group chat and composer persistence", () => {
     lifecycleProof.mailbox.mockResolvedValue(null);
     await expect(deliverGameChatLifecycle(group.id, "recap")).resolves.toBe(true);
     expect(lifecycleProof.append).toHaveBeenCalledTimes(2);
-    expect(lifecycleProof.prepare.mock.calls[1][0].envelope.notification).toMatchObject({ deliveryIdempotencyKey: `game-recap:${group.id}`, responsePolicy: { kind: "require_game_recap" } });
+    expect(lifecycleProof.prepare.mock.calls[1][0].envelope.notification).toMatchObject({ deliveryIdempotencyKey: `game-recap:${group.id}`, responsePolicy: { kind: "require_game_recap", pairFingerprint: gameGroupLoreFingerprint((await gameRow(group.id)).audienceKey!), loreAccess: "read" } });
     expect((await gameRow(group.id)).invitees[1].memberId).toBeNull();
     lifecycleProof.mailbox.mockResolvedValue({ id: "synthetic-recap", consumedAt: null });
     await expect(deliverGameChatLifecycle(group.id, "recap")).resolves.toBe(true);
@@ -1415,7 +1415,13 @@ function prepareGroupLifecycle(room: string) {
 describe.skipIf(!enabled)("group chat after departure", () => {
   it("keeps remaining-player reads, funding, check-ins and majority edits while refusing leaver mutations", async () => {
     const g = await leaverChatGame();
+    const { handleGameChatTool } = await import("@/src/lib/game/chat-tool");
+    const request = { memberId: g.room, multiplayer: true, runtimeIdentity: null, request: { action: "read_game" as const,
+      origin: { kind: "automation_occurrence" as const, automationId: "synthetic_lore_read", occurrenceAt: "2030-03-09T12:00:00Z" } } };
+    const lore = { loreFingerprint: gameGroupLoreFingerprint((await gameRow(g.game.id)).audienceKey!), loreGuidance: expect.stringContaining("murph.game_lore") };
+    expect((await handleGameChatTool(request)).result).toMatchObject(lore);
     await ok(g.people[2].id, { type: "leave", gameId: g.game.id });
+    expect((await handleGameChatTool(request)).result).toMatchObject(lore);
     expect(await readGroupGameChatAuthority(await gameRow(g.game.id), g.room)).not.toBeNull();
     const shared = (await readGameChatState(g.room, g.members, g.people[2].id)).games[0];
     expect(shared).toMatchObject({ id: g.game.id, pendingInviteeCount: 0 });
@@ -1424,7 +1430,6 @@ describe.skipIf(!enabled)("group chat after departure", () => {
     expect(shared.terms.tasks).toHaveLength(2);
     expect(await requestGameRecapRegeneration({ gameId: g.game.id, regenerationId: "live_game", operatorMemberId: "system", execute: false })).toMatchObject({ outcome: "not_settled" });
     chatProof.sender = g.people[2].id; chatProof.wake = leaverChatWake(g.room);
-    const { handleGameChatTool } = await import("@/src/lib/game/chat-tool");
     expect(await handleGameChatTool({ memberId: g.room, multiplayer: true, runtimeIdentity: null,
       request: { action: "read_game", origin: { kind: "accepted_input", assistantInputId: "ain_synthetic_leaver_read" } } }))
       .toMatchObject({ result: { status: "ok", state: { games: [{ id: g.game.id, players: shared.players }] } } });

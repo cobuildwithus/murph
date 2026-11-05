@@ -46472,6 +46472,122 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
 })
 
 describeRealCodex('real Codex game recap e2e', () => {
+  it('group game lore continuity stays room-safe through a read-only recap', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-group-lore-e2e-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    const { buildGameRecapInstructions } = await import('@murphai/hosted-execution/runtime-control')
+    const { MURPH_GAME_LORE_TOOL, MURPH_READ_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    const { createAssistantHostedToolContext } = await import('../src/assistant/hosted-tool-context.js')
+    const { GAME_LIVE_LORE_GUIDANCE } = await import('@murphai/hosted-execution/runtime-control')
+    type GameRequest = import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest
+    type Recap = import('@murphai/hosted-execution/runtime-control').HostedGameRecap
+    const fingerprint = 'd'.repeat(32)
+    const gameId = 'game_group_lore_synthetic'
+    const eventId = `game-recap:${gameId}`
+    const inputId = 'ain_' + 'd'.repeat(32)
+    const players = ['Alex (1)', 'Alex (2)', 'Sam'].map((name, seat) => ({ memberId: `player_${seat}`, name, task: 'Take the stairs' }))
+    const calls: GameRequest[] = []
+    const saved: Recap[] = []
+    const recapEvents: unknown[] = []
+    let loreReads = 0
+    let loreWrites = 0
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
+      const lorePath = path.join(workingDirectory, 'games', `lore-${fingerprint}.md`)
+      await mkdir(path.dirname(lorePath), { recursive: true })
+      const usedLine = 'The challenge ended. The elevator filed for retirement.'
+      await writeFile(lorePath, `Used bit: elevator retirement.
+Chat line used: ${usedLine}
+Riley (player_departed): the velvet cape bit from an earlier game.
+Jordan (player_unjoined): the glitter throne bit from room conversation.
+`)
+      const groupTool = { request: async (request: GameRequest): Promise<import('@murphai/hosted-execution/runtime-control').HostedGameToolResponse> => {
+        calls.push(request)
+        if (request.action !== 'read_game') throw new Error('Only a room read is authorized during the live turn.')
+        return { action: 'read_game', result: { status: 'ok', loreFingerprint: fingerprint, loreGuidance: GAME_LIVE_LORE_GUIDANCE, state: { games: [{
+          id: gameId, maxPlayers: 10, status: 'live', startsOn: null, lengthDays: 3,
+          players: players.map((player, seat) => ({ memberId: player.memberId, firstName: player.name, seat, dayOne: '2030-03-04', timeZone: 'UTC' })),
+          terms: { n: 1, fromDay: 0, defaultTask: 'Take the stairs', tasks: players.map((player, seat) => ({ seat, text: player.task })), schedule: { count: 3 }, stakes: [{ kind: 'prize', item: 'Choose brunch' }] },
+          pendingChange: null, changeControls: { canStartNow: false, canEdit: false, canEditSchedule: false, canEditStartDate: false, editableFromDay: null },
+        }] } } }
+      } }
+      const context = createAssistantHostedToolContext({ executionContext: { memberId: 'synthetic-room', userEnvKeys: [], groupTool },
+        messageInput: { channel: 'linq', vault: workingDirectory } as never,
+        session: { binding: { channel: 'linq' }, sessionId: 'synthetic-lore-session' } as never,
+        getConversationScope: () => 'group', getUserActionAcceptedInputIds: () => [inputId],
+      })
+      const guidance = await context.prepareGameLore?.()
+      const live = await executeRealCodexAppServerTurn({ approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({ assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group', currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T16:00:00.000Z', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null }) + '\n' + guidance,
+        dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_GAME_LORE_TOOL], env: config.env,
+        hostedToolContext: { ...context,
+          readGameLore: async () => { loreReads += 1; return context.readGameLore!() },
+          replaceGameLore: async content => { loreWrites += 1; await context.replaceGameLore!(content) },
+        }, model: config.model, modelProvider: config.modelProvider, reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        prompt: `Current room message from Alex (2), memberId player_1, Message ref ${inputId}: Murph, remember our running joke from last game: the stairs have unionized. Save it for the recap; please do not use the joke in this reply.`,
+      })
+      process.stdout.write(`[group-lore live] ${JSON.stringify({ reply: live.finalMessage, loreReads, loreWrites })}\n`)
+      expect(loreReads).toBeGreaterThanOrEqual(1)
+      expect(loreWrites).toBe(1)
+      const liveLore = await readFile(lorePath, 'utf8')
+      expect(liveLore).toMatch(/player_1/iu)
+      expect(liveLore).toMatch(/union/iu)
+      expect(liveLore).toContain(usedLine)
+      expect(live.finalMessage).not.toMatch(/player_|memberId|game_lore/iu)
+      calls.length = 0
+      const modelTarget = createAssistantModelTarget({ approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
+        codexHome: permissionHome.codexHome, model: config.model, modelProvider: config.modelProvider, provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write' })
+      if (!modelTarget) throw new Error('Expected real Codex target.')
+      const scope = { gameId, eventId, pairFingerprint: fingerprint, loreAccess: 'read' as const }
+      const result = await sendAssistantNotificationLocal({ actorId: null, bindingDeliveryTarget: 'synthetic-lore-thread', channel: 'linq', identityId: null,
+        deliveryDispatchMode: 'queue-only', deliveryTarget: 'synthetic-lore-thread', deliveryIdempotencyKey: eventId, deliveryDedupeToken: eventId,
+        executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'synthetic-room', userEnvKeys: [], gameRecapScope: scope,
+          groupTool: { request: async request => {
+            calls.push(request)
+            if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', recapGame: { id: gameId, maxPlayers: 10, players,
+              lengthDays: 3, schedule: { count: 3 }, stakes: [{ kind: 'prize', item: 'Choose brunch' }], score: players.map(p => ({ name: p.name, score: 3 })),
+              days: [1, 2, 3].map(dayNumber => ({ dayNumber, posts: Object.fromEntries(players.map((p, seat) => [p.name, { entryId: `entry_${seat}_${dayNumber}`, kind: 'photo', text: 'App-only caption: tangerine moon boots.' }])) })),
+            } } }
+            if (request.action !== 'write_recap') throw new Error('Unexpected group recap action.')
+            saved.push(request.recap)
+            return { action: 'write_recap', result: { status: 'ok', recapOutcome: 'ok: saved.', recap: saved[0], chatLine: `${saved[0]!.chatLine}\nWatch the recap: https://recaps.murph.test/recap/${gameId}` } }
+          } },
+        } },
+        instructions: buildGameRecapInstructions([{ playerName: 'Alex (2)', text: 'Another week taking the stairs.' },
+          { playerName: 'Sam', text: 'Riley and Jordan should bring the velvet cape and glitter throne back.' }], undefined, true),
+        onTraceEvent: event => recapEvents.push(event.rawEvent),
+        responsePolicy: { kind: 'require_game_recap', ...scope }, threadId: 'synthetic-lore-thread', threadIsDirect: false,
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env }, turnTrigger: 'manual-deliver', vault: workingDirectory, workingDirectory,
+      })
+      const loreActions = readCapabilityRoutingActions(recapEvents).filter(action => action.kind === 'dynamic' && /(?:^|[.])game_lore$/u.test(action.tool))
+      expect(loreActions.map(action => action.kind === 'dynamic' ? action.argumentsValue : null)).toEqual([{ operation: 'read' }])
+      expect(calls[0]?.action).toBe('read_game')
+      expect(saved).toHaveLength(1)
+      const recap = saved[0]!
+      const story = JSON.stringify({ pages: recap.pages, superlatives: recap.superlatives, chatLine: recap.chatLine })
+      expect(story).toMatch(/union/iu)
+      expect(story).not.toMatch(/Riley|Jordan|velvet|glitter|elevator|retirement|missing|failed/iu)
+      expect(recap).not.toHaveProperty('scoreLine')
+      expect(recap.pages.length).toBeGreaterThanOrEqual(3)
+      expect(recap.pages.length).toBeLessThanOrEqual(7)
+      expect(recap.superlatives?.map(item => item.memberId).sort()).toEqual(players.map(p => p.memberId).sort())
+      expect(recap.chatLine).not.toMatch(/tangerine|moon boots|player_|https?:/iu)
+      expect(recap.chatLine.length).toBeLessThan(160)
+      expect(await readFile(lorePath, 'utf8')).toBe(liveLore.replace(/\n?$/u, '\n') + `Chat line used: ${recap.chatLine}\n`)
+      expect(result.response).toBe(`${recap.chatLine}\nWatch the recap: https://recaps.murph.test/recap/${gameId}`)
+      expect(result.deliveryOutcome?.kind).toBe('queued')
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      expect(intents).toHaveLength(1)
+      expect(intents[0]?.message).toBe(result.response)
+      process.stdout.write(`[group-lore recap] ${JSON.stringify({ recap, reply: result.response, actions: calls.map(call => call.action) })}\n`)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
+    }
+  }, 360_000)
   it.each([
     { name: 'game recap notification writes one sealed story and queues its saved chat line exactly', weekendsOff: false, regeneration: false, superlatives: false },
     { name: 'game recap notification with weekends off', weekendsOff: true, regeneration: false, superlatives: false },
