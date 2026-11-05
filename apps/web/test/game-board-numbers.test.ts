@@ -24,9 +24,14 @@ function person(id: string, number: BoardNumber, inARow = 0): BoardPerson {
 
 describe("pair board numbers", () => {
   it.each(BOARD_METRICS)("preserves unavailable states for %s", metric => {
-    for (const [state, expected] of [["not_granted", "not_shared"], ["pending", "pending"], ["missing", "pending"], ["hidden", "hidden"]] as const) {
+    for (const [state, expected] of [["not_granted", "not_shared"], ["pending", "pending"], ["hidden", "hidden"]] as const) {
       expect(boardNumber(metric, { state, records: [] }, window, window.from)).toEqual({ state: expected });
     }
+    expect(boardNumber(metric, { state: "missing", records: [] }, window, window.from))
+      .toEqual({ state: "pending", reason: "no_readings" });
+    expect(available([], metric)).toEqual({ state: "pending", reason: "no_readings" });
+    expect(available(rows(metric, "manual", window.from, 1, 52, "invalid-unit"), metric))
+      .toEqual({ state: "pending", reason: "no_readings" });
   });
   it("selects a single sufficiently covered source without filling its gaps", () => {
     const points = [...rows(), ...rows("restingHeartRate", "oura", "2030-03-25", 4, 60),
@@ -67,7 +72,7 @@ describe("pair board numbers", () => {
     const naps = rows("sleep", "oura", window.from, 7, 40, "minutes").map(record => ({
       ...record, data: { ...record.data, sleepType: "nap" as const },
     }));
-    expect(available(naps, "sleep")).toEqual({ state: "pending" });
+    expect(available(naps, "sleep")).toEqual({ state: "pending", reason: "no_readings" });
   });
   it.each([
     ["07:00:00", "2026-11-03", 8000, 14],
@@ -102,6 +107,13 @@ describe("pair board numbers", () => {
     expect(available(records, "vo2Max")).toMatchObject({ latest: { value: 42.3 },
       comparison: { baseline: { days: 2, value: 40, through: "2030-03-14" }, current: { from: "2030-03-15", days: 2 }, improvement: expect.closeTo(2.26) } });
     expect(available(records.slice(1), "vo2Max")).toMatchObject({ comparison: null });
+  });
+  it.each([0, 10, 45, 46])("shows one member-reported VO2 reading from %s days ago without a comparison", age => {
+    const date = addDays(window.through, -age);
+    expect(available(rows("vo2Max", "manual", date, 1, 52, "mL/kg/min"), "vo2Max")).toEqual({
+      state: "available", unit: "ml/kg/min", latest: { date, value: 52 },
+      daily: [{ date, value: 52 }], stale: age > 45, comparison: null,
+    });
   });
   it("awards positive improvement only, with no crown for ties or all-negative changes", () => {
     const positive = available([...rows(), ...rows("restingHeartRate", "oura", "2030-03-25", 7, 60)]);

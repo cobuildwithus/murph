@@ -98,6 +98,16 @@ afterAll(async () => {
 });
 
 describe.skipIf(!enabled)("pair board PostgreSQL authority and routes", () => {
+  it("distinguishes a readable empty VO2 snapshot from an unpublished grant on the wire", async () => {
+    const f = await fixture(true);
+    await f.share(f.a, "vo2-max-days.v0", true, false, 0);
+    await f.share(f.b, "vo2-max-days.v0");
+    const response = await GET(new Request("https://example.test/board"), { params: Promise.resolve({ memberId: f.b }) });
+    expect(response.status).toBe(200);
+    const { board } = await response.json();
+    expect(board.people[0].numbers.vo2Max).toEqual({ state: "pending", reason: "no_readings" });
+    expect(board.people[1].numbers.vo2Max).toEqual({ state: "pending" });
+  });
   it("shows an unjoined shell, admits a pair seat and publishes all four scopes through existing grants", async () => {
     const f = await fixture();
     await f.share(f.b, "steps-days.v0", true);
