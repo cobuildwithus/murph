@@ -7,7 +7,7 @@ import { buildHostedMemberPhoneIdentityFields } from "@/src/lib/hosted-onboardin
 import { createHostedEmailLookupKey, createHostedExternalThreadIdentityLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { areGameGroupsEnabled } from "@/src/lib/game/access";
 import { gameAudienceKeys, gameGroupLoreFingerprint } from "@/src/lib/game/audience";
-import { runGameCommand, readGame, readHome, readGameChatState, runGameChatUpdate, readGameRecapMaterial, sealGameRecap, authorizeMediaRead } from "@/src/lib/game/service";
+import { runGameCommand, readGame, readHome, readGameChatState, readGameRematchNotice, runGameChatUpdate, readGameRecapMaterial, sealGameRecap, authorizeMediaRead } from "@/src/lib/game/service";
 import { assertGameProposalDeliveryCurrentTx } from "@/src/lib/game/chat-delivery-authority";
 import { readGameChatFundingRooms } from "@/src/lib/game/chat-access";
 import { requestGameRecapRegeneration } from "@/src/lib/game/recap-regeneration";
@@ -1199,6 +1199,102 @@ async function majorityGame(seated = 4, unjoined = 0) {
 }
 
 describe.skipIf(!enabled)("group majority changes", () => {
+  it.each([
+    { scalar: "duration", starter: 0 }, { scalar: "duration", starter: 1 },
+    { scalar: "schedule", starter: 0 }, { scalar: "schedule", starter: 1 },
+  ])("Same again inherits words after a real $scalar-only change with starter $starter", async ({ scalar, starter }) => {
+    const g = await majorityGame(3, 1);
+    const before = await gameRow(g.game.id);
+    const edit = g.edit();
+    edit.terms.stakes = [{ kind: "prize", item: "Choose our next outing" }];
+    if (scalar === "duration") edit.terms.lengthDays = 12;
+    else edit.terms.schedule = { days: [0, 2, 4] };
+    expect(await g.send(0, edit)).toMatchObject({ ok: true });
+    expect(await g.vote(1, "approve")).toMatchObject({ ok: true });
+    const changed = await gameRow(g.game.id);
+    expect(changed.termsWordsEncrypted).toBe(before.termsWordsEncrypted);
+    expect(changed.terms).toMatchObject({ versions: [{ n: 2 }] });
+    await settle(g.game.id, g.people[0].id);
+    const copied = await create(g.people[starter], [], { previousGameId: g.game.id });
+    const row = await gameRow(copied.id);
+    expect(row.lengthDays).toBe(scalar === "duration" ? 12 : 10);
+    expect(row.terms).toMatchObject({ versions: [{ n: 1, schedule: scalar === "schedule" ? { days: [0, 2, 4] } : { count: 10 } }] });
+    const notice = await readGameRematchNotice(copied.id, g.people.map(p => p.id));
+    expect(notice).toMatchObject({ maxPlayers: 10, termsVersion: 1, comparison: { sameGame: true } });
+    expect(JSON.stringify(notice)).not.toContain("Private invitation task");
+  });
+
+  it("Same again takes v3 words through a v1-word, v2-scalar, v3-word, v4-scalar sequence", async () => {
+    const g = await majorityGame(3, 1);
+    for (let revision = 1; revision <= 3; revision++) {
+      const edit = g.edit({ expectedTermsVersion: revision, proposalId: randomUUID() });
+      edit.terms = { ...edit.terms, lengthDays: revision === 3 ? 14 : 12,
+        stakes: [{ kind: "prize", item: revision >= 2 ? "Choose a concert" : "Choose our next outing" }] };
+      expect(await g.send(0, edit)).toMatchObject({ ok: true });
+      expect(await g.send(1, { operation: "approve", gameId: g.game.id, proposalId: edit.proposalId! })).toMatchObject({ ok: true });
+    }
+    const prior = await gameRow(g.game.id);
+    const [plain] = await openGameTexts([{ table: "game", field: "terms_words", rowId: prior.id, memberId: prior.wordsOwnerMemberId, value: prior.termsWordsEncrypted }]);
+    expect(JSON.parse(plain!).versions.map((words: { n: number }) => words.n)).toEqual([1, 3]);
+    await settle(g.game.id, g.people[0].id);
+    const copied = await create(g.people[1], [], { previousGameId: g.game.id });
+    const notice = await readGameRematchNotice(copied.id, g.people.map(p => p.id));
+    expect(notice).toMatchObject({ comparison: { sameGame: true }, terms: { lengthDays: 14, stakes: [{ item: "Choose a concert" }] } });
+  });
+
+  it.each([false, true])("copies then edits group Same again once with private overrides; joined in between: %s", async joined => {
+    const g = await majorityGame(3, 1);
+    await settle(g.game.id, g.people[0].id);
+    const gameId = randomUUID();
+    const requested = { lengthDays: 12, startsOn: "2030-03-15", defaultTask: "Read a chapter", tasks: [{ memberId: g.people[1].id, text: "Read a chapter" }],
+      schedule: { days: [0, 2, 4] }, stakes: [{ kind: "prize" as const, item: "Choose the concert" }] };
+    const send = (update: HostedGameUpdate) => runGameChatUpdate({ ...g.context, actorMemberId: g.people[1].id, now: createdAt, update });
+    expect(await send({ operation: "create", gameId, previousGameId: g.game.id, terms: { ...requested, tasks: g.people.map(p => ({ memberId: p.id, text: "Read a chapter" })) } })).toMatchObject({ ok: true });
+    expect(await gameRow(gameId)).toMatchObject({ maxPlayers: 10, lengthDays: 10, startsOn: null });
+    if (joined) {
+      const view = await readGame(gameId, g.people[1].id, true);
+      await ok(g.people[0].id, join(view!.inviteToken!));
+      requested.tasks.push({ memberId: g.people[0].id, text: "Read a chapter" });
+    }
+    const proposalId = randomUUID();
+    const firstEdit = await send({ operation: "edit_terms", gameId, expectedTermsVersion: 1, proposalId, terms: requested });
+    if (joined) {
+      expect(firstEdit).toMatchObject({ ok: false });
+      expect(await send({ operation: "edit_terms", gameId, expectedTermsVersion: 1, proposalId: randomUUID(), terms: {
+        ...requested, startsOn: "2030-03-01", defaultTask: "Take a walk", tasks: requested.tasks.map(task => ({ ...task, text: "Take a walk" })), schedule: { count: 10 },
+      } })).toMatchObject({ ok: true });
+    } else expect(firstEdit).toMatchObject({ ok: true });
+    const row = await gameRow(gameId);
+    expect(row.lengthDays).toBe(joined ? 10 : 12);
+    if (joined) expect(row.pendingChange).not.toBeNull();
+    else expect(row.startsOn?.toISOString().slice(0, 10)).toBe("2030-03-15");
+    const [plain] = await openGameTexts([{ table: "game", field: "terms_words", rowId: row.id, memberId: row.wordsOwnerMemberId, value: row.termsWordsEncrypted }]);
+    expect(plain).toContain("Private invitation task");
+    expect(await db.game.count({ where: { previousGameId: g.game.id } })).toBe(1);
+  });
+
+  it.each(["task", "prize", "date"])("fences prepared and generated rematch facts after a %s edit without another receipt", async changed => {
+    const g = await majorityGame(3, 1);
+    await settle(g.game.id, g.people[0].id);
+    const copied = await create(g.people[1], [], { previousGameId: g.game.id });
+    const notice = await readGameRematchNotice(copied.id, g.people.map(p => p.id));
+    expect(notice).toMatchObject({ termsVersion: 1 });
+    const delivery = { tx: db, containerMemberId: g.context.chatContainerMemberId, audience: g.context.chatAudience, deliveryIdempotencyKey: `game-rematch:${copied.id}`, rematchTermsVersion: 1 };
+    expect(await assertGameProposalDeliveryCurrentTx(delivery)).toBe(true);
+    await expect(assertGameProposalDeliveryCurrentTx({ ...delivery, rematchTermsVersion: null })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    const { startsOn: _start, ...copiedTerms } = terms;
+    await ok(g.people[1].id, { type: "editTerms", gameId: copied.id, expectedTermsVersion: 1, terms: { ...copiedTerms,
+      ...(changed === "date" ? { startsOn: "2030-03-15" } : {}),
+      stakes: changed === "prize" ? [{ kind: "prize", item: "Choose a concert" }] : terms.stakes,
+      tasks: [{ seat: 3, text: changed === "task" ? "Hidden new assignment" : "Private invitation task" }],
+    } });
+    await expect(assertGameProposalDeliveryCurrentTx(delivery)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    const updated = await readGameRematchNotice(copied.id, g.people.map(p => p.id));
+    expect(updated).toMatchObject({ termsVersion: 2, startsOn: changed === "date" ? "2030-03-15" : null,
+      comparison: { sameGame: changed === "date", individualTasksChanged: changed === "task" } });
+    expect(JSON.stringify(updated)).not.toContain("Hidden new assignment");
+    expect(await db.hostedLinqDelivery.count({ where: { sourceRef: copied.id, template: "game_rematch" } })).toBe(1);
+  });
   it("lets a non-starter propose full terms, keeps private words, and applies with the deciding voter", async () => {
     const g = await majorityGame(4, 1);
     const edit = g.edit();

@@ -1875,8 +1875,15 @@ from association statement failures. Diagnostics contain fixed reason codes only
 Groups have no automatic bootstrap producer and cannot silently change rooms.
 Only remaining players have names, status and authored evidence in shared
 projections; invitees with no player row appear only as counts. Private pending
-labels stay with the starter. Final lifecycle egress repeats the authority
-check and verifies the provider target. Lifecycle notices and recap links contain text only. Any group
+labels stay with the starter. Rematch comparison decrypts canonical assignments
+inside Web and emits only shared scalar changes and a generic individual-task
+change flag, never unjoined assignments or labels. Publication and final rematch
+egress compare the immutable mailbox terms revision under the game lock. An
+unsupported revision policy or missing Web authority acknowledgement fails closed,
+including a two-human group room. One receipt owns the invitation. A revision
+fence does not prove consent after delivery: changed visible terms need renewed
+individual agreement; private task review stays in the addressed app invitation.
+Final lifecycle egress repeats the authority check and verifies the provider target. Lifecycle notices and recap links contain text only. Any group
 report withholds the shared recap, including media and quotes. Recaps may read
 only the authorized room-audience game lore, never private memory or contact
 labels. Group lore keys derive from the stored original audience, not the room
@@ -1886,7 +1893,18 @@ or photo details. Person notes retain memberIds beside names, but messages omit
 IDs and recap callbacks include only eligible players. Group recap lore is
 read-only in the runner because recap evidence includes app-only posts. Trusted
 code records only the accepted canonical bare room chat line, once, within the
-existing 64 KiB limit; that line must use room-visible evidence only.
+existing 64 KiB limit; that line must use room-visible evidence only. A separate
+group missed-day batch may grant writable lore only for authorized room-visible
+evidence, never app captions or media. Its producer and final egress must use
+`readGroupGameChatAuthority` for every included game and current eligible person;
+a room identifier alone grants no authority. Current missed-day production remains
+pair-only until that guarded batch path is deployed.
+
+A kickoff reminder offer supplies no consent. Existing automation saves bind the
+requesting member, exact game, chosen local time and timezone, and bounded duration.
+Every occurrence requires an OK scheduled read, that exact game's live status
+and the requester in its current players. Missing, ended, departed or unavailable
+state suppresses delivery; another game or another person's request cannot substitute.
 
 
 Game proposals are structural metadata under the canonical game lock. The

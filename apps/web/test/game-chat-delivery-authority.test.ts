@@ -33,6 +33,11 @@ describe("game proposal provider dispatch authority", () => {
     setGame(null);
     await expect(assertGameProposalDeliveryCurrentTx(refusal)).rejects.toMatchObject({code:"GAME_CHANGE_SUPERSEDED"});
   });
+  it("rejects a malformed rematch key without granting authority", async () => {
+    const { input, findFirst } = setup();
+    await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "game-rematch:game:extra" })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    expect(findFirst).not.toHaveBeenCalled();
+  });
   it("does not interfere with unrelated runtime deliveries", async () => {
     const { input, findFirst } = setup();
     await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "ordinary-reply" })).resolves.toBe(false);

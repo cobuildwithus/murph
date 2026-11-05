@@ -268,6 +268,11 @@ export function currentTerms(terms: StoredTerms): StoredTermsVersion {
   return terms.versions[terms.versions.length - 1];
 }
 
+/** Scalar edits inherit the latest encrypted words at or before their revision. */
+export function effectiveTermWords(words: TermWords, revision: number): TermWords["versions"][number] {
+  return [...words.versions].reverse().find(candidate => candidate.n <= revision) ?? words.versions[0];
+}
+
 /** The rules a given day was played under: the latest version from that day. */
 export function termsForDay(terms: StoredTerms, dayIndex: number): StoredTermsVersion {
   let version = terms.versions[0];

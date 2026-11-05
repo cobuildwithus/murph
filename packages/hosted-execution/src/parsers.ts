@@ -1744,6 +1744,15 @@ function parseHostedExecutionAssistantNotificationResponsePolicy(
   const kind = requireString(record.kind, `${label}.kind`);
 
   switch (kind) {
+    case "require_game_rematch": {
+      assertExactHostedExecutionKeys(record, ["kind", "gameId", "eventId", "termsVersion"], label);
+      const gameId = requireString(record.gameId, `${label}.gameId`);
+      const eventId = requireString(record.eventId, `${label}.eventId`);
+      if (eventId !== `game-rematch:${gameId}` || !Number.isSafeInteger(record.termsVersion) || Number(record.termsVersion) < 1) {
+        throw new TypeError(`${label} has invalid rematch revision authority.`);
+      }
+      return { kind, gameId, eventId, termsVersion: Number(record.termsVersion) };
+    }
     case "allow_send_or_skip":
     case "require_send":
       return { kind };

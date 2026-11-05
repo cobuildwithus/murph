@@ -477,6 +477,7 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
 
   const result: HostedRuntimeLinqRecentInboundEngagementResult = {};
   const response = value as {
+    gameRematchAuthorityChecked?: unknown;
     assistantAskFallbackRequired?: unknown;
     deliveryBlockCode?: unknown;
     deliveryPosture?: unknown;
@@ -485,6 +486,7 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
     providerDispatchClaimed?: unknown;
     resolvedRoute?: unknown;
   };
+  if (response.gameRematchAuthorityChecked === true) result.gameRematchAuthorityChecked = true;
   if (typeof response.assistantAskFallbackRequired === "boolean") {
     result.assistantAskFallbackRequired = response.assistantAskFallbackRequired;
   }
