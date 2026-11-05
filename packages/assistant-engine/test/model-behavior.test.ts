@@ -1615,7 +1615,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toMatchInlineSnapshot(`"68a1d5108af16ff8649843be4ab7aa231321228a52be79e80f0f3010cfea7c67"`)
-    expect(promptA.cacheMetadata.stableRouteCapabilityPromptHash).toMatchInlineSnapshot(`"fba82e6d1a086b059f8c45cb4296ce6c88ad4b1bd21d7748bfa7313bcef65725"`)
+    expect(promptA.cacheMetadata.stableRouteCapabilityPromptHash).toMatchInlineSnapshot(`"3ffe5dc506994dc7c7c93430466ac0589ac9c6c47b0b0047b73b555687c53122"`)
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
     )
