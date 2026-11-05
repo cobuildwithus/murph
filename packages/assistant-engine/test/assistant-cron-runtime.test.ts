@@ -3179,8 +3179,10 @@ describe('assistant cron runtime orchestration', () => {
     ['past', '2026-04-08T08:01:30.000Z', true],
     ['ahead of', '2026-04-08T08:30:00.000Z', false],
   ] as const)(
-    'holds a queued device notification by the parent deadline when dispatch is %s it',
+    'holds a queued device notification by the live clock when it is %s the parent deadline',
     async (_case, activeUntil, stale) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-04-08T08:02:00.000Z'))
       const { vaultRoot } = await createRuntimeContext(
         'assistant-cron-runtime-device-outbox-expiry-',
       )
@@ -3215,7 +3217,8 @@ describe('assistant cron runtime orchestration', () => {
         dispatchHooks: { prepareDispatchIntent },
         force: true,
         intentId: intent.intentId,
-        now: new Date('2026-04-08T08:02:00.000Z'),
+        // The drain's clock, captured before an earlier send delayed this one.
+        now: new Date('2026-04-08T08:01:00.000Z'),
         vault: vaultRoot,
       })
 

@@ -1217,7 +1217,6 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
     const deviceActivityAuthorityError =
       await resolveDeviceActivityOutboxAuthorityError({
         intent: dispatchIntent,
-        now,
         vault: input.vault,
       })
     const authorityError =
@@ -1641,7 +1640,6 @@ function assistantOutboxIntentMatchesPreparedDispatch(
 
 async function resolveDeviceActivityOutboxAuthorityError(input: {
   intent: AssistantOutboxIntent
-  now: Date
   vault: string
 }): Promise<Error | null> {
   const metadata = readAssistantDeviceActivityDeliveryIdempotencyMetadata(
@@ -1651,13 +1649,16 @@ async function resolveDeviceActivityOutboxAuthorityError(input: {
     return null
   }
 
+  const parent = await readAssistantDeviceActivityParentAutomation({
+    metadata,
+    vault: input.vault,
+  })
+  // A drain captures one clock for all its sends, so read the deadline against
+  // the time this send actually happens.
   const parentAutomation = resolveAssistantDeviceActivityParentValidity({
     metadata,
-    now: input.now,
-    parent: await readAssistantDeviceActivityParentAutomation({
-      metadata,
-      vault: input.vault,
-    }),
+    now: new Date(),
+    parent,
   })
   if (!parentAutomation) {
     return new VaultCliError(
