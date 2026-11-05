@@ -4,6 +4,7 @@ import type { HostedRuntimeGroupSharedRecord } from "@murphai/hosted-execution/r
 import { addDays } from "@/src/lib/game/time";
 import { pairBoardStreak } from "@/src/lib/game/board-streak";
 import type { RuleState } from "@/src/lib/game/rules";
+import { lastSettledStepDay } from "@/src/lib/settled-step-day";
 
 const window = { from: "2030-01-01", through: "2030-03-31" };
 const metricKeys = { restingHeartRate: "resting-heart-rate", sleep: "total-sleep-minutes", steps: "steps", vo2Max: "estimated-vo2-max" };
@@ -67,6 +68,33 @@ describe("pair board numbers", () => {
       ...record, data: { ...record.data, sleepType: "nap" as const },
     }));
     expect(available(naps, "sleep")).toEqual({ state: "pending" });
+  });
+  it.each([
+    ["07:00:00", "2026-11-03", 8000, 14],
+    ["08:00:00", "2026-11-04", 4000, 15],
+  ])("excludes unsettled step days at %s local but retains today's heart rate", (time, settledThrough, latestValue, days) => {
+    const now = new Date(`2026-11-05T${time}-05:00`);
+    const currentWindow = { from: "2026-08-08", through: "2026-11-05" };
+    const stepsWindow = { ...currentWindow, through: lastSettledStepDay(now, "America/New_York") };
+    const records = [...rows("steps", "garmin", currentWindow.from, 7, 6000, "count"),
+      ...rows("steps", "garmin", "2026-10-28", 7, 8000, "count"),
+      ...rows("steps", "garmin", "2026-11-04", 1, 4000, "count"),
+      ...rows("steps", "garmin", "2026-11-05", 1, 1000, "count")];
+    const number = boardNumber("steps", { state: "available", records }, stepsWindow, currentWindow.from);
+    expect(number).toMatchObject({ state: "available", latest: { date: settledThrough, value: latestValue }, stale: false,
+      comparison: { baseline: { from: currentWindow.from, value: 6000, days: 7 },
+        current: { from: addDays(settledThrough, -6), through: settledThrough, days: 7 }, sinceFirstGame: true } });
+    if (number.state !== "available") throw new Error("Expected settled steps");
+    expect(number.daily).toHaveLength(days);
+    expect(number.daily.every(point => point.date <= settledThrough)).toBe(true);
+    expect(number.comparison?.current.value).toBeCloseTo(time === "07:00:00" ? 8000 : (6 * 8000 + 4000) / 7);
+    expect(number.comparison?.improvement).toBeCloseTo(time === "07:00:00" ? 2000 : (6 * 8000 + 4000) / 7 - 6000);
+    expect(boardNumber("restingHeartRate", { state: "available", records: rows("restingHeartRate", "oura", "2026-11-05", 1, 59) },
+      currentWindow, currentWindow.from)).toMatchObject({ latest: { date: "2026-11-05", value: 59 }, daily: [{ date: "2026-11-05", value: 59 }] });
+    for (const age of [7, 8]) {
+      expect(boardNumber("steps", { state: "available", records: rows("steps", "garmin", addDays(settledThrough, -age), 1, 8000, "count") },
+        stepsWindow, currentWindow.from)).toMatchObject({ stale: age > 7, comparison: null });
+    }
   });
   it("uses sparse VO2 median policy, two distinct days and a 14-day current window", () => {
     const records = [...rows("vo2Max", "garmin", "2030-01-02", 2, 40, "mL/kg/min"),

@@ -104,6 +104,11 @@ history. Crowns name the unique largest positive improvement (or positive
 streak); ties and all-nonpositive values give null. They are recomputed, not
 stored holders.
 
+Steps alone use the last settled day (the viewer-local date eight hours ago,
+minus one day) as their cutoff and stale reference, so daily values, latest,
+comparisons and crowns exclude unsettled days while the window start and
+top-level response window stay unchanged.
+
 `PUT /api/game/v1/people/:memberId/board/sharing` takes
 `{ expectedMembershipId: string | null, numbers: MetricName[] }` and returns a
 fresh `{ board }`. Null means an intentional first join, authorized by a current

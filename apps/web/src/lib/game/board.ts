@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { formatTimeZoneDateTimeParts } from "@murphai/contracts";
 import { buildHostedVaultShareProjectionScopeKey } from "@murphai/hosted-execution/vault-share";
 import { getPrisma } from "../prisma";
+import { lastSettledStepDay } from "../settled-step-day";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { readHostedThreadRouteByThreadIdentity } from "../hosted-routing/thread-route-store";
@@ -89,8 +90,10 @@ export async function readPairBoard(viewerId: string, otherId: string): Promise<
   if (!current || current.groupId !== binding.groupId || current.runtimeMemberId !== binding.runtimeMemberId) return null;
   const through = formatTimeZoneDateTimeParts(now, binding.timeZone).dayKey;
   const window = { from: addDays(through, -89), through };
+  const stepsWindow = { ...window, through: lastSettledStepDay(now, binding.timeZone) };
   const people: BoardPerson[] = shared.people.map(person => {
-    const number = (index: number) => boardNumber(BOARD_METRICS[index], person.projections[index], window, facts.firstGameOn);
+    const number = (index: number) => boardNumber(BOARD_METRICS[index], person.projections[index],
+      BOARD_METRICS[index] === "steps" ? stepsWindow : window, facts.firstGameOn);
     return { memberId: person.memberId, me: person.memberId === viewerId, member: person.member,
       inARow: facts.streaks.get(person.memberId) ?? null,
       numbers: { restingHeartRate: number(0), sleep: number(1), steps: number(2), vo2Max: number(3) } };

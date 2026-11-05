@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hostedVaultShareProjectionKindToScope, buildHostedVaultShareProjectionScopeKey, resolveHostedVaultShareDataSource, type HostedVaultShareFixedProjectionKind } from "@murphai/hosted-execution/vault-share";
 
 const mocks = vi.hoisted(() => ({ audience: vi.fn(), route: vi.fn(), wake: vi.fn(), afterDecrypt: vi.fn(), decrypt: vi.fn(), auth: vi.fn() }));
@@ -84,7 +84,11 @@ async function fixture(joined = false) {
   return { a, b, room, groupId, gameId, read, raw, share };
 }
 
-beforeEach(() => { vi.clearAllMocks(); mocks.afterDecrypt.mockResolvedValue(undefined); mocks.wake.mockResolvedValue(undefined); process.env.MURPH_GAME_ENABLED = "true"; delete process.env.MURPH_GAME_BOARD_ENABLED; delete process.env.MURPH_GAME_MEMBER_ALLOWLIST; });
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-11-05T12:00:00Z"));
+  vi.clearAllMocks(); mocks.afterDecrypt.mockResolvedValue(undefined); mocks.wake.mockResolvedValue(undefined); process.env.MURPH_GAME_ENABLED = "true"; delete process.env.MURPH_GAME_BOARD_ENABLED; delete process.env.MURPH_GAME_MEMBER_ALLOWLIST;
+});
+afterEach(() => { vi.useRealTimers(); });
 afterAll(async () => {
   if (!enabled) return;
   await db.game.deleteMany({ where: { id: { in: games } } });
@@ -110,8 +114,27 @@ describe.skipIf(!enabled)("pair board PostgreSQL authority and routes", () => {
     const read = await f.read();
     for (const value of Object.values(read!.people[0].numbers)) {
       expect(value.state).toBe("available");
-      if (value.state === "available") expect(value.daily).toHaveLength(90);
+      if (value.state === "available") expect(value.daily).toHaveLength(value.unit === "steps" ? 89 : 90);
     }
+  });
+  it.each([
+    ["07:00:00", "2026-11-03", 88],
+    ["08:00:00", "2026-11-04", 89],
+  ])("applies the steps cutoff in the composed board at %s local", async (time, through, days) => {
+    vi.setSystemTime(new Date(`2026-11-05T${time}-05:00`));
+    const f = await fixture(true);
+    await db.gamePlayer.updateMany({ where: { gameId: f.gameId }, data: { timeZone: "America/New_York" } });
+    await f.share(f.a, "steps-days.v0", true);
+    await f.share(f.a, "resting-heart-rate-days.v0", true);
+    const board = await f.read();
+    expect(board?.window).toEqual({ from: "2026-08-08", through: "2026-11-05" });
+    const numbers = board!.people[0].numbers;
+    expect(numbers.steps).toMatchObject({ state: "available", latest: { date: through, value: 8000 }, stale: false,
+      comparison: { current: { through, value: 8000, days: 7 } } });
+    if (numbers.steps.state !== "available") throw new Error("Expected settled steps");
+    expect(numbers.steps.daily).toHaveLength(days);
+    expect(numbers.steps.daily.every(point => point.date <= through)).toBe(true);
+    expect(numbers.restingHeartRate).toMatchObject({ latest: { date: "2026-11-05", value: 65 } });
   });
   it("preserves an unshown scope, deselects, repeats and keeps committed grants when waking fails", async () => {
     const f = await fixture(true);
@@ -204,7 +227,7 @@ describe.skipIf(!enabled)("pair board PostgreSQL authority and routes", () => {
     expect(mocks.decrypt.mock.calls).toEqual([[4, 90], [4, 90]]);
     for (const person of board!.people) for (const metric of Object.values(person.numbers)) {
       expect(metric.state).toBe("available");
-      if (metric.state === "available") expect(metric.daily).toHaveLength(90);
+      if (metric.state === "available") expect(metric.daily).toHaveLength(metric.unit === "steps" ? 89 : 90);
     }
   });
   it("uses the latest chat-bound pair game; an unbound newer game doesn't hide the board", async () => {
