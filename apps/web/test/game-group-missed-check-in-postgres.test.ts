@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 import { getPrisma } from "@/src/lib/prisma";
 import { runGameCommand, reserveDueGameMissedDayCheckIns } from "@/src/lib/game/service";
@@ -16,13 +16,17 @@ import { acquireHostedMailboxCausalAppendLockTx, readHostedMailboxWakeByDedupeKe
 import { recordHostedLinqRuntimeProviderDispatchFenceTx } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import { createHostedEmailLookupKey, createHostedExternalThreadIdentityLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { upsertHostedMemberEmailAuthorization } from "@/src/lib/hosted-onboarding/hosted-member-store";
 
 // Same synthetic provider and local KMS boundaries as game-groups-postgres.
-const proof = vi.hoisted(() => ({ rooms: new Map<string, string[]>(), signal: vi.fn(), afterPrepare: null as null | (() => Promise<void>) }));
+const proof = vi.hoisted(() => ({ rooms: new Map<string, string[]>(), chatFailures: new Map<string, unknown>(), signal: vi.fn(), afterPrepare: null as null | (() => Promise<void>) }));
 vi.mock("@/src/lib/hosted-onboarding/linq-client", async original => ({ ...await original<object>(),
-  getHostedLinqChatSummary: async ({ chatId }: { chatId: string }) => ({ isGroup: true, handlesComplete: true,
-    handles: [{ handle: "+15555550100", isMe: true, status: "active" }, ...(proof.rooms.get(chatId) ?? []).map(handle => ({ handle, isMe: false, status: "active" }))] }),
+  getHostedLinqChatSummary: async ({ chatId }: { chatId: string }) => {
+    if (proof.chatFailures.has(chatId)) throw proof.chatFailures.get(chatId);
+    return { isGroup: true, handlesComplete: true,
+      handles: [{ handle: "+15555550100", isMe: true, status: "active" }, ...(proof.rooms.get(chatId) ?? []).map(handle => ({ handle, isMe: false, status: "active" }))] };
+  },
 }));
 vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", async original => ({ ...await original<object>(),
   readHostedThreadContainerLinqRouteAuthorities: async ({ containerMemberIds }: { containerMemberIds: string[] }) => ({ authorities: new Map(containerMemberIds.map(id => [id,
@@ -60,7 +64,7 @@ const db = getPrisma();
 const members: string[] = [], games: string[] = [], events: string[] = [];
 const date = "2030-03-04", now = new Date("2030-03-05T09:00:00Z");
 function barrier() { let release!: () => void; return { promise: new Promise<void>(resolve => { release = resolve; }), release: () => release() }; }
-async function fixture(count = 3) {
+async function fixture(count = 3, roomId = `missed_room_${randomUUID()}`) {
   const people = await Promise.all(Array.from({ length: count }, async (_, seat) => {
     const id = `missed_person_${randomUUID()}`, email = `${randomUUID()}@example.test`;
     members.push(id);
@@ -69,7 +73,6 @@ async function fixture(count = 3) {
     expect((await runGameCommand({ actorMemberId: id, command: { type: "setProfile", firstName: seat < 2 ? "Alex" : "Sam", timeZone: "UTC" } })).ok).toBe(true);
     return { id, email };
   }));
-  const roomId = `missed_room_${randomUUID()}`;
   members.push(roomId);
   await db.hostedMember.create({ data: { id: roomId } });
   await db.hostedThreadContainer.create({ data: { memberId: roomId, ownerMemberId: people[0]!.id,
@@ -92,6 +95,14 @@ async function fixture(count = 3) {
   };
   events.push(gameGroupMissedDayEventId(roomId, date));
   return { roomId, people, addGame };
+}
+/** Rooms the sweep visits at the pinned `now`, in visiting order, so no case depends on the wall clock. */
+async function shardRooms(count: number) {
+  const prefix = `missed_room_${randomUUID()}_`, shard = Math.floor(now.getTime() / 60_000) % 60;
+  const rooms = await db.$queryRaw<Array<{ id: string }>>`SELECT ${prefix} || n AS id FROM generate_series(1, 2000) AS n
+    WHERE mod(abs(hashtext(${prefix} || n)::bigint), 60) = ${shard} ORDER BY id LIMIT ${count}`;
+  expect(rooms).toHaveLength(count);
+  return rooms.map(room => room.id);
 }
 async function receipt(eventId: string) { return db.hostedLinqDelivery.findUniqueOrThrow({ where: { idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(eventId)! } }); }
 async function publish(roomId: string, ids: string[], at = now) {
@@ -130,7 +141,7 @@ beforeAll(async () => {
   await db.hostedLinqDelivery.updateMany({ where: { source: "game_lifecycle", status: { in: ["awaiting_generation", "generation_queued"] } }, data: { retryAfterAt: new Date("9999-01-01T00:00:00Z") } });
 });
 afterEach(async () => {
-  proof.afterPrepare = null; proof.signal.mockReset();
+  proof.afterPrepare = null; proof.signal.mockReset(); proof.chatFailures.clear(); vi.restoreAllMocks();
   if (!enabled) return;
   await db.hostedLinqDelivery.deleteMany({ where: { OR: [{ payloadOwnerMemberId: { in: members } }, { idempotencyKey: { in: events.map(event => createHostedLinqDeliveryIdempotencyLookupKey(event)!) } }] } });
   await db.game.deleteMany({ where: { id: { in: games } } });
@@ -206,6 +217,46 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect(await reserveDueGameMissedDayCheckIns(at)).toBe(1);
     expect(await drainGameChatLifecycle({ now: at })).toMatchObject({ queued: 1 });
     expect((await readGroupMissedDayDeliveryAuthority(gameGroupMissedDayEventId(f.roomId, date), f.roomId))?.policy.batch).toHaveLength(2);
+  });
+
+  it("skips a room with one person left in the text, while the rest of its shard and pending deliveries proceed", async () => {
+    const [badId, healthyId, pendingId] = await shardRooms(3);
+    const bad = await fixture(3, badId), healthy = await fixture(3, healthyId), pending = await fixture(3, pendingId);
+    await bad.addGame(); await healthy.addGame();
+    expect(await reserveGroupGameMissedDay(pending.roomId, [await pending.addGame()], now)).toBe(1);
+    const pendingEvent = gameGroupMissedDayEventId(pending.roomId, date);
+    // Oldest in the drain, so this delivery rather than the sweep's fresh reservation takes the batch.
+    await db.hostedLinqDelivery.update({ where: { id: (await receipt(pendingEvent)).id }, data: { attemptedAt: new Date(0) } });
+    proof.rooms.set(bad.roomId, [bad.people[0]!.email]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(await drainGameChatLifecycle({ now })).toMatchObject({ attempted: 1, queued: 1 });
+
+    expect((await receipt(pendingEvent)).status).toBe("generation_queued");
+    expect((await receipt(gameGroupMissedDayEventId(healthy.roomId, date))).status).toBe("awaiting_generation");
+    expect(await db.hostedLinqDelivery.count({ where: { payloadOwnerMemberId: bad.roomId } })).toBe(0);
+    expect(await db.hostedMailboxItem.count({ where: { userId: bad.roomId } })).toBe(0);
+    expect(warn).toHaveBeenCalledWith(expect.any(String), { warning: "game.missed-day.room-skipped", reason: "participants_changed" });
+    const logged = JSON.stringify(warn.mock.calls);
+    for (const value of [bad.roomId, ...bad.people.flatMap(person => [person.id, person.email])]) expect(logged).not.toContain(value);
+    // Nothing was recorded, so the room's next shard visit inside the window claims normally.
+    proof.rooms.set(bad.roomId, bad.people.map(person => person.email));
+    await reserveDueGameMissedDayCheckIns(new Date(now.getTime() + 60 * 60_000));
+    expect((await receipt(gameGroupMissedDayEventId(bad.roomId, date))).status).toBe("awaiting_generation");
+  });
+
+  it.each([
+    ["a database outage", () => { const failure = new Prisma.PrismaClientInitializationError("Can't reach database server.", "synthetic"); vi.spyOn(db.gameBlock, "findFirst").mockRejectedValue(failure); return failure; }],
+    ["a provider timeout", (roomId: string) => { const failure = hostedOnboardingError({ code: "LINQ_SEND_FAILED", httpStatus: 502, message: "Linq chat read timed out.", retryable: true }); proof.chatFailures.set(roomId, failure); return failure; }],
+    ["a provider rejection", (roomId: string) => { const failure = hostedOnboardingError({ code: "LINQ_SEND_FAILED", httpStatus: 502, message: "Linq chat read failed with HTTP 401.", details: { failureStage: "http", status: 401 } }); proof.chatFailures.set(roomId, failure); return failure; }],
+    ["a provider 404", (roomId: string) => { const failure = hostedOnboardingError({ code: "LINQ_SEND_FAILED", httpStatus: 502, message: "Linq chat read failed with HTTP 404.", details: { failureStage: "http", status: 404 } }); proof.chatFailures.set(roomId, failure); return failure; }],
+    ["an unexpected defect", (roomId: string) => { const failure = new TypeError("Synthetic defect."); proof.chatFailures.set(roomId, failure); return failure; }],
+  ] as const)("stops the pass on %s instead of reporting a skipped room", async (_kind, inject) => {
+    const [roomId] = await shardRooms(1), f = await fixture(3, roomId);
+    await f.addGame();
+    const failure = inject(f.roomId);
+    await expect(drainGameChatLifecycle({ now })).rejects.toBe(failure);
+    expect(await db.hostedLinqDelivery.count({ where: { payloadOwnerMemberId: f.roomId } })).toBe(0);
   });
 
   it("serializes pair and group contenders under the verified two-contact pair lock", async () => {

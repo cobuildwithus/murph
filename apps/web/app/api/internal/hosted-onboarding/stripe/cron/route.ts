@@ -41,7 +41,13 @@ export const GET = withJsonError(async (request: Request) => {
     reconcileDueHostedStripeEvents({
       prisma,
     }),
-    drainGameChatLifecycle({ prisma, signal: request.signal }).catch(() => ({ kind: "failed" as const })),
+    drainGameChatLifecycle({ prisma, signal: request.signal }).catch((error: unknown) => {
+      logHostedOnboardingDiagnostic("game.chat-lifecycle-drain", {
+        kind: "cron_failed",
+        reason: isHostedOnboardingError(error) ? error.code : "unhandled",
+      });
+      return { kind: "failed" as const };
+    }),
   ]);
 
   return jsonOk({

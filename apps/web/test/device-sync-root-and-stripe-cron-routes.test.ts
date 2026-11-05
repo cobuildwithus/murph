@@ -225,6 +225,28 @@ describe("hosted onboarding Stripe cron route", () => {
     });
   });
 
+  it("logs a failed game drain by fixed reason and still reports Stripe reconciliation", async () => {
+    mocks.drainGameChatLifecycle.mockRejectedValueOnce(new Error("Synthetic private detail."));
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const response = await hostedOnboardingStripeCronRoute.GET(
+      new Request("https://join.example.test/api/internal/hosted-onboarding/stripe/cron"),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      gameChatLifecycle: { kind: "failed" },
+      reconciledEventIds: ["evt_paid", "evt_trial"],
+    });
+    expect(info).toHaveBeenCalledWith(expect.any(String), {
+      diagnostic: "game.chat-lifecycle-drain",
+      kind: "cron_failed",
+      reason: "unhandled",
+    });
+    expect(JSON.stringify(info.mock.calls)).not.toContain("Synthetic private detail");
+    info.mockRestore();
+  });
+
   it("still reports Stripe reconciliation when the outreach drain throws", async () => {
     // Outreach shares this billing-critical cron, so a drain failure must not
     // turn a healthy Stripe reconciliation into a failed cron invocation.

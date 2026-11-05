@@ -191,12 +191,17 @@ function normalizeChatHandle(value: string): string | null {
   return normalized ? `${kind}:${normalized}` : null;
 }
 
+/** This room's audience can't be proven, so nothing may be sent. The fixed reason is safe to log. */
+export class GameChatAudienceError extends Error {
+  constructor(readonly reason: "route_unavailable" | "participants_changed" | "line_unavailable" | "identity_ambiguous", message: string) { super(message); }
+}
+
 /** Provider roster and rotating keyed handles are preparation, never transaction work. */
 export async function readGameChatAudience(containerMemberId: string) {
   const prisma = getPrisma();
   const routes = await readHostedThreadContainerLinqRouteAuthorities({ containerMemberIds: [containerMemberId], prisma });
   const route = routes.authorities.get(containerMemberId);
-  if (!route) throw new Error("Game chat route is unavailable.");
+  if (!route) throw new GameChatAudienceError("route_unavailable", "Game chat route is unavailable.");
   return { ...await readGameChatHandleAudience(route.threadId), route };
 }
 
@@ -205,9 +210,9 @@ async function readGameChatHandleAudience(threadId: string) {
   const chat = await getHostedLinqChatSummary({ chatId: threadId, timeoutMs: 3_000 });
   const active = chat.handles.filter(handle => handle.status === null || handle.status.toLowerCase() === "active");
   const handles = active.filter(handle => !handle.isMe).map(handle => handle.handle);
-  if (!isExactGameChat(chat, handles)) throw new Error("The game's chat participants have changed.");
+  if (!isExactGameChat(chat, handles)) throw new GameChatAudienceError("participants_changed", "The game's chat participants have changed.");
   const line = await readHostedLinqIncomingLineState({ phoneNumberLookupKeys: createHostedPhoneLookupKeyReadCandidates(active.find(handle => handle.isMe)?.handle), prisma });
-  if (line.kind !== "assignable" && line.kind !== "at_risk") throw new Error("Game chat sending line is unavailable.");
+  if (line.kind !== "assignable" && line.kind !== "at_risk") throw new GameChatAudienceError("line_unavailable", "Game chat sending line is unavailable.");
   const contacts = handles.map(value => createHostedLinqParticipantContact({ kind: value.includes("@") ? "email" : "phone", value })!);
   const resolved = await lookupHostedGroupParticipantMemberIdsByHandles({ handles: contacts.map(contact => contact.value), prisma });
   const phoneKeys = contacts.filter(contact => contact.kind === "phone").flatMap(createHostedLinqParticipantContactLookupKeyReadCandidates);
@@ -219,7 +224,7 @@ async function readGameChatHandleAudience(threadId: string) {
   });
   const memberIds = resolvedContacts.flatMap(({ memberId }) => memberId ? [memberId] : []);
   // Two handles resolving to one person are ambiguous audience evidence.
-  if (new Set(memberIds).size !== memberIds.length) throw new Error("Game chat identity is ambiguous.");
+  if (new Set(memberIds).size !== memberIds.length) throw new GameChatAudienceError("identity_ambiguous", "Game chat identity is ambiguous.");
   return { memberIds, contacts, resolvedContacts, keys: gameAudienceKeys(contacts), threadId };
 }
 
