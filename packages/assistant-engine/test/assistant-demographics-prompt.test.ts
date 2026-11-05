@@ -6,10 +6,9 @@ it.each([false, true])("composes canonical demographic persistence without gende
     currentLocalDate: "2026-01-01", currentTimeZone: "UTC", hostedRuntime: true,
     modelBehaviorProfile: "gpt5-agentic", onboardingGuidance, ordinaryInboundTurn: true,
   });
-  expect(prompt).toContain("vault-cli memory set-demographics");
-  expect(prompt).toContain("source statement date");
-  expect(prompt).toContain("never from gender, names, or pronouns");
-  expect(prompt).toContain("Age stays a dated approximate fact");
-  expect(prompt).toContain("unresolved receipt");
+  // The route lives in every chat; the option rules (--as-of, clearing) stay in
+  // the command's own help.
+  expect(prompt).toContain("Save stated birth year, age or biological sex only with `vault-cli memory set-demographics`");
+  expect(prompt).toContain("never infer sex from gender");
   expect(prompt).not.toContain("Identity or Context memory for optional demographics");
 });

@@ -206,6 +206,7 @@ export function registerMemoryCommands(cli: Cli.Cli) {
 
   memory.command("set-demographics", {
     description: "Save explicitly stated birth year, dated age, or biological sex in Identity memory. Never infer sex from gender.",
+    args: z.object({}),
     options: memoryMutationOptionsSchema.extend({
       birthYear: z.number().int().min(1900).max(9999).optional().describe("Explicit birth year; omit to preserve."),
       age: z.number().int().min(13).max(120).optional().describe("Stated age; requires --as-of and excludes --birth-year."),

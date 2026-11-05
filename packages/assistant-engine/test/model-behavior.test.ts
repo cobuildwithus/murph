@@ -1309,7 +1309,11 @@ describe('assistant system prompt cache stability', () => {
     // adding 557 characters. Preserve the existing 128-character margin.
     // The explicit sleep-note exception adds 682 rendered characters while
     // retaining the existing margin. It covers ordinary and exact scheduled turns.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(80_976)
+    // The demographics save route adds 124 characters so a birth year, age or
+    // biological sex stated in any chat lands as the canonical record the app
+    // reads, not prose; its option rules stay in the command's own help. Direct
+    // input grows by the same bytes and groups are unchanged. Retain the margin.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(81_100)
   })
 
   it('keeps the sleep-note exception explicit in the composed production policy', () => {
@@ -1631,7 +1635,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toMatchInlineSnapshot(`"68a1d5108af16ff8649843be4ab7aa231321228a52be79e80f0f3010cfea7c67"`)
-    expect(promptA.cacheMetadata.stableRouteCapabilityPromptHash).toMatchInlineSnapshot(`"a3f89cdc54eed00b2b08560f9b1469e6861da0457f905a848dcba833ca65231e"`)
+    expect(promptA.cacheMetadata.stableRouteCapabilityPromptHash).toMatchInlineSnapshot(`"c65b0e35f2eaf9e761e34d435e4db9b24e0c70e17c11a2134d400d877ffa84ad"`)
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
     )

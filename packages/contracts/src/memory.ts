@@ -300,7 +300,7 @@ export function upsertMemoryRecord(input: MemoryDocument, next: UpsertMemoryReco
   if (kind === null) return upsertMemoryRecordRaw(input, next);
   const fact = parseMemoryDemographic(text);
   if (next.section !== "Identity" || !fact) {
-    throw new Error("Demographic records must use a valid canonical Identity format.");
+    throw new Error("Save birth year, age or biological sex with `vault-cli memory set-demographics`.");
   }
   if (fact.kind === "dob") {
     // A newer full date supersedes an older year or dated age.
