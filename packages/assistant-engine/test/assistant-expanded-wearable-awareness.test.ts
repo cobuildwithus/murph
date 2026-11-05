@@ -17,7 +17,6 @@ function buildPrompt(): string {
     currentLocalDate: '2026-08-12',
     currentTimeZone: 'America/Chicago',
     onboardingGuidance: false,
-    modelBehaviorProfile: 'gpt5-agentic',
     turnTrigger: null,
     assistantContextSnapshotPrompt: null,
   })

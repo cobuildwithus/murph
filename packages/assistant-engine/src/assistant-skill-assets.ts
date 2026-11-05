@@ -301,6 +301,60 @@ export const ASSISTANT_SKILLS = [
     triggerHint:
       'Read before calling generate_song when an explicit current request or a complete independently authorized owning-flow contract indicates generated music is required. This registry entry routes to the active music-generation skill but never authorizes a call. The active skill may shape selection and prompt craft only after the authorization signal.',
   },
+  {
+    slug: 'journal',
+    name: 'journal',
+    triggerHint:
+      'Use in a private conversation before writing a Journal note for a lived health fact, when correcting a saved Journal entry, and when the member asks whether something was saved or why it is missing from Journal.',
+  },
+  {
+    slug: 'health-records',
+    name: 'health-records',
+    triggerHint:
+      'Use in a private conversation before saving clinical documents and health files the member sends: lab reports, visit or discharge summaries, imaging reports, medication lists, allergy statements, PDFs, exports, audio or video, and photos kept to track a body change over time.',
+  },
+  {
+    slug: 'file-send',
+    name: 'file-send',
+    triggerHint:
+      'Use in a private conversation before calling send_vault_file, and on later turns when the member says they approved a file or asks whether it arrived.',
+  },
+  {
+    slug: 'reminders',
+    name: 'reminders',
+    triggerHint:
+      'Use in a private conversation before creating or changing a reminder, check-in, review, scheduled summary or other automation, including the reminder for a confirmed appointment.',
+  },
+  {
+    slug: 'product-feedback',
+    name: 'product-feedback',
+    triggerHint:
+      'Use in a private conversation before calling murph.submit_product_feedback, when the member is frustrated with Murph or asks for a feature, or when a Murph workflow is blocked, degraded, circular or manual.',
+  },
+  {
+    slug: 'assistant-style',
+    name: 'assistant-style',
+    triggerHint:
+      'Use in a private conversation before reading or changing how Murph sounds or runs for this member (personality, tone, voice, Humor, Push, Detail, Unhinged, model, provider, reasoning) and before offering a dial change.',
+  },
+  {
+    slug: 'habitat',
+    name: 'habitat',
+    triggerHint:
+      'Use in a private conversation before advising about the member\'s home, workspace, equipment or environment, and before saving durable facts about them.',
+  },
+  {
+    slug: 'lab-tests',
+    name: 'lab-tests',
+    triggerHint:
+      'Use in a private conversation before calling murph.labs, when someone asks which lab tests or panels to get, what a test costs or includes, or where to get blood drawn.',
+  },
+  {
+    slug: 'private-group-access',
+    name: 'private-group-access',
+    triggerHint:
+      'Use in a private conversation before acting on one of the member\'s group chats from there: asking or handing context to a joined group, choosing among groups, changing or revoking what a group can see, leaving a group, or explaining what membership shares.',
+  },
 ] as const
 
 export type AssistantSkillSlug = typeof ASSISTANT_SKILLS[number]['slug']

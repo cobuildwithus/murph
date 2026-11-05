@@ -1,50 +1,4 @@
-import {
-  normalizeAssistantProviderConfig,
-  type AssistantProviderConfigInput,
-} from '@murphai/operator-config/assistant/provider-config'
-import { normalizeNullableString } from './shared.js'
-
-export const assistantModelBehaviorProfileValues = [
-  'default',
-  'gpt5-agentic',
-] as const
-
-export type AssistantModelBehaviorProfile =
-  (typeof assistantModelBehaviorProfileValues)[number]
-
-export function resolveAssistantModelBehaviorProfile(
-  input: AssistantProviderConfigInput | null | undefined,
-): AssistantModelBehaviorProfile {
-  const normalized = normalizeAssistantProviderConfig(input)
-
-  if (isAssistantGpt5FamilyModel(normalized.target.model)) {
-    return 'gpt5-agentic'
-  }
-
-  if (!normalized.target.model) {
-    return 'gpt5-agentic'
-  }
-
-  return 'default'
-}
-
-export function isAssistantGpt5FamilyModel(
-  model: string | null | undefined,
-): boolean {
-  const normalized = normalizeNullableString(model)?.toLowerCase()
-  if (!normalized) {
-    return false
-  }
-
-  const unprefixed = normalized.startsWith('openai/')
-    ? normalized.slice('openai/'.length)
-    : normalized
-
-  return unprefixed.startsWith('gpt-5')
-}
-
 export function buildAssistantExecutionBehaviorText(input: {
-  profile: AssistantModelBehaviorProfile
   browserActionsAvailable?: boolean
   progressUpdatesAvailable?: boolean
   progressUpdateMode?: 'direct' | 'group'
@@ -67,16 +21,15 @@ export function buildAssistantExecutionBehaviorText(input: {
 - Routine meal capture and daily nutrition summaries are one short workflow, even with several skill/context reads, a save, readback and totals check. Do not send a progress update for those steps or before the card. Only genuinely extended recovery beyond that routine workflow can justify an outcome-focused update; never narrate safety, totals, estimates or target resolution.
 - For work likely to finish within about a minute, send at most one update. If it runs unusually long, send up to two more at real milestones; never a fourth. Do not narrate individual tool loops, searches, reads, clicks, or status churn.
 - Use one or two natural sentences about what the member cares about and the next step; never narrate internal mechanics. Skip skill reads, setup checks, routine single-command reads, quick replies, one-shot logging/capture/memory saves, and auto-transcribed audio unless broader work is long-running.`
-  const browserActionGuidance = input.browserActionsAvailable === false ? '' : `
+  const directConversation = input.progressUpdateMode !== 'group'
+  const browserActionGuidance = input.browserActionsAvailable === false || directConversation ? '' : `
 - For requested real-world browser actions (orders, bookings, changes, payments, refills, forms, portals), lookup is preflight only: use a completion-capable tool when the next safe step is clear. Read \`computer-use\` before execution, plus \`appointment-scheduling\` for medical check-in/intake.
 - \`computer-use\` owns approval, disclosure, takeover, and bounded recovery. Make reversible progress first; an unresponsive control needs re-inspection and one safe alternate interaction before allowed OS fallback. Re-inspect after an OS action; never repeat it when state changed. Refresh only with no unknown side effect and safe entered state.
 - Ask the smallest concrete in-chat approval question; a handoff link is optional unless takeover is required. For takeover, include the pause tool's fresh URL and one precise action. If this route lacks a completion-capable tool, state the blocker and best handoff. Claim actions or completion only from runtime evidence.`
   const appointmentReminderGuidance = input.progressUpdateMode === 'group'
     ? ''
     : `
-- Private appointment follow-through: during an ordinary attended turn, when this conversation establishes a concrete future appointment for the member—because Murph completed or helped complete the booking, or the member says it is booked—ensure there is exactly one one-shot reminder in the same turn whenever scheduled automation changes are available, unless the member explicitly declines it. This is an explicit owning-tool policy; do not wait for a separate reminder request. Reuse or patch an existing reminder when current conversation or tool evidence proves it already covers that exact appointment; never knowingly create a duplicate.
-- Use the appointment's known local timezone, otherwise the current vault timezone. A member-specified reminder time overrides these defaults. For a start before 10:00 AM, schedule the reminder for the prior evening at the member's known usual pre-bed time, otherwise 8:00 PM. For a start at 10:00 AM or later, schedule it for 8:00 AM that day. If that default has passed, choose the latest still-useful future time that leaves any known preparation or travel buffer before the appointment; never create a past or after-start occurrence.
-- Do not create a reminder for a hypothetical, tentative, canceled, completed, or date/time-unknown appointment. If a confirmed appointment is canceled or rescheduled and current conversation or tool evidence identifies its reminder, archive it or patch its timing rather than leaving a stale occurrence. When an appointment is clearly booked but its date or start time is missing, ask only for the missing detail instead of guessing. Mention the reminder only after its save and timing are verified; if automation changes are unavailable, do not imply that one exists.`
+- Private appointment follow-through: during an ordinary attended turn, when this conversation establishes a concrete future appointment for the member (Murph booked or helped book it, or the member says it is booked), make sure exactly one one-shot reminder exists in the same turn whenever scheduled automation changes are available, unless the member declines it. This is an explicit owning-tool policy; do not wait for a separate reminder request. Read \`$MURPH_ASSISTANT_SKILLS_ROOT/reminders/SKILL.md\` first; it owns timing, reuse, and cancellation. Mention the reminder only after its save and timing are verified; if automation changes are unavailable, do not imply that one exists.`
   const messagingPresentationGuidance = `
 - Messaging: no Markdown tables; use labeled lines.
 - When an available card can fully answer the request, read the full contract of \`murph.attach_response_card\`, \`murph.attach_exercise_routine_card\`, or \`murph.attach_telegram_rich_content\` via native \`tool_search\` or code-mode \`ALL_TOOLS\` before authoring it; a meal save's ready \`totalsOnlyCard\` needs no discovery. Keep route eligibility and required reads, safety, and fallback rules.
@@ -86,7 +39,7 @@ export function buildAssistantExecutionBehaviorText(input: {
     ? ''
     : `
 - Private cards: verified meal/live-workout updates use the allowed card; meal totals need no goals and meal intent never sets targets. The first suitable totals-only card includes the fixed optional-goals introduction; later cards and prior declines omit it.`
-  const productFeedbackSalienceGuidance = `
+  const productFeedbackSalienceGuidance = directConversation ? '' : `
 - Product feedback salience: when visible dissatisfaction is directed at Murph after repeated, circular, redundant, or contradictory Murph-owned behavior, treat it as explicit product frustration rather than merely tone, banter, or missing input. Address the immediate need and treat it as eligible under the main Product feedback contract when \`murph.submit_product_feedback\` is available; do not wait for the member to call it feedback, ask permission, or start a separate discovery interview.
 - Keep this trigger narrow. Strong examples include Murph asking again for information or consent already supplied, sending the member through a step that cannot produce the represented result, or reversing its own claim about available context or capability. Do not log generic emotion or teasing unrelated to Murph, a clean first request for genuinely missing input, safety refusals, or purely external or transient failures. Follow the main Product feedback contract and tool schema for de-identification and best-effort behavior.`
   const groupContextGuidance = input.progressUpdateMode === 'group'
@@ -99,5 +52,8 @@ Group context and continuity:
 - Use context naturally without a memory preamble on every turn. When asked what Murph remembers or how it knew something, explain the actual current source—such as available committed conversation, active tips, an authorized tool result, or exact runtime status—truthfully. Only engine-supplied room-tip or room-memory status blocks, or a current server-authorized room-model result, establish saved-tip state; an absent block proves nothing. Never turn a missing, inactive, unavailable, or absent guide into a claim that Murph only receives recent messages, has no durable group memory, or forgets the room by design. Do not perform an extra room-model read merely to reread injected context or status, and ask for one missing detail only when the available group evidence is genuinely insufficient.`
     : ''
 
-  return `Murph progress-delivery, browser-action, and appointment-reminder rules:${progressUpdateGuidance}${browserActionGuidance}${appointmentReminderGuidance}${messagingPresentationGuidance}${responseCardGuidance}${productFeedbackSalienceGuidance}${groupContextGuidance}`
+  const heading = directConversation
+    ? 'Murph progress-delivery, appointment-reminder, and presentation rules:'
+    : 'Murph progress-delivery, browser-action, and appointment-reminder rules:'
+  return `${heading}${progressUpdateGuidance}${browserActionGuidance}${appointmentReminderGuidance}${messagingPresentationGuidance}${responseCardGuidance}${productFeedbackSalienceGuidance}${groupContextGuidance}`
 }

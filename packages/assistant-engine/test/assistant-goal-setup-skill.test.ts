@@ -35,7 +35,6 @@ function buildPrompt(): string {
     currentLocalDate: '2026-08-30',
     currentTimeZone: 'America/New_York',
     hostedRuntime: true,
-    modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
     ordinaryInboundTurn: true,
     turnTrigger: null,
@@ -282,7 +281,7 @@ describe('assistant goal setup skill', () => {
 
   it('uses successful save receipts without duplicate verification reads', async () => {
     const compact = compactWhitespace(await readSkill())
-    expect(buildPrompt()).toContain('Treat a successful save receipt as confirmation the requested write completed.')
+    expect(buildPrompt()).toContain('A successful save receipt confirms the write.')
     expect(buildPrompt()).toContain('Accepting an invitation to begin setup starts only that conversation.')
     expect(buildPrompt()).toContain("Accepting a concrete final proposal authorizes its named writes under the owner's rules; perform them without asking again.")
     expect(buildPrompt()).not.toContain('Setup acceptance starts the setup conversation only, not activation.')

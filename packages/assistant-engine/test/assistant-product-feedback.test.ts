@@ -1,3 +1,7 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+
+import { resolveAssistantSkillsRoot } from "../src/assistant-skill-assets.js";
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import {
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
@@ -188,7 +192,7 @@ describe("assistant product feedback", () => {
     expect(schema).not.toContain('"topic"');
   });
 
-  it("keeps the detailed summary rubric single-owned by the tool schema", () => {
+  it("keeps the detailed summary rubric single-owned by the tool schema", async () => {
     const rubricMarker =
       "name the generic actor, exact Murph surface or workflow";
     const systemPrompt = buildAssistantSystemPrompt({
@@ -204,20 +208,23 @@ describe("assistant product feedback", () => {
       currentLocalDate: "2026-07-30",
       currentTimeZone: "America/New_York",
       hostedRuntime: true,
-      modelBehaviorProfile: "gpt5-agentic",
       onboardingGuidance: false,
       turnTrigger: null,
     });
-    expect(systemPrompt).toContain(
+    const skill = (await readFile(
+      path.join(resolveAssistantSkillsRoot(), "product-feedback", "SKILL.md"), "utf8",
+    )).replace(/\s+/gu, " ");
+    expect(systemPrompt).toContain("$MURPH_ASSISTANT_SKILLS_ROOT/product-feedback/SKILL.md");
+    expect(skill).toContain(
       "append a privacy-safe `Reproduction:` section in that same summary field",
     );
 
-    expect(systemPrompt).toContain("On explicit feedback submission, record facts and gaps now")
-    expect(systemPrompt).toContain("Otherwise, if one missing answer would materially change")
+    expect(skill).toContain("On explicit feedback submission, record the facts and gaps now");
+    expect(skill).toContain("Otherwise, if one missing answer would materially change");
     const toolSchema = JSON.stringify(
       MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema,
     );
-    const ordinaryStack = `${systemPrompt}\n${toolSchema}`;
+    const ordinaryStack = `${systemPrompt}\n${skill}\n${toolSchema}`;
 
     expect(ordinaryStack.split(rubricMarker)).toHaveLength(2);
   });

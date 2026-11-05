@@ -286,7 +286,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
         assistantHostedGroupToolSurface: scope === 'group' ? 'families' : 'none',
         channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: scope === 'local' ? 'direct' : scope, currentLocalDate: '2026-11-02', currentInstant: '2026-11-02T16:00:00.000Z', currentTimeZone: 'UTC',
-        hostedRuntime: scope !== 'local', modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, ordinaryInboundTurn: true,
+        hostedRuntime: scope !== 'local',onboardingGuidance: false, ordinaryInboundTurn: true,
       })
       const developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
       const tools = resolveMurphDynamicTools(scope === 'local' ? {} : {
@@ -348,7 +348,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
     const layers = buildAssistantSystemPromptLayers({
       currentLocalDate: '2026-11-02', currentTimeZone: 'UTC', conversationScope: 'direct',
       cliAccess: { rawCommand: 'vault-cli' },
-      assistantCliContract: null, channel: 'linq', onboardingGuidance: false, modelBehaviorProfile: 'gpt5-agentic',
+      assistantCliContract: null, channel: 'linq', onboardingGuidance: false,
     })
     const instructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
     let threadId: string | null = null
@@ -461,7 +461,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
         channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: scope, currentLocalDate: '2026-09-28',
         currentInstant: '2026-09-28T08:00:00.000Z', currentTimeZone: 'UTC',
-        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        hostedRuntime: true,
         onboardingGuidance: false, ordinaryInboundTurn: true,
       })
       const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
@@ -516,7 +516,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
         channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: scope, currentLocalDate: '2026-09-28',
         currentInstant: '2026-09-28T08:00:00.000Z', currentTimeZone: 'UTC',
-        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        hostedRuntime: true,
         onboardingGuidance: false, ordinaryInboundTurn: true,
       })
       const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
@@ -599,7 +599,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
         channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: scope, currentLocalDate: '2026-10-01',
         currentInstant: '2026-10-01T08:00:00.000Z', currentTimeZone: 'Europe/Paris',
-        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        hostedRuntime: true,
         onboardingGuidance: false, ordinaryInboundTurn: true,
       })
       const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
@@ -677,7 +677,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
         channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: scope, currentLocalDate: '2026-09-14',
         currentInstant: '2026-09-14T16:00:00.000Z', currentTimeZone: 'America/New_York',
-        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        hostedRuntime: true,
         onboardingGuidance: false, ordinaryInboundTurn: true,
       })
       const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
@@ -737,7 +737,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
         channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: scope, currentLocalDate: '2026-10-01',
         currentInstant: '2026-10-01T08:00:00.000Z', currentTimeZone: 'Europe/Paris',
-        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        hostedRuntime: true,
         onboardingGuidance: false, ordinaryInboundTurn: true,
       })
       const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
@@ -816,7 +816,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
         channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: scope, currentLocalDate: '2026-10-01',
         currentInstant: '2026-10-01T08:00:00.000Z', currentTimeZone: 'Europe/Paris',
-        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        hostedRuntime: true,
         onboardingGuidance: false, ordinaryInboundTurn: true,
       })
       const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
@@ -903,7 +903,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
         channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: scope, currentLocalDate: '2026-09-14',
         currentInstant: '2026-09-14T16:00:00.000Z', currentTimeZone: 'America/New_York',
-        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        hostedRuntime: true,
         onboardingGuidance: false, ordinaryInboundTurn: true,
       })
       const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
@@ -953,7 +953,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
         cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: scope, currentLocalDate: '2026-10-14',
         currentInstant: '2026-10-14T16:00:00.000Z', currentTimeZone: 'America/New_York',
-        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        hostedRuntime: true,
         onboardingGuidance: false, ordinaryInboundTurn: true,
       })
       const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
@@ -1001,7 +1001,7 @@ describe('Codex canonical tool input contract upgrade guard', () => {
         cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: scope, currentLocalDate: '2026-10-14',
         currentInstant: '2026-10-14T16:00:00.000Z', currentTimeZone: 'America/New_York',
-        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        hostedRuntime: true,
         onboardingGuidance: false, ordinaryInboundTurn: scope === 'direct',
         assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
         turnTrigger: scope === 'group' ? 'automation-cron' : null,
@@ -1245,7 +1245,7 @@ describe('native poll input measurement', () => {
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: scope, currentLocalDate: '2026-09-21',
           currentInstant: '2026-09-21T16:00:00.000Z', currentTimeZone: 'America/New_York',
-          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+          hostedRuntime: true,onboardingGuidance: false,
           ordinaryInboundTurn: true,
         })
         let developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
@@ -1324,7 +1324,7 @@ describe('on-demand sender contact input measurement', () => {
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: scope, currentLocalDate: '2030-04-01',
           currentInstant: '2030-04-01T16:00:00.000Z', currentTimeZone: 'America/New_York',
-          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+          hostedRuntime: true,onboardingGuidance: false,
           ordinaryInboundTurn: true,
         })
         const developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
@@ -1376,7 +1376,7 @@ describe('game tools initial input measurement', () => {
           assistantHostedGroupToolSurface: scope === 'group' ? 'families' : 'none',
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: scope, currentLocalDate: '2030-04-01', currentInstant: '2030-04-01T16:00:00.000Z', currentTimeZone: 'America/New_York',
-          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, ordinaryInboundTurn: true,
+          hostedRuntime: true,onboardingGuidance: false, ordinaryInboundTurn: true,
         })
         const developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
         const tools = resolveMurphDynamicTools({
@@ -1434,7 +1434,7 @@ describe('game progress and photo initial input measurement', () => {
           assistantHostedGroupToolSurface: scope === 'group' ? 'families' : 'none',
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: scope, currentLocalDate: '2030-04-01', currentInstant: '2030-04-01T16:00:00.000Z', currentTimeZone: 'America/New_York',
-          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, ordinaryInboundTurn: true,
+          hostedRuntime: true,onboardingGuidance: false, ordinaryInboundTurn: true,
         })
         const developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
         const availableTools = resolveMurphDynamicTools({
@@ -1505,7 +1505,7 @@ describe('game host initial input measurement', () => {
           assistantHostedGroupToolSurface: scope === 'group' ? 'families' : 'none',
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: scope, currentLocalDate: '2030-04-01', currentInstant: '2030-04-01T16:00:00.000Z', currentTimeZone: 'America/New_York',
-          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, ordinaryInboundTurn: true,
+          hostedRuntime: true,onboardingGuidance: false, ordinaryInboundTurn: true,
         })
         const developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
         const availableTools = resolveMurphDynamicTools({
@@ -1569,7 +1569,7 @@ describe('game incomplete initial input measurement', () => {
           assistantHostedGroupToolSurface: scope === 'group' ? 'families' : 'none',
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: scope, currentLocalDate: '2030-04-01', currentInstant: '2030-04-01T16:00:00.000Z', currentTimeZone: 'America/New_York',
-          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, ordinaryInboundTurn: true,
+          hostedRuntime: true,onboardingGuidance: false, ordinaryInboundTurn: true,
         })
         const developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
         const availableTools = resolveMurphDynamicTools({
@@ -1638,7 +1638,7 @@ describe('Bluetooth help initial input measurement', () => {
           assistantHostedGroupToolSurface: scope === 'group' ? 'families' : 'none',
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: scope, currentLocalDate: '2030-04-01', currentInstant: '2030-04-01T16:00:00.000Z', currentTimeZone: 'America/New_York',
-          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, ordinaryInboundTurn: true,
+          hostedRuntime: true,onboardingGuidance: false, ordinaryInboundTurn: true,
         })
         const head = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
         // Exact prompt-only inverse of this PR against bc5a1ead20; no tools changed.
@@ -1695,7 +1695,7 @@ describe('meal names initial input measurement', () => {
           assistantHostedGroupToolSurface: scope === 'group' ? 'families' : 'none',
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: scope, currentLocalDate: '2030-04-01', currentInstant: '2030-04-01T16:00:00.000Z', currentTimeZone: 'America/New_York',
-          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, ordinaryInboundTurn: true,
+          hostedRuntime: true,onboardingGuidance: false, ordinaryInboundTurn: true,
         })
         const head = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
         // Exact initial-prompt inverse against f7024b89f6. CLI schemas and

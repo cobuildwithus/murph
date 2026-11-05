@@ -1,4 +1,9 @@
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+
 import { describe, expect, it } from 'vitest'
+
+import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
 import { buildAssistantSystemPromptLayers } from '../src/assistant/system-prompt.js'
 import { buildAssistantCliGuidanceText } from '../src/assistant-cli-access.js'
 
@@ -8,30 +13,38 @@ function privateLayers() {
     channel: 'telegram', conversationScope: 'direct', hostedRuntime: true,
     cliAccess: { rawCommand: 'vault-cli' },
     currentLocalDate: '2026-05-18', currentTimeZone: 'UTC',
-    modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+onboardingGuidance: false,
   })
 }
 
 describe('private Journal capture and recovery instructions', () => {
-  it('retains automatic fact capture and its no-retention and causality boundaries', () => {
+  it('retains automatic fact capture and its no-retention and causality boundaries', async () => {
     const policy = privateLayers().stableRouteCapabilityPrompt
-    expect(policy).toContain('An extra request to save is not required')
-    expect(policy).toContain('Respect an explicit no-retention request')
+    const skill = (await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'journal', 'SKILL.md'), 'utf8',
+    )).replace(/\s+/gu, ' ')
+    expect(policy).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/journal/SKILL.md')
+    expect(policy).toContain('No save request is needed')
+    expect(policy).toContain('Respect a no-retention request')
     expect(policy).toContain('hypothetical questions are not events')
-    expect(policy).toContain('Save facts, not inferred causes or diagnoses')
-    expect(policy).toContain('A suggested explanation is not a separate Journal fact')
-    expect(policy).toContain('same existing event')
+    expect(policy).toContain('Save the reported observation, not an inferred cause or diagnosis')
+    expect(policy).toContain('even one the member suggests')
+    expect(skill).toContain('same existing event')
   })
 
-  it('requires record verification and an honest distinction between saves and web visibility', () => {
+  it('requires record verification and an honest distinction between saves and web visibility', async () => {
     const policy = privateLayers().stableRouteCapabilityPrompt
-    expect(policy).toContain('When asked whether a fact was saved or why it is missing from Journal, read the relevant canonical records')
-    expect(policy).toContain('acknowledge the missed capture')
-    expect(policy).toContain('never explain it as requiring an explicit logging request')
-    expect(policy).toContain('A canonical save does not prove that the web page has refreshed')
-    expect(policy).toContain('Do not diagnose a stale page, filter, or sync failure without evidence')
-    expect(policy).toContain('never use legacy `vault-cli journal` day commands or add day links')
-    expect(policy).toContain('invent filter controls')
+    const skill = (await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'journal', 'SKILL.md'), 'utf8',
+    )).replace(/\s+/gu, ' ')
+    expect(policy).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/journal/SKILL.md')
+    expect(skill).toContain('When asked whether a fact was saved or why it is missing from Journal, read the relevant canonical records')
+    expect(skill).toContain('If an eligible fact was missed, say so')
+    expect(skill).toContain('Never explain the gap as needing an explicit logging request')
+    expect(skill).toContain('A canonical save does not prove the web page has refreshed')
+    expect(skill).toContain('Do not diagnose a stale page, filter, or sync failure without evidence')
+    expect(skill).toContain('Never use legacy `vault-cli journal` day commands or add day links')
+    expect(skill).toContain('invent filter controls')
   })
 
   it('grounds shell execution in the current workspace and distinguishes launch failures from ambiguous writes', () => {

@@ -79,7 +79,7 @@ describe('imported-record natural recall evidence', () => {
       cliAccess: { rawCommand: 'vault-cli' },
       conversationScope: 'direct', hostedRuntime: true, ordinaryInboundTurn: true,
       currentInstant: '2026-04-11T12:00:00Z', currentLocalDate: '2026-04-11', currentTimeZone: 'UTC',
-      modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+onboardingGuidance: false, turnTrigger: null,
     })
     expect(prompt).toContain('Resolve ambiguity with available context first')
     expect(prompt).toContain('Ask only for missing subjective context, ambiguous details, consent, or facts no available source can answer.')

@@ -8,7 +8,7 @@ function prompt(overrides: Partial<AssistantSystemPromptInput> = {}): string {
     assistantProgressUpdatesAvailable: true,
     channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
     conversationScope: 'direct', currentLocalDate: '2030-01-10', currentTimeZone: 'UTC',
-    hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+    hostedRuntime: true,
     onboardingGuidance: false, ordinaryInboundTurn: true,
     ...overrides,
   })

@@ -26,7 +26,6 @@ describe('proactive onboarding support', () => {
       currentTimeZone: 'America/New_York',
       hostedRuntime: true,
       onboardingGuidance: true,
-      modelBehaviorProfile: 'gpt5-agentic',
       turnTrigger: null,
     })
 

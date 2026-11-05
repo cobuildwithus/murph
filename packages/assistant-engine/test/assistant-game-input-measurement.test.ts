@@ -104,7 +104,7 @@ describe.skipIf(process.env.MURPH_MEASURE_GAME_INPUT !== '1')('group game tools 
           assistantProgressUpdatesAvailable: true, channel: 'linq',
           cliAccess: { rawCommand: 'vault-cli' }, conversationScope: scope,
           currentLocalDate: '2030-01-10', currentInstant: '2030-01-10T16:00:00.000Z', currentTimeZone: 'UTC',
-          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+          hostedRuntime: true,onboardingGuidance: false,
           ordinaryInboundTurn: true,
         })
         const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({

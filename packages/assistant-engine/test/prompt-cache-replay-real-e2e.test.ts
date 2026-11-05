@@ -81,7 +81,7 @@ it.skipIf(!live)('replays synthetic Murph workflows through native Codex with ca
           cliAccess: { rawCommand: 'vault-cli' },
           currentLocalDate: '2026-09-22', currentTimeZone: 'UTC',
           currentInstant: `2026-09-22T12:0${iteration}:00.000Z`,
-          onboardingGuidance: false, modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false,
           hostedRuntime: true, assistantHostedAutomationAvailable: true,
           turnTrigger: 'automation-cron',
         })

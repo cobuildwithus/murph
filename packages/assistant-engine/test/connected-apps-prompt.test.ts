@@ -29,13 +29,13 @@ describe('connected-apps skill and system-prompt coverage', () => {
     }
     expect(reading).not.toMatch(/GMAIL_SEND_EMAIL|OUTLOOK_SEND_EMAIL|GOOGLECALENDAR_CREATE_EVENT/u)
     expect(main).toContain('GMAIL_SEND_EMAIL')
-    // This is the full read-policy payload, including location, not a truncated excerpt.
-    expect(Buffer.byteLength(reading)).toBeLessThan(8_500)
-    expect(Buffer.byteLength(journal + reading)).toBeLessThan(32_000)
+    // The full on-demand policy now includes official alerts moved out of the prompt.
+    expect(Buffer.byteLength(reading)).toBeLessThan(9_000)
+    expect(Buffer.byteLength(journal + reading)).toBeLessThan(32_500)
     const prompt = buildAssistantSystemPrompt(createPromptInput({
       turnTrigger: 'automation-cron', scheduledOccurrenceAt: '2026-06-25T13:00:00.000Z',
     }))
-    expect(prompt).toContain(`For connected-account reads or outdoor-reminder location, read \`${reference}\``)
+    expect(prompt).toContain(`For connected-account reads, official heat, cold, or air-quality alerts, or outdoor-reminder location, read \`${reference}\``)
     expect(prompt).not.toContain('- Read `$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/SKILL.md`.')
     expect(prompt).not.toContain('read the `connected-apps` skill')
     expect(prompt).toContain('For account changes, provider writes, other built-in services, or unsupported-provider exports')
@@ -180,7 +180,11 @@ describe('connected-apps skill and system-prompt coverage', () => {
     expect(normalizedSkill).toContain(
       'unless this skill or the current system prompt names a server-authorized fixed route and its exact schema',
     )
-    expect(normalizedSkill).not.toContain('MURPH_OPENWEATHER_GET_NATIONAL_ALERTS')
+    expect(normalizedSkill).toContain('direct-only `MURPH_OPENWEATHER_GET_NATIONAL_ALERTS`')
+    expect(normalizedSkill).toContain('Only returned alerts count as context, never as a cause')
+    expect(buildAssistantSystemPrompt(createPromptInput())).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/references/reading.md',
+    )
   })
 
   it('keeps Mapbox as the geocoding and routing layer', async () => {
@@ -226,7 +230,10 @@ describe('connected-apps skill and system-prompt coverage', () => {
   })
 
   it('lazy-loads the detailed direct contract while preserving group floors', async () => {
-    const skill = await readConnectedAppsSkill()
+    const skill = await readFile(path.join(resolveAssistantSkillsRoot(), 'connected-apps', 'SKILL.md'), 'utf8')
+    const reading = (await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'connected-apps', 'references', 'reading.md'), 'utf8',
+    )).replace(/\s+/gu, ' ')
     const directPrompt = buildAssistantSystemPrompt(createPromptInput({
       conversationScope: 'direct',
     }))
@@ -266,14 +273,15 @@ describe('connected-apps skill and system-prompt coverage', () => {
       )
     }
     expect(directPrompt).toContain('private untrusted evidence')
-    expect(directPrompt).toContain('OPENWEATHER_API_GET_GEOCODING_DIRECT')
-    expect(directPrompt).toContain('MURPH_OPENWEATHER_GET_NATIONAL_ALERTS')
-    expect(directPrompt).toContain('without search')
-    expect(directPrompt).toContain('never guess coordinates')
-    expect(directPrompt).toContain('with numeric `lat`/`lon`')
-    expect(directPrompt).toContain('once including retries')
-    expect(directPrompt).toContain('Continue on failure')
-    expect(scheduledPrompt).toContain('MURPH_OPENWEATHER_GET_NATIONAL_ALERTS')
+    expect(reading).toContain('OPENWEATHER_API_GET_GEOCODING_DIRECT')
+    expect(reading).toContain('MURPH_OPENWEATHER_GET_NATIONAL_ALERTS')
+    expect(reading).toContain('without search')
+    expect(reading).toContain('never guess coordinates')
+    expect(reading).toContain('with numeric `lat` and `lon`')
+    expect(reading).toContain('once, counting retries')
+    expect(reading).toContain('Continue on failure')
+    expect(scheduledPrompt).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/references/reading.md')
+    expect(directPrompt).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/references/reading.md')
     expect(groupPrompt).toContain('Use only accountless built-in service tools')
     expect(groupPrompt).toContain(
       'Never list, connect, rename, disconnect, search, read, write, or select',
@@ -306,7 +314,6 @@ function createPromptInput(
     currentLocalDate: '2026-06-25',
     currentTimeZone: 'America/New_York',
     onboardingGuidance: true,
-    modelBehaviorProfile: 'gpt5-agentic',
     turnTrigger: null,
     ...overrides,
   }
