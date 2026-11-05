@@ -1851,3 +1851,6 @@ The retirement of obsolete PR prose guards is recorded in
 [the implementation plan](exec-plans/completed/2026-11-04-drop-pr-prose-checks.md).
 Current requirements remain in `operations/completion-workflow.md` and
 `references/testing-ci-map.md`.
+
+GPT Image 2.6 migration: [execution plan](exec-plans/completed/2026-11-04-image-26.md).
+The current model and compatibility contract remain in `../ARCHITECTURE.md`.

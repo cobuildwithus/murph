@@ -3758,7 +3758,7 @@ describe('assistant outbox runtime', () => {
     )
   })
 
-  it.each(['gpt-image-2', 'gpt-image-2.5-flare'])('prunes terminal outbox intents while retaining %s capture evidence and active retries', async (source) => {
+  it.each(['gpt-image-2', 'gpt-image-2.5-flare', 'gpt-image-2.6-flare'])('prunes terminal outbox intents while retaining %s capture evidence and active retries', async (source) => {
     const { paths, vaultRoot } = await createAssistantVault('assistant-outbox-retention-')
 
     const oldTerminal = await createIntent(vaultRoot, {

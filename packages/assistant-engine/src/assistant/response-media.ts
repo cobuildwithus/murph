@@ -38,7 +38,9 @@ export function isAssistantGeneratedImageResponseMedia(
   media: AssistantResponseMedia | null | undefined,
 ): media is AssistantVaultImageResponseMedia {
   return media?.kind === 'vault_image' &&
-    (media.source === 'gpt-image-2' || media.source === 'gpt-image-2.5-flare') &&
+    (media.source === 'gpt-image-2' ||
+      media.source === 'gpt-image-2.5-flare' ||
+      media.source === 'gpt-image-2.6-flare') &&
     media.ref.startsWith('raw/captures/')
 }
 

@@ -724,7 +724,7 @@ describe('assistant auto-reply event-first path', () => {
     expect(prompt).not.toContain('memo-1.m4a')
   })
 
-  it.each(['gpt-image-2', 'gpt-image-2.5-flare'])('binds an exact native reply to the first of two %s captures', async (source) => {
+  it.each(['gpt-image-2', 'gpt-image-2.5-flare', 'gpt-image-2.6-flare'])('binds an exact native reply to the first of two %s captures', async (source) => {
     const vault = await createTempVault()
     const firstMedia = {
       alt: 'Generated image',
