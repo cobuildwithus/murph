@@ -300,6 +300,7 @@ export interface AssistantNotificationInput
       | 'scheduledAutomationAuthority'
       | 'scheduledInvocationAuthority'
       | 'scheduledOccurrenceAt'
+      | 'deviceActivityOccurrence'
       | 'serviceTier'
       | 'showThinkingTraces'
       | 'turnEnvironment'
@@ -1705,6 +1706,7 @@ function buildAssistantNotificationMessageInput(
     scheduledAutomationAuthority: input.scheduledAutomationAuthority ?? null,
     scheduledInvocationAuthority: input.scheduledInvocationAuthority ?? null,
     scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
+    deviceActivityOccurrence: input.deviceActivityOccurrence,
     serviceTier: input.serviceTier ?? null,
     sessionId: input.sessionId,
     showThinkingTraces: input.showThinkingTraces,

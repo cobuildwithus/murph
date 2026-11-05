@@ -129,6 +129,12 @@ export interface AssistantTurnEnvironment {
   env?: NodeJS.ProcessEnv
 }
 
+export interface AssistantDeviceActivityOccurrence {
+  parentAutomationId: string
+  /** The device-activity child's persisted, retry-stable event key. */
+  occurrenceKey: string
+}
+
 export interface AssistantMessageInput extends AssistantSessionResolutionFields {
   /** Host-attested exact reaction target; never extracted from prompt text. */
   reactionRouting?: import('./reaction-routing.js').AssistantReactionRoutingInput | null
@@ -199,6 +205,11 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   // Exact engine-owned occurrence for this scheduled turn. This is ephemeral
   // decision context, not persisted automation or session state.
   scheduledOccurrenceAt?: string | null
+  // Engine-owned identity of the wearable event behind a private
+  // device-activity run, set only after the live route proves the turn
+  // private. It keys that run's own effects (a phone call, a Clinical Records
+  // link) and grants nothing else; never model supplied or persisted.
+  deviceActivityOccurrence?: AssistantDeviceActivityOccurrence | null
   // Per-turn provider processing tier; never part of session/route identity.
   serviceTier?: AssistantProviderServiceTier | null
   showThinkingTraces?: boolean

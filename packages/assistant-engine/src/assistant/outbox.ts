@@ -115,11 +115,11 @@ import {
 import { stripAssistantResponseMediaPlacement } from './reply-bubbles.js'
 import { writeAssistantAutoReplyIntentProvenance } from './automation/intent-provenance.js'
 import type { AssistantRunEvent } from './automation/shared.js'
+import { readAssistantDeviceActivityDeliveryIdempotencyMetadata } from './device-activity-cron-tags.js'
 import {
-  assistantDeviceActivityAuthorityKeyMatches,
-  readAssistantDeviceActivityDeliveryIdempotencyMetadata,
-} from './device-activity-cron-tags.js'
-import { readAssistantDeviceActivityParentAutomation } from './device-activity-parent-automation.js'
+  readAssistantDeviceActivityParentAutomation,
+  resolveAssistantDeviceActivityParentValidity,
+} from './device-activity-parent-automation.js'
 import {
   resolveAssistantOutboxAutomationAuthorityError,
 } from './outbox/automation-authority.js'
@@ -1217,6 +1217,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
     const deviceActivityAuthorityError =
       await resolveDeviceActivityOutboxAuthorityError({
         intent: dispatchIntent,
+        now,
         vault: input.vault,
       })
     const authorityError =
@@ -1640,6 +1641,7 @@ function assistantOutboxIntentMatchesPreparedDispatch(
 
 async function resolveDeviceActivityOutboxAuthorityError(input: {
   intent: AssistantOutboxIntent
+  now: Date
   vault: string
 }): Promise<Error | null> {
   const metadata = readAssistantDeviceActivityDeliveryIdempotencyMetadata(
@@ -1649,25 +1651,15 @@ async function resolveDeviceActivityOutboxAuthorityError(input: {
     return null
   }
 
-  const parentAutomation = await readAssistantDeviceActivityParentAutomation({
+  const parentAutomation = resolveAssistantDeviceActivityParentValidity({
     metadata,
-    vault: input.vault,
+    now: input.now,
+    parent: await readAssistantDeviceActivityParentAutomation({
+      metadata,
+      vault: input.vault,
+    }),
   })
-  if (
-    !parentAutomation ||
-    parentAutomation.status !== 'active' ||
-    parentAutomation.schedule.kind !== 'deviceActivity' ||
-    !assistantDeviceActivityAuthorityKeyMatches({
-      authorityKey: metadata.authorityKey,
-      automation: {
-        ...parentAutomation,
-        schedule: {
-          activityKind: parentAutomation.schedule.activityKind,
-          source: parentAutomation.schedule.source,
-        },
-      },
-    })
-  ) {
+  if (!parentAutomation) {
     return new VaultCliError(
       'ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE',
       'Device activity automation authority changed before outbound delivery.',

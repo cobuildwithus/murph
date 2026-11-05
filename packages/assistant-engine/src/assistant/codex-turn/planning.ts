@@ -90,6 +90,7 @@ import {
 } from '../turn-progress.js'
 import {
   resolveAssistantHostedScheduledInvocationScope,
+  resolveAssistantHostedDeviceActivityOccurrence,
   resolveAssistantHostedScheduledPhoneCallScope,
   type AssistantHostedToolContext,
 } from '../hosted-tool-context.js'
@@ -542,12 +543,21 @@ function areConversationPollsAvailable(input: AssistantRouteTurnPlanInput, accep
   return (acceptedInputIds.length > 0 || scheduledInvocationScope !== null) && (channel === 'linq' || channel === 'telegram') && input.hostedToolContext?.pollTool != null
 }
 
+/** A clock occurrence or a private wearable event can each key a one-shot effect. */
+function hasOccurrenceEffectAuthority(
+  scheduledInvocationScope: ReturnType<typeof resolveAssistantHostedScheduledInvocationScope>,
+  deviceActivityOccurrence: ReturnType<typeof resolveAssistantHostedDeviceActivityOccurrence>,
+): boolean {
+  return scheduledInvocationScope !== null || deviceActivityOccurrence !== null
+}
+
 function resolvePrivateMemberToolAvailability({
   input,
   privateInteractiveAudience,
   privateInteractiveProviderTurn,
   userActionAcceptedInputIds,
   scheduledInvocationScope,
+  deviceActivityOccurrence,
   currentAudienceDeliveryFields,
 }: {
   input: AssistantRouteTurnPlanInput
@@ -555,6 +565,7 @@ function resolvePrivateMemberToolAvailability({
   privateInteractiveProviderTurn: boolean
   userActionAcceptedInputIds: readonly string[]
   scheduledInvocationScope: ReturnType<typeof resolveAssistantHostedScheduledInvocationScope>
+  deviceActivityOccurrence: ReturnType<typeof resolveAssistantHostedDeviceActivityOccurrence>
   currentAudienceDeliveryFields: ReturnType<typeof resolveAssistantCurrentAudienceDeliveryFields>
 }) {
   const privateUserAction =
@@ -572,7 +583,7 @@ function resolvePrivateMemberToolAvailability({
     clinicalRecordsConnectLinkAvailable:
       privateInteractiveAudience &&
       (userActionAcceptedInputIds.length > 0 ||
-        scheduledInvocationScope !== null) &&
+        hasOccurrenceEffectAuthority(scheduledInvocationScope, deviceActivityOccurrence)) &&
       input.hostedToolContext?.clinicalRecordsConnectLinkTool != null,
     familyPlanAvailable:
       privateInteractiveAudience &&
@@ -907,6 +918,11 @@ export async function resolveAssistantRouteTurnPlan(
       conversationScope,
       messageInput: input.input,
       originSessionId: input.session.sessionId,
+    })
+  const deviceActivityOccurrence =
+    resolveAssistantHostedDeviceActivityOccurrence({
+      conversationScope,
+      messageInput: input.input,
     })
   const hostedGroupRuntime =
     conversationScope === 'group' && input.executionContext?.hosted != null
@@ -1345,6 +1361,7 @@ export async function resolveAssistantRouteTurnPlan(
           privateInteractiveProviderTurn,
           userActionAcceptedInputIds,
           scheduledInvocationScope,
+          deviceActivityOccurrence,
           currentAudienceDeliveryFields,
         }),
         ...resolveGroupToolAvailability({
