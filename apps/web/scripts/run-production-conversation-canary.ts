@@ -51,7 +51,12 @@ type LinqProductionCanaryResetResult = {
 };
 
 type LinqProductionCanaryTurnResult = {
+  /** Send to the first thing the member sees: Murph's tapback or its first text. */
   latencyMs: number;
+  /** Present when Murph's "on it" tapback on the sent message came first. */
+  firstVisible?: "tapback";
+  /** Send to the first text reply, reported when a tapback came first. */
+  replyMs?: number;
   senderSendMs: number;
   stage: (typeof CANARY_TURNS)[number]["stage"];
   turn: number;
@@ -116,9 +121,11 @@ export async function runLinqProductionCanary(
       const turn = index + 1;
       const sentAt = performance.now();
       const sentAtEpochMs = Date.now();
+      let sentMessageId: string | null = null;
       const replyPromise = waitForLinqProductionCanaryReply({
         inbound,
         notBeforeEpochMs: sentAtEpochMs,
+        sentMessageId: () => sentMessageId,
         spaceId: space.id,
         timeoutMs: CANARY_REPLY_WAIT_MS,
         userId: target.id,
@@ -128,16 +135,28 @@ export async function runLinqProductionCanary(
         void replyPromise.catch(() => undefined);
         throwCanaryFailure("send-unconfirmed");
       }
+      sentMessageId = readCanarySentMessageId(sent);
       const senderSendMs = Math.round(performance.now() - sentAt);
-      const reply = await replyPromise.catch(async (error: unknown) => {
+      const { tapbackAt, text: reply } = await replyPromise.catch(async (error: unknown) => {
         const observation = error instanceof LinqProductionCanaryReplyUnavailableError
           ? formatCanaryReplyObservation(error.observation) : "";
         await reportCanaryFailureDiagnostics(config, { stage, turn }, reportDiagnostic);
         throwCanaryFailure(`reply-unavailable; turn=${turn}; stage=${stage}; wait_limit_ms=${CANARY_REPLY_WAIT_MS}${observation}`);
       });
       const replyAt = performance.now();
-      const latencyMs = Math.round(replyAt - sentAt);
-      const turnResult = { latencyMs, senderSendMs, stage, turn };
+      // Murph's tapback replaces the "working on it" text, so it counts as
+      // the first visible response; the text reply is still required.
+      const firstVisibleAt = tapbackAt ?? replyAt;
+      const latencyMs = Math.round(firstVisibleAt - sentAt);
+      const turnResult: LinqProductionCanaryTurnResult = {
+        latencyMs,
+        ...(tapbackAt === null
+          ? {}
+          : { firstVisible: "tapback" as const, replyMs: Math.round(replyAt - sentAt) }),
+        senderSendMs,
+        stage,
+        turn,
+      };
       reportTurn?.(turnResult);
       if (latencyMs >= replyBudgetMs) {
         await reportCanaryFailureDiagnostics(config, { stage, turn }, reportDiagnostic);
@@ -147,7 +166,7 @@ export async function runLinqProductionCanary(
       }
       const interReplyGapMs = previousReplyAt === null
         ? null
-        : replyAt - previousReplyAt;
+        : firstVisibleAt - previousReplyAt;
       if (
         interReplyGapMs !== null
         && interReplyGapMs >= replyBudgetMs
@@ -177,13 +196,20 @@ export async function runLinqProductionCanary(
   }
 }
 
+/**
+ * Waits for Murph's first text reply. On the way it notes when Murph's "on it"
+ * tapback lands on the message the canary just sent (`tapbackAt`, from the
+ * same clock as the caller's send time), since that tapback stands in for the
+ * progress text the runtime now skips.
+ */
 export async function waitForLinqProductionCanaryReply(input: {
   inbound: AsyncIterator<[Space, Message]>;
   notBeforeEpochMs: number;
+  sentMessageId?: () => string | null;
   spaceId: string;
   timeoutMs: number;
   userId: string;
-}): Promise<string> {
+}): Promise<{ tapbackAt: number | null; text: string }> {
   let observedCount = 0;
   let rejectedCount = 0;
   // Identity-only markers cannot be confused with provider error names or values.
@@ -194,6 +220,13 @@ export async function waitForLinqProductionCanaryReply(input: {
       .unref();
   });
 
+  // The tapback can land before `space.send` resolves with the sent id, so
+  // candidates are matched against it once the text reply arrives.
+  const tapbacks: Array<{ at: number; content: Message["content"] }> = [];
+  const firstTapbackAt = () => {
+    const sentMessageId = input.sentMessageId?.() ?? null;
+    return tapbacks.find((tapback) => isCanaryTapbackOnSentMessage(tapback.content, sentMessageId))?.at ?? null;
+  };
   const nextReply = (async () => {
     while (true) {
       const next = await input.inbound.next();
@@ -202,19 +235,20 @@ export async function waitForLinqProductionCanaryReply(input: {
       }
       observedCount = Math.min(observedCount + 1, CANARY_REPLY_OBSERVATION_COUNT_MAX);
       const [space, message] = next.value;
-      if (
-        space.id !== input.spaceId
-        || message.direction !== "inbound"
-        || message.platform !== "imessage"
-        || message.sender?.id !== input.userId
-        || message.content.type !== "text"
-        || !Number.isFinite(message.timestamp.getTime())
-        || message.timestamp.getTime() < input.notBeforeEpochMs
-      ) {
-        rejectedCount = Math.min(rejectedCount + 1, CANARY_REPLY_OBSERVATION_COUNT_MAX);
+      const fromMurph = space.id === input.spaceId
+        && message.direction === "inbound"
+        && message.platform === "imessage"
+        && message.sender?.id === input.userId
+        && Number.isFinite(message.timestamp.getTime())
+        && message.timestamp.getTime() >= input.notBeforeEpochMs;
+      if (fromMurph && message.content.type === "text") {
+        return { tapbackAt: firstTapbackAt(), text: message.content.text.trim() };
+      }
+      if (fromMurph && message.content.type === "reaction") {
+        tapbacks.push({ at: performance.now(), content: message.content });
         continue;
       }
-      return message.content.text.trim();
+      rejectedCount = Math.min(rejectedCount + 1, CANARY_REPLY_OBSERVATION_COUNT_MAX);
     }
   })();
 
@@ -228,6 +262,20 @@ export async function waitForLinqProductionCanaryReply(input: {
       rejectedCount,
     });
   }
+}
+
+function readCanarySentMessageId(sent: unknown): string | null {
+  const id = typeof sent === "object" && sent !== null ? (sent as { id?: unknown }).id : null;
+  return typeof id === "string" && id ? id : null;
+}
+
+/** A tapback whose target is the exact message the canary sent this turn. */
+function isCanaryTapbackOnSentMessage(content: Message["content"], sentMessageId: string | null): boolean {
+  if (content.type !== "reaction" || !sentMessageId) {
+    return false;
+  }
+  const target = content.target as { id?: unknown; parentId?: unknown } | undefined;
+  return target?.id === sentMessageId || target?.parentId === sentMessageId;
 }
 
 function assertLinqProductionCanaryReply(input: {
