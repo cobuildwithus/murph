@@ -43,6 +43,7 @@ import {
   type HostedPhoneCallResultDeliveryOutcomeRequest,
 } from "@murphai/hosted-execution/phone-calls";
 import {
+  ASSISTANT_PROGRESS_UPDATE_ACKNOWLEDGED_CODE,
   applyAssistantVaultFileSendApprovalResult,
   beginAssistantOutboxIntentMirrorPreparedDispatch,
   buildAssistantVaultFileSendApprovalRequest,
@@ -2109,6 +2110,7 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
       telegramEnv,
     }),
     sendLinq: createHostedAssistantLinqSendDependency({
+      deliveryPurpose: "progress_update",
       effectsPort: input.effectsPort ?? null,
       linqEnv,
       linqDeliveryContexts,
@@ -4752,6 +4754,8 @@ function createHostedAssistantLinqSendDependency(input: {
     HostedAssistantDeliveryPayload,
     "actorId" | "identityId" | "threadId" | "threadIsDirect"
   > | null;
+  /** Progress sends ask Web whether a burst tapback already covers them. */
+  deliveryPurpose?: "progress_update" | null;
   /** Enables one timing row per existing provider-dispatch boundary. */
   dispatchTimingContext?: HostedDeliveryTraceContext | null;
   effectsPort?: Pick<
@@ -4934,6 +4938,7 @@ function createHostedAssistantLinqSendDependency(input: {
     const readProviderAttempt = () => providerAttempt;
     const readResolvedEngagementInput = () => ({
       answeredMailboxItemIds: request.answeredMailboxItemIds,
+      deliveryPurpose: input.deliveryPurpose ?? null,
       assistantAskFallback: reviewedAssistantAskCompletion
         ? isHostedReviewedAssistantAskFallbackPayload({
             media: request.media,
@@ -6224,6 +6229,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   assistantAskCompletionExpiresAt?: string;
   assistantAskFallback?: boolean;
   authorityCheckOnly: boolean;
+  deliveryPurpose?: "progress_update" | null;
   directRecipientPhoneNumber: string | null;
   effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement"> | null;
   expectedResolvedRoute?: HostedExecutionResolvedLinqDeliveryRoute;
@@ -6262,6 +6268,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
               input.assistantAskCompletionExpiresAt,
           }),
       authorityCheckOnly: input.authorityCheckOnly,
+      ...readHostedAssistantLinqDeliveryPurposeField(input.deliveryPurpose),
       directRecipientPhoneNumber: input.directRecipientPhoneNumber,
       ...(input.expectedResolvedRoute
         ? { expectedResolvedRoute: input.expectedResolvedRoute }
@@ -6293,7 +6300,8 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
       idempotencyKey: input.idempotencyKey,
     });
   }
-  const normalized = normalizeHostedAssistantLinqEngagementResult(result);
+  const normalized: HostedRuntimeLinqRecentInboundEngagementResult = result ?? {};
+  assertHostedAssistantProgressUpdateNotAcknowledged({ ...input, result: normalized });
   if (input.authorityCheckOnly !== true && normalized.deliveryBlockCode) {
     const code = `ASSISTANT_LINQ_EGRESS_${
       normalized.deliveryBlockCode.toUpperCase()
@@ -6400,36 +6408,40 @@ function assertHostedAssistantLinqProviderDispatchClaim(input: {
   }
 }
 
-function normalizeHostedAssistantLinqEngagementResult(
-  result: HostedRuntimeLinqRecentInboundEngagementResult | void,
-): HostedRuntimeLinqRecentInboundEngagementResult {
-  const normalized: HostedRuntimeLinqRecentInboundEngagementResult = {};
-  if (typeof result?.assistantAskFallbackRequired === "boolean") {
-    normalized.assistantAskFallbackRequired =
-      result.assistantAskFallbackRequired;
+function readHostedAssistantLinqDeliveryPurposeField(
+  deliveryPurpose: "progress_update" | null | undefined,
+): { deliveryPurpose?: "progress_update" } {
+  return deliveryPurpose ? { deliveryPurpose } : {};
+}
+
+/**
+ * Web skips a progress update's dispatch fence once Linq accepted the burst's
+ * tapback; nothing reached the provider, so this is a pre-provider skip.
+ */
+function assertHostedAssistantProgressUpdateNotAcknowledged(input: {
+  authorityCheckOnly: boolean;
+  deliveryPurpose?: "progress_update" | null;
+  result: HostedRuntimeLinqRecentInboundEngagementResult;
+}): void {
+  if (
+    input.authorityCheckOnly !== true
+    && input.deliveryPurpose === "progress_update"
+    && input.result.progressUpdateSuppressed === true
+  ) {
+    throw new VaultCliError(
+      ASSISTANT_PROGRESS_UPDATE_ACKNOWLEDGED_CODE,
+      "The member already got an emoji reaction for this burst.",
+      { retryable: false },
+    );
   }
-  if (result?.deliveryBlockCode) {
-    normalized.deliveryBlockCode = result.deliveryBlockCode;
-  }
-  if (result?.deliveryPosture) {
-    normalized.deliveryPosture = result.deliveryPosture;
-  }
-  if (typeof result?.providerDispatchClaimed === "boolean") {
-    normalized.providerDispatchClaimed = result.providerDispatchClaimed;
-  }
-  const resolvedRoute = parseHostedExecutionResolvedLinqDeliveryRoute(
-    result?.resolvedRoute,
-  );
-  if (resolvedRoute) {
-    normalized.resolvedRoute = resolvedRoute;
-  }
-  return normalized;
 }
 
 function requireHostedAssistantLinqResolvedRoute(
   result: HostedRuntimeLinqRecentInboundEngagementResult,
 ): HostedExecutionResolvedLinqDeliveryRoute {
-  const resolvedRoute = result.resolvedRoute;
+  const resolvedRoute = parseHostedExecutionResolvedLinqDeliveryRoute(
+    result.resolvedRoute,
+  );
   if (!resolvedRoute) {
     throw new VaultCliError(
       "ASSISTANT_LINQ_RESOLVED_ROUTE_PROTOCOL_UNAVAILABLE",

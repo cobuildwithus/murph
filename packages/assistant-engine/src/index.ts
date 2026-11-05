@@ -22,6 +22,7 @@ export type {
 export * from './assistant/group-challenge-scorecard.js'
 export * from './assistant/group-challenge-scorecard-schema.js'
 export * from './assistant/provider-start-critical-path.js'
+export { ASSISTANT_PROGRESS_UPDATE_ACKNOWLEDGED_CODE } from './assistant/progress-constants.js'
 export * from './assistant/private-completion-continuity.js'
 export {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,

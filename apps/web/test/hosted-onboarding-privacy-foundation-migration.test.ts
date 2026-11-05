@@ -1249,6 +1249,7 @@ describe("hosted Prisma baseline migration", () => {
       "20261102120000_hosted_cold_ingest_media",
       "20261102230000_game_seat_storage",
       "20261104180000_game_post_replies",
+      "20261105000000_hosted_linq_ack_reaction",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(

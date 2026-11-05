@@ -43,6 +43,7 @@ import { promisify } from 'node:util'
 import { brotliCompressSync } from 'node:zlib'
 import { MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION } from '../src/assistant/weekly-usage-optimizer.js'
 import { createAssistantProductFeedbackRecorder } from '../src/assistant/turn-progress.js'
+import { ASSISTANT_PROGRESS_UPDATE_ACKNOWLEDGED_CODE } from '../src/assistant/progress-constants.js'
 import { syntheticUsageDiagnostics } from './support/usage-diagnostics.ts'
 
 import {
@@ -510,6 +511,66 @@ describeRealCodex('real natural goal canary journey', () => {
       expect(await listFollowUpAutomations(fixture.vault)).toHaveLength(0)
     } finally {
       observer.mockRestore()
+      await fixture.close()
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 300_000)
+
+  it('ack tapback covers the early update and the reply never mentions it', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const fixture = await createCanonicalLiveFixture(config, 'linq')
+    try {
+      const raw: unknown = JSON.parse(await readFile(new URL(
+        '../../../apps/web/scripts/fixtures/linq-production-conversation.json', import.meta.url,
+      ), 'utf8'))
+      if (!Array.isArray(raw)) throw new Error('Expected canary conversation fixture.')
+      const promptFor = (stage: string) => {
+        const prompt = readString(raw.map(readRecord).find((item) => item?.stage === stage)?.prompt)
+        if (!prompt) throw new Error(`Missing canary stage: ${stage}`)
+        return prompt
+      }
+      const sessionId = 'synthetic-ack-tapback-session'
+      const now = new Date().toISOString()
+      await saveAssistantSession(fixture.vault, parseAssistantSessionRecord({
+        alias: null, schema: 'murph.assistant-session.v1', sessionId,
+        binding: { actorId: null, channel: 'linq', conversationKey: 'linq:direct:canonical-live-synthetic-thread',
+          delivery: null, identityId: null, threadId: 'canonical-live-synthetic-thread', threadIsDirect: true },
+        createdAt: now, updatedAt: now, lastTurnAt: null, resumeState: null, turnCount: 0,
+        target: { adapter: 'codex-cli', approvalPolicy: 'never', codexCommand: fixture.codexCommand,
+          codexHome: fixture.codexHome, model: config.model, modelProvider: config.modelProvider,
+          oss: false, profile: null, reasoningEffort: 'low', sandbox: 'workspace-write' },
+      }))
+      await appendAssistantTranscriptEntries(fixture.vault, sessionId, [
+        { kind: 'user', text: promptFor('welcome') },
+        { kind: 'assistant', text: ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE },
+        { kind: 'user', text: promptFor('identity-question') },
+        { kind: 'assistant', text: MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal },
+        { kind: 'user', text: promptFor('runtime-identity') },
+        { kind: 'assistant', text: 'Good to meet you, Robin. What would you most like from your health—something you want to improve, understand, handle, or be able to do?' },
+      ])
+      // Web already reacted to this inbound, so every progress send is skipped.
+      const progressAttempts: string[] = []
+      const result = await fixture.message(promptFor('goal-proposal'), {
+        sessionId, includeEarlySessionOnboarding: true,
+        deliverResponse: true, deliveryDispatchMode: 'queue-only',
+        deliveryIdempotencyKey: 'synthetic-ack-tapback-goal-proposal', turnTrigger: 'automation-auto-reply',
+        executionContext: { hosted: { memberId: 'synthetic-ack-tapback-member', userEnvKeys: [],
+          progressDeliveryDependencies: { async sendLinq(input) {
+            progressAttempts.push(input.message)
+            throw Object.assign(new Error('The member already got an emoji reaction for this burst.'), {
+              code: ASSISTANT_PROGRESS_UPDATE_ACKNOWLEDGED_CODE,
+            })
+          } },
+        } },
+      })
+      process.stdout.write(`[ack-tapback-progress] ${JSON.stringify({ progressAttempts, reply: result.response })}\n`)
+      expect(progressAttempts.length).toBeGreaterThanOrEqual(1)
+      expect(progressAttempts.length).toBeLessThanOrEqual(2)
+      expect(result.response).toMatch(/walk/iu)
+      expect(result.response).toMatch(/lunch/iu)
+      expect(result.response).not.toMatch(/emoji|react|tapback|progress update|skipped|⏰|👀|📊|🔎|📝/iu)
+      expect(await listGoals(fixture.vault)).toHaveLength(0)
+    } finally {
       await fixture.close()
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
     }

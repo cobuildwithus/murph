@@ -210,6 +210,21 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.linqFirstContactAdmissionOpenAiApiKey).toBe("shared-openai-key");
   });
 
+  it("keeps Linq ack reactions off unless explicitly on, then prefers the dedicated key", () => {
+    expect(readHostedOnboardingEnvironment(createProcessEnv({
+      OPENAI_API_KEY: "shared-openai-key",
+    })).linqAckReactionOpenAiApiKey).toBeNull();
+    expect(readHostedOnboardingEnvironment(createProcessEnv({
+      HOSTED_LINQ_ACK_REACTIONS: "on",
+      OPENAI_API_KEY: "shared-openai-key",
+    })).linqAckReactionOpenAiApiKey).toBe("shared-openai-key");
+    expect(readHostedOnboardingEnvironment(createProcessEnv({
+      HOSTED_LINQ_ACK_REACTIONS: "on",
+      HOSTED_LINQ_ACK_REACTION_OPENAI_API_KEY: "ack-openai-key",
+      OPENAI_API_KEY: "shared-openai-key",
+    })).linqAckReactionOpenAiApiKey).toBe("ack-openai-key");
+  });
+
   it("requires contact privacy keys even outside production", () => {
     expect(() =>
       readHostedOnboardingEnvironment({

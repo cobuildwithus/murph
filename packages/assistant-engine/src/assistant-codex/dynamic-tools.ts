@@ -6945,6 +6945,9 @@ async function executeProgressUpdateTool(input: {
     if (result.kind === 'failed') {
       return toolTextResult(false, 'progress update failed during best-effort delivery', 'reported_failure')
     }
+    if (result.reason === 'acknowledged') {
+      return toolTextResult(true, 'progress update skipped: the member already got an emoji reaction saying you are on it, so just reply when ready')
+    }
     if (result.reason === 'limit') {
       return toolTextResult(false, 'progress update skipped: progress update limit reached', 'limit_reached')
     }

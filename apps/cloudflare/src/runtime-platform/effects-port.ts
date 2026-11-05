@@ -480,6 +480,7 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
     assistantAskFallbackRequired?: unknown;
     deliveryBlockCode?: unknown;
     deliveryPosture?: unknown;
+    progressUpdateSuppressed?: unknown;
     providerDispatchClaimed?: unknown;
     resolvedRoute?: unknown;
   };
@@ -504,6 +505,9 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
   }
   if (typeof response.providerDispatchClaimed === "boolean") {
     result.providerDispatchClaimed = response.providerDispatchClaimed;
+  }
+  if (response.progressUpdateSuppressed === true) {
+    result.progressUpdateSuppressed = true;
   }
 
   const resolvedRoute = parseHostedExecutionResolvedLinqDeliveryRoute(response.resolvedRoute);

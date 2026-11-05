@@ -8,6 +8,13 @@ import type {
 
 export const MAX_PROGRESS_UPDATES_PER_TURN = 3
 
+/**
+ * Thrown by a hosted progress send when Web already reacted to the member's
+ * current burst with an "on it" emoji, so a progress note would repeat it.
+ */
+export const ASSISTANT_PROGRESS_UPDATE_ACKNOWLEDGED_CODE =
+  'ASSISTANT_PROGRESS_UPDATE_ACKNOWLEDGED'
+
 export function shouldCreateAssistantProgressDelivery(
   input: Pick<
     AssistantMessageInput,

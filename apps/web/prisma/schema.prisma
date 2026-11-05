@@ -2307,6 +2307,20 @@ model HostedLinqChatHealth {
   @@map("hosted_linq_chat_health")
 }
 
+/// Burst state for the Web "on it" emoji tapback on direct Linq chats.
+/// A burst is the member's messages after the chat's latest
+/// HostedLinqDelivery.attemptedAt. claimedAt reserves the burst's one tapback,
+/// reactedAt marks Linq accepting it, and heavyAt silences the burst.
+model HostedLinqAckReaction {
+  linqChatLookupKey String    @id @map("linq_chat_lookup_key")
+  claimedAt         DateTime? @map("claimed_at")
+  reactedAt         DateTime? @map("reacted_at")
+  heavyAt           DateTime? @map("heavy_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@map("hosted_linq_ack_reaction")
+}
+
 model HostedLinqProviderEvent {
   eventId              String   @id @map("event_id")
   eventType            String   @map("event_type")
