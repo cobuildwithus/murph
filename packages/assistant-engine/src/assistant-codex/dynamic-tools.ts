@@ -8194,27 +8194,42 @@ function parseSelectReplyTargetArguments(
 }
 
 /**
- * Queues Murph's reaction, unless Web's "on it" tapback already sits on that
- * message: iMessage keeps one tapback per sender per message, so a second
- * reaction would replace it. The skip is a success and sets no final action.
+ * Queues Murph's reaction. When Web's "on it" tapback already sits on that
+ * message, Murph learns which emoji it was: iMessage keeps one tapback per
+ * sender per message, so a different reaction replaces it, and the same one
+ * (thumbs_up over Web's native 👍 Like) would change nothing and is skipped.
+ * Neither result sets a final action.
  */
 function buildReactToMessageToolResult<Reaction extends string>(input: {
   reaction: Reaction
   target: { ackReaction?: string; targetInputId: string }
 }) {
-  if (input.target.ackReaction) {
+  const ackReaction = input.target.ackReaction
+  if (ackReaction && ASSISTANT_REACTION_EMOJI[input.reaction] === ackReaction) {
     return toolTextResult(
       true,
-      `no reaction sent: this message already has your ${input.target.ackReaction} tapback from when it arrived, and a second one would replace it. Carry on; if a reaction was going to be your whole reply, finish without reply.`,
+      `no reaction sent: this message already has your ${ackReaction} tapback from when it arrived. Carry on; if a reaction was going to be your whole reply, finish without reply.`,
     )
   }
   return {
-    ...toolTextResult(true, 'reaction queued'),
+    ...toolTextResult(
+      true,
+      ackReaction
+        ? `reaction queued; it replaces the ${ackReaction} tapback you put on this message when it arrived (one tapback per message). No need to mention it.`
+        : 'reaction queued',
+    ),
     reactionPatch: {
       reaction: input.reaction,
       targetInputId: input.target.targetInputId,
     },
   }
+}
+
+/** How each Murph reaction shows in iMessage; thumbs_up is the native Like. */
+const ASSISTANT_REACTION_EMOJI: Readonly<Record<string, string>> = {
+  heart: '❤️',
+  laugh: '😂',
+  thumbs_up: '👍',
 }
 
 async function authorizeDynamicToolMessageTarget(input: {
