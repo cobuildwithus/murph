@@ -17,7 +17,6 @@ function buildPrompt(conversationScope: AssistantConversationScope): string {
     conversationScope,
     currentLocalDate: '2026-08-02',
     currentTimeZone: 'America/New_York',
-    modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
     turnTrigger: null,
   })

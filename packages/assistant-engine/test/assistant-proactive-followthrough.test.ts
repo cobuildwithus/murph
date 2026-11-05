@@ -23,11 +23,9 @@ const behaviorFollowthroughSkillPath = path.join(
 describe('assistant proactive follow-through', () => {
   it('keeps exact-package acceptance and narrow support boundaries in the owning skill', async () => {
     const direct = buildAssistantExecutionBehaviorText({
-      profile: 'gpt5-agentic',
       progressUpdateMode: 'direct',
     })
     const group = buildAssistantExecutionBehaviorText({
-      profile: 'gpt5-agentic',
       progressUpdateMode: 'group',
     })
     const setup = await readFile(behaviorFollowthroughSkillPath, 'utf8')

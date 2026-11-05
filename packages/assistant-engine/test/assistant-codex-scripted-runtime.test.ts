@@ -3729,7 +3729,7 @@ text(result.output);
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: scope, currentLocalDate: '2026-04-11',
           currentInstant: '2026-04-11T12:00:00.000Z', currentTimeZone: 'UTC',
-          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+          hostedRuntime: true,
           onboardingGuidance: false, ordinaryInboundTurn: true,
         })
         return {
@@ -3838,7 +3838,7 @@ text(result.output);
         channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: scope, currentLocalDate: '2030-01-10',
         currentInstant: '2030-01-10T16:00:00.000Z', currentTimeZone: 'UTC',
-        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        hostedRuntime: true,
         onboardingGuidance: false, ordinaryInboundTurn: true,
       })
       const developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
@@ -3910,7 +3910,6 @@ text(result.output);
       currentInstant: '2026-09-08T16:00:00.000Z',
       currentTimeZone: 'America/New_York',
       hostedRuntime: true,
-      modelBehaviorProfile: 'gpt5-agentic',
       onboardingGuidance: false,
       ordinaryInboundTurn: true,
     })
@@ -8410,7 +8409,6 @@ text(JSON.stringify(result));
       currentLocalDate: '2026-07-30',
       currentTimeZone: 'America/New_York',
       hostedRuntime: true,
-      modelBehaviorProfile: 'gpt5-agentic',
       onboardingGuidance: false,
       turnTrigger: null,
     })
@@ -11117,7 +11115,6 @@ function buildScriptedHostedSystemPrompt(
     currentLocalDate: '2026-07-30',
     currentTimeZone: 'America/New_York',
     hostedRuntime: true,
-    modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance,
     ordinaryInboundTurn: scheduledOccurrenceAt === undefined,
     scheduledOccurrenceAt,

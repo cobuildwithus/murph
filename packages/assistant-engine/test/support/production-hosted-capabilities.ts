@@ -18,7 +18,7 @@ export function assertProductionHostedCapabilityParity(input: {
   assert.equal(input.dynamicTools.length, 49)
   assert.deepEqual(input.dynamicTools.map((tool) => `${tool.namespace}.${tool.name}`), PRODUCTION_HOSTED_TOOL_NAMES)
   const bytes = Buffer.byteLength(input.developerInstructions ?? '')
-  assert.ok(bytes >= 121_000 * 0.97 && bytes <= 122_348 * 1.03, `Hosted developer instructions outside production envelope: ${bytes} bytes`)
+  assert.ok(bytes >= 87_330 * 0.97 && bytes <= 87_330 * 1.03, `Hosted developer instructions outside production envelope: ${bytes} bytes`)
   assert.ok(input.developerInstructions?.includes('Murph CLI Contract:'))
 }
 

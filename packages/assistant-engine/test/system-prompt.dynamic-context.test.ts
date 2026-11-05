@@ -24,7 +24,6 @@ const baseConversationInput: AssistantSystemPromptInput = {
   },
   currentLocalDate: '2026-06-29',
   currentTimeZone: 'America/New_York',
-  modelBehaviorProfile: 'gpt5-agentic',
   onboardingGuidance: false,
 }
 
@@ -40,11 +39,19 @@ describe('assistant dynamic context prompt blocks', () => {
     expect(prompt).not.toContain('`vault-cli wearables latest` for recent nightly summaries')
   })
 
-  it.each(['direct', 'group'] as const)('separates reminder model selection from route inheritance in %s chats', conversationScope => {
+  it.each(['direct', 'group'] as const)('separates reminder model selection from route inheritance in %s chats', async conversationScope => {
     const { prompt } = buildAssistantSystemPromptLayers({ ...baseConversationInput, conversationScope, channel: 'linq', hostedRuntime: true, assistantHostedAutomationAvailable: true })
     expect(prompt).toContain('Always include this override')
     expect(prompt).toContain('`gpt-6-luna` for fixed cues, `gpt-6.1-sol` for judgment, or the member’s explicit choice')
-    expect(prompt).toContain('A new automation inherits the delivery route of')
+    if (conversationScope === 'group') {
+      expect(prompt).toContain('A new automation inherits the delivery route of')
+    } else {
+      const skill = (await readFile(
+        path.join(resolveAssistantSkillsRoot(), 'reminders', 'SKILL.md'), 'utf8',
+      )).replace(/\s+/gu, ' ')
+      expect(prompt).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/reminders/SKILL.md')
+      expect(skill).toContain("A new automation inherits this conversation's delivery route")
+    }
   })
 
   it.each(['direct', 'group'] as const)('routes lasting corrections to their canonical owner in %s conversations', (conversationScope) => {
@@ -62,10 +69,10 @@ describe('assistant dynamic context prompt blocks', () => {
     expect(prompt).toContain('Scheduled automation changes are unavailable in this turn')
   })
 
-  it.each(['direct', 'group'] as const)('keeps initiative bounded in the assembled %s prompt for Sol and existing profiles', (conversationScope) => {
-    for (const modelBehaviorProfile of ['default', 'gpt5-agentic'] as const) {
+  it.each(['direct', 'group'] as const)('keeps initiative bounded in the assembled %s prompt for Sol', async (conversationScope) => {
+    {
       const { prompt, stableRouteCapabilityPrompt, dynamicTurnContextPrompt } = buildAssistantSystemPromptLayers({
-        ...baseConversationInput, conversationScope, modelBehaviorProfile,
+        ...baseConversationInput, conversationScope,
         channel: 'linq', hostedRuntime: true,
       })
       expect(stableRouteCapabilityPrompt).toContain('Concrete "can you" or "help me" requests ask for action')
@@ -73,9 +80,19 @@ describe('assistant dynamic context prompt blocks', () => {
       expect(prompt.match(/Delegated initiative:/gu)).toHaveLength(1)
       expect(dynamicTurnContextPrompt).not.toContain('Delegated initiative:')
       expect(prompt).toContain('never system, safety, privacy, evidence, consent, confirmation, or handoff requirements')
-      expect(prompt).toContain('connected-source records disappeared after sync')
-      expect(prompt).toContain('care settings such as clinics')
-      expect(prompt).toContain('from both summary and reproduction, even when they explain the complaint')
+      if (conversationScope === 'group') {
+        expect(prompt).toContain('connected-source records disappeared after sync')
+        expect(prompt).toContain('care settings such as clinics')
+        expect(prompt).toContain('from both summary and reproduction, even when they explain the complaint')
+      } else {
+        const skill = (await readFile(
+          path.join(resolveAssistantSkillsRoot(), 'product-feedback', 'SKILL.md'), 'utf8',
+        )).replace(/\s+/gu, ' ')
+        expect(prompt).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/product-feedback/SKILL.md')
+        expect(skill).toContain('connected-source records disappeared after sync')
+        expect(skill).toContain('care settings such as clinics')
+        expect(skill).toContain('from both summary and reproduction, even when they explain the complaint')
+      }
       expect(prompt).toContain('Never infer another person\'s consent or new permission')
       expect(prompt).toContain('Respect group floor, silence, and scheduled-turn rules; no extra reply or follow-up')
       expect(prompt).toContain('If input is needed, ask one highest-value blocker last on texting routes.')
@@ -157,7 +174,7 @@ describe('assistant dynamic context prompt blocks', () => {
     expect(prompt).not.toContain('`no_recent_reporting` means an older sharing grant has no records in that window')
   })
 
-  it('keeps exact-scope consent recovery and truthful delivery guidance resident', () => {
+  it('keeps exact-scope consent recovery and truthful delivery guidance with their owners', async () => {
     const { prompt } = buildAssistantSystemPromptLayers({
       ...baseConversationInput, channel: 'linq', conversationScope: 'group',
       hostedRuntime: true, assistantHostedGroupToolSurface: 'families',
@@ -174,9 +191,13 @@ describe('assistant dynamic context prompt blocks', () => {
       ...baseConversationInput, channel: 'linq', conversationScope: 'direct',
       hostedRuntime: true, assistantHostedGroupToolSurface: 'families',
     }).prompt
-    expect(direct).toContain('Private group-sharing recovery:')
-    expect(direct).toContain('lead with the next step: ask the member to send that request in the named group chat')
-    expect(direct).toContain('a group_consult handoff only posts context and cannot perform this change')
+    const skill = (await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'private-group-access', 'SKILL.md'), 'utf8',
+    )).replace(/\s+/gu, ' ')
+    expect(direct).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/private-group-access/SKILL.md')
+    expect(skill).toContain('Sharing permission requests')
+    expect(skill).toContain('lead with the next step: ask the member to send that request in the named group chat')
+    expect(skill).toContain('a `group_consult` handoff only posts context and cannot make this change')
     expect(direct).not.toContain('Group sharing recovery in the current group chat:')
   })
 
@@ -237,7 +258,7 @@ describe('assistant dynamic context prompt blocks', () => {
     expect(prompt).toContain('the sender is not authenticated strongly enough')
   })
 
-  it.each(['linq', 'telegram'])('composes existing-file attachment guidance for private %s replies', (channel) => {
+  it.each(['linq', 'telegram'])('composes existing-file attachment guidance for private %s replies', async (channel) => {
     const layers = buildAssistantSystemPromptLayers({
       ...baseConversationInput,
       channel,
@@ -254,10 +275,14 @@ describe('assistant dynamic context prompt blocks', () => {
       .find(tool => tool.name === 'send_vault_file')
     expect(tool).toBeDefined()
     const existingFileGuidance = 'For an existing saved file, pass its current vault-relative ref directly'
-    expect(prompt).toContain(existingFileGuidance)
+    const skill = (await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'file-send', 'SKILL.md'), 'utf8',
+    )).replace(/\s+/gu, ' ')
+    expect(prompt).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/file-send/SKILL.md')
+    expect(skill).toContain(existingFileGuidance)
     expect(tool!.description).toContain(existingFileGuidance)
-    expect(prompt).toContain('Never stage possible later sends or move or copy existing files there.')
-    expect(prompt).toContain('the runtime adds the exact approval link outside model context')
+    expect(skill).toContain('Never stage possible later sends or move or copy existing files there.')
+    expect(skill).toContain('the runtime adds the exact approval link outside model context')
     expect(prompt).not.toMatch(/only (?:be sent to|for) (?:the current |your )?iMessage/iu)
   })
 
@@ -522,7 +547,6 @@ describe('assistant dynamic context prompt blocks', () => {
       },
       currentLocalDate: '2026-06-29',
       currentTimeZone: 'America/New_York',
-      modelBehaviorProfile: 'gpt5-agentic',
       onboardingGuidance: false,
       scheduledOccurrenceAt: '2026-06-29T13:00:00.000Z',
       turnTrigger: 'automation-cron',

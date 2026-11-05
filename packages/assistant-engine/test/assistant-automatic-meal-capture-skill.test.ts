@@ -21,7 +21,6 @@ function buildPrompt(input: {
     currentTimeZone: 'America/New_York',
     conversationScope: input.conversationScope ?? 'direct',
     onboardingGuidance: false,
-    modelBehaviorProfile: 'gpt5-agentic',
     scheduledOccurrenceAt: input.scheduledOccurrenceAt,
     turnTrigger: null,
     assistantContextSnapshotPrompt: null,

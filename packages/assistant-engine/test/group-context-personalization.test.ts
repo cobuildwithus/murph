@@ -26,7 +26,6 @@ const basePromptInput = {
   currentLocalDate: '2026-08-07',
   currentTimeZone: 'America/New_York',
   hostedRuntime: true,
-  modelBehaviorProfile: 'gpt5-agentic',
   onboardingGuidance: false,
 } satisfies AssistantSystemPromptInput
 

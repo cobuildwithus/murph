@@ -29,7 +29,7 @@ describe('native poll dynamic tool', () => {
         assistantCliContract: null, assistantPollsAvailable: available,
         channel: 'telegram', cliAccess: { rawCommand: 'vault-cli' },
         conversationScope, currentLocalDate: '2026-09-21', currentTimeZone: 'UTC',
-        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+        hostedRuntime: true,onboardingGuidance: false,
       })
       expect(layers.stableRouteCapabilityPrompt.includes('Native polls:')).toBe(available)
       expect(resolveMurphDynamicTools({ pollsAvailable: available }).includes(MURPH_POLL_TOOL)).toBe(available)

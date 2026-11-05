@@ -155,9 +155,7 @@ describeRealCodex('real Codex progress channel contract e2e', { tags: ['real-cod
     const result = await executeCodexAppServerTurn({
       approvalPolicy: 'never',
       codexHome,
-      developerInstructions: buildAssistantExecutionBehaviorText({
-        profile: 'gpt5-agentic',
-      }),
+      developerInstructions: buildAssistantExecutionBehaviorText({}),
       env,
       model,
       modelProvider,

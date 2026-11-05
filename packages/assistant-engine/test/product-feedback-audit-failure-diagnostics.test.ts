@@ -274,7 +274,7 @@ describe('scheduled audit rejection through the real parser, recorder and failur
       assistantCliContract: null, assistantContextSnapshotPrompt: null,
       assistantHostedDeviceConnectAvailable: false, assistantKnowledgeToolsAvailable: false,
       channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
-      currentLocalDate: '2030-01-07', currentTimeZone: 'UTC', modelBehaviorProfile: 'gpt5-agentic',
+      currentLocalDate: '2030-01-07', currentTimeZone: 'UTC',
       turnTrigger: 'automation-cron', hostedRuntime: true, conversationScope: 'direct', onboardingGuidance: false,
     })
     const composed = [prompt, MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION.instructions,

@@ -78,6 +78,15 @@ read, write, or select personal email, calendar, storage, notes, or tasks. Ask
 the person to continue in their private Murph conversation. Return a URL only
 when the accountless service created the requested group-relevant deliverable.
 
+## Official weather alerts
+
+For heat, cold or air-quality alerts, geocode a known city or region with
+`OPENWEATHER_API_GET_GEOCODING_DIRECT`; never guess coordinates. Call the
+direct-only `MURPH_OPENWEATHER_GET_NATIONAL_ALERTS` once, counting retries,
+without search, with numeric `lat` and `lon`. Only returned alerts count as
+context, never as a cause. Continue on failure. Ask for a location only when
+needed.
+
 ## Outdoor reminder location
 
 Before saving an outdoor reminder, reuse a city or region already known from the

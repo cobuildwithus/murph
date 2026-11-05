@@ -1,3 +1,7 @@
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+
+import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
 import { describe, expect, it, vi } from 'vitest'
 import { MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION, resolveUsageOptimizerFeedbackScope } from '../src/assistant/weekly-usage-optimizer.js'
 import { MURPH_MANAGED_AUTOMATIONS } from '../src/assistant/managed-automations.js'
@@ -48,9 +52,13 @@ describe('weekly usage optimizer', () => {
     expect(seed.instructions).toContain('leave that candidate unchanged and report incomplete coverage')
   })
 
-  it('composes bounded Luna eligibility without the retired no-tool prohibition', () => {
-    const prompt = buildAssistantSystemPrompt({ assistantCliContract: null, assistantContextSnapshotPrompt: null, assistantHostedDeviceConnectAvailable: false, assistantKnowledgeToolsAvailable: false, channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, currentLocalDate: '2026-10-05', currentTimeZone: 'UTC', modelBehaviorProfile: 'gpt5-agentic', turnTrigger: 'automation-cron', hostedRuntime: true, conversationScope: 'direct', onboardingGuidance: false })
-    const composed = [prompt, seed.instructions, MURPH_AUTOMATION_TOOL.description].join('\n')
+  it('composes bounded Luna eligibility without the retired no-tool prohibition', async () => {
+    const prompt = buildAssistantSystemPrompt({ assistantCliContract: null, assistantContextSnapshotPrompt: null, assistantHostedDeviceConnectAvailable: false, assistantKnowledgeToolsAvailable: false, channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, currentLocalDate: '2026-10-05', currentTimeZone: 'UTC',turnTrigger: 'automation-cron', hostedRuntime: true, conversationScope: 'direct', onboardingGuidance: false })
+    const skill = (await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'product-feedback', 'SKILL.md'), 'utf8',
+    )).replace(/\s+/gu, ' ')
+    expect(prompt).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/product-feedback/SKILL.md')
+    const composed = [prompt, skill, seed.instructions, MURPH_AUTOMATION_TOOL.description].join('\n')
     expect(composed).toContain('bounded low-risk workflows')
     expect(composed).toContain('Preserve explicit member model preferences')
     expect(composed).toContain('Scheduled audits report evidence and coverage limits without questions')

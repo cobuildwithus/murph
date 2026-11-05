@@ -1,4 +1,9 @@
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+
 import { describe, expect, it } from 'vitest'
+
+import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
 
 import {
   buildAssistantSystemPromptLayers,
@@ -8,32 +13,36 @@ import {
 const LABS_GUIDANCE_HEADER = 'Lab test discovery:'
 
 describe('assistant labs prompt guidance', () => {
-  it('puts the read-only catalog policy in the stable direct layer only', () => {
+  it('puts the read-only catalog policy behind the stable direct trigger only', async () => {
     const layers = buildAssistantSystemPromptLayers(createPromptInput({
       assistantHostedLabsAvailable: true,
       conversationScope: 'direct',
     }))
 
+    const skill = (await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'lab-tests', 'SKILL.md'), 'utf8',
+    )).replace(/\s+/gu, ' ')
+    expect(layers.stableRouteCapabilityPrompt).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/lab-tests/SKILL.md')
     expect(layers.stableRouteCapabilityPrompt).toContain(LABS_GUIDANCE_HEADER)
-    expect(layers.stableRouteCapabilityPrompt).toContain(
+    expect(skill).toContain(
       'cannot order, book, pay for, reserve, or start checkout',
     )
-    expect(layers.stableRouteCapabilityPrompt).toContain(
-      'heart health, overall health, liver health, or longevity',
+    expect(skill).toContain(
+      'heart health, overall health, liver health or longevity',
     )
-    expect(layers.stableRouteCapabilityPrompt).toContain(
+    expect(skill).toContain(
       'prefer the matching biomarker or narrow result',
     )
-    expect(layers.stableRouteCapabilityPrompt).toContain(
+    expect(skill).toContain(
       'Keep each search to at most 5 results',
     )
-    expect(layers.stableRouteCapabilityPrompt).toContain(
+    expect(skill).toContain(
       'the current catalog price',
     )
-    expect(layers.stableRouteCapabilityPrompt).toContain(
+    expect(skill).toContain(
       'does not establish Murph ordering, member eligibility, appointment availability',
     )
-    expect(layers.stableRouteCapabilityPrompt).toContain(
+    expect(skill).toContain(
       'ordering through Murph is planned for later',
     )
     expect(layers.stableRouteCapabilityPrompt).not.toMatch(/junction/iu)
@@ -73,7 +82,6 @@ function createPromptInput(
     },
     currentLocalDate: '2026-07-16',
     currentTimeZone: 'America/New_York',
-    modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
     ...overrides,
   }

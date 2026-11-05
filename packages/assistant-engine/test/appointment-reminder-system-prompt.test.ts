@@ -1,4 +1,9 @@
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+
 import { describe, expect, it } from 'vitest'
+
+import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
 
 import {
   buildAssistantSystemPrompt,
@@ -17,36 +22,39 @@ function createPromptInput(
     conversationScope,
     currentLocalDate: '2026-08-10',
     currentTimeZone: 'America/New_York',
-    modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
     turnTrigger: null,
   }
 }
 
 describe('appointment reminder system prompt', () => {
-  it('proactively creates one well-timed reminder for a confirmed private appointment', () => {
+  it('proactively creates one well-timed reminder for a confirmed private appointment', async () => {
     const prompt = buildAssistantSystemPrompt(createPromptInput('direct'))
+    const skill = (await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'reminders', 'SKILL.md'), 'utf8',
+    )).replace(/\s+/gu, ' ')
+    expect(prompt).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/reminders/SKILL.md')
 
     expect(prompt).toContain('Private appointment follow-through:')
     expect(prompt).toContain('during an ordinary attended turn')
     expect(prompt).toContain('concrete future appointment')
     expect(prompt).toContain('exactly one one-shot reminder')
-    expect(prompt).toContain('unless the member explicitly declines it')
+    expect(prompt).toContain('unless the member declines it')
     expect(prompt).toContain('do not wait for a separate reminder request')
-    expect(prompt).toContain('never knowingly create a duplicate')
-    expect(prompt).toContain(
-      'A member-specified reminder time overrides these defaults',
+    expect(skill).toContain('never knowingly create a duplicate')
+    expect(skill).toContain(
+      'member-specified reminder time overrides these defaults',
     )
-    expect(prompt).toContain('For a start before 10:00 AM')
-    expect(prompt).toContain('otherwise 8:00 PM')
-    expect(prompt).toContain('For a start at 10:00 AM or later')
-    expect(prompt).toContain('8:00 AM that day')
-    expect(prompt).toContain('never create a past or after-start occurrence')
-    expect(prompt).toContain(
-      'hypothetical, tentative, canceled, completed, or date/time-unknown appointment',
+    expect(skill).toContain('For a start before 10:00 AM')
+    expect(skill).toContain('otherwise 8:00 PM')
+    expect(skill).toContain('For a start at 10:00 AM or later')
+    expect(skill).toContain('8:00 AM that day')
+    expect(skill).toContain('never create a past or after-start occurrence')
+    expect(skill).toContain(
+      'hypothetical, tentative, canceled, completed, or date-or-time-unknown appointment',
     )
-    expect(prompt).toContain(
-      'archive it or patch its timing rather than leaving a stale occurrence',
+    expect(skill).toContain(
+      'archive it or patch its timing',
     )
     expect(prompt).toContain('only after its save and timing are verified')
   })

@@ -4,7 +4,7 @@ it.each([false, true])("composes canonical demographic persistence without gende
   const prompt = buildAssistantSystemPrompt({ assistantCliContract: null, assistantContextSnapshotPrompt: null,
     channel: "linq", cliAccess: { rawCommand: "vault-cli" }, conversationScope: "direct",
     currentLocalDate: "2026-01-01", currentTimeZone: "UTC", hostedRuntime: true,
-    modelBehaviorProfile: "gpt5-agentic", onboardingGuidance, ordinaryInboundTurn: true,
+    onboardingGuidance, ordinaryInboundTurn: true,
   });
   // The route lives in every chat; the option rules (--as-of, clearing) stay in
   // the command's own help.

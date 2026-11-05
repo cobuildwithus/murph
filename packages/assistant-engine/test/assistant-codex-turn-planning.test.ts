@@ -1,10 +1,11 @@
 import { MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION_ID } from '../src/assistant/managed-automation-ids.js'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
 import { buildCodexThreadStartParams } from '../src/assistant-codex/app-server-requests.ts'
 import { withCodexToolInputContract } from '../src/assistant-codex/tool-input-contract.ts'
 import { MURPH_CODEX_BASE_INSTRUCTIONS } from '../src/assistant/codex-base-instructions.ts'
@@ -362,9 +363,15 @@ describe('assistant Codex turn planning', () => {
         }),
       }),
     }
-    // Preserve the weekly audit rule alongside the runtime's wiki guidance;
-    // the complete-plan fingerprints below characterize their composition.
-    for (const plan of [plans.direct, plans.group, plans.scheduledEmail]) {
+    // Direct turns load the weekly audit rule from its skill; group turns
+    // retain the resident rule. Fingerprints characterize both compositions.
+    const feedbackSkill = (await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'product-feedback', 'SKILL.md'), 'utf8',
+    )).replace(/\s+/gu, ' ')
+    expect(feedbackSkill).toContain(
+      'Scheduled audits report evidence and coverage limits without questions.',
+    )
+    for (const plan of [plans.group]) {
       for (const instructions of [plan.systemPrompt, plan.developerInstructions]) {
         expect(instructions).toContain(
           'Scheduled audits report evidence and coverage limits without questions.',
@@ -373,6 +380,7 @@ describe('assistant Codex turn planning', () => {
     }
     for (const plan of [plans.direct, plans.scheduledEmail]) {
       for (const instructions of [plan.systemPrompt, plan.developerInstructions]) {
+        expect(instructions).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/product-feedback/SKILL.md')
         expect(instructions).toContain('vault-cli knowledge show <slug> --format json')
         expect(instructions).toContain('start from exact supplied page references')
         expect(instructions).toContain(
@@ -450,11 +458,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "9d191cb5f448d677cb6884d171ec373091c2519c362cd9ea86d5952d2557483c",
+        "direct": "52be23d5fa0ffb25415135cf93c125cd140ceb935de55cdee6b13f9538af19cf",
         "group": "5310158636bd160d61ad8b50b425e4a08880ddbe2d055ad499bbab8643a231ef",
         "maintenance": "52f122f38125b96ccf960ea62ada87ef983f3e1060cdafef33eae3309b970038",
         "outputOnly": "b87c76c464b664e3d9dcbf947b1cd7a3c823dad67b72a8597c8a462e1bd3dd54",
-        "scheduledEmail": "afa404eb2a47c764e930c806e2969538be7cb6dcee71e451eed4d30b5dc65df0",
+        "scheduledEmail": "375f49ed1eb5a10589145ee32b4adacbfa7b585ebb7a99446f79353275479a37",
       }
     `)
   })

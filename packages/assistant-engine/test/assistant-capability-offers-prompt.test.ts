@@ -1,4 +1,9 @@
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+
 import { describe, expect, it } from 'vitest'
+
+import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
 
 import {
   renderAssistantInputGroupReactionContextPrompt,
@@ -134,7 +139,7 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('Group challenges are group-chat only')
   })
 
-  it('names generic group-email and new-group permission mechanics inside hosted-group guidance', () => {
+  it('names generic group-email and new-group permission mechanics inside hosted-group guidance', async () => {
     const prompt = buildAssistantSystemPromptLayers(createCommonCodexPromptInput({
         assistantHostedAutomationAvailable: true,
         hostedRuntime: true,
@@ -144,51 +149,63 @@ describe('assistant capability-offers prompt contract', () => {
       HOSTED_GROUPS_HEADER,
     )
 
-    expect(section).toContain('`murph.group_data action="read_shared" audience="group_email"`')
-    expect(section).toContain('Preparation returns only currently authorized address-free facts')
+    const skill = (await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'private-group-access', 'SKILL.md'), 'utf8',
+    )).replace(/\s+/gu, ' ')
+    const groupSection = getPromptSection(
+      buildAssistantSystemPromptLayers(createCommonCodexPromptInput({
+        assistantHostedAutomationAvailable: true,
+        conversationScope: 'group',
+        hostedRuntime: true,
+      })).stableRouteCapabilityPrompt,
+      HOSTED_GROUPS_HEADER,
+    )
+    expect(prompt).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/private-group-access/SKILL.md')
+    expect(groupSection).toContain('`murph.group_data action="read_shared" audience="group_email"`')
+    expect(groupSection).toContain('Preparation returns only currently authorized address-free facts')
     expect(section).not.toContain('`vault-cli group weekly')
-    expect(section).toContain('Send revalidates recipients and grants')
-    expect(section).toContain('`accepted` means pending, not delivered')
-    expect(section).toContain('never exposes recipient addresses to the model')
-    expect(section).toContain('email requires `group-email.v0`')
+    expect(groupSection).toContain('Send revalidates recipients and grants')
+    expect(groupSection).toContain('`accepted` means pending, not delivered')
+    expect(groupSection).toContain('never exposes recipient addresses to the model')
+    expect(skill).toContain('email requires `group-email.v0`')
     expect(section).not.toContain('proactively call `action="post_join_offer"` once')
-    expect(section).toContain('`murph.group_data action="read_shared"` as the only hosted path')
-    expect(section).toContain('resolves live access after the tool call')
+    expect(skill).toContain('`murph.group_data action="read_shared"` is the only hosted path')
+    expect(skill).toContain('resolves live access after the call')
     expect(section).not.toContain(
       'explicit current visibility or explicitly present-time attribution of a consented shared metric',
     )
     expect(section).not.toContain('call exact-scope `read_shared` once first')
     expect(section).not.toContain('`pending` means permission is active')
-    expect(section).toContain('Model-size `status="partial"` lists current `omittedParticipantIds`')
-    expect(section).toContain('never infer their departure, score, diagnostics, or permission')
-    expect(section).toContain('or call the standings complete')
-    expect(section).toContain("require its exact `Sender:` handle in exactly one row's `currentTurnHandles`")
-    expect(section).toContain('scheduled and detached reads have no current-turn handles')
+    expect(skill).toContain('Model-size `status="partial"` lists current `omittedParticipantIds`')
+    expect(skill).toContain('never infer their departure, score, diagnostics or permission')
+    expect(skill).toContain('or call the standings complete')
+    expect(groupSection).toContain("require its exact `Sender:` handle in exactly one row's `currentTurnHandles`")
+    expect(groupSection).toContain('scheduled and detached reads have no current-turn handles')
     expect(section).not.toContain('For running-challenge standings')
-    expect(section).toContain('`not_granted`, `pending`, `missing`, and `available`')
+    expect(skill).toContain('`not_granted`, `pending`, `missing` and `available`')
     expect(prompt).not.toContain('stored, not rechecked')
-    expect(prompt).toContain('New access uses v1')
-    expect(prompt).toContain('v0 only for existing requests/grants')
-    expect(prompt).toContain('Return tagged records separately')
-    expect(prompt).toContain('Legacy may be untagged')
-    expect(prompt).toContain('no cross-source winner')
-    expect(prompt).toContain('Never imply max-HR baselines')
+    expect(skill).toContain('New access uses v1')
+    expect(skill).toContain('v0 only for existing requests or grants')
+    expect(skill).toContain('Return tagged records separately')
+    expect(skill).toContain('Legacy records may be untagged')
+    expect(skill).toContain('no cross-source winner')
+    expect(skill).toContain('Never imply max-HR baselines')
     expect(prompt).not.toContain('`selected` score')
-    expect(section).toContain('Use `read_current` for membership and permissions')
-    expect(section).toContain('Neither path grants Apple Health access')
-    expect(section).toContain('missing Steps never proves someone denied or forgot Apple Health permission')
-    expect(section).toContain(
-      "After read_current, use the group-chat skill's core permissions only for `status=none`",
+    expect(skill).toContain('`murph.group_membership action="read_current"` is membership and permission setup only')
+    expect(skill).toContain('Neither path grants Apple Health access')
+    expect(skill).toContain('missing Steps never proves someone denied or forgot Apple Health permission')
+    expect(skill).toContain(
+      "After `read_current`, use the group-chat skill's core permissions only for `status=none`",
     )
-    expect(section).toContain('existing groups use workflow scopes')
-    expect(section).toContain('SMS supports the same roster and group-access workflow')
-    expect(section).toContain('`action="offer_access"` is the sole model-facing join or permission action')
-    expect(section).toContain('`presentation="native"`')
-    expect(section).toContain('does not prove UI was newly posted or is currently visible')
-    expect(section).toContain('`presentation="link"` with the exact first-party URL')
-    expect(section).toContain('`status="unavailable"` when no consent surface is proven')
+    expect(skill).toContain('existing groups use workflow scopes')
+    expect(groupSection).toContain('SMS supports the same roster and group-access workflow')
+    expect(groupSection).toContain('`action="offer_access"` is the sole model-facing join or permission action')
+    expect(groupSection).toContain('`presentation="native"`')
+    expect(groupSection).toContain('does not prove UI was newly posted or is currently visible')
+    expect(groupSection).toContain('`presentation="link"` with the exact first-party URL')
+    expect(groupSection).toContain('`status="unavailable"` when no consent surface is proven')
     expect(section).not.toContain('when it already posted consent UI')
-    expect(section).toContain(
+    expect(groupSection).toContain(
       'Existing members keep their membership and other grants unchanged',
     )
     expect(section).not.toContain('to join by reacting')
@@ -227,7 +244,7 @@ describe('assistant capability-offers prompt contract', () => {
     )
   })
 
-  it('lists memberships before direct consultation and clarifies from safe inventory labels', () => {
+  it('lists memberships before direct consultation and clarifies from safe inventory labels', async () => {
     const directLayers = buildAssistantSystemPromptLayers(
       createCommonCodexPromptInput(),
     )
@@ -246,81 +263,85 @@ describe('assistant capability-offers prompt contract', () => {
       HOSTED_GROUPS_HEADER,
     )
 
-    expect(directSection).toContain(
+    const skill = (await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'private-group-access', 'SKILL.md'), 'utf8',
+    )).replace(/\s+/gu, ' ')
+    expect(directSection).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/private-group-access/SKILL.md')
+    expect(skill).toContain(
       'call `murph.group_membership action="list_memberships"`',
     )
-    expect(directSection).toContain(
-      'joined-group consultation is available only for groups Murph has already joined',
+    expect(skill).toContain(
+      'Joined-group consultation works only for groups Murph has already joined',
     )
-    expect(directSection).toContain('cannot access an unjoined device chat')
-    expect(directSection).toContain(
+    expect(skill).toContain('cannot reach an unjoined device chat')
+    expect(skill).toContain(
       'State that distinction for capability questions',
     )
-    expect(directSection).toContain(
-      'search/load deferred `murph.group_consult` via `tool_search` or code-mode `ALL_TOOLS` before redirecting or denying',
+    expect(skill).toContain(
+      'search or load deferred `murph.group_consult` via `tool_search` or code-mode `ALL_TOOLS` before redirecting or denying',
     )
-    expect(directSection).toContain(
+    expect(skill).toContain(
       'do not claim this build cannot access or message a joined group',
     )
-    expect(directSection).toContain(
+    expect(skill).toContain(
       'Select only an exact opaque `membershipId` returned in this conversation',
     )
-    expect(directSection).toContain(
+    expect(skill).toContain(
       'while `nextCursor` is nonnull, call `list_memberships` again with that exact cursor',
     )
-    expect(directSection).toContain(
+    expect(skill).toContain(
       "Resolve the member's ordinary cue against every inventory entry's title",
     )
-    expect(directSection).not.toContain('If the candidate is not settled')
-    expect(directSection).toContain(
+    expect(skill).not.toContain('If the candidate is not settled')
+    expect(skill).toContain(
       'send only identity-neutral factual context; the host supplies any group-safe attribution',
     )
-    expect(directSection).not.toContain('memory show')
-    expect(directSection).toContain(
-      '`participantRoster.participantCount`, which is the real chat participant count',
+    expect(skill).not.toContain('memory show')
+    expect(skill).toContain(
+      '`participantRoster.participantCount`, the real chat participant count',
     )
-    expect(directSection).toContain(
+    expect(skill).toContain(
       'availability controls whether the resolved destination can be used, never whether it is a semantic match',
     )
-    expect(directSection).toContain(
+    expect(skill).toContain(
       'An omitted availability field is a legacy entry and remains usable',
     )
-    expect(directSection).toContain(
+    expect(skill).toContain(
       'Never remove an unavailable match and thereby select another group',
     )
-    expect(directSection).toContain(
-      'Never use `memberCount` for this clarification',
+    expect(skill).toContain(
+      'Never use `memberCount` for this',
     )
-    expect(directSection).toContain(
-      'Never treat `truncated`, one unavailable entry, or one entry\'s unavailable participant roster as global unavailability',
+    expect(skill).toContain(
+      'Never treat `truncated`, one unavailable entry, or one entry\'s unavailable roster as global unavailability',
     )
-    expect(directSection).toContain(
-      'every inventory entry containing that safe label remains a candidate',
+    expect(skill).toContain(
+      'every inventory entry containing that safe label stays a candidate',
     )
-    expect(directSection).toContain(
-      'Do not treat people the member omitted as exclusions unless they explicitly say only',
+    expect(skill).toContain(
+      'Do not treat people the member omitted as exclusions unless they say "only"',
     )
-    expect(directSection).toContain('ask one concise natural clarification')
-    expect(directSection).toContain(
+    expect(skill).toContain('ask one concise natural clarification')
+    expect(skill).toContain(
       'give every candidate its own real participant count or other safe label',
     )
-    expect(directSection).toContain('paste-or-screenshot fallback')
-    expect(directSection).toContain(
-      'If the selected entry is unavailable, or a selected Ask or handoff returns unavailable',
+    expect(skill).toContain('paste-or-screenshot fallback')
+    expect(skill).toContain(
+      'If the selected entry is unavailable, or a selected ask or handoff returns unavailable',
     )
-    expect(directSection).toContain(
-      'always name the safe title, say explicitly that the chat cannot be used right now and nothing was queued',
+    expect(skill).toContain(
+      'name the safe title, say explicitly that the chat cannot be used right now and nothing was queued',
     )
-    expect(directSection).toContain(
-      'never select an unrelated group or expose identifiers, provider details, or the internal reason',
+    expect(skill).toContain(
+      'never select an unrelated group or expose identifiers, provider details or the internal reason',
     )
-    expect(directSection).toContain('Never expose, quote, edit, infer')
-    expect(directSection).toContain('never guess among unresolved entries or fan out')
-    expect(directSection).toContain('Track each cursor chain separately')
-    expect(directSection).toContain(
-      'When one chain returns its null next cursor, that chain is exhausted for this turn',
+    expect(skill).toContain('Never expose, quote, edit, infer')
+    expect(skill).toContain('never guess among unresolved entries or fan out')
+    expect(skill).toContain('Track each cursor chain separately')
+    expect(skill).toContain(
+      'When one chain returns its null next cursor, it is exhausted for this turn',
     )
-    expect(directSection).toContain(
+    expect(skill).toContain(
       'ignore any renewed cursor or truncation for the exhausted chain and never restart it',
     )
     expect(groupPrompt).not.toContain('last resort for a generic group cue')
@@ -585,9 +606,9 @@ describe('assistant capability-offers prompt contract', () => {
     )
 
     expect(section).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/phone-calls/SKILL.md')
-    expect(section).toContain('Call only the user-authorized destination')
-    expect(section).toContain('Never call emergency services')
-    expect(section).toContain('A call tool start status is not the call outcome')
+    expect(section).toContain('Call only the authorized destination')
+    expect(section).toContain('never call emergency services')
+    expect(section).toContain("A call's start status is not its outcome")
     expect(section).not.toContain('`starting`')
     expect(Buffer.byteLength(section, 'utf8')).toBeLessThanOrEqual(700)
   })
@@ -635,7 +656,6 @@ function createCommonCodexPromptInput(
     currentLocalDate: '2026-04-15',
     currentTimeZone: 'Asia/Kuala_Lumpur',
     onboardingGuidance: true,
-    modelBehaviorProfile: 'gpt5-agentic',
     turnTrigger: null,
     assistantContextSnapshotPrompt: null,
     ...overrides,

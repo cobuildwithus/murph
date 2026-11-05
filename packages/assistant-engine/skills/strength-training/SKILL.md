@@ -78,7 +78,7 @@ Preserve useful stable elements. Identify the bottleneck—progression, dose, te
 
 ### Product action and privacy
 
-Planning is not activation. Do not silently create a protocol, reminder, check-in, or persisted record. Obtain explicit consent for side effects and keep them bounded to the chosen block.
+Planning is not activation. Do not silently create a protocol, reminder, check-in, or saved plan or routine. Obtain explicit consent for those side effects and keep them bounded to the chosen block. Workouts, sets, and other health facts the member reports are still saved under the private saving rules; that capture needs no extra consent.
 
 Treat physique photos, body measurements, pain and symptom notes, training logs, and competition health data as private by default. Sharing requires explicit user intent.
 

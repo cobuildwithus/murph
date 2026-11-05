@@ -480,7 +480,6 @@ function createPromptInput(
     currentLocalDate: '2026-07-30',
     currentTimeZone: 'America/New_York',
     hostedRuntime: true,
-    modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
     ...overrides,
   }

@@ -132,7 +132,7 @@ function buildKnowledgePrompt(input: {
     assistantKnowledgeToolsAvailable: input.assistantKnowledgeToolsAvailable ?? false, channel: 'linq',
     cliAccess: { rawCommand: 'vault-cli' },
     conversationScope: input.conversationScope ?? 'direct', currentLocalDate: '2026-10-16', currentTimeZone: 'UTC',
-    hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, ordinaryInboundTurn: true,
+    hostedRuntime: true,onboardingGuidance: false, ordinaryInboundTurn: true,
   })
 }
 

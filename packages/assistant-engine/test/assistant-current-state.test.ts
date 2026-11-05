@@ -43,7 +43,7 @@ describe('assistant current state', () => {
       channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'direct',
       currentLocalDate: '2030-04-02', currentTimeZone: 'Europe/Warsaw',
       currentInstant: '2030-04-02T06:00:00.000Z', scheduledOccurrenceAt: '2030-04-02T06:00:00.000Z',
-      hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+      hostedRuntime: true,onboardingGuidance: false,
       turnTrigger: 'automation-cron',
     })
     expect(layers.staticCacheableCorePrompt).toContain("Match replies, including voice memo text, to the user's conversational language")

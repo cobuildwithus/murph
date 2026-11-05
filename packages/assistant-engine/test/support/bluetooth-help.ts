@@ -13,7 +13,6 @@ export function buildBluetoothHelpInstructions(conversationScope: 'direct' | 'gr
     currentLocalDate: '2026-10-23',
     currentTimeZone: 'America/New_York',
     hostedRuntime: true,
-    modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
     turnTrigger: null,
   })

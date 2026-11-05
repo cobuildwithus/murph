@@ -25,7 +25,7 @@ describe('group shared metric presentation prompt', () => {
       assistantCliContract: null, assistantHostedAutomationAvailable: available,
       channel, cliAccess: { rawCommand: 'vault-cli' },
       conversationScope: 'group', hostedRuntime: true, onboardingGuidance: false,
-      modelBehaviorProfile: 'gpt5-agentic', currentLocalDate: '2030-02-12', currentTimeZone: 'UTC',
+currentLocalDate: '2030-02-12', currentTimeZone: 'UTC',
     })
     expect(prompt).toContain('never creates new permission or overrides consent, audience, or tool restrictions')
     expect(prompt).toContain(channel === 'email'
@@ -48,7 +48,7 @@ describe('group shared metric presentation prompt', () => {
     expect(prompt).toContain('do not loop or make another tool call to poll')
     expect(prompt).toContain('not proof the wearable uploaded or the provider completed a refresh')
     const scheduled = buildAssistantSystemPrompt({
-      assistantCliContract: null, onboardingGuidance: false, modelBehaviorProfile: 'gpt5-agentic',
+      assistantCliContract: null, onboardingGuidance: false,
       assistantHostedGroupToolSurface: 'shared_read', assistantHostedAutomationAvailable: true, channel: 'linq',
       cliAccess: { rawCommand: 'vault-cli' },
       conversationScope: 'group', hostedRuntime: true,
@@ -255,7 +255,6 @@ function buildHostedGroupSharedPrompt(
     currentLocalDate: '2026-08-27',
     currentTimeZone: 'America/New_York',
     hostedRuntime: true,
-    modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
     turnTrigger: null,
   })

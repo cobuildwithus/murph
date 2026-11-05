@@ -58,9 +58,6 @@ import {
   type AssistantDiagnosticsPolicy,
 } from '../issue-reporting.js'
 import {
-  resolveAssistantModelBehaviorProfile,
-} from '../model-behavior.js'
-import {
   resolveAssistantCodexResumeThreadId,
   resolveAssistantRouteResumeBinding,
 } from '../codex-resume-binding.js'
@@ -1177,9 +1174,6 @@ export async function resolveAssistantRouteTurnPlan(
       sharedPlan: input.sharedPlan,
     })
   const pollsAvailable = areConversationPollsAvailable(input, userActionAcceptedInputIds, currentAudienceDeliveryFields.channel, scheduledInvocationScope)
-  const modelBehaviorProfile = resolveAssistantModelBehaviorProfile(
-    input.route.providerOptions,
-  )
   const toolSchemaHash = null
   const buildRouteSystemPromptResult = (options: {
     assistantCliContract: string | null
@@ -1283,7 +1277,6 @@ export async function resolveAssistantRouteTurnPlan(
         input.sharedPlan.cliAccess.env,
       ),
       onboardingGuidance: options.injectOnboardingGuidance,
-      modelBehaviorProfile,
       ordinaryInboundTurn,
       scheduledOccurrenceAt: input.input.scheduledOccurrenceAt ?? null,
       turnTrigger: input.input.turnTrigger ?? null,
