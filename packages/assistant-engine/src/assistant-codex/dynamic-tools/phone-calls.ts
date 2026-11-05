@@ -198,6 +198,18 @@ export function createPhoneCallRequestKey(input: {
 export function createScheduledPhoneCallRequestKey(input: {
   scope: AssistantHostedScheduledPhoneCallScope
 }): string {
+  if (input.scope.occurrenceKey !== undefined) {
+    // A device-activity run keys its call on the wearable event, which stays
+    // the same when a retry moves the run's clock occurrence.
+    const deviceDigest = createHash('sha256')
+      .update(stableJson({
+        automationId: input.scope.automationId,
+        occurrenceKey: input.scope.occurrenceKey,
+        schema: 'murph.create-phone-call.device-activity-occurrence-request-key.v1',
+      }))
+      .digest('hex')
+    return `${HOSTED_SCHEDULED_PHONE_CALL_REQUEST_KEY_PREFIX}${deviceDigest}`
+  }
   const digest = createHash('sha256')
     .update(stableJson({
       automationId: input.scope.automationId,

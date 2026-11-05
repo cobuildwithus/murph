@@ -26,6 +26,7 @@ import type { CodexThreadIdentity } from './codex-thread-route.js'
 import type { AssistantProviderUsageDraft } from './providers/types.js'
 import { recordAssistantUsageEvent } from './service-usage.js'
 import type {
+  AssistantDeviceActivityOccurrence,
   AssistantMessageInput,
 } from './service-contracts.js'
 import type {
@@ -84,6 +85,8 @@ export interface AssistantHostedUserActionScope
 
 export interface AssistantHostedScheduledPhoneCallScope
   extends HostedRuntimeScheduledAutomationAuthority {
+  /** Present for a private device-activity run: the wearable event key. */
+  occurrenceKey?: string
   resultNotificationChannel?: HostedPhoneCallResultNotificationChannel
   originSessionId: string
 }
@@ -200,6 +203,8 @@ export interface AssistantHostedToolContext {
     usageDraft: AssistantProviderUsageDraft
   }): void
   currentScheduledPhoneCallScope?(): AssistantHostedScheduledPhoneCallScope | null
+  /** The wearable event behind a private device-activity run, if any. */
+  currentDeviceActivityOccurrence?(): AssistantDeviceActivityOccurrence | null
   currentUserActionScope?(): AssistantHostedUserActionScope | null
   currentGameRecapScope?(): NonNullable<AssistantHostedExecutionContext['gameRecapScope']> | null
   currentGameMissedCheckInScope?(): NonNullable<AssistantHostedExecutionContext['gameMissedCheckInScope']> | null
@@ -447,6 +452,12 @@ export function createAssistantHostedToolContext(input: {
       originSessionId: deliveryContext.session.sessionId,
     })
   }
+  const readCurrentDeviceActivityOccurrence = () =>
+    resolveAssistantHostedDeviceActivityOccurrence({
+      conversationScope:
+        input.getConversationScope?.() ?? 'unverified-external',
+      messageInput: readDeliveryContext().messageInput,
+    })
   const phoneCalls: AssistantPhoneCallPort | null =
     executionContext?.phoneCalls ?? null
   let subscriptionActionClaimed = false
@@ -631,6 +642,7 @@ export function createAssistantHostedToolContext(input: {
     closeGroupEmailCapability: groupEmailOutboxTool?.closeCapability,
     recordGroupEmailSendResult: input.recordGroupEmailSendResult,
     currentScheduledPhoneCallScope: readCurrentScheduledPhoneCallScope,
+    currentDeviceActivityOccurrence: readCurrentDeviceActivityOccurrence,
     currentUserActionScope: readCurrentUserActionScope,
     currentGameRecapScope: () => executionContext?.gameRecapScope ?? null,
     currentGameMissedCheckInScope: () => executionContext?.gameMissedCheckInScope ?? null,
@@ -711,6 +723,34 @@ export function createAssistantHostedScheduledRequestKey(input: {
   return `scheduled_${digest}`
 }
 
+/** Keys a private device-activity run's effect on its wearable event, so a retry repeats nothing. */
+export function createAssistantHostedDeviceActivityRequestKey(input: {
+  occurrence: AssistantDeviceActivityOccurrence
+  operation: 'clinical-records-connect-link'
+}): `scheduled_${string}` {
+  const digest = createHash('sha256')
+    .update(JSON.stringify({
+      occurrenceKey: input.occurrence.occurrenceKey,
+      operation: input.operation,
+      parentAutomationId: input.occurrence.parentAutomationId,
+      schema: 'murph.assistant-device-activity-request-key.v1',
+    }))
+    .digest('hex')
+  return `scheduled_${digest}`
+}
+
+export function resolveAssistantHostedDeviceActivityOccurrence(input: {
+  conversationScope: AssistantConversationScope
+  messageInput: Pick<AssistantMessageInput, 'deviceActivityOccurrence' | 'turnTrigger'>
+}): AssistantDeviceActivityOccurrence | null {
+  const occurrence = input.messageInput.deviceActivityOccurrence ?? null
+  return occurrence !== null
+    && input.conversationScope === 'direct'
+    && input.messageInput.turnTrigger === 'automation-cron'
+    ? occurrence
+    : null
+}
+
 // The host, not the model or tool arguments, owns which durable session an
 // asynchronous image completion resumes. Binding it here keeps the caller's
 // `scopeId` (pending/queued coordination) and `readStatus` untouched.
@@ -734,16 +774,32 @@ export function resolveAssistantHostedScheduledPhoneCallScope(input: {
   conversationScope: AssistantConversationScope
   messageInput: Pick<
     AssistantMessageInput,
-    'scheduledInvocationAuthority' | 'scheduledOccurrenceAt' | 'turnTrigger'
+    | 'deviceActivityOccurrence'
+    | 'scheduledInvocationAuthority'
+    | 'scheduledOccurrenceAt'
+    | 'turnTrigger'
   >
   originSessionId: string
 }): AssistantHostedScheduledPhoneCallScope | null {
-  const scope = resolveAssistantHostedScheduledInvocationScope(input)
   const channel = input.channel?.trim().toLowerCase()
-  if (
-    (channel !== 'linq' && channel !== 'telegram')
-    || scope?.conversationScope !== 'direct'
-  ) {
+  if (channel !== 'linq' && channel !== 'telegram') {
+    return null
+  }
+  const scope = resolveAssistantHostedScheduledInvocationScope(input)
+  if (scope === null) {
+    const deviceOccurrence = resolveAssistantHostedDeviceActivityOccurrence(input)
+    const occurrenceAt = input.messageInput.scheduledOccurrenceAt ?? null
+    return deviceOccurrence === null || occurrenceAt === null
+      ? null
+      : {
+          automationId: deviceOccurrence.parentAutomationId,
+          occurrenceAt,
+          occurrenceKey: deviceOccurrence.occurrenceKey,
+          resultNotificationChannel: channel,
+          originSessionId: input.originSessionId,
+        }
+  }
+  if (scope.conversationScope !== 'direct') {
     return null
   }
 

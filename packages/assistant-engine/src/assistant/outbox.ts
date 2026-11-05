@@ -115,11 +115,11 @@ import {
 import { stripAssistantResponseMediaPlacement } from './reply-bubbles.js'
 import { writeAssistantAutoReplyIntentProvenance } from './automation/intent-provenance.js'
 import type { AssistantRunEvent } from './automation/shared.js'
+import { readAssistantDeviceActivityDeliveryIdempotencyMetadata } from './device-activity-cron-tags.js'
 import {
-  assistantDeviceActivityAuthorityKeyMatches,
-  readAssistantDeviceActivityDeliveryIdempotencyMetadata,
-} from './device-activity-cron-tags.js'
-import { readAssistantDeviceActivityParentAutomation } from './device-activity-parent-automation.js'
+  readAssistantDeviceActivityParentAutomation,
+  resolveAssistantDeviceActivityParentValidity,
+} from './device-activity-parent-automation.js'
 import {
   resolveAssistantOutboxAutomationAuthorityError,
 } from './outbox/automation-authority.js'
@@ -1649,25 +1649,18 @@ async function resolveDeviceActivityOutboxAuthorityError(input: {
     return null
   }
 
-  const parentAutomation = await readAssistantDeviceActivityParentAutomation({
+  const parent = await readAssistantDeviceActivityParentAutomation({
     metadata,
     vault: input.vault,
   })
-  if (
-    !parentAutomation ||
-    parentAutomation.status !== 'active' ||
-    parentAutomation.schedule.kind !== 'deviceActivity' ||
-    !assistantDeviceActivityAuthorityKeyMatches({
-      authorityKey: metadata.authorityKey,
-      automation: {
-        ...parentAutomation,
-        schedule: {
-          activityKind: parentAutomation.schedule.activityKind,
-          source: parentAutomation.schedule.source,
-        },
-      },
-    })
-  ) {
+  // A drain captures one clock for all its sends, so read the deadline against
+  // the time this send actually happens.
+  const parentAutomation = resolveAssistantDeviceActivityParentValidity({
+    metadata,
+    now: new Date(),
+    parent,
+  })
+  if (!parentAutomation) {
     return new VaultCliError(
       'ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE',
       'Device activity automation authority changed before outbound delivery.',

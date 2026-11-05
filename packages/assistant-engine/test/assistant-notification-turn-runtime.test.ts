@@ -3619,6 +3619,111 @@ test('usage optimizer isolation preserves foreground resume on terminal failure'
   }))
 })
 
+test('a private device-activity run reaches its event-keyed effects, and no poll, through the real tool context', async () => {
+  const occurrence = {
+    occurrenceKey: 'a'.repeat(40),
+    parentAutomationId: 'automation-sync-listener',
+  }
+  const occurrenceAt = '2030-01-10T12:00:00.000Z'
+  const startCall = vi.fn(async () => ({
+    phoneCallId: 'hpc_sync_run',
+    status: 'calling' as const,
+  }))
+  const createConnectLink = vi.fn(async () => ({
+    connectUrl: `https://app.example.test/records/connect#clinicalRecordsIntent=cr_${'a'.repeat(32)}`,
+    expiresAt: '2030-01-10T12:15:00.000Z',
+    ok: true as const,
+  }))
+  const pollRequest = vi.fn()
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Sync run finished.',
+      text: 'Your records link is ready.',
+    }),
+  })
+  const { sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+    onExecuteCodexTurnWithRecovery: async (providerInput) => {
+      const hostedToolContext = providerInput.hostedToolContext
+      expect(hostedToolContext?.currentInvocationScope?.()).toBeNull()
+      expect(hostedToolContext?.currentUserActionScope?.()).toBeNull()
+      expect(hostedToolContext?.currentDeviceActivityOccurrence?.()).toEqual(occurrence)
+      const execute = async (tool: string, argumentsValue: unknown) => {
+        const request = readTestMurphDynamicToolRequest({
+          method: 'item/tool/call',
+          params: { arguments: argumentsValue, namespace: 'murph', tool },
+        })
+        if (!request) {
+          throw new Error(`Expected a parsed ${tool} request.`)
+        }
+        return (await executeMurphDynamicToolRequest({
+          env: {},
+          fetchImpl: fetch,
+          hostedToolContext,
+          nextUsageOrdinal: () => 1,
+          progressDelivery: null,
+          request,
+        })).rpcResult
+      }
+
+      await expect(execute('create_phone_call', {
+        allowTransferToUser: true,
+        callerName: 'Alex',
+        goal: 'Book a recovery massage for Friday.',
+        instructions: ['Only book Friday afternoon.'],
+        shareableFacts: { patient_name: 'Alex' },
+        successCriteria: 'The studio confirms a Friday time.',
+        timeZone: 'America/New_York',
+        to: { label: 'Massage studio', phoneNumber: '+12125550123' },
+      })).resolves.toMatchObject({ success: true })
+      await expect(execute('create_clinical_records_connect_link', {}))
+        .resolves.toMatchObject({ success: true })
+      await expect(execute('poll', {
+        action: 'create',
+        options: ['Yes', 'No'],
+        question: 'Sleep well?',
+      })).resolves.toMatchObject({ success: false })
+
+      return { kind: 'succeeded', providerTurn: providerResult }
+    },
+    providerResult,
+    turnId: 'turn-notification-device-effects',
+  })
+
+  await sendAssistantNotificationLocal({
+    channel: 'linq',
+    deliveryIdempotencyKey: 'delivery-device-effects',
+    deviceActivityOccurrence: occurrence,
+    executionContext: {
+      hosted: {
+        clinicalRecordsConnectLinkTool: { createConnectLink },
+        memberId: 'member-sync-run',
+        phoneCalls: { start: startCall, status: vi.fn(), stop: vi.fn() },
+        pollTool: { request: pollRequest },
+        userEnvKeys: [],
+      },
+    },
+    instructions: 'A wearable sync matched this automation.',
+    scheduledOccurrenceAt: occurrenceAt,
+    threadIsDirect: true,
+    turnTrigger: 'automation-cron',
+    vault: '/vaults/device-effects',
+  })
+
+  expect(startCall).toHaveBeenCalledTimes(1)
+  expect(startCall).toHaveBeenCalledWith(
+    expect.objectContaining({
+      requestKey: expect.stringMatching(/^phone_call_scheduled_[a-f0-9]{64}$/u),
+      resultNotificationChannel: 'linq',
+    }),
+    expect.anything(),
+  )
+  expect(createConnectLink).toHaveBeenCalledWith(expect.objectContaining({
+    requestKey: expect.stringMatching(/^scheduled_[a-f0-9]{64}$/u),
+  }))
+  expect(pollRequest).not.toHaveBeenCalled()
+})
+
 test('sendAssistantNotificationLocal releases typing after accepted delivery', async () => {
   const providerSession = createAssistantSession()
   const providerResult = createProviderResult({

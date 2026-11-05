@@ -1475,7 +1475,11 @@ instructions carry the member-approved destination, call goal and disclosure
 bounds; the private Linq or Telegram route carries status and results rather
 than restricting the action to a message. Due turns use the existing exact
 occurrence phone-call authority and occurrence request key, with no fresh input
-or extra consent turn. Direct Linq imports retain the authenticated sender handle in existing source
+or extra consent turn. A wearable-sync automation has the same authority once
+the live route proves its run private: the request key hashes the child job's
+persisted event key rather than a clock time, so a retry repeats no call, and
+the cron owner revalidates the parent automation before every provider, tool,
+delivery, and commit step. Direct Linq imports retain the authenticated sender handle in existing source
 metadata. Private message prompts omit the sender handle; the deferred
 `get_sender_contact` tool reads only the latest current accepted private Linq
 input when needed, using the existing invocation scope and input store. No

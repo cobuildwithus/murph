@@ -61,7 +61,8 @@ appointment readiness.
 ## Scheduled private calls
 
 A private Linq or Telegram automation can place one call at its exact scheduled
-occurrence. For an explicit request to call later, save one `murph.automation`
+occurrence, or for the wearable sync event that woke it. For an explicit request
+to call later, save one `murph.automation`
 with the requested local time and timezone and Sol as its model. Store the
 approved destination number, concrete call goal, minimal shareable facts,
 success criteria, and any disclosure or transfer limits in its instructions.

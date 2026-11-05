@@ -3049,6 +3049,192 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it.each([
+    ['direct', true, true],
+    ['group', false, false],
+  ] as const)(
+    'names the wearable event only for a private live route (%s)',
+    async (_route, liveThreadIsDirect, expected) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-04-08T09:00:00.000Z'))
+      const { parentAutomationId, vaultRoot } =
+        await seedDueDeviceActivityRun('assistant-cron-runtime-device-occurrence-')
+
+      await expect(processDueAssistantCronJobsLocal({
+        executionContext: createDeviceActivityHostedContext(liveThreadIsDirect),
+        limit: 1,
+        vault: vaultRoot,
+      })).resolves.toMatchObject({ succeeded: 1 })
+
+      expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          deviceActivityOccurrence: expected
+            ? { occurrenceKey: DEVICE_RUN_OCCURRENCE_KEY, parentAutomationId }
+            : null,
+          scheduledInvocationAuthority: null,
+        }),
+      )
+    },
+  )
+
+  it('never names the wearable event on a manual run', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:00:00.000Z'))
+    const { job, vaultRoot } =
+      await seedDueDeviceActivityRun('assistant-cron-runtime-device-manual-')
+
+    await runAssistantCronJobNow({
+      executionContext: createDeviceActivityHostedContext(true),
+      job: job.jobId,
+      vault: vaultRoot,
+    })
+
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({ deviceActivityOccurrence: null }),
+    )
+  })
+
+  it('stops a tool once the parent listener is paused mid-turn', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:00:00.000Z'))
+    const { job, parentAutomation, vaultRoot } =
+      await seedDueDeviceActivityRun('assistant-cron-runtime-device-paused-')
+    const effect = vi.fn()
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (input: {
+      beforeToolExecution: () => Promise<void>
+    }) => {
+      parentAutomation.status = 'paused'
+      await input.beforeToolExecution()
+      effect()
+      throw new Error('Expected the pre-tool check to stop the turn.')
+    })
+
+    await processDueAssistantCronJobsLocal({
+      executionContext: createDeviceActivityHostedContext(true),
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(effect).not.toHaveBeenCalled()
+    const { runs } = await listAssistantCronRuns({ job: job.jobId, vault: vaultRoot })
+    expect(runs).toEqual([
+      expect.objectContaining({
+        error: expect.stringContaining('parent listener is no longer authorized'),
+        status: 'skipped',
+      }),
+    ])
+  })
+
+  it.each([
+    ['still elapsed', '2026-04-08T09:30:00.000Z', false],
+    ['extended into the future', '2026-04-09T09:30:00.000Z', true],
+  ] as const)(
+    'trusts the record a declined archival returns when its deadline is %s',
+    async (_case, returnedActiveUntil, eligible) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-04-08T09:00:00.000Z'))
+      const { parentAutomation, vaultRoot } = await seedDueDeviceActivityRun(
+        'assistant-cron-runtime-device-expiry-race-',
+        { activeUntil: '2026-04-08T09:30:00.000Z' },
+      )
+      const effect = vi.fn()
+      cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (input: {
+        beforeToolExecution: () => Promise<void>
+      }) => {
+        vi.setSystemTime(new Date('2026-04-08T10:00:00.000Z'))
+        // A concurrent cursor write makes archival decline and return a newer record.
+        cronMocks.archiveAutomationIfActiveUntilElapsed.mockResolvedValueOnce({
+          archived: false,
+          record: {
+            ...parentAutomation,
+            activeUntil: returnedActiveUntil,
+            updatedAt: '2026-04-08T09:59:59.000Z',
+          },
+        })
+        await input.beforeToolExecution()
+        effect()
+        return {
+          decision: {
+            kind: 'send_message' as const,
+            privateSummary: 'Prepared the sync check-in.',
+            text: 'Completed the sync check-in.',
+          },
+          response: 'Completed the sync check-in.',
+          session: { sessionId: 'session-default' },
+        }
+      })
+
+      await processDueAssistantCronJobsLocal({
+        executionContext: createDeviceActivityHostedContext(true),
+        limit: 1,
+        vault: vaultRoot,
+      })
+
+      expect(cronMocks.archiveAutomationIfActiveUntilElapsed).toHaveBeenCalledTimes(1)
+      expect(effect).toHaveBeenCalledTimes(eligible ? 1 : 0)
+    },
+  )
+
+  it.each([
+    ['past', '2026-04-08T08:01:30.000Z', true],
+    ['ahead of', '2026-04-08T08:30:00.000Z', false],
+  ] as const)(
+    'holds a queued device notification by the live clock when it is %s the parent deadline',
+    async (_case, activeUntil, stale) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-04-08T08:02:00.000Z'))
+      const { vaultRoot } = await createRuntimeContext(
+        'assistant-cron-runtime-device-outbox-expiry-',
+      )
+      const parentAutomationId = 'auto_device_activity_outbox_expiry'
+      const parentAutomation = createDeviceRunParent(parentAutomationId, { activeUntil })
+      getVaultAutomationStore(vaultRoot).push(parentAutomation)
+      const metadata = {
+        authorityKey: buildDeviceActivityAuthorityKey(parentAutomation),
+        occurrenceKey: DEVICE_RUN_OCCURRENCE_KEY,
+        parentAutomationId,
+        parentAutomationRelativePath: parentAutomation.relativePath,
+      }
+      const intent = buildTestLinqOutboxIntent({
+        createdAt: '2026-04-08T08:01:00.000Z',
+        intentId: 'outbox_device_activity_expiry',
+        message: 'How did that run feel?',
+      })
+      await saveAssistantOutboxIntent(vaultRoot, {
+        ...intent,
+        deliveryIdempotencyKey: buildAssistantDeviceActivityDeliveryIdempotencyKey({
+          discriminator: {
+            jobId: 'cron_device_activity_outbox_expiry',
+            target: intent.targetFingerprint,
+          },
+          metadata,
+        }),
+        nextAttemptAt: '2026-04-08T08:02:00.000Z',
+      })
+
+      const prepareDispatchIntent = vi.fn(async () => undefined)
+      const dispatched = await dispatchAssistantOutboxIntent({
+        dispatchHooks: { prepareDispatchIntent },
+        force: true,
+        intentId: intent.intentId,
+        // The drain's clock, captured before an earlier send delayed this one.
+        now: new Date('2026-04-08T08:01:00.000Z'),
+        vault: vaultRoot,
+      })
+
+      expect(prepareDispatchIntent).toHaveBeenCalledTimes(stale ? 0 : 1)
+      if (stale) {
+        expect(dispatched.deliveryError).toEqual(expect.objectContaining({
+          code: 'ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE',
+        }))
+      } else {
+        expect(dispatched.deliveryError).not.toEqual(expect.objectContaining({
+          code: 'ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE',
+        }))
+      }
+    },
+  )
+
   it('consumes generated device activity jobs when a skip overlaps foreground preemption', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T09:00:00.000Z'))
@@ -14774,6 +14960,106 @@ function getVaultAutomationStore(vault: string): MockAutomationRecord[] {
   const created: MockAutomationRecord[] = []
   cronMocks.automationsByVault.set(vault, created)
   return created
+}
+
+const DEVICE_RUN_OCCURRENCE_KEY = 'fedcba0987654321fedcba0987654321fedcba09'
+
+function createDeviceRunParent(
+  automationId: string,
+  overrides: Partial<MockAutomationRecord> = {},
+): MockAutomationRecord {
+  return {
+    automationId,
+    continuityPolicy: 'fresh',
+    createdAt: '2026-04-08T08:00:00.000Z',
+    instructions: 'Ask about imported runs.',
+    relativePath: 'bank/automations/device-run-effects-listener.md',
+    route: {
+      channel: 'linq',
+      deliverySource: null,
+      deliveryTarget: 'linq_chat_device_run',
+      identityId: null,
+      participantId: null,
+      threadId: null,
+      threadIsDirect: true,
+    },
+    schedule: {
+      activityKind: 'run',
+      after: '2026-04-08T08:00:00.000Z',
+      kind: 'deviceActivity',
+      source: 'whoop',
+    },
+    slug: 'device-run-effects-listener',
+    status: 'active',
+    summary: null,
+    tags: ['device'],
+    title: 'Device run effects listener',
+    updatedAt: '2026-04-08T08:00:00.000Z',
+    ...overrides,
+  }
+}
+
+function createDeviceActivityHostedContext(threadIsDirect: boolean) {
+  return {
+    hosted: {
+      memberId: 'member-device-run-effects',
+      resolveScheduledLinqRoute: vi.fn().mockResolvedValue({
+        deliveryPosture: 'recover',
+        target: 'linq_chat_device_run',
+        threadIsDirect,
+      }),
+      userEnvKeys: [],
+    },
+  }
+}
+
+async function seedDueDeviceActivityRun(
+  prefix: string,
+  overrides: Partial<MockAutomationRecord> = {},
+) {
+  const { vaultRoot } = await createRuntimeContext(prefix)
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  const parentAutomationId = 'automation-device-run-effects'
+  const parentAutomation = createDeviceRunParent(parentAutomationId, overrides)
+  getVaultAutomationStore(vaultRoot).push(parentAutomation)
+  const job = assistantCronJobSchema.parse({
+    createdAt: '2026-04-08T08:59:00.000Z',
+    enabled: true,
+    jobId: 'cron_device_activity_effects',
+    keepAfterRun: true,
+    name: appendAssistantDeviceActivityCronJobMetadata('Device run effects', {
+      authorityKey: buildDeviceActivityAuthorityKey(parentAutomation),
+      occurrenceKey: DEVICE_RUN_OCCURRENCE_KEY,
+      parentAutomationId,
+      parentAutomationRelativePath: parentAutomation.relativePath,
+    }),
+    prompt: 'Ask about the imported run.',
+    schedule: { at: '2026-04-08T08:59:30.000Z', kind: 'at' },
+    schema: 'murph.assistant-cron-job.v1',
+    state: {
+      consecutiveFailures: 0,
+      lastError: null,
+      lastFailedAt: null,
+      lastRunAt: null,
+      lastSucceededAt: null,
+      nextRunAt: '2026-04-08T08:59:30.000Z',
+      runningAt: null,
+      runningPid: null,
+    },
+    target: {
+      alias: null,
+      channel: 'linq',
+      deliverySource: null,
+      deliveryTarget: 'linq_chat_device_run',
+      identityId: null,
+      participantId: null,
+      sessionId: null,
+      threadId: null,
+    },
+    updatedAt: '2026-04-08T08:59:00.000Z',
+  })
+  await writeAssistantCronStore(paths, { version: 1, jobs: [job] })
+  return { job, parentAutomation, parentAutomationId, vaultRoot }
 }
 
 function buildDeviceActivityAuthorityKey(automation: MockAutomationRecord): string {

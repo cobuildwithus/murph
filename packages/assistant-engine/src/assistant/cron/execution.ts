@@ -93,6 +93,7 @@ import {
 import type { AssistantProviderServiceTier } from '../providers/types.js'
 import type {
   AssistantDeliveryOutcome,
+  AssistantDeviceActivityOccurrence,
   AssistantTurnEnvironment,
 } from '../service-contracts.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
@@ -123,11 +124,13 @@ import {
 import { runScheduledLogCronJob } from './scheduled-log.js'
 import { assistantCronScheduleHasSingleDailyTime } from './schedule.js'
 import {
-  assistantDeviceActivityAuthorityKeyMatches,
   buildAssistantDeviceActivityDeliveryIdempotencyKey,
   readAssistantDeviceActivityCronJobMetadata,
 } from '../device-activity-cron-tags.js'
-import { readAssistantDeviceActivityParentAutomation } from '../device-activity-parent-automation.js'
+import {
+  readAssistantDeviceActivityParentAutomation,
+  resolveAssistantDeviceActivityParentValidity,
+} from '../device-activity-parent-automation.js'
 import {
   buildCanonicalAutomationUpsertInput,
   buildVisibleLocalAssistantCronStore,
@@ -936,6 +939,20 @@ export async function executeClaimedAssistantCronJob(
               canonicalSourceDisposition = authority.kind
               throw new AssistantCronCanonicalSourceInvalidatedError(authority)
             }
+            if (deviceActivityAuthority.automationId !== null) {
+              const currentDeviceActivityAuthority =
+                await resolveDeviceActivityParentAuthority({
+                  job: rawInput.job,
+                  vault: input.vault,
+                })
+              if (
+                currentDeviceActivityAuthority.error !== null ||
+                currentDeviceActivityAuthority.automationId !==
+                  deviceActivityAuthority.automationId
+              ) {
+                throw new AssistantCronDeviceActivityParentInvalidatedError()
+              }
+            }
             await assertAssistantCronLifecycleNotificationStillAuthorized({
               authorityGate,
               job: input.job,
@@ -1147,21 +1164,11 @@ export async function executeClaimedAssistantCronJob(
       errorCode = error.code
       outcome = 'skipped_gate'
       reason = `canonical_source_${error.disposition}`
-    } else if (error instanceof AssistantCronLifecycleNotificationInvalidatedError) {
+    } else if (error instanceof AssistantCronGateSkipError) {
       errorText = error.message
       errorCode = error.code
       outcome = 'skipped_gate'
-      reason = 'lifecycle_precondition'
-    } else if (error instanceof AssistantCronManagedOwnerInvalidatedError) {
-      errorText = error.message
-      errorCode = error.code
-      outcome = 'skipped_gate'
-      reason = 'managed_owner_scope_mismatch'
-    } else if (error instanceof AssistantCronLinqHealthPreflightBlockedError) {
-      errorText = error.message
-      errorCode = error.code
-      outcome = 'skipped_gate'
-      reason = 'linq_health_preflight'
+      reason = error.skipReason
     } else {
       const yieldedError =
         error instanceof AssistantCronForegroundYieldedError ||
@@ -1467,6 +1474,12 @@ function buildAssistantCronNotificationDeliveryInput(input: Pick<
       }),
     outboxExternalThreadRouteAuthority:
       input.authorizedDelivery.externalThreadRouteAuthority,
+    deviceActivityOccurrence: resolveAssistantCronDeviceActivityOccurrence({
+      deviceActivityAuthority: input.deviceActivityAuthority,
+      job: claimedJob,
+      threadIsDirect: deliveryRoute.threadIsDirect,
+      trigger: input.trigger,
+    }),
     participantId: claimedJob.target.participantId,
     turnPolicy: resolveAssistantCronNotificationTurnPolicy(input.job),
     responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
@@ -1484,6 +1497,23 @@ function buildAssistantCronNotificationDeliveryInput(input: Pick<
     deliveryTarget: deliveryRoute.deliveryTarget,
     threadIsDirect: deliveryRoute.threadIsDirect,
   }
+}
+
+/** The live route, not the saved target, decides whether a sync run is private. */
+function resolveAssistantCronDeviceActivityOccurrence(input: {
+  deviceActivityAuthority: DeviceActivityParentAuthority
+  job: AssistantCronJob
+  threadIsDirect: boolean | null | undefined
+  trigger: ExecuteClaimedAssistantCronJobInput['trigger']
+}): AssistantDeviceActivityOccurrence | null {
+  const parentAutomationId = input.deviceActivityAuthority.automationId
+  const metadata = readAssistantDeviceActivityCronJobMetadata(input.job.name)
+  return parentAutomationId !== null
+    && metadata !== null
+    && input.trigger === 'scheduled'
+    && input.threadIsDirect === true
+    ? { occurrenceKey: metadata.occurrenceKey, parentAutomationId }
+    : null
 }
 
 function resolveAssistantCronNotificationOutcome(input: {
@@ -2712,52 +2742,30 @@ async function resolveDeviceActivityParentAuthority(input: {
     }
   }
 
-  let parentAutomation = await readAssistantDeviceActivityParentAutomation({
+  const readParent = await readAssistantDeviceActivityParentAutomation({
     metadata,
     vault: input.vault,
   })
-  if (
-    parentAutomation?.activeUntil &&
-    Date.now() >= Date.parse(parentAutomation.activeUntil)
-  ) {
-    const expiry = await archiveAutomationIfActiveUntilElapsed({
-      expectedUpdatedAt: parentAutomation.updatedAt,
-      lookup: parentAutomation.automationId,
-      now: new Date(),
-      vaultRoot: input.vault,
-    })
-    parentAutomation = expiry.record
-  }
-  if (!parentAutomation || parentAutomation.status !== 'active') {
-    return {
-      assistantTargetOverride: null,
-      automationId: null,
-      contextReferences: [],
-      error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
-      route: null,
-    }
-  }
-  if (parentAutomation.schedule.kind !== 'deviceActivity') {
-    return {
-      assistantTargetOverride: null,
-      automationId: null,
-      contextReferences: [],
-      error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
-      route: null,
-    }
-  }
-  const authorityMatches = assistantDeviceActivityAuthorityKeyMatches({
-    authorityKey: metadata.authorityKey,
-    automation: {
-      ...parentAutomation,
-      schedule: {
-        activityKind: parentAutomation.schedule.activityKind,
-        source: parentAutomation.schedule.source,
-      },
-    },
+  const archivalNow = new Date()
+  const parentAfterArchival =
+    readParent?.activeUntil &&
+    archivalNow.getTime() >= Date.parse(readParent.activeUntil)
+      ? (await archiveAutomationIfActiveUntilElapsed({
+          expectedUpdatedAt: readParent.updatedAt,
+          lookup: readParent.automationId,
+          now: archivalNow,
+          vaultRoot: input.vault,
+        })).record
+      : readParent
+  // Validate whatever archival returned: a concurrent cursor write makes it
+  // decline and hand back a still-active record whose deadline has passed.
+  const parentAutomation = resolveAssistantDeviceActivityParentValidity({
+    metadata,
+    now: new Date(),
+    parent: parentAfterArchival,
   })
   if (
-    !authorityMatches ||
+    !parentAutomation ||
     !assistantCronTargetMatchesAutomationRoute(input.job.job.target, parentAutomation.route)
   ) {
     return {
@@ -3323,7 +3331,14 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
   }
 }
 
-class AssistantCronLinqHealthPreflightBlockedError extends VaultCliError {
+/** A gate stopped this run, so it is recorded as skipped rather than failed. */
+abstract class AssistantCronGateSkipError extends VaultCliError {
+  abstract readonly skipReason: string
+}
+
+class AssistantCronLinqHealthPreflightBlockedError extends AssistantCronGateSkipError {
+  readonly skipReason = 'linq_health_preflight'
+
   constructor(blockCode: HostedRuntimeLinqDeliveryBlockCode) {
     super(
       `ASSISTANT_LINQ_EGRESS_${blockCode.toUpperCase()}`,
@@ -3353,7 +3368,21 @@ class AssistantCronCanonicalSourceInvalidatedError extends VaultCliError {
   }
 }
 
-class AssistantCronLifecycleNotificationInvalidatedError extends VaultCliError {
+/** The device-activity parent was paused, removed, expired or changed mid-turn. */
+class AssistantCronDeviceActivityParentInvalidatedError extends AssistantCronGateSkipError {
+  readonly skipReason = 'device_activity_authority_stale'
+
+  constructor() {
+    super(
+      'ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE',
+      ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
+    )
+  }
+}
+
+class AssistantCronLifecycleNotificationInvalidatedError extends AssistantCronGateSkipError {
+  readonly skipReason = 'lifecycle_precondition'
+
   constructor(reason: string) {
     super('ASSISTANT_CRON_LIFECYCLE_AUTHORITY_STALE', reason)
   }
@@ -3367,7 +3396,9 @@ function buildAssistantCronOnboardingFollowupReconciliationRequiredError(): Vaul
   )
 }
 
-class AssistantCronManagedOwnerInvalidatedError extends VaultCliError {
+class AssistantCronManagedOwnerInvalidatedError extends AssistantCronGateSkipError {
+  readonly skipReason = 'managed_owner_scope_mismatch'
+
   constructor() {
     super(
       'ASSISTANT_CRON_MANAGED_OWNER_SCOPE_STALE',

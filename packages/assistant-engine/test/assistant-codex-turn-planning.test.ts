@@ -5178,6 +5178,66 @@ describe('assistant Codex turn planning', () => {
     },
   )
 
+  it.each([
+    ['private', true, true],
+    ['group', false, false],
+  ] as const)(
+    'offers event-keyed effects, but no poll, to a %s device-activity run with a wearable event',
+    async (_scope, threadIsDirect, privateTurn) => {
+      planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(null)
+      planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+        supportsNativeResume: false,
+      })
+      const plan = await resolveAssistantRouteTurnPlan({
+        acceptedInputItems: [],
+        executionContext: {
+          hosted: { memberId: 'member-device-activity-effects', userEnvKeys: [] },
+        },
+        hostedToolContext: {
+          ...createHostedToolContext(),
+          clinicalRecordsConnectLinkTool: { createConnectLink: vi.fn() },
+          phoneCalls: { start: vi.fn(), status: vi.fn(), stop: vi.fn() },
+          pollTool: { request: vi.fn() },
+        },
+        input: {
+          ...createMessageInput(),
+          channel: 'linq',
+          deviceActivityOccurrence: {
+            occurrenceKey: 'a'.repeat(40),
+            parentAutomationId: 'automation-sync-listener',
+          },
+          scheduledInvocationAuthority: null,
+          scheduledOccurrenceAt: '2026-11-05T15:17:05.711Z',
+          threadIsDirect,
+          turnTrigger: 'automation-cron',
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-11-05',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan: createSharedPlan({}, {
+          channel: 'linq',
+          threadIsDirect,
+          threadId: threadIsDirect ? 'linq-direct-thread' : 'linq-group-thread',
+        }),
+      })
+
+      const toolNames = plan.dynamicTools.map((tool) => tool.name)
+      expect(toolNames.includes('create_phone_call')).toBe(privateTurn)
+      expect(toolNames.includes('create_clinical_records_connect_link')).toBe(privateTurn)
+      expect(toolNames).not.toContain('poll')
+      expect(toolNames).not.toContain('stop_phone_call')
+    },
+  )
+
   it('offers cards to an interactive private notification and a group automation run on Telegram', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(null)
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)

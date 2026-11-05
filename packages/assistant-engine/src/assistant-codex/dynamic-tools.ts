@@ -179,6 +179,7 @@ import {
 } from '../assistant/group-challenge-scorecard-schema.js'
 import type { AssistantRuntimeIssueInput } from '../assistant/issue-reporting.js'
 import {
+  createAssistantHostedDeviceActivityRequestKey,
   createAssistantHostedScheduledRequestKey,
   type AssistantHostedImageCompletionEffectScope,
   type AssistantHostedInvocationScope,
@@ -3127,6 +3128,39 @@ async function executeStopPhoneCallDynamicTool(
   }
 }
 
+/** Who may create a link this turn, with the key a scheduled link needs; null when nobody may. */
+function resolveClinicalRecordsConnectLinkAuthority(
+  context: AssistantHostedToolContext,
+): { requestKey?: `scheduled_${string}` } | null {
+  const invocationScope = context.currentInvocationScope?.() ?? null
+  if (invocationScope !== null) {
+    if (invocationScope.conversationScope !== 'direct') return null
+    return invocationScope.origin.kind === 'automation_occurrence'
+      ? {
+          requestKey: createAssistantHostedScheduledRequestKey({
+            operation: 'clinical-records-connect-link',
+            origin: invocationScope.origin,
+          }),
+        }
+      : {}
+  }
+  const userActionScope = context.currentUserActionScope?.() ?? null
+  if ((userActionScope?.acceptedInputIds.length ?? 0) > 0) {
+    return userActionScope?.conversationScope === 'direct' ? {} : null
+  }
+  // A private device-activity run has no invocation scope; its wearable event
+  // is the authority and its audience comes from the authenticated route.
+  const occurrence = context.currentDeviceActivityOccurrence?.() ?? null
+  return occurrence !== null && context.currentConversationScope?.() === 'direct'
+    ? {
+        requestKey: createAssistantHostedDeviceActivityRequestKey({
+          occurrence,
+          operation: 'clinical-records-connect-link',
+        }),
+      }
+    : null
+}
+
 async function executeClinicalRecordsConnectLinkDynamicTool(
   input: ExecuteMurphDynamicToolRequestInput,
   request: Extract<MurphDynamicToolRequest, { kind: 'create-clinical-records-connect-link' }>,
@@ -3141,16 +3175,8 @@ async function executeClinicalRecordsConnectLinkDynamicTool(
     )
   }
 
-  const invocationScope = hostedToolContext.currentInvocationScope?.() ?? null
-  const userActionScope = hostedToolContext.currentUserActionScope?.() ?? null
-  const conversationScope =
-    invocationScope?.conversationScope ??
-    userActionScope?.conversationScope ??
-    null
-  const hasAuthority =
-    invocationScope !== null ||
-    (userActionScope?.acceptedInputIds.length ?? 0) > 0
-  if (conversationScope !== 'direct' || !hasAuthority) {
+  const authority = resolveClinicalRecordsConnectLinkAuthority(hostedToolContext)
+  if (authority === null) {
     return toolTextResult(
       false,
       'Clinical Records connection links require current user input in a private conversation or exact private scheduled automation authority',
@@ -3160,14 +3186,7 @@ async function executeClinicalRecordsConnectLinkDynamicTool(
 
   try {
     const result = await connectLinkTool.createConnectLink({
-      ...(invocationScope?.origin.kind === 'automation_occurrence'
-        ? {
-            requestKey: createAssistantHostedScheduledRequestKey({
-              operation: 'clinical-records-connect-link',
-              origin: invocationScope.origin,
-            }),
-          }
-        : {}),
+      ...authority,
       signal: input.abortSignal ?? null,
     })
     return toolTextResult(true, safeToolPayloadText({
