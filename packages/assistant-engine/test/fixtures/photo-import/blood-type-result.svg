@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1179" height="2556" viewBox="0 0 1179 2556">
+  <rect width="1179" height="2556" fill="#0b0b0c"/>
+  <g fill="#f2f2f2" font-family="sans-serif">
+    <text x="72" y="300" font-size="44" fill="#9a9a9a">LAB RESULTS</text>
+    <text x="72" y="420" font-size="88" font-weight="bold">ABO Group</text>
+    <text x="72" y="520" font-size="44" fill="#c8c8c8">Blood typing test</text>
+    <rect x="72" y="640" width="1035" height="360" rx="36" fill="#1c1c1e"/>
+    <text x="120" y="740" font-size="44" fill="#9a9a9a">Result</text>
+    <text x="120" y="880" font-size="112" font-weight="bold">O Negative</text>
+    <text x="72" y="1120" font-size="40" fill="#9a9a9a">Collected Mar 3, 2026</text>
+  </g>
+</svg>

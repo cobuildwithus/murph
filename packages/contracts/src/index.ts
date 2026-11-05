@@ -1,4 +1,5 @@
 export * from "./bank-entities.ts";
+export * from "./blood-type.ts";
 export * from "./browser-vault.ts";
 export * from "./constants.ts";
 export * from "./clinical-fact.ts";

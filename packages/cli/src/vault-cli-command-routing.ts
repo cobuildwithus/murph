@@ -2,10 +2,46 @@ import type { Cli } from 'incur'
 
 import type { KnownLazyRootCommand } from './vault-cli-routing.js'
 
+// Roots whose commands need only the CLI instance. Roots that need vault or
+// inbox services stay in the switch below.
+const cliOnlyScopedRegistrars = {
+  assertion: async () => (await import('./commands/clinical-imports.js')).registerAssertionCommands,
+  automation: async () => (await import('./commands/automation.js')).registerAutomationCommands,
+  batch: async () => (await import('./commands/batch.js')).registerBatchCommands,
+  'clinical-note': async () => (await import('./commands/clinical-imports.js')).registerClinicalNoteCommands,
+  commons: async () => (await import('./commands/commons.js')).registerCommonsCommands,
+  'diagnostic-test': async () => (await import('./commands/clinical-imports.js')).registerDiagnosticTestCommands,
+  encounter: async () => (await import('./commands/encounter.js')).registerEncounterCommands,
+  exercise: async () => (await import('./commands/exercise.js')).registerExerciseCommands,
+  habitat: async () => (await import('./commands/habitat.js')).registerHabitatCommands,
+  knowledge: async () => (await import('./commands/knowledge.js')).registerKnowledgeCommands,
+  measurement: async () => (await import('./commands/measurement.js')).registerMeasurementCommands,
+  memory: async () => (await import('./commands/memory.js')).registerMemoryCommands,
+  profile: async () => (await import('./commands/profile.js')).registerProfileCommands,
+  query: async () => (await import('./commands/search.js')).registerSearchCommands,
+  route: async () => (await import('./commands/route.js')).registerRouteCommands,
+  search: async () => (await import('./commands/search.js')).registerSearchCommands,
+  'social-history': async () => (await import('./commands/clinical-imports.js')).registerSocialHistoryCommands,
+  timeline: async () => (await import('./commands/search.js')).registerSearchCommands,
+  vitals: async () => (await import('./commands/clinical-imports.js')).registerVitalsCommands,
+} satisfies Partial<Record<KnownLazyRootCommand, () => Promise<(cli: Cli.Cli) => void>>>
+
+type CliOnlyScopedRoot = keyof typeof cliOnlyScopedRegistrars
+
+function isCliOnlyScopedRoot(root: KnownLazyRootCommand): root is CliOnlyScopedRoot {
+  return Object.hasOwn(cliOnlyScopedRegistrars, root)
+}
+
 export async function registerScopedVaultCliCommand(input: {
   cli: Cli.Cli
   root: KnownLazyRootCommand
 }): Promise<void> {
+  if (isCliOnlyScopedRoot(input.root)) {
+    const register = await cliOnlyScopedRegistrars[input.root]()
+    register(input.cli)
+    return
+  }
+
   switch (input.root) {
     case 'allergy': {
       const [
@@ -36,21 +72,6 @@ export async function registerScopedVaultCliCommand(input: {
       )
       return
     }
-    case 'assertion': {
-      const { registerAssertionCommands } = await import('./commands/clinical-imports.js')
-      registerAssertionCommands(input.cli)
-      return
-    }
-    case 'automation': {
-      const { registerAutomationCommands } = await import('./commands/automation.js')
-      registerAutomationCommands(input.cli)
-      return
-    }
-    case 'batch': {
-      const { registerBatchCommands } = await import('./commands/batch.js')
-      registerBatchCommands(input.cli)
-      return
-    }
     case 'blood-test': {
       const [
         { registerBloodTestCommands },
@@ -71,11 +92,6 @@ export async function registerScopedVaultCliCommand(input: {
         createScopedVaultServices(),
       ])
       registerCaptureCommands(input.cli, services)
-      return
-    }
-    case 'commons': {
-      const { registerCommonsCommands } = await import('./commands/commons.js')
-      registerCommonsCommands(input.cli)
       return
     }
     case 'condition': {
@@ -100,21 +116,6 @@ export async function registerScopedVaultCliCommand(input: {
       registerDeviceCommands(input.cli, createIntegratedDeviceSyncServices())
       return
     }
-    case 'clinical-note': {
-      const { registerClinicalNoteCommands } = await import('./commands/clinical-imports.js')
-      registerClinicalNoteCommands(input.cli)
-      return
-    }
-    case 'diagnostic-test': {
-      const { registerDiagnosticTestCommands } = await import('./commands/clinical-imports.js')
-      registerDiagnosticTestCommands(input.cli)
-      return
-    }
-    case 'encounter': {
-      const { registerEncounterCommands } = await import('./commands/encounter.js')
-      registerEncounterCommands(input.cli)
-      return
-    }
     case 'event': {
       const [
         { registerEventCommands },
@@ -135,11 +136,6 @@ export async function registerScopedVaultCliCommand(input: {
         import('./vault-cli-services.js'),
       ])
       registerExperimentCommands(input.cli, createCliVaultUsecaseServices())
-      return
-    }
-    case 'exercise': {
-      const { registerExerciseCommands } = await import('./commands/exercise.js')
-      registerExerciseCommands(input.cli)
       return
     }
     case 'food': {
@@ -201,11 +197,6 @@ export async function registerScopedVaultCliCommand(input: {
       registerJournalCommands(input.cli, services)
       return
     }
-    case 'knowledge': {
-      const { registerKnowledgeCommands } = await import('./commands/knowledge.js')
-      registerKnowledgeCommands(input.cli)
-      return
-    }
     case 'list':
     case 'show': {
       const [
@@ -240,21 +231,6 @@ export async function registerScopedVaultCliCommand(input: {
       registerMedicationCommands(input.cli, services)
       return
     }
-    case 'measurement': {
-      const { registerMeasurementCommands } = await import('./commands/measurement.js')
-      registerMeasurementCommands(input.cli)
-      return
-    }
-    case 'habitat': {
-      const { registerHabitatCommands } = await import('./commands/habitat.js')
-      registerHabitatCommands(input.cli)
-      return
-    }
-    case 'memory': {
-      const { registerMemoryCommands } = await import('./commands/memory.js')
-      registerMemoryCommands(input.cli)
-      return
-    }
     case 'protocol':
     case 'regimen': {
       const [
@@ -267,19 +243,6 @@ export async function registerScopedVaultCliCommand(input: {
       registerProtocolCommands(input.cli, services)
       return
     }
-    case 'query':
-    case 'search':
-    case 'timeline': {
-      const { registerSearchCommands } = await import('./commands/search.js')
-      registerSearchCommands(input.cli)
-      return
-    }
-
-    case 'route': {
-      const { registerRouteCommands } = await import('./commands/route.js')
-      registerRouteCommands(input.cli)
-      return
-    }
     case 'supplement': {
       const [
         { registerSupplementCommands },
@@ -289,16 +252,6 @@ export async function registerScopedVaultCliCommand(input: {
         createScopedVaultServices(),
       ])
       registerSupplementCommands(input.cli, services)
-      return
-    }
-    case 'social-history': {
-      const { registerSocialHistoryCommands } = await import('./commands/clinical-imports.js')
-      registerSocialHistoryCommands(input.cli)
-      return
-    }
-    case 'vitals': {
-      const { registerVitalsCommands } = await import('./commands/clinical-imports.js')
-      registerVitalsCommands(input.cli)
       return
     }
     case 'wearables': {

@@ -124,6 +124,7 @@ import {
   buildJournalView,
   getQueryProjectionStatus,
   knowledgeAbsentPageResultSchema,
+  readCurrentBloodType,
   readVaultRawTolerant,
   type CanonicalEntity,
 } from '@murphai/query'
@@ -2894,6 +2895,132 @@ describeRealCodex('real Codex retained image e2e', () => {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }
   }, 360_000)
+})
+
+async function listSavedBloodTypeResults(vaultRoot: string): Promise<string[]> {
+  const tests = (await readVaultRawTolerant(vaultRoot)).events.filter(event => event.kind === 'test')
+  const values: string[] = []
+  for (const test of tests) {
+    const results = Array.isArray(test.attributes.results) ? test.attributes.results : []
+    for (const result of results) {
+      if (!result || typeof result !== 'object') continue
+      const { analyte, slug, textValue } = result as Record<string, unknown>
+      const label = `${String(analyte ?? '')} ${String(slug ?? '')}`
+      if (/blood[\s-]*(?:type|group)|\babo\b/iu.test(label) && typeof textValue === 'string') values.push(textValue)
+    }
+  }
+  return values
+}
+
+async function buildBloodTypeDeveloperInstructions(vaultRoot: string): Promise<string> {
+  // Mirrors private hosted planning: the scoped production CLI contract plus current state.
+  const assistantCliContract = scopeAssistantCliSurfaceContractForAssistant({
+    contract: buildAssistantCliSurfaceContract(await readAssistantCliLlmsFullManifestFromCliEntry({
+      cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
+      workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+    })),
+    hostedRuntime: true,
+  })
+  if (assistantCliContract === null) throw new Error('Expected the production CLI surface contract.')
+  await markAssistantContextSnapshotDirty({ vaultRoot, domains: ['blood_tests', 'health_context'] })
+  await refreshAssistantContextSnapshot({ vaultRoot, now: () => '2026-11-04T23:30:00.000Z' })
+  return buildAssistantSystemPrompt({
+    assistantCliContract,
+    assistantContextSnapshotPrompt: await readAssistantCurrentStatePrompt({ vaultRoot }),
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: { rawCommand: 'vault-cli' },
+    conversationScope: 'direct',
+    currentInstant: '2026-11-04T23:38:00.000Z',
+    currentLocalDate: '2026-11-04',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'default',
+    onboardingGuidance: false,
+    ordinaryInboundTurn: true,
+    turnTrigger: null,
+  })
+}
+
+describeRealCodex('real Codex blood type provenance e2e', () => {
+  // `steered` mirrors production delivery: the image starts the turn and the
+  // member's question arrives as a live steer while the turn is running.
+  it.each(['together', 'steered'] as const)('saves a blood type read from a lab screenshot instead of calling it an existing record: %s', async (delivery) => {
+    const config = await resolveRealCodexE2eConfig()
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-blood-type-e2e-'))
+    const vaultRoot = path.join(root, 'vault')
+    const binDirectory = path.join(root, 'bin')
+    const commandLogPath = path.join(root, 'commands.log')
+    const image = fileURLToPath(new URL('./fixtures/photo-import/blood-type-result.webp', import.meta.url))
+    try {
+      await initializeVault({ vaultRoot, createdAt: '2026-11-04T23:00:00.000Z', timezone: 'America/New_York' })
+      await appendBloodTest({
+        vaultRoot, occurredAt: '2026-04-23T13:00:00.000Z', testName: 'synthetic-panel', title: 'Synthetic panel',
+        results: [{ analyte: 'Ferritin', slug: 'ferritin', value: 80, unit: 'ng/mL' }],
+      })
+      await materializeFocusedActivityProjectionCli({ binDirectory, commandLogPath, vaultRoot })
+      const readCommands = async () => (await readFile(commandLogPath, 'utf8').catch(() => '')).split('\n').filter(Boolean)
+      const question = 'Will you be able to find this later?'
+      const turns = [
+        { prompt: 'What’s my blood type? I’m filling out a donor form.', fresh: false },
+        { prompt: 'Can you keep track of it for me if I find it?', fresh: false },
+        {
+          prompt: delivery === 'together' ? question : 'Received a message with 1 image attachment.',
+          images: [{ path: image, mimeType: 'image/webp' }],
+          steer: delivery === 'steered' ? question : null,
+          fresh: false,
+        },
+        // A new conversation: the screenshot and earlier turns are gone, so only the vault can answer.
+        { prompt: 'remind me what blood type I am', fresh: true },
+      ] as const
+      let threadId: string | null = null
+      const replies: string[] = []
+      let commandsBeforeRecall: string[] = []
+      for (const [index, turn] of turns.entries()) {
+        if (turn.fresh) {
+          threadId = null
+          commandsBeforeRecall = await readCommands()
+        }
+        const steerPrompt = 'steer' in turn ? turn.steer : null
+        let steered: Promise<void> | null = null
+        const result = await executeRealCodexAppServerTurn({
+          onLiveTurn: steerPrompt ? (live) => { steered ??= live.steer({ prompt: steerPrompt }) } : null,
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: await buildBloodTypeDeveloperInstructions(vaultRoot),
+          env: config.env, fixtureBinDirectory: binDirectory, groupConversation: false,
+          images: 'images' in turn ? turn.images : null,
+          model: config.model, modelProvider: config.modelProvider,
+          prompt: turn.prompt, reasoningEffort: 'medium', resumeSessionId: threadId,
+          sandbox: 'workspace-write', vaultRoot, workingDirectory: root,
+        })
+        if (steerPrompt) {
+          expect(steered).not.toBeNull()
+          await steered
+        }
+        threadId = result.threadId
+        replies.push(result.finalMessage)
+        if (index < 2) expect(await listSavedBloodTypeResults(vaultRoot)).toEqual([])
+      }
+      const saved = await listSavedBloodTypeResults(vaultRoot)
+      const commands = await readCommands()
+      const recallCommands = commands.slice(commandsBeforeRecall.length)
+      process.stdout.write(`[blood-type-provenance-e2e] ${JSON.stringify({ delivery, model: config.model, saved, commands, replies })}\n`)
+      expect(saved).toHaveLength(1)
+      expect((await readCurrentBloodType(vaultRoot))?.value).toBe('O-')
+      const screenshotReply = replies[2] ?? ''
+      expect(screenshotReply).toMatch(/O[\s-]*(?:negative|neg|-|−)/iu)
+      expect(screenshotReply).not.toMatch(/already (?:in|on|saved|had)|in your records already|overlooked|missed (?:it|this)/iu)
+      expect(recallCommands.some(command => /^profile show\b|^blood-test (?:list|show)\b/u.test(command))).toBe(true)
+      expect(recallCommands.some(command => /^profile set\b|^blood-test save\b/u.test(command))).toBe(false)
+      expect(replies[3] ?? '').toMatch(/O[\s-]*(?:negative|neg|-|−)/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths])
+    }
+  }, 1_200_000)
 })
 
 describeRealCodex('real Codex approved vault-file continuity e2e', () => {
