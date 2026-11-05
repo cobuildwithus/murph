@@ -9,7 +9,8 @@ import { mediaKeyPrefixFor } from "./access";
 import { putGameMedia } from "./media";
 import { readGamePhotoPostingStateTx, runGameCommand } from "./service";
 import { addDays, dayStartInstant } from "./time";
-import { downloadGameChatPhoto, gamePhotoAttachment } from "./chat-photo-media";
+import { downloadGameChatPhoto, gamePhotoAttachment, GameChatPhotoImportError } from "./chat-photo-media";
+import { logHostedOnboardingWarning } from "../hosted-onboarding/logging";
 
 const offerSchema = z.object({
   v: z.literal(1), gameId: z.string(), containerMemberId: z.string(), sourceMessageRef: z.string(),
@@ -32,7 +33,10 @@ export async function handleGameChatPhoto(input: Input): Promise<PhotoResult> {
   try {
     const media = await downloadGameChatPhoto(prepared.source);
     stored = await putGameMedia({ ...media, prefix: mediaKeyPrefixFor(input.actor) });
-  } catch { return rejected("photo_unavailable_resend_or_use_app"); }
+  } catch (error) {
+    logHostedOnboardingWarning("game.chat.photo-import", { reason: error instanceof GameChatPhotoImportError ? error.reason : "store" });
+    return rejected("photo_unavailable_resend_or_use_app");
+  }
   const entryId = photoEntryId(input, prepared.offer);
   const result = await runGameCommand({
     actorMemberId: input.actor, multiplayer: input.multiplayer, chatContainerMemberId: input.containerMemberId, chatPlayerMemberIds: input.playerMemberIds,
