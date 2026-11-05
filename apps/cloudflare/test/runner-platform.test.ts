@@ -7854,6 +7854,49 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
+  it.each([
+    [true, true],
+    ["true", undefined],
+    [false, undefined],
+  ] as const)("forwards the progress purpose and keeps only a literal true suppression flag (%s)", async (flag, expected) => {
+    const bodies: unknown[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      bodies.push(await request.json());
+      return new Response(JSON.stringify({
+        ok: true,
+        progressUpdateSuppressed: flag,
+        resolvedRoute: {
+          conversationThreadId: null,
+          directRecipientPhoneNumber: null,
+          fromPhoneNumber: "+15550002",
+          target: "chat_123",
+          targetKind: "thread",
+          threadIsDirect: true,
+        },
+      }), { headers: { "content-type": "application/json" }, status: 200 });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    const result = await platform.effectsPort.assertLinqRecentInboundEngagement!({
+      authorityCheckOnly: false,
+      deliveryPurpose: "progress_update",
+      target: "chat_123",
+      targetKind: "thread",
+    });
+
+    expect(bodies[0]).toMatchObject({ deliveryPurpose: "progress_update" });
+    expect(result && result.progressUpdateSuppressed).toBe(expected);
+  });
+
   it.each([undefined, { target: "chat_legacy", targetKind: "thread", threadIsDirect: true }, { conversationThreadId: null, directRecipientPhoneNumber: "+15550100001", fromPhoneNumber: null, target: "chat_group", targetKind: "thread", threadIsDirect: false }])("does not synthesize a Linq route from legacy or invalid response fields %#", async (resolvedRoute) => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({

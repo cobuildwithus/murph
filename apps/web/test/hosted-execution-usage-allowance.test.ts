@@ -711,7 +711,7 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
-  it.each(["gpt-image-2", "gpt-image-2.5-flare"])("prices %s image generation text, image, and output tokens", (model) => {
+  it.each(["gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.6-flare"])("prices %s image generation text, image, and output tokens", (model) => {
     const generatedImage = {
       ...BASE_USAGE_RECORD,
       cachedInputTokens: 0,

@@ -298,6 +298,7 @@ const commandGroups: Readonly<Record<string, string>> = {
   "medication": "history add",
   "memory": "forget|set-name|show|update|upsert",
   "model": "",
+  "profile": "set|show",
   "protocol": "import-json|list|show",
   "provider": "delete|edit|import-json|list|save|scaffold|show",
   "query": "projection rebuild|projection status",

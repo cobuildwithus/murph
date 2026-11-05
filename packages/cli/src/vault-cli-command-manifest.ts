@@ -99,6 +99,11 @@ import {
   registerImmunizationCommands,
 } from './commands/health-immunization-save.js'
 import { registerHabitatCommands } from './commands/habitat.js'
+import {
+  profileSetResultSchema,
+  profileShowResultSchema,
+  registerProfileCommands,
+} from './commands/profile.js'
 import { registerIntakeCommands } from './commands/intake.js'
 import { registerJournalCommands } from './commands/journal.js'
 import { registerMemoryCommands } from './commands/memory.js'
@@ -865,6 +870,28 @@ export const vaultCliCommandDescriptors = [
     ],
     register({ cli }) {
       registerHabitatCommands(cli)
+    },
+  },
+  {
+    id: 'profile',
+    bindingMode: 'none',
+    rootCommandNames: ['profile'],
+    leafCommands: [
+      {
+        path: ['profile', 'show'],
+        description:
+          'Show the saved blood type. Null means no recognizable blood type is saved in blood-test history.',
+        output: profileShowResultSchema,
+      },
+      {
+        path: ['profile', 'set'],
+        description:
+          "Save the member's blood type as one blood-test result. Returns unchanged only for an exact retry.",
+        output: profileSetResultSchema,
+      },
+    ],
+    register({ cli }) {
+      registerProfileCommands(cli)
     },
   },
   {

@@ -138,7 +138,7 @@ describe('generateOpenAiImage', () => {
 
     const form = capturedInit?.body as FormData
     expect(form.get('model')).toBe(OPENAI_IMAGE_GENERATION_MODEL)
-    expect(form.get('model')).toBe('gpt-image-2.5-flare')
+    expect(form.get('model')).toBe('gpt-image-2.6-flare')
     expect(form.get('prompt')).toBe('Use image 1 as the product reference.')
     expect(form.get('quality')).toBe('high')
     expect(form.get('size')).toBe('1024x1536')

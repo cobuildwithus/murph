@@ -98,6 +98,8 @@ Shared event envelope fields include `note`, `tags`, canonical `links[]`, `rawRe
 
 Blood tests do not define a separate canonical record family. `blood-test` remains the user-facing noun/view over canonical `kind: "test"` event-ledger records.
 
+Blood type is one blood-test result with `slug: "blood-type"`, analyte `Blood type (ABO/Rh)` and a compact `textValue` such as `AB+` or `O-`. `vault-cli profile` reads and writes it; the parser in `@murphai/contracts` (`parseBloodType`) is shared by every reader.
+
 `clinical_assertion` events store bounded assertion facts such as NKDA/NKFA, denied social-history statements, normality assertions, negative screenings, not-applicable statements, no-known-medications, and no-known-family-history. They carry `assertion`, `assertedOn`, optional `domain`, optional `polarity`, optional `subject`, optional `assertionText`, optional coding fields, and optional source context/evidence. They are not allergy records, because an allergy record represents an actual allergy or intolerance.
 
 Structured clinical notes do not define a separate event kind. They are canonical `kind: "note"` events with optional `noteType`, `authoredAt`, `signedAt`, `author`, `providerId`, `facility`, `encounterId`, and `sections[]`. A section stores `heading`, `text`, and an optional bounded section kind such as `assessment`, `plan`, `results`, or `instructions`.

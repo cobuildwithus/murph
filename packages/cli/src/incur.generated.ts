@@ -199,6 +199,8 @@ declare module 'incur' {
       'memory show': { args: { memoryId?: string }; options: { recordOnly?: boolean; compact?: boolean } }
       'memory update': { args: { memoryId: string; text: string }; options: { compact?: boolean; section?: "Identity" | "Preferences" | "Instructions" | "Context" } }
       'memory upsert': { args: { text: string }; options: { compact?: boolean; section: "Identity" | "Preferences" | "Instructions" | "Context" } }
+      'profile set': { args: {}; options: { requestId?: string; bloodType: string; occurredAt?: string | string | string; source?: "manual" | "import" | "device" | "derived"; note?: string; rawRef?: string[] } }
+      'profile show': { args: {}; options: { requestId?: string } }
       'protocol import-json': { args: {}; options: { requestId?: string; input: string } }
       'protocol list': { args: {}; options: { requestId?: string; status?: "available" | "archived"; commonsProtocol?: string; limit: number } }
       'protocol show': { args: { id: string }; options: { requestId?: string } }

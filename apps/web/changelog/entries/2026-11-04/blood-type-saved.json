@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-04",
+  "order": 200,
+  "item": {
+    "id": "blood-type-saved",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Murph keeps your blood type",
+    "summary": "Tell Murph your blood type or send a photo of a lab result, and it saves it so you can ask again in any new chat.",
+    "details": "Murph only says your blood type is on file after it has been saved. It also recognizes a blood type in lab results you already saved, even when the lab calls it ABO group and Rh type.",
+    "relevanceTags": ["labs", "assistant"],
+    "sourcePullRequests": [4573]
+  }
+}
