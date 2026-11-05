@@ -16,7 +16,8 @@ import { assertHostedDeployEnvironmentAsync } from "./deploy-preflight.js";
 import { assertPrivateGameImageVariants } from "./deploy-game-images.ts";
 import { assertHostedWebProtocolAdmission } from "./deploy-web-protocol.ts";
 import { resolveDeployWorkerCliPaths } from "./deploy-worker-version-paths.js";
-import { stageHostedRunnerRelease } from "./stage-runner-release.ts";
+import { assertReleaseNotBehindLive } from "./deploy-release-order.ts";
+import { readLiveRunnerReleaseSha, stageHostedRunnerRelease } from "./stage-runner-release.ts";
 import { createRunnerReleaseProvider } from "./runner-release-provider.ts";
 import { runSmokeHostedDeploy } from "./smoke-hosted-deploy.shared.ts";
 import { prepareHostedContainerDeployImage } from "./prepare-container-deploy-image.ts";
@@ -90,6 +91,10 @@ export async function runDeployWorkerVersionCli(
         const current = await readCurrentDeployment(input.workerName, input.configPath);
         const currentVersionId = requireSingleLiveVersion(current);
         const currentVersion = await releaseProvider.readWorkerVersion(input.workerName, currentVersionId);
+        const { releaseSha } = await readRunnerBundleManifest(runnerBundleDir);
+        await assertReleaseNotBehindLive({
+          releaseSha, liveReleaseSha: readLiveRunnerReleaseSha(currentVersion), checkoutDir: deployRoot,
+        });
         const stageSourceVersionId = recovery?.id ?? currentVersionId;
         const assertUploadSource = async (expectedSourceVersionId: string): Promise<void> => {
           const before = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
@@ -107,7 +112,6 @@ export async function runDeployWorkerVersionCli(
           });
           await assertUploadSource(stageSourceVersionId);
         }
-        const { releaseSha } = await readRunnerBundleManifest(runnerBundleDir);
         const preparedConfigPath = await prepareHostedContainerDeployImage({
           accountId: requireConfiguredString(env.CLOUDFLARE_ACCOUNT_ID, "CLOUDFLARE_ACCOUNT_ID"),
           configPath: input.configPath,

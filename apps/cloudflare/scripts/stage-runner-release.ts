@@ -203,6 +203,10 @@ function readNamespaceId(version: unknown, className: string): string {
   if (matches.length !== 1 || !isObjectRecord(matches[0])) throw invalid();
   return requiredString(matches[0].namespace_id);
 }
+/** Public commit of the serving runner release; null when the live record predates release SHAs. */
+export function readLiveRunnerReleaseSha(version: unknown): string | null {
+  return readHostedRunnerDeployment(readReleaseVariables(version))?.active.releaseSha ?? null;
+}
 function readReleaseVariables(version: unknown): Record<string, string> {
   const names = new Set(["HOSTED_EXECUTION_RUNNER_DEPLOYMENT", "HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT", "HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT"]);
   const result: Record<string, string> = {};
