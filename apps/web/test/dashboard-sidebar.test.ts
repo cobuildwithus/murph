@@ -220,15 +220,6 @@ test("Sidebar keeps public Goal guides out of authenticated dashboard navigation
   assert.doesNotMatch(markup, />Goals<\/a>/);
 });
 
-test("Sidebar does not render research-only Age navigation", () => {
-  mocks.usePathname.mockReturnValue("/home");
-
-  const markup = renderToStaticMarkup(createElement(Sidebar));
-
-  assert.doesNotMatch(markup, /href="\/age"/);
-  assert.doesNotMatch(markup, />Age<\/a>/);
-});
-
 test("Sidebar keeps the read-only Labs catalog out of navigation", () => {
   mocks.usePathname.mockReturnValue("/labs");
 

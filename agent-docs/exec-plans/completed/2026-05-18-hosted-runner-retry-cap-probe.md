@@ -18,7 +18,7 @@ before durable work is checked.
 - Do not add a new product control plane or persisted canonical state.
 - Preserve Durable Object one-alarm behavior.
 - Keep logs metadata-only.
-- Preserve unrelated active hosted-runner and Murph Age worktree edits.
+- Preserve unrelated active hosted-runner worktree edits.
 
 ## Plan
 

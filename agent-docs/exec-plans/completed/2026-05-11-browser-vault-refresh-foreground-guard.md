@@ -54,7 +54,7 @@ Updated: 2026-05-11
 
 ## Current evidence
 
-- Initial inspection found target Cloudflare runner files clean, with unrelated dirty work in runner-state and CLI/Murph Age files.
+- Initial inspection found target Cloudflare runner files clean, with unrelated dirty work in runner-state and CLI files.
 - Focused browser-vault subset initially exposed that applying the invocation-lock guard to all detached refresh execution would break the existing committed-idle-checkpoint refresh path; the guard was narrowed to alarm-driven refresh wakes.
 - `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/user-runner-alarm.test.ts -t "defers a due browser-vault refresh alarm while foreground invocation lock is active" --no-coverage` passed.
 - `pnpm typecheck` passed.

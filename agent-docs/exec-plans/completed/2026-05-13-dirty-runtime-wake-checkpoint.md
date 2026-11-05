@@ -23,7 +23,7 @@ Updated: 2026-05-13
 ## Constraints
 
 - Technical constraints: keep checkpoint publication inside the runtime-owned idle-shutdown path; derive deadlines from existing request/runtime projection only.
-- Product/process constraints: preserve unrelated active hosted-runtime and Murph Age worktree edits.
+- Product/process constraints: preserve unrelated active hosted-runtime worktree edits.
 
 ## Risks and mitigations
 
