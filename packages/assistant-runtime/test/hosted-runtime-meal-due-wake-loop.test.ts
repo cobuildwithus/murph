@@ -16,19 +16,18 @@ import {
   runHostedWorkspaceRuntimeJobInProcess,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 import { publishHostedWorkspaceMediaReferences } from "../src/hosted-runtime/media-references.ts";
-import type { HostedWorkspaceRunnerAssistantPhaseResult } from "../src/hosted-runtime/workspace-runner.ts";
 
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==";
-const computedWakeAt = () => new Date(Date.now() + 9 * 60 * 60_000).toISOString();
+const inMs = (ms: number) => new Date(Date.now() + ms).toISOString();
 
 // A thumbnail that stayed pending made each invocation's retry checkpoint rebase
-// onto the restored due assistant wake, so the runner re-woke every ~25 s.
+// onto the restored wake: a serviced due wake re-armed itself (~25 s loop) and an
+// earlier wake the pass had just computed was replaced by the later restored one.
 test.each([
-  ["computes the next schedule", (): HostedWorkspaceRunnerAssistantPhaseResult => ({
-    progressed: true, checkpointReason: "assistant_runtime_commit",
-    nextWakeAt: computedWakeAt(), nextWakeReason: "assistant" })],
-  ["finds no work", (): HostedWorkspaceRunnerAssistantPhaseResult => ({ progressed: false })],
-])("a pending meal thumbnail does not re-arm a serviced due wake when the pass %s", async (_label, pass) => {
+  { label: "a serviced due wake re-arms", committedInMs: -60_000, passInMs: 9 * 60 * 60_000 },
+  { label: "a meal-only dirty runtime skip its idle checkpoint timer", committedInMs: -60_000, passInMs: null },
+  { label: "an earlier computed wake is replaced", committedInMs: 9 * 60 * 60_000, passInMs: 30 * 60_000 },
+])("a pending meal thumbnail retry does not let $label", async ({ committedInMs, passInMs }) => {
   const root = await mkdtemp(path.join(tmpdir(), "murph-meal-due-wake-"));
   const source = path.join(root, "source");
   const live = path.join(root, "live");
@@ -41,7 +40,8 @@ test.each([
     artifacts.set(hash, bundle);
     return createSnapshotFixtureRef({ hash, size: bundle.byteLength });
   };
-  const dueWakeAt = new Date(Date.now() - 60_000).toISOString();
+  const committedWakeAt = inMs(committedInMs);
+  const passWakeAt = passInMs === null ? null : inMs(passInMs);
   const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
   try {
     await initializeVault({ createdAt: new Date().toISOString(), vaultRoot: source });
@@ -55,8 +55,8 @@ test.each([
     mealMedia.hooks.before = async () => { await new Promise((resolve) => setTimeout(resolve, 2_500)); };
     let workspace: HostedWorkspaceState = createWorkspaceState({
       version: "0", snapshotRef: await snapshot(source),
-      nextWakeAt: dueWakeAt, nextWakeReason: "assistant",
-      nextDefaultProcessingWakeAt: dueWakeAt, nextDefaultProcessingWakeReason: "assistant",
+      nextWakeAt: committedWakeAt, nextWakeReason: "assistant",
+      nextDefaultProcessingWakeAt: committedWakeAt, nextDefaultProcessingWakeReason: "assistant",
     });
     const events: string[] = [];
     const result = await runHostedWorkspaceRuntimeJobInProcess(
@@ -84,15 +84,22 @@ test.each([
         },
         async createCheckpointSnapshot() { return { snapshotRef: await snapshot(live) }; },
         async importItem() { return { status: "imported" }; },
-        async runAssistantPhase() { return pass(); },
+        async runAssistantPhase() {
+          return passWakeAt === null ? { progressed: false } : {
+            progressed: true, checkpointReason: "assistant_runtime_commit", nextWakeAt: passWakeAt, nextWakeReason: "assistant" };
+        },
       });
     assert.deepEqual(mealMedia.calls.map((call) => call.operation), ["record"]);
     assert.deepEqual(checkpointRequests.map((request) => request.reason),
       ["canonical_runtime_commit", "idle_shutdown"]);
-    for (const request of checkpointRequests) {
-      assert.notEqual(request.nextWakeAt, dueWakeAt, `${request.reason} re-armed the serviced due wake`);
+    if (committedInMs < 0) {
+      for (const request of checkpointRequests) {
+        assert.notEqual(request.nextWakeAt, committedWakeAt, `${request.reason} re-armed the serviced due wake`);
+      }
     }
-    assert.ok(result.nextWakeAt && Date.parse(result.nextWakeAt) > Date.now(),
-      "the next invocation is the thumbnail retry or the computed schedule, not an immediate re-wake");
+    if (passWakeAt !== null) {
+      assert.equal(checkpointRequests.at(-1)?.nextWakeAt, passWakeAt, "the idle snapshot publishes the wake the pass computed");
+    }
+    assert.ok(result.nextWakeAt && Date.parse(result.nextWakeAt) > Date.now(), "no immediate re-wake");
   } finally { await removeTempRoot(root); }
 }, 30_000);
