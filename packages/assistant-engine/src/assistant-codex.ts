@@ -9,6 +9,7 @@ import {
 import { createCodexCliTimingReceiver, withCliTimingEnvironmentAdmission } from './assistant-codex/cli-timing.js'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { statSync } from 'node:fs'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -3634,6 +3635,8 @@ async function runCodexAppServerTurnOnProcess(
               }
             : {}),
           codexTimingElapsedMs: elapsedMs,
+          // Read after the resume span above is captured.
+          ...readResumedCodexRolloutBytes(stage, input.env.CODEX_HOME, rolloutRelativePath),
           codexTimingProviderActionCount: providerActionCount,
           codexTimingThreadIdPresent: codexThreadId !== null,
           codexTimingStage: stage,
@@ -6422,6 +6425,24 @@ function isInvocationScopedRootToolRequest(
     request.kind === 'select-reply-target' ||
     request.kind === 'invalid-reaction-arguments' ||
     request.kind === 'invalid-reply-target-arguments'
+}
+
+/**
+ * Size of the rollout a cold resume just loaded, so its latency can be paired
+ * with history length. A local metadata read; unknown sizes stay absent.
+ */
+function readResumedCodexRolloutBytes(
+  stage: string,
+  codexHome: string | undefined,
+  rolloutRelativePath: string | null,
+): { codexTimingRolloutBytes?: number } {
+  if (stage !== 'thread-resumed' || !codexHome || !rolloutRelativePath) return {}
+  try {
+    const rollout = statSync(path.join(codexHome, rolloutRelativePath))
+    return rollout.isFile() ? { codexTimingRolloutBytes: rollout.size } : {}
+  } catch {
+    return {}
+  }
 }
 
 function resolveCodexRolloutRelativePath(input: {
