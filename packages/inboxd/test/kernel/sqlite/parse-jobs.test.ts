@@ -5,111 +5,74 @@ import { describe, expect, it } from "vitest";
 import { createAttachmentParseJobStore } from "../../../src/kernel/sqlite/parse-jobs.ts";
 
 describe("createAttachmentParseJobStore", () => {
-  it("enqueues only media attachments for parser jobs", () => {
+  it("skips succeeded attachments, claims null parser state, and permits a deliberate rerun", () => {
     const database = createParseJobTestDatabase();
+    try {
+      database.exec(`
+        insert into capture_attachment (attachment_id, kind, parser_state)
+        values ('attachment-a', 'audio', 'succeeded'), ('attachment-b', 'audio', null);
+        insert into attachment_parse_job
+          (job_id, capture_id, attachment_id, pipeline, state, attempts, created_at)
+        values
+          ('job-a', 'capture-1', 'attachment-a', 'attachment_text', 'pending', 1, '2026-04-15'),
+          ('job-b', 'capture-1', 'attachment-b', 'attachment_text', 'pending', 0, '2026-04-15');
+      `);
+      const store = createAttachmentParseJobStore({ database, refreshCaptureSearchIndex() {} });
+      expect(store.claimNextAttachmentParseJob({ attachmentId: "attachment-a" })).toBeNull();
+      expect(readParseJobState(database, "job-a")).toBe("pending");
+      expect(store.claimNextAttachmentParseJob({ captureId: "capture-1" })?.attachmentId)
+        .toBe("attachment-b");
 
-    const insertAttachment = database.prepare(
-      `
-        insert into capture_attachment (
-          attachment_id,
-          kind,
-          parser_state,
-          parse_updated_at
-        ) values (?, ?, null, null)
-      `,
-    );
-    insertAttachment.run("attachment-audio", "audio");
-    insertAttachment.run("attachment-video", "video");
-    insertAttachment.run("attachment-document", "document");
-    insertAttachment.run("attachment-image", "image");
-
-    const store = createAttachmentParseJobStore({
-      database,
-      refreshCaptureSearchIndex() {},
-    });
-    store.enqueueAttachmentParseJobs({
-      captureId: "capture-1",
-      attachments: [
-        {
-          attachmentId: "attachment-audio",
-          ordinal: 1,
-          kind: "audio",
-          mime: "audio/mpeg",
-          fileName: "voice.mp3",
-          storedPath: "raw/inbox/capture-1/attachments/attachment-audio/voice.mp3",
-        },
-        {
-          attachmentId: "attachment-video",
-          ordinal: 2,
-          kind: "video",
-          mime: "video/mp4",
-          fileName: "clip.mp4",
-          storedPath: "raw/inbox/capture-1/attachments/attachment-video/clip.mp4",
-        },
-        {
-          attachmentId: "attachment-document",
-          ordinal: 3,
-          kind: "document",
-          mime: "application/pdf",
-          fileName: "lab.pdf",
-          storedPath: "raw/inbox/capture-1/attachments/attachment-document/lab.pdf",
-        },
-        {
-          attachmentId: "attachment-image",
-          ordinal: 4,
-          kind: "image",
-          mime: "image/jpeg",
-          fileName: "photo.jpg",
-          storedPath: "raw/inbox/capture-1/attachments/attachment-image/photo.jpg",
-        },
-      ],
-      createdAt: "2026-04-15T12:00:00.000Z",
-    });
-
-    const jobs = store.listAttachmentParseJobs();
-
-    expect(jobs).toHaveLength(2);
-    expect(jobs.map((job) => job.attachmentId)).toEqual([
-      "attachment-audio",
-      "attachment-video",
-    ]);
-    for (const job of jobs) {
-      expect(job).toMatchObject({
-        captureId: "capture-1",
-        pipeline: "attachment_text",
-        state: "pending",
-      });
+      // Broad requeues deliberately rerun terminal jobs, including published successes.
+      database.exec("update attachment_parse_job set state = 'succeeded' where job_id = 'job-a'");
+      expect(store.requeueAttachmentParseJobs({ attachmentId: "attachment-a" })).toBe(1);
+      expect(database.prepare("select parser_state from capture_attachment where attachment_id = 'attachment-a'")
+        .get()).toEqual({ parser_state: "pending" });
+      expect(store.claimNextAttachmentParseJob({ attachmentId: "attachment-a" }))
+        .toMatchObject({ attachmentId: "attachment-a", state: "running", attempts: 2 });
+    } finally {
+      database.close();
     }
-    expect(
-      database
-        .prepare(
-          "select parser_state from capture_attachment where attachment_id = ?",
-        )
-        .get("attachment-audio"),
-    ).toEqual({ parser_state: "pending" });
-    expect(
-      database
-        .prepare(
-          "select parser_state from capture_attachment where attachment_id = ?",
-        )
-        .get("attachment-video"),
-    ).toEqual({ parser_state: "pending" });
-    expect(
-      database
-        .prepare(
-          `
-            select attachment_id, parser_state
-            from capture_attachment
-            where attachment_id in ('attachment-document', 'attachment-image')
-            order by attachment_id asc
-          `,
-        )
-        .all(),
-    ).toEqual([
-      { attachment_id: "attachment-document", parser_state: null },
-      { attachment_id: "attachment-image", parser_state: null },
-    ]);
-    database.close();
+  });
+
+  it.each([
+    ["matching", "job-a", 2, "running", "audio", "running", 1],
+    ["wrong job", "job-other", 2, "running", "audio", "running", 0],
+    ["stale attempt", "job-a", 1, "running", "audio", "running", 0],
+    ["non-running job", "job-a", 2, "succeeded", "audio", "succeeded", 0],
+    ["non-media job", "job-a", 2, "running", "document", "running", 0],
+    ["published attachment", "job-a", 2, "running", "audio", "succeeded", 0],
+  ] as const)("resets only the exact claimed attempt: %s", (_scenario, jobId, attempt, state, kind, parserState, expected) => {
+    const database = createParseJobTestDatabase();
+    try {
+      database.prepare(`insert into capture_attachment
+        (attachment_id, kind, parser_state, transcript_text, derived_path)
+        values ('attachment-a', ?, ?, 'Published transcript.', 'derived/result.json')`).run(kind, parserState);
+      database.prepare(`insert into attachment_parse_job
+        (job_id, capture_id, attachment_id, pipeline, state, attempts, created_at)
+        values ('job-a', 'capture-1', 'attachment-a', 'attachment_text', ?, 2, '2026-04-15')`).run(state);
+      database.exec(`insert into capture_attachment (attachment_id, kind, parser_state)
+        values ('attachment-b', 'audio', 'running');
+        insert into attachment_parse_job
+        (job_id, capture_id, attachment_id, pipeline, state, attempts, created_at)
+        values ('job-b', 'capture-1', 'attachment-b', 'attachment_text', 'running', 2, '2026-04-15')`);
+      const store = createAttachmentParseJobStore({ database, refreshCaptureSearchIndex() {} });
+      expect(store.requeueAttachmentParseJobs({ exactAttempt: { jobId, attempt } })).toBe(expected);
+      expect(readParseJobState(database, "job-a")).toBe(expected ? "pending" : state);
+      expect(readParseJobState(database, "job-b")).toBe("running");
+      expect(database.prepare(`select parser_state, transcript_text, derived_path
+        from capture_attachment where attachment_id = 'attachment-a'`).get()).toEqual({
+        parser_state: expected ? "pending" : parserState,
+        transcript_text: expected ? null : "Published transcript.",
+        derived_path: expected ? null : "derived/result.json",
+      });
+      // Omitting exactAttempt preserves deliberate broad reruns, including success.
+      expect(store.requeueAttachmentParseJobs({ captureId: "capture-1" })).toBe(
+        1 + (kind === "audio" && expected === 0 ? 1 : 0),
+      );
+    } finally {
+      database.close();
+    }
   });
 
   it("orders same-timestamp jobs by attachment id for listing and claiming", () => {

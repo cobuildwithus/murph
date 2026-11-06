@@ -58,6 +58,30 @@ import type {
 } from "../models.ts";
 
 const HOSTED_CONVERSATION_PARSER_RETRY_DELAY_MS = 60_000;
+let activeHostedParserPreparations = 0;
+
+/**
+ * Only the two conversation preparations own parser claims, and both join every claim.
+ * The container serializes workspace invocations; its invocation fence excludes other processes.
+ * In-process preparations can overlap, so only the sole active preparation recovers.
+ */
+async function enterHostedParserPreparation({ platform, runtime }: {
+  platform: Pick<NormalizedHostedAssistantRuntimeConfig["platform"], "logPort">;
+  runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
+}): Promise<void> {
+  activeHostedParserPreparations += 1;
+  if (activeHostedParserPreparations !== 1) return;
+  try {
+    for (const job of runtime.listAttachmentParseJobs({ limit: 200, state: "running" })) {
+      runtime.requeueAttachmentParseJobs({ exactAttempt: { attempt: job.attempts, jobId: job.jobId } });
+    }
+  } catch (error) {
+    await logHostedConversationParserRetryFailure({
+      captureId: null, error, platform,
+      safeFallbackMessage: "Hosted conversation parser recovery failed.",
+    });
+  }
+}
 
 export interface HostedConversationWakeLocalImportResult {
   capture: PersistedCapture | null;
@@ -94,6 +118,7 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
   let pipeline: Awaited<ReturnType<typeof createInboxPipeline>> | null = null;
 
   try {
+    await enterHostedParserPreparation({ platform: input.runtime.platform, runtime });
     assertHostedConversationProjectionLive(input.signal ?? null);
     pipeline = await createInboxPipeline({
       runtime,
@@ -129,6 +154,7 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
       capturePersistMs,
     };
   } finally {
+    activeHostedParserPreparations -= 1;
     if (pipeline) {
       pipeline.close();
     } else {
@@ -179,6 +205,7 @@ export async function prepareHostedConversationAudioPairIntoLocalInbox(input: {
   let activeIndex: 0 | 1 = 0;
   try {
     runtime = await openInboxRuntime({ vaultRoot: input.vaultRoot });
+    await enterHostedParserPreparation({ platform: input.runtime.platform, runtime });
     assertHostedConversationProjectionLive(signal);
     pipeline = await createInboxPipeline({ runtime, vaultRoot: input.vaultRoot });
     for (const index of [0, 1] as const) {
@@ -284,6 +311,7 @@ export async function prepareHostedConversationAudioPairIntoLocalInbox(input: {
         }
       }
     } finally {
+      if (runtime) activeHostedParserPreparations -= 1;
       if (pipeline) pipeline.close();
       else runtime?.close();
     }
@@ -448,7 +476,7 @@ async function reportHostedConversationParserResults(input: {
 }
 
 async function logHostedConversationParserRetryFailure(input: {
-  captureId: string;
+  captureId: string | null;
   error: unknown;
   platform: Pick<NormalizedHostedAssistantRuntimeConfig["platform"], "logPort">;
   safeFallbackMessage: string;
@@ -561,7 +589,7 @@ function hasPendingHostedConversationMediaParseJob(input: {
   }
 
   return capture.attachments.some((attachment) => {
-    if (attachment.kind !== "audio" && attachment.kind !== "video") {
+    if (attachment.parseState === "succeeded" || (attachment.kind !== "audio" && attachment.kind !== "video")) {
       return false;
     }
     return input.runtime.listAttachmentParseJobs({

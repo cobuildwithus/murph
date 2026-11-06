@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "vitest";
 
 import { initializeVault } from "@murphai/core";
@@ -2708,6 +2709,120 @@ test("attachment parse worker consumes inbox jobs, writes derived artifacts, and
   pipeline.close();
 });
 
+test("capture replay preserves a recovered success while the worker drains another attachment", async () => {
+  const vaultRoot = await makeTempDirectory("murph-parser-recovered-success-vault");
+  const sourceRoot = await makeTempDirectory("murph-parser-recovered-success-source");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+
+  try {
+    const input = {
+      source: "telegram",
+      externalId: "recovered-success-1",
+      accountId: "self",
+      thread: { id: "chat-recovered-success-1" },
+      actor: { isSelf: false },
+      occurredAt: "2026-03-13T11:00:00.000Z",
+      text: null,
+      attachments: [
+        {
+          kind: "audio" as const,
+          mime: "audio/wav",
+          originalPath: await writeExternalFile(sourceRoot, "a.wav", "wav-bytes-a"),
+          fileName: "a.wav",
+        },
+        {
+          kind: "audio" as const,
+          mime: "audio/wav",
+          originalPath: await writeExternalFile(sourceRoot, "b.wav", "wav-bytes-b"),
+          fileName: "b.wav",
+        },
+      ],
+      raw: {},
+    };
+    const capture = await pipeline.processCapture(input);
+    const [jobA, jobB] = runtime.listAttachmentParseJobs({ captureId: capture.captureId });
+    assert.ok(jobA);
+    assert.ok(jobB);
+    const providerCalls: string[] = [];
+    const registry = createParserRegistry([{
+      id: "recovered-success-parser",
+      locality: "local",
+      openness: "open_source",
+      runtime: "node",
+      priority: 500,
+      async discover() {
+        return { available: true, reason: "available for recovery test" };
+      },
+      supports(request) {
+        return (request.preparedKind ?? request.artifact.kind) === "audio";
+      },
+      async run(request) {
+        providerCalls.push(request.artifact.attachmentId);
+        if (request.artifact.attachmentId === jobA.attachmentId && providerCalls.length > 1) {
+          throw new Error("published attachment must not be transcribed again");
+        }
+        return { text: request.artifact.attachmentId === jobA.attachmentId
+          ? "Published transcript A." : "Published transcript B." };
+      },
+    }]);
+    const workerInput = {
+      vaultRoot, runtime, registry, ffmpeg: disableFfmpegLookup(),
+      jobFilters: { captureId: capture.captureId },
+    };
+    const [published] = await runAttachmentParseWorker({ ...workerInput, maxJobs: 1 });
+    assert.equal(published?.status, "succeeded");
+    assert.equal(published.job.attachmentId, jobA.attachmentId);
+    assert.ok(published.resultPath);
+    assert.equal((await readParserResult({ vaultRoot, resultPath: published.resultPath })).text,
+      "Published transcript A.");
+
+    // Recreate owner loss after publication but before runtime finalization.
+    const database = new DatabaseSync(runtime.databasePath);
+    try {
+      database.prepare(`update attachment_parse_job
+        set state = 'running', result_path = null, finished_at = null
+        where job_id = ?`).run(jobA.jobId);
+      database.prepare(`update capture_attachment
+        set parser_state = 'running', transcript_text = null, derived_path = null
+        where attachment_id = ?`).run(jobA.attachmentId);
+    } finally {
+      database.close();
+    }
+    assert.equal(runtime.getAttachment(jobA.attachmentId)?.attachment.transcriptText, null);
+    assert.equal(runtime.requeueAttachmentParseJobs({
+      exactAttempt: { jobId: jobA.jobId, attempt: published.job.attempts },
+    }), 1);
+    assert.equal((await pipeline.processCapture(input)).deduped, true);
+    const recovered = runtime.getAttachment(jobA.attachmentId)?.attachment;
+    assert.equal(recovered?.parseState, "succeeded");
+    assert.equal(recovered.transcriptText, "Published transcript A.");
+    assert.equal(recovered.derivedPath, published.resultPath);
+    assert.deepEqual(runtime.listAttachmentParseJobs({ captureId: capture.captureId })
+      .map((job) => job.state), ["pending", "pending"]);
+    assert.equal(runtime.getAttachment(jobB.attachmentId)?.attachment.parseState, "pending");
+
+    const callsBeforeDrain = providerCalls.length;
+    const drained = await runAttachmentParseWorker(workerInput);
+    assert.deepEqual(providerCalls.slice(callsBeforeDrain), [jobB.attachmentId]);
+    assert.equal(drained.length, 1);
+    assert.equal(drained[0]?.status, "succeeded");
+    const attachmentA = runtime.getAttachment(jobA.attachmentId)?.attachment;
+    assert.equal(attachmentA?.transcriptText, "Published transcript A.");
+    assert.equal(attachmentA.parseState, "succeeded");
+    assert.equal(attachmentA.derivedPath, published.resultPath);
+    assert.equal(runtime.listAttachmentParseJobs({ attachmentId: jobA.attachmentId })[0]?.attempts,
+      published.job.attempts);
+    assert.equal(runtime.getAttachment(jobB.attachmentId)?.attachment.parseState, "succeeded");
+    assert.equal(runtime.listAttachmentParseJobs({ attachmentId: jobB.attachmentId })[0]?.state, "succeeded");
+  } finally {
+    pipeline.close();
+    await fs.rm(vaultRoot, { recursive: true, force: true });
+    await fs.rm(sourceRoot, { recursive: true, force: true });
+  }
+});
+
 test("attachment parse worker requeues its claimed job when provider parsing aborts", async () => {
   const vaultRoot = await makeTempDirectory("murph-parser-worker-aborted-provider-vault");
   const sourceRoot = await makeTempDirectory("murph-parser-worker-aborted-provider-source");
@@ -2793,6 +2908,7 @@ test("attachment parse worker requeues its claimed job when provider parsing abo
     {
       attachmentId,
       captureId: capture.captureId,
+      exactAttempt: { attempt: 1, jobId: runtime.listAttachmentParseJobs({ captureId: capture.captureId })[0]!.jobId },
       state: "running",
     },
   ]);
@@ -2807,7 +2923,7 @@ test("attachment parse worker requeues its claimed job when provider parsing abo
   pipeline.close();
 });
 
-test("stale running parser attempts do not overwrite a requeued rerun", async () => {
+test.each(["completion", "abort"] as const)("stale running parser %s does not overwrite a requeued rerun", async (lateAction) => {
   const vaultRoot = await makeTempDirectory("murph-parser-worker-race-vault");
   const sourceRoot = await makeTempDirectory("murph-parser-worker-race-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
@@ -2848,6 +2964,18 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
   const firstRunRelease = new Promise<void>((resolve) => {
     releaseFirstRun = resolve;
   });
+  let signalSecondRunStarted: (() => void) | undefined;
+  const secondRunStarted = new Promise<void>((resolve) => { signalSecondRunStarted = resolve; });
+  let releaseSecondRun: (() => void) | undefined;
+  const secondRunRelease = new Promise<void>((resolve) => { releaseSecondRun = resolve; });
+  const controller = new AbortController();
+  const finalizations: Array<{ attempt: number; applied: boolean }> = [];
+  const complete = runtime.completeAttachmentParseJob;
+  runtime.completeAttachmentParseJob = (input) => {
+    const result = complete(input);
+    finalizations.push({ attempt: input.attempt, applied: result.applied });
+    return result;
+  };
 
   const registry = createParserRegistry([
     {
@@ -2875,6 +3003,8 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
           };
         }
 
+        signalSecondRunStarted?.();
+        await secondRunRelease;
         return {
           text: "fresh rerun text",
         };
@@ -2887,28 +3017,44 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
     runtime,
     registry,
     ffmpeg: disableFfmpegLookup(),
+    signal: controller.signal,
   });
 
   await firstRunStarted;
+  const firstJob = runtime.listAttachmentParseJobs({ captureId: capture.captureId })[0]!;
   assert.equal(
     runtime.requeueAttachmentParseJobs({
       captureId: capture.captureId,
+      exactAttempt: { jobId: firstJob.jobId, attempt: firstJob.attempts },
       state: "running",
     }),
     1,
   );
 
-  const rerun = await runAttachmentParseJobOnce({
+  const secondAttempt = runAttachmentParseJobOnce({
     vaultRoot,
     runtime,
     registry,
     ffmpeg: disableFfmpegLookup(),
   });
+  try {
+    await secondRunStarted;
+    if (lateAction === "abort") controller.abort();
+    releaseFirstRun?.();
+    assert.equal(await firstAttempt, null);
+    assert.equal(runtime.listAttachmentParseJobs({ captureId: capture.captureId })[0]?.state, "running");
+    assert.equal(runtime.listAttachmentParseJobs({ captureId: capture.captureId })[0]?.attempts, 2);
+    assert.equal(runtime.getCapture(capture.captureId)?.attachments[0]?.parseState, "running");
+    if (lateAction === "completion") assert.deepEqual(finalizations, [{ attempt: 1, applied: false }]);
+  } finally {
+    releaseFirstRun?.();
+    releaseSecondRun?.();
+    await Promise.allSettled([firstAttempt, secondAttempt]);
+  }
+  const rerun = await secondAttempt;
   assert.equal(rerun?.status, "succeeded");
+  assert.equal(rerun?.job.attempts, 2);
   assert.match(rerun?.resultPath ?? "", /attempts\/0002\/result\.json$/u);
-
-  releaseFirstRun?.();
-  assert.equal(await firstAttempt, null);
 
   const refreshed = runtime.getCapture(capture.captureId);
   assert.ok(refreshed);

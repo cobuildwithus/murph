@@ -3947,6 +3947,14 @@ whose commit times out behind that outstanding backup stays a retryable
 mailbox block (`conversation-import.canonical-write-busy`): the item keeps its
 watermark position, records no terminal attachment evidence, admits no reply,
 and retries through the ordinary mailbox retry path.
+
+Parser claims live only in the two conversation preparations, which join every
+claim before closing the runtime. The only active preparation resets running
+attempts by exact job and attempt before capture replay or any claim; a concurrent
+preparation skips recovery. Published parser evidence stays authoritative, and
+late cancellation or completion from an older attempt matches nothing. Drain
+active parser ownership before replacing or rolling back the runner image.
+
 Receipt replay is fail-stop for each restore attempt. The encrypted R2 reader
 owns artifact failure disposition: transport, object-read, key-resolution
 request, and service failures remain retryable, while a persisted object with

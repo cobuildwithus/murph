@@ -1890,3 +1890,7 @@ accounting deadline proofs are recorded in the [delivery settlement execution re
 Single-checkpoint receipt recovery and the accepted workspace owner are tracked in
 [`single checkpoint receipt recovery`](exec-plans/completed/2026-11-06-single-checkpoint-receipt-recovery.md).
 The durable contract remains in `references/hosted-runtime-protocol.md`.
+
+Hosted parser attempt recovery decisions are tracked in
+[`parser attempts`](exec-plans/completed/2026-11-06-sm-pr17-parser-attempts.md).
+The durable contract remains in `references/hosted-runtime-protocol.md`.
