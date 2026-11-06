@@ -45,6 +45,7 @@ vi.mock("next/server", async (original) => ({
 }));
 
 import { bindPairGameChat } from "@/src/lib/game/chat-membership";
+import { lockGamePair } from "@/src/lib/game/blocks";
 import type { GameCommand, GameTermsInput } from "@/src/lib/game/contract";
 import { putGameMedia } from "@/src/lib/game/media";
 import * as gameMedia from "@/src/lib/game/media";
@@ -1212,8 +1213,11 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       ok: false,
     });
     await ok(ava, { termsVersion: 1, timeZone: "America/New_York", token: second!.inviteToken!, type: "join" });
-    // Ava's own rematch of round 1 is the one she's already playing.
-    expect(await ok(ava, rematchOf(first))).toMatchObject({ id: second!.id, status: "live" });
+    // Ava's own rematch of round 1 is refused because a live game is refused, not returned.
+    expect(await run(ava, rematchOf(first))).toMatchObject({
+      ok: false,
+      error: { code: "ALREADY_IN_A_GAME", message: "This game already has an open rematch." },
+    });
 
     // Once round 2 has settled, round 1 is outdated; round 2 rematches fine.
     await devSettleNow(second!.id, leo);
@@ -1253,11 +1257,11 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const results = await Promise.all([run(leo, command()), run(samePlayer ? leo : ava, command())]);
     const stored = await getPrisma().game.findMany({ where: { previousGameId: first.gameId } });
     expect(stored).toHaveLength(1);
-    if (samePlayer) expect(results.filter((result) => result.ok)).toHaveLength(1);
-    else {
-      expect(results.every((result) => result.ok)).toBe(true);
-      expect(stored[0].status).toBe("live");
-    }
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    expect(results.filter((result) => !result.ok)).toEqual([
+      expect.objectContaining({ ok: false, status: 409, error: expect.objectContaining({ code: "ALREADY_IN_A_GAME" }) }),
+    ]);
+    expect(stored[0].status).toBe("invited");
   });
 
   it("keeps an older live game on Home beyond fifty newer invitations", async () => {
@@ -1298,7 +1302,8 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(await authorizeMediaRead(viewer, shot.mediaKeys[0])).toBe(false);
   });
 
-  it.each(["challenger", "opponent"] as const)("treats both players tapping rematch as the second accepting the first (first: %s)", async (firstAsker) => {
+  it.each(["challenger", "opponent"].flatMap(firstAsker => ["equal", "different"].map(secondTerms => ({ firstAsker, secondTerms }))))(
+    "refuses a second rematch ask until explicit acceptance (first: $firstAsker, terms: $secondTerms)", async ({ firstAsker, secondTerms }) => {
     const leo = await member("Leo", "America/New_York");
     const ava = await member("Ava", "Pacific/Auckland");
     const first = await startGame(leo, ava);
@@ -1308,19 +1313,128 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await getPrisma().game.update({ where: { id: first.gameId }, data: { chatContainerMemberId: room } });
     await devSettleNow(first.gameId, leo);
     const [asker, answerer] = firstAsker === "challenger" ? [leo, ava] : [ava, leo];
-    const asked = await ok(asker, { gameId: randomUUID(), inviteeFirstName: "Them", previousGameId: first.gameId, terms: TERMS, type: "createGame" });
+    const firstRequest: GameCommand = { gameId: randomUUID(), inviteeFirstName: "Them", previousGameId: first.gameId, terms: TERMS, type: "createGame" };
+    const asked = await ok(asker, firstRequest);
     lifecycleDelivery.mockClear();
-    const answerId = randomUUID();
-    const answer: GameCommand = { gameId: answerId, inviteeFirstName: "Them", previousGameId: first.gameId, terms: { ...TERMS, lengthDays: 14 }, type: "createGame" };
-    const answered = await ok(answerer, answer);
-    // The second ask joins the first on its terms, with no second game.
-    expect(answered).toMatchObject({ id: asked!.id, round: 2, status: "live", lengthDays: 7 });
-    expect(await getPrisma().game.count({ where: { previousGameId: first.gameId } })).toBe(1);
-    expect(await getPrisma().hostedLinqDelivery.count({ where: { source: "game_lifecycle", template: "game_rematch", sourceRef: asked!.id } })).toBe(1);
-    expect(lifecycleDelivery).not.toHaveBeenCalled();
-    // A retry of the same request returns the same game.
-    expect(await ok(answerer, answer)).toMatchObject({ id: asked!.id, status: "live" });
-    expect(await getPrisma().game.count({ where: { id: answerId } })).toBe(0);
+    const secondRequest: GameCommand = { gameId: randomUUID(), inviteeFirstName: "Them", previousGameId: first.gameId,
+      terms: secondTerms === "equal" ? TERMS : { ...TERMS, lengthDays: 14 }, type: "createGame" };
+    const refusal = { ok: false, status: 409, error: { code: "ALREADY_IN_A_GAME",
+      message: "They already asked for a rematch. Read it first: pull down on Home to see it." } };
+    const db = getPrisma();
+    const stored = await db.game.findMany({ where: { previousGameId: first.gameId } });
+    const events = await db.gameEvent.count({ where: { gameId: asked!.id } });
+    // Neither an ask nor its retry agrees to the open offer or writes another game.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      expect(await run(answerer, secondRequest)).toEqual(refusal);
+      expect(await db.game.findMany({ where: { previousGameId: first.gameId } })).toEqual(stored);
+      expect(stored).toEqual([expect.objectContaining({ id: asked!.id, status: "invited", lengthDays: 7 })]);
+      expect(await db.game.count({ where: { id: secondRequest.gameId } })).toBe(0);
+      expect(await db.gameEvent.count({ where: { gameId: asked!.id } })).toBe(events);
+      expect(await db.hostedLinqDelivery.count({ where: { source: "game_lifecycle", template: "game_rematch", sourceRef: asked!.id } })).toBe(1);
+      expect(lifecycleDelivery).not.toHaveBeenCalled();
+    }
+    expect(await ok(asker, firstRequest)).toMatchObject({ id: asked!.id, status: "invited" });
+    const offer = (await readHome(answerer)).games.find(game => game.previousGameId === first.gameId);
+    expect(offer).toMatchObject({ id: asked!.id, status: "invited", inviteToken: asked!.inviteToken, lengthDays: 7, terms: asked!.terms });
+    expect(offer!.inviteToken).toEqual(expect.any(String));
+    expect(await ok(answerer, { type: "join", token: offer!.inviteToken!, termsVersion: offer!.terms.n, timeZone: "UTC" }))
+      .toMatchObject({ id: asked!.id, status: "live", lengthDays: 7, terms: asked!.terms });
+    expect(await ok(asker, firstRequest)).toMatchObject({ id: asked!.id, status: "live" });
+    expect(await run(answerer, secondRequest)).toEqual({ ok: false, status: 409,
+      error: { code: "ALREADY_IN_A_GAME", message: "This game already has an open rematch." } });
+  });
+
+  async function waitForPairLockRequests(holderPid: number, expected: bigint) {
+    const deadline = Date.now() + 5_000;
+    for (;;) {
+      // The holder owns only this pair's advisory lock, so unrelated waiters cannot count.
+      const [waiting] = await getPrisma().$queryRaw<Array<{ count: bigint }>>`
+        SELECT count(*) AS count FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock'
+          AND ${holderPid} = ANY(pg_blocking_pids(pid))`;
+      if (waiting.count === expected) return;
+      if (Date.now() >= deadline) throw new Error(`Expected ${expected} rematch requests waiting on the pair lock; saw ${waiting.count}.`);
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+  }
+
+  it("replays the same creator's same-id rematch under the pair lock", async () => {
+    const challenger = await member("Challenger", "UTC"), opponent = await member("Opponent", "UTC");
+    const previous = await startGame(challenger, opponent);
+    await devSettleNow(previous.gameId, challenger);
+    const request: GameCommand = { type: "createGame", gameId: randomUUID(), inviteeFirstName: "Them", previousGameId: previous.gameId, terms: TERMS };
+    const db = getPrisma();
+    let markLocked!: () => void, release!: () => void, holderPid = 0;
+    const locked = new Promise<void>(resolve => { markLocked = resolve; });
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const holding = db.$transaction(async tx => {
+      await lockGamePair(tx, challenger, opponent);
+      const [backend] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
+      holderPid = backend.pid;
+      markLocked();
+      await held;
+    }, { timeout: 20_000 });
+    const asks: Array<ReturnType<typeof run>> = [];
+    try {
+      await Promise.race([locked, holding]);
+      for (const waitingFor of [1n, 2n]) {
+        asks.push(run(challenger, request));
+        await waitForPairLockRequests(holderPid, waitingFor);
+      }
+      expect(await db.game.count({ where: { id: request.gameId } })).toBe(0);
+    } finally {
+      release();
+      await Promise.allSettled([holding, ...asks]);
+    }
+    await holding;
+    for (const result of await Promise.all(asks)) {
+      expect(result, result.ok ? undefined : JSON.stringify(result.error)).toMatchObject({ ok: true, game: { id: request.gameId, status: "invited" } });
+    }
+    expect(await db.game.count({ where: { id: request.gameId } })).toBe(1);
+    expect(await db.gameEvent.count({ where: { gameId: request.gameId, type: "created" } })).toBe(1);
+  });
+
+  it.each(["challenger", "opponent"] as const)("refuses the second rematch ask under the pair lock (first: %s)", async firstAsker => {
+    const challenger = await member("Challenger", "UTC"), opponent = await member("Opponent", "UTC");
+    const previous = await startGame(challenger, opponent);
+    await devSettleNow(previous.gameId, challenger);
+    const [asker, answerer] = firstAsker === "challenger" ? [challenger, opponent] : [opponent, challenger];
+    const firstRequest: GameCommand = { type: "createGame", gameId: randomUUID(), inviteeFirstName: "Them", previousGameId: previous.gameId, terms: TERMS };
+    const secondRequest: GameCommand = { ...firstRequest, gameId: randomUUID(), terms: { ...TERMS, lengthDays: 14 } };
+    const db = getPrisma();
+    let markLocked!: () => void, release!: () => void, holderPid = 0;
+    const locked = new Promise<void>(resolve => { markLocked = resolve; });
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const holding = db.$transaction(async tx => {
+      await lockGamePair(tx, challenger, opponent);
+      const [backend] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
+      holderPid = backend.pid;
+      markLocked();
+      await held;
+    }, { timeout: 20_000 });
+    const asks: Array<ReturnType<typeof run>> = [];
+    try {
+      await Promise.race([locked, holding]);
+      for (const waitingFor of [1n, 2n]) {
+        asks.push(waitingFor === 1n ? run(asker, firstRequest) : run(answerer, secondRequest));
+        await waitForPairLockRequests(holderPid, waitingFor);
+      }
+      // Both asks reached the pair lock after reading a chain with no rematch.
+      expect(await db.game.count({ where: { previousGameId: previous.gameId } })).toBe(0);
+    } finally {
+      release();
+      await Promise.allSettled([holding, ...asks]);
+    }
+    await holding;
+    const [created, refused] = await Promise.all(asks);
+    expect(created).toMatchObject({ ok: true, game: { id: firstRequest.gameId, status: "invited", lengthDays: 7 } });
+    expect(refused).toEqual({ ok: false, status: 409, error: { code: "ALREADY_IN_A_GAME",
+      message: "They already asked for a rematch. Read it first: pull down on Home to see it." } });
+    expect(await db.game.findMany({ where: { previousGameId: previous.gameId }, select: { id: true, status: true, lengthDays: true } }))
+      .toEqual([{ id: firstRequest.gameId, status: "invited", lengthDays: 7 }]);
+    if (!created.ok || !created.game) throw new Error("Expected the first rematch offer.");
+    expect(await ok(answerer, { type: "join", token: created.game.inviteToken!, termsVersion: created.game.terms.n, timeZone: "UTC" }))
+      .toMatchObject({ id: firstRequest.gameId, status: "live", lengthDays: 7, terms: created.game.terms });
   });
 
   it.each([0, 1, 2, 3, 4, 5, 6] as const)("never starts a game on an unscheduled day (only weekday %s)", async (weekday) => {
@@ -1475,11 +1589,16 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const first = await startGame(a, b); await devSettleNow(first.gameId, a);
     const unrelated = await startGame(a, b); await devSettleNow(unrelated.gameId, a);
     await startGame(a, b);
-    const [one, two] = await Promise.all([a, b].map(actor => run(actor, { type: "createGame", gameId: randomUUID(), previousGameId: first.gameId, inviteeFirstName: "Friend", terms: TERMS })));
-    expect(one.ok && two.ok).toBe(true);
-    if (!one.ok || !two.ok) throw new Error("Expected rematch acceptance");
-    expect(one.game!.id).toBe(two.game!.id);
-    expect((await readGame(one.game!.id, a))!.status).toBe("live");
+    const results = await Promise.all([a, b].map(actor => run(actor, { type: "createGame", gameId: randomUUID(), previousGameId: first.gameId, inviteeFirstName: "Friend", terms: TERMS })));
+    expect(results.filter(result => result.ok)).toHaveLength(1);
+    const winner = results.findIndex(result => result.ok);
+    const offered = results[winner];
+    if (!offered.ok || !offered.game) throw new Error("Expected a rematch offer");
+    expect(results[1 - winner]).toEqual({ ok: false, status: 409, error: { code: "ALREADY_IN_A_GAME",
+      message: "They already asked for a rematch. Read it first: pull down on Home to see it." } });
+    expect((await readGame(offered.game.id, a))!.status).toBe("invited");
+    expect(await ok([a, b][1 - winner], { type: "join", token: offered.game.inviteToken!, termsVersion: offered.game.terms.n, timeZone: "UTC" }))
+      .toMatchObject({ id: offered.game.id, status: "live" });
     expect(await run(a, { type: "createGame", gameId: randomUUID(), previousGameId: unrelated.gameId, inviteeFirstName: "Friend", terms: TERMS })).toMatchObject({ ok: true });
   });
 

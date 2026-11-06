@@ -5935,10 +5935,9 @@ hide an earlier visible use. Home prioritizes live games in SQL before its
 bounded candidate window. Rematch creation rechecks `previous_game_id`
 descendants and pair capacity under
 the existing pair lock; the ancestry index avoids repeated whole-table scans.
-An open direct rematch conflicts, a settled descendant makes its ancestor
-outdated, and unrelated chains do not conflict; an opposite simultaneous request
-joins the first invite
-after releasing that transaction. Grace accepts captures only from the day
+An open direct rematch conflicts, including the other player's open offer in
+either race order, a settled descendant makes its ancestor outdated, and
+unrelated chains do not conflict. Grace accepts captures only from the day
 that just ended, with the existing clock slack at both boundaries.
 
 `/api/game/v1` routes are thin: they fold path ids into one command. Writes:

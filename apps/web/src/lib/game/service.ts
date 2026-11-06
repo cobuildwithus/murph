@@ -197,7 +197,7 @@ export async function runGameCommand(input: {
       : await runCommand({ chatAudience, actor, now: input.now, chatContainerMemberId: input.chatContainerMemberId, chatPlayerMemberIds: input.chatPlayerMemberIds, beforeMutationTx: input.beforeMutationTx, postGuard: input.postGuard }, command);
     const { gameId, dayOutcome, composer } = typeof applied === "object" && applied !== null ? applied : { gameId: applied };
     await deliverAppGameNegotiation(command, gameId, input.chatContainerMemberId);
-    await deliverCreatedRematch(command, gameId, input.chatContainerMemberId);
+    await deliverCreatedRematch(command, input.chatContainerMemberId);
     const game = gameId && !input.chatContainerMemberId ? await readGame(gameId, actor, input.multiplayer) : null;
     return { game: game && composer ? { ...game, composer } : game, ok: true, ...(dayOutcome ? { dayOutcome } : {}) };
   } catch (error) {
@@ -232,8 +232,8 @@ async function deliverAppGameNegotiation(command: GameCommand, gameId: string | 
   }
 }
 
-async function deliverCreatedRematch(command: GameCommand, gameId: string | null, chatContainerMemberId?: string): Promise<void> {
-  if (command.type !== "createGame" || chatContainerMemberId || (!command.previousGameId && command.maxPlayers !== 10) || gameId !== command.gameId) return;
+async function deliverCreatedRematch(command: GameCommand, chatContainerMemberId?: string): Promise<void> {
+  if (command.type !== "createGame" || chatContainerMemberId || (!command.previousGameId && command.maxPlayers !== 10)) return;
   try {
     const { deliverGameChatLifecycle } = await import("./chat-lifecycle");
     await deliverGameChatLifecycle(command.gameId, "rematch");
@@ -622,37 +622,23 @@ async function createGame(context: CommandContext, command: Extract<GameCommand,
   if (!profile) reject("PROFILE_REQUIRED", "Add your first name first.");
   if (await isGameCreationReplay(prisma, actor, gameId, chatOther ? chatPlayers : undefined)) return gameId;
   const rematch = await readGameCreationRematch(context, command, chatOther);
-  if (rematch?.answer?.createdBy) {
-    const termsVersion = currentTerms(parseStoredTerms(rematch.answer.terms)).n;
-    return joinGame(context, { id: rematch.answer.id, createdBy: rematch.answer.createdBy }, { termsVersion, timeZone: profile.timeZone });
-  }
   if (chatOther) await maintainPair(actor, chatOther);
   const data = await prepareGameCreateData(context, command, rematch, chatOther, profile.timeZone);
   try {
-    const answer = await commandTransaction(context, async (tx) => {
+    await commandTransaction(context, async (tx) => {
       const now = context.now ?? await databaseNow(tx);
-      if (chatOther) {
-        await lockGamePair(tx, actor, chatOther);
-        if (await isGameCreationReplay(tx, actor, gameId, chatPlayers)) return null;
+      if (data.invitees.create.memberId) {
+        await lockGamePair(tx, actor, data.invitees.create.memberId);
+        if (await isGameCreationReplay(tx, actor, gameId, chatOther ? chatPlayers : undefined)) return;
       }
-      // A block since the rematch was read, under the lock a block takes.
-      const pending = await revalidatePairCreationTx({ actor, opponentMemberId: data.invitees.create.memberId, now, previousGameId: command.previousGameId, tx });
-      if (pending && chatOther) reject("ALREADY_IN_A_GAME", "This game already has an open rematch. Read and agree to its exact terms first.");
-      if (pending) return pending;
+      // Recheck a block or a rematch since the first read, under the pair lock.
+      await revalidatePairCreationTx({ actor, opponentMemberId: data.invitees.create.memberId, now, previousGameId: command.previousGameId, tx });
       const players = await gameCreationPlayers(tx, actor, profile.timeZone, now, chatOther);
       await tx.game.create({ data: { ...data, inviteExpiresAt: new Date(now.getTime() + GAME_INVITE_TTL_MS), players: { create: players } } });
       const previous = command.previousGameId ? { previousGameId: command.previousGameId } : {};
       await writeEvents(tx, gameId, actor, [{ payload: { round: data.round, ...previous }, type: "created" }]);
       if (data.chatContainerMemberId && !chatOther) await reserveGameChatLifecycleTx({ gameId, kind: "rematch", now, tx });
-      return null;
     });
-    // Joining rechecks the selected invitation under the same pair lock.
-    // Keep its loading/crypto preparation outside the creation transaction.
-    if (answer?.createdBy) {
-      return joinGame(context, { id: answer.id, createdBy: answer.createdBy }, {
-        termsVersion: currentTerms(parseStoredTerms(answer.terms)).n, timeZone: profile.timeZone,
-      });
-    }
   } catch (error) {
     if (!isUniqueViolation(error)) throw error;
     if (!await isGameCreationReplay(prisma, actor, gameId, chatOther ? chatPlayers : undefined)) reject("INVALID_REQUEST", "That game id is taken.");
@@ -822,11 +808,11 @@ async function isGameCreationReplay(tx: Pick<Tx, "game">, actor: string, gameId:
 }
 
 async function readGameCreationRematch(context: CommandContext, command: Extract<GameCommand, { type: "createGame" }>, chatOther?: string) {
-  const rematch = command.previousGameId ? await readRematch(context.actor, command.previousGameId, context.now ?? new Date()) : null;
+  const rematch = command.previousGameId ? await readRematch(context.actor, command.previousGameId) : null;
   // A listed creator starts fresh games; an unlisted player may rematch an on-game.
   if (!isGameOn({ players: [{ memberId: context.actor }], invitees: [{ memberId: rematch?.opponentMemberId ?? null }] })) reject("GAME_DISABLED", "Starting a game is invite only for now.");
   if (chatOther && rematch && rematch.opponentMemberId !== chatOther) reject("NOT_A_PLAYER", "Rematch a settled game with the other person in this chat.");
-  if (chatOther && rematch?.answer) reject("ALREADY_IN_A_GAME", "This game already has an open rematch. Read and agree to its exact terms first.");
+  if (rematch && command.previousGameId) await assertLatestInChain(context.actor, rematch.opponentMemberId, command.previousGameId, context.now ?? new Date());
   return rematch;
 }
 
@@ -838,32 +824,29 @@ async function gameCreationPlayers(tx: Tx, actor: string, timeZone: string, join
   return [...players, { memberId: other, seat: 1, timeZone: profile.timeZone, joinedAt }];
 }
 
+/** Caller holds the pair lock. */
 async function revalidatePairCreationTx(input: {
   actor: string;
   opponentMemberId: string | null;
   now: Date;
   previousGameId?: string;
   tx: Tx;
-}): Promise<RematchAnswer | null> {
-  if (!input.opponentMemberId) return null;
-  await lockGamePair(input.tx, input.actor, input.opponentMemberId);
+}): Promise<void> {
+  if (!input.opponentMemberId) return;
   await rejectBlockedPair(input.tx, input.actor, input.opponentMemberId, "You can't rematch this game.");
-  const pending = input.previousGameId ? await assertLatestInChain(input.actor, input.opponentMemberId, input.previousGameId, input.now, input.tx) : null;
-  if (!pending) await assertPairCapacity(input.tx, input.actor, input.opponentMemberId, input.now);
-  return pending;
+  if (input.previousGameId) await assertLatestInChain(input.actor, input.opponentMemberId, input.previousGameId, input.now, input.tx);
+  await assertPairCapacity(input.tx, input.actor, input.opponentMemberId, input.now);
 }
 
 /**
  * A rematch must follow a finished game the challenger played. After a settled
  * game with exactly one other player, it continues the round count and is
  * addressed to that player, the only one who can accept it, on their Home.
- * When that player already sent their own rematch of it, `answer` is theirs.
  */
 async function readRematch(
   actor: string,
   previousGameId: string,
-  now: Date,
-): Promise<{ round: number; opponentMemberId: string | null; chatContainerMemberId: string | null; answer?: RematchAnswer }> {
+): Promise<{ round: number; opponentMemberId: string; chatContainerMemberId: string | null }> {
   const previous = await getPrisma().game.findUnique({
     include: { invitees: true, players: { select: { memberId: true } } },
     where: { id: previousGameId },
@@ -876,14 +859,11 @@ async function readRematch(
   if (others.length !== 1 || !others[0].memberId) reject("INVALID_REQUEST", "The other player is no longer available for a rematch.");
   await rejectBlockedPair(getPrisma(), actor, others[0].memberId, "You can't rematch this game.");
   await maintainPair(actor, others[0].memberId);
-  const answer = await assertLatestInChain(actor, others[0].memberId, previous.id, now);
-  return { opponentMemberId: others[0].memberId, chatContainerMemberId: previous.chatContainerMemberId, round: previous.round + 1, ...(answer ? { answer } : {}) };
+  return { opponentMemberId: others[0].memberId, chatContainerMemberId: previous.chatContainerMemberId, round: previous.round + 1 };
 }
 
-type RematchAnswer = Pick<Game, "id" | "createdBy" | "terms">;
-
 /** Rematch ancestry, not unrelated games between the same people, owns the round. */
-async function assertLatestInChain(actor: string, otherId: string, previousGameId: string, now: Date, tx?: Tx): Promise<RematchAnswer | null> {
+async function assertLatestInChain(actor: string, otherId: string, previousGameId: string, now: Date, tx?: Tx): Promise<void> {
   const prisma = tx ?? getPrisma();
   const later = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
     WITH RECURSIVE descendants AS (
@@ -893,14 +873,13 @@ async function assertLatestInChain(actor: string, otherId: string, previousGameI
     ) SELECT id FROM descendants WHERE status = 'settled' LIMIT 1`);
   if (later.length) reject("REMATCH_OUTDATED", "A later game in this rematch chain has already finished.");
   const pending = await prisma.game.findFirst({
-    select: { createdBy: true, id: true, invitees: { select: { memberId: true } }, terms: true, status: true },
+    select: { createdBy: true, status: true },
     where: { previousGameId, ...openPairWhere(actor, otherId, now) },
     orderBy: { id: "asc" },
   });
-  // Opposite asks accept the first invitation; a retry can find it already live.
-  if (pending?.createdBy === otherId && pending.invitees.some(invitee => invitee.memberId === actor)) return pending;
+  // Asking is never agreeing: their open offer waits for its own yes, even on the same terms.
+  if (pending?.createdBy === otherId && pending.status !== "live") reject("ALREADY_IN_A_GAME", "They already asked for a rematch. Read it first: pull down on Home to see it.");
   if (pending) reject("ALREADY_IN_A_GAME", "This game already has an open rematch.");
-  return null;
 }
 
 /** An unaddressed link cannot occupy a pair's slot until someone joins it. */
