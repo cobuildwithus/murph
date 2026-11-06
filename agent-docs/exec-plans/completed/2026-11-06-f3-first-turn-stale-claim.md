@@ -1,6 +1,6 @@
 # Release a first-turn claim that never reached the provider
 
-Status: active
+Status: completed
 Created: 2026-11-06
 Updated: 2026-11-06
 
@@ -29,3 +29,5 @@ Reaches: exact replay, later input, and runtime egress; fresh, sealed, and held
 obligations retain their existing safety boundaries.
 Proof: synthetic PostgreSQL journeys with only provider sends mocked, including
 rollback and a concurrent owner defeating the skip.
+- Deep review: no serious finding. Full-stack `linq-first-turn-held` regression: exit 0, 3 of 3.
+Completed: 2026-11-06
