@@ -165,7 +165,7 @@ describe("hosted local retryable outbox foreground restart e2e", () => {
     const retryableStatus = await waitForDurableRetryableOutbox();
     expect(retryableStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
 
-    const baselineIdleShutdownCleanupCount = countActivityExpiredDestroyRequestLogs();
+    const baselineIdleShutdownCleanupCount = countForcedExpiryDestroyRequestLogs();
     const restartedStatus = await waitForIdleShutdownCheckpoint({
       baselineCleanupCount: baselineIdleShutdownCleanupCount,
     });
@@ -176,7 +176,7 @@ describe("hosted local retryable outbox foreground restart e2e", () => {
       .toBeNull();
     expect(restartedStatus.inFlight).toBe(false);
     expect(restartedStatus.lastErrorCode ?? null).toBeNull();
-    expect(countActivityExpiredDestroyRequestLogs())
+    expect(countForcedExpiryDestroyRequestLogs())
       .toBeGreaterThan(baselineIdleShutdownCleanupCount);
     expect(requireLinqStub().countAcceptedSends(olderReplyPath, olderReplyMatcher)).toBe(
       baselineOlderAcceptedCount,
@@ -418,7 +418,7 @@ async function waitForIdleShutdownCheckpoint(input: {
       && deltaRef === null
       && !status.inFlight
       && !status.lastErrorCode
-      && countActivityExpiredDestroyRequestLogs() > input.baselineCleanupCount
+      && countForcedExpiryDestroyRequestLogs() > input.baselineCleanupCount
     ) {
       return status;
     }
@@ -557,7 +557,7 @@ function readHostedOutboxCounter(
   return -1;
 }
 
-function countActivityExpiredDestroyRequestLogs(): number {
+function countForcedExpiryDestroyRequestLogs(): number {
   const output = [
     requireScenario().harness.stdoutTail(200_000),
     requireScenario().harness.stderrTail(200_000),
@@ -582,11 +582,19 @@ function countActivityExpiredDestroyRequestLogs(): number {
       }
 
       const candidate = record as {
-        details?: { destroyRequestReason?: unknown };
+        details?: { destroyRequestReason?: unknown; lastActivityExpiryAgeMs?: unknown };
         message?: unknown;
       };
-      return candidate.message === "Hosted execution container destroy requested."
-        && candidate.details?.destroyRequestReason === "activity-expired";
+      if (candidate.message !== "Hosted execution container destroy requested.") {
+        return false;
+      }
+      // A forced expiry yields to an active invocation, whose completion then
+      // performs the same cleanup. Either order is the requested idle shutdown.
+      return candidate.details?.destroyRequestReason === "activity-expired"
+        || (
+          candidate.details?.destroyRequestReason === "invoke-completed"
+          && typeof candidate.details.lastActivityExpiryAgeMs === "number"
+        );
     }).length;
 }
 
