@@ -2516,6 +2516,8 @@ export async function runHostedWorkspaceAssistantPhase(
       platform: input.runtime.platform,
       assistantDeliveryEffects: deliveryEffects,
       linqDeliveryContexts: currentLinqDeliveryContexts,
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+      signal: input.signal,
       vaultRoot: input.restored.vaultRoot,
     });
 
@@ -5285,6 +5287,8 @@ async function prepareSystemMailboxDelivery(input: {
     systemMailboxDeliveryPreparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
       platform: phaseInput.runtime.platform,
       assistantDeliveryEffects: systemMailboxDeliveryEffectsForDispatch,
+      materializeWorkspaceArtifacts: phaseInput.materializeWorkspaceArtifacts,
+      signal: phaseInput.signal,
       ...(nonIdempotentPhoneCallResultEffectIds.length > 0
         ? {
             selectedNonIdempotentEffectIds:
@@ -6205,6 +6209,8 @@ async function collectForegroundDeliveryEffects(input: {
   platform: Pick<HostedRuntimePlatform, "logPort">;
   actionApprovalPort: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["actionApprovalPort"];
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
+  materializeWorkspaceArtifacts?: HostedWorkspaceRuntimeAssistantPhaseInput["materializeWorkspaceArtifacts"];
+  signal?: AbortSignal | null;
   messageVolumeReceiptPort: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["effectsPort"];
   preferredIntentIds: readonly string[];
   vaultRoot: string;
@@ -6221,6 +6227,8 @@ async function collectForegroundDeliveryEffects(input: {
     platform: input.platform,
     assistantDeliveryEffects: deliveryEffects,
     linqDeliveryContexts: input.linqDeliveryContexts ?? null,
+    materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+    signal: input.signal,
     vaultRoot: input.vaultRoot,
   });
   return {
@@ -6248,6 +6256,8 @@ async function runForegroundAssistantReplyPhase(input: {
     platform: input.input.runtime.platform,
     actionApprovalPort: input.input.runtime.platform.actionApprovalPort ?? null,
     linqDeliveryContexts: input.linqDeliveryContexts,
+    materializeWorkspaceArtifacts: input.input.materializeWorkspaceArtifacts,
+    signal: input.input.signal,
     messageVolumeReceiptPort: input.input.runtime.platform.effectsPort,
     preferredIntentIds: input.currentTurnDeliveryIntentIds,
     vaultRoot: input.input.restored.vaultRoot,

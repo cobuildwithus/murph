@@ -5,7 +5,7 @@ import { initializeVault } from "@murphai/core";
 import { snapshotHostedBundleRoots, restoreHostedBundleRoots } from "@murphai/runtime-state/node";
 import { createHostedArtifactMaterializer } from "../src/hosted-runtime/artifacts.ts";
 import { readHostedMediaReferenceCatalogue, writeHostedMediaReferenceCatalogue } from "../src/hosted-runtime/media-references.ts";
-import type { HostedRuntimeMediaStore } from "../src/hosted-runtime/platform.ts";
+import { HostedRuntimeMediaReadError, type HostedRuntimeMediaStore } from "../src/hosted-runtime/platform.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 
@@ -20587,8 +20587,9 @@ it.each(["telegram", "linq"] as const)("hydrates approved %s files after a cold 
   }
 });
 
-it.each(["telegram", "linq"] as const)("recovers interrupted %s file delivery through the real outbox dispatcher", async (channel) => {
+it.each(["telegram", "linq"] as const)("recovers interrupted %s file delivery with fresh preparation through the real outbox dispatcher", async (channel) => {
   const actual = await vi.importActual<typeof import("@murphai/assistant-engine/assistant-outbox")>("@murphai/assistant-engine/assistant-outbox");
+  mocks.listAssistantOutboxIntents.mockImplementation(actual.listAssistantOutboxIntents);
   mocks.dispatchAssistantOutboxIntent.mockImplementation(actual.dispatchAssistantOutboxIntent);
   mocks.readAssistantOutboxIntentMirrorState.mockImplementation(actual.readAssistantOutboxIntentMirrorState);
   mocks.readAssistantOutboxIntent.mockImplementation(actual.readAssistantOutboxIntent);
@@ -20600,16 +20601,37 @@ it.each(["telegram", "linq"] as const)("recovers interrupted %s file delivery th
   mocks.beginAssistantOutboxIntentMirrorPreparedDispatch.mockImplementation(actual.beginAssistantOutboxIntentMirrorPreparedDispatch);
   mocks.resetAssistantOutboxPreparedDispatchById.mockImplementation(actual.resetAssistantOutboxPreparedDispatchById);
   mocks.shouldDispatchAssistantOutboxIntent.mockImplementation(actual.shouldDispatchAssistantOutboxIntent);
-  for (const interruption of ["during-read", "before-read", "owner-loss"] as const) {
+  const interruptions = channel === "telegram"
+    ? ["during-read", "before-read", "owner-loss", "transport", "expired", "missing", "changed"] as const
+    : ["during-read", "before-read", "owner-loss"] as const;
+  for (const interruption of interruptions) {
     const root = await mkdtemp(path.join(tmpdir(), "murph-file-interruption-"));
     const ref = "raw/inbox/synthetic/photo.png";
     const bytes = Buffer.from("synthetic approved photo");
     const target = channel === "telegram" ? "123" : "chat_123";
     const cancel = new AbortController();
-    const reason = new Error("Synthetic materialization interruption");
+    const reason = interruption === "owner-loss"
+      ? Object.assign(new Error("Synthetic media GET rejected stale invocation with HTTP 401"), {
+          name: "HostedRuntimeInternalAuthorityRejectedError",
+          code: "HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY",
+          reason: "internal_authority_rejected",
+          status: 401,
+          statusCode: 401,
+          responseStatus: 401,
+        })
+      : new Error("Synthetic materialization interruption");
     let interrupt = false;
+    let persistedIntentId: string | null = null;
     const get = vi.fn(async () => {
+      // A failed warm read may be retried by the authoritative read after the
+      // claim. On the normal and interrupted paths no remote read follows it.
+      if (channel === "telegram" && persistedIntentId && !["transport", "missing", "changed"].includes(interruption)) {
+        expect((await actual.readAssistantOutboxIntent(root, persistedIntentId))?.status).toBe("pending");
+      }
       if (interrupt) {
+        if (interruption === "transport") throw new HostedRuntimeMediaReadError({ cause: reason, retryable: true });
+        if (interruption === "missing") return null;
+        if (interruption === "changed") return Buffer.from("synthetic changed bytes");
         if (interruption === "during-read") cancel.abort(reason);
         throw reason;
       }
@@ -20646,7 +20668,9 @@ it.each(["telegram", "linq"] as const)("recovers interrupted %s file delivery th
           media: [file], transportIdempotent: channel === "linq", idempotencyKey: approved.deliveryIdempotencyKey ?? undefined }),
       });
       await actual.saveAssistantOutboxIntent(root, { ...approved, dedupeKey: effect.fingerprint });
+      persistedIntentId = approved.intentId;
       await rm(path.join(root, ref));
+      get.mockClear();
       const providerFetch = vi.fn<typeof fetch>(async () => Response.json({ ok: true, result: { message_id: 7 } }));
       mocks.sendLinqMessage.mockImplementation(async (_request, dependencies) => {
         expect(await dependencies.loadVaultFile(file)).toEqual(bytes);
@@ -20660,27 +20684,82 @@ it.each(["telegram", "linq"] as const)("recovers interrupted %s file delivery th
         platformEnv: { TELEGRAM_BOT_TOKEN: "synthetic-token" }, materializeWorkspaceArtifacts,
         vaultRoot: root, wake: HOSTED_WAKE.wake,
       };
-      const prepared = await prepareHostedAssistantDeliveryEffectsForDispatch(input);
-      expect(prepared.preparedDispatches).toHaveLength(channel === "telegram" ? 1 : 0);
       interrupt = true;
-      await expect(drainHostedPreparedAssistantDeliveries({ ...input, ...prepared, allowPreparedSending: true, signal: cancel.signal }))
-        .rejects.toMatchObject({ name: "AssistantWorkspaceArtifactMaterializationError", cause: reason });
+      if (channel === "telegram") {
+        if (interruption === "before-read") cancel.abort(reason);
+        if (interruption === "expired") {
+          const catalogue = await readHostedMediaReferenceCatalogue({ vaultRoot: root });
+          catalogue.entries[0]!.expiresAt = "2000-01-01T00:00:00Z";
+          await writeHostedMediaReferenceCatalogue({ vaultRoot: root, catalogue });
+        }
+        const preparing = prepareHostedAssistantDeliveryEffectsForDispatch({ ...input, signal: cancel.signal });
+        if (["transport", "expired", "missing", "changed"].includes(interruption)) {
+          // Warming never throws for one bad file: a throw here would stop every
+          // other delivery in the batch. The authoritative read reports the outcome.
+          const prepared = await preparing;
+          expect(prepared.preparedDispatches).toHaveLength(1);
+          await drainHostedPreparedAssistantDeliveries({ ...input, ...prepared, allowPreparedSending: true });
+          expect(providerFetch).not.toHaveBeenCalled();
+          const settled = await actual.readAssistantOutboxIntent(root, approved.intentId);
+          expect(settled?.status).toBe(interruption === "transport" ? "retryable" : "failed");
+          expect(settled?.lastError?.code).toBe("ASSISTANT_VAULT_FILE_UNAVAILABLE");
+          expect(settled?.delivery).toBeNull();
+          continue;
+        }
+        await expect(preparing).rejects.toMatchObject({ name: "AssistantWorkspaceArtifactMaterializationError", cause: reason });
+        expect(consume).not.toHaveBeenCalled();
+        if (interruption === "owner-loss") expect(cancel.signal.aborted).toBe(false);
+        expect(get).toHaveBeenCalledTimes(interruption === "before-read" ? 0 : 1);
+      } else {
+        const prepared = await prepareHostedAssistantDeliveryEffectsForDispatch(input);
+        expect(prepared.preparedDispatches).toHaveLength(0);
+        await expect(drainHostedPreparedAssistantDeliveries({ ...input, ...prepared, allowPreparedSending: true, signal: cancel.signal }))
+          .rejects.toMatchObject({ name: "AssistantWorkspaceArtifactMaterializationError", cause: reason });
+      }
       const interrupted = await actual.readAssistantOutboxIntent(root, approved.intentId);
-      expect(interrupted?.status).toBe(channel === "telegram" && interruption !== "owner-loss" ? "pending" : "sending");
+      expect(interrupted?.status).toBe(channel === "telegram" ? "pending" : "sending");
       expect(interrupted?.lastError).toBeNull();
       expect(interrupted?.delivery).toBeNull();
+      if (channel === "telegram") {
+        expect(interrupted?.preparedDispatchToken).toBeNull();
+        expect(interrupted?.attemptCount).toBe(0);
+      }
       expect(providerFetch).not.toHaveBeenCalled();
       interrupt = false;
-      // Unprepared Linq sends recover through the existing stale-sending timer.
-      // Advance only Date; keep real filesystem and provider dispatch scheduling.
-      vi.useFakeTimers({ toFake: ["Date"] });
-      vi.setSystemTime(new Date(Date.now() + 11 * 60 * 1000));
-      const retry = await drainHostedPreparedAssistantDeliveries({ ...input, ...prepared, allowPreparedSending: true });
+      if (channel === "linq") {
+        // Unprepared Linq sends recover through the existing stale-sending timer.
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(new Date(Date.now() + 11 * 60 * 1000));
+      }
+      // The successor rebuilds its effect and preparation from durable state.
+      const successorEffects = await collectHostedAssistantDeliverySideEffects({
+        actionApprovalPort: input.actionApprovalPort,
+        preferredIntentIds: [approved.intentId],
+        includeBackgroundDueIntents: false,
+        vaultRoot: root,
+      });
+      expect(successorEffects).toHaveLength(1);
+      const successorInput = {
+        ...input,
+        assistantDeliveryEffects: successorEffects,
+        materializeWorkspaceArtifacts: createHostedArtifactMaterializer({
+          vaultRoot: root, operatorHomeRoot: root, mediaStore: { put: async () => {}, get },
+        }),
+      };
+      const freshPreparation = await prepareHostedAssistantDeliveryEffectsForDispatch(successorInput);
+      expect(freshPreparation.preparedDispatches).toHaveLength(channel === "telegram" ? 1 : 0);
+      const readsBeforeDispatch = get.mock.calls.length;
+      const retry = await drainHostedPreparedAssistantDeliveries({ ...successorInput, ...freshPreparation, allowPreparedSending: true });
       expect(retry).toEqual([expect.objectContaining({ deliveryStatus: "sent" })]);
       const delivered = await actual.readAssistantOutboxIntent(root, approved.intentId);
       expect(delivered?.status).toBe("sent");
       expect(delivered?.media).toEqual(approved.media);
       expect(providerFetch).toHaveBeenCalledTimes(1);
+      if (channel === "telegram") {
+        expect(get).toHaveBeenCalledTimes(readsBeforeDispatch);
+        const form = providerFetch.mock.calls[0]![1]!.body as FormData;
+        expect(Buffer.from(await (form.get("document") as File).arrayBuffer())).toEqual(bytes);
+      }
       expect(request).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();

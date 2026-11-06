@@ -101,6 +101,7 @@ import {
 } from "@murphai/operator-config/telegram-runtime";
 import {
   assistantChannelDeliverySchema,
+  assistantVaultFileMaxBytes,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import {
@@ -1934,6 +1935,8 @@ function hasHostedAssistantOutboxConfirmationRetryPath(
 export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
   platform?: Pick<HostedRuntimePlatform, "logPort"> | null;
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
+  materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
+  signal?: AbortSignal | null;
   selectedNonIdempotentEffectIds?: readonly string[];
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
@@ -1960,6 +1963,11 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
     const linqDeliveryContext = resolveHostedAssistantLinqDeliveryContextForEffect({
       contexts: linqDeliveryContexts,
       effect,
+    });
+    await hydrateHostedTelegramVaultFilesBeforeClaim({
+      effect,
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+      signal: input.signal,
     });
     const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
       onEvent,
@@ -1994,6 +2002,31 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
   return {
     preparedDispatches,
   };
+}
+
+async function hydrateHostedTelegramVaultFilesBeforeClaim(input: {
+  effect: HostedAssistantDeliveryEffect;
+  materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
+  signal?: AbortSignal | null;
+}): Promise<void> {
+  const { payload } = input.effect;
+  if (payload.channel !== "telegram" || payload.threadIsDirect !== true) {
+    return;
+  }
+  const paths = payload.media
+    .filter((media) => media.kind === "vault_file")
+    .map((file) => `vault:${file.ref}`);
+  if (paths.length === 0 || !input.materializeWorkspaceArtifacts) {
+    return;
+  }
+  // Warm bytes before Telegram's non-idempotent sending claim, so an owner loss
+  // on the remote read leaves the intent claimable. This only warms: the read
+  // after the checkpoint reports per-file outcomes, because a throw here would
+  // stop every other delivery in this batch. Interruption still propagates.
+  await input.materializeWorkspaceArtifacts(paths, {
+    maxFileBytes: assistantVaultFileMaxBytes,
+    signal: input.signal,
+  });
 }
 
 function shouldPrepareHostedAssistantDeliveryEffectForDispatch(

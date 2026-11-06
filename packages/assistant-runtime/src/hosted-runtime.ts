@@ -3793,6 +3793,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 ? await prepareHostedAssistantDeliveryEffectsForDispatch({
                     platform: foregroundRuntime.platform,
                     assistantDeliveryEffects: exactDeliveryEffects,
+                    materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
+                    signal: runtimeAbortController.signal,
                     selectedNonIdempotentEffectIds: exactDeliveryEffects
                       .filter((effect) =>
                         effect.payload.transportIdempotent !== true
