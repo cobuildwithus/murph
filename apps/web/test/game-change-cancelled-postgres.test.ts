@@ -1,3 +1,4 @@
+import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { getPrisma } from "@/src/lib/prisma";
@@ -25,7 +26,7 @@ async function setup() {
 
 describe.skipIf(!enabled)("game cancellation lifecycle transaction", () => {
   afterAll(async () => {
-    await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: members } } });
+    await cleanupGameFixtures(getPrisma(), members);
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: members } } }); });
   it("rolls back cancellation and its announcement when history cannot commit", async () => {
     const { a, gameId } = await setup();

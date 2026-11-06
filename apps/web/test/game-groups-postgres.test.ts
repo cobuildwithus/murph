@@ -1,3 +1,4 @@
+import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 import { linqRoster } from "./support/linq-roster";
 import { reviewGameReport } from "@/src/lib/game/report-review";
 import { randomUUID } from "node:crypto";
@@ -140,11 +141,9 @@ async function parkOtherLifecycleReceipts(receiptId: string) {
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 afterAll(async () => {
   if (!enabled) return;
-  const ownedGames = await db.game.findMany({ where: { wordsOwnerMemberId: { in: ids } }, select: { id: true } });
-  await db.hostedLinqDelivery.deleteMany({ where: { source: "game_lifecycle", OR: ownedGames.flatMap(game => [{ sourceRef: game.id }, { sourceRef: { startsWith: `${game.id}:` } }]) } });
   // Delete the large synthetic entry fixture in one set before roster cascades.
   await db.gameEntry.deleteMany({ where: { memberId: { in: ids } } });
-  await db.game.deleteMany({ where: { wordsOwnerMemberId: { in: ids } } });
+  await cleanupGameFixtures(db, ids);
   await db.hostedThreadContainer.deleteMany({ where: { memberId: { in: ids } } });
   await db.hostedMember.deleteMany({ where: { id: { in: ids } } });
 });
@@ -830,7 +829,7 @@ describe.skipIf(!enabled)("maximum-cardinality group projections", () => {
     const [viewer, other] = people;
     const base = await create(viewer, [other]);
     const original = await gameRow(base.id);
-    await db.game.delete({ where: { id: base.id } });
+    await cleanupGameFixtures(db, [viewer.id]);
     const { players: originalPlayers, invitees: originalInvitees, tickets: originalTickets, ...template } = original;
     expect([originalPlayers.length, originalInvitees.length, originalTickets.length]).toEqual([1, 1, 0]);
     const dayOne = new Date("2030-01-01T00:00:00Z");
@@ -915,8 +914,7 @@ describe.skipIf(!enabled)("maximum-cardinality group projections", () => {
     expect(history.groups?.every(group => group.record.won === 25 && group.record.lost === 0 && group.record.tied === 0)).toBe(true);
     expect(history.people[0].games[0].id).toBe(pair!.id);
     await measure("history", async () => withHistoryPhotoDeliveries(await readHistory(viewer.id, true), viewer.id));
-    const { writeFile } = await import("node:fs/promises");
-    await writeFile(".tmp-pr4-load.json", JSON.stringify(metrics, null, 2));
+    console.info(JSON.stringify(metrics));
   });
 });
 

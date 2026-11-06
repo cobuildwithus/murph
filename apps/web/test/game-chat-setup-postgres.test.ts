@@ -1,3 +1,4 @@
+import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { getPrisma } from "@/src/lib/prisma";
@@ -33,7 +34,7 @@ async function appRematch(f: Awaited<ReturnType<typeof setup>>) {
 describe.skipIf(!enabled)("chat game setup persistence", () => {
   afterEach(() => vi.unstubAllEnvs());
   afterAll(async () => {
-    await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: members } } });
+    await cleanupGameFixtures(getPrisma(), members);
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: members } } }); });
   it("shows an addressed app rematch to both players and only its invitee can shake in chat", async () => {
     const f = await setup(), id = await appRematch(f);

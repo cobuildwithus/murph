@@ -1,3 +1,4 @@
+import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -252,7 +253,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
   });
 
   afterAll(async () => {
-    await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: memberIds } } });
+    await cleanupGameFixtures(getPrisma(), memberIds);
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: memberIds } } });
     delete process.env.MURPH_GAME_MEDIA_DIR;
     await rm(mediaDir, { force: true, recursive: true });

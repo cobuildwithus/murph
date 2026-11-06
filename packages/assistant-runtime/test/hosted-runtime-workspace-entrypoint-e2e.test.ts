@@ -313,8 +313,6 @@ describe("hosted workspace runtime entrypoint", () => {
       vi.setSystemTime(new Date(firstNow));
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
 
-      const firstPhaseFinished = createDeferred<void>();
-      const secondPhaseFinished = createDeferred<void>();
       let assistantPhaseCalls = 0;
       const platform = createPlatform({
         deviceSyncPort,
@@ -403,8 +401,8 @@ describe("hosted workspace runtime entrypoint", () => {
               inputId: pendingInputId,
               vaultRoot,
             });
+            events.push("assistant.phase:2:finished");
             shutdownController.abort();
-            firstPhaseFinished.resolve();
             return {
               checkpointReason: "assistant_runtime_commit" as const,
               progressed: true,
@@ -415,19 +413,14 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      await withRealTimeout(
-        firstPhaseFinished.promise,
-        runtimeTransitionTimeoutMs,
-        () => events.join(","),
-      );
-      assert.equal(assistantPhaseCalls, 2);
-      assert.equal(checkpointRequests.length, 0);
-
       const result = await withRealTimeout(
         resultPromise,
         runtimeTransitionTimeoutMs,
         () => events.join(","),
       );
+      assert.equal(assistantPhaseCalls, 2);
+      // Concurrent device work can publish a status-only commit on either side of phase 2.
+      assert.ok(events.indexOf("assistant.phase:2:finished") < events.indexOf("snapshot:idle_shutdown"), events.join(","));
       const checkpoint = checkpointRequests.at(-1);
       assert.ok(checkpoint);
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);

@@ -1,3 +1,4 @@
+import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -582,7 +583,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         expect(await deletion.hostedMember.findUnique({ where: { id: memberId } })).toBeNull();
       } finally {
         setHostedSecureBoxStringTestCodecForTests(codec);
-        await deletion.game.deleteMany({ where: { wordsOwnerMemberId: memberId } });
+        await cleanupGameFixtures(deletion, [memberId]);
         await deletion.hostedMember.deleteMany({ where: { id: memberId } });
         await disconnectClients([deletion]);
       }
@@ -617,7 +618,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         expect(await deletion.gamePlayer.count({ where: { gameId, memberId: leaver } })).toBe(0);
       } finally {
         setHostedSecureBoxStringTestCodecForTests(null);
-        await deletion.game.deleteMany({ where: { wordsOwnerMemberId: { in: [leaver, stayer] } } });
+        await cleanupGameFixtures(deletion, [leaver, stayer]);
         await deletion.hostedMember.deleteMany({ where: { id: { in: [leaver, stayer] } } });
         await disconnectClients([deletion]);
       }

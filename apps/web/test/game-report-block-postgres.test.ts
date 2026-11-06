@@ -1,3 +1,4 @@
+import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 
@@ -115,7 +116,7 @@ describe.skipIf(!runPostgresProof)("weekly game report and block", () => {
   });
   afterAll(async () => {
     vi.unstubAllEnvs();
-    await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: memberIds } } });
+    await cleanupGameFixtures(getPrisma(), memberIds);
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: memberIds } } });
   });
 
