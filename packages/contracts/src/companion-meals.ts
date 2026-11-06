@@ -20,6 +20,7 @@ export const companionMealSchema = z.object({
   proteinGrams: amount,
   carbsGrams: amount,
   fatGrams: amount,
+  fiberGrams: amount.optional(),
   uploadId: companionMealUploadIdSchema.nullable(),
   thumbnail: mealPhotoThumbnailSchema.optional(),
 }).strict();

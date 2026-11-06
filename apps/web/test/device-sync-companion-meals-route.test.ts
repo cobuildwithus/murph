@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { addMeal, initializeVault } from "@murphai/core";
-import { createBrowserVaultCoreQueryClient, splitBrowserVaultReplica } from "@murphai/query/browser-replica-client";
+import { createBrowserVaultCoreQueryClient, parseBrowserVaultCoreShard, splitBrowserVaultReplica } from "@murphai/query/browser-replica-client";
 import { createBrowserVaultReplica, readVault } from "@murphai/query/browser-replica-server";
 import { NodeNextRequest } from "next/dist/server/base-http/node";
 import { NextRequestAdapter } from "next/dist/server/web/spec-extension/adapters/next-request";
@@ -67,6 +67,28 @@ it.each(["?limit=0", "?limit=32", "?limit=1.5", "?limit=1&limit=2", "?memberId=s
 
 it("returns only the one member-owned meal without images or provenance", async () => {
   expect(await (await detail(request(), context())).json()).toEqual({ timeZone: "Asia/Tokyo", savedAt, meal: { ...meal, photo: null } });
+});
+
+it.each([undefined, null, 0, 6.5])("serves legacy and fiber core replicas through both route presenters: %s", async fiberGrams => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "synthetic-meals-fiber-"));
+  try {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const replica = await createBrowserVaultReplica({ vault: await readVault(vaultRoot), metricPoints: [], generatedAt: savedAt, sourceBundleHash: "a".repeat(64) });
+    const savedMeal = { ...meal, ...(fiberGrams === undefined ? {} : { fiberGrams }) };
+    const savedDay = { ...days[0]!, meals: [savedMeal] };
+    replica.meals = { schemaVersion: 1, timeZone: "UTC", days: [savedDay] };
+    const shards = await splitBrowserVaultReplica(replica);
+    const core = parseBrowserVaultCoreShard(JSON.parse(JSON.stringify(shards.core)));
+    mocks.decode.mockResolvedValue({ client: createBrowserVaultCoreQueryClient(core) });
+    const listing = await GET(request());
+    expect(listing.status).toBe(200);
+    expect(await listing.json()).toEqual({
+      timeZone: "UTC", savedAt, days: [{ ...savedDay, meals: [{ ...savedMeal, photo: null }] }], nextCursor: null,
+    });
+    const single = await detail(request(), context());
+    expect(single.status).toBe(200);
+    expect(await single.json()).toEqual({ timeZone: "UTC", savedAt, meal: { ...savedMeal, photo: null } });
+  } finally { await rm(vaultRoot, { recursive: true, force: true }); }
 });
 
 it.each(["meal_othermember", "invalid"])("treats missing or foreign IDs alike: %s", async id => {

@@ -1,6 +1,6 @@
 # iOS Meals API
 
-Last verified: 2026-11-05
+Last verified: 2026-11-06
 
 ## Scope and ownership
 
@@ -55,6 +55,7 @@ Exact synthetic 200 response (one populated day):
           "proteinGrams": 32,
           "carbsGrams": 58,
           "fatGrams": null,
+          "fiberGrams": 6.5,
           "uploadId": null,
           "photo": null
         }
@@ -71,6 +72,12 @@ its totals and counts cover all canonical selected meals on that local day.
 Nutrients sum only known estimates; if no meal supplies a nutrient its total is
 null, including calories. A real zero stays zero. `calorieMealCount` distinguishes
 partial from complete calorie coverage. Values are approximate, not targets.
+Each meal's optional nullable `fiberGrams` comes from canonical
+`nutrition.totals.fiberGrams`. The reader release accepts it without emitting it;
+after the separate writer release, published meals carry a number or null.
+Absent and null both mean unknown. Day objects have no fiber field. The iOS app
+derives a day's fiber only when every logged meal has a number; the server's
+existing day nutrient totals and counts are unchanged.
 `name` prefers the canonical event title written by `meal add/import-json/edit
 --name`: a sentence-case dish name, normally 2–5 words and at most 40 characters.
 Description, portions, places, and uncertainty stay in `note`. The CLI requires a name for add/import and rejects invalid title edits before
@@ -112,8 +119,9 @@ Exact synthetic 200 response:
     "proteinGrams": 32,
     "carbsGrams": 58,
     "fatGrams": null,
+    "fiberGrams": 6.5,
     "uploadId": null,
-          "photo": null
+    "photo": null
   }
 }
 ```
@@ -276,6 +284,40 @@ evacuate old member runtimes before resuming their canonical workspace on the
 new image. Older Workers return no thumbnail deliveries during Web-first skew.
 
 ## Release order and compatibility
+
+Meal fiber ships in two PRs: `codex/meals-fiber-reader` accepts the optional
+nullable meal field, then `codex/meals-fiber-writer` publishes it. Both examples
+above show the writer shape; stored replicas without fiber stay readable.
+`presentCompanionMeals` preserves the field in list and detail while replacing
+private thumbnail metadata with `photo`.
+
+The replica Meals reader inventory is:
+
+| Reader | Pre-reader behavior when a meal carries `fiberGrams` |
+| --- | --- |
+| Web server: `browser-vault/loader.ts`, used by companion Meals list/detail/removal, Journal, numbers, demographics, and the production canary | Full and core parsers call the strict Meals schema and reject the key, even when null. Meals maps this failure to `MEALS_PROJECTION_UNAVAILABLE`; other core consumers also fail decoding. |
+| Browser bundle: `browser-vault/context.tsx` / `warm-store.ts` through `loader.ts`, and Settings data export through `export.ts` | The same strict full/core parsers reject it. An already-open tab keeps its old reader after Web promotion. |
+| Hosted Cloudflare Worker: `browser-vault-store.ts` `encodeBrowserVaultReplicaChildren`, reached by runner outbound replica writes | Strictly parses the full replica before splitting and encrypting it; an old Worker rejects a new runner's fiber output. Ciphertext session delivery itself does not parse Meals. |
+| Hosted runner: `hosted-runtime/browser-vault-replica.ts` through `buildCompanionMealsProjection` | Validates its own built projection with the strict schema, but does not consume the saved replica Meals section. An old runner reads existing canonical fiber and omits it from its output, so it does not reject a new saved replica. |
+| Operational checkpoint recovery: `apps/cloudflare/scripts/checkpoint-recovery-replica.ts` | Its full-replica parser also rejects the key; run it from the reader release or newer. |
+
+Before PR 2 reaches main (runtime deploys may select main HEAD), promote PR 1
+to production Web, converge the compatible Cloudflare Worker/runtime pair, and
+drain or reload pre-reader browser sessions. Web deployment alone does not
+upgrade open tabs. Verify deployed revision/image admission and browser asset
+revision before admitting writers; the reader rollout is compatible with old
+writers and changes no member-visible response. During writer rollout, old
+runners may still publish meals without fiber, which the compatible readers
+accept. Retained replicas acquire fiber at their next ordinary runtime
+publication; no generation bump, backfill, or forced wake is required.
+
+Once any fiber replica is written, PR 1 is the minimum Web server, browser
+bundle, and Cloudflare Worker/runtime release for rollback and recovery tools.
+Rolling back only the writer does not remove retained fiber replicas. Keep the
+compatible readers; a below-floor rollback requires proving no fiber-bearing
+replica can reach any old reader. Post-deploy, check revision convergence and
+bounded decode/publication errors, then verify ordinary list/detail reads carry
+fiber while day objects retain their existing shape.
 
 The upload-link reader release (#4435, merge
 `21f806eb67f01b1c346846b9eea2ab31f4f6e4e3`) must converge in Web and all runtimes
