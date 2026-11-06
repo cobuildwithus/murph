@@ -2123,7 +2123,6 @@ type HostedGroupJoinOutreachDeletionSnapshot = {
   outreachIds: string[];
 };
 
-
 async function readHostedGroupJoinOutreachDeletionSnapshot(input: {
   memberIdFilter: string | { in: string[] };
   prisma: Prisma.TransactionClient;

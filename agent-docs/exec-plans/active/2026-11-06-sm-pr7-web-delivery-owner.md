@@ -63,11 +63,6 @@ Updated: 2026-11-06
 - Focused first-turn, planner and delivery-store unit proofs passed. Activation
   fixtures and runtime egress coverage passed in the focused six-file run
   (313 tests, exit 0).
-- The single end-of-task typecheck exited 2 on five fixture typing errors.
-  Those fixtures were corrected and focused tests passed; typecheck was not
-  repeated under the task's one-run limit.
-- The plan remains active. No push, CI or remote review is part of this local task.
-
 - Signup suppression now commits within the delivery owner. Transport retains
   its existing fallback and sent conditions; receipts return only contact-card
   context. Privacy deletion calls the extracted batched projection maintenance

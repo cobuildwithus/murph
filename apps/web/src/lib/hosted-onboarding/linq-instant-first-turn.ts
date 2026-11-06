@@ -522,7 +522,7 @@ export async function completeHostedLinqInstantFirstTurn(input: {
       });
     } catch {
       return await abandonHostedLinqInstantFirstTurnForFallback({
-        expectedAttemptedAt: input.generation.attemptedAt,
+        expectedAttemptedAt: generationAttemptedAt,
         eventId: input.wakeHandoff.eventId,
         linqChatId: chatId,
         prisma,
@@ -549,7 +549,7 @@ export async function completeHostedLinqInstantFirstTurn(input: {
       );
     }
     return await abandonHostedLinqInstantFirstTurnForFallback({
-      expectedAttemptedAt: input.generation.attemptedAt,
+      expectedAttemptedAt: generationAttemptedAt,
       eventId: input.wakeHandoff.eventId,
       linqChatId: chatId,
       prisma,
@@ -567,7 +567,7 @@ export async function completeHostedLinqInstantFirstTurn(input: {
       );
     }
     return await abandonHostedLinqInstantFirstTurnForFallback({
-      expectedAttemptedAt: input.generation.attemptedAt,
+      expectedAttemptedAt: generationAttemptedAt,
       eventId: input.wakeHandoff.eventId,
       linqChatId: chatId,
       prisma,
@@ -644,7 +644,7 @@ export async function completeHostedLinqInstantFirstTurn(input: {
       && error.code === "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH"
     ) {
       return await abandonHostedLinqInstantFirstTurnForFallback({
-        expectedAttemptedAt: input.generation.attemptedAt,
+        expectedAttemptedAt: generationAttemptedAt,
         eventId: input.wakeHandoff.eventId,
         linqChatId: chatId,
         prisma,
@@ -673,8 +673,8 @@ export async function completeHostedLinqInstantFirstTurn(input: {
     );
   }
 
-  const expectedAttemptedAt = claim.attemptedAt;
-  if (!expectedAttemptedAt) {
+  const dispatchAttemptedAt = claim.attemptedAt;
+  if (!dispatchAttemptedAt) {
     throw buildHostedLinqInstantFirstTurnRetryError("delivery-claim-unconfirmed");
   }
 
@@ -691,11 +691,11 @@ export async function completeHostedLinqInstantFirstTurn(input: {
     try {
       if (!resumed && isDefinitiveHostedLinqInstantFirstTurnSendFailure(error)) {
         rejected = await recordHostedLinqInstantFirstTurnFirstDispatchRejectionTx({
-          expectedAttemptedAt, idempotencyKey, prisma,
+          expectedAttemptedAt: dispatchAttemptedAt, idempotencyKey, prisma,
         });
       } else {
         await markHostedLinqDeliverySendFailedTx({
-          expectedAttemptedAt,
+          expectedAttemptedAt: dispatchAttemptedAt,
           failureCode: readHostedLinqInstantFirstTurnFailureCode(error),
           idempotencyKey,
           linqChatId: input.wakeHandoff.linqChatId,
@@ -715,7 +715,7 @@ export async function completeHostedLinqInstantFirstTurn(input: {
   if (!sendResult.messageId) {
     try {
       await markHostedLinqDeliverySendFailedTx({
-        expectedAttemptedAt,
+        expectedAttemptedAt: dispatchAttemptedAt,
         failureCode: "missing-provider-message-id",
         idempotencyKey,
         linqChatId: sendResult.chatId ?? input.wakeHandoff.linqChatId,
@@ -748,7 +748,7 @@ export async function completeHostedLinqInstantFirstTurn(input: {
     });
   } catch (error) {
     await markHostedLinqDeliverySendFailedTx({
-      expectedAttemptedAt,
+      expectedAttemptedAt: dispatchAttemptedAt,
       failureCode: "accepted-finalization-failed",
       idempotencyKey,
       linqChatId: sendResult.chatId ?? input.wakeHandoff.linqChatId,
@@ -1061,7 +1061,7 @@ async function readHostedLinqInstantFirstTurnPayload(input: {
   }
   if (delivery.template !== HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE) {
     throw buildHostedLinqInstantFirstTurnRetryError(
-      "delivery-payload-incomplete",
+      "delivery-intent-incompatible",
     );
   }
   if (delivery.acceptedAt || delivery.deliveredAt) {
@@ -1088,7 +1088,7 @@ async function readHostedLinqInstantFirstTurnPayload(input: {
   );
   if (!message) {
     throw buildHostedLinqInstantFirstTurnRetryError(
-      "delivery-payload-incomplete",
+      "delivery-payload-invalid",
     );
   }
   return { kind: "reply", message };

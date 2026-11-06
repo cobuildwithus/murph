@@ -395,8 +395,8 @@ export async function resolveHostedLinqInviteSignupDispatchEffectIdTx(input: {
 }
 
 type HostedLinqDeliveryProviderDispatchClaimInput = {
-  expectedAttemptedAt?: Date;
   attemptedAt?: Date;
+  expectedAttemptedAt?: Date;
   groupJoinOutreachId?: string | null;
   groupJoinReplyOccurredAt?: Date | null;
   idempotencyKey?: string | null;
@@ -829,9 +829,24 @@ export type HostedLinqInstantFirstTurnRuntimeEgressDisposition =
   | "available"
   | "defer";
 
-// Correlated -> answered; skipped -> empty fallback; failed -> sealed retry or
-// certified empty fallback; attempted -> empty reserved or sealed; started -> sealed.
-// Every other combination is held, including incomplete payload tuples.
+/**
+ * The legal states of one first-turn row. Empty means all three payload fields
+ * are null; sealed means all three hold this exact obligation. Correlation is
+ * read first because a late positive may settle a row after any reclaim.
+ *
+ * | Row                                   | Disposition | Who may change it                         | Runtime egress   |
+ * | ------------------------------------- | ----------- | ----------------------------------------- | ---------------- |
+ * | provider-correlated                   | answered    | receipts and finalization                 | already_answered |
+ * | skipped + empty                       | fallback    | nobody                                    | available        |
+ * | failed + empty + certified rejection  | fallback    | nobody                                    | available        |
+ * | attempted + empty                     | reserved    | exact claim seals or skips; stale reclaim | defer            |
+ * | attempted, started or failed + sealed | sealed      | exact claim dispatches or fails; a failed | defer            |
+ * |                                       |             | or stale row reclaims                     |                  |
+ * | anything else                         | held        | positive evidence only                    | defer            |
+ *
+ * Held covers legacy skipped + sealed and uncertified failed + empty rows: their
+ * evidence cannot show what the person received, so they never resume.
+ */
 function resolveHostedLinqInstantFirstTurnDeliveryDisposition(input: {
   acceptedAt: Date | null;
   deliveredAt: Date | null;
@@ -3781,49 +3796,50 @@ export async function releaseHostedLinqSignupSuppressionAfterDeletionTx(input: {
 }): Promise<void> {
   const { prisma } = input;
   const projectionIdentities = readHostedLinqSignupProjectionIdentities(input.deliveries);
-  if (projectionIdentities.length > 0) {
-    const liveDeliveries = await prisma.hostedLinqDelivery.findMany({
-      select: { sourceRef: true },
-      where: {
-        OR: projectionIdentities.map((identity) => ({
-          sourceRef: {
-            startsWith: buildHostedLinqInviteSignupEffectId({
-              memberId: identity.memberId,
-              occurredAt: identity.dayUtc,
-            }),
-          },
-        })),
-        status: {
-          in: ["attempted", "provider_dispatch_started", "accepted", "delivered"],
-        },
-        template: {
-          in: ["invite_signup", "invite_signup_fallback"],
-        },
-      },
-    });
-    const liveIdentityKeys = new Set(
-      readHostedLinqSignupProjectionIdentities(liveDeliveries).map(
-        (identity) => `${identity.memberId}\0${identity.dayUtc}`,
-      ),
-    );
-    const releasedIdentities = projectionIdentities.filter(
-      (identity) => !liveIdentityKeys.has(`${identity.memberId}\0${identity.dayUtc}`),
-    );
-    if (releasedIdentities.length > 0) {
-      const identityWhere = releasedIdentities.map((identity) => ({
-        dayUtc: new Date(identity.dayUtc),
-        memberId: identity.memberId,
-      }));
-      await prisma.hostedLinqDailyState.updateMany({
-        // Preserve the independent daily reminder allowance when reopening signup.
-        data: { onboardingLinkSentAt: null },
-        where: {
-          ...(identityWhere.length === 1 ? identityWhere[0] : { OR: identityWhere }),
-          onboardingLinkSentAt: { not: null },
-        },
-      });
-    }
+  if (projectionIdentities.length === 0) {
+    return;
   }
+  const liveDeliveries = await prisma.hostedLinqDelivery.findMany({
+    select: { sourceRef: true },
+    where: {
+      OR: projectionIdentities.map((identity) => ({
+        sourceRef: {
+          startsWith: buildHostedLinqInviteSignupEffectId({
+            memberId: identity.memberId,
+            occurredAt: identity.dayUtc,
+          }),
+        },
+      })),
+      status: {
+        in: ["attempted", "provider_dispatch_started", "accepted", "delivered"],
+      },
+      template: {
+        in: ["invite_signup", "invite_signup_fallback"],
+      },
+    },
+  });
+  const liveIdentityKeys = new Set(
+    readHostedLinqSignupProjectionIdentities(liveDeliveries).map(
+      (identity) => `${identity.memberId}\0${identity.dayUtc}`,
+    ),
+  );
+  const identityWhere = projectionIdentities
+    .filter((identity) => !liveIdentityKeys.has(`${identity.memberId}\0${identity.dayUtc}`))
+    .map((identity) => ({
+      dayUtc: new Date(identity.dayUtc),
+      memberId: identity.memberId,
+    }));
+  if (identityWhere.length === 0) {
+    return;
+  }
+  await prisma.hostedLinqDailyState.updateMany({
+    // Preserve the independent daily reminder allowance when reopening signup.
+    data: { onboardingLinkSentAt: null },
+    where: {
+      ...(identityWhere.length === 1 ? identityWhere[0] : { OR: identityWhere }),
+      onboardingLinkSentAt: { not: null },
+    },
+  });
 }
 
 export async function hasHostedLinqInviteSignupLiveDeliveryTx(input: {
