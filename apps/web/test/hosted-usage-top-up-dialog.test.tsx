@@ -424,6 +424,42 @@ test("requires an explicit amount choice after opening from the settings deep li
   }
 });
 
+test("keeps the amount unselected when a link opens the night page", async () => {
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      initialOpen: true,
+      linkPage: true,
+      offers: usageCreditOffers(),
+    }),
+    {
+      location: {
+        href: "https://example.test/settings?addUsage=true#subscription",
+      },
+      requireButton: false,
+    },
+  );
+
+  try {
+    const dialog = rendered.container.querySelector('[role="dialog"]');
+    assert.ok(dialog);
+    assert.equal(dialog.classList.contains("h-dvh"), true);
+    assert.match(rendered.container.textContent ?? "", /One payment\. Nothing repeats\./);
+    const radioInputs = Array.from(
+      rendered.container.querySelectorAll<HTMLInputElement>('input[type="radio"]'),
+    );
+    assert.equal(radioInputs.length, 3);
+    assert.equal(radioInputs.every((input) => !input.checked), true);
+    assert.equal(buttonByText(rendered.container, "Choose an amount").disabled, true);
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("names the exact Family beneficiary in the trigger and dialog", async () => {
   const { HostedUsageTopUpDialog } = await import(
     "@/src/components/settings/hosted-usage-top-up-dialog"

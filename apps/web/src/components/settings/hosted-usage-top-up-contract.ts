@@ -48,6 +48,8 @@ interface HostedUsageTopUpDialogProps {
   deferTerminalRefreshUntilClose?: boolean;
   initialCheckoutErrorCode?: HostedUsageCreditCapacityConflictCode;
   initialOpen?: boolean;
+  /** A link from Murph opened this, so it fills the screen as a night page. */
+  linkPage?: boolean;
   inert?: boolean;
   offers: readonly HostedUsageTopUpOffer[];
   payerMemberId: string;

@@ -28,6 +28,7 @@ import { RadioGroup } from "@/src/components/ui/radio-group";
 import {
   HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE,
 } from "@/src/lib/hosted-onboarding/usage-credit-capacity-conflict";
+import { LINK_PAGE_NIGHT_TOKENS } from "@/src/components/link-page/link-page-shell";
 import { cn } from "@/src/lib/utils";
 
 import {
@@ -69,6 +70,11 @@ interface SelectionPresentation {
   paymentNeedsRecovery: boolean;
   selectionError: string | null;
 }
+
+// A link from Murph opens this as a full night page. The purchase is the same,
+// and the amount stays unselected: the button can charge a saved card at once.
+const USAGE_LINK_PAGE_CLASS =
+  "left-0 top-0 h-dvh max-h-dvh w-full max-w-none translate-x-0 translate-y-0 content-start rounded-none border-0 bg-[#1C1915] px-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-14 text-[#FFFCF6] sm:max-w-none sm:rounded-none sm:px-[max(1.5rem,calc(50vw-13rem))] [&_button[data-slot=button]]:rounded-full";
 
 interface DialogHeaderPresentation {
   description: string | null;
@@ -255,7 +261,10 @@ function readDialogHeader(input: {
       title,
     };
   }
-  return { description: null, title };
+  return {
+    description: props.linkPage ? "One payment. Nothing repeats." : null,
+    title,
+  };
 }
 
 interface PurchaseScreenContentProps {
@@ -779,14 +788,19 @@ function HostedUsageTopUpSurface({
           className={cn(
             "max-h-[calc(100dvh-2rem)] gap-7 overflow-y-auto border border-border bg-popover p-6 sm:max-w-xl sm:p-8",
             statusPresentation.compact && "sm:max-w-md",
+            props.linkPage && USAGE_LINK_PAGE_CLASS,
           )}
+          style={props.linkPage ? LINK_PAGE_NIGHT_TOKENS : undefined}
           initialFocus={titleRef}
         >
           <DialogHeader className="pr-10">
             <DialogTitle
               ref={titleRef}
               tabIndex={-1}
-              className="text-3xl font-semibold leading-[1.1] tracking-tight outline-none"
+              className={cn(
+                "text-3xl font-semibold leading-[1.1] tracking-tight outline-none",
+                props.linkPage && "text-[40px] leading-[44px] tracking-[-0.02em]",
+              )}
             >
               {header.title}
             </DialogTitle>

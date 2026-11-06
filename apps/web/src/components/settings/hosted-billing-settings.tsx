@@ -775,6 +775,7 @@ function PlanUsageBand(props: {
         checkoutUrl={props.usageTopUpCheckoutUrl}
         deferTerminalRefreshUntilClose
         initialOpen={props.usageTopUpInitialOpen}
+        linkPage={props.usageTopUpInitialOpen}
         offers={[]}
         payerMemberId={payerMemberId}
         purchaseReturn={props.usageTopUpPurchaseReturn}
@@ -815,6 +816,7 @@ function PlanUsageBand(props: {
         activePurchase={props.usageTopUpActivePurchase}
         checkoutUrl={props.usageTopUpCheckoutUrl}
         initialOpen={props.usageTopUpInitialOpen}
+        linkPage={props.usageTopUpInitialOpen}
         offers={eligibleUsageTopUpOffers}
         payerMemberId={payerMemberId}
         purchaseReturn={props.usageTopUpPurchaseReturn}
@@ -891,6 +893,7 @@ function PlanUsageBand(props: {
       activePurchase={props.usageTopUpActivePurchase}
       checkoutUrl={props.usageTopUpCheckoutUrl}
       initialOpen={props.usageTopUpInitialOpen}
+        linkPage={props.usageTopUpInitialOpen}
       offers={eligibleUsageTopUpOffers}
       payerMemberId={payerMemberId}
       purchaseReturn={props.usageTopUpPurchaseReturn}
