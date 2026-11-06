@@ -1,5 +1,6 @@
 import {
-  createDueAssistantWorkspace, createPhaseInput, mocks,
+  createDueAssistantWorkspace, createPhaseInput, createResolvedMemberActivationMailboxItem,
+  loadHostedSystemMailboxRealImplementation, mocks,
   runHostedWorkspaceAssistantPhase, runHostedWorkspaceDurableCheckpointEffects,
 } from "./hosted-runtime-workspace-assistant-phase.harness.ts";
 import { createHash } from "node:crypto";
@@ -13,11 +14,12 @@ import {
   requestAssistantVaultFileSend,
 } from "@murphai/assistant-engine/assistant-outbox";
 import { DAILY_NUTRITION_OPTIONAL_GOALS_INTRO } from "@murphai/operator-config/assistant-response-cards";
-import { buildHostedExecutionRuntimeTimerWake } from "@murphai/hosted-execution";
+import { buildHostedExecutionMemberActivatedWake, buildHostedExecutionRuntimeTimerWake } from "@murphai/hosted-execution";
 import { buildHostedActionApprovalCycleOwnerKey, buildHostedActionApprovalOutcomeEffectId } from "@murphai/hosted-execution/action-approval";
 import { HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON } from "@murphai/hosted-execution/orchestration-control";
 import { serializeHostedEmailThreadTarget } from "@murphai/runtime-state";
 import type { HostedRuntimeActionApprovalPort } from "../src/hosted-runtime/platform.ts";
+import { readHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
 import { createHostedRuntimeEffectsPortStub } from "./hosted-runtime-test-helpers.ts";
 
 vi.mock("@murphai/core", async (importOriginal) => {
@@ -158,6 +160,109 @@ async function fixture(channel: Channel, options: Partial<IntentInput> = {}) {
     sends: () => channel === "email" ? sendEmail.mock.calls.length : providerFetch.mock.calls.filter(([url]) => !String(url).includes("/typing")).length,
   };
 }
+
+async function queueTelegramSignupActivation(vaultRoot: string) {
+  const systemMailbox = await loadHostedSystemMailboxRealImplementation();
+  const item = createResolvedMemberActivationMailboxItem({ occurredAt: NOW });
+  const wake = buildHostedExecutionMemberActivatedWake({
+    eventId: item.item.dedupeKey, memberId: "member_synthetic_phase", occurredAt: NOW,
+    memberChannels: { email: false, linq: false, telegram: true },
+    signupWelcome: {
+      route: {
+        actorId: null, channel: "telegram", delivery: { kind: "explicit", target: "123" },
+        identityId: "hbidx:telegram:v1:test", threadId: null, threadIsDirect: true,
+      },
+      text: "Welcome to Murph.",
+    },
+  });
+  expect(await systemMailbox.enqueueHostedSystemMailboxItem({
+    item, vaultRoot, wake,
+  })).toMatchObject({ status: "imported" });
+  mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementation(systemMailbox.prepareHostedSystemMailboxItemForCheckpoint);
+  mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockImplementation(systemMailbox.recordHostedSystemMailboxItemAfterCheckpoint);
+  mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(systemMailbox.resolveHostedSystemMailboxNextWakeCandidate);
+  mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
+    expect(await readHostedSystemMailboxState(vaultRoot)).toMatchObject({
+      pending: [{ itemId: item.item.id, status: "pending", wake: { kind: "member.activated" } }],
+    });
+    return {
+      assistantAutomationCurrentTurnDeliveryIntentIds: [], assistantAutomationProgressed: true,
+      nextWakeAt: null, redactedLogEntries: [],
+    };
+  });
+}
+
+describe("post-foreground maintenance publication", () => {
+  it("runs the prepared Telegram retry after publication and preserves its sent receipt on restore", async () => {
+    const f = await fixture("telegram");
+    await f.retry();
+    await queueTelegramSignupActivation(f.vaultRoot);
+
+    const { post, callsBeforeLocalCheckpoint } = await f.phase("foreground");
+    expect(callsBeforeLocalCheckpoint).toBe(0);
+    expect(f.sends()).toBe(0);
+    expect(post?.afterDurableCheckpoint).toBeDefined();
+    expect(await f.read()).toMatchObject({ status: "sending", preparedDispatchToken: expect.any(String) });
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).not.toHaveBeenCalled();
+    await f.publish();
+    expect(f.sends()).toBe(0);
+    const effects = post?.afterDurableCheckpoint;
+    const results = [];
+    for (const effect of typeof effects === "function" ? [effects] : effects ?? []) {
+      results.push(await effect());
+    }
+    expect(f.sends()).toBe(1);
+    expect(await f.read()).toMatchObject({ status: "sent", preparedDispatchToken: null });
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledTimes(1);
+    expect(await readHostedSystemMailboxState(f.vaultRoot)).toEqual({ pending: [] });
+    expect(results).toContainEqual(expect.objectContaining({
+      nextWakeAt: new Date(Date.now() + 120_000).toISOString(),
+      nextWakeReason: HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+      requiresFollowUpCheckpoint: true,
+      redactedStatus: expect.objectContaining({ hostedSystemMailboxRecorded: 0, hostedOutboxDeliverySent: 1 }),
+    }));
+
+    await f.publish(); // Persist the follow-up receipt before restoring the workspace.
+    await f.restore();
+    vi.setSystemTime(new Date(Date.now() + 600_000));
+    const later = await f.phase();
+    await runHostedWorkspaceDurableCheckpointEffects(later.post?.afterDurableCheckpoint);
+    expect(f.sends()).toBe(1);
+    expect((await f.read()).status).toBe("sent");
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledTimes(1);
+  });
+
+  it("resets the exact retry token when the inner hook yields and lets a later pass claim it", async () => {
+    const f = await fixture("telegram");
+    await f.retry();
+    const before = await f.read();
+    await queueTelegramSignupActivation(f.vaultRoot);
+    let yieldNow = false;
+    const { post } = await f.phase("foreground", [], () => yieldNow);
+    const prepared = await f.read();
+    expect(prepared).toMatchObject({ status: "sending", preparedDispatchToken: expect.any(String) });
+    await f.publish();
+    yieldNow = true;
+    await runHostedWorkspaceDurableCheckpointEffects(post?.afterDurableCheckpoint);
+    expect(f.sends()).toBe(0);
+    expect(await f.read()).toMatchObject({
+      status: before.status, attemptCount: before.attemptCount,
+      lastAttemptAt: before.lastAttemptAt, preparedDispatchToken: null,
+    });
+    expect(mocks.resetHostedPreparedAssistantDeliveryEffects).toHaveBeenCalledWith(expect.objectContaining({
+      preparedDispatches: [expect.objectContaining({ intentId: f.intent.intentId, preparedDispatchToken: prepared.preparedDispatchToken })],
+    }));
+    yieldNow = false;
+    const later = await f.phase();
+    const reclaimed = await f.read();
+    expect(reclaimed).toMatchObject({ status: "sending", preparedDispatchToken: expect.any(String) });
+    expect(reclaimed.preparedDispatchToken).not.toBe(prepared.preparedDispatchToken);
+    await f.publish();
+    await runHostedWorkspaceDurableCheckpointEffects(later.post?.afterDurableCheckpoint);
+    expect(f.sends()).toBe(1);
+    expect((await f.read()).status).toBe("sent");
+  });
+});
 
 describe.each(["telegram", "email"] as const)("%s publication", (channel) => {
   it.each(["retryable", "durable pending"] as const)("publishes the exact %s claim before sending and never resends after restore", async (state) => {

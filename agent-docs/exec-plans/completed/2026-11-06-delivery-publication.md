@@ -90,5 +90,34 @@ MURPH_COMPLEXITY_BASE_SHA=89a15d73f0 pnpm complexity:diff
 - Production TypeScript against `89a15d73f0`: 211 lines added, 68 removed, net **+143**, across six files. The removed Telegram-only ambiguity workaround accounts for the engine reduction.
 - `MURPH_COMPLEXITY_BASE_SHA=89a15d73f0 pnpm complexity:diff` exits **0** after the follow-up refactor, with the guard and threshold unchanged. All six production files pass: engine outbox debt 82 → 80 and maximum 66 → 64; dispatch-state debt 48 → 48 and maximum 38 → 38; runtime entrypoint debt 420 → 419 and maximum 186 → 185; callbacks debt 154 → 154 and maximum 73 → 73; assistant phase debt 276 → 276 and maximum 114 → 114; workspace-runner debt 58 → 58 and maximum 70 → 70. The callbacks/assistant-phase deltas compare unmoved functions. The marker walk, prepared-dispatch predicate, missing-token outcome, deadline helpers and projection closure keep the existing decisions at their owners without increasing complexity debt.
 - `git diff --check`: exit 0. Changed-file privacy scan: pass. No new package, registry, state machine, wire or persisted format was introduced.
-- Remaining: no implementation or focused behavior proof left undone. The complexity guard now passes against the original production head. No umbrella tests, live provider/model calls, push, PR, external review or deployment were run, as required by the local scope.
+- Remaining: no implementation or focused behavior proof is left undone, and the complexity guard passes.
+
+### ReviewGPT round 1 continuation fix
+
+- Outcome: a due Telegram reply collected during post-foreground activation maintenance reaches provider entry after the enclosing publication.
+- Reaches: queued Telegram signup activation, ordinary reply retry, pre-provider yield, and restored follow-up receipts.
+- Proof: the real foreground phase, system-mailbox enqueue/prepare/record, delivery collect/prepare/drain, copied vault snapshots, and a synthetic provider counter.
+- Starting head: `7521a601ad`. Before production edits, the focused name-filtered run exited **1**: **2 failed, 26 skipped**. After the outer durable callback the provider count was **0**, expected **1**. On yield, the intent remained `sending` with its prepared token and attempt count **2**, expected `retryable`, a cleared token, and its original attempt count **1**.
+- The first fixture run also exited **1** (2 failed, 26 skipped), but failed at real mailbox parsing because the reused mock-only welcome route used unsupported delivery kind `chat`. The proof now constructs the wake with the real builder and `explicit` delivery; that fixture error is not counted as regression evidence.
+- Red command (with the temp-root environment below): `pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --no-coverage test/hosted-runtime-delivery-publication.test.ts --testNamePattern 'post-foreground maintenance publication' --maxWorkers=2`.
+- Implementation: run the returned durable effects sequentially inside the enclosing durable callback, forwarding its context and merging the earliest wake and redacted status. Those claims already belong to the enclosing publication. Keep the follow-up checkpoint requirement and let errors reach the existing best-effort handler.
+- First implementation run: **exit 1**, **1 passed, 1 failed, 26 skipped**. Provider entry and token reset were fixed; the remaining assertion incorrectly expected `hostedSystemMailboxRecorded: 1`. This activation has no separate post-checkpoint record, so the real callback reports `0`. The proof asserts that callback is invoked exactly once and the activation queue is empty, plus the merged delivery metric.
+- Final commands:
+
+  ```sh
+  export MURPH_VITEST_TEMP_ROOT="$PWD/.tmp/pr13" TMPDIR="$PWD/.tmp/pr13"
+  pnpm build:workspace:incremental
+  pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --no-coverage test/hosted-runtime-delivery-publication.test.ts test/hosted-runtime-workspace-assistant-phase-foreground.test.ts test/hosted-runtime-workspace-assistant-phase-delivery.test.ts test/hosted-runtime-system-mailbox-notification.test.ts --maxWorkers=2
+  pnpm --dir packages/assistant-runtime typecheck
+  MURPH_COMPLEXITY_BASE_SHA=$(git merge-base HEAD origin/main) pnpm complexity:diff
+  ```
+
+- Incremental workspace build: **exit 0**, both before the red proof and after the implementation.
+- Final focused proof: **413 passed, 4 files, exit 0**. The publication file contains **28 cases**, including the two new post-foreground journeys. Provider calls stay at zero through publication, become exactly one in the enclosing callback, and remain one after restoring the follow-up snapshot and advancing ten minutes. Yield restores the original retry state and exact token ownership; the next pass claims a fresh token and sends once.
+- Assistant-runtime typecheck: **exit 0**.
+- Complexity: **exit 0** against merge base `64bd18363634`; all six branch-changed production files pass. Assistant-phase debt remains **276 → 276**, maximum **114 → 114**; the threshold and guard are unchanged.
+- Parent review: **Ready**. The existing outbox owns the claim and receipt; no new queue, list of deferred work, deadline, persisted field, flag, provider behavior, or model input was added. The new loop awaits each effect in order and has no catch that could swallow an error. The existing release entry needs no separate item for this unshipped regression correction.
+- Brief corrections: no change to the accepted cause or required production behavior. The zero activation record metric above is a fixture/assertion clarification; the real activation record callback still runs exactly once.
+- Final diff whitespace check: **exit 0**. Authored-diff privacy scan: **pass**; all fixtures and provider responses are synthetic.
+
 Completed: 2026-11-06

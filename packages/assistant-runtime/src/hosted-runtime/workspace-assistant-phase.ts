@@ -4618,14 +4618,33 @@ function deferPostForegroundMemberMaintenanceResult(
   return {
     ...(recordAfterCheckpoint
       ? {
-          afterDurableCheckpoint: async () => {
+          afterDurableCheckpoint: async (context?: HostedWorkspaceDurableCheckpointEffectContext) => {
             const recorded = await recordAfterCheckpoint();
             if (!recorded) {
               return null;
             }
+            let nextWake = createHostedRuntimeWakeCandidate(
+              recorded.nextWakeAt ?? null,
+              recorded.nextWakeReason ?? "assistant",
+            );
+            let redactedStatus = recorded.redactedStatus;
+            // Claims were prepared before the enclosing publication, which already holds them.
+            for (const effect of listHostedAssistantPhaseDurableCheckpointEffects(recorded.afterDurableCheckpoint ?? null)) {
+              const delivered = await effect(context);
+              if (!delivered) continue;
+              nextWake = selectHostedRuntimeWakeCandidate([
+                nextWake,
+                createHostedRuntimeWakeCandidate(
+                  delivered.nextWakeAt ?? null,
+                  delivered.nextWakeReason ?? "assistant",
+                ),
+              ]);
+              redactedStatus = mergeHostedRuntimeRedactedStatus(redactedStatus, delivered.redactedStatus);
+            }
             return {
-              nextWakeAt: recorded.nextWakeAt ?? null,
-              nextWakeReason: recorded.nextWakeReason ?? "assistant",
+              nextWakeAt: nextWake.at,
+              nextWakeReason: nextWake.reason,
+              redactedStatus,
               requiresFollowUpCheckpoint: true,
             };
           },
