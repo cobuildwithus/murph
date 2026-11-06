@@ -1,6 +1,8 @@
 import * as z from '@murphai/contracts/zod-runtime'
 import { assistantVaultFileMaxBytes } from '@murphai/operator-config/assistant-cli-contracts'
 import { readHostedMediaReferenceCatalogueValue } from '@murphai/runtime-state/node'
+import { resolveVaultPathOnDisk } from '@murphai/core'
+import { lstat } from 'node:fs/promises'
 import type { SafeToolCallValidationDigest } from '../../assistant/tool-validation-digest.js'
 import type { AssistantWorkspaceArtifactMaterializer } from '../../assistant/execution-context.js'
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
@@ -12,10 +14,6 @@ const argumentsSchema = z.object({
   paths: z.array(vaultRelativePath).min(1).max(100).optional(),
   all: z.literal(true).optional(),
 }).strict().refine(value => (value.paths !== undefined) !== (value.all === true), 'Supply paths or all: true, not both.')
-
-// Retention and deletion removed these on purpose. An export must not present
-// them as failures, while an exact request still gets the specific reason.
-const REMOVED_BY_POLICY: ReadonlySet<string> = new Set(['expired', 'obsolete'])
 
 export const VAULT_MEDIA_EXPORT_GUIDANCE = 'call materialize_vault_media with all: true before archiving; disclose unavailable paths and reasons without claiming completeness. Unavailable means unrestored, not excluded: preserve any local copy as unverified. Never drop files to fit the 100 MiB send cap; if the finished ZIP exceeds it, report that it cannot be sent. Archive'
 
@@ -56,30 +54,54 @@ export async function materializeVaultMedia(input: {
   signal?: AbortSignal | null
 }) {
   input.signal?.throwIfAborted()
-  const paths = input.args.all
-    ? (await readHostedMediaReferenceCatalogueValue(input.vaultRoot)).entries.map(entry => {
-        // The catalogue reader owns descriptor interpretation; only vault scope
-        // is checked here. Do not silently skip an invalid catalogue path.
-        const value = z.object({ relativePath: vaultRelativePath }).parse(entry)
-        return value.relativePath
-      })
-    : input.args.paths ?? []
-  const uniquePaths = [...new Set(paths)]
+  const { paths, admitted, overBudget } = await selectVaultMediaPaths(input)
   const unavailable: { path: string; reason: string }[] = []
   let available = 0
   let removed = 0
   // The port already processes media sequentially and reads the catalogue once.
   // Keep a bulk request together rather than re-reading it for every batch.
-  const result = await input.materialize(uniquePaths.map(ref => `vault:${ref}`), {
+  const result = await input.materialize(admitted.map(ref => `vault:${ref}`), {
     maxFileBytes: assistantVaultFileMaxBytes, signal: input.signal,
   })
-  for (const ref of uniquePaths) {
+  for (const ref of paths) {
     const key = `vault:${ref}`
-    const reason = result.missingArtifactPaths.get(key)
+    const reason = overBudget.has(ref) ? 'size' : result.missingArtifactPaths.get(key)
     if (!reason && result.materializedArtifactPaths.has(key)) available += 1
-    else if (input.args.all && reason && REMOVED_BY_POLICY.has(reason)) removed += 1
+    else if (input.args.all && await wasVaultMediaRemoved(input.vaultRoot, ref, reason)) removed += 1
     else unavailable.push({ path: ref, reason: reason ?? 'missing' })
   }
   input.signal?.throwIfAborted()
-  return { requested: uniquePaths.length, available, removed, unavailable }
+  return { requested: paths.length, available, removed, unavailable }
+}
+
+async function selectVaultMediaPaths(input: { args: z.infer<typeof argumentsSchema>; vaultRoot: string }) {
+  const catalogue = await readHostedMediaReferenceCatalogueValue(input.vaultRoot)
+  const entries = catalogue.entries.map(entry => z.object({
+    relativePath: vaultRelativePath, byteSize: z.number().int().nonnegative(),
+  }).parse(entry))
+  const requested = new Set(input.args.paths)
+  const selected = entries.filter(entry => input.args.all || requested.has(entry.relativePath))
+  const paths = [...new Set([...selected.map(entry => entry.relativePath), ...requested])]
+  const sizes = new Map(selected.map(entry => [entry.relativePath, entry.byteSize]))
+  const admitted: string[] = []
+  const overBudget = new Set<string>()
+  let totalBytes = 0
+  for (const ref of paths) {
+    totalBytes += sizes.get(ref) ?? 0
+    if (totalBytes > assistantVaultFileMaxBytes) overBudget.add(ref)
+    else admitted.push(ref)
+  }
+  return { paths, admitted, overBudget }
+}
+
+async function wasVaultMediaRemoved(vaultRoot: string, relativePath: string, reason: string | undefined) {
+  if (reason === 'obsolete') return true
+  if (reason !== 'expired') return false
+  try {
+    const resolved = await resolveVaultPathOnDisk(vaultRoot, relativePath)
+    return !(await lstat(resolved.absolutePath)).isFile()
+  } catch (error) {
+    // Only proven absence may hide an expired path from the export's gaps.
+    return (error as NodeJS.ErrnoException).code === 'ENOENT'
+  }
 }

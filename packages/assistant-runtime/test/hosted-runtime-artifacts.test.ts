@@ -1248,6 +1248,12 @@ test("meal thumbnail and full-photo deletion survives canonical receipt replay a
     const cleaned = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot: restoredRoot, mediaStore: store.mediaStore });
     expect(cleaned.prunedMediaCount).toBe(0);
     expect(store.storedBytesByMediaId.size).toBe(0);
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot: restoredRoot })).entries).toEqual([]);
+    // Use the real cleaned catalogue and manifest, not a materializer double.
+    const retired = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]!;
+    const materialize = createHostedArtifactMaterializer({ vaultRoot: restoredRoot, operatorHomeRoot: restoredRoot, mediaStore: store.mediaStore });
+    expect(await materializeVaultMedia({ args: { paths: [retired.relativePath] }, vaultRoot: restoredRoot, materialize }))
+      .toEqual({ requested: 1, available: 0, removed: 0, unavailable: [{ path: retired.relativePath, reason: "obsolete" }] });
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -1303,7 +1309,7 @@ test.each([false, true])("cold-restored meal reads retain inspectable bytes afte
 test("real materialization rejects wrong local images and classifies mixed outcomes", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-materialization-outcomes-"));
   const good = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==", "base64");
-  const names = ["good", "missing", "corrupt", "transport", "large", "expired"];
+  const names = ["good", "missing", "corrupt", "transport", "expired", "large"];
   try {
     const entries = names.map(name => ({ relativePath: `raw/inbox/synthetic/${name}.png`, mediaId: createHash("sha256").update(name).digest("hex"),
       byteSize: name === "large" ? 100 * 1024 * 1024 + 1 : good.length, sha256: createHash("sha256").update(good).digest("hex"),
@@ -1327,10 +1333,11 @@ test("real materialization rejects wrong local images and classifies mixed outco
       "vault:raw/inbox/synthetic/expired.png": "expired",
     });
     const report = await materializeVaultMedia({ args: { all: true }, vaultRoot, materialize });
-    expect(report).toEqual({ requested: 6, available: 1, removed: 1, unavailable: [
+    expect(report).toEqual({ requested: 6, available: 1, removed: 0, unavailable: [
       { path: "raw/inbox/synthetic/missing.png", reason: "missing" },
       { path: "raw/inbox/synthetic/corrupt.png", reason: "integrity" },
       { path: "raw/inbox/synthetic/transport.png", reason: "transport" },
+      { path: "raw/inbox/synthetic/expired.png", reason: "expired" },
       { path: "raw/inbox/synthetic/large.png", reason: "size" },
     ] });
     for (const name of ["missing", "corrupt", "expired"]) {

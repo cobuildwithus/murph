@@ -291,6 +291,7 @@ export type {
 } from "./operations/index.ts";
 export {
   canonicalRawArtifactMatches,
+  canonicalRawArtifactIsPrivacyTombstone,
   buildRawImportManifest,
   parseRawImportManifest,
   resolveRawManifestPath,

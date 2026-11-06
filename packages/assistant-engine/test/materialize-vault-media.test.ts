@@ -57,7 +57,7 @@ describe('materialize vault media', () => {
     const refs = ['raw/inbox/a/expired.png', 'raw/meals/a/retired.jpg', 'raw/inbox/a/lost.png', 'raw/inbox/a/ok.png']
     const cataloguePath = resolveHostedMediaReferenceCataloguePath(root)
     await mkdir(path.dirname(cataloguePath), { recursive: true })
-    await writeFile(cataloguePath, JSON.stringify({ schema: HOSTED_MEDIA_REFS_SCHEMA, entries: refs.map(relativePath => ({ mediaKind: 'image', relativePath })) }))
+    await writeFile(cataloguePath, JSON.stringify({ schema: HOSTED_MEDIA_REFS_SCHEMA, entries: refs.map(relativePath => ({ mediaKind: 'image', relativePath, byteSize: 1 })) }))
     const port: AssistantWorkspaceArtifactMaterializer = vi.fn(async () => ({
       materializedArtifactPaths: new Set(['vault:raw/inbox/a/ok.png']),
       missingArtifactPaths: new Map([['vault:raw/inbox/a/expired.png', 'expired'], ['vault:raw/meals/a/retired.jpg', 'obsolete'],
@@ -93,7 +93,7 @@ describe('materialize vault media', () => {
     const catalogue = resolveHostedMediaReferenceCataloguePath(root)
     await mkdir(path.dirname(catalogue), { recursive: true })
     await writeFile(catalogue, JSON.stringify({ schema: HOSTED_MEDIA_REFS_SCHEMA,
-      entries: Array.from({ length: 201 }, (_, i) => ({ mediaKind: 'image', relativePath: `raw/inbox/photo-${i}.png` })) }))
+      entries: Array.from({ length: 201 }, (_, i) => ({ mediaKind: 'image', relativePath: `raw/inbox/photo-${i}.png`, byteSize: 1 })) }))
     materialize.mockClear()
     const result = await run({ all: true }, { vaultRoot: root })
     expect(materialize).toHaveBeenCalledOnce()
@@ -105,7 +105,7 @@ describe('materialize vault media', () => {
     const catalogue = resolveHostedMediaReferenceCataloguePath(root)
     await mkdir(path.dirname(catalogue), { recursive: true })
     await writeFile(catalogue, JSON.stringify({ schema: HOSTED_MEDIA_REFS_SCHEMA, entries: [
-      { mediaKind: 'image', relativePath: 'raw/inbox/old/photo.png' },
+      { mediaKind: 'image', relativePath: 'raw/inbox/old/photo.png', byteSize: 1 },
       { mediaKind: 'integration-ingest', relativePath: 'ledger/integration-ingests/2025/2025-01.jsonl.br', byteSize: 10, expiresAt: null, mediaId: 'a'.repeat(64), sha256: 'b'.repeat(64) },
     ] }))
     materialize.mockClear()
