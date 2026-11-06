@@ -448,8 +448,13 @@ even when cleanup retains their owner row.
 
 The native usage-settlement receipt is a negative latch: pending or denied
 settlement blocks managed provider access. Only an explicit allowance response
-clears that report's pending latch. Eviction or an unknown response cannot grant
-access. Postgres retains the canonical usage and credit ledger.
+clears that report's pending latch, and it never clears a denial. An unknown Web
+outcome durably denies the report before Web is told to revoke the attempt, so a
+replay settles the ledger once without reopening that generation. The next
+registered generation gets fresh admission. A settlement interrupted before that
+denial leaves the report pending and the Worker issues no revoke, so a replay can
+still settle it. Eviction or an unknown response cannot grant access. Postgres
+retains the canonical usage and credit ledger.
 
 ## Uploads and deletion
 

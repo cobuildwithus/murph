@@ -321,6 +321,40 @@ reader bundle has converged, then exercise image/audio/video approval and retry
 and check bounded unsupported-type and missing-file diagnostics after enabling
 writes. Existing attachment limits and approval authority remain in force.
 
+### Native usage denial floor
+
+An unknown usage settlement is denied natively before Web is told to revoke the
+attempt. That Worker needs every runner controller on #4646 or newer. An older
+controller answers denial with an `UPDATE` that records nothing once a racing
+success has removed the pending row, then acknowledges it. Web is revoked while
+provider access stays open.
+
+Controller and Worker ship from one script, so release order cannot separate
+them; the gate is time. An inactive Durable Object starts on the latest version
+at its next request. An active one keeps its code until it hibernates or reaches
+the deferred `max_delay`, then resets. This repository sets no
+`code_update_strategy`, so that delay is Cloudflare's 300-second default. Before
+the first deploy of the denying Worker, a version carrying #4646 must have been
+at 100% for that delay plus at least a minute, with no rollback since. Observed
+resets have landed up to 25 seconds after the delay.
+
+The protected workflow's log names each activated version and its time. For
+corroboration without production secrets, count `murph-hosted` rows by
+`$workers.scriptVersion.id` with `cf observability telemetry query`: nothing may
+appear on a version below #4646 after its last `Durable Object reset because its
+code was updated`. This cannot prove the drain alone, because invocation logs are
+off and the settlement RPCs log nothing. The time bound is the gate.
+
+Once the denying Worker is live, a rollback below #4646 needs affected generations
+settled first: let every generation live at that point complete or be replaced,
+because registering the next generation clears its rows. Stored denials survive
+such a rollback, since older controllers delete only pending rows. Until those
+generations end, though, a Worker still on this code can have its denial dropped
+by an older controller, and a later unknown settlement leaves a pending row that a
+replay clears. A rollback that stays at or above #4646 needs no wait; it only
+reopens that replay window for later unknown settlements. Any rollback still needs
+explicit permission.
+
 ### Identity, recovery, and capacity
 
 `HOSTED_EXECUTION_RUNNER_DEPLOYMENT` retains active, candidate, and previous
