@@ -368,6 +368,7 @@ the canonical mutation in the same transaction. Access, suspension, and health-d
 consent are checked at claim admission, not repeated by ownership or provider
 validation. A policy change blocks new admission; already admitted work may finish
 until completion or the existing retirement/shutdown path ends its ownership.
+The external retention tick retries an interrupted consent stop.
 This is not an immediate-cancellation guarantee. Deleted members remain blocked;
 their retained owner rows exist only for cleanup.
 
@@ -534,8 +535,11 @@ throughput. Check overdue unprotected candidates and created-versus-purged
 counts over matched windows after deployment.
 
 Account deletion and expired-computer cleanup share this cron and keep their
-existing due-time, lease, state-claim and retry guards. The offset avoids other
-retention jobs' nominal start minutes; it does not serialize invocations.
+existing due-time, lease, state-claim and retry guards. Consent stop redrive runs
+first, selecting up to 8 explicitly revoked members with a non-idle owner or
+retained target for the same signed reconciliation, without normal processing
+eligibility. The offset avoids other retention jobs' nominal start minutes;
+it does not serialize invocations.
 [Vercel cron concurrency](https://vercel.com/docs/cron-jobs/manage-cron-jobs)
 and the existing exact-target/idempotent deletion contracts still apply.
 Grace periods, reference protection, write fences and per-run bounds are unchanged.

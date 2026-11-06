@@ -705,11 +705,14 @@ direct-Starter gate is fully exhausted again.
   state. The withdrawal response waits for the per-user Cloudflare execution
   barrier to serialize behind earlier ensures, re-read the Web-owned grant,
   clear the write fence, and stop the runner; every later ensure re-reads that
-  grant before work. Renewal waits behind the earlier stop before committing a
-  new grant. Cleanup failure cannot restore authority, while an absent legacy
-  grant is not reinterpreted as withdrawal. Settings, latest-available export,
-  and account deletion remain available; renewed consent is the only processing
-  restore path.
+  grant before work. The existing external retention tick redrives stops
+  interrupted before that barrier for explicitly revoked members with a non-idle
+  owner or retained target, without normal processing eligibility, through the
+  same reconciliation. Every member renewal surface waits behind the earlier stop
+  before committing a new grant. Cleanup failure cannot restore authority, while
+  an absent legacy grant is not reinterpreted as withdrawal. Settings,
+  latest-available export, and account deletion remain available; renewed consent
+  is the only processing restore path.
 - The Cloudflare Worker that can retain an exact user-control stop target after
   clearing write authority is a hard rollback floor after the first such row is
   written. Withdrawal and account deletion must consume that same persisted

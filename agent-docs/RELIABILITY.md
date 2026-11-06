@@ -447,10 +447,13 @@ Current product admission, delivery and native runtime safety rules remain.
   existing per-user Cloudflare execution owner to serialize with earlier
   ensures, re-read the Web-owned grant, clear the write fence, and stop the
   runner before acknowledging success. Later ensures re-read consent under the
-  same lock. Renewal waits behind the earlier stop, commits its new grant, then
-  signals the existing Temporal workflow. Best-effort provider cleanup failures
-  are secret-safe, do not roll back the grant, and may be retried idempotently
-  by repeating withdrawal.
+  same lock. The existing external retention tick redrives an interrupted stop
+  through the same reconciliation for explicitly revoked members with a non-idle
+  owner or retained target, without normal processing eligibility. Every member
+  renewal surface waits behind the earlier stop before committing its new grant;
+  hosted Web renewal then signals the existing Temporal workflow. Best-effort
+  provider cleanup failures are secret-safe, do not roll back the grant, and may
+  be retried idempotently by repeating withdrawal.
   Webhooks finalize an already-claimed trace without appending dirty work;
   scheduled selection and wake admission both exclude explicit revocation; and
   queued model work rechecks authority before usage is consumed. Renewal is a

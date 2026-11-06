@@ -20,6 +20,31 @@ import {
   type HostedConsentStatus,
 } from "../legal/consent";
 
+const CONSENT_STOP_REDRIVE_BATCH_SIZE = 8;
+
+/** Selection only nominates: signed reconciliation rereads consent and ownership,
+ * so a regrant or replaced owner makes the old stop a no-op. */
+export async function redriveHostedHealthDataConsentStops(input: {
+  prisma: PrismaClient;
+}): Promise<{ configured: boolean; reconciled: number; failed: number }> {
+  const client = readHostedExecutionControlClientIfConfigured();
+  if (!client) return { configured: false, reconciled: 0, failed: 0 };
+  // Stateless rotation keeps persistent failures from occupying every bounded batch.
+  const candidates = await input.prisma.$queryRaw<Array<{ memberId: string }>>`
+    SELECT consent.member_id AS "memberId"
+    FROM hosted_consent_grant AS consent
+    JOIN hosted_runtime_owner AS owner ON owner.user_id = consent.member_id
+    WHERE consent.scope = ${HOSTED_HEALTH_DATA_CONSENT_SCOPE} AND consent.status = 'revoked'
+      AND (owner.phase <> 'idle' OR owner.runner_container_name IS NOT NULL)
+    ORDER BY random()
+    LIMIT ${CONSENT_STOP_REDRIVE_BATCH_SIZE}
+  `;
+  const results = await Promise.allSettled(candidates.map(({ memberId }) =>
+    reconcileHostedHealthDataRuntimeConsent({ client, memberId })));
+  const reconciled = results.filter(result => result.status === "fulfilled").length;
+  return { configured: true, reconciled, failed: results.length - reconciled };
+}
+
 export async function withdrawHostedHealthDataConsent(input: {
   memberId: string;
   prisma: PrismaClient;
