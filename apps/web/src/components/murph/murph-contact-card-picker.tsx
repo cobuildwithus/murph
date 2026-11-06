@@ -170,9 +170,11 @@ export function MurphContactCardPreview({
 }
 
 export function MurphAddToContactsButton({
+  className,
   size = "lg",
   variant = "outline",
 }: {
+  className?: string;
   size?: React.ComponentProps<typeof Button>["size"];
   variant?: React.ComponentProps<typeof Button>["variant"];
 }) {
@@ -180,7 +182,7 @@ export function MurphAddToContactsButton({
 
   return (
     <>
-      <Button onClick={() => setOpen(true)} size={size} type="button" variant={variant}>
+      <Button className={className} onClick={() => setOpen(true)} size={size} type="button" variant={variant}>
         Add Murph to Contacts
       </Button>
       <MurphContactCardPicker

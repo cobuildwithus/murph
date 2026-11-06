@@ -3,11 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { CheckCircleIcon, MailIcon } from "lucide-react";
-
-import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import { Button } from "@/src/components/ui/button";
-import { JoinInviteEyebrow } from "./join-invite-eyebrow";
+import { LinkPageDots } from "@/src/components/link-page/link-page-dots";
+import {
+  LinkPageError,
+  LinkPageFrame,
+  LinkPageLink,
+  LinkPagePill,
+  LinkPageScreen,
+} from "@/src/components/link-page/link-page-shell";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 import { isHostedOnboardingPendingStage } from "@/src/lib/hosted-onboarding/stage";
 import { HOSTED_APP_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
@@ -35,7 +38,6 @@ interface HostedInviteSuccessState {
   description: string;
   pending: boolean;
   title: string;
-  variant: "active" | "pending" | "terminal";
 }
 
 export function JoinInviteSuccessClient({
@@ -139,14 +141,13 @@ export function JoinInviteSuccessClient({
   }, [preview, router, shouldRedirectToHome]);
 
   const href = `/join/${encodeURIComponent(inviteCode)}`;
-  const successState = resolveHostedInviteSuccessState(status);
   const supportMailtoHref = buildHostedCheckoutSuccessSupportMailto({
     inviteCode,
     stage: status.stage,
   });
   const showSetupDelaySupport = !preview
     && Boolean(sessionId)
-    && successState.pending
+    && shouldPoll
     && delayedSetupSupportStage === status.stage;
   const shouldShowSuccessUi = shouldShowHostedInviteSuccessUi({
     errorMessage,
@@ -161,89 +162,62 @@ export function JoinInviteSuccessClient({
   }
 
   return (
-    <main className="flex min-h-screen items-start justify-center bg-background px-6 py-16 text-foreground sm:px-10 sm:py-20">
-      <section className="w-full max-w-xl">
-        <div className="flex flex-col gap-6">
-          <div className="flex flex-col gap-3">
-            {successState.variant === "terminal" ? (
-              <JoinInviteEyebrow label="Something went wrong" tone="danger" />
-            ) : (
-              <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.22em] text-olive/80">
-                {successState.variant === "active" ? (
-                  <CheckCircleIcon className="size-4" />
-                ) : null}
-                <span>{successState.variant === "active" ? "Ready" : "Working on it"}</span>
-              </div>
-            )}
-            <h1 className="font-serif text-3xl font-semibold tracking-tight text-[#2d3436] md:text-4xl">
-              {successState.title}
-            </h1>
-            <p className="leading-relaxed text-muted-foreground">{successState.description}</p>
-          </div>
+    <LinkPageFrame>
+      <JoinInviteSuccessScreen
+        errorMessage={errorMessage}
+        onAction={() => {
+          if (!preview && shouldRedirectToHome) {
+            router.replace(resolveHostedInviteSuccessRedirectPath());
+            return;
+          }
 
-          {successState.pending && !showSetupDelaySupport ? (
-            <div className="rounded-xl border border-olive/20 bg-olive/5 px-5 py-4 text-sm leading-relaxed text-olive">
-              We&apos;ll keep checking automatically and your invite page will switch over as soon as setup finishes.
-            </div>
-          ) : null}
+          window.location.assign(href);
+        }}
+        onEmailSupport={() => window.location.assign(supportMailtoHref)}
+        showSetupDelaySupport={showSetupDelaySupport}
+        status={status}
+      />
+    </LinkPageFrame>
+  );
+}
 
-          {showSetupDelaySupport && successState.pending ? (
-            <div className="rounded-2xl border border-[#c4a882]/35 bg-[#fefdf8] p-5 shadow-[0_1px_2px_rgba(45,52,54,0.04)]">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0 space-y-2">
-                  <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-[#736a58]">
-                    <span className="size-1.5 rounded-full bg-[#c4a882]" />
-                    <span>Support ready</span>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="font-serif text-lg font-semibold leading-snug text-[#2d3436]">
-                      Setup is taking longer than expected
-                    </p>
-                    <p className="text-sm leading-relaxed text-muted-foreground">
-                      We&apos;ll keep checking automatically. If you&apos;re stuck here,
-                      email support. The draft already includes the details we need to help.
-                    </p>
-                  </div>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="w-full border-[#c4a882]/45 bg-white text-[#2d3436] hover:border-olive/45 hover:bg-olive/5 sm:w-fit"
-                  onClick={() => window.location.assign(supportMailtoHref)}
-                >
-                  <MailIcon className="size-4" />
-                  Email support
-                </Button>
-              </div>
-            </div>
-          ) : null}
+export function JoinInviteSuccessScreen({
+  errorMessage = null,
+  onAction,
+  onEmailSupport,
+  showSetupDelaySupport = false,
+  status,
+}: {
+  errorMessage?: string | null;
+  onAction?: () => void;
+  onEmailSupport?: () => void;
+  showSetupDelaySupport?: boolean;
+  status: HostedInviteStatusPayload;
+}) {
+  const successState = resolveHostedInviteSuccessState(status);
+  const setupDelayed = showSetupDelaySupport && successState.pending;
+  const ActionControl = successState.pending ? LinkPageLink : LinkPagePill;
 
+  return (
+    <LinkPageScreen
+      actions={
+        <>
           {errorMessage ? (
-            <Alert variant="destructive">
-              <AlertTitle>Unable to refresh status</AlertTitle>
-              <AlertDescription>{errorMessage}</AlertDescription>
-            </Alert>
+            <LinkPageError>Unable to refresh status. {errorMessage}</LinkPageError>
           ) : null}
-
-          <Button
-            type="button"
-            onClick={() => {
-              if (!preview && shouldRedirectToHome) {
-                router.replace(resolveHostedInviteSuccessRedirectPath());
-                return;
-              }
-
-              window.location.assign(href);
-            }}
-            size="lg"
-            className="w-fit"
-          >
-            {successState.buttonLabel}
-          </Button>
-        </div>
-      </section>
-    </main>
+          {setupDelayed ? (
+            <LinkPagePill onClick={onEmailSupport}>Email support</LinkPagePill>
+          ) : null}
+          <ActionControl onClick={onAction}>{successState.buttonLabel}</ActionControl>
+        </>
+      }
+      detail={setupDelayed
+        ? "We’ll keep checking automatically, or you can email support."
+        : successState.description}
+      title={setupDelayed ? "Setup is taking longer than expected." : successState.title}
+    >
+      {successState.pending && !setupDelayed ? <LinkPageDots /> : null}
+    </LinkPageScreen>
   );
 }
 
@@ -306,56 +280,49 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
         buttonLabel: "Open home",
         description: "Opening your home page.",
         pending: false,
-        title: "You’re all set",
-        variant: "active",
+        title: "You’re all set.",
       };
     case "activating":
       return {
         buttonLabel: "Back to invite",
-        description: JOIN_INVITE_ACTIVATION_PENDING_COPY.successDescription,
+        description: JOIN_INVITE_ACTIVATION_PENDING_COPY.subtitle,
         pending: true,
-        title: "Finishing your setup",
-        variant: "pending",
+        title: "Payment confirmed.",
       };
     case "verify":
       return {
         buttonLabel: "Back to invite",
         description: "Checking your signup status.",
         pending: true,
-        title: "Finishing verification",
-        variant: "pending",
+        title: "Finishing verification.",
       };
     case "checkout":
       return {
         buttonLabel: "Back to invite",
-        description: "Setting up your account and assistant. This takes about a minute.",
+        description: JOIN_INVITE_ACTIVATION_PENDING_COPY.subtitle,
         pending: true,
-        title: "Payment received",
-        variant: "pending",
+        title: "Payment received.",
       };
     case "expired":
       return {
         buttonLabel: "Back to invite",
-        description: "Text Murph again for a fresh link.",
+        description: "Ask Murph for a new one.",
         pending: false,
-        title: "Invite expired",
-        variant: "terminal",
+        title: "This link expired.",
       };
     case "invalid":
       return {
         buttonLabel: "Back to invite",
-        description: "Text Murph again for a fresh link.",
+        description: "Ask Murph for a new one.",
         pending: false,
-        title: "Invite not found",
-        variant: "terminal",
+        title: "This link isn’t working.",
       };
     case "blocked":
       return {
         buttonLabel: "Back to invite",
         description: "Head back to your invite for next steps.",
         pending: false,
-        title: "Account blocked",
-        variant: "terminal",
+        title: "This account can’t continue.",
       };
   }
 }

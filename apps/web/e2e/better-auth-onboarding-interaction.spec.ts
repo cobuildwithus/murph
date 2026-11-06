@@ -78,14 +78,17 @@ test("real messaging setup renders immediately while settings are delayed at des
   const setup = page.locator("main");
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 900 });
-    await expect(setup.locator('input[type="tel"]')).toBeVisible();
-    await expect(setup.getByText("Connect Telegram", { exact: true })).toBeVisible();
+    await expect(setup.getByRole("button", { name: "Text message" })).toBeVisible();
+    await expect(setup.getByRole("button", { name: "Telegram", exact: true })).toBeVisible();
     await expect(setup.getByText("Connect phone", { exact: true })).toHaveCount(0);
     await expect(setup.getByText("Set up a passkey")).toHaveCount(0);
     expect(await setup.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
     await setup.screenshot({ path: testInfo.outputPath(`messaging-${width}.png`) });
   }
+  await setup.getByRole("button", { name: "Text message" }).click();
   const input = setup.locator('input[type="tel"]');
+  await expect(input).toBeVisible();
+  await expect(setup.getByText("Connect Telegram", { exact: true })).toBeHidden();
   await input.fill("2025550195");
   await setup.getByRole("button", { name: "Send verification code" }).click();
   expect(sends).toBe(0);
@@ -93,11 +96,10 @@ test("real messaging setup renders immediately while settings are delayed at des
   await expect.poll(() => sends).toBe(1);
   await expect(setup.getByText(/We texted the latest code/u)).toBeVisible();
   await expect(setup.getByText("Connect Telegram", { exact: true })).toHaveCount(0);
-  await expect(setup.getByText("OR", { exact: true })).toHaveCount(0);
+  await expect(setup.getByRole("button", { name: "Use Telegram instead" })).toHaveCount(0);
   await setup.screenshot({ path: testInfo.outputPath("phone-verification.png") });
   await setup.getByRole("button", { name: "Use a different number" }).click();
-  await expect(setup.getByText("Connect Telegram", { exact: true })).toBeVisible();
-  await expect(setup.getByText("OR", { exact: true })).toBeVisible();
+  await expect(setup.getByRole("button", { name: "Use Telegram instead" })).toBeVisible();
   await page.route("**/api/settings/login-methods/otp/verify", (route) => route.fulfill({ json: { ok: true } }));
   await setup.getByRole("button", { name: "Send verification code" }).click();
   await setup.locator('input[autocomplete="one-time-code"]').fill("123456");

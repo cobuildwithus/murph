@@ -95,9 +95,7 @@ import {
   CHECKOUT_CORE_FEATURES,
   CHECKOUT_PULSE_FEATURES,
   EDGE_ONLY_FEATURES,
-  JOIN_EDGE_FEATURES,
   JOIN_FAMILY_FEATURES,
-  JOIN_PULSE_FEATURES,
   SETTINGS_CORE_FEATURES,
   SETTINGS_EDGE_FEATURES,
   SETTINGS_FAMILY_FEATURES,
@@ -1881,8 +1879,6 @@ export function ComponentsContent() {
             AI models; the top model requires an active paid Edge plan.
           </p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <PlanBulletListStudy title="Pulse · join page" features={JOIN_PULSE_FEATURES} />
-            <PlanBulletListStudy title="Edge · join page" features={JOIN_EDGE_FEATURES} />
             <PlanBulletListStudy title="Family · join page" features={JOIN_FAMILY_FEATURES} />
             <PlanBulletListStudy title="Core · settings" features={SETTINGS_CORE_FEATURES} />
             <PlanBulletListStudy title="Pulse · settings" features={SETTINGS_PULSE_FEATURES} />

@@ -1649,7 +1649,7 @@ describe("executeHostedMailboxEvent", () => {
     }
   });
 
-  it("captures assistant context snapshot as a route-planning slowest stage", () => {
+  it.each(["assistant_context_snapshot", "assistant_context_snapshot_refresh", "follow_up_context"])("captures route-planning tail stage %s", (stage) => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_provider_plan_context_snapshot",
       memberId: "member_123",
@@ -1682,9 +1682,11 @@ describe("executeHostedMailboxEvent", () => {
           providerRequestOrdinal: 0,
           resumeCodexThreadIdPresent: true,
           routePlanningAssistantContextSnapshotElapsedMs: 8,
+          routePlanningAssistantContextSnapshotRefreshElapsedMs: 7,
+          routePlanningFollowUpContextElapsedMs: 6,
           routePlanningElapsedMs: 23,
           routePlanningMeasuredElapsedMs: 22,
-          routePlanningSlowestStage: "assistant_context_snapshot",
+          routePlanningSlowestStage: stage,
           routePlanningSlowestStageElapsedMs: 8,
           workingDirectoryKind: "hosted-stable-proc-cwd",
         },
@@ -1704,9 +1706,11 @@ describe("executeHostedMailboxEvent", () => {
         providerPlanKind: "provider.plan",
         requestId: "req_context_snapshot",
         routePlanningAssistantContextSnapshotElapsedMs: 8,
+        routePlanningAssistantContextSnapshotRefreshElapsedMs: 7,
+        routePlanningFollowUpContextElapsedMs: 6,
         routePlanningElapsedMs: 23,
         routePlanningMeasuredElapsedMs: 22,
-        routePlanningSlowestStage: "assistant_context_snapshot",
+        routePlanningSlowestStage: stage,
         routePlanningSlowestStageElapsedMs: 8,
         workingDirectoryKind: "hosted-stable-proc-cwd",
       }),

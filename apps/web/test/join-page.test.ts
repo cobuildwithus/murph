@@ -643,6 +643,9 @@ test("JoinInviteCancelPage returns to the invite without legacy share state", as
 
   assert.match(markup, /href="\/join\/invite-code"/);
   assert.doesNotMatch(markup, /\?share=/);
+  assert.match(markup, /Checkout paused\./);
+  assert.match(markup, /Your phone number is still verified\./);
+  assert.match(markup, />Return to invite</);
 });
 
 function createStatus(

@@ -2136,7 +2136,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         throw new TypeError("Hosted runtime redacted status checkpoint requires workspace port support.");
       }
 
+      const publicationQueuedAt = performance.now();
       const publication = pendingRuntimeStatusPublication.then(async () => {
+        const publicationStartedAt = performance.now();
         assertRuntimeNotAborted();
         const workspace = checkpointRequestBuilder.latestWorkspace() ?? checkpointInput.workspace;
         const requestedCheckpointNextWakeAt = Object.hasOwn(checkpointInput, "nextWakeAt")
@@ -2150,6 +2152,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           : workspace?.nextWakeReason ?? null;
         const checkpointNowMs = Date.now();
         const checkpointNow = new Date(checkpointNowMs).toISOString();
+        const wakesStartedAt = performance.now();
         const {
           checkpointProcessingWake,
           defaultProcessingWake,
@@ -2163,10 +2166,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           runtimeEnv: invocationRuntimeEnv,
           vaultRoot: restored.vaultRoot,
         });
+        const resolveWakesMs = Math.round(performance.now() - wakesStartedAt);
         const canonicalRuntimeCommit = checkpointInput.reason === "canonical_runtime_commit";
         const checkpointWorkspacePort = canonicalRuntimeCommit
           ? workspacePort
           : foregroundWorkspacePort;
+        const progressStatusStartedAt = performance.now();
         const redactedStatus = await withHostedMailboxProgressStatus({
           workspaceVersion: (BigInt(checkpointMetadata.expectedWorkspaceVersion) + 1n).toString(),
           redactedStatus: {
@@ -2179,6 +2184,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           },
           vaultRoot: restored.vaultRoot,
         });
+        const progressStatusMs = Math.round(performance.now() - progressStatusStartedAt);
         const canonicalSystemProgressCommitted =
           systemMailboxProcessingMode
           && checkpointInput.reason === "canonical_runtime_commit"
@@ -2195,6 +2201,15 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               ?? checkpointMetadata.systemMailboxProgressGeneration,
             progressed: systemMailboxProgressedForCheckpoint,
           });
+        emitHostedExecutionStructuredLog({
+          component: "runtime", phase: "checkpoint", level: "info",
+          message: "Hosted status publication timing.",
+          details: {
+            checkpointReason: checkpointInput.reason,
+            queueWaitMs: Math.round(publicationStartedAt - publicationQueuedAt),
+            resolveWakesMs, progressStatusMs,
+          },
+        });
         const checkpointOperation = checkpointWorkspacePort.checkpoint({
           attemptId: checkpointMetadata.attemptId,
           expectedWorkspaceVersion: checkpointMetadata.expectedWorkspaceVersion,
@@ -3599,10 +3614,14 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       const returnSystemMailboxModeResult = async (
         extraCandidates: readonly HostedRuntimeWakeCandidate[] = [],
       ): Promise<HostedWorkspaceInvocationResult> => {
+        const returnStartedAt = performance.now();
+        const returnTiming: { completionTailImportMs?: number; checkpointMs?: number; checkpointStage?: string } = {};
         if (assistantCronDeadlineMs !== null
           && Date.now() >= assistantCronDeadlineMs) await prefetchSystemMailboxAssistantWork();
         if (independentCompletionMetadataPending && readyDurableCheckpointEffects.length === 0) {
+          const completionTailStartedAt = performance.now();
           await importSystemMailboxCompletionTail();
+          returnTiming.completionTailImportMs = Math.round(performance.now() - completionTailStartedAt);
         }
         const checkpointStage = resolveHostedSystemMailboxReturnCheckpointStage({
           canonicalWritePending:
@@ -3613,7 +3632,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             canonicalWriteReceiptLogBlocksBackgroundMaintenance(),
         });
         if (!canDeferSystemMailboxCheckpointForForeground() && (checkpointStage || runtimeStateDirty)) {
-          await checkpointSystemMailboxMode(checkpointStage ?? "system_mailbox.checkpoint.independent_work");
+          const checkpointStartedAt = performance.now();
+          returnTiming.checkpointStage = checkpointStage ?? "system_mailbox.checkpoint.independent_work";
+          await checkpointSystemMailboxMode(returnTiming.checkpointStage);
+          returnTiming.checkpointMs = Math.round(performance.now() - checkpointStartedAt);
         }
         await finishIndependentSystemWorkAfterCheckpoint();
         const systemMailboxState = await readHostedSystemMailboxState(restored.vaultRoot);
@@ -3668,6 +3690,14 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             vaultRoot: restored.vaultRoot,
           }),
           mailboxBudgetExhausted: mailboxBudgetExhausted(),
+        });
+        emitHostedExecutionStructuredLog({
+          component: "runtime", phase: "wake.running", level: "info",
+          message: "Hosted system mailbox return timing.",
+          details: {
+            totalMs: Math.round(performance.now() - returnStartedAt),
+            ...returnTiming,
+          },
         });
         return invocationResult;
       };
@@ -4578,6 +4608,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 beforeProviderAcceptedInputs: async ({
                   acceptedInputs,
                 }) => {
+                  const acceptedInputsStartedAt = performance.now();
                   if (runtimeOwnerHandoffRequested) {
                     throw new AssistantActiveTurnInputUnavailableError(
                       "Runtime ownership changed; retrying the turn in a fresh invocation.",
@@ -4642,6 +4673,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                     }
                   }
                   consumeReadyImageCompletionInputs(assistantInputIds);
+                  emitHostedExecutionStructuredLog({
+                    component: "runtime", phase: "wake.running", level: "info",
+                    message: "Hosted before provider accepted inputs timing.",
+                    details: { totalMs: Math.round(performance.now() - acceptedInputsStartedAt) },
+                  });
                   return () => {
                     // The accepted-input scope ends at provider return, before
                     // transcript/session persistence and reply dispatch. Re-arm

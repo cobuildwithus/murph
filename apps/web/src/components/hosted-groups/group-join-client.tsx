@@ -471,12 +471,7 @@ export function GroupJoinInviteMismatchRecovery() {
   return (
     <LinkPageScreen
       actions={
-        <JoinInviteSignOutButtonIsland
-          className={LINK_PAGE_PILL_CLASS}
-          idleLabel="Sign out and continue"
-          size="unstyled"
-          variant="unstyled"
-        />
+        <JoinInviteSignOutButtonIsland appearance="pill" idleLabel="Sign out and continue" />
       }
       detail="This browser is signed into a different Murph account. Sign out, then verify the phone number that received this invite."
       title="Use the invited phone number."

@@ -59,6 +59,8 @@ const HOSTED_ASSISTANT_REASONING_EFFORT_VALUES = new Set([
 const HOSTED_ASSISTANT_ROUTE_PLANNING_STAGE_VALUES = new Set([
   "active_experiment_context",
   "assistant_context_snapshot",
+  "assistant_context_snapshot_refresh",
+  "follow_up_context",
   "cli_bootstrap",
   "fallback_instructions",
   "memory_overview",
@@ -615,6 +617,8 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
     "dynamicToolCount",
     "routePlanningActiveExperimentContextElapsedMs",
     "routePlanningAssistantContextSnapshotElapsedMs",
+    "routePlanningAssistantContextSnapshotRefreshElapsedMs",
+    "routePlanningFollowUpContextElapsedMs",
     "routePlanningCliBootstrapElapsedMs",
     "routePlanningElapsedMs",
     "routePlanningFallbackInstructionsElapsedMs",

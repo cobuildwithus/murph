@@ -50,7 +50,7 @@ import { GrowthScorecardStudy } from "./growth-scorecard-study";
 import { HealthDataConsentWithdrawalFlowStudy } from "./health-data-consent-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
 import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
-import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-study";
+import { JoinInviteStudy } from "./join-invite-study";
 import { OpsUsageStudy } from "./ops-usage-study";
 import { OpsGameReportsStudy } from "./ops-game-reports-study";
 import { OpsOperatorTaskStudy } from "./ops-operator-task-study";
@@ -552,8 +552,8 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Family billing recovery and management on Join">
-            <JoinFamilyBillingRecoveryStudy />
+          <StudySection title="Sign up on Join: every stage, Family billing recovery, and the checkout return">
+            <JoinInviteStudy />
           </StudySection>
         </>
       ) : null}

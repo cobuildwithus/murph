@@ -520,8 +520,13 @@ uses `LinkPageSurface`, because the frame repaints the whole document.
 
 Give a page one object where the funding dial sits, when it has something real
 to show: `LinkPageSheet` for a file or a record, a ticket for an invite, a
-calendar page for a date. Do not add one to a page with nothing to act on, such
-as a dead link.
+calendar page for a date, and `LinkPageDots`, the logo's dot grid, while the page
+is working on something. Do not add one to a page with nothing to act on, such as
+a dead link.
+
+A choice between plans is one row per plan and one pill that names the selected
+plan. The rows lock while that plan's checkout runs, so the plan that opens is
+always the one on the pill, and coming back from checkout restores them.
 
 A private link keeps its reason for being opened: `LinkPageSignIn` puts the
 sign-in form on the page under a headline that names the task, and finishes the
