@@ -59,7 +59,7 @@ import {
 } from "../hosted-onboarding/member-activation";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
-  getHostedLinqChatHandles,
+  getHostedLinqChatSummary,
   sendHostedLinqChatMessage,
   sendHostedLinqReactionBoundChatMessage,
   updateHostedLinqChatAvatar,
@@ -435,7 +435,7 @@ async function recordHostedRuntimeGroupJournalFact(
       await input.scheduleMailboxWake?.(admission.mailboxWake);
     } catch (error) {
       (input.logger ?? console).warn(
-        "Hosted group Journal handoff failed; the mailbox recovery sweep will retry it.",
+        "Hosted group Journal handoff failed; the handoff sweep retries facts from the last 24 hours.",
         sanitizeHostedOnboardingStructuredLogDetails({
           errorName: deriveHostedOnboardingTimingErrorName(error),
           outcome: "post_commit_handoff_failed",
@@ -2188,12 +2188,13 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
     return unavailable(authorized.unavailableReason);
   }
 
-  let handles: Awaited<ReturnType<typeof getHostedLinqChatHandles>>;
+  let observation: Awaited<ReturnType<typeof getHostedLinqChatSummary>>;
   try {
-    handles = await getHostedLinqChatHandles({ chatId: authorized.chatId });
+    observation = await getHostedLinqChatSummary({ chatId: authorized.chatId });
   } catch {
     return unavailable("provider_unavailable");
   }
+  const { handles } = observation;
   // An empty roster means the provider payload had no recognizable handles;
   // treat that as provider trouble instead of a truthful "nobody here".
   if (handles.length === 0) {
@@ -2242,7 +2243,7 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
   await reconcileHostedThreadContainerParticipants({
     chatId: authorized.chatId,
     containerMemberId: input.memberId,
-    handles,
+    observation,
     prisma,
     resolvedParticipants,
   });

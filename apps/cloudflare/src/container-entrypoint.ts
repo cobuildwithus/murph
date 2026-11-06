@@ -327,6 +327,18 @@ type HostedContainerRuntimeWakeNotification = {
   requestedProcessingMode?: HostedWorkspaceInvocationProcessingMode | null;
 };
 
+type HostedContainerRuntimeWakeSender =
+  (notification?: HostedContainerRuntimeWakeNotification) => boolean;
+
+// One record per admitted invocation: identity, abort, voice, the installed wake
+// sender, and one coalesced wake held until that sender exists. A request
+// detaches only its own record, before the completion callback, so a successor
+// can enter while the predecessor's callback settles.
+interface HostedContainerAdmittedJob extends HostedContainerActiveInvocation {
+  pendingWake: HostedContainerRuntimeWakeNotification | null;
+  sendWake: HostedContainerRuntimeWakeSender | null;
+}
+
 function createHostedContainerRuntimeWakeNotification(
   input: HostedContainerRuntimeWakeNotification,
 ): HostedContainerRuntimeWakeNotification {
@@ -337,6 +349,21 @@ function createHostedContainerRuntimeWakeNotification(
     ...(input.orchestration ? { orchestration: input.orchestration } : {}),
     ...(input.requestedProcessingMode ? { requestedProcessingMode: input.requestedProcessingMode } : {}),
   };
+}
+
+function coalesceHostedContainerRuntimeWake(
+  pending: HostedContainerRuntimeWakeNotification | null,
+  next: HostedContainerRuntimeWakeNotification,
+): HostedContainerRuntimeWakeNotification {
+  if (!pending) return next;
+  return createHostedContainerRuntimeWakeNotification({
+    mailboxWakeHighWater: mergeHostedMailboxWakeHighWater(
+      pending.mailboxWakeHighWater, next.mailboxWakeHighWater,
+    ),
+    notifiedAtEpochMs: pending.notifiedAtEpochMs,
+    orchestration: pending.orchestration ?? next.orchestration,
+    requestedProcessingMode: next.requestedProcessingMode ?? pending.requestedProcessingMode,
+  });
 }
 
 export async function startHostedContainerEntrypoint(input: {
@@ -410,20 +437,7 @@ export async function startHostedContainerEntrypoint(input: {
   let settlingCompletionCallbackCount = 0;
   let workspaceInvocationAcceptedCount = 0;
   let conversationActivityReceivedAtEpochMs: number | null = null;
-  let activeRuntimeWake: ((notification?: HostedContainerRuntimeWakeNotification) => boolean) | null = null;
-  let activeRuntimeWakeAttemptId: string | null = null;
-  let activeRuntimeWakeLeaseGeneration: string | null = null;
-  let activeRuntimeWakeUserId: string | null = null;
-  let activeRuntimeWakePending = false;
-  let activeRuntimeWakePendingAttemptId: string | null = null;
-  let activeRuntimeWakePendingLeaseGeneration: string | null = null;
-  let activeRuntimeWakePendingNotifiedAtEpochMs: number | null = null;
-  let activeRuntimeWakePendingMailboxHighWater: HostedMailboxWakeHighWater | null = null;
-  let activeRuntimeWakePendingOrchestration: HostedRuntimeOrchestrationLatencyDiagnostics | null = null;
-  let activeRuntimeWakePendingRequestedProcessingMode:
-    HostedWorkspaceInvocationProcessingMode | null = null;
-  let activeRuntimeWakePendingUserId: string | null = null;
-  let activeWorkspaceInvocationAbort: HostedContainerActiveInvocation | null = null;
+  let activeAdmittedJob: HostedContainerAdmittedJob | null = null;
   let pendingWorkspaceInvocationAbort: HostedContainerWorkspaceInvocationAbortRequest | null = null;
   // Node startup span (process start -> ready to accept). Computed once after the
   // port is listening and consumed by the FIRST (cold) invocation only; a warm
@@ -446,20 +460,15 @@ export async function startHostedContainerEntrypoint(input: {
         return false;
       }
 
-      const advertiseAbsent =
-        activeHostedRunnerJobCount === 0
-        && activeRuntimeWake === null
-        && !activeRuntimeWakePending
-        && activeRuntimeWakePendingAttemptId === null
-        && activeWorkspaceInvocationAbort === null;
+      const advertiseAbsent = activeHostedRunnerJobCount === 0;
       discardUnreadRequestBody(request);
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
           activeHostedRunnerJobCount,
           runtimeWakeAbsent: advertiseAbsent,
-          workspaceAttemptId: activeRuntimeWakeAttemptId,
-          workspacePendingAttemptId: activeRuntimeWakePendingAttemptId,
+          workspaceAttemptId: activeAdmittedJob?.sendWake ? activeAdmittedJob.attemptId : null,
+          workspacePendingAttemptId: activeAdmittedJob?.attemptId ?? null,
         },
         level: "warn",
         message: "Hosted container entrypoint rejected a runtime wake after shutdown started.",
@@ -496,7 +505,8 @@ export async function startHostedContainerEntrypoint(input: {
     if (rejectRuntimeWakeAfterShutdown()) {
       return;
     }
-    const wake = activeRuntimeWake;
+    const job = activeAdmittedJob;
+    const wake = job?.sendWake ?? null;
     const notifiedAtEpochMs = Date.now();
     let absent = false;
     let mismatch = false;
@@ -514,59 +524,27 @@ export async function startHostedContainerEntrypoint(input: {
       notifiedAtEpochMs,
       orchestration: acceptedWakeOrchestration,
     });
-    if (wakeRequest && wake !== null) {
-      mismatch = !hostedContainerRuntimeWakeIdentityMatches(wakeRequest, {
-        attemptId: activeRuntimeWakeAttemptId,
-        leaseGeneration: activeRuntimeWakeLeaseGeneration,
-        userId: activeRuntimeWakeUserId,
-      });
+    const identityMismatch = wakeRequest !== null && job !== null
+      && !hostedContainerInvocationIdentityMatches(job, wakeRequest);
+    if (wake) {
+      mismatch = identityMismatch;
       accepted = !mismatch && wake(wakeNotification) === true;
-    } else if (!wakeRequest) {
-      accepted = wake?.({ notifiedAtEpochMs }) === true;
-    }
-    if (
-      !accepted
-      && !mismatch
-      && canDeferHostedContainerRuntimeWake(wake !== null, wakeRequest)
-      && activeRuntimeWakePendingAttemptId !== null
-    ) {
-      if (
-        wakeRequest
-        && !hostedContainerRuntimeWakeIdentityMatches(wakeRequest, {
-          attemptId: activeRuntimeWakePendingAttemptId,
-          leaseGeneration: activeRuntimeWakePendingLeaseGeneration,
-          userId: activeRuntimeWakePendingUserId,
-        })
-      ) {
-        mismatch = true;
-      } else {
-        if (!activeRuntimeWakePending) {
-          activeRuntimeWakePendingMailboxHighWater = wakeNotification.mailboxWakeHighWater ?? null;
-          activeRuntimeWakePendingNotifiedAtEpochMs = notifiedAtEpochMs;
-          activeRuntimeWakePendingOrchestration = acceptedWakeOrchestration;
-        } else {
-          activeRuntimeWakePendingMailboxHighWater = mergeHostedMailboxWakeHighWater(
-            activeRuntimeWakePendingMailboxHighWater, wakeNotification.mailboxWakeHighWater,
-          );
-          if (!activeRuntimeWakePendingOrchestration && acceptedWakeOrchestration) {
-            activeRuntimeWakePendingOrchestration = acceptedWakeOrchestration;
-          }
-        }
-        activeRuntimeWakePendingRequestedProcessingMode =
-          wakeRequest?.requestedProcessingMode
-          ?? activeRuntimeWakePendingRequestedProcessingMode;
-        activeRuntimeWakePending = true;
+    } else if (job && wakeRequest?.voiceCallId === undefined) {
+      // A call reservation needs its live owner; only ordinary wakes coalesce before readiness.
+      mismatch = identityMismatch;
+      if (!mismatch) {
+        job.pendingWake = coalesceHostedContainerRuntimeWake(job.pendingWake, wakeNotification);
         pending = true;
         accepted = true;
       }
-    } else if (!accepted && !mismatch && wakeRequest && wake === null) {
-      absent = activeRuntimeWakePendingAttemptId === null;
+    } else if (wakeRequest) {
+      absent = job === null;
     }
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
         activeHostedRunnerJobCount,
-        activeRuntimeWakePending,
+        activeRuntimeWakePending: job?.pendingWake != null,
         activeRuntimeWakePresent: wake !== null,
         runtimeWakeAccepted: accepted,
         runtimeWakeAbsent: absent,
@@ -574,8 +552,8 @@ export async function startHostedContainerEntrypoint(input: {
         runtimeWakePending: pending,
         runtimeWakeReceivedAtEpochMs: wakeReceivedAtEpochMs,
         runtimeWakeHandledAtEpochMs: Date.now(),
-        workspaceAttemptId: activeRuntimeWakeAttemptId,
-        workspacePendingAttemptId: activeRuntimeWakePendingAttemptId,
+        workspaceAttemptId: wake ? job?.attemptId ?? null : null,
+        workspacePendingAttemptId: job?.attemptId ?? null,
       },
       message: "Hosted container entrypoint handled runtime wake request.",
       phase: "wake.running",
@@ -605,14 +583,13 @@ export async function startHostedContainerEntrypoint(input: {
     const invocationAbort = new AbortController();
     let claimedRunnerSlot = false;
     let workspaceRestorePreparation: Promise<HostedWorkspaceRestorePreparation> | null = null;
-    let runtimeWakeForRequest: ((notification?: HostedContainerRuntimeWakeNotification) => boolean) | null = null;
     let job: HostedExecutionRunnerJobInput | null = null;
     let completedInvocation: {
       job: HostedExecutionRunnerJobInput;
       result: HostedExecutionRunnerJobResult;
     } | null = null;
     let stopActiveJobDiagnostics: (() => void) | null = null;
-    let activeAbortRecord: HostedContainerActiveInvocation | null = null;
+    let admittedJob: HostedContainerAdmittedJob | null = null;
     try {
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
       const requestKind = HOSTED_CONTAINER_REQUEST_KINDS.get(`${request.method} ${requestUrl.pathname}`);
@@ -635,7 +612,7 @@ export async function startHostedContainerEntrypoint(input: {
           return;
         }
         const result = await controlHostedContainerVoice({
-          command, readCurrent: () => activeWorkspaceInvocationAbort,
+          command, readCurrent: () => activeAdmittedJob,
           shutdownSignal: containerShutdownController.signal,
         });
         writeJsonResponse(response, 200, result);
@@ -723,11 +700,9 @@ export async function startHostedContainerEntrypoint(input: {
           return;
         }
 
-        const activeAbort = activeWorkspaceInvocationAbort;
+        const activeAbort = activeAdmittedJob;
         const accepted = activeAbort !== null
-          && activeAbort.attemptId === abortRequest.attemptId
-          && activeAbort.leaseGeneration === abortRequest.leaseGeneration
-          && activeAbort.userId === abortRequest.userId;
+          && hostedContainerInvocationIdentityMatches(activeAbort, abortRequest);
         if (accepted) {
           activeAbort.abort(new Error("workspace invocation preempted"));
         } else if (activeAbort === null) {
@@ -907,7 +882,7 @@ export async function startHostedContainerEntrypoint(input: {
         const requestBody: unknown = JSON.parse(await readHostedContainerInvocationRequestBody(request));
         const requestEnvelope = parseHostedExecutionContainerInvocationEnvelope(requestBody);
         job = runtime.parseRunnerJobInput(requestEnvelope.job);
-        requestDiagnostics.workspaceAttemptId = readHostedContainerWorkspaceAttemptId(job);
+        requestDiagnostics.workspaceAttemptId = job.request.attemptId;
       } catch (error) {
         emitHostedExecutionStructuredLog({
           component: "container",
@@ -938,29 +913,27 @@ export async function startHostedContainerEntrypoint(input: {
         phase: "wake.running",
         userId: readHostedExecutionRunnerJobUserId(job),
       });
-      activeRuntimeWakePendingAttemptId = readHostedContainerWorkspaceAttemptId(job);
-      activeRuntimeWakePendingLeaseGeneration = readHostedContainerWorkspaceLeaseGeneration(job);
-      activeRuntimeWakePendingUserId = readHostedExecutionRunnerJobUserId(job);
-      activeAbortRecord = {
+      const invocation: HostedContainerAdmittedJob = {
         signal: invocationAbort.signal,
         abort(reason: Error) {
           if (!containerShutdownController.signal.aborted && !invocationAbort.signal.aborted) {
             invocationAbort.abort(reason);
           }
         },
-        attemptId: readHostedContainerWorkspaceAttemptId(job),
-        leaseGeneration: readHostedContainerWorkspaceLeaseGeneration(job),
+        attemptId: job.request.attemptId,
+        leaseGeneration: job.request.leaseGeneration,
         userId: readHostedExecutionRunnerJobUserId(job),
+        pendingWake: null,
+        sendWake: null,
       };
-      activeWorkspaceInvocationAbort = activeAbortRecord;
+      admittedJob = invocation;
+      activeAdmittedJob = invocation;
       if (
         pendingWorkspaceInvocationAbort
-        && activeAbortRecord.attemptId === pendingWorkspaceInvocationAbort.attemptId
-        && activeAbortRecord.leaseGeneration === pendingWorkspaceInvocationAbort.leaseGeneration
-        && activeAbortRecord.userId === pendingWorkspaceInvocationAbort.userId
+        && hostedContainerInvocationIdentityMatches(invocation, pendingWorkspaceInvocationAbort)
       ) {
         pendingWorkspaceInvocationAbort = null;
-        activeAbortRecord.abort(new Error("workspace invocation preempted"));
+        invocation.abort(new Error("workspace invocation preempted"));
       }
       stopActiveJobDiagnostics = startHostedContainerActiveJobDiagnostics({
         job,
@@ -997,45 +970,19 @@ export async function startHostedContainerEntrypoint(input: {
           }
         },
         onVoiceReady(voice) {
-          if (activeAbortRecord) activeAbortRecord.voice = voice;
+          invocation.voice = voice;
         },
         onRuntimeWakeReady(sendWake) {
-          activeRuntimeWake = sendWake;
-          activeRuntimeWakeAttemptId = job
-            ? readHostedContainerWorkspaceAttemptId(job)
-            : null;
-          activeRuntimeWakeLeaseGeneration = job
-            ? readHostedContainerWorkspaceLeaseGeneration(job)
-            : null;
-          activeRuntimeWakeUserId = job
-            ? readHostedExecutionRunnerJobUserId(job)
-            : null;
-          runtimeWakeForRequest = sendWake;
-          const pendingWake = activeRuntimeWakePending;
-          const pendingWakeNotifiedAtEpochMs = activeRuntimeWakePendingNotifiedAtEpochMs;
-          const pendingWakeOrchestration = activeRuntimeWakePendingOrchestration;
-          const pendingWakeMailboxHighWater = activeRuntimeWakePendingMailboxHighWater;
-          const pendingWakeRequestedProcessingMode =
-            activeRuntimeWakePendingRequestedProcessingMode;
-          activeRuntimeWakePending = false;
-          activeRuntimeWakePendingNotifiedAtEpochMs = null;
-          activeRuntimeWakePendingOrchestration = null;
-          activeRuntimeWakePendingMailboxHighWater = null;
-          activeRuntimeWakePendingRequestedProcessingMode = null;
+          invocation.sendWake = sendWake;
+          const pendingWake = invocation.pendingWake;
+          invocation.pendingWake = null;
           emitHostedExecutionStructuredLog({
             component: "container",
             details: {
               activeHostedRunnerJobCount,
               activeRuntimeWakePresent: true,
-              pendingRuntimeWakeDelivered: pendingWake
-                ? sendWake(createHostedContainerRuntimeWakeNotification({
-                    mailboxWakeHighWater: pendingWakeMailboxHighWater,
-                    orchestration: pendingWakeOrchestration,
-                    notifiedAtEpochMs: pendingWakeNotifiedAtEpochMs ?? undefined,
-                    requestedProcessingMode: pendingWakeRequestedProcessingMode,
-                  }))
-                : false,
-              workspaceAttemptId: activeRuntimeWakeAttemptId,
+              pendingRuntimeWakeDelivered: pendingWake ? sendWake(pendingWake) : false,
+              workspaceAttemptId: invocation.attemptId,
             },
             message: "Hosted container invocation reported runtime wake readiness.",
             phase: "wake.running",
@@ -1114,31 +1061,7 @@ export async function startHostedContainerEntrypoint(input: {
       writeJsonResponse(response, classified.statusCode, classified.payload);
     } finally {
       stopActiveJobDiagnostics?.();
-      if (runtimeWakeForRequest && activeRuntimeWake === runtimeWakeForRequest) {
-        activeRuntimeWake = null;
-        activeRuntimeWakeAttemptId = null;
-        activeRuntimeWakeLeaseGeneration = null;
-        activeRuntimeWakeUserId = null;
-      }
-      if (
-        job
-        && activeRuntimeWakePendingAttemptId === readHostedContainerWorkspaceAttemptId(job)
-      ) {
-        activeRuntimeWakePending = false;
-        activeRuntimeWakePendingAttemptId = null;
-        activeRuntimeWakePendingLeaseGeneration = null;
-        activeRuntimeWakePendingNotifiedAtEpochMs = null;
-        activeRuntimeWakePendingOrchestration = null;
-        activeRuntimeWakePendingMailboxHighWater = null;
-        activeRuntimeWakePendingRequestedProcessingMode = null;
-        activeRuntimeWakePendingUserId = null;
-      }
-      if (
-        activeAbortRecord
-        && activeWorkspaceInvocationAbort === activeAbortRecord
-      ) {
-        activeWorkspaceInvocationAbort = null;
-      }
+      if (activeAdmittedJob === admittedJob) activeAdmittedJob = null;
       requestAbort.cleanup();
       await recordSettlingCompletionCallback(completedInvocation);
       // A checkpoint control response must not let shutdown exit while the
@@ -1613,11 +1536,6 @@ function parseHostedContainerWorkspaceInvocationAbortRequest(
   };
 }
 
-// A call reservation needs its live owner; only ordinary wakes coalesce before readiness.
-function canDeferHostedContainerRuntimeWake(ready: boolean, request: HostedContainerRuntimeWakeRequest | null): boolean {
-  return !ready && request?.voiceCallId === undefined;
-}
-
 async function readHostedContainerRuntimeWakeRequest(
   request: IncomingMessage,
 ): Promise<HostedContainerRuntimeWakeRequest | null> {
@@ -1708,17 +1626,13 @@ async function recordHostedContainerRuntimeCompletionIfPresent(
   await recordHostedContainerRuntimeCompletionBestEffort(input);
 }
 
-function hostedContainerRuntimeWakeIdentityMatches(
-  expected: HostedContainerRuntimeWakeRequest,
-  actual: {
-    attemptId: string | null;
-    leaseGeneration: string | null;
-    userId: string | null;
-  },
+function hostedContainerInvocationIdentityMatches(
+  job: HostedContainerAdmittedJob,
+  identity: HostedContainerWorkspaceInvocationAbortRequest,
 ): boolean {
-  return actual.attemptId === expected.attemptId
-    && actual.leaseGeneration === expected.leaseGeneration
-    && actual.userId === expected.userId;
+  return job.attemptId === identity.attemptId
+    && job.leaseGeneration === identity.leaseGeneration
+    && job.userId === identity.userId;
 }
 
 function readHostedExecutionRunnerResultPhase(result: unknown): string | null {
@@ -1732,18 +1646,6 @@ function readHostedExecutionRunnerResultPhase(result: unknown): string | null {
 
 function readHostedExecutionRunnerJobUserId(job: HostedExecutionRunnerJobInput): string {
   return job.request.userId;
-}
-
-function readHostedContainerWorkspaceAttemptId(
-  job: HostedExecutionRunnerJobInput,
-): string | null {
-  return job.kind === "workspace-invocation" ? job.request.attemptId : null;
-}
-
-function readHostedContainerWorkspaceLeaseGeneration(
-  job: HostedExecutionRunnerJobInput,
-): string | null {
-  return job.kind === "workspace-invocation" ? job.request.leaseGeneration : null;
 }
 
 function assertHostedContainerArchitectureVersion(value: unknown): void {

@@ -261,6 +261,68 @@ describe.skipIf(!runPostgresProof)(
       await expect(readCounter(client, userId, "conversation")).resolves.toBe(10n);
     });
 
+    it("accepts a receipt recovery snapshot with its genuine wake while conversation input is pending", async () => {
+      const client = requirePrisma(observer);
+      const userId = await createMember(client, memberIds);
+      const now = new Date();
+      const genuineWakeAt = new Date(now.getTime() + 60 * 60 * 1000);
+      const recoveredSnapshotRef = createBundleRef("checkpoint_pg_recovered");
+      const pendingItemId = createId("pending");
+
+      await client.hostedWorkspace.create({
+        data: {
+          nextWakeAt: genuineWakeAt,
+          nextWakeReason: "assistant",
+          redactedStatusJson: {
+            hostedCanonicalWriteReceiptLogByteSize: 128,
+            hostedCanonicalWriteReceiptLogSha256: "a".repeat(64),
+            hostedMailboxConversationImportedSeq: "1",
+          },
+          snapshotRef: createBundleRef("checkpoint_pg_saturated"),
+          userId,
+          version: 4n,
+        },
+      });
+      await client.hostedMailboxLaneCounter.create({
+        data: { consumedSeq: 1n, lane: "conversation", nextSeq: 3n, userId },
+      });
+      await client.hostedMailboxItem.create({
+        data: mailboxItem({
+          createdAt: new Date(now.getTime() - 60_000),
+          id: pendingItemId,
+          laneSeq: 2n,
+          userId,
+        }),
+      });
+
+      const recovered = await checkpointHostedWorkspace({
+        checkpointedAt: now,
+        expectedVersion: 4n,
+        nextWakeAt: genuineWakeAt,
+        nextWakeReason: "assistant",
+        prisma: client,
+        reason: "idle_shutdown",
+        redactedStatusJson: { hostedMailboxConversationImportedSeq: "1" },
+        snapshotRef: recoveredSnapshotRef,
+        userId,
+      });
+
+      expect(recovered).toMatchObject({
+        conversationInputAhead: true,
+        status: "updated",
+        workspace: {
+          nextWakeAt: genuineWakeAt.toISOString(),
+          nextWakeReason: "assistant",
+          snapshotRef: recoveredSnapshotRef,
+          version: "5",
+        },
+      });
+      expect(recovered.workspace?.redactedStatusJson).toEqual({
+        hostedMailboxConversationImportedSeq: "1",
+      });
+      await expect(readConsumedIds(client, [pendingItemId])).resolves.toEqual([]);
+    });
+
     it("enforces system progress generation transitions atomically with checkpoint CAS", async () => {
       const client = requirePrisma(observer);
       const userId = await createMember(client, memberIds);

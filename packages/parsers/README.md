@@ -39,6 +39,7 @@ in publication order, before closing the runtime, including on failure or caller
 cancellation. This API does not take a cooperative abort signal or own a queue,
 retry loop, or durable state. Serial `drain`/`drainOnce` retain their existing
 behavior. A parser failure is finalized only by completion, not by `ready`.
+Abort cleanup resets only its own job and attempt, leaving a newer claim intact.
 
 This keeps parsing additive to `@murphai/inboxd`: canonical inbox evidence remains under inbox ownership, while parser outputs stay rebuildable under `derived/inbox/**`.
 

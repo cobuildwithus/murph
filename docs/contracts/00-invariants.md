@@ -323,13 +323,20 @@ it has been explicitly elevated to a cross-cutting invariant.
   or provider facts. Attempt identities are unique to one attempt. These roles
   remain distinct across retry, replay, overlapping ingestion, restart, reorder,
   resend, and migration re-entry.
+- A redelivered provider event or member gesture repeats the operation first
+  accepted, under the identity first accepted. It never takes its owner from the
+  current account binding, and once accepted it cannot re-apply after leave,
+  revocation, or relink. The durable row or receipt that records that acceptance
+  must outlive those changes.
 - Validate target, configuration, and authority before claiming an irreversible
   effect. Persist the minimum effect identity and intent before the provider
   call.
 - Once a non-idempotent provider call may have started, ambiguous failure does
   not release the claim or permit blind resend without provider idempotency or
   proof that the effect did not begin. Acknowledge, clean up, or advance
-  progress only after terminal or durable pending evidence.
+  progress only after terminal or durable pending evidence. Accepted delivery
+  needing confirmation settles through its existing delivery retry deadline;
+  optional accounting may update its own marker but never moves that deadline.
   A retry under a provider idempotency key sends the bytes accepted for that
   key, so freeze those inputs on the accepted receipt and never rebuild them
   from current source state.
@@ -339,7 +346,7 @@ it has been explicitly elevated to a cross-cutting invariant.
 - Any path that suppresses or defers a user-visible effect records a typed
   durable outcome. A persisted pending effect names its current validity
   predicate and is durably superseded instead of delivered when that predicate
-  fails.
+  fails. A moderated removal clears any stored recap story that may hold the content in the transaction that removes it, reads hide a story that predates that rule, and generated work may publish only from sources still permitted at commit.
 - A canonical group-join reaction accepted for reply-gated proactive outreach
   is Web-owned durable work. The eligible phone participant either has no member
   identity or is a verified, unsuspended member without active hosted access who
@@ -433,7 +440,11 @@ it has been explicitly elevated to a cross-cutting invariant.
 
 - Cursors, watermarks, sequences, pending-input indexes, and pagination use one
   total, transitive, owner-shared ordering primitive. Import progress is not
-  handling progress.
+  handling progress. A continuation may mutate only the identity and revision it
+  observed, using current owner state at commit. A scan may only advance the
+  cursor of the entry it read; only enable and disable writers change channel
+  membership. A scheduled completion archives a one-shot only while the registry
+  still holds the revision and occurrence that ran.
 - Explicit owner or provider causal identifiers take precedence over
   positional, "latest," grouping, watermark, and time-window heuristics. Work
   with distinct ordering anchors must not be merged into one turn. A
@@ -509,6 +520,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   transaction, or returning control to a caller that may do either. Preserve the
   first observed failure while awaiting siblings; fail-fast observation must not
   leave detached work mutating scoped state after finalization.
+- A Linq roster observation carries its pre-read time and completeness. Partial
+  evidence establishes presence, never absence; removal and the complete-roster
+  watermark require a complete, nonempty, within-cap roster. Equal-time conflicts
+  resolve to removal. Required roster proof that is unavailable produces a
+  retryable response, never an acknowledgement.
 - Public Linq unbound-group pending-setup admission is bounded by the
   provider-proven 32-member roster. Before `BEGIN`, its owner performs one
   candidate projection, canonical batch runtime-access read, active-managed-line
@@ -700,11 +716,14 @@ direct-Starter gate is fully exhausted again.
   state. The withdrawal response waits for the per-user Cloudflare execution
   barrier to serialize behind earlier ensures, re-read the Web-owned grant,
   clear the write fence, and stop the runner; every later ensure re-reads that
-  grant before work. Renewal waits behind the earlier stop before committing a
-  new grant. Cleanup failure cannot restore authority, while an absent legacy
-  grant is not reinterpreted as withdrawal. Settings, latest-available export,
-  and account deletion remain available; renewed consent is the only processing
-  restore path.
+  grant before work. The existing external retention tick redrives stops
+  interrupted before that barrier for explicitly revoked members with a non-idle
+  owner or retained target, without normal processing eligibility, through the
+  same reconciliation. Every member renewal surface waits behind the earlier stop
+  before committing a new grant. Cleanup failure cannot restore authority, while
+  an absent legacy grant is not reinterpreted as withdrawal. Settings,
+  latest-available export, and account deletion remain available; renewed consent
+  is the only processing restore path.
 - The Cloudflare Worker that can retain an exact user-control stop target after
   clearing write authority is a hard rollback floor after the first such row is
   written. Withdrawal and account deletion must consume that same persisted

@@ -1,3 +1,5 @@
+import type { HostedLinqChatSummary } from "@/src/lib/hosted-onboarding/linq-client";
+import { linqRoster } from "./support/linq-roster";
 import {
   HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
   type HostedCryptoDomain,
@@ -149,10 +151,7 @@ const mocks = vi.hoisted(() => {
       usageCreditBalanceUsdMicros: 0n,
       usageCreditLedgerVersion: 0n,
     })),
-    getHostedLinqChatSummary: vi.fn(async (): Promise<{
-      handles: string[];
-      isGroup: boolean | null;
-    }> => ({
+    getHostedLinqChatSummary: vi.fn(async (): Promise<HostedLinqChatSummary> => linqRoster({
       handles: [],
       isGroup: false,
     })),
@@ -1140,10 +1139,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.getPrisma.mockReset().mockImplementation(() => {
       throw new Error("Unexpected getPrisma call in Linq dispatch test.");
     });
-    mocks.getHostedLinqChatSummary.mockReset().mockResolvedValue({
+    mocks.getHostedLinqChatSummary.mockReset().mockResolvedValue(linqRoster({
       handles: [],
       isGroup: false,
-    });
+    }));
     mocks.enforceDirectMailboxPreparation = false;
     mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockReset();
     mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
@@ -1964,10 +1963,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   it.each(["sms", "RCS"] as const)(
     "canonically classifies route-less inbound Linq %s direct chats despite conflicting preferred-service metadata",
     async (service) => {
-      mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+      mocks.getHostedLinqChatSummary.mockResolvedValueOnce(linqRoster({
         handles: [],
         isGroup: false,
-      });
+      }));
       const prisma = asPrismaTransactionClient({
         hostedWebhookReceipt: {
           create: vi.fn().mockResolvedValue({}),
@@ -2175,10 +2174,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     },
     {
       lookupError: null,
-      summary: {
+      summary: linqRoster({
         handles: [],
         isGroup: null,
-      },
+      }),
     },
   ])("fails closed when an unknown audience cannot be classified", async ({
     lookupError,
@@ -2401,10 +2400,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     part,
     privateSentinels,
   }) => {
-    mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+    mocks.getHostedLinqChatSummary.mockResolvedValueOnce(linqRoster({
       handles: [],
       isGroup: false,
-    });
+    }));
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),

@@ -330,13 +330,14 @@ async function forwardWithRuntimeUsageSettlement(input: {
   try {
     response = await input.forward();
   } catch (error) {
-    await receipt.finish(null);
+    await receipt.finish(false);
     throw error;
   }
-  let allowed: boolean | null = null;
+  // Anything but an explicit allowance denies, including an unknown outcome.
+  let allowed = false;
   if (response.ok) {
     try { allowed = parseHostedRuntimeUsageRecordResponse(await response.clone().json()).platformAiUsageAllowedAfter; }
-    catch { /* Keep the durable pending receipt. */ }
+    catch { /* An unreadable answer is not an allowance. */ }
   }
   await receipt.finish(allowed);
   return response;

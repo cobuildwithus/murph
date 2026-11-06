@@ -32,6 +32,8 @@ import {
 import { executeHostedRuntimeOwnerCommand } from "@/src/lib/hosted-execution/runtime-owner-control";
 import type { HostedRuntimeOwnerCommand } from "@murphai/hosted-execution/runtime-owner";
 import { readHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowance";
+import { recordHostedAiUsageRecordsAndSendLimitNotices } from "@/src/lib/hosted-execution/usage";
+import { buildHostedLiveUsageRecord } from "@murphai/hosted-execution/assistant-usage";
 import { executeHostedRuntimeReplicaPutCommand } from "@/src/lib/hosted-execution/runtime-replica-puts";
 import { hostedWorkspaceSnapshotObjectKey, hostedBrowserVaultReplicaUserPrefix, listHostedBrowserVaultReplicaSiblingObjectKeys } from "@murphai/hosted-execution/storage-paths";
 import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
@@ -1915,6 +1917,34 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     expect(await multipartOutstanding()).toMatchObject({ completedAt: null, drainUntil: null });
     expect(await release("synthetic-multipart-write")).toEqual({ applied: true });
     expect(await outstanding()).toMatchObject({ completedAt: expect.any(Date) });
+  });
+
+  it("settles an identical usage replay after revocation without charging twice or reopening the runtime owner", async () => {
+    const { userId, runtime } = await launchedRuntime();
+    const now = new Date();
+    await observer.hostedMemberBillingRef.create({ data: {
+      memberId: userId, currentBillingPlanCode: "launch_monthly",
+      stripeSubscriptionLookupKey: `synthetic-subscription-${userId}`,
+      currentPeriodStart: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)),
+      currentPeriodEnd: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)),
+    } });
+    const record = buildHostedLiveUsageRecord({ memberId: userId, sessionId: `synthetic-call-${userId}`,
+      occurredAt: now.toISOString(), startDurationMs: 0, endDurationMs: 2_000 });
+    const settle = () => recordHostedAiUsageRecordsAndSendLimitNotices({
+      prisma: first, trustedUserId: userId, runtimeIdentity: runtime, accountAllowance: true,
+      noticeDeliveryTarget: null, usage: [record],
+    });
+    expect(await settle()).toEqual({ recordedIds: [record.usageId], platformAiUsageAllowedAfter: true });
+    const usage = await observer.hostedAiUsage.findUniqueOrThrow({ where: { id: record.usageId } });
+    expect(usage.allowanceCostUsdMicros).toBeGreaterThan(0n);
+    const spent = await observer.hostedAiUsagePeriod.findMany({ where: { memberId: userId }, select: { spentUsdMicros: true } });
+    expect(spent).toEqual([{ spentUsdMicros: usage.allowanceCostUsdMicros }]);
+    await second.$transaction(tx => revokeHostedRuntimeAiUsageTx(tx, runtime));
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toMatchObject({ platformAiUsageAllowed: false });
+    expect(await settle()).toEqual({ recordedIds: [record.usageId], platformAiUsageAllowedAfter: true });
+    expect(await observer.hostedAiUsage.count({ where: { memberId: userId } })).toBe(1);
+    expect(await observer.hostedAiUsagePeriod.findMany({ where: { memberId: userId }, select: { spentUsdMicros: true } })).toEqual(spent);
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toMatchObject({ platformAiUsageAllowed: false });
   });
 
   it("binds provider credentials and delayed retirement to the current immutable target", async () => {

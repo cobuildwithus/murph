@@ -79,7 +79,7 @@ describe("Web direct runtime wake", () => {
     await startHostedDirectRuntimeWakeBestEffort(input);
     expect(mocks.ensure.mock.calls[0]?.[0]).not.toHaveProperty("admission");
     expect(mocks.member).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ id: input.userId, suspendedAt: null, AND: expect.any(Array) }),
+      where: expect.objectContaining({ id: input.userId, AND: expect.arrayContaining([expect.objectContaining({ suspendedAt: null })]) }),
     }));
   });
 

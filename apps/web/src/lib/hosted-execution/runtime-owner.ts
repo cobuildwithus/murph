@@ -4,11 +4,10 @@ import { randomUUID } from "node:crypto";
 import { Prisma, type HostedRuntimeOwner as StoredHostedRuntimeOwner, type PrismaClient } from "@prisma/client";
 import type { HostedWorkspaceInvocationProcessingMode } from "@murphai/hosted-execution/runtime-control";
 
-import { activeHostedMemberAccessWithParticipantsWhere, readGameChatAllowanceBeneficiary } from "../hosted-onboarding/member-access";
+import { activeHostedMemberAccessWithParticipantsWhere, hostedRuntimeMemberEligibleWhere, readGameChatAllowanceBeneficiary } from "../hosted-onboarding/member-access";
 import { isGameEnabled } from "../game/access";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
-import { hostedHealthDataConsentNotRevokedWhere } from "../legal/consent";
 
 // Migration columns remain in the schema only until contract cleanup.
 export type HostedRuntimeOwner = Omit<StoredHostedRuntimeOwner, "migrationPhase" | "migrationId">;
@@ -369,9 +368,8 @@ async function readRuntimeAdmissionTx(
     select: { id: true },
     where: {
       id: userId,
-      suspendedAt: null,
       AND: [
-        hostedHealthDataConsentNotRevokedWhere(),
+        hostedRuntimeMemberEligibleWhere(),
         ...(processingMode === "inbox_media_retention" ? [] : [activeHostedMemberAccessWithParticipantsWhere(now, false)]),
       ],
     },
@@ -382,7 +380,7 @@ async function readRuntimeAdmissionTx(
   // Preserve the ordinary fast path and the source member's consent boundary.
   const eligibleMember = await tx.hostedMember.findUnique({
     select: { id: true },
-    where: { id: userId, suspendedAt: null, threadContainer: { isNot: null }, AND: [hostedHealthDataConsentNotRevokedWhere()] },
+    where: { id: userId, threadContainer: { isNot: null }, AND: [hostedRuntimeMemberEligibleWhere()] },
   });
   if (!eligibleMember) return null;
   const allowanceBeneficiaryMemberId = await readGameChatAllowanceBeneficiary({ memberId: userId, now, prisma: tx });

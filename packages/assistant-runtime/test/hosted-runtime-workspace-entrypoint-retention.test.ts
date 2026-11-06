@@ -150,7 +150,6 @@ import {
   type HostedRuntimeDeviceSyncPort,
   type HostedRuntimeMailboxPort,
   type HostedRuntimePlatform,
-  type RuntimeLivenessPort,
   type HostedRuntimeWorkspacePort,
   type HostedRuntimeWorkspaceSnapshotPort,
 } from "../src/hosted-runtime-contracts.ts";

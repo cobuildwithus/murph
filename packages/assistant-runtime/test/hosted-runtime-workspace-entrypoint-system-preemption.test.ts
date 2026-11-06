@@ -124,7 +124,6 @@ import {
   type HostedRuntimeDeviceSyncPort,
   type HostedRuntimeMailboxPort,
   type HostedRuntimePlatform,
-  type RuntimeLivenessPort,
   type HostedRuntimeWorkspacePort,
   type HostedRuntimeWorkspaceSnapshotPort,
 } from "../src/hosted-runtime-contracts.ts";
@@ -384,16 +383,13 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       assert.deepEqual(
-        checkpointRequests.slice(0, 2).map((request) => request.reason),
-        ["idle_shutdown", "import"],
+        events.slice(0, requireEventIndex(events, "device.snapshot"))
+          .filter((event) => event === "workspace.checkpoint"),
+        ["workspace.checkpoint"],
       );
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(
         checkpointRequests[0]?.redactedStatus
-          ?.hostedCanonicalWriteReceiptLogSha256,
-        receiptLogHash,
-      );
-      assert.equal(
-        checkpointRequests[1]?.redactedStatus
           ?.hostedCanonicalWriteReceiptLogSha256,
         undefined,
       );

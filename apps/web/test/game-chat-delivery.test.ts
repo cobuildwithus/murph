@@ -1,6 +1,8 @@
+import { linqRoster } from "./support/linq-roster";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GameChange, GamePendingChange } from "../src/lib/game/contract";
 const m = vi.hoisted(() => ({
+  consumed: vi.fn(),
   bootstrap: vi.fn(), updateStatus: vi.fn(), game: vi.fn(), updateGame: vi.fn(), candidates: vi.fn(), identities: vi.fn(), routes: vi.fn(), chat: vi.fn(), create: vi.fn(), claim: vi.fn(), receipt: vi.fn(), saveReceipt: vi.fn(), accepted: vi.fn(), prepare: vi.fn(), ensure: vi.fn(), reconcile: vi.fn(), enqueue: vi.fn(), mailbox: vi.fn(), wake: vi.fn(), prepareMailbox: vi.fn(), routeCheck: vi.fn(), lines: vi.fn(), line: vi.fn(), capacity: vi.fn(), decode: vi.fn(), encode: vi.fn(), room: vi.fn(),
 }));
 vi.mock("../src/lib/prisma", () => {
@@ -26,13 +28,13 @@ vi.mock("../src/lib/hosted-onboarding/linq-line-store", () => ({ claimHostedLinq
 vi.mock("../src/lib/hosted-routing/thread-container-service", () => ({ prepareHostedThreadContainerCreation: m.prepare, ensureHostedThreadContainerRouteTx: m.ensure }));
 vi.mock("../src/lib/hosted-groups/thread-container-participants", () => ({ reconcileHostedThreadContainerParticipants: m.reconcile }));
 vi.mock("../src/lib/game/service", () => ({ readGameNoticeRoom: m.room }));
-vi.mock("../src/lib/hosted-mailbox/store", () => ({ appendPreparedHostedMailboxEnvelopeTx: m.enqueue, prepareHostedMailboxEnvelopeAppend: m.prepareMailbox, readHostedMailboxItemByDedupeKey: m.mailbox }));
+vi.mock("../src/lib/hosted-mailbox/store", () => ({ isHostedMailboxItemConsumed: m.consumed, appendPreparedHostedMailboxEnvelopeTx: m.enqueue, prepareHostedMailboxEnvelopeAppend: m.prepareMailbox, readHostedMailboxItemByDedupeKey: m.mailbox }));
 vi.mock("../src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: m.wake }));
 vi.mock("../src/lib/hosted-routing/assistant-notification-destination", () => ({ readHostedThreadContainerLinqRouteAuthorities: m.routes, assertHostedAssistantNotificationRouteAuthority: m.routeCheck, resolveHostedAssistantNotificationDestination: async () => ({ conversationShape: "thread-container", route: { channel: "linq" } }), bindHostedAssistantNotificationDestination: () => ({ route: { channel: "linq", delivery: { kind: "thread", target: "chat" }, accountId: "line" }, externalThreadRouteAuthority: { channel: "linq", containerMemberId: "room", threadId: "chat", accountLookupKey: "line-key" } }) }));
 import { deliverGameChangeProposal, isExactGameChat, buildGameProposalInstructions, readGameProposalDeliveryPlayers, requireExactGameChat } from "../src/lib/game/chat-delivery";
 const phones = ["+15555550101", "+15555550102"];
 const proposal: GamePendingChange = { id: "proposal", proposedByMemberId: "person-a", expectedTermsVersion: 1, change: { kind: "edit", schedule: { days: [5, 6] }, lengthDays: 14 }, effectiveFromDay: 2, deliveryStatus: "pending", startsOn: null };
-const chat = { isGroup: true, handlesComplete: true, handles: [...phones.map((handle) => ({ handle, isMe: false, status: "active" })), { handle: "+15555550100", isMe: true, status: "active" }] };
+const chat = linqRoster({ isGroup: true, handlesComplete: true, handles: [...phones.map((handle) => ({ handle, isMe: false, status: "active" })), { handle: "+15555550100", isMe: true, status: "active" }] });
 const game = (container: string | null = null) => ({ id: "game", lengthDays: 7, status: "live", pendingChange: { v: 1, ...proposal }, chatContainerMemberId: container, players: [{ memberId: "person-a", seat: 0, timeZone: "UTC", dayOne: new Date("2030-03-04T00:00:00Z") }, { memberId: "person-b", seat: 1, timeZone: "UTC", dayOne: new Date("2030-03-04T00:00:00Z") }] });
 const candidate = (memberId: string, name: string | null = null, activity: string | null = "2030-03-04T12:00:00Z", created = "2030-03-01T12:00:00Z") => ({
   memberId, createdAt: new Date(created), member: {
@@ -43,7 +45,8 @@ const candidate = (memberId: string, name: string | null = null, activity: strin
 });
 describe("game proposal chat delivery", () => {
   beforeEach(() => {
-    vi.resetAllMocks(); m.bootstrap.mockResolvedValue("room"); m.updateStatus.mockResolvedValue(1);
+    vi.resetAllMocks();
+    m.consumed.mockResolvedValue(false); m.bootstrap.mockResolvedValue("room"); m.updateStatus.mockResolvedValue(1);
     m.game.mockResolvedValue(game()); m.updateGame.mockResolvedValue({ count: 1 }); m.candidates.mockResolvedValue([]);
     m.identities.mockImplementation(async ({ memberId }: { memberId: string }) => ({ phoneNumber: phones[memberId === "person-a" ? 0 : 1], phoneNumberVerifiedAt: new Date() }));
     m.routes.mockImplementation(async ({ containerMemberIds }: { containerMemberIds: string[] }) => ({ authorities: new Map(containerMemberIds.map((id) => [id, { threadId: id === "room" ? "chat" : `${id}-chat`, channel: "linq" }])) })); m.chat.mockResolvedValue(chat); m.line.mockResolvedValue({ kind: "assignable" });

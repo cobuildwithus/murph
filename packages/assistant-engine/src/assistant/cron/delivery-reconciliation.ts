@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto'
 import { assistantFollowUpContextChangedCanRetry } from '../follow-ups.js'
-import { setScheduledLogStatus, upsertAutomation } from '@murphai/core'
 import {
   assistantCronJobSchema,
   type AssistantCronJob,
@@ -25,7 +24,7 @@ import {
   writeAssistantCronStore,
 } from './store.js'
 import {
-  buildCanonicalAutomationUpsertInput,
+  archiveCanonicalAssistantCronSourceIfOccurrenceCurrent,
   listCanonicalAssistantCronRecords,
   resolveCanonicalAssistantCronOccurrenceAt,
   resolveCanonicalAssistantCronJobId,
@@ -178,12 +177,13 @@ async function reconcileAssistantCronTerminalDelivery(input: {
         shouldRemoveCanonicalAssistantCronSourceAfterDelivery({
           runtimeState,
           source,
-        })
-      ) {
-        await archiveCanonicalAssistantCronSourceAfterDelivery({
+        }) &&
+        await archiveCanonicalAssistantCronSourceIfOccurrenceCurrent({
+          occurrenceAt: runtimeState.state.pendingOccurrenceAt!,
           source,
           vault: input.vault,
         })
+      ) {
         removeAssistantCronCanonicalRuntimeRecord(runtimeStore, runtimeState.jobId)
         continue
       }
@@ -623,18 +623,10 @@ function shouldRemoveCanonicalAssistantCronSourceAfterDelivery(input: {
   runtimeState: AssistantCronCanonicalRuntimeRecord
   source: CanonicalAssistantCronJobRecord
 }): boolean {
-  if (input.source.schedule.kind !== 'at') {
-    return false
-  }
-  if (canonicalAssistantCronSourceChangedAfterRuntimeState(input)) {
-    return false
-  }
-
-  const pendingOccurrenceAt = input.runtimeState.state.pendingOccurrenceAt
   return (
-    pendingOccurrenceAt !== null &&
-    pendingOccurrenceAt ===
-      resolveCanonicalAssistantCronOccurrenceAt(input.source, input.runtimeState)
+    input.source.schedule.kind === 'at' &&
+    input.runtimeState.state.pendingOccurrenceAt !== null &&
+    !canonicalAssistantCronSourceChangedAfterRuntimeState(input)
   )
 }
 
@@ -649,33 +641,6 @@ function canonicalAssistantCronSourceChangedAfterRuntimeState(input: {
     Number.isFinite(runtimeUpdatedMs) &&
     sourceUpdatedMs > runtimeUpdatedMs
   )
-}
-
-async function archiveCanonicalAssistantCronSourceAfterDelivery(input: {
-  source: CanonicalAssistantCronJobRecord
-  vault: string
-}): Promise<void> {
-  if (input.source.kind === 'automation') {
-    await upsertAutomation(
-      { ...buildCanonicalAutomationUpsertInput({
-        vault: input.vault,
-        automationId: input.source.automationId,
-        automation: input.source,
-        title: input.source.title,
-        status: 'archived',
-        schedule: input.source.schedule,
-        route: input.source.route,
-        instructions: input.source.instructions,
-      }), completedOccurrence: true },
-    )
-    return
-  }
-
-  await setScheduledLogStatus({
-    vaultRoot: input.vault,
-    scheduledLogId: input.source.scheduledLogId,
-    status: 'archived',
-  })
 }
 
 function omitPendingDeliveryIntentId<T extends { pendingDeliveryIntentId?: string | null }>(

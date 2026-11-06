@@ -1,6 +1,7 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { hostedConnectedAppStartedIntentOwnerCutoff } from "../connected-apps/connect-intent-ownership";
+import { hostedRuntimeMemberEligibleSql } from "../hosted-onboarding/member-access";
 import { getPrisma } from "../prisma";
 import { HOSTED_OPERATOR_TASK_RESULT_RETENTION_MS } from "../hosted-ops/operator-task-retention";
 import {
@@ -331,7 +332,9 @@ async function claimDueInboxMediaRetentionSignalWorkspaces(input: {
     WITH due AS (
       SELECT "user_id"
       FROM "hosted_workspace"
+      JOIN "hosted_member" AS "member" ON "member"."id" = "hosted_workspace"."user_id"
       WHERE "inbox_media_retention_wake_at" <= ${input.now}
+        AND ${hostedRuntimeMemberEligibleSql()}
       ORDER BY
         "inbox_media_retention_signal_attempted_at" ASC NULLS FIRST,
         "inbox_media_retention_wake_at" ASC,

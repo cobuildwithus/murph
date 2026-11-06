@@ -1986,10 +1986,21 @@ model HostedGroup {
   members           HostedGroupMember[]
   joinOffers        HostedGroupJoinOffer[]
   disclosurePermissions HostedGroupDisclosurePermission[]
+  offerGestureReceipts HostedGroupOfferGestureReceipt[]
 
   @@index([ownerMemberId])
   @@index([kind])
   @@map("hosted_group")
+}
+
+model HostedGroupOfferGestureReceipt {
+  id        String      @id
+  groupId   String      @map("group_id")
+  createdAt DateTime    @default(now()) @map("created_at")
+  group     HostedGroup @relation(fields: [groupId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([groupId])
+  @@map("hosted_group_offer_gesture_receipt")
 }
 
 model HostedGroupJoinOffer {
@@ -2121,6 +2132,8 @@ model HostedThreadContainer {
   memberId                   String              @id @map("member_id")
   ownerMemberId              String              @map("owner_member_id")
   monthlyUsageLimitUsdMicros BigInt              @default(7500000) @map("monthly_usage_limit_usd_micros")
+  /// Latest complete Linq roster observation; null means none recorded since this column was added. History is never assigned one.
+  completeRosterObservedAt   DateTime?           @map("complete_roster_observed_at")
   createdAt                  DateTime            @default(now()) @map("created_at")
   member                     HostedMember        @relation("HostedThreadContainerMember", fields: [memberId], references: [id], onDelete: Cascade)
   owner                      HostedMember        @relation("HostedThreadContainerOwner", fields: [ownerMemberId], references: [id], onDelete: Restrict)

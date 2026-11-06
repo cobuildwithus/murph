@@ -191,14 +191,13 @@ async function reconcileExistingRuntime(ctx: ProcessingContext, owner: HostedRun
   const receipt = container?.readSupervisedInvocation
     ? await ctx.step("read_invocation", () => container.readSupervisedInvocation!({ userId: ctx.input.userId })).catch(() => null) : null;
   if (receipt?.state === "completed" && receipt.attemptId === identity.attemptId && receipt.generation === identity.generation && owner.runnerContainerName) {
-    return await reconcileCompletedRuntime(ctx, owner, receipt.immediateRecheckRequested) ? null : retryProcessing(ctx, "completion_unconfirmed");
+    return reconcileCompletedRuntime(ctx, owner, owner.runnerContainerName, receipt.immediateRecheckRequested);
   }
   if (owner.phase === "retiring" || (owner.processingMode === "inbox_media_retention" && ctx.mode !== "inbox_media_retention")) {
     return retireRuntime(ctx, owner);
   }
   if (wake) return wake;
-  // Age decides when to attempt retirement; it never proves stoppedness.
-  const startingDeadline = owner.startedAt ? Date.parse(owner.startedAt) + 30_000 : 0;
+  const startingDeadline = retirementAttemptAtEpochMs(owner.startedAt);
   if (owner.phase === "starting" && startingDeadline > Date.now()) {
     return retryProcessing(ctx, "starting_fence_preserved",
       isForegroundBehindBackground(ctx, owner) ? Math.min(startingDeadline, Date.now() + 1_000) : startingDeadline);
@@ -206,14 +205,22 @@ async function reconcileExistingRuntime(ctx: ProcessingContext, owner: HostedRun
   return retireRuntime(ctx, owner);
 }
 
-async function reconcileCompletedRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot, immediateRecheckRequested: boolean): Promise<boolean> {
-  const runnerContainerName = owner.runnerContainerName;
-  if (!runnerContainerName) return false;
+// Age decides when to attempt retirement; it never proves stoppedness.
+function retirementAttemptAtEpochMs(since: string | null): number {
+  return since ? Date.parse(since) + 30_000 : 0;
+}
+
+async function reconcileCompletedRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot, runnerContainerName: string, immediateRecheckRequested: boolean): Promise<HostedRuntimeEnsureProcessingResponse | null> {
   const identity = requireIdentity(owner);
   const live = await readRuntimeFenceLivenessBestEffort({ commandBudget: ctx.budget,
     identity: { ...identity, leaseGeneration: identity.generation, userId: ctx.input.userId },
-    runnerContainerName: owner.runnerContainerName, runnerContainerNamespace: ctx.namespace, stepTimeoutMs: 1_000 });
-  if (live.outcome !== "inactive") return false;
+    runnerContainerName, runnerContainerNamespace: ctx.namespace, stepTimeoutMs: 1_000 });
+  if (live.outcome !== "inactive") {
+    // Active, mismatched or unknown liveness settles nothing. A completed attempt has no
+    // outcome left to preserve, so past the window a confirmed stop is the way through.
+    return retirementAttemptAtEpochMs(owner.completedAt ?? owner.startedAt) > Date.now()
+      ? retryProcessing(ctx, "completion_unconfirmed") : retireRuntime(ctx, owner);
+  }
   await ctx.step("complete_invocation", () => recordHostedRuntimeOwnerCompletion({
     source: ctx.source, userId: ctx.input.userId, ...identity,
     settledRunnerContainerName: runnerContainerName,
@@ -221,7 +228,7 @@ async function reconcileCompletedRuntime(ctx: ProcessingContext, owner: HostedRu
   }), ctx.env.webControlTimeoutMs);
   // A stale result can mean a concurrent caller already released this owner.
   // Re-admit from Postgres; neither the old snapshot nor the receipt grants launch.
-  return true;
+  return null;
 }
 
 async function wakeExistingRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot): Promise<HostedRuntimeEnsureProcessingResponse | null> {
