@@ -1,6 +1,6 @@
 # Move hosted E2E gates to one nightly run
 
-Status: active
+Status: completed
 Created: 2026-11-05
 Updated: 2026-11-05
 
@@ -18,7 +18,7 @@ end-to-end message proof. Slower journeys that caught no product bug since
   live smoke, and drop the reminder, Codex cache-prefix, and Cloudflare test gates.
 - Reminder, foreground, and Codex cache-prefix journeys run nightly against public
   main, and a failed run opens or updates a GitHub issue naming a person.
-- The first post-merge Web admission passes on the new lane list.
+- The nightly mode and its failure alert are proven on real runners before merge.
 
 ## Scope
 
@@ -47,8 +47,8 @@ end-to-end message proof. Slower journeys that caught no product bug since
 
 ## Tasks
 
-1. Land the private change and this public change back to back.
-2. Prove the first post-merge admission and the first nightly run.
+1. Prove the nightly mode and the alert from the private PR branch.
+2. Land the private change and this public change back to back.
 
 ## Decisions
 
@@ -61,6 +61,13 @@ end-to-end message proof. Slower journeys that caught no product bug since
 
 ## Verification
 
-- `node --test scripts/hosted-orchestration-compatibility.test.mjs`
-- Private focused tests, and one nightly-mode run on the private PR branch.
-- First post-merge `Temporal Web production admission` on public main.
+- `node --test scripts/hosted-orchestration-compatibility.test.mjs` passed, 78 of 78.
+- Agent docs drift check and `pnpm complexity:diff` passed.
+- Private focused tests passed: plan 31, compatibility readers 196, verify lanes 23,
+  ReviewGPT gates 7, and the two workflow test files 44.
+- The nightly mode passed all six lanes on real runners from the private PR branch,
+  at 37 billed minutes.
+- A deliberately cancelled nightly run failed the rollup and opened the real issue,
+  proving the alert path. The issue-update branch is proven by a stubbed test only.
+- The first post-merge admission is proved in the PR handoff, after this plan closes.
+Completed: 2026-11-05
