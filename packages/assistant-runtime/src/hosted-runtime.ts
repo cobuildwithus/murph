@@ -2536,14 +2536,15 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     const initialMailboxImportPlan = resolveHostedInitialMailboxImportPlan({
       vaultRoot: restored.vaultRoot,
     });
-    if (
-      (input.request.processingMode ?? "default") === "default"
-      && !initialMailboxImportPlan.bootstrapRequired
-    ) {
-      if (!hostedCodexRuntime) {
-        throw new TypeError("Default hosted runtime processing requires Codex setup.");
+    const installCodexProcessPreparationForConversation = (
+      preparedHostedCodexRuntime: InvocationCodexRuntime,
+    ): void => {
+      if (initialMailboxImportPlan.bootstrapRequired) {
+        return;
       }
-      const preparedHostedCodexRuntime = hostedCodexRuntime;
+      // Each foreground entry installs once, after any system-only checkpoint
+      // has settled preparation and before its first conversation import.
+      codexProcessPreparationStart = null;
       startCodexProcessPreparationForConversation = (channel) => {
         if (codexProcessPreparationStart) {
           return;
@@ -2554,11 +2555,17 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         }
         codexProcessPreparationStart = (async () => {
           try {
-            const target = invocationAssistantTarget;
+            const target = invocationAssistantTarget
+              ?? await readHostedAssistantExecutionDefaultTarget({
+                assistantBootstrap: initialAssistantBootstrap,
+                homeDirectory: restored.operatorHomeRoot,
+                runtimeEnv: preparedHostedCodexRuntime.runtimeEnv,
+              });
             assertRuntimeNotAborted();
             if (!target) {
               return null;
             }
+            invocationAssistantTarget = target;
             const turnEnvironment = createHostedAssistantTurnEnvironment({
               operatorHomeRoot: restored.operatorHomeRoot,
               runtimeEnv: preparedHostedCodexRuntime.runtimeEnv,
@@ -2577,6 +2584,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           }
         })();
       };
+    };
+    if ((input.request.processingMode ?? "default") === "default") {
+      if (!hostedCodexRuntime) {
+        throw new TypeError("Default hosted runtime processing requires Codex setup.");
+      }
+      installCodexProcessPreparationForConversation(hostedCodexRuntime);
     }
     assertRuntimeNotAborted();
     const initialMailboxImportLanes =
@@ -4385,6 +4398,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     const resolveForegroundProcessingMode = () => systemMailboxForegroundWakePrefetch
       ? "default"
       : input.request.processingMode ?? "default";
+    if (systemMailboxForegroundWakePrefetch) {
+      installCodexProcessPreparationForConversation(hostedCodexRuntime);
+    }
     committedWorkspace = checkpointRequestBuilder.latestWorkspace() ?? activeWorkspace;
     const runtimeEnv = hostedCodexRuntime.runtimeEnv;
     let browserVaultReplicaRefreshRequested = false;
