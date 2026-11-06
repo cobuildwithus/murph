@@ -129,7 +129,9 @@ function LinkPageScreen({
       <div
         className={cn(
           "flex flex-1 flex-col",
-          fill ? "min-h-0 pb-2" : "justify-center py-6",
+          // Enough for a list to stay usable. Past that the page scrolls, so the
+          // actions below can never sit on top of a choice.
+          fill ? "min-h-[14.5rem] pb-2" : "justify-center py-6",
         )}
       >
         {children}

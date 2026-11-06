@@ -223,7 +223,7 @@ test("renders a not-now escape link with the group join legal consent gate", asy
 
   const markup = renderToStaticMarkup(
     createElement(GroupJoinLegalConsentGate, {
-      detail: "4 people. You choose what you share.",
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       initialStatus: null,
       notNowHref: "/home",
       title: "Join Sunday Sleep Crew.",
@@ -242,7 +242,7 @@ test("keeps the home destination on the consent gate not-now link", async () => 
 
   const markup = renderToStaticMarkup(
     createElement(GroupJoinLegalConsentGate, {
-      detail: "4 people. You choose what you share.",
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       initialStatus: null,
       notNowHref: "/home",
       title: "Join Sunday Sleep Crew.",
@@ -262,7 +262,7 @@ test("renders optional sharing cards with visible keyboard focus treatment", asy
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [],
       alreadyActiveMember: false,
-      detail: "4 people. You choose what you share.",
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
@@ -295,7 +295,7 @@ test("keeps every exact description one tap away in Details", async () => {
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [],
       alreadyActiveMember: false,
-      detail: "4 people. You choose what you share.",
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
@@ -307,7 +307,7 @@ test("keeps every exact description one tap away in Details", async () => {
   );
   cleanupRender = cleanup;
 
-  expect(container.textContent).toContain("The last 90 days of what you pick.");
+  expect(container.textContent).toContain("Your name and what you pick from the last 90 days.");
   expect(container.textContent).not.toContain("Shares ");
 
   const drawer = await openDetails(container, window);
@@ -332,6 +332,43 @@ test("keeps every exact description one tap away in Details", async () => {
   });
 });
 
+test("says the name is shared before joining an invite with no optional choices", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ redirectTo: null });
+  const { GroupJoinAcceptForm } = await import(
+    "@/src/components/hosted-groups/group-join-client"
+  );
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(GroupJoinAcceptForm, {
+      activeVaultShareProjectionScopes: [],
+      alreadyActiveMember: false,
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
+      expectedMembershipId: null,
+      groupName: "Sunday Sleep Crew",
+      joinCode: "JOIN123",
+      memberCount: 4,
+      permissions: [],
+      postJoinContactOption: null,
+      postJoinDestination: "/home",
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = cleanup;
+
+  expect(container.textContent).toContain("They’ll see your name");
+  expect(container.textContent).not.toContain("Details");
+
+  const join = Array.from(container.querySelectorAll("button"))
+    .find((candidate) => candidate.textContent === "Join group");
+  await act(async () => {
+    join?.dispatchEvent(new window.Event("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith(expect.objectContaining({
+    payload: expect.objectContaining({ selectedVaultShareProjectionScopes: [] }),
+  }));
+});
+
 test("keeps a comprehensive default checklist bounded and keyboard-scrollable", async () => {
   const { GroupJoinAcceptForm } = await import(
     "@/src/components/hosted-groups/group-join-client"
@@ -341,7 +378,7 @@ test("keeps a comprehensive default checklist bounded and keyboard-scrollable", 
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [],
       alreadyActiveMember: false,
-      detail: "4 people. You choose what you share.",
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
@@ -392,7 +429,7 @@ test("clears, retries, and selectively restores comprehensive optional sharing",
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [],
       alreadyActiveMember: false,
-      detail: "4 people. You choose what you share.",
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
@@ -478,7 +515,7 @@ test("clears every visible optional grant for an existing member", async () => {
       activeVaultShareProjectionScopes:
         HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
       alreadyActiveMember: true,
-      detail: "4 people. You choose what you share.",
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: "membership_existing",
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
@@ -536,7 +573,7 @@ test.each([false, true])(
       createElement(GroupJoinAcceptForm, {
         activeVaultShareProjectionScopes: alreadyActiveMember ? [offer.projectionScopes[0]!] : [],
         alreadyActiveMember,
-        detail: "4 people. You choose what you share.",
+        detail: "4 people. They’ll see your name, and anything you choose to share.",
         expectedMembershipId: alreadyActiveMember ? "membership_existing" : null,
         groupName: "Synthetic group",
         joinCode: "JOIN123",
@@ -593,7 +630,7 @@ test("discloses and submits source-aware sleep metadata on the link-only join pa
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [],
       alreadyActiveMember: false,
-      detail: "4 people. You choose what you share.",
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
@@ -670,7 +707,7 @@ test.each([
           { projectionKind: "deep-sleep-days.v0" as const },
         ],
         alreadyActiveMember: true,
-        detail: "4 people. You choose what you share.",
+        detail: "4 people. They’ll see your name, and anything you choose to share.",
         expectedMembershipId: "membership_existing",
         groupName: "Sunday Sleep Crew",
         joinCode: "JOIN123",
@@ -816,7 +853,7 @@ test("renders one Daily macros card that toggles every macro scope together", as
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [],
       alreadyActiveMember: false,
-      detail: "4 people. You choose what you share.",
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
       inviteCode: "invite_phone_bound",
@@ -916,7 +953,7 @@ test("shows revocable individual macro cards for an existing mixed macro grant",
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [{ projectionKind: "protein-days.v0" }],
       alreadyActiveMember: true,
-      detail: "4 people. You choose what you share.",
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: "membership_existing",
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
@@ -959,7 +996,7 @@ test("keeps a phone-bound invite to phone sign-in on the page", async () => {
   );
   const { cleanup, container } = await renderClientComponent(
     createElement(GroupJoinSignIn, {
-      detail: "4 people. You choose what you share.",
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       inviteCode: "invite_opaque",
       memberCount: 4,
       title: "Join Sunday Sleep Crew.",
@@ -981,7 +1018,7 @@ test("keeps a phone-bound invite to phone sign-in on the page", async () => {
   });
 
   expect(container.textContent).toContain("Join Sunday Sleep Crew.");
-  expect(container.textContent).toContain("4 people. You choose what you share.");
+  expect(container.textContent).toContain("4 people. They’ll see your name, and anything you choose to share.");
   expect(mocks.authPanelProps?.inviteCode).toBe("invite_opaque");
   expect(mocks.authPanelProps?.methods).toEqual(["phone"]);
   expect(mocks.authPanelProps?.requireLaunchConsentOnCompletion).toBe(true);
@@ -996,7 +1033,7 @@ test("returns an authenticated new member to the same group intent", async () =>
   );
   const { cleanup, container, window } = await renderClientComponent(
     createElement(GroupJoinSignIn, {
-      detail: "4 people. You choose what you share.",
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       memberCount: 4,
       title: "Join Sunday Sleep Crew.",
     }),
@@ -1045,7 +1082,7 @@ test("offers same-link account recovery for a mismatched phone-bound invite", as
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [],
       alreadyActiveMember: false,
-      detail: "4 people. You choose what you share.",
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
       inviteCode: "invite_phone_bound",
@@ -1097,7 +1134,7 @@ test("returns to the dashboard through a real link once membership succeeds", as
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [],
       alreadyActiveMember: false,
-      detail: "4 people. You choose what you share.",
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
@@ -1148,7 +1185,7 @@ test("continues an incomplete account into canonical setup after membership succ
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [],
       alreadyActiveMember: false,
-      detail: "4 people. You choose what you share.",
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
@@ -1195,7 +1232,7 @@ test("hands a messaging member back to the channel Murph reaches them on", async
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [],
       alreadyActiveMember: false,
-      detail: "4 people. You choose what you share.",
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
@@ -1238,7 +1275,7 @@ test("uses the canonical home destination when no completed-member contact retur
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [],
       alreadyActiveMember: false,
-      detail: "4 people. You choose what you share.",
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
@@ -1271,7 +1308,7 @@ test("binds an existing-member sharing update to the rendered membership id", as
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [],
       alreadyActiveMember: true,
-      detail: "4 people. You choose what you share.",
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: "membership_existing",
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
@@ -1396,7 +1433,7 @@ test("lets Leave group take the quiet place, unless setup is still owed", async 
   const member = {
     activeVaultShareProjectionScopes: [],
     alreadyActiveMember: true,
-    detail: "4 people. You choose what you share.",
+    detail: "4 people. They’ll see your name, and anything you choose to share.",
     expectedMembershipId: "membership_existing",
     groupName: "Sunday Sleep Crew",
     joinCode: "JOIN123",

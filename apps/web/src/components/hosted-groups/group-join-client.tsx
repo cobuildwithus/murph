@@ -363,7 +363,7 @@ export function GroupJoinAcceptForm(props: {
             <>
               {props.alreadyActiveMember
                 ? "Uncheck to stop sharing."
-                : "The last 90 days of what you pick."}{" "}
+                : "Your name and what you pick from the last 90 days."}{" "}
               <Button
                 className="relative font-semibold text-[#FFFCF6] underline underline-offset-2 after:absolute after:-inset-x-2 after:-inset-y-3"
                 onClick={() => setDetailsOpen(true)}

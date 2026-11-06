@@ -28,7 +28,7 @@ import { cn } from "@/src/lib/utils";
 const DESIGN_GROUP_NAME = "Sunday sleep crew";
 const DESIGN_JOIN_CODE = "DESIGN_JOIN";
 const DESIGN_MEMBER_COUNT = 4;
-const DESIGN_DETAIL = "4 people. You choose what you share.";
+const DESIGN_DETAIL = "4 people. They’ll see your name, and anything you choose to share.";
 const DESIGN_CONSENT_DOCUMENTS: HostedConsentStatus["documents"] = [
   {
     href: "/legal/terms",

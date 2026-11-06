@@ -503,6 +503,10 @@ same surface with only their currently active shares selected, and the list
 includes both the current group request and every older share that member can
 still revoke.
 
+Joining always shares the member's name, so the visible sentence says so in every
+state, including an invite with no optional choices. Do not rely on Details for
+it, because Details only appears when there are choices.
+
 ### Link Pages
 
 A page someone reaches from a link in a Murph message sits on the app's night

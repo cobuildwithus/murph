@@ -152,7 +152,7 @@ test("renders the group display name on the join page when present", async () =>
   });
   expect(mocks.readHostedConsentStatus).not.toHaveBeenCalled();
   expect(markup).toContain("Join Sunday Sleep Crew.");
-  expect(markup).toContain("1 person. You choose what you share.");
+  expect(markup).toContain("1 person. They’ll see your name, and anything you choose to share.");
   expect(markup).not.toContain("Join this family");
 });
 
@@ -167,7 +167,7 @@ test("falls back to the group kind when the group has no display name", async ()
   const markup = await renderGroupJoinPage("JOIN123");
 
   expect(markup).toContain("Join this family.");
-  expect(markup).toContain("4 people. You choose what you share.");
+  expect(markup).toContain("4 people. They’ll see your name, and anything you choose to share.");
 });
 
 test("explains a dead group link and offers Murph", async () => {

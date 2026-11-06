@@ -177,7 +177,8 @@ function renderGroupJoin(input: {
     alreadyActiveMember ? `You're in ${groupName}` : `Join ${groupName}`,
   );
   const memberLabel = view.memberCount === 1 ? "1 person" : `${view.memberCount} people`;
-  const detail = `${memberLabel}. You choose what you share.`;
+  // Joining always shares the member's name, so every state says so before they join.
+  const detail = `${memberLabel}. They’ll see your name, and anything you choose to share.`;
   const leaveAction = view.viewerCanLeave ? (
     <GroupJoinLeaveButton groupName={groupName} joinCode={input.joinCode} />
   ) : null;
