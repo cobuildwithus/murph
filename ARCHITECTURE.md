@@ -5894,7 +5894,9 @@ author, and terms reports target the starter. Reports do not remove score credit
 `game_report` holds one report: reporter, reported member, game, entry,
 `about` (post, player, terms), reason, a note and a snapshot of the reported
 words sealed under the reporter's key (`game_report`/`note`, `snapshot`), and
-the snapshot's media keys. Reported member, game and entry are `SET NULL`, so
+the snapshot's media keys. Accepted alert inputs freeze the block flag, entry
+kind, invite origin and game id; the alert game id is plain text so deletion
+cannot clear it. Reported member, game and entry are `SET NULL`, so
 the snapshot outlives the post, the game and the reported account; the reporter
 cascades. Reports come from a game (finished too) or, before accepting, from an
 invite token. A reported post is hidden from its reporter (`hidden: true`, still
@@ -5905,7 +5907,10 @@ values or who reported) through the operational alert path, to
 `HOSTED_GAME_REPORT_ALERT_EMAILS` (else `HOSTED_LINQ_ALERT_EMAILS`), once per
 report by idempotency key and at most ten per reporter per UTC day; a failed
 send returns retryable `GAME_REPORT_ALERT_FAILED` and the app retries the same
-id. `/ops/game-reports` (ops members only) lists unreviewed reports with their
+id. Every report kind recovers its stored identity before live visibility
+checks, allowing alert retry after blocking or deletion. Legacy receipts without
+frozen inputs skip email retries and remain in the Ops queue.
+`/ops/game-reports` (ops members only) lists unreviewed reports with their
 snapshots, and `POST /api/ops/game-reports` takes down the post (a `removed`
 tombstone with its words, summary, blur and media keys cleared, so no one but
 its poster can read the upload; hosted image bytes stay until a per-image
@@ -5959,8 +5964,7 @@ profile/entry deletion cascade without a new account-deletion branch.
 
 Reply reports leave `entryId` null and uniquely bind reporter and reply.
 Their optional `snapshotAudioEncrypted` is re-sealed for the reporter under
-`game_report:<reportId>`. Report identity is recovered before live visibility
-checks, allowing alert retry after deletion. The Ops queue selects columns
+`game_report:<reportId>`. The Ops queue selects columns
 explicitly, exposes an authenticated audio path and never fetches audio bytes.
 Ops removal dispatches to the same locked reply deletion; post score and recap
 are unchanged. Evidence outlives the author's account and follows the reporter's

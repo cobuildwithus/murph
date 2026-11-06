@@ -332,6 +332,9 @@ it has been explicitly elevated to a cross-cutting invariant.
   progress only after terminal or durable pending evidence. Accepted delivery
   needing confirmation settles through its existing delivery retry deadline;
   optional accounting may update its own marker but never moves that deadline.
+  A retry under a provider idempotency key sends the bytes accepted for that
+  key, so freeze those inputs on the accepted receipt and never rebuild them
+  from current source state.
 - Failure to observe an outcome does not prove rejection. Once a native game
   write has read its request, a server failure is reported as retryable, never
   as a final refusal of that request.
