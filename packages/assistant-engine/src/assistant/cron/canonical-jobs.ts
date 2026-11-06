@@ -4,7 +4,7 @@ import {
   type AutomationSchedule,
   type AutomationSupportKind,
 } from '@murphai/contracts'
-import { loadVault, upsertAutomation } from '@murphai/core'
+import { archiveAutomationIfOccurrenceCurrent, archiveScheduledLogIfOccurrenceCurrent, loadVault, upsertAutomation } from '@murphai/core'
 import {
   listAutomations as listCanonicalAutomations,
   listScheduledLogs as listCanonicalScheduledLogs,
@@ -314,6 +314,21 @@ export function isCanonicalAssistantCronSourceEnabled(
   }
 }
 
+export async function archiveCanonicalAssistantCronSourceIfOccurrenceCurrent(input: {
+  occurrenceAt: string
+  source: CanonicalAssistantCronJobRecord
+  vault: string
+}): Promise<boolean> {
+  const completion = {
+    expectedUpdatedAt: input.source.updatedAt,
+    occurrenceAt: input.occurrenceAt,
+    vaultRoot: input.vault,
+  }
+  return input.source.kind === 'automation'
+    ? archiveAutomationIfOccurrenceCurrent({ ...completion, lookup: input.source.automationId })
+    : archiveScheduledLogIfOccurrenceCurrent({ ...completion, scheduledLogId: input.source.scheduledLogId })
+}
+
 export function resolveCanonicalAssistantCronOccurrenceAt(
   source: CanonicalAssistantCronJobRecord,
   runtimeState: AssistantCronCanonicalRuntimeRecord,
@@ -336,7 +351,7 @@ export function resolveCanonicalAssistantCronNextDeliverableOccurrenceProjection
   if (
     runtimeState.state.pendingOccurrenceAt !== null ||
     runtimeState.state.retryAfterAt !== null ||
-    runtimeState.state.pendingDeliveryIntentId !== null ||
+    runtimeState.state.pendingDeliveryIntentId != null ||
     runtimeState.state.runningAt !== null
   ) {
     return {
