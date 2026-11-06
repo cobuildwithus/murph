@@ -449,6 +449,18 @@ function GroupUsageFundingStudy() {
           <GroupFundingCapacityConflict />
         </DesignSponsorshipState>
 
+        <DesignSponsorshipState label="Back from monthly checkout" state="monthly-finished">
+          <GroupSponsorshipManagementCard
+            {...card}
+            checkoutReturned
+            management={{
+              ...management,
+              authorizationId: "hgsa_design_finished",
+              status: "active",
+            }}
+          />
+        </DesignSponsorshipState>
+
         <DesignSponsorshipState label="Active sponsor" state="monthly-active">
           <GroupSponsorshipManagementCard
             {...card}
