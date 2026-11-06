@@ -38,7 +38,7 @@ import {
 } from "@murphai/contracts";
 
 import { VAULT_LAYOUT } from "./constants.ts";
-import { generateRecordId } from "./ids.ts";
+import { deterministicContractId, generateRecordId } from "./ids.ts";
 import { VaultError } from "./errors.ts";
 import { readUtf8File, walkVaultFilesInterruptible } from "./fs.ts";
 import {
@@ -1128,6 +1128,41 @@ export async function upsertAutomation(
   input: UpsertAutomationInput,
 ): Promise<UpsertAutomationResult> {
   return withAutomationRegistryLock(input.vaultRoot, () => upsertAutomationWithLatestRegistry(input));
+}
+
+/** Replays stored input slots before allocating another ordinary save. */
+export async function createAutomationForInputs(
+  input: Omit<UpsertAutomationInput, "automationId" | "createOnly" | "slug"> & {
+    acceptedInputIds: readonly string[];
+    claimedAutomationIds: Set<string>;
+  },
+): Promise<Pick<UpsertAutomationResult, "created" | "record">> {
+  return withAutomationRegistryLock(input.vaultRoot, async () => {
+    const { acceptedInputIds, claimedAutomationIds, ...writeInput } = input;
+    if (acceptedInputIds.length === 0) {
+      throw new VaultError("VAULT_INVALID_INPUT", "An ordinary input save requires accepted input ids.");
+    }
+    const records = await loadAutomationRecords(input.vaultRoot);
+    const recordsById = new Map(records.map((record) => [record.automationId, record]));
+    let automationId = "";
+    for (const inputId of acceptedInputIds) {
+      for (let slot = 0; ; slot += 1) {
+        automationId = deterministicContractId(
+          "automation", JSON.stringify(["murph.automation.input-create.v1", inputId, slot]),
+        );
+        const record = recordsById.get(automationId);
+        if (!record) break;
+        if (claimedAutomationIds.has(automationId)) continue;
+        claimedAutomationIds.add(automationId);
+        return { created: false, record };
+      }
+    }
+    const result = await upsertAutomationWithLatestRegistry({
+      ...writeInput, automationId, createOnly: true,
+    }, records);
+    claimedAutomationIds.add(automationId);
+    return result;
+  });
 }
 
 /** Registers one child per dispatched message under the existing registry lock. */

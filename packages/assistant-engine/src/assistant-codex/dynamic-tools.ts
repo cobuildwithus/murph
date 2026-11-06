@@ -345,6 +345,7 @@ import type {
   AnalyzeVideoTurnState,
 } from './analyze-video-tool.js'
 export * from './dynamic-tool-catalog.js'
+export { automationRequestApplied } from './dynamic-tools/automation.js'
 import {
   asRecord,
   ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
@@ -1259,6 +1260,8 @@ type HostedComputerToolPayloadSanitizer =
   | 'open'
 
 export interface MurphDynamicToolExecutionResult {
+  /** Private save replay metadata; never part of rpcResult. */
+  automationSaveReplayed?: true
   /** Private finite failure metadata; never part of rpcResult. */
   failureDiagnostic?: ToolFailureDiagnostic
   followUpRequestPatch?: import("@murphai/contracts").AutomationFollowUpRequest
@@ -3728,6 +3731,12 @@ function isInvalidOrdinaryToolRequest(request: MurphDynamicToolRequest): request
   return 'validationDigest' in request && request.kind !== 'invalid-automation-arguments'
 }
 
+function currentAcceptedInputIds(
+  context: AssistantHostedToolContext | null | undefined,
+): readonly string[] | undefined {
+  return context?.currentUserActionScope?.()?.acceptedInputIds
+}
+
 async function dispatchMurphDynamicToolRequest(
   input: ExecuteMurphDynamicToolRequestInput,
 ): Promise<MurphDynamicToolExecutionResult> {
@@ -3801,6 +3810,7 @@ async function dispatchMurphDynamicToolRequest(
     case 'automation': {
       const automationTool = input.hostedToolContext?.automationTool ?? null
       return await executeAutomationDynamicTool({
+        acceptedInputIds: currentAcceptedInputIds(input.hostedToolContext),
         abortSignal: input.abortSignal ?? null,
         automationTool,
         onboardingFirstReadCompletionTransitionAvailable:
