@@ -283,7 +283,7 @@ at that deadline. A bound completed native receipt still reconciles the canonica
 owner before applying local warmth, because native completion does not prove
 canonical acknowledgment. Otherwise only an eligible stop reconciles the owner.
 A matching starting, active or retiring owner
-protects the readiness-to-launch handoff, including after Durable Object
+protects an unprepared readiness-to-launch handoff, including after Durable Object
 reactivation. Readiness establishes a missing native lifecycle schedule; persisted
 schedules survive controller replacement. The controller constructor does not
 recreate that deadline: an unbound standby can legitimately have none, and the
@@ -295,11 +295,20 @@ which runs outside the lifecycle lock so arriving work does not wait on
 control-plane latency. Explicit retirement
 and its exact native stop proof remain the recovery owner. When the outer result
 is lost after a completion callback, the existing container lifecycle recheck
-also replays settled completion for a matching retiring owner, exact completed
-native receipt, and inactive native fence. This releases drained owners without
-requiring new mailbox work. Active or unknown native execution, stale receipts,
-and failed completion preserve the scheduled recheck. Destruction requires a
-fresh canonical observation on a later lifecycle pass.
+also replays settled completion for a matching starting, active or warm retiring
+owner, exact completed native receipt, and inactive native fence. This releases
+drained owners without requiring new mailbox work. Active or unknown native
+execution, stale receipts, and failed completion preserve the scheduled recheck.
+Destruction requires a fresh canonical observation on a later lifecycle pass.
+An exact registered invocation on a positively stopped process retires its target
+without manufacturing completion; a missing receipt preserves an unprepared start.
+The lifecycle schedule payload carries only the member and target for retrying
+`target_retired` after this slot has durably retired, armed before that step. An
+updated or stale response ends the retry, including across controller eviction.
+On demand, a completed attempt with active, mismatched or unknown liveness keeps
+its fence for 30 seconds from completion, or from start when Web has no completion.
+It then enters the existing cold retirement path, which requires a confirmed
+native retirement before release. That evidence never settles completion.
 Without a future local receipt deadline, remote denial retains the existing
 short lifecycle recheck.
 
