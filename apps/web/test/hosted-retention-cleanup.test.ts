@@ -17,6 +17,7 @@ import {
   HOSTED_MAILBOX_STRUCTURAL_RETENTION_MS,
   HOSTED_RETENTION_BATCH_SIZE,
   HOSTED_RETENTION_MAX_BATCHES,
+  HOSTED_RUNTIME_LEDGER_RETENTION_MS,
   deleteExpiredHostedCallbackRequestNonces,
   runHostedControlPlaneRetentionCleanup,
   runHostedRuntimeSignalRetentionCleanup,
@@ -106,6 +107,7 @@ describe("hosted retention cleanup", () => {
       ['DELETE FROM "hosted_group_current_sender_clarification"', 3],
       ['DELETE FROM "hosted_group_participant_observation"', 4],
       ['DELETE FROM "device_webhook_trace"', 4],
+      ['DELETE FROM "hosted_runtime_put_drain"', 6],
       ['UPDATE "hosted_linq_provider_event"', 5],
       ['UPDATE "hosted_member"', 3],
       ['UPDATE "hosted_operator_task"', 2],
@@ -151,6 +153,7 @@ describe("hosted retention cleanup", () => {
       expiredMailboxContentRetired: 7,
       expiredMailboxTombstonesDeleted: 3,
       expiredOperatorTaskResultsRetired: 2,
+      expiredRuntimePutDrainsDeleted: 6,
       expiredSensitiveActionChallengesDeleted: 2,
       expiredSignupNotificationContextsRetired: 3,
     });
@@ -213,7 +216,10 @@ describe("hosted retention cleanup", () => {
     ]);
 
     // One statement per category: every short batch stops that category's loop.
-    expect(executeRaw).toHaveBeenCalledTimes(19);
+    expect(executeRaw).toHaveBeenCalledTimes(20);
+    expect(findRetentionCall(executeRaw, 'DELETE FROM "hosted_runtime_put_drain"').slice(1))
+      .toEqual([new Date(now.getTime() - HOSTED_RUNTIME_LEDGER_RETENTION_MS), HOSTED_RETENTION_BATCH_SIZE]);
+    expect(executeRaw.mock.calls.some(call => sqlOf(call).includes('DELETE FROM "hosted_runtime_orphan"'))).toBe(false);
 
     const finalReplyAlertCall = findRetentionCall(
       executeRaw,

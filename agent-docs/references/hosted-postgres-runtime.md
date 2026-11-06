@@ -536,6 +536,25 @@ as an already-finished abort. Failures remain pending and retry after a minute.
 Account deletion requests immediate reconciliation after the member is gone,
 then waits for all write obligations before physical namespace deletion.
 
+Finished PUT receipts age out after 30 days through the hourly control-plane
+retention sweep, at most 20,000 rows per run. A replica or snapshot receipt goes
+once it has completed, no owner row holds its exact attempt and generation, and
+no upload session, expired or not, names its snapshot. Attempt, write and snapshot
+identities are random, so nothing can reuse a receipt outside those two. Media and
+private-media receipts stay because media admission has no owner fence. Unfinished
+writes are never removed.
+
+Orphan rows stay on purpose, because a retired row is the publication fence. At
+the Web layer it is the only stop for a current attempt at the right workspace
+version presenting a stale ref, and that failure would leave a workspace pointing
+at a deleted object. Purge drops only the payload: acknowledgement clears a
+snapshot row's `snapshot_ref` in the same update that sets `purged_at`, since a
+wrapped data key is useless once its object is gone and the fence reads only
+`retired_at`. Legacy snapshot rows keep their ref because the table requires it
+and a repeat purge parses it. Rows purged before this behavior keep theirs; no
+sweep rewrites them. A later record can re-arm a cleared row, and its repeat purge
+needs only the object key.
+
 Replica cleanup owns the root and its derived shard family; individual upload
 receipts prevent a successful sibling from releasing a failed sibling's write.
 Media retirement is terminal and revision-acknowledged. Canonical snapshot and
