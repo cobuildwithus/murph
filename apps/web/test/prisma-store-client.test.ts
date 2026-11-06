@@ -128,6 +128,10 @@ describe("prisma module", () => {
     mocks.poolInstances.length = 0;
     mocks.transaction.mockReset();
     mocks.connect.mockReset();
+    mocks.connect.mockImplementation(async () => ({
+      getTransactionStatus: () => "I",
+      release: vi.fn(),
+    }));
     process.env = { ...ORIGINAL_ENV };
     resetPrismaGlobal();
   });
@@ -1417,16 +1421,18 @@ describe("prisma module", () => {
     const { createPrismaClient } = await import("@/src/lib/prisma");
     createPrismaClient({ databaseUrl: "postgresql://example.invalid/db" });
     const pool = mocks.poolInstances[0]!;
-    const pending = Promise.resolve({ connected: true });
+    const client = { connected: true, getTransactionStatus: () => "I", release: vi.fn() };
+    const pending = Promise.resolve(client);
     mocks.connect.mockReturnValueOnce(pending).mockReturnValueOnce(undefined);
-    expect(pool.connect()).toBe(pending);
+    await expect(pool.connect()).resolves.toBe(client);
     const callback = vi.fn();
     expect(pool.connect(callback)).toBeUndefined();
     expect(mocks.connect.mock.calls).toEqual([[], [expect.any(Function)]]);
     const forwarded = mocks.connect.mock.calls[1]![0] as (...args: unknown[]) => unknown;
     const callbackReceiver = {};
-    forwarded.call(callbackReceiver, null, "result");
-    expect(callback).toHaveBeenCalledWith(null, "result");
+    client.release = vi.fn();
+    forwarded.call(callbackReceiver, null, client, client.release);
+    expect(callback).toHaveBeenCalledWith(null, client, client.release);
     expect(callback.mock.contexts).toEqual([callbackReceiver]);
     expect(mocks.connect.mock.contexts).toEqual([pool, pool]);
   });
@@ -1439,8 +1445,8 @@ describe("prisma module", () => {
     const samples: PrismaPoolAcquisitionTiming[] = [];
     let clock = 0;
     vi.spyOn(performance, "now").mockImplementation(() => clock);
-    const client = { connected: true };
     const release = vi.fn();
+    const client = { connected: true, getTransactionStatus: () => "I", release };
     const callback = vi.fn();
     mocks.connect.mockImplementationOnce(async () => { clock = 40; return client; });
     await runWithPrismaOperationTimings([], async () => {
@@ -1448,12 +1454,13 @@ describe("prisma module", () => {
     }, samples);
     mocks.connect.mockImplementationOnce((cb: (...args: unknown[]) => unknown) => {
       clock = 70;
+      client.release = release;
       cb(null, client, release);
     });
     await runWithPrismaOperationTimings([], async () => {
       expect(pool.connect(callback)).toBeUndefined();
     }, samples);
-    expect(callback).toHaveBeenCalledWith(null, client, release);
+    expect(callback).toHaveBeenCalledWith(null, client, client.release);
     expect(release).not.toHaveBeenCalled();
     expect(samples.map(sample => sample.ms)).toEqual([40, 30]);
     expect(samples[0]).toMatchObject({ idleConnections: 0, totalConnections: 0, waitingRequests: 0 });
@@ -1468,12 +1475,13 @@ describe("prisma module", () => {
     const failure = new Error("synthetic checkout failure");
     const samples: PrismaPoolAcquisitionTiming[] = [];
     const callback = vi.fn();
-    mocks.connect.mockRejectedValueOnce(failure).mockImplementationOnce((cb: (error: Error) => void) => cb(failure));
+    const done = vi.fn();
+    mocks.connect.mockRejectedValueOnce(failure).mockImplementationOnce((cb: (...args: unknown[]) => void) => cb(failure, undefined, done));
     await runWithPrismaOperationTimings([], async () => {
       await expect(pool.connect()).rejects.toBe(failure);
       pool.connect(callback);
     }, samples);
-    expect(callback).toHaveBeenCalledWith(failure);
+    expect(callback).toHaveBeenCalledWith(failure, undefined, done);
     expect(samples).toHaveLength(2);
   });
 

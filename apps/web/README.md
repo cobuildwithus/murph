@@ -2086,14 +2086,17 @@ That module permits one jittered retry when replay cannot duplicate an effect.
 A `pool_checkout_timeout` means the statement never reached Postgres. A
 `connection_establishment_timeout` means the driver failed while opening the
 physical connection. A `transaction_start_timeout` is Prisma's `P2028` raised
-before it invokes the transaction callback. Closed connections, including pg's
-plain `Connection terminated unexpectedly` error, also permit one retry for
-standalone model reads or interactive transaction setup before callback entry.
-The model-read allowlist excludes raw SQL, which may have effects even through a
-query API. The existing public transaction wrapper carries an async scope so
-reads inside interactive or batch transactions do not independently retry a
-closed connection or escape their transaction's failure boundary. Batch
-transactions and potentially dispatched writes do not replay disconnects.
+before it invokes the transaction callback. The timed-out start can still
+complete later. A release inside a transaction closes the connection and logs
+`transaction_left_open`, which counts connections that would otherwise have
+hidden later writes. Closed connections, including pg's plain `Connection
+terminated unexpectedly` error, also permit one retry for standalone model reads
+or interactive transaction setup before callback entry. The model-read allowlist
+excludes raw SQL, which may have effects even through a query API. The existing
+public transaction wrapper carries an async scope so reads inside interactive or
+batch transactions do not independently retry a closed connection or escape
+their transaction's failure boundary. Batch transactions and potentially
+dispatched writes do not replay disconnects.
 
 When the local pool is already full or has waiters, failures return immediately
 as backpressure instead of re-entering the same queue. The wrapper tracks
