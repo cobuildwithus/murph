@@ -2030,6 +2030,13 @@ replay, and rollback after real event and grant writes. The broader
 `MURPH_TEST_POSTGRES_CONCURRENCY` suites run in the separate required
 PostgreSQL shards described above.
 
+`hosted-consent-cleanup-redrive-postgres.test.ts` uses that loopback-only gate
+to prove recovery after committed withdrawal, each residue predicate, unchanged
+granted/regranted/recent consent, a regrant after selection, per-account retry
+spacing despite a sibling's pre-write failure, Junction provider-config cleanup,
+stable clinical disconnect fences, retained credentials on disconnected rows,
+and interrupted disconnect recovery through the real owners.
+
 For local proof, prepare an isolated loopback `murph_dev_<slug>` database with the
 same schema command, then run
 `MURPH_CONSENT_TEST_DB_URL="$LOCAL_POSTGRES_URL" pnpm --dir apps/web test:prepared test/legal-consent-postgres.test.ts`.

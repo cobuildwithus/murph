@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   cleanupExpiredRuns: vi.fn(),
   redriveHostedHealthDataConsentStops: vi.fn(),
+  redriveHostedHealthDataConsentCleanups: vi.fn(),
   runHostedRuntimeResourceCleanup: vi.fn(),
   deleteExpiredHostedBrowserAssertionNonces: vi.fn(),
   deleteExpiredHostedCallbackRequestNonces: vi.fn(),
@@ -11,6 +12,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/hosted-privacy/health-data-consent-withdrawal", () => ({
   redriveHostedHealthDataConsentStops: mocks.redriveHostedHealthDataConsentStops,
+  redriveHostedHealthDataConsentCleanups: mocks.redriveHostedHealthDataConsentCleanups,
 }));
 
 vi.mock("@/src/lib/hosted-execution/runtime-resource-cleanup", () => ({ runHostedRuntimeResourceCleanup: mocks.runHostedRuntimeResourceCleanup }));
@@ -47,9 +49,11 @@ import { runHostedExternalRetentionCleanup } from "@/src/lib/hosted-retention/ex
 import { runHostedNonceRetentionCleanup } from "@/src/lib/hosted-retention/nonce-cleanup";
 
 describe("hosted retention owner split", () => {
+  const request = new Request("https://app.example.test/api/internal/hosted-execution/retention/external/cron");
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.redriveHostedHealthDataConsentStops.mockResolvedValue({ configured: true, reconciled: 2, failed: 1 });
+    mocks.redriveHostedHealthDataConsentCleanups.mockResolvedValue({ selected: 3 });
     mocks.runHostedRuntimeResourceCleanup.mockResolvedValue({ configured: true, deleted: 2, failed: 0 });
     mocks.cleanupExpiredRuns.mockResolvedValue({ expiredRuns: 4 });
     mocks.deleteExpiredHostedBrowserAssertionNonces.mockResolvedValue(3);
@@ -103,19 +107,28 @@ describe("hosted retention owner split", () => {
       await Promise.resolve();
       expect(mocks.cleanupExpiredRuns).not.toHaveBeenCalled();
       expect(mocks.runHostedRuntimeResourceCleanup).not.toHaveBeenCalled();
+      expect(mocks.redriveHostedHealthDataConsentCleanups).not.toHaveBeenCalled();
       return { completed: 1, failed: 0, pending: 2, selected: 3 };
     });
     mocks.cleanupExpiredRuns.mockImplementationOnce(async () => {
       await Promise.resolve();
       expect(mocks.runHostedRuntimeResourceCleanup).not.toHaveBeenCalled();
+      expect(mocks.redriveHostedHealthDataConsentCleanups).not.toHaveBeenCalled();
       return { expiredRuns: 4 };
+    });
+    mocks.runHostedRuntimeResourceCleanup.mockImplementationOnce(async () => {
+      await Promise.resolve();
+      expect(mocks.redriveHostedHealthDataConsentCleanups).not.toHaveBeenCalled();
+      return { configured: true, deleted: 2, failed: 0 };
     });
 
     await expect(runHostedExternalRetentionCleanup({
       now,
       prisma: prisma as never,
+      request,
     })).resolves.toEqual({
       healthDataConsentStopRedrive: { configured: true, reconciled: 2, failed: 1 },
+      healthDataConsentCleanupRedrive: { selected: 3 },
       accountDeletionCleanup: {
         completed: 1,
         failed: 0,
@@ -132,6 +145,7 @@ describe("hosted retention owner split", () => {
     });
     expect(mocks.cleanupExpiredRuns).toHaveBeenCalledWith({ now });
     expect(mocks.runHostedRuntimeResourceCleanup).toHaveBeenCalledWith({ now, prisma });
+    expect(mocks.redriveHostedHealthDataConsentCleanups).toHaveBeenCalledExactlyOnceWith({ now, prisma, request });
     expect(mocks.drainHostedAccountDeletionCleanupBatch).toHaveBeenCalledTimes(1);
     expect(mocks.cleanupExpiredRuns).toHaveBeenCalledTimes(1);
     expect(mocks.runHostedRuntimeResourceCleanup).toHaveBeenCalledTimes(1);
@@ -142,7 +156,7 @@ describe("hosted retention owner split", () => {
 
   it("redrives consent stops even when a later cleanup owner throws", async () => {
     mocks.drainHostedAccountDeletionCleanupBatch.mockRejectedValueOnce(new Error("Synthetic cleanup failure"));
-    await expect(runHostedExternalRetentionCleanup({ prisma: {} as never })).rejects.toThrow("Synthetic cleanup failure");
+    await expect(runHostedExternalRetentionCleanup({ prisma: {} as never, request })).rejects.toThrow("Synthetic cleanup failure");
     expect(mocks.redriveHostedHealthDataConsentStops).toHaveBeenCalledOnce();
     expect(mocks.redriveHostedHealthDataConsentStops.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.drainHostedAccountDeletionCleanupBatch.mock.invocationCallOrder[0]!);

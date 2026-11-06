@@ -7,7 +7,7 @@ export const maxDuration = 300;
 export const GET = withJsonError(async (request: Request) => {
   requireVercelCronRequest(request);
 
-  const cleanup = await runHostedExternalRetentionCleanup();
+  const cleanup = await runHostedExternalRetentionCleanup({ request });
 
   return jsonOk({ cleanup });
 });

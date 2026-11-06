@@ -3450,6 +3450,12 @@ Settings writes revocation before the required runtime barrier and before
 best-effort source and meal-photo cleanup, so AI admission, message append,
 runtime usage, source connection,
 webhook, scheduled-sync, and companion boundaries fail closed independently.
+The external retention tick redrives remaining clinical, device and meal-photo
+cleanup last once revocation is an hour old, with the same age gate on device
+connection updates. Selection
+only nominates; each cleanup step rereads consent, and clinical disconnect
+timestamps stay fixed across retries. This adds no stop or cancellation beyond
+the existing withdrawal cleanup.
 Before withdrawal succeeds, Web invokes a Vercel OIDC-authenticated Cloudflare
 control route whose per-user Durable Object operation serializes with every
 runtime ensure, re-reads the Web-owned grant through the signed callback, clears
