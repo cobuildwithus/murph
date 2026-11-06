@@ -380,9 +380,13 @@ missing object or empty session also returns 503 instead of implying absence. Un
 Each is null when no usable daily value exists in the window; otherwise it has:
 
 - `unit`: respectively `bpm`, `minutes`, `steps`, `ml/kg/min`.
-- `source`: the device behind the latest date's value, such as `WHOOP`, or null.
+- `source`: the latest value's source label, such as `WHOOP` or `Manual`, or null.
   The app ranks resting heart rate by it, because some devices read overnight.
-- `latest: { date, value }` and ascending `daily: [{ date, value }]`, with one
+- `reported`: true when the latest value is manual, whether entered in the app
+  or saved through chat; false for device readings. The server shares the
+  exported manual-source rule with runtime projections. The app never compares
+  humanized source labels.
+- `latest: { date, value, observedAt }` and ascending `daily: [{ date, value }]`, with one
   value per saved local date. Provider precedence is already applied in the
   replica. Remaining same-date daily/value rows use the last observed row (ID
   breaks timestamp ties); aggregate and comparator rows are excluded.
@@ -405,6 +409,56 @@ uses unrounded canonical values; wire values and delta are rounded to integers
 for heart rate, sleep and steps, and one decimal for VO2. Delta keeps the raw
 current-minus-baseline direction. No source IDs, labels, health context, meals,
 notes, lab rows or metric-selection metadata appear in this response.
+
+### Typed VO2 readings
+
+`POST /api/device-sync/companion/measurements` uses the native bearer session,
+active member access and Browser Vault consent. It accepts at most 1 KiB of JSON
+and no query parameters:
+
+```json
+{
+  "actionId": "d8653d1f-fb8d-400b-8efe-d3fbdc9f9830",
+  "requestedAt": "2026-11-06T12:34:56.000Z",
+  "metric": "estimated-vo2-max",
+  "value": 42.5
+}
+```
+
+The metric is closed to `estimated-vo2-max`; value must be finite and within
+10–90 inclusive. `requestedAt` is the real time of entry and may be at most
+24 hours ahead of server time. A delayed retry keeps its original timestamp and
+action id. A new entry uses a new id and time. Invalid input returns 400
+`MEASUREMENT_INVALID_REQUEST`; oversized bodies return 413. There is no caller
+unit, source or date field. The health-metrics catalog owns unit and precision.
+
+The route submits closed `measurement.add` V1 through the existing encrypted
+member-action mailbox. Session and Browser Vault authority are checked again
+inside the member-locked admission transaction, through the same thin helper
+used by demographics and Meals. Those routes retain their existing validation,
+projection prerequisites, Meals target proof and HTTP errors. Reusing an action
+id with different content returns 409 `MEMBER_ACTION_ID_CONFLICT`. Other save
+failures return retryable 503 `MEASUREMENT_SAVE_UNAVAILABLE`; auth failures keep
+401/403. Success returns 202 with `{ "accepted": true, "actionId": "…" }` and
+`Cache-Control: no-store`, including an identical transport retry.
+
+Poll the existing `GET /api/device-sync/companion/member-actions/<actionId>`.
+A newly written measurement reports `applied`; replay of an existing id reports
+`unchanged`, including after correction or deletion. Neither status proves
+replica publication. Numbers retains all prior fields and adds `reported` and
+`latest.observedAt`; distinct timestamped readings on one date select the newest
+in both Numbers and shared projections. Equal-time historical rows keep their
+existing ordering.
+
+The native input and optimistic overlay ship separately: show input with no
+reading or when `reported` is true, and retain the typed overlay until saved
+`latest.observedAt` reaches `requestedAt`, rejection, a newer entry or a member
+change. This backend change does not ship that app behavior.
+
+Deploy and verify the measurement decoder and handler in the Worker and runner
+before this Web producer; the native build is last. Both consumer components
+are the rollback floor while producers or retained requests remain, as specified
+in `ARCHITECTURE.md`. This action adds no replica generation gate or feature flag.
 
 ### Shared demographics
 

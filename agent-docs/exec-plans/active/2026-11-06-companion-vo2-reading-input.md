@@ -171,3 +171,51 @@ deletion, and prove concurrent identical calls create only one revision.
 The existing same-id upsert proof still passes. Runtime readback proves the
 manual source, catalog unit, action-derived id, requested time and terminal
 applied/unchanged outcomes. No Web caller is included in the consumer commit.
+
+
+Producer proof passed:
+
+| Owner | Focused Vitest files | Passing tests |
+| --- | --- | --- |
+| Web | `device-sync-companion-{measurements,demographics,meals,numbers}-route`, `member-action-mailbox-boundary`, `member-action-outcome-route`, `imessage-mini-app-routes` | 166 |
+| Assistant Runtime | `vault-share-reported-vo2`, `vault-share-projection` | 160 |
+| Health Metrics | `index` | 31 |
+| Query | `browser-vault-metric-points-labs-measurements` | 14 |
+
+Each suite used `pnpm exec vitest run --config <owner>/vitest.config.ts
+<owner>/test/<file>.test.ts --no-coverage`. Web runs used
+`apps/web/vitest.config.ts`; package runs used their package config. An initial
+Numbers run exposed old exact-response assertions; they now include the
+additive timestamp and the full Numbers suite passes. The first runtime test
+needed canonical vault initialization; its corrected real-vault proof passes.
+
+`pnpm --dir packages/health-metrics typecheck`,
+`pnpm --dir packages/query typecheck`,
+`pnpm --dir packages/assistant-runtime typecheck`, and
+`pnpm --dir apps/web typecheck` all passed. Preparation passed with
+`pnpm build:workspace:incremental`, `pnpm --dir packages/health-commons generate`,
+and `pnpm --dir apps/web prisma:generate`. `pnpm complexity:diff`,
+`pnpm logs:guard`, and `git diff --check` passed. The first consumer complexity
+check identified the expanded dispatch switch; moving its existing meal error
+mapping to a private helper brought the switch below its prior complexity.
+No registry, generic write endpoint, feature flag, store, dependency, timestamp
+ordering field or source-enum plumbing was added.
+
+Backend journey verdict: Ready. Actual canonical typed actions and real query
+replicas prove newest-time selection with both id and input order reversed;
+Numbers route proof independently reads real canonical app, chat and device
+measurements. Session or consent revocation between initial authority and the
+locked append prevents both append and runtime signaling. Existing demographics,
+Meals target/body/error paths and outcome post-read checks remain covered.
+Canonical replay preserves corrections and tombstones without ledger/audit
+changes. Manual provenance uses one exported label rule, with the runtime's
+existing provider authority check retained.
+
+`pnpm hosted-local worktree doctor vo2-reading-input` failed because the external
+Temporal worker package is not configured (`MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR`).
+No full hosted-local stack smoke was run; composed real-vault tests are the
+next-best local proof. There is no production or live deployment evidence.
+Native implementation/tests and public release notes belong to the later app
+release; this backend preparation ships no native UI. No model behavior changes
+or provider turns are involved. No push, PR, merge or deployment was performed.
+The plan remains active for that later work and rollout verification.

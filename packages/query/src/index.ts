@@ -248,6 +248,7 @@ export type {
 } from "./search-shared.ts";
 export {
   buildMetricSeries,
+  isManualMetricSource,
   createCustomMetricDefinition,
   formatMetricDisplayValue,
   listMetricDefinitions,
