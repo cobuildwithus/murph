@@ -85,3 +85,12 @@ deletion cannot be undone. Billing, recovery and revenue reporting never needed 
 table, and the runner never accesses it directly. #4615 is the rollback floor after
 cleanup; older Web writes this table, so restoring it requires re-expanding the
 table first.
+
+The `20261106200000_clear_recaps_with_removed_posts` cleanup clears stored recap
+stories in games with a post removed for everyone, where the game has no recap
+witness, so the story may quote that post. A reported-only post, a retake, a
+poster's own withdrawal, or a legacy story with nothing removed never matches.
+Reads already hide every story it clears, so members see no change. It touches no
+receipt, mailbox row or provider, sends no member message, and preserves the
+settled result. The cleared ciphertext cannot be restored; a cleared story falls
+back to the app's template recap and can be regenerated.

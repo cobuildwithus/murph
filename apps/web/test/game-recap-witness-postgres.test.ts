@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getPrisma } from "../src/lib/prisma";
 import { sealGameText } from "../src/lib/game/crypto";
 import { readGame, readHistory, readHome, readGameRecapMaterial, sealGameRecap } from "../src/lib/game/service";
 import { runWithPrismaOperationTimings, type PrismaOperationTiming } from "../src/lib/prisma-operation-timing";
 import { recordGameRecapWitnessTx } from "../src/lib/game/recap-witness";
+import { listHostedWebContractMigrations } from "../scripts/run-production-contract-migrations";
 import { deliverGameChatLifecycle } from "../src/lib/game/chat-lifecycle";
 import { buildHostedExecutionAssistantNotificationRequestedWake } from "@murphai/hosted-execution";
 import { appendPreparedHostedMailboxEnvelopeTx, prepareHostedMailboxEnvelopeAppend } from "../src/lib/hosted-mailbox/store";
@@ -474,6 +476,35 @@ describe.skipIf(!enabled)("recap moderation witness PostgreSQL proof", () => {
       expect(removed.eventReads).toEqual([]);
       expect(removed.operations).toEqual(baseline.operations);
     });
+  });
+
+  it("contract cleanup clears only affected legacy stories without touching other rows", async () => {
+    const legacy = await fixture(false), clean = await fixture(false), witnessed = await fixture(), reported = await fixture(false), retaken = await fixture(false);
+    for (const f of [legacy, clean, witnessed, reported, retaken]) {
+      await sealGameRecap(f.sealInput);
+      await deliverGameChatLifecycle(f.gameId, "recap");
+    }
+    // Model stories left by old Web before its functions drained.
+    await legacy.db.gameEvent.deleteMany({ where: { gameId: { in: [legacy.gameId, clean.gameId, reported.gameId, retaken.gameId] }, type: "recap_witness" } });
+    for (const f of [legacy, witnessed]) await f.db.gameEntry.update({ where: { id: f.entries[0]!.id }, data: { withdrawnAt: new Date(), withdrawnReason: "removed" } });
+    // Neither of these is a removal for everyone, so neither story may be cleared.
+    await report(reported);
+    await retaken.db.gameEntry.update({ where: { id: retaken.entries[0]!.id }, data: { withdrawnAt: new Date(), withdrawnReason: "retake" } });
+    const before = await Promise.all([legacy, clean, witnessed, reported, retaken].map(story));
+    const deliveries = await legacy.db.hostedLinqDelivery.findMany({ where: { sourceRef: { in: games } }, orderBy: { id: "asc" } });
+    const mailbox = await legacy.db.hostedMailboxItem.findMany({ where: { userId: { in: members } }, orderBy: { id: "asc" } });
+    const entries = await legacy.db.gameEntry.findMany({ where: { gameId: { in: games } }, orderBy: { id: "asc" } });
+    const tickets = await legacy.db.gameTicket.findMany({ where: { gameId: { in: games } }, orderBy: { id: "asc" } });
+    const migrationId = "20261106200000_clear_recaps_with_removed_posts";
+    expect((await listHostedWebContractMigrations()).some(m => m.id === migrationId)).toBe(true);
+    const sql = readFileSync(new URL(`../prisma/contract-migrations/${migrationId}/migration.sql`, import.meta.url), "utf8");
+    expect(await legacy.db.$executeRawUnsafe(sql)).toBe(1);
+    expect(await Promise.all([legacy, clean, witnessed, reported, retaken].map(story))).toEqual([{ ...before[0], recapEncrypted: null }, ...before.slice(1)]);
+    expect(await legacy.db.hostedLinqDelivery.findMany({ where: { sourceRef: { in: games } }, orderBy: { id: "asc" } })).toEqual(deliveries);
+    expect(await legacy.db.hostedMailboxItem.findMany({ where: { userId: { in: members } }, orderBy: { id: "asc" } })).toEqual(mailbox);
+    expect(await legacy.db.gameEntry.findMany({ where: { gameId: { in: games } }, orderBy: { id: "asc" } })).toEqual(entries);
+    expect(await legacy.db.gameTicket.findMany({ where: { gameId: { in: games } }, orderBy: { id: "asc" } })).toEqual(tickets);
+    expect(await legacy.db.$executeRawUnsafe(sql)).toBe(0);
   });
 
   it.each(["delivered", "generation_queued", "never sealed"])("regeneration after takedown respects %s delivery", async state => {

@@ -611,9 +611,9 @@ resulting avatar. No private photo is shared with the subject or other players.
   the public URL remains a generic app handoff.
   Removing a post for everyone clears any stored story that may hold it in the
   removal transaction. Reads hide a stored story that may hold a post removed
-  for everyone from every viewer; its ciphertext stays until a separately
-  approved cleanup. No pass over existing stories runs at deploy time. The
-  settled result stays and `recap: null` uses the app's existing template.
+  for everyone from every viewer, and a one-time post-deploy cleanup clears the
+  stored ciphertext of such stories from before this rule. Members are not
+  messaged. The settled result stays and `recap: null` uses the app's existing template.
   The newest accepted generation's witness, or the original generation's witness
   when none was accepted, determines what the story may hold. Missing or malformed
   witnesses cannot rule out a removed post. Report-only suppression remains per

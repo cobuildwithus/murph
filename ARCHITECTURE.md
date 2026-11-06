@@ -5582,9 +5582,10 @@ entry IDs in the mailbox append transaction, under the game lock. One source
 validity check guards material reads, seal, replay and dispatch: every witnessed
 entry must still be permitted. Takedown clears a story that may quote the removed
 post in the same transaction, without changing the settled result. Existing
-stories that may hold a post removed for everyone are hidden from every viewer;
-their ciphertext stays until a separately approved cleanup. There is no data
-migration or deploy-time pass over stored stories in this change. The stored
+stories that may hold a post removed for everyone are hidden from every viewer.
+The post-deploy contract migration
+`20261106200000_clear_recaps_with_removed_posts` then clears the ciphertext of
+such stories in games with no witness. The stored
 story's generation is the newest accepted regeneration, or the original recap
 generation when none was accepted. A missing or malformed witness cannot rule
 out the removed post. Detail and Home batch this lookup in two event reads only
