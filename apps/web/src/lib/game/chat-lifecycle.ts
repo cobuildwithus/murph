@@ -1,4 +1,5 @@
 import "server-only";
+import { recordGameRecapWitnessTx } from "./recap-witness";
 import { groupGameRecapPlayers } from "./recap-cohort";
 
 import { isPairRoster, isGameMemberSet } from "./roster";
@@ -563,6 +564,7 @@ async function lifecycleInstructions(game: Pick<Game, "id" | "chatContainerMembe
     if (!game.chatContainerMemberId) return null;
     const { readGameRecapMaterial } = await import("./service");
     const { readGameRecapChatMessages } = await import("./chat-tool");
+    // Instructions carry no entries; publication fixes the witness.
     const material = await readGameRecapMaterial(game.id, game.chatContainerMemberId, players);
     return material
       ? buildGameRecapInstructions(await readGameRecapChatMessages({ containerMemberId: game.chatContainerMemberId, material }), await noticeRoom(), game.maxPlayers === 10)
@@ -654,7 +656,7 @@ async function enqueueGameLifecycle(input: {
   let appended;
   try {
     appended = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      if (input.kind === "rematch" && input.game.maxPlayers === 10) await tx.$queryRaw`SELECT id FROM game WHERE id = ${input.gameId} FOR UPDATE`;
+      if (input.kind === "recap" || input.kind === "rematch" && input.game.maxPlayers === 10) await tx.$queryRaw`SELECT id FROM game WHERE id = ${input.gameId} FOR UPDATE`;
       if (bound.externalThreadRouteAuthority) await assertHostedAssistantNotificationRouteAuthority({ authority: bound.externalThreadRouteAuthority, prisma: tx });
       if (input.kind === "talk" || input.kind === "challenge") {
         await assertGameProposalDeliveryCurrentTx({ tx, deliveryIdempotencyKey: input.eventId,
@@ -664,6 +666,7 @@ async function enqueueGameLifecycle(input: {
         return result;
       }
       if (!await isGameLifecycleAppendCurrentTx(input, tx)) return null;
+      if (input.kind === "recap" && !await recordGameRecapWitnessTx(tx, input.gameId, input.eventId)) return null;
       const result = await appendPreparedHostedMailboxEnvelopeTx({ prepared, tx });
       await markGameChatGenerationQueuedTx(input.eventId, tx, input.containerMemberId);
       return result;

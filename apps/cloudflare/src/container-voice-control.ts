@@ -3,8 +3,8 @@ import type { HostedVoiceControlRequest, HostedVoiceControlResponse } from "@mur
 
 export interface HostedContainerActiveInvocation {
   abort(reason: Error): void;
-  attemptId: string | null;
-  leaseGeneration: string | null;
+  attemptId: string;
+  leaseGeneration: string;
   userId: string;
   signal: AbortSignal;
   voice?: Pick<HostedRuntimeVoice, "connect" | "closeCall">;

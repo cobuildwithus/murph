@@ -147,9 +147,6 @@ import type {
   AssistantConnectedAppsPort,
   AssistantHostedPrivateImageUrlPublisher,
 } from "@murphai/assistant-engine";
-import type {
-  RuntimeLivenessPort,
-} from "./liveness.ts";
 
 export const HOSTED_RUNTIME_ARTIFACT_READ_PURPOSES = [
   "canonical_write_receipt",
@@ -915,9 +912,6 @@ export interface HostedRuntimePlatform {
   subscriptionToolPort?: HostedRuntimeSubscriptionToolPort | null;
   phoneCalls?: HostedRuntimePhoneCallPort | null;
   productFeedbackPort?: HostedRuntimeProductFeedbackPort | null;
-  runtimeLivenessIntervalMs?: number | null;
-  runtimeLivenessPort?: RuntimeLivenessPort | null;
-  runtimeLivenessRequired?: boolean | null;
   usageRecordPort?: HostedRuntimeUsageRecordPort | null;
   /** Ephemeral, invocation-bound speech; never an independently retried effect. */
   voicePort?: { speak: NonNullable<AssistantChannelDependencies["sendVoice"]> } | null;

@@ -1,5 +1,8 @@
 import * as z from "@murphai/contracts/zod-runtime";
 
+// A new value of the existing error field: this generation is durably finished and must end without sending.
+export const GAME_RECAP_GENERATION_RETIRED = "recap_generation_retired";
+
 const ref = z.string().min(1).max(128);
 const gameId = z.string().regex(/^[A-Za-z0-9_-]{8,64}$/u);
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/u);

@@ -5573,9 +5573,32 @@ See [companion presence](agent-docs/references/companion-presence.md).
 Operator recap regeneration reuses the lifecycle receipt, minute sweep, hosted
 notification and recap validation/delivery owners. `game_event.command_key`
 records one request and acceptance per bounded regeneration id. The existing
-`game.recap_encrypted` remains visible until the accepted replacement commits
+`game.recap_encrypted` is retained until the accepted replacement commits
 under the pair and game locks. No alternate story store or queue exists. The Ops
 command and rollout/rollback contract live in the weekly game spec.
+
+Recap publication records an immutable `recap_witness` event with the permitted
+entry IDs in the mailbox append transaction, under the game lock. One source
+validity check guards material reads, seal, replay and dispatch: every witnessed
+entry must still be permitted. Takedown clears a story that may quote the removed
+post in the same transaction, without changing the settled result. Existing
+stories that may hold a post removed for everyone are hidden from every viewer;
+their ciphertext stays until a separately approved cleanup. There is no data
+migration or deploy-time pass over stored stories in this change. The stored
+story's generation is the newest accepted regeneration, or the original recap
+generation when none was accepted. A missing or malformed witness cannot rule
+out the removed post. Detail and Home batch this lookup in two event reads only
+when stored stories have removed entries, then re-read those games' ciphertext
+in one batch. A changed ciphertext suppresses that read so a clean replacement's
+witness cannot admit the older words. Ordinary views and history add no reads.
+Reports keep their existing viewer-specific suppression, and withdrawals or
+retakes alone do not hide a story. A clean accepted replacement can show again.
+Existing mailbox items remain legacy generations with no witness; they proceed only
+while no entry has been removed or reported, and takedown clears their story
+conservatively. Web answers stale work with the existing unavailable shape for
+now and leaves its receipt queued. The runner accepts durable retirement, but
+Web will emit it only in the later activation release.
+
 
 `apps/web` owns the weekly game (product: `agent-docs/product-specs/weekly-game.md`).
 The pure roster helpers bound member-set operations to ten. The common rules

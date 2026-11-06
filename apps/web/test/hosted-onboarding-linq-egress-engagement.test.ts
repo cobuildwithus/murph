@@ -2064,7 +2064,7 @@ describe("hosted Linq egress authority", () => {
   it.each(["exact", "extra", "missing", "blocked", "departed", "provider-stale", "outside-join", "unjoined-started", "unjoined-recap", "rotation", "added-after-prepare", "shrunk-recap", "outsider-after-shrink", "rematch-current", "rematch-two-human", "rematch-stale", "rematch-legacy"])("rechecks group game authority through real Linq egress: %s", async scenario => {
     const prisma = Object.assign(createPrismaStub({ threadRouteContainerMemberId: "member-1", activeMemberAccess: true }), {
       gameBlock: { findFirst: vi.fn().mockResolvedValue(scenario === "blocked" ? { blockerMemberId: "person-b" } : null) },
-      gameReport: { findFirst: vi.fn().mockResolvedValue(null) },
+      gameReport: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) },
     });
     prisma.$transaction.mockImplementation(async operation => operation(prisma));
     Object.assign(prisma.hostedMember, { findFirst: vi.fn().mockResolvedValue(null) });
@@ -2195,7 +2195,7 @@ describe("hosted Linq egress authority", () => {
       // Proposal authority loads canonical state under the game lock; resolution notices read their recorded event.
       prisma.game.findMany.mockResolvedValue([game]);
       prisma.game.findUnique.mockResolvedValue(game);
-      prisma.gameEvent.findUnique.mockResolvedValue({ gameId: "game", type: "change_expired", payload: { proposalId: "proposal", reason: "A check-in arrived first." } });
+      prisma.gameEvent.findUnique.mockResolvedValue(["recap", "regenerated-recap"].includes(scenario) ? null : { gameId: "game", type: "change_expired", payload: { proposalId: "proposal", reason: "A check-in arrived first." } });
       mocks.readGameProposalDeliveryPlayers.mockResolvedValue(scenario === "other-audience" ? ["person-a", "person-c"] : ["person-a", "person-b"]);
       if (scenario === "line-blocked") {
         const line = await prisma.hostedLinqLine.findFirst();
@@ -2905,8 +2905,9 @@ function createPrismaStub(input: {
     $executeRaw: vi.fn().mockResolvedValue(1),
     $queryRaw: vi.fn().mockResolvedValue([]),
     game: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]), findUnique: vi.fn().mockResolvedValue(null) },
-    gameEntry: { findMany: vi.fn().mockResolvedValue([]) },
+    gameEntry: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) },
     gameEvent: { findUnique: vi.fn().mockResolvedValue(null) },
+    gameReport: { findMany: vi.fn().mockResolvedValue([]) },
     deviceConnectionSource: {
       findUnique: vi.fn().mockResolvedValue(null),
     },
