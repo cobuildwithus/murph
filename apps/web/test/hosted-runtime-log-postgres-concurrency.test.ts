@@ -248,7 +248,6 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
     const rollbackPool = new PgPool({
       connectionString: postgresDatabaseUrl(primaryDatabaseUrl, testDatabaseName),
       max: 1,
-      query_timeout: 1_000,
     });
     const failure = new Error("member authority unavailable");
 
