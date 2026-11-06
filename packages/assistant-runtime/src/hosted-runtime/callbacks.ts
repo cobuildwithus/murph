@@ -3970,9 +3970,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           if (!privateCompletion) {
             providerDispatchEntered = true;
           }
-          const result = await sendTelegramRichMessage(request, dependencies);
-          await assertHostedDeliveryLiveNow(input);
-          return result;
+          return sendTelegramRichMessage(request, dependencies);
         },
         sendTelegramFile: async (request) => {
           const intent = mirrorState.intent;
@@ -4025,9 +4023,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               return bytes;
             },
           }, "Hosted assistant Telegram file delivery");
-          const result = await sendTelegramFileMessage(request, dependencies);
-          await assertHostedDeliveryLiveNow(input);
-          return result;
+          return sendTelegramFileMessage(request, dependencies);
         },
         sendTelegramImage: async (request) => {
           const verifiedVaultImages = await preloadHostedAssistantVaultImages({
@@ -4078,15 +4074,13 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               : {}),
           }, "Hosted assistant Telegram image delivery");
           providerDispatchEntered = true;
-          const result = await sendTelegramImageMessage({
+          return sendTelegramImageMessage({
             idempotencyKey: request.idempotencyKey ?? null,
             media: request.media,
             message: request.message,
             replyToMessageId: request.replyToMessageId ?? null,
             target: request.target,
           }, dependencies);
-          await assertHostedDeliveryLiveNow(input);
-          return result;
         },
         setTelegramMessageReaction: async (request) => {
           await assertHostedDeliveryCanEnterProvider(input);
@@ -4107,9 +4101,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             ...(input.signal ? { signal: input.signal } : {}),
           }, "Hosted assistant Telegram reaction delivery");
           providerDispatchEntered = true;
-          const result = await setTelegramMessageReaction(request, dependencies);
-          await assertHostedDeliveryLiveNow(input);
-          return result;
+          return setTelegramMessageReaction(request, dependencies);
         },
         telegramVoiceMemoRuntime: {
           ...(telegramAuthorityBoundTarget
@@ -4117,7 +4109,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             : {}),
           env: input.telegramVoiceMemoEnv,
           fetchImplementation: createHostedProviderFetchBoundary({
-            assertLive: () => assertHostedDeliveryLiveNow(input),
             assertProviderEntryLive: async () => {
               await assertHostedDeliveryCanEnterProvider(input);
               const target = readHostedAssistantDeliveryPayloadTarget(
@@ -4752,7 +4743,6 @@ function shouldResetHostedPreparedDeliveryOnPreProviderAbort(input: {
 }
 
 function createHostedProviderFetchBoundary(input: {
-  assertLive?: () => Promise<void>;
   assertProviderEntryLive?: () => Promise<void>;
   onProviderDispatchEntered?: () => Promise<void> | void;
   onTelegramVoiceMemoDispatchEntered?: () => void;
@@ -4771,7 +4761,7 @@ function createHostedProviderFetchBoundary(input: {
   };
 
   return (async (request, init) => {
-    await (input.assertProviderEntryLive ?? input.assertLive)?.();
+    await input.assertProviderEntryLive?.();
     const fetchImplementation = requireHostedProviderFetch(
       input.providerFetch,
       input.operation,
@@ -4783,9 +4773,7 @@ function createHostedProviderFetchBoundary(input: {
     ) {
       input.onTelegramVoiceMemoDispatchEntered();
     }
-    const response = await fetchImplementation(request, init);
-    await input.assertLive?.();
-    return response;
+    return fetchImplementation(request, init);
   }) as typeof fetch;
 }
 

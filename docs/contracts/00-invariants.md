@@ -345,6 +345,9 @@ it has been explicitly elevated to a cross-cutting invariant.
   only after terminal or durable pending evidence. Accepted delivery
   needing confirmation settles through its existing delivery retry deadline;
   optional accounting may update its own marker but never moves that deadline.
+  A hosted Telegram send checks liveness before provider entry. Once a sender
+  returns an accepted response, losing liveness cannot discard it: the outbox
+  persists the receipt, then the post-dispatch check runs.
   A retry under a provider idempotency key sends the bytes accepted for that
   key, so freeze those inputs on the accepted receipt and never rebuild them
   from current source state.
