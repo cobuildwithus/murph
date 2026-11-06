@@ -5745,15 +5745,6 @@ async function runCodexAppServerTurnOnProcess(
     steerInput: Omit<CodexAppServerSteerInput, 'threadId' | 'turnId'>,
   ): Promise<void> => {
     const liveTurn = requireLiveTurnIds()
-    const preparedSteerImages = await materializeCodexImages({
-      images: normalizeCodexAppServerImageDetails({
-        images: steerInput.images,
-        model: input.model,
-        modelProvider: input.modelProvider,
-        turnKind: 'steer',
-      }),
-      tempRoot: input.tempRoot,
-    })
     const deliveryContextOrdinal = automationRelativeDateReferenceWindows.length
     automationRelativeDateReferenceWindows.push(
       mergeAutomationRelativeDateReferenceWindows(
@@ -5762,6 +5753,15 @@ async function runCodexAppServerTurnOnProcess(
       ),
     )
     try {
+      const preparedSteerImages = await materializeCodexImages({
+        images: normalizeCodexAppServerImageDetails({
+          images: steerInput.images,
+          model: input.model,
+          modelProvider: input.modelProvider,
+          turnKind: 'steer',
+        }),
+        tempRoot: input.tempRoot,
+      })
       await withCodexRpcTimeout(
         sendRequest(
           'turn/steer',

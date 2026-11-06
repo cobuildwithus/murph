@@ -212,6 +212,10 @@ reproduced on a real App Server:
   and reproduced by holding a request before headers. The rule now counts a steer
   from submission: `automationRelativeDateReferenceWindows.length > 1`, an entry
   pushed before `turn/steer` and rolled back if it is rejected.
+- Final ReviewGPT round 2 found the entry was still pushed after the async image
+  write of a steered screenshot, so that write left billing enabled. Accepted and
+  reproduced by holding the write. The entry now goes in before the first await,
+  and image preparation sits inside the same rollback.
 - Scope is deliberate. `assistant_configuration` still runs after a steer: it is a
   reversible preference, Web binds no semantics to the input, and refusing it is
   the reported bug.
@@ -243,7 +247,9 @@ expiry, turn commit). Do not merge the two context objects wholesale.
   error `assistant configuration updates require user-sourced input`, and passes
   after the change. All three steered-subscription sequences fail without the rule
   and pass with it: queued behind a slow tool, issued by an older cell, and issued
-  after the steer is acknowledged but before Codex consumes it.
+  after the steer is acknowledged but before Codex consumes it. A fourth, issued
+  during a steered image write, fails without the reorder and passes with it, and a
+  failed image write releases the block.
 - Live model: `pnpm test:assistant:live -- --test "explicit Max upgrade"` passed.
   A confirmation with a mid-turn follow-up made no subscription request, and the
   reply said nothing was applied and asked for one more confirmation. Confirming
