@@ -38,7 +38,7 @@ function harness() {
   const request = (body: unknown = { usage: { usageId: "synthetic-report" } }) => new Request(`${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane}${HOSTED_RUNNER_WEB_CONTROL_ROUTES.usageRecording.path}`, { method: "POST", headers: {
     "content-type": "application/json", "x-hosted-runtime-attempt-id": identity.attemptId, "x-hosted-runtime-lease-generation": identity.generation, "x-hosted-runtime-workspace-version": "0",
   }, body: JSON.stringify(body) });
-  return { userId, identity, receipt, owner, env, request, container };
+  return { userId, identity, sql, receipt, owner, env, request, container };
 }
 
 const caller = { containerId: "synthetic-container", className: "RunnerContainer" };
@@ -123,6 +123,8 @@ describe("Provider identity and usage settlement with native receipts", () => {
       return { cutover: "postgres", status: "authorized", owner: h.owner };
     });
     await expect(handleRunnerOutboundRequest(h.request(), h.env, h.userId, caller)).rejects.toThrow("synthetic Web outage");
+    expect(h.container.finishRuntimeUsageSettlement).not.toHaveBeenCalled();
+    expect(h.sql.exec("SELECT state FROM runner_usage_settlement").toArray()).toEqual([{ state: "pending" }]);
     const provider = await readNativeRuntimeProviderAuthority(h.env, caller);
     expect(provider).toMatchObject({ settlementPending: true });
     expect(h.receipt().usageSettlementAllowsProviders(h.identity)).toBe(false);
@@ -161,6 +163,49 @@ describe("Provider identity and usage settlement with native receipts", () => {
       .rejects.toThrow("Native usage settlement receipt was rejected");
     expect(fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
     expect(commandHostedRuntimeOwner).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])("keeps denial durable with the unchanged Worker when a usage report races (first allowed=%s)", async firstAllowed => {
+    const h = harness();
+    let answerFirst!: (response: Response) => void;
+    let answerSecond!: (response: Response) => void;
+    let markBothForwarded!: () => void;
+    const firstResponse = new Promise<Response>(resolve => { answerFirst = resolve; });
+    const secondResponse = new Promise<Response>(resolve => { answerSecond = resolve; });
+    const bothForwarded = new Promise<void>(resolve => { markBothForwarded = resolve; });
+    vi.mocked(fetchHostedExecutionWebControlPlaneResponse)
+      .mockImplementationOnce(() => firstResponse)
+      .mockImplementationOnce(() => { markBothForwarded(); return secondResponse; });
+    const first = handleRunnerOutboundRequest(h.request(), h.env, h.userId, caller);
+    const second = handleRunnerOutboundRequest(h.request(), h.env, h.userId, caller);
+    await bothForwarded;
+    expect(h.container.beginRuntimeUsageSettlement).toHaveBeenCalledTimes(2);
+    answerFirst(Response.json({ platformAiUsageAllowedAfter: firstAllowed, recorded: true, usageId: "synthetic-report" }));
+    expect((await first).status).toBe(200);
+    expect(h.receipt().usageSettlementAllowsProviders(h.identity)).toBe(firstAllowed);
+    answerSecond(Response.json({ platformAiUsageAllowedAfter: !firstAllowed, recorded: true, usageId: "synthetic-report" }));
+    expect((await second).status).toBe(200);
+    expect(h.container.finishRuntimeUsageSettlement.mock.calls.map(([input]) => input.allowed)).toEqual([firstAllowed, !firstAllowed]);
+    expect(h.receipt().usageSettlementAllowsProviders(h.identity)).toBe(false);
+    expect(h.receipt().readProviderInvocation()).toMatchObject({ settlementPending: true });
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation)).toEqual(["revoke_ai_usage"]);
+    const upstream = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Must not reach provider"));
+    const provider = await handleHostedRunnerOpenAiOutbound(new Request("https://api.openai.com/v1/responses", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "synthetic-model", input: "Synthetic request" }),
+    }), { ...h.env, OPENAI_API_KEY: "synthetic-provider-secret" }, caller);
+    expect(provider.status).toBe(503);
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
+  it("requires the current controller before a later denial-before-revoke Worker release", async () => {
+    const h = harness();
+    vi.mocked(fetchHostedExecutionWebControlPlaneResponse).mockResolvedValue(Response.json({ platformAiUsageAllowedAfter: true, recorded: true, usageId: "synthetic-report" }));
+    expect((await handleRunnerOutboundRequest(h.request(), h.env, h.userId, caller)).status).toBe(200);
+    h.sql.exec("UPDATE runner_usage_settlement SET state = 'denied' WHERE report_id = ? AND attempt_id = ? AND generation = ?", "synthetic-report", h.identity.attemptId, h.identity.generation);
+    expect(h.receipt().usageSettlementAllowsProviders(h.identity)).toBe(true);
+    h.receipt().finishUsageSettlement(h.identity, "synthetic-report", false);
+    expect(h.receipt().usageSettlementAllowsProviders(h.identity)).toBe(false);
   });
 
   it("clears its pending receipt only after explicit successful settlement", async () => {

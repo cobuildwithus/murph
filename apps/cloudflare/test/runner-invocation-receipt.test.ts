@@ -55,6 +55,72 @@ describe("native invocation receipts", () => {
     expect(recovered.usageSettlementAllowsProviders(next)).toBe(true);
   });
 
+  it.each([true, false])("keeps denial through racing settlement and replay across eviction (first allowed=%s)", firstAllowed => {
+    const sql = createTestSqlStorage();
+    const identity = { attemptId: "usage-attempt", generation: "1" };
+    const receipt = () => new RunnerInvocationReceiptStore(sql);
+    receipt().register(identity);
+    expect(receipt().beginUsageSettlement(identity, "usage-report")).toBe(true);
+    receipt().finishUsageSettlement(identity, "usage-report", firstAllowed);
+    expect(receipt().usageSettlementAllowsProviders(identity)).toBe(firstAllowed);
+    expect(receipt().readProviderInvocation()).toMatchObject({ settlementPending: !firstAllowed });
+    receipt().finishUsageSettlement(identity, "usage-report", !firstAllowed);
+    expect(receipt().usageSettlementAllowsProviders(identity)).toBe(false);
+    expect(receipt().readProviderInvocation()).toMatchObject({ settlementPending: true });
+    receipt().finishUsageSettlement(identity, "usage-report", true);
+    expect(receipt().usageSettlementAllowsProviders(identity)).toBe(false);
+    expect(receipt().readProviderInvocation()).toMatchObject({ settlementPending: true });
+    expect(receipt().beginUsageSettlement(identity, "usage-report")).toBe(true);
+    expect(receipt().usageSettlementAllowsProviders(identity)).toBe(false);
+    expect(receipt().readProviderInvocation()).toMatchObject({ settlementPending: true });
+  });
+
+  it("persists denial without a prior row and keeps repeated denial idempotent across eviction", () => {
+    const sql = createTestSqlStorage();
+    const identity = { attemptId: "usage-attempt", generation: "1" };
+    const receipt = () => new RunnerInvocationReceiptStore(sql);
+    receipt().register(identity);
+    for (let replay = 0; replay < 2; replay++) {
+      receipt().finishUsageSettlement(identity, "usage-report", false);
+      expect(receipt().usageSettlementAllowsProviders(identity)).toBe(false);
+      expect(receipt().readProviderInvocation()).toMatchObject({ settlementPending: true });
+      expect(sql.exec("SELECT state FROM runner_usage_settlement").toArray()).toEqual([{ state: "denied" }]);
+    }
+  });
+
+  it.each([false, true])("keeps a successor clear when denial arrives after completion (successor registered=%s)", registered => {
+    const sql = createTestSqlStorage();
+    const identity = { attemptId: "usage-attempt", generation: "1" };
+    const next = { attemptId: "next-usage-attempt", generation: "2" };
+    const receipt = () => new RunnerInvocationReceiptStore(sql);
+    receipt().register(identity);
+    expect(receipt().complete(identity, false)).toBe(true);
+    if (registered) receipt().register(next);
+    receipt().finishUsageSettlement(identity, "usage-report", false);
+    expect(sql.exec("SELECT state FROM runner_usage_settlement").toArray()).toEqual(registered ? [] : [{ state: "denied" }]);
+    if (!registered) receipt().register(next);
+    expect(receipt().usageSettlementAllowsProviders(next)).toBe(true);
+    expect(receipt().readProviderInvocation()).toMatchObject({ ...next, settlementPending: false });
+  });
+
+  it.each([
+    { attemptId: "wrong-attempt", generation: "1" },
+    { attemptId: "usage-attempt", generation: "2" },
+  ])("ignores denial for a mismatched identity %j", wrongIdentity => {
+    const sql = createTestSqlStorage();
+    const identity = { attemptId: "usage-attempt", generation: "1" };
+    const receipt = () => new RunnerInvocationReceiptStore(sql);
+    receipt().register(identity);
+    receipt().finishUsageSettlement(wrongIdentity, "usage-report", false);
+    expect(sql.exec("SELECT state FROM runner_usage_settlement").toArray()).toEqual([]);
+    expect(receipt().usageSettlementAllowsProviders(identity)).toBe(true);
+    expect(receipt().readProviderInvocation()).toMatchObject({ settlementPending: false });
+    receipt().beginUsageSettlement(identity, "usage-report");
+    receipt().finishUsageSettlement(wrongIdentity, "usage-report", false);
+    receipt().finishUsageSettlement(identity, "usage-report", true);
+    expect(receipt().usageSettlementAllowsProviders(identity)).toBe(true);
+  });
+
   it("retains provider context across eviction and resets it only for a completed successor", () => {
     const sql = createTestSqlStorage();
     const first = { attemptId: "provider-1", generation: "1" };
