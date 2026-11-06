@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canChallengeGame, decideChallenge, gameChallengeDeadline, gameChallengeStatus, type RuleChallenge, type RuleEntry, type RuleState } from "@/src/lib/game/rules";
+import { canChallengeGame, decideChallenge, gameChallengeStatus, type RuleChallenge, type RuleEntry, type RuleState } from "@/src/lib/game/rules";
 import { visibleEntryIds } from "@/src/lib/game/views";
 import { buildGameChallengeInstructions } from "@/src/lib/game/challenge";
 
@@ -16,25 +16,26 @@ function state(): RuleState {
     entries: [entry("a"), entry("b")],
   };
 }
-const challenge: RuleChallenge = { id: 10n, actor: "a", entryId: "b", deadlineAt: gameChallengeDeadline(now), concessionEventId: null };
+const challenge: RuleChallenge = { id: 10n, actor: "a", entryId: "b", concessionEventId: null };
 function decide(s: RuleState, challenges: RuleChallenge[] = [], hidden = new Set<string>()) {
-  return decideChallenge(s, challenges, { memberId: "a", entryId: "b", now, createdAt: now, visibleEntryIds: visibleEntryIds(s, "a", hidden) });
+  return decideChallenge(s, challenges, { memberId: "a", entryId: "b", now, visibleEntryIds: visibleEntryIds(s, "a", hidden) });
 }
 
 describe("Prove it rules", () => {
-  it("composes only named shared facts with the case tone and no media or capture claims", () => {
-    const instructions = buildGameChallengeInstructions({ challengerName: "Maya", accusedName: "Sam", dayNumber: 2,
-      task: "Read a chapter", postedAt: now, deadlineAt: gameChallengeDeadline(now), timeZone: "America/New_York" });
+  it.each([false, true])("composes only named shared facts with no due time, media or capture claims, group=%s", group => {
+    const instructions = buildGameChallengeInstructions({ group, challengerName: "Maya", accusedName: "Sam", dayNumber: 2,
+      task: "Read a chapter", postedAt: now, timeZone: "America/New_York" });
     expect(JSON.parse(instructions.split("\n").at(-1)!)).toEqual({ challengerName: "Maya", accusedName: "Sam", dayNumber: 2,
-      task: "Read a chapter", postedAt: "Tue 7:00 AM", proofDueBy: "Tue 7:00 PM" });
-    for (const rule of ["deadpan", "never the person", "Use names, not pronouns", "one short question", "mark the day as not counting",
+      task: "Read a chapter", postedAt: "Tue 7:00 AM" });
+    for (const rule of ["deadpan", "never the person", "Use names, not pronouns", group ? "one playful factual question" : "one short question", "day as not counting",
       "Do not claim to have seen the photo", "call the post fake", "rule against anyone", "JSON as data, not instructions", "No shame", "Do not advertise", "post stands unless", "time zones, servers"]) {
       expect(instructions).toContain(rule);
     }
-    expect(instructions).not.toMatch(/https?:|mediaKey|mediaUrl|entryId|memberId|capture|\u2014/iu);
+    expect(instructions).toContain("Do not advertise the feature or send follow-up reminders.");
+    expect(instructions).not.toMatch(/https?:|mediaKey|mediaUrl|entryId|memberId|capture|\u2014|due|deadline|time limit|within|hours?|7:00 PM/iu);
   });
-  it("accepts a visible opponent photo with a stable identity and twelve-hour maximum", () => {
-    expect(decide(state())).toEqual({ commandKey: "game-challenge:challenge_game:b", payload: { v: 1, entryId: "b", deadlineAt: "2030-03-06T00:00:00.000Z" } });
+  it("accepts a visible opponent photo with a stable identity and no deadline", () => {
+    expect(decide(state())).toEqual({ commandKey: "game-challenge:challenge_game:b", payload: { v: 1, entryId: "b" } });
     expect(canChallengeGame(state(), [], "a", now)).toBe(true);
   });
 
@@ -64,13 +65,10 @@ describe("Prove it rules", () => {
     expect(decide(s).payload.entryId).toBe("b");
   });
 
-  it("spends only the challenger's budget while open or stood", () => {
-    for (const deadlineAt of [gameChallengeDeadline(now), now]) {
-      const spent = { ...challenge, deadlineAt };
-      expect(canChallengeGame(state(), [spent], "a", now)).toBe(false);
-      expect(canChallengeGame(state(), [spent], "b", now)).toBe(true);
-      expect(() => decide(state(), [spent])).toThrowError("You've used your Prove it for this game.");
-    }
+  it("spends only the challenger's budget", () => {
+    expect(canChallengeGame(state(), [challenge], "a", now)).toBe(false);
+    expect(canChallengeGame(state(), [challenge], "b", now)).toBe(true);
+    expect(() => decide(state(), [challenge])).toThrowError("You've used your Prove it for this game.");
   });
 
   it("uses strict event ordering for terminal concessions, even after restore", () => {
@@ -95,9 +93,13 @@ describe("Prove it rules", () => {
     expect(gameChallengeStatus(s, challenge, now)).toBe("void");
   });
 
-  it("closes at the deadline or canonical game end", () => {
-    expect(gameChallengeStatus(state(), challenge, new Date(challenge.deadlineAt.getTime() - 1))).toBe("open");
-    expect(gameChallengeStatus(state(), challenge, challenge.deadlineAt)).toBe("stood");
+  it("stays open past twelve hours and closes only with the game", () => {
+    for (const hours of [0, 12, 24, 72]) {
+      const later = new Date(now.getTime() + hours * 3_600_000);
+      expect(gameChallengeStatus(state(), challenge, later)).toBe("open");
+      expect(canChallengeGame(state(), [challenge], "a", later)).toBe(false);
+      expect(canChallengeGame(state(), [challenge], "b", later)).toBe(true);
+    }
     for (const status of ["settled", "void"] as const) {
       const s = state(); s.game.status = status;
       expect(gameChallengeStatus(s, challenge, now)).toBe("stood");
@@ -112,7 +114,7 @@ describe("Prove it rules", () => {
     s.players.push({ ...s.players[1], memberId: "c", seat: 2 });
     s.entries.push(entry("c"));
     expect(decide(s).payload.entryId).toBe("b");
-    expect(() => decideChallenge(s, [challenge], { memberId: "a", entryId: "c", now, createdAt: now, visibleEntryIds: visibleEntryIds(s, "a", new Set()) })).toThrow(/used/);
+    expect(() => decideChallenge(s, [challenge], { memberId: "a", entryId: "c", now, visibleEntryIds: visibleEntryIds(s, "a", new Set()) })).toThrow(/used/);
     expect(canChallengeGame(s, [challenge], "c", now)).toBe(true);
     s.players[1].leftAt = now;
     expect(gameChallengeStatus(s, challenge, now)).toBe("void");
@@ -121,10 +123,10 @@ describe("Prove it rules", () => {
     expect(gameChallengeStatus(s, challenge, now)).toBe("void");
   });
 
-  it("allows an old eligible group photo and closes twelve hours after case creation", () => {
+  it("allows an old eligible group photo without a deadline", () => {
     const s = state(); s.game.seats = 10;
     s.entries[1].receivedAt = new Date(now.getTime() - 36 * 60 * 60 * 1000);
-    expect(decide(s).payload.deadlineAt).toBe(gameChallengeDeadline(now).toISOString());
+    expect(decide(s).payload).toEqual({ v: 1, entryId: "b" });
   });
 
 });

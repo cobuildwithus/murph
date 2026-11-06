@@ -362,7 +362,6 @@ export type GameDayOtherStatus = "posted" | "locked" | "missed" | "none" | "off"
 export interface GameEntryView {
   reply?: GameReplyView;
   canReply?: boolean;
-  challenge?: { status: "open" | "stood"; deadlineAt: string; byYou: boolean };
   /** Self-reported incomplete day; omitted after restore. Does not hide the artifact. */
   incomplete?: true;
   entryId: string;

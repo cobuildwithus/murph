@@ -2125,7 +2125,7 @@ describe("hosted Linq egress authority", () => {
     expect(mocks.readGameProposalDeliveryPlayers).toHaveBeenCalledWith(eventId, "member-1", "chat-authorized-group");
   });
 
-  it.each(["open", "conceded", "restored", "retaken", "withdrawn", "expired", "settled", "void", "due", "other-audience", "unbound", "missing-event"])(
+  it.each(["open", "legacy-deadline", "conceded", "restored", "retaken", "withdrawn", "settled", "void", "due", "other-audience", "unbound", "missing-event"])(
     "requires an open Prove it case at final provider claim in a quiet room: %s", async scenario => {
       const prisma = createPrismaStub({ threadRouteContainerMemberId: "member-1" });
       prisma.hostedLinqDailyState.findFirst.mockResolvedValue(null);
@@ -2146,7 +2146,7 @@ describe("hosted Linq egress authority", () => {
       const idempotencyKey = "game-challenge:game:entry";
       prisma.$queryRaw.mockImplementation(async query => JSON.stringify(query).includes("FROM game_event challenge") && scenario !== "missing-event" ? [{
         id: 10n, gameId: "game", actor: "person-a", commandKey: idempotencyKey,
-        payload: { v: 1, entryId: "entry", deadlineAt: new Date(now.getTime() + (scenario === "expired" ? -1 : 3_600_000)).toISOString() },
+        payload: { v: 1, entryId: "entry", ...(scenario === "legacy-deadline" ? { deadlineAt: new Date(now.getTime() - 1).toISOString() } : {}) },
         concessionEventId: ["conceded", "restored"].includes(scenario) ? 11n : null,
       }] : []);
       mocks.readGameProposalDeliveryPlayers.mockResolvedValue(scenario === "other-audience" ? ["person-a", "outsider"] : ["person-a", "person-b"]);
@@ -2156,7 +2156,7 @@ describe("hosted Linq egress authority", () => {
           answeredMailboxItemIds: [], idempotencyKey, target: "chat-authorized-group", targetKind: "thread" }),
       }));
       const response = await dispatch();
-      if (scenario === "open") {
+      if (["open", "legacy-deadline"].includes(scenario)) {
         expect(response.status).toBe(200);
         expect(await response.json()).toMatchObject({ providerDispatchClaimed: true });
         expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledOnce();

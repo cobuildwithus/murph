@@ -29,7 +29,6 @@ import {
   effectiveTermWords,
   groupTaskOverrideSeats,
   canChallengeGame,
-  gameChallengeStatus,
   type RuleChallenge,
   assertGroupTermsOpen,
   canRedeemGroupTicket,
@@ -241,14 +240,11 @@ function canRedeemTicketView(row: GameTicketRow, input: GameViewInput, owedBy: s
 
 function entryView(entry: RuleEntry, input: GameViewInput): GameEntryView {
   const words = input.entryWords.get(entry.id);
-  const challenge = input.challenges?.find(challenge => challenge.entryId === entry.id);
-  const status = challenge && gameChallengeStatus(input.state, challenge, input.now);
   return {
     ...(input.state.game.seats === 2 ? {
       ...(input.entryReplies?.has(entry.id) ? { reply: input.entryReplies.get(entry.id) } : {}),
       ...(entry.memberId !== input.viewerId && input.replyEligibleEntryIds !== undefined ? { canReply: input.replyEligibleEntryIds?.has(entry.id) ?? false } : {}),
     } : {}),
-    ...(challenge && (status === "open" || status === "stood") ? { challenge: { status, deadlineAt: challenge.deadlineAt.toISOString(), byYou: challenge.actor === input.viewerId } } : {}),
     ...(entry.incomplete ? { incomplete: true as const } : {}),
     entryId: entry.id,
     kind: entry.kind,

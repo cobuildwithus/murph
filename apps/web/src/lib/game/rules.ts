@@ -216,7 +216,6 @@ export interface RuleChallenge {
   id: bigint;
   actor: string;
   entryId: string;
-  deadlineAt: Date;
   concessionEventId: bigint | null;
 }
 
@@ -226,18 +225,13 @@ export function gameChallengeKey(gameId: string, entryId: string): string {
   return `game-challenge:${gameId}:${entryId}`;
 }
 
-/** The stored maximum window; canonical game end may close the case earlier. */
-export function gameChallengeDeadline(createdAt: Date): Date {
-  return new Date(createdAt.getTime() + 12 * 60 * 60 * 1000);
-}
-
 /** Restoring score never erases a concession or spends the returned budget. */
 export function gameChallengeStatus(state: RuleState, challenge: RuleChallenge, now: Date): GameChallengeStatus {
   const entry = state.entries.find(entry => entry.id === challenge.entryId);
   if (state.game.seats === 10 && [challenge.actor, entry?.memberId].some(id => !remainingPlayers(state).some(player => player.memberId === id))) return "void";
   if (challenge.concessionEventId !== null && challenge.concessionEventId > challenge.id) return "conceded";
   if (!entry || entry.withdrawnAt !== null || liveEntry(state.entries, entry.memberId, entry.dayIndex)?.id !== entry.id) return "void";
-  return state.game.status !== "live" || isGameDue(state, now) || now >= challenge.deadlineAt ? "stood" : "open";
+  return state.game.status !== "live" || isGameDue(state, now) ? "stood" : "open";
 }
 
 export function canChallengeGame(state: RuleState, challenges: readonly RuleChallenge[], memberId: string, now: Date): boolean {
@@ -249,8 +243,8 @@ export function canChallengeGame(state: RuleState, challenges: readonly RuleChal
 
 /** Visibility is supplied by the single viewer projection, visibleEntryIds. */
 export function decideChallenge(state: RuleState, challenges: readonly RuleChallenge[], input: {
-  memberId: string; entryId: string; visibleEntryIds: ReadonlySet<string>; now: Date; createdAt: Date;
-}): { commandKey: string; payload: { v: 1; entryId: string; deadlineAt: string } } {
+  memberId: string; entryId: string; visibleEntryIds: ReadonlySet<string>; now: Date;
+}): { commandKey: string; payload: { v: 1; entryId: string } } {
   requireLivePlayer(state, input.memberId);
   if (state.game.seats !== 10 && !isPairRoster(remainingPlayers(state))) reject("INVALID_REQUEST", "Prove it is available in two-player games.");
   if (isGameDue(state, input.now)) reject("GAME_NOT_LIVE", "This game has ended.");
@@ -263,7 +257,7 @@ export function decideChallenge(state: RuleState, challenges: readonly RuleChall
     || !input.visibleEntryIds.has(entry.id)) reject("INVALID_REQUEST", "Choose an opponent's visible photo post that counts.");
   if (!canChallengeGame(state, challenges, input.memberId, input.now)) reject("CHALLENGE_USED", "You've used your Prove it for this game.");
   return { commandKey: gameChallengeKey(state.game.id, entry.id),
-    payload: { v: 1, entryId: entry.id, deadlineAt: gameChallengeDeadline(input.createdAt).toISOString() } };
+    payload: { v: 1, entryId: entry.id } };
 }
 
 export function currentTerms(terms: StoredTerms): StoredTermsVersion {

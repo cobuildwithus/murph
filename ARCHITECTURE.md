@@ -5612,13 +5612,13 @@ the batched query returns only the latest accused/day concession id per case.
 App group admission prepares the bound provider audience before locking and
 revalidates it through `readGroupGameChatAuthority` before spending the case.
 Notice facts contain only profile names from that game's remaining-player cohort,
-the target day's inherited task (the shared default for groups), day, posting time and deadline.
+the target day's inherited task (the shared default for groups), day and posting time.
 Private task overrides, app views, labels, captions, excuses, replies and media never enter notices.
 The exact-notice delivery validator locks the game after route authority and
 rechecks the case and prepared room for both mailbox publication and final claim.
 Mailbox append and receipt transition commit together. Crypto/provider work stays
 outside transactions; stale work is skipped, unavailable providers remain retryable.
-The weekly game spec owns eligibility, wire fields and deadline semantics.
+The weekly game spec owns eligibility, wire fields and case semantics.
 
 `http/capability.ts` reads `X-Murph-Game-Multiplayer: 1`; the command boundary,
 reads, public invite preview and media reads pass it to the existing service.

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { GameSchedule } from "@/src/lib/game/contract";
-import { decideJoin, gameChallengeDeadline, type RuleChallenge, type RuleEntry, type RuleState, type TermWords } from "@/src/lib/game/rules";
+import { decideJoin, type RuleChallenge, type RuleEntry, type RuleState, type TermWords } from "@/src/lib/game/rules";
 import { addDays, dayStartInstant } from "@/src/lib/game/time";
 import { buildGameView, gameMediaUrl, termsView, ticketView, visibleEntryIds, type GameViewInput } from "@/src/lib/game/views";
 
@@ -99,21 +99,29 @@ describe("weekly game views: tickets", () => {
     );
   });
 
-  it.each([2, 10] as const)("projects case state and hidden-post omissions at maxPlayers=%s", seats => {
+  it.each([2, 10] as const)("keeps case budget but omits entry case state at maxPlayers=%s", seats => {
     const state = liveState();
     state.game.seats = seats;
     state.game.chatContainerMemberId = "room";
     const now = noonOnDay(state, LEO, 0);
     const posted = entry(AVA, 0, 1);
     state.entries.push(entry(LEO, 0, 1), posted);
-    const challenge: RuleChallenge = { id: 1n, actor: LEO, entryId: posted.id, deadlineAt: gameChallengeDeadline(now), concessionEventId: null };
+    const challenge: RuleChallenge = { id: 1n, actor: LEO, entryId: posted.id, concessionEventId: null };
     const overrides = { challenges: [challenge] };
     expect(view(state, LEO, now).canChallenge).toBe(true);
     const opened = view(state, LEO, now, overrides);
     expect(opened.canChallenge).toBe(false);
-    expect(opened.days[0].others[0].entry?.challenge).toEqual({ status: "open", deadlineAt: challenge.deadlineAt.toISOString(), byYou: true });
-    expect(view(state, AVA, now, overrides).days[0].mine?.challenge?.byYou).toBe(false);
-    expect(view(state, LEO, challenge.deadlineAt, overrides).days[0].others[0].entry?.challenge?.status).toBe("stood");
+    expect(opened.days[0].others[0].entry?.entryId).toBe(posted.id);
+    for (const status of ["live", "settled"] as const) {
+      state.game.status = status;
+      for (const viewer of [LEO, AVA]) {
+        const projected = view(state, viewer, now, overrides);
+        const entries = projected.days.flatMap(day => [day.mine, ...day.others.map(other => other.entry)]).filter(Boolean);
+        expect(entries.length).toBeGreaterThan(0);
+        for (const entry of entries) expect(entry).not.toHaveProperty("challenge");
+      }
+    }
+    state.game.status = "live";
     for (const hidden of [{ hiddenEntryIds: new Set([posted.id]) }, { hiddenMemberIds: new Set([AVA]) }]) {
       const other = view(state, LEO, now, { ...overrides, ...hidden }).days[0].others[0];
       expect(other?.entry).toBeFalsy();

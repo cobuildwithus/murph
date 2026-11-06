@@ -758,11 +758,11 @@ challenge event's id; restoring the day changes score only, never the case or
 the returned budget. A restored day can have a new case on a new entry, while a
 retry against the original entry remains a no-op.
 
-The stored `deadlineAt` is the accepted event's `createdAt` plus twelve hours.
-It is the maximum answer window, with no photo-age cutoff. A settled, void or canonically due game closes
-an unconceded case early as `stood`. Explaining a post in chat does not mutate
-the case or score. Only the accused can mark the day as not counting through
-the existing self-reported incomplete-day command. Murph never judges a photo.
+A case is one Murph message in the chat, with no deadline and no effect on
+score, streak or missed days. There is no photo-age cutoff. A settled, void or
+canonically due game closes an unconceded case as `stood`. Explaining a post in
+chat does not mutate the case or day. Only the accused's own existing
+mark-incomplete path changes the day. Murph never judges a photo.
 
 ### App API
 
@@ -787,13 +787,8 @@ The additive view fields are:
 
 - `GameView.canChallenge?: boolean`: current servers emit whether this viewer
   has an unspent challenge in a live, bound, not-due pair or capable group. Entry eligibility is
-  checked separately; clients must also require the opponent's unlocked photo,
-  no `incomplete`, and no `challenge`.
-- `GameEntryView.challenge?: { status: "open" | "stood"; deadlineAt: string;
-  byYou: boolean }`: an ISO-8601 deadline and whether this viewer opened the
-  case. It appears on the visible entry for either player, including the
-  accused's `mine`. Void and conceded cases omit it. The existing incomplete
-  tag remains the concession display until score is restored.
+  checked separately; clients must also require the opponent's unlocked photo
+  and no `incomplete`.
 - `GameDayView.others[].postedAt?: string`: the server's `receivedAt` as an
   ISO-8601 timestamp, now present on unlocked visible posts as well as locked
   posts. Reported, hidden, absent and withdrawn posts still omit it.
@@ -812,14 +807,15 @@ The additive view fields are:
   phone doesn't bring back a finished game's page.
 
 Older clients ignore the additive fields, and older responses may omit them.
-The separate iOS release owns the tap reveal, confirmation and case labels.
+The separate iOS release owns the tap reveal and confirmation. The backend
+sends no case status to the app.
 Report and Block keep their existing access and presentation rules.
 
 ### Chat notice and rollout
 
 Acceptance appends one `challenged` event and reserves one `game_challenge`
 lifecycle receipt in the same short database transaction. The event payload is
-`{ v: 1, entryId: string, deadlineAt: string }`, with the challenger in `actor`.
+`{ v: 1, entryId: string }`, with the challenger in `actor`.
 `game-challenge:<gameId>:<entryId>` is the command key, lifecycle event identity,
 mailbox dedupe key and delivery idempotency key. The receipt stores the existing
 hashed lookup key and `sourceRef: <gameId>:<entryId>`. Event ids are used only for
@@ -827,8 +823,8 @@ concession ordering, never notice identity. No migration is needed.
 
 The drain uses `require_send` and only the game's already-bound chat. It never
 discovers or creates a room for a case. One shared projection governs budget,
-view state, drain eligibility and final provider claim. A concession, retake,
-withdrawal, group departure, expiry or game end supersedes pending work; a changed binding or
+drain eligibility and final provider claim. A concession, retake,
+withdrawal, group departure or game end supersedes pending work; a changed binding or
 audience blocks dispatch. Publication and final claim share the exact-notice
 validator under the game lock, after route authority. The app challenge writer
 prepares and revalidates the group room before spending a case. Quiet rooms retain the existing game-notice exemption and
@@ -836,7 +832,7 @@ repeated dispatch claims the same delivery only once.
 
 Instructions contain shared profile names, the target day's inherited task
 (the shared default for groups, never a private per-seat override), day number,
-and the server receipt time and proof deadline as weekday and clock time in the
+and the server receipt time as weekday and clock time in the
 accused's time zone (the zone itself is not named). They contain no media URLs
 or keys, private contact labels, or capture-to-post gap. The notice is two or
 three short lines, deadpan, uses names rather than pronouns, asks one short
@@ -845,12 +841,17 @@ counting. The situation can be funny; the
 person is never the joke. No shame, insults, laughing emoji, em dashes, invented
 evidence, verdicts, feature advertising or reminders.
 
-The lifecycle-template-filter release must land first and remains the rollback
-floor. It selects supported templates and non-null source refs before the drain
+The lifecycle-template-filter release must land first. It selects supported
+templates and non-null source refs before the drain
 batch limit, so an older compatible drain ignores new challenge receipts.
 Deploy this Web backend before the iOS build that calls it. Hosted-runtime
 schemas and tools are unchanged. This backend foundation does not yet expose a
 member-facing control; the complete app release owns its public changelog entry.
+
+The previous Web release rejects rows without `deadlineAt`. Once a new case
+exists, this Web release is the rollback floor. Recover with this release or
+a later compatible forward fix. Existing rows with `deadlineAt` remain readable;
+the field is ignored.
 
 ## Deferred
 

@@ -283,7 +283,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(JSON.parse(instructions!.split("\n").at(-1)!)).toMatchObject({ challengerName: "Maya", accusedName: "Sam", task: "10 min abs" });
   });
 
-  it("accepts Prove it atomically, collapses concurrent retries, and returns budget permanently after concession", async () => {
+  it.each([false, true])("accepts Prove it atomically, reads spent budget, and returns it permanently after concession, legacy deadline=%s", async legacyDeadline => {
     const a = await member("Maya", "America/New_York"), b = await member("Sam", "America/New_York");
     const db = getPrisma();
     const { gameId } = await startGame(a, b);
@@ -308,20 +308,24 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const results = await Promise.all([run(a, command), run(a, command)]);
     expect(results.every(result => result.ok)).toBe(true);
     const accepted = await db.gameEvent.findUniqueOrThrow({ where: { commandKey: key } });
-    expect(accepted).toMatchObject({ actor: a, type: "challenged", payload: { v: 1, entryId: target.entryId,
-      deadlineAt: new Date(accepted.createdAt.getTime() + 12 * 3_600_000).toISOString() } });
+    expect(accepted).toMatchObject({ actor: a, type: "challenged" });
+    expect(accepted.payload).toEqual({ v: 1, entryId: target.entryId });
+    if (legacyDeadline) await db.gameEvent.update({ where: { id: accepted.id }, data: {
+      payload: { v: 1, entryId: target.entryId, deadlineAt: new Date(accepted.createdAt.getTime() - 3_600_000).toISOString() },
+    } });
     expect(await db.gameEvent.count({ where: { commandKey: key } })).toBe(1);
     expect(await db.hostedLinqDelivery.findMany({ where: { template: "game_challenge", sourceRef: `${gameId}:${target.entryId}` } }))
       .toEqual([expect.objectContaining({ status: "awaiting_generation", payloadOwnerMemberId: room })]);
     const currentCase = await readGameChallengeCase(db, gameId, target.entryId, new Date());
+    expect(currentCase?.status).toBe("open");
     const instructions = await readGameChallengeInstructions(currentCase!);
     const facts = JSON.parse(instructions!.split("\n").at(-1)!);
     // Times are weekday and clock time in the accused's zone, which is never named.
     const inZone = (date: Date) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", hour: "numeric", minute: "2-digit" }).format(date);
     const targetEntry = currentCase!.state.entries.find(entry => entry.id === target.entryId)!;
     expect(facts).toEqual({ challengerName: "Maya", accusedName: "Sam", dayNumber: targetEntry.dayIndex + 1, task: "10 min abs",
-      postedAt: inZone(targetEntry.receivedAt), proofDueBy: inZone(currentCase!.challenge.deadlineAt) });
-    expect(instructions).not.toMatch(/Friend|https?:|mediaKey|captureAge/u);
+      postedAt: inZone(targetEntry.receivedAt) });
+    expect(instructions).not.toMatch(/Friend|https?:|mediaKey|captureAge|proofDueBy|deadline|proof is due/iu);
     expect((await readGame(gameId, a))?.canChallenge).toBe(false);
     expect(await errorCode(b, command)).toBe("INVALID_REQUEST");
     const targetDay = (await readGame(gameId, b))!.days.find(day => day.mine?.entryId === target.entryId)!;
