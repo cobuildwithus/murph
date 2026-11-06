@@ -109,7 +109,7 @@ describe('assistant generated delivery files', () => {
     )
     for (const boundary of [
       "member's authenticated private conversation",
-      "archive all files under that member's workspace root as-is",
+      "Archive all files under that member's workspace root as-is",
       'including dotfiles, runtime/history, configuration/instruction files',
       'any credential-bearing records present',
       'without content-based exclusion, redaction, or sanitization',

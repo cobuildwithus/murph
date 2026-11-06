@@ -6690,3 +6690,5 @@ function providerActionFallbackKeyFromNormalized(
 }
 
 export { resolveGenerateImageReferences } from "./assistant-codex/image-reference-resolver.js"
+
+export { materializeVaultMedia } from './assistant-codex/dynamic-tools/materialize-vault-media.js'

@@ -1,5 +1,5 @@
 import { readVerifiedAssistantVaultImageBytes, resolveAssistantVaultFileResponseMedia, resolveAssistantVaultImageResponseMedia } from "@murphai/assistant-engine/assistant-outbox";
-import { resolveGenerateImageReferences } from "@murphai/assistant-engine/assistant-codex";
+import { materializeVaultMedia, resolveGenerateImageReferences } from "@murphai/assistant-engine/assistant-codex";
 import { HostedRuntimeMediaReadError } from "../src/hosted-runtime/platform.ts";
 import { createMealMediaStore } from "./hosted-meal-media.harness.ts";
 import { runHostedMealMediaMaintenance, createHostedMealMediaBudget } from "../src/hosted-runtime/meal-media-maintenance.ts";
@@ -1306,7 +1306,7 @@ test("real materialization rejects wrong local images and classifies mixed outco
   const names = ["good", "missing", "corrupt", "transport", "large", "expired"];
   try {
     const entries = names.map(name => ({ relativePath: `raw/inbox/synthetic/${name}.png`, mediaId: createHash("sha256").update(name).digest("hex"),
-      byteSize: name === "large" ? 1000 : good.length, sha256: createHash("sha256").update(good).digest("hex"),
+      byteSize: name === "large" ? 100 * 1024 * 1024 + 1 : good.length, sha256: createHash("sha256").update(good).digest("hex"),
       mediaKind: "image" as const, mimeType: "image/png", recordedAt: "2030-01-01T00:00:00Z",
       expiresAt: name === "expired" ? "2000-01-01T00:00:00Z" : null }));
     await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue: { schema: "murph.hosted-media-refs.v1", entries } });
@@ -1326,6 +1326,13 @@ test("real materialization rejects wrong local images and classifies mixed outco
       "vault:raw/inbox/synthetic/transport.png": "transport", "vault:raw/inbox/synthetic/large.png": "size",
       "vault:raw/inbox/synthetic/expired.png": "expired",
     });
+    const report = await materializeVaultMedia({ args: { all: true }, vaultRoot, materialize });
+    expect(report).toEqual({ requested: 6, available: 1, removed: 1, unavailable: [
+      { path: "raw/inbox/synthetic/missing.png", reason: "missing" },
+      { path: "raw/inbox/synthetic/corrupt.png", reason: "integrity" },
+      { path: "raw/inbox/synthetic/transport.png", reason: "transport" },
+      { path: "raw/inbox/synthetic/large.png", reason: "size" },
+    ] });
     for (const name of ["missing", "corrupt", "expired"]) {
       expect(await readFile(path.join(vaultRoot, `raw/inbox/synthetic/${name}.png`))).toEqual(wrong);
       await expect(resolveGenerateImageReferences({ vaultRoot, refs: [`raw/inbox/synthetic/${name}.png`], materializeWorkspaceArtifacts: materialize }))
@@ -1341,6 +1348,8 @@ test("real materialization rejects wrong local images and classifies mixed outco
     expect(await readFile(path.join(vaultRoot, entries[1]!.relativePath))).toEqual(wrong);
     const stale = createHostedArtifactMaterializer({ vaultRoot, operatorHomeRoot: vaultRoot, mediaStore: { ...mediaStore, get: async () => { throw ownerLost; } } });
     await expect(stale([entries[1]!.relativePath])).rejects.toMatchObject({ cause: ownerLost });
+    await expect(materializeVaultMedia({ args: { all: true }, vaultRoot, materialize: stale })).rejects.toMatchObject({ cause: ownerLost });
+    await expect(materializeVaultMedia({ args: { all: true }, vaultRoot, materialize, signal: controller.signal })).rejects.toBeDefined();
   } finally { await rm(vaultRoot, { recursive: true, force: true }); }
 });
 

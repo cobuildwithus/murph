@@ -266,3 +266,132 @@ in the attachment-evidence file before termination. That superseded run is
 SIGTERM and the wrapper captured exit 143. The final-state attachment-evidence
 file passes all 21 tests in a fresh process, and the final focused engine and
 consumer lanes above pass. No unrelated process was signalled.
+
+
+## PR 2 local implementation — 2026-11-06
+
+Scope: the deferred private `materialize_vault_media` tool, complete-export
+preparation guidance, and deterministic/live proof only. Keep this plan active
+for PRs 3–4. One local commit; no push, PR or deployment.
+
+Outcome: saved media missing locally can be read, and workspace backups restore
+catalogued media and cold history before archiving. Unavailable or unverified
+files are disclosed; an oversized finished ZIP fails without dropping files.
+Reaches: authenticated private conversations admitted by `send_vault_file`;
+groups and unverified conversations cannot invoke restoration.
+Proof: exact schema/admission/scope, complete catalogue enumeration through the sequential port, composed
+runtime mixed outcomes and interruption, valid oversized ZIP rejection, real
+Codex archive and old-photo journeys, and first-provider-input ablation.
+
+The catalogue already supports native deferred loading. This low-frequency tool
+uses it, adding no resident prompt procedure or flag. The existing catalogue
+reader, materialization port, canonical authority and send cap remain owners.
+No changes to externalization, upload eligibility or snapshot exclusion.
+The architecture's secure-file boundary documents the resulting contract.
+
+Changelog disposition: no public release note for this explicitly local-only,
+unpublished slice; the release must describe this member-visible improvement.
+External ReviewGPT and exact-head CI require a pushed PR and remain outside the
+explicit boundary. Local parent review and focused verification apply here.
+
+### PR 2 result and review
+
+The tool schema is an object with no additional properties and exactly one of
+`paths` (1–100 strings, each 1–4096 characters) or `all: true`. Paths must be
+normalized vault-relative paths: no absolute paths, traversal, backslashes,
+control characters, drive prefixes or workspace root selectors. Literal vault
+subdirectories named `vault` or `operator-home`, and colon-bearing filenames,
+remain in the vault because the port receives explicit `vault:` keys.
+`all` reads the catalogue once at this boundary, including cold ingest months,
+and passes the full selection once to the existing sequential materializer.
+This avoids re-reading its catalogue for artificial batches. No parallel remote
+fanout is added. Exact requests retain their 100-path admission bound.
+
+The response is `{ requested, available, unavailable: [{ path, reason }] }`.
+Only authoritative PR 1 outcomes count as available. Reasons are `missing`,
+`expired`, `integrity`, `size`, `transport` or `obsolete`; an omitted outcome
+fails closed as missing. Abort and owner-loss errors propagate. The real
+runtime composition proves that wrong local PNG bytes remain unchanged and
+are never reported restored when remote bytes are missing or corrupt.
+
+Parent review: **Ready** for this local slice. Five live scenarios passed on
+`gpt-6.1-sol`, local subscription, using production prompts/tool contracts and
+synthetic catalogue/materializer/delivery ports. All four archive scenarios
+assert one `all: true` call before send preparation, one approval request,
+byte-for-byte ZIP contents and unchanged originals. The old-photo journey
+asserts one exact-path call, native image viewing and the correct visual answer.
+The runtime test separately composes the actual hosted materializer with the
+engine result owner; live fixtures do not claim real storage/provider delivery.
+
+The extra incomplete-archive replay caught misleading prose despite passing
+its first assertions: the reply said a file was excluded, while the archive
+correctly preserved an unverified local copy. The owning guidance now explicitly
+distinguishes unrestored from excluded, and the replay rejects that claim.
+Two subsequent runs passed with truthful missing-original/local-copy wording.
+No source files are dropped or modified to make an export fit the send cap.
+The completed, valid oversized-ZIP fixture fails before requesting approval.
+
+### PR 2 provider input
+
+In-fixture ablation removes this tool and replaces only the added export
+sentence with the exact PR 1 wording. The synthetic conversation, production
+prompt layers and other tools stay identical. Captures use the real App Server
+with a scripted `gpt-6.1-sol` provider, excluding only `prompt_cache_key`.
+No exact target tokenizer is configured; scripted token usage is not a token
+measurement.
+
+| Scope | Component | Base UTF-8 bytes | Head UTF-8 bytes | Delta |
+| --- | --- | ---: | ---: | ---: |
+| Direct | Complete decoded first request | 136985 | 137309 | +324 (+0.237%) |
+| Direct | Registered tool descriptors | 66504 | 67682 | +1178 (+1.771%) |
+| Direct | Instructions and turn prompt | 70584 | 70584 | 0 |
+| Group | Complete decoded first request | 141082 | 141082 | 0 |
+| Group | Registered tool descriptors | 46753 | 46753 | 0 |
+| Group | Instructions and turn prompt | 67578 | 67578 | 0 |
+
+Native deferral keeps the tool's full schema out of the first provider request.
+No resident prompt or group prompt text changed.
+
+### PR 2 executed lanes
+
+Every test/build/typecheck lane captures `EXIT=$?` before inspecting output and
+returns the real status. These are local results, not CI/deployment evidence.
+For package tests below, the command prefix is `pnpm --dir <package> exec vitest
+run --config vitest.config.ts --no-coverage`.
+
+| Lane | Selection | Final result |
+| --- | --- | --- |
+| Engine boundaries and adjacent consumers | `materialize-vault-media`, `assistant-vault-file-send`, `assistant-codex-turn-planning`, `assistant-codex-group-tool`, `assistant-local-service-hosted-tools`, `assistant-local-service-delivery`, `system-prompt.dynamic-context` (`test/*.test.ts`) | Exit 0; 7 files, 445 passed |
+| Final tool/send boundary recheck | `test/materialize-vault-media.test.ts test/assistant-vault-file-send.test.ts` | Exit 0; 98 passed, including 25 new-tool tests |
+| Provider contract conversion | `test/assistant-codex-tool-input-contract.test.ts` | Exit 0; 20 passed, 40 opt-in cases skipped |
+| Input measurement | `MURPH_MEASURE_VAULT_MEDIA_INPUT=1` plus the provider-contract file and `-t 'vault media: complete first provider input'` | Exit 0; 2 passed |
+| Full hosted tool admission | `MURPH_RUN_REAL_CODEX_E2E=1` plus `test/production-hosted-capabilities.test.ts` (synthetic provider boundary) | Exit 0; 1 passed, 50 tools |
+| Runtime real materializer | `packages/assistant-runtime`, `test/hosted-runtime-artifacts.test.ts` | Exit 0; 39 passed |
+| CLI consumer | `packages/cli`, `test/cli-runtime-artifacts.test.ts` | Exit 0; 7 passed |
+| Cloudflare consumers | From root: `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts --no-coverage apps/cloudflare/test/container-workspace-restore-preparation.test.ts apps/cloudflare/test/runtime-media-write-cancellation.test.ts` | Exit 0; 16 passed |
+| Typechecks | `pnpm --dir <package> typecheck` for `packages/assistant-engine`, `packages/assistant-runtime`, `packages/cli`, `apps/cloudflare` | All exit 0 |
+| Dependency/build preparation | `pnpm install --prefer-offline`; `pnpm build:workspace:incremental`; `node scripts/assemble-assistant-cli-surface.mjs` | All exit 0 |
+| Repository checks | `pnpm complexity:diff`; `pnpm docs:drift`; `git diff --check`; authored-content privacy scan | All exit 0 |
+
+Each live command uses `pnpm test:assistant:live -- --test '<pattern>'`:
+
+| Pattern | Result and reply review |
+| --- | --- |
+| `an original-file workspace ZIP` | Exit 0; Ready |
+| `a full workspace ZIP including member runtime files` | Exit 0; Ready |
+| `a complete workspace ZIP from a general backup request` | Exit 0; Ready |
+| `real Codex old saved photo e2e` | Exit 0; Ready; green background, white label, 42 g |
+| `a disclosed incomplete workspace ZIP` | Initial exit 0 but UX Hold; corrected guidance/replay exit 0 twice, Ready |
+
+Earlier nonpassing lanes: the intentional preimplementation regression exited
+1; initial new-test RPC/context fixture mistakes also exited 1, then passed.
+Typechecks exited 2 for new fixture typing and later an inferred request-union
+shape; explicit request types fixed them, and all four final package checks pass.
+The first complexity lane exited 1; using the existing reader list and a typed
+ordinary-validation predicate kept dispatcher complexity from growing. A combined
+live pattern and an overly qualified pattern each exited 2 before provider work;
+unique scenario substrings ran normally. The first hosted-capability parity lane
+exited 1 because its generated CLI contract was absent; the documented generator
+exited 0 and the parity rerun passed. Frog's existing prepared-runtime/CLI-contract
+entry already describes that setup requirement; no new workaround or entry was
+needed. There are no unresolved local verification failures.
