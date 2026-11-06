@@ -433,7 +433,11 @@ it has been explicitly elevated to a cross-cutting invariant.
 
 - Cursors, watermarks, sequences, pending-input indexes, and pagination use one
   total, transitive, owner-shared ordering primitive. Import progress is not
-  handling progress.
+  handling progress. A continuation may mutate only the identity and revision it
+  observed, using current owner state at commit. A scan may only advance the
+  cursor of the entry it read; only enable and disable writers change channel
+  membership. A scheduled completion archives a one-shot only while the registry
+  still holds the revision and occurrence that ran.
 - Explicit owner or provider causal identifiers take precedence over
   positional, "latest," grouping, watermark, and time-window heuristics. Work
   with distinct ordering anchors must not be merged into one turn. A

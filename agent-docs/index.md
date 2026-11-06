@@ -1875,3 +1875,7 @@ Changelog deletion evidence is owned by `../apps/web/changelog/README.md`; [veri
 Canonical publication uncertainty and operational receipt replay proof are tracked in
 [`canonical evidence preservation`](exec-plans/completed/2026-11-06-preserve-canonical-evidence.md).
 The durable contract remains in `references/hosted-runtime-protocol.md`.
+
+Scheduling writer ownership proof is tracked in
+[`scheduling writers`](exec-plans/completed/2026-11-06-sm-pr14-scheduling-writers.md).
+The durable rule remains in `docs/contracts/00-invariants.md`.
