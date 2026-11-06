@@ -289,56 +289,6 @@ export async function createHostedGroupSponsorshipMomentTx(input: {
   });
 }
 
-export async function assertHostedGroupSponsorshipRequestMatchesTx(input: {
-  draft: HostedGroupSponsorshipDraft | null;
-  purchaseId: string;
-  tx: Prisma.TransactionClient;
-}): Promise<void> {
-  if (await hostedGroupSponsorshipRequestMatchesTx(input)) {
-    return;
-  }
-  throw hostedOnboardingError({
-    code: "HOSTED_USAGE_CREDIT_REQUEST_KEY_CONFLICT",
-    httpStatus: 409,
-    message: "That request key was already used for another sponsorship.",
-  });
-}
-
-export async function hostedGroupSponsorshipRequestMatchesTx(input: {
-  draft: HostedGroupSponsorshipDraft | null;
-  purchaseId: string;
-  tx: Prisma.TransactionClient;
-}): Promise<boolean> {
-  const moment = await input.tx.hostedGroupSponsorshipMoment.findUnique({
-    select: {
-      configurationDigest: true,
-      creativeRequestEncrypted: true,
-    },
-    where: { purchaseId: input.purchaseId },
-  });
-  if (!moment) {
-    return false;
-  }
-  const actual = Buffer.from(
-    moment?.configurationDigest ?? digestHostedGroupSponsorshipDraft(null),
-    "utf8",
-  );
-  const expectedDrafts = moment.creativeRequestEncrypted === null
-    ? [
-        input.draft,
-        canonicalizeModernHostedGroupSponsorshipDraft(input.draft),
-      ]
-    : [canonicalizeModernHostedGroupSponsorshipDraft(input.draft)];
-  return expectedDrafts.some((draft) => {
-    const expected = Buffer.from(
-      digestHostedGroupSponsorshipDraft(draft),
-      "utf8",
-    );
-    return expected.byteLength === actual.byteLength
-      && timingSafeEqual(expected, actual);
-  });
-}
-
 export async function activateHostedGroupSponsorshipMomentTx(input: {
   activatedAt: Date;
   customContentAuthorized: boolean;

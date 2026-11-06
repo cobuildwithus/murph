@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-05",
+  "order": 500,
+  "item": {
+    "id": "simpler-group-funding-page",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "A simpler way to keep Murph going in a group",
+    "summary": "Funding a group is now one page with one dial, and the button shows the amount you chose.",
+    "details": "Drag the end of the dial to set an amount, and scrolling past it leaves your choice alone. A monthly sponsorship still charges $5 at a time, up to your limit. If you cancel at checkout, you land back on the same page. The optional personal notes, songs and credits are gone.",
+    "relevanceTags": ["groups", "funding"],
+    "sourcePullRequests": [4613]
+  }
+}

@@ -10,10 +10,9 @@ import {
 } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
 import {
-  GroupUsageFundingActions,
-  GroupUsageFundingShell,
+  GroupFundingSurface,
 } from "@/src/components/hosted-groups/group-usage-funding-shell";
-import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-sponsorship-dialog";
+import { GroupFundingCheckout } from "@/src/components/hosted-groups/group-funding-checkout";
 import { GroupSponsorshipManagementCard } from "@/src/components/hosted-groups/group-sponsorship-management-card";
 import { MetricCard } from "@/src/components/ui/metric-card";
 import {
@@ -121,7 +120,6 @@ import {
   DESIGN_GROUP_SPONSORSHIP_OFFERS,
   DESIGN_USAGE_OFFERS,
   DESIGN_USAGE_MISSION_CONTACT_OPTION,
-  GroupFundingSupportersStudy,
   GroupSponsorshipManagementConfirmationStudy,
 } from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
@@ -1173,46 +1171,31 @@ export function ComponentsContent() {
               data-design-component="group-usage-funding"
               id="group-usage-funding-component"
             >
-              <GroupUsageFundingShell
-                action={(
-                  <GroupUsageFundingActions
-                    monthlyAction={(
-                      <GroupSponsorshipDialog
-                        checkoutUrl={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/usage-credit/checkout`}
-                        customizationAllowed
-                        inert
-                        mode="monthly"
-                        monthlyCapMinor={1_000}
-                        monthlyCapOptions={DESIGN_GROUP_MONTHLY_CAPS}
-                        offers={[DESIGN_GROUP_SPONSORSHIP_OFFERS[0]]}
-                        payerMemberId="design_usage_top_up_payer"
-                      />
-                    )}
-                    oneTimeAction={(
-                      <GroupSponsorshipDialog
-                        checkoutUrl={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/usage-credit/checkout`}
-                        customizationAllowed
-                        inert
-                        mode="one_time"
-                        offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
-                        payerMemberId="design_usage_top_up_payer"
-                        triggerSize="default"
-                        triggerVariant="link"
-                      />
-                    )}
-                  />
-                )}
-                groupName="Sunday sleep crew"
-              />
+              <GroupFundingSurface>
+                <GroupFundingCheckout
+                  checkoutUrl={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/usage-credit/checkout`}
+                  groupName="Sunday sleep crew"
+                  inert
+                  initialMonthlyCapMinor={1_000}
+                  monthly={{
+                    capOptions: DESIGN_GROUP_MONTHLY_CAPS,
+                    offer: DESIGN_GROUP_SPONSORSHIP_OFFERS[0],
+                  }}
+                  oneTimeOffers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
+                  payerMemberId="design_usage_top_up_payer"
+                />
+              </GroupFundingSurface>
             </div>
             <div
               data-design-component="group-sponsorship-management"
               id="group-sponsorship-management-component"
               inert
             >
+<GroupFundingSurface>
               <GroupSponsorshipManagementCard
                 periodEndTimeZone="UTC"
                 endpoint={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/sponsorship`}
+                groupName="Sunday sleep crew"
                 initialSelectedMonthlyCapMinor={5_000}
                 management={{
                   authorizationId: "hgsa_design_component",
@@ -1224,6 +1207,7 @@ export function ComponentsContent() {
                   status: "active",
                 }}
               />
+              </GroupFundingSurface>
             </div>
             <GroupSponsorshipManagementConfirmationStudy />
             <div
@@ -1473,17 +1457,6 @@ export function ComponentsContent() {
               </div>
             ))}
           </div>
-        </Section>
-
-        <Separator />
-
-        <Section title="Group funding supporters">
-          <p className="text-sm text-muted-foreground">
-            The funding page recognizes the current monthly sponsor and recent
-            one-time supporters without exposing contribution amounts or the
-            sponsor&apos;s private monthly maximum.
-          </p>
-          <GroupFundingSupportersStudy />
         </Section>
 
         <Separator />

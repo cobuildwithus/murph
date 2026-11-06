@@ -502,91 +502,69 @@ group request and every older share that member can still revoke.
 
 ### Group Usage Funding
 
-An authenticated group funding link opens its relevant funding control
-immediately: monthly sponsorship for an unsponsored chat, one-time contribution
-for an already sponsored chat, or payment recovery when a purchase is in
-progress. Use `GroupUsageFundingShell` only as the quiet reopen surface beneath
-that control. Do not add a second sales card, decorative status badge, duplicate
-headline, or explanatory paragraph. Retain `Back to Murph` as the quiet
-secondary action.
+The funding link is one page on the app's night ground, the twin of a challenge
+invite link: `GroupFundingFrame`, then `GroupFundingScreen` for each state. A
+state is one Fraunces headline ending in a period, at most one supporting
+sentence, and at most one cream pill plus one quiet link. The headline is the
+state, so there is no fixed header and no status box. The page does not add a
+drawer, a sales card, a status badge, a note under the button, an optional form,
+or a list of supporters. Paint `html` and `body` night too, so overscroll and
+Safari's bars don't show the cream page beneath.
 
-A signed-out funding link first shows one neutral sign-in handoff and returns to
-the exact funding URL after authentication. Do not reveal whether the group or
-the viewer has a private sponsorship relationship before that handoff. An
-authenticated payer keeps the cancellation path even when the group is no
-longer eligible for new funding; authenticated non-payers see the ordinary
-unavailable state. After cancellation, replace the action with a durable receipt
-that confirms future automatic refills stopped and existing usage credit stays
-with the group. Do not reload into an unrelated unavailable state.
+A signed-out link shows one sign-in action and returns to the exact funding URL.
+Do not reveal whether the viewer has a private sponsorship relationship before
+that. An authenticated payer keeps the cancellation path even when the group is
+no longer eligible for new funding; authenticated non-payers see the ordinary
+unavailable state. After cancellation, keep a durable receipt on the page instead
+of reloading into an unrelated state.
 
-For a signed-in active group participant, append one quiet **Supporters** list
-beneath the funding action when a current monthly sponsorship or recent
-one-time contribution exists. Use only a public alias entered after the dialog
-discloses its signed-in-group audience and active-monthly-or-recent-20 duration,
-and only after verified settlement preserved the sponsor's group authority;
-otherwise use `Anonymous`. Label each row only as
-`Monthly sponsor` or `One-time contribution`. Do not show amounts, monthly
-maximums, dates, payer identity, payment status, or automatic-refill history.
-Signed-out visitors and non-participants never see the supporter list. Keep the
-list absent when there is nothing to recognize. Stream it beneath the complete
-primary action in its own best-effort Suspense boundary with a null fallback so
-recognition cannot delay funding, management, cancellation, or recovery. Render
-its real component with synthetic states in both the components catalog and
-this section study.
+`GroupFundingDial` is the amount control: $5, $10, $20, and $50 a month, or the
+one-time amounts. Only its knob takes a drag, and only the knob sets
+`touch-action: none`, so a scroll that starts anywhere else on the dial scrolls
+the page. The amount updates live during the drag, and the knob cannot cross the
+gap between the two ends. Tapping a printed amount and Arrow, Home, and End keys
+reach the same stops. The dial shrinks with the viewport height, down to a floor,
+so the pill stays in view under Safari's bars; a phone shows far less height than
+its screen size. The number and knob scale with the dial. Nothing on the dial may
+extend past its own box; a rotated full-size layer makes the whole page scroll
+sideways.
 
-Use `GroupSponsorshipDialog` for the primary monthly choice. Present $5, $10,
-$20, and $50 as visually prominent monthly maximums. On desktop, use the shared
-choice cards. On phones, use a near-full-height bottom drawer with one large
-circular cap slider. The handle follows a pointer anywhere around the arc and
-snaps to the nearest available maximum on release; Arrow keys and Home/End
-provide the same four-stop selection. Keep the opening explanation to
-`Choose your monthly sponsorship limit.` The explicit sponsor action authorizes
-the initial $5 activation purchase, whose amount is shown before payment;
-selecting a maximum alone does not charge the card. Keep both funding actions
-available at every current group-capacity state; capacity changes urgency and
-automatic refill timing, not the ability to fund. Keep an explicit one-time
-contribution as the secondary action. On phones, open that contribution in the
-same bottom-drawer pattern as monthly sponsorship; keep the centered dialog on
-larger screens. Customer-facing amount choices say `usage`; cost weighting is
-an accounting detail, not interface copy. Keep the contribution action at the
-drawer's safe-area edge while its body scrolls. Dollar amounts remain usage
-capacity, never an owned or promised number of messages. Every cap increase
-requires fresh payer confirmation. Keep the alias, note, and eligible temporary
-running bit in one collapsible `Add a note` section, open by default, and attach
-them only to the activation or one-time purchase, never to automatic refills.
-Optional text fields use the sage focus border without an outer glow. The
-drawer body owns overflow while the sponsor action stays available at the safe
-area edge, so expanded note fields never become unreachable. Preserve visible
-focus and selection states. Render the production activation,
-active-management, near-cap/recovery, paused, and one-time states at desktop and
-mobile sizes on `/design` with controls inert, including content rendered
-through a dialog or drawer portal.
+The pill states the chosen amount: `Sponsor up to $10 a month` or `Give $10`.
+Choosing an amount alone never charges the card. Keep funding available at every
+group capacity state; capacity changes urgency and refill timing, not the ability
+to fund. Dollar amounts remain usage capacity, never a promised number of
+messages.
 
-In active sponsorship management, reveal the apply action only after the payer
-selects a different maximum. Use the large primary button at full width on
-phones and label an increase as a review step, not as completed confirmation.
-The review opens a focus-safe responsive alert dialog with the current and new
-monthly maximums, the rule that $5 usage purchases happen only while automatic
-refills are active, and explicit `Keep current setup` and `Increase to $N`
-actions. Keep the dialog visible when the result cannot be confirmed. For limit
-changes, replace the secondary action with `Check current setup` and make
-dismissal reload authoritative state while retaining the primary retry. For
-cancellation, keep the dialog open and use the exact authorized cancellation
-request as an idempotent status check so a lost response still reaches the
-terminal receipt. Never use a browser alert or confirm prompt for sponsorship
-changes.
+Monthly and one-time share one purchase controller, so an unresolved payment has
+a single owner. The quiet `Give once instead` and `Sponsor monthly instead` links
+switch between them, and neither appears while an attempt is unresolved. A chat
+sponsored by someone else offers only one-time.
 
-When group funding is fulfilled, switch from the payment-status composition to
-one confident success hierarchy: a compact sage confirmation mark, the
-Fraunces headline `This group has more Murph`, one sentence confirming that the
-contribution is ready, and one full-width **Open Messages** action. State that
-Messages opens without a group deep link and the member must choose the group.
-Keep the desktop dialog and mobile drawer at content height, and use their
-standard close control as the only separate exit. Do not add a congratulatory
-kicker, divider band, second dismissal action, bordered status card,
-payment-pending copy, invented amount, or celebration graphics. Once
-fulfillment is verified, do not carry frozen sponsor details or their
-payment-recovery instructions into the success receipt.
+A canceled or failed checkout returns to the normal page with one sentence, such
+as `Checkout canceled. Nothing was charged.`, and the dial ready to use. Never
+treat the cancel return as proof: follow the authoritative purchase status, which
+can still confirm a payment. When an attempt may have reached payment, offer only
+`Check payment`, which reuses the same request and cannot start a second payment.
+Every state keeps a way forward. Move focus to the new headline or sentence when
+an outcome replaces the control the person just used.
+
+When funding is fulfilled, the headline is `This group has more Murph.` with a
+small gold ticket and one **Open Messages** pill. Messages has no group deep link.
+The ticket prints no amount.
+
+An active sponsor sees the same dial set to their monthly limit, with what was
+charged and when the month resets in the sentence. The pill appears only after
+they choose a different limit. Paused and failed-payment states set the dial
+aside until refills are running. Raising a limit opens the app's night drawer
+stating the new limit and that $5 charges happen only while refills are on. Keep
+that drawer visible when a result cannot be confirmed. For limit changes, offer
+`Check current setup` and reload authoritative state on dismissal. For
+cancellation, keep the drawer open and repeat the exact authorized request as an
+idempotent status check so a lost response still reaches the receipt. Never use a
+browser alert or confirm prompt for sponsorship changes.
+
+Render each state with its real component on `/screenshots/groups` at phone and
+desktop widths.
 
 ### Hosted AI Usage Activity
 

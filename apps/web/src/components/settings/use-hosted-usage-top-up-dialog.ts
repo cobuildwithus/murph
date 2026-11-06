@@ -59,14 +59,13 @@ function useHostedUsageTopUpDialog({
   buildCheckoutPayload,
   checkoutUrl = CHECKOUT_URL,
   deferTerminalRefreshUntilClose = false,
-  groupPaymentMode,
   initialCheckoutErrorCode,
   initialOpen = false,
   inert = false,
   offers,
   payerMemberId,
   purchaseReturn = null,
-}: HostedUsageTopUpDialogProps) {
+}: Omit<HostedUsageTopUpDialogProps, "scope">) {
   const { refresh } = useRouter();
   const [state, dispatch] = useReducer(
     hostedUsageTopUpReducer,
@@ -97,8 +96,7 @@ function useHostedUsageTopUpDialog({
     purchaseReturn?.kind === "cancel" ? purchaseReturn.purchaseId : null;
   const selectedOfferCode =
     state.screen.kind === "selection" && !state.screen.capacityConflict
-      ? state.screen.selectedOfferCode ??
-        (groupPaymentMode === "monthly" ? offers[0]?.offerCode ?? null : null)
+      ? state.screen.selectedOfferCode
       : null;
   const selectedOffer =
     offers.find((offer) => offer.offerCode === selectedOfferCode) ?? null;

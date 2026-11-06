@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   activateHostedGroupSponsorshipMomentTx,
-  assertHostedGroupSponsorshipRequestMatchesTx,
   createHostedGroupSponsorshipMomentTx,
   digestHostedGroupSponsorshipDraft,
   hasHostedGroupSponsorshipCustomizationAuthority,
@@ -367,24 +366,6 @@ describe("hosted group sponsorship store", () => {
     expect(harness.row.creativeRequestEncrypted).toMatch(/^sealed:/u);
     expect(harness.row.creativeRequestEncrypted).not.toContain("ensemble");
 
-    await expect(assertHostedGroupSponsorshipRequestMatchesTx({
-      draft,
-      purchaseId: "purchase_123",
-      tx: harness.prisma as never,
-    })).resolves.toBeUndefined();
-    await expect(assertHostedGroupSponsorshipRequestMatchesTx({
-      draft: {
-        ...draft,
-        creativeRequest: {
-          ...draft.creativeRequest,
-          styleRequest: "Changed after payment started.",
-        },
-      },
-      purchaseId: "purchase_123",
-      tx: harness.prisma as never,
-    })).rejects.toMatchObject({
-      code: "HOSTED_USAGE_CREDIT_REQUEST_KEY_CONFLICT",
-    });
 
     await activateHostedGroupSponsorshipMomentTx({
       activatedAt: PAID_AT,
@@ -506,11 +487,6 @@ describe("hosted group sponsorship store", () => {
     expect(harness.row.creativeRequestEncrypted).toMatch(/^sealed:/u);
     expect(harness.row.sponsorMessageEncrypted).toBeNull();
     expect(harness.row.fundingPageAliasConsent).toBeNull();
-    await expect(assertHostedGroupSponsorshipRequestMatchesTx({
-      draft: legacyDraft,
-      purchaseId: "purchase_old_client",
-      tx: harness.prisma as never,
-    })).resolves.toBeUndefined();
     await expect(readHostedGroupSponsorshipDraftForCreator({
       creatorMemberId: "member_sponsor",
       prisma: harness.prisma as never,
@@ -559,11 +535,6 @@ describe("hosted group sponsorship store", () => {
     expect(harness.row.creativeRequestEncrypted).toBeNull();
     expect(harness.row.publicAliasEncrypted).toBeNull();
     expect(harness.row.sponsorMessageEncrypted).toBeNull();
-    await expect(assertHostedGroupSponsorshipRequestMatchesTx({
-      draft: aliasOnlyDraft,
-      purchaseId: "purchase_quiet",
-      tx: harness.prisma as never,
-    })).resolves.toBeUndefined();
     const quiet = await readHostedGroupSponsorshipMomentForNotification({
       customContentAuthorized: true,
       offerCode: "usage_5_usd",
@@ -580,11 +551,6 @@ describe("hosted group sponsorship store", () => {
     harness.row.creativeRequestEncrypted = null;
     harness.row.publicAliasEncrypted =
       `sealed:${Buffer.from(aliasOnlyDraft.publicAlias, "utf8").toString("base64url")}`;
-    await expect(assertHostedGroupSponsorshipRequestMatchesTx({
-      draft: aliasOnlyDraft,
-      purchaseId: "purchase_quiet",
-      tx: harness.prisma as never,
-    })).resolves.toBeUndefined();
     await expect(readHostedGroupSponsorshipMomentForNotification({
       customContentAuthorized: true,
       offerCode: "usage_5_usd",
@@ -706,15 +672,6 @@ describe("hosted group sponsorship store", () => {
       prisma: harness.prisma as never,
       purchaseId: "purchase_materialized_by_base_web",
     })).resolves.toEqual(draft);
-    await expect(assertHostedGroupSponsorshipRequestMatchesTx({
-      draft: {
-        publicAlias: draft.publicAlias,
-        runningBitRequest: draft.runningBitRequest,
-        sponsorMessage: draft.sponsorMessage,
-      },
-      purchaseId: "purchase_materialized_by_base_web",
-      tx: harness.prisma as never,
-    })).resolves.toBeUndefined();
 
     await activateHostedGroupSponsorshipMomentTx({
       activatedAt: PAID_AT,

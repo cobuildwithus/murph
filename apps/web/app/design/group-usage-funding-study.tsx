@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  useEffect,
   useState,
   type ReactNode,
 } from "react";
@@ -11,17 +10,21 @@ import type {
 } from "@murphai/hosted-execution/plan-usage";
 
 import {
-  GroupFundingSignInRequired,
+  GroupFundingAttemptFailure,
+  GroupFundingCapacityConflict,
+  GroupFundingCheckout,
+  GroupFundingPurchaseStatus,
+  GroupFundingSelection,
+  readGroupFundingPurchaseStatus,
+  type GroupFundingMonthlyCapOption,
+} from "@/src/components/hosted-groups/group-funding-checkout";
+import {
+  GroupFundingSignInButton,
 } from "@/src/components/hosted-groups/group-funding-sign-in-button";
-import { GroupFundingSupporters } from "@/src/components/hosted-groups/group-funding-supporters";
 import {
-  GroupUsageFundingActions,
-  GroupUsageFundingShell,
+  GroupFundingScreen,
+  GroupFundingSurface,
 } from "@/src/components/hosted-groups/group-usage-funding-shell";
-import {
-  GroupSponsorshipDialog,
-  type GroupSponsorshipMonthlyCapOption,
-} from "@/src/components/hosted-groups/group-sponsorship-dialog";
 import {
   GroupSponsorshipCanceledReceipt,
   GroupSponsorshipManagementCard,
@@ -30,6 +33,10 @@ import {
 import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
+import {
+  readHostedUsageTopUpPurchaseActions,
+  type HostedUsageTopUpPurchaseScreen,
+} from "@/src/components/settings/hosted-usage-top-up-state";
 import { Button } from "@/src/components/ui/button";
 import type { HostedAiUsageActivitySnapshot } from "@/src/lib/hosted-execution/usage-activity-types";
 import {
@@ -49,40 +56,39 @@ const DESIGN_PAYER_MEMBER_ID = "design_usage_top_up_payer";
 const DESIGN_SIGNUP_REFERRAL_URL = "https://example.com/r/design-referral";
 
 const DESIGN_GROUP_SPONSORSHIP_OFFERS = [
-  {
-    amountLabel: "$5",
-    offerCode: "usage_5_usd",
-    runningBitDurationLabel: null,
-  },
-  {
-    amountLabel: "$10",
-    offerCode: "usage_10_usd",
-    runningBitDurationLabel: "1 day",
-  },
-  {
-    amountLabel: "$20",
-    offerCode: "usage_20_usd",
-    runningBitDurationLabel: "3 days",
-  },
+  { amountLabel: "$5", offerCode: "usage_5_usd" },
+  { amountLabel: "$10", offerCode: "usage_10_usd" },
+  { amountLabel: "$20", offerCode: "usage_20_usd" },
 ] as const;
 
 const DESIGN_GROUP_MONTHLY_CAPS =
   HOSTED_GROUP_SPONSORSHIP_MONTHLY_CAPS_MINOR.map((monthlyCapMinor) => ({
     amountLabel: `$${monthlyCapMinor / 100}`,
     monthlyCapMinor,
-  })) satisfies readonly GroupSponsorshipMonthlyCapOption[];
+  })) satisfies readonly GroupFundingMonthlyCapOption[];
 
-const DESIGN_GROUP_FUNDING_SUPPORTERS = {
-  monthlySponsor: {
-    id: "hucp_design_monthly_sponsor",
-    name: "The Group Historian",
-  },
-  oneTimeContributions: [
-    { id: "hucp_design_one_time_1", name: "Night Shift" },
-    { id: "hucp_design_one_time_2", name: "Anonymous" },
-    { id: "hucp_design_one_time_3", name: "Anonymous" },
-    { id: "hucp_design_one_time_4", name: "Anonymous" },
-  ],
+const DESIGN_GROUP_NAME = "Sunday sleep crew";
+const DESIGN_GROUP_MONTHLY_PLAN = {
+  capOptions: DESIGN_GROUP_MONTHLY_CAPS,
+  offer: DESIGN_GROUP_SPONSORSHIP_OFFERS[0],
+};
+const DESIGN_GROUP_MONTHLY_DIAL = {
+  caption: "a month",
+  onValueChange: () => undefined,
+  options: DESIGN_GROUP_MONTHLY_CAPS.map((option) => ({
+    amountLabel: option.amountLabel,
+    value: option.monthlyCapMinor,
+  })),
+  value: 1_000,
+};
+const DESIGN_GROUP_ONE_TIME_DIAL = {
+  caption: "one time",
+  onValueChange: () => undefined,
+  options: DESIGN_GROUP_SPONSORSHIP_OFFERS.map((offer) => ({
+    amountLabel: offer.amountLabel,
+    value: offer.offerCode as string,
+  })),
+  value: "usage_10_usd",
 };
 
 const DESIGN_USAGE_MISSION_CONTACT_OPTION: MurphContactOption = {
@@ -288,90 +294,29 @@ const DESIGN_FAMILY_EXHAUSTED_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
 
 function GroupUsageFundingStudy() {
   const endpoint = "/api/design/group-sponsorship-management";
-  const [previewMode, setPreviewMode] = useState<
-    "fulfilled" | "monthly" | "one_time" | null
-  >(null);
-
-  useEffect(() => {
-    function syncActivationPreview() {
-      setPreviewMode(
-        window.location.hash === "#group-funding-receipt"
-          ? "fulfilled"
-          : window.location.hash === "#group-usage-funding"
-            ? "monthly"
-            : window.location.hash === "#group-one-time-contribution"
-              ? "one_time"
-              : null,
-      );
-    }
-
-    syncActivationPreview();
-    window.addEventListener("hashchange", syncActivationPreview);
-    return () =>
-      window.removeEventListener("hashchange", syncActivationPreview);
-  }, []);
-
-  const previewOpenProps = (mode: "monthly" | "one_time") => ({
-    initialOpen: previewMode === mode,
-  });
-
-  const oneTimeContribution = (
-    <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        Murph is sponsored in this chat.
-      </p>
-      <GroupUsageFundingActions
-        oneTimeAction={(
-          <GroupSponsorshipDialog
-            {...previewOpenProps("one_time")}
-            key={previewMode === "one_time" ? "open" : "closed"}
-            checkoutUrl="/api/design/usage-credit-preview"
-            customizationAllowed
-            inert
-            mode="one_time"
-            offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
-            payerMemberId={DESIGN_PAYER_MEMBER_ID}
-            triggerSize="lg"
-            triggerVariant="outline"
-          />
-        )}
-      />
-      <GroupFundingSupporters supporters={DESIGN_GROUP_FUNDING_SUPPORTERS} />
-    </div>
-  );
-  const oneTimeRecovery = () => (
-    <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        Murph is sponsored in this chat.
-      </p>
-      <GroupSponsorshipDialog
-        activePurchase={{
-          cancelAllowed: true,
-          offerCode: "usage_10_usd",
-          purchaseId: "hucp_design_one_time_recovery",
-          retryAllowed: true,
-          status: "checkout_open",
-          url: "https://checkout.stripe.test/design-group-one-time",
-        }}
-        checkoutUrl="/api/design/usage-credit-preview"
-        customizationAllowed
-        frozenSponsorship={{
-          creativeRequest: {
-            format: "song",
-            prompt: "Turn the group’s finish-line energy into a tiny theme.",
-            styleRequest: "Warm acoustic ensemble with a bright tempo.",
-          },
-          publicAlias: "Sunday sleep crew",
-          runningBitRequest: "Keep the finish-line jokes going.",
-          sponsorMessage: null,
-        }}
-        inert
-        mode="one_time"
-        offers={[]}
-        payerMemberId={DESIGN_PAYER_MEMBER_ID}
-      />
-    </div>
-  );
+  const headline = `Keep Murph in ${DESIGN_GROUP_NAME}.`;
+  const selection = {
+    onSubmit: () => undefined,
+    title: headline,
+  };
+  const monthly = {
+    ...selection,
+    amount: DESIGN_GROUP_MONTHLY_DIAL,
+    mode: "monthly" as const,
+    onModeChange: () => undefined,
+  };
+  const management = {
+    chargedThisPeriodMinor: 500,
+    monthlyCapMinor: 2_000,
+    pendingMonthlyCapMinor: null,
+    pendingThisPeriodMinor: 0,
+    periodEnd: "2026-08-30T16:00:00.000Z",
+  } as const;
+  const card = {
+    endpoint,
+    groupName: DESIGN_GROUP_NAME,
+    periodEndTimeZone: "UTC",
+  };
 
   return (
     <div
@@ -384,219 +329,255 @@ function GroupUsageFundingStudy() {
           Production components · inert synthetic states
         </p>
         <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-          Monthly sponsorship is the primary flow. One-time contribution
-          remains a separate secondary action and stays quiet in the room by
-          default. An authorized participant can optionally request one message,
-          poem, or 15-second song before checkout.
+          One page on the app&apos;s night ground, the twin of a challenge invite
+          link. Each state has one headline and one action.
         </p>
       </div>
 
-      <DesignSponsorshipState
-        label="Activation at any capacity"
-        state="monthly-activation"
-      >
-        <GroupUsageFundingShell
-          action={(
-            <div inert>
-              <GroupUsageFundingActions
-                monthlyAction={(
-                  <GroupSponsorshipDialog
-                    {...previewOpenProps("monthly")}
-                    key={previewMode === "monthly" ? "open" : "closed"}
-                    checkoutUrl="/api/design/usage-credit-preview"
-                    customizationAllowed
-                    inert
-                    mode="monthly"
-                    monthlyCapMinor={1_000}
-                    monthlyCapOptions={DESIGN_GROUP_MONTHLY_CAPS}
-                    offers={[DESIGN_GROUP_SPONSORSHIP_OFFERS[0]]}
-                    payerMemberId={DESIGN_PAYER_MEMBER_ID}
-                  />
-                )}
-                oneTimeAction={(
-                  <GroupSponsorshipDialog
-                    checkoutUrl="/api/design/usage-credit-preview"
-                    customizationAllowed
-                    inert
-                    mode="one_time"
-                    offers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
-                    payerMemberId={DESIGN_PAYER_MEMBER_ID}
-                    triggerSize="default"
-                    triggerVariant="link"
-                  />
-                )}
-              />
-            </div>
-          )}
-          groupName="Sunday sleep crew"
-        />
-      </DesignSponsorshipState>
+      <div className="grid gap-x-6 gap-y-10 md:grid-cols-2 xl:grid-cols-3">
+        <DesignSponsorshipState label="Monthly sponsorship" state="monthly-activation">
+          <GroupFundingCheckout
+            checkoutUrl="/api/design/usage-credit-preview"
+            groupName={DESIGN_GROUP_NAME}
+            initialMonthlyCapMinor={1_000}
+            monthly={DESIGN_GROUP_MONTHLY_PLAN}
+            oneTimeOffers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
+            payerMemberId={DESIGN_PAYER_MEMBER_ID}
+          />
+        </DesignSponsorshipState>
 
-      <div className="grid gap-6 xl:grid-cols-2">
-        <DesignSponsorshipState
-          label="Fulfilled group contribution receipt"
-          state="fulfilled-receipt"
-        >
-          <div id="group-funding-receipt">
-            <Button
-              variant="outline"
-              onClick={() => setPreviewMode("fulfilled")}
-            >
-              Preview success receipt
-            </Button>
-            {previewMode === "fulfilled" ? (
-              <HostedUsageTopUpDialog
-                activePurchase={{
-                  offerCode: "usage_10_usd",
-                  purchaseId: "hucp_design_group_fulfilled",
-                  retryAllowed: false,
-                  status: "fulfilled",
-                }}
-                inert
-                initialOpen
-                offers={[]}
-                payerMemberId={DESIGN_PAYER_MEMBER_ID}
-                scope="group"
-              />
-            ) : null}
-          </div>
+        <DesignSponsorshipState label="One-time contribution" state="one-time">
+          <GroupFundingSelection
+            {...selection}
+            amount={DESIGN_GROUP_ONE_TIME_DIAL}
+            mode="one_time"
+            onModeChange={() => undefined}
+          />
         </DesignSponsorshipState>
 
         <DesignSponsorshipState
-          label="Ordinary sponsored participant + one-time action"
+          label="Chat already sponsored by someone else"
           state="ordinary-sponsored-one-time"
         >
-          <div id="group-one-time-contribution">
-            <GroupUsageFundingShell
-              action={<div inert>{oneTimeContribution}</div>}
-              groupName="Sunday sleep crew"
-            />
-          </div>
-        </DesignSponsorshipState>
-
-        <DesignSponsorshipState
-          label="Active management near cap"
-          state="monthly-active"
-        >
-          <div inert>
-            <GroupSponsorshipManagementCard
-              periodEndTimeZone="UTC"
-              endpoint={endpoint}
-              initialSelectedMonthlyCapMinor={5_000}
-              management={{
-                authorizationId: "hgsa_design_active",
-                chargedThisPeriodMinor: 500,
-                monthlyCapMinor: 1_000,
-                pendingMonthlyCapMinor: null,
-                pendingThisPeriodMinor: 500,
-                periodEnd: "2026-08-30T16:00:00.000Z",
-                status: "active",
-              }}
-            />
-          </div>
-        </DesignSponsorshipState>
-
-        <DesignSponsorshipState
-          label="Paused with next-period decrease"
-          state="monthly-paused"
-        >
-          <GroupSponsorshipManagementCard
-            periodEndTimeZone="UTC"
-            endpoint={endpoint}
-            inert
-            management={{
-              authorizationId: "hgsa_design_paused",
-              chargedThisPeriodMinor: 1_000,
-              monthlyCapMinor: 2_000,
-              pendingMonthlyCapMinor: 500,
-              pendingThisPeriodMinor: 0,
-              periodEnd: "2026-08-30T16:00:00.000Z",
-              status: "paused",
-            }}
+          <GroupFundingSelection
+            {...selection}
+            amount={DESIGN_GROUP_ONE_TIME_DIAL}
+            detail="You can still chip in."
+            mode="one_time"
+            title={`${DESIGN_GROUP_NAME} is sponsored.`}
           />
         </DesignSponsorshipState>
 
-        <DesignSponsorshipState
-          label="Sponsor page with payment recovery"
-          state="monthly-recovery"
-        >
-          <GroupUsageFundingShell
-            action={(
-              <div>
-                <GroupSponsorshipManagementCard
-                  periodEndTimeZone="UTC"
-                  endpoint={endpoint}
-                  management={{
-                    authorizationId: "hgsa_design_recovery",
-                    chargedThisPeriodMinor: 0,
-                    monthlyCapMinor: 2_000,
-                    pendingMonthlyCapMinor: null,
-                    pendingThisPeriodMinor: 0,
-                    periodEnd: "2026-08-30T16:00:00.000Z",
-                    status: "recovery_required",
-                  }}
-                />
-                <GroupFundingSupporters
-                  supporters={DESIGN_GROUP_FUNDING_SUPPORTERS}
-                />
-              </div>
-            )}
-            groupName="Sunday sleep crew"
+        <DesignSponsorshipState label="Canceled at checkout" state="checkout-canceled">
+          <GroupFundingSelection
+            {...monthly}
+            detail="Checkout canceled. Nothing was charged."
           />
         </DesignSponsorshipState>
 
+        <DesignSponsorshipState label="Payment failed" state="payment-failed">
+          <GroupFundingSelection
+            {...monthly}
+            detail="That payment didn’t go through. Nothing was charged."
+          />
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState label="Opening checkout" state="checkout-opening">
+          <GroupFundingSelection {...monthly} busy locked onModeChange={null} />
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState label="Checkout didn’t open" state="checkout-not-opened">
+          <GroupFundingAttemptFailure failure="not_opened" />
+        </DesignSponsorshipState>
+
         <DesignSponsorshipState
-          label="Cancellation-only recovery"
-          state="monthly-cancel-only"
+          label="Attempt may have reached payment"
+          state="checkout-unconfirmed"
         >
+          <GroupFundingAttemptFailure failure="unconfirmed" />
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState label="Checkout left open" state="checkout-open">
+          <GroupFundingPurchaseStudy
+            purchase={designPurchase({
+              checkoutUrl: "https://checkout.stripe.test/design",
+              status: "checkout_open",
+            })}
+          />
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState label="Checkout open for another chat" state="target-conflict">
+          <GroupFundingPurchaseStudy
+            purchase={designPurchase({
+              status: "checkout_open",
+              targetConflict: true,
+            })}
+          />
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState label="Confirming payment" state="payment-confirming">
+          <GroupFundingPurchaseStudy
+            purchase={designPurchase({ status: "payment_pending" })}
+          />
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState label="Confirmation is slow" state="payment-slow">
+          <GroupFundingPurchaseStudy
+            purchase={designPurchase({
+              poll: { kind: "exhausted", run: 0 },
+              status: "payment_pending",
+            })}
+          />
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState label="Couldn’t check payment" state="payment-check-failed">
+          <GroupFundingPurchaseStudy
+            purchase={designPurchase({ poll: { kind: "failed", run: 0 } })}
+          />
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState label="Contribution complete" state="fulfilled-receipt">
+          <GroupFundingPurchaseStudy
+            purchase={designPurchase({ status: "fulfilled" })}
+          />
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState label="Group credit is full" state="capacity-conflict">
+          <GroupFundingCapacityConflict />
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState label="Active sponsor" state="monthly-active">
           <GroupSponsorshipManagementCard
-            periodEndTimeZone="UTC"
-            cancelOnly
-            endpoint="/api/groups/fund/design/sponsorship"
+            {...card}
             management={{
-              authorizationId: "hgsa_design_cancel_only",
-              chargedThisPeriodMinor: 500,
-              monthlyCapMinor: 1_000,
-              pendingMonthlyCapMinor: null,
-              pendingThisPeriodMinor: 0,
-              periodEnd: "2026-08-30T16:00:00.000Z",
+              ...management,
+              authorizationId: "hgsa_design_active",
+              pendingThisPeriodMinor: 500,
               status: "active",
             }}
           />
         </DesignSponsorshipState>
 
-        <DesignSponsorshipState
-          label="Signed-out sponsorship management handoff"
-          state="monthly-management-sign-in"
-        >
-          <GroupFundingSignInRequired initiallyOpen={false} />
+        <DesignSponsorshipState label="Raising the limit" state="monthly-raising">
+          <GroupSponsorshipManagementCard
+            {...card}
+            initialSelectedMonthlyCapMinor={5_000}
+            management={{
+              ...management,
+              authorizationId: "hgsa_design_raising",
+              status: "active",
+            }}
+          />
         </DesignSponsorshipState>
 
-        <DesignSponsorshipState
-          label="Cancellation completion receipt"
-          state="monthly-canceled"
-        >
+        <DesignSponsorshipState label="Paused" state="monthly-paused">
+          <GroupSponsorshipManagementCard
+            {...card}
+            management={{
+              ...management,
+              authorizationId: "hgsa_design_paused",
+              status: "paused",
+            }}
+          />
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState label="Payment needs attention" state="monthly-recovery">
+          <GroupSponsorshipManagementCard
+            {...card}
+            management={{
+              ...management,
+              authorizationId: "hgsa_design_recovery",
+              chargedThisPeriodMinor: 0,
+              status: "recovery_required",
+            }}
+          />
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState label="Billing locked, cancel only" state="monthly-cancel-only">
+          <GroupSponsorshipManagementCard
+            {...card}
+            cancelOnly
+            endpoint="/api/groups/fund/design/sponsorship"
+            management={{
+              ...management,
+              authorizationId: "hgsa_design_cancel_only",
+              status: "active",
+            }}
+          />
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState label="Sponsorship canceled" state="monthly-canceled">
           <GroupSponsorshipCanceledReceipt />
         </DesignSponsorshipState>
 
-        <DesignSponsorshipState
-          label="Monthly limit increase confirmation"
-          state="monthly-limit-confirmation"
-        >
-          <GroupSponsorshipManagementConfirmationStudy />
+        <DesignSponsorshipState label="Signed out, group known" state="signed-out">
+          <GroupFundingScreen
+            actions={<GroupFundingSignInButton initiallyOpen={false} />}
+            title={headline}
+          />
         </DesignSponsorshipState>
 
         <DesignSponsorshipState
-          label="Sponsored-chat one-time purchase recovery"
-          state="sponsored-one-time-recovery"
+          label="Signed out, link not public"
+          state="monthly-management-sign-in"
         >
-          <GroupUsageFundingShell
-            action={<div inert>{oneTimeRecovery()}</div>}
-            groupName="Sunday sleep crew"
+          <GroupFundingScreen
+            actions={<GroupFundingSignInButton initiallyOpen={false} />}
+            title="Sign in to continue."
+          />
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState label="Link unavailable" state="unavailable">
+          <GroupFundingScreen
+            detail="Ask the group for a new one."
+            title="This link isn’t working."
           />
         </DesignSponsorshipState>
       </div>
+
+      <GroupSponsorshipManagementConfirmationStudy />
     </div>
+  );
+}
+
+function designPurchase(
+  overrides: Partial<HostedUsageTopUpPurchaseScreen>,
+): HostedUsageTopUpPurchaseScreen {
+  return {
+    cancelAllowed: false,
+    checkoutError: null,
+    checkoutUrl: null,
+    kind: "purchase",
+    operation: "idle",
+    poll: { kind: "dormant", run: 0 },
+    purchaseId: "hucp_design_group_funding",
+    restartAt: null,
+    retryOfferCode: null,
+    retryRequestKey: null,
+    selectionConflict: null,
+    status: null,
+    targetConflict: false,
+    ...overrides,
+  };
+}
+
+function GroupFundingPurchaseStudy({
+  purchase,
+}: {
+  purchase: HostedUsageTopUpPurchaseScreen;
+}) {
+  const actions = readHostedUsageTopUpPurchaseActions(purchase, false);
+  return (
+    <GroupFundingPurchaseStatus
+      actions={actions}
+      groupName={DESIGN_GROUP_NAME}
+      operation={purchase.operation}
+      status={readGroupFundingPurchaseStatus({
+        actions,
+        purchase,
+        returnedFromSuccessfulCheckout: false,
+      })}
+    />
   );
 }
 
@@ -631,18 +612,6 @@ export function GroupSponsorshipManagementConfirmationStudy() {
   );
 }
 
-export function GroupFundingSupportersStudy() {
-  return (
-    <div
-      className="w-full max-w-lg rounded-3xl border border-border bg-background px-6 pb-8"
-      data-design-component="group-funding-supporters"
-      inert
-    >
-      <GroupFundingSupporters supporters={DESIGN_GROUP_FUNDING_SUPPORTERS} />
-    </div>
-  );
-}
-
 function DesignSponsorshipState(props: {
   children: ReactNode;
   label: string;
@@ -650,15 +619,18 @@ function DesignSponsorshipState(props: {
 }) {
   return (
     <section
-      className="scroll-mt-6 space-y-3"
+      className="min-w-0 scroll-mt-6 space-y-3"
       data-design-state={props.state}
       id={`group-funding-${props.state}`}
     >
       <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
         {props.label}
       </p>
-      <div className="w-full max-w-xl">
-        {props.children}
+      <div
+        className="mx-auto flex min-h-[44rem] w-full max-w-sm flex-col overflow-hidden rounded-3xl"
+        data-design-surface
+      >
+        <GroupFundingSurface>{props.children}</GroupFundingSurface>
       </div>
     </section>
   );
