@@ -165,17 +165,17 @@ export async function readHostedRuntimeReconciliationFacts(
 
   reportStage?.("canonical_mailbox");
   const modelFreeWakeAt = readHostedRuntimeSystemModelFreeWakeAt(workspace);
+  const systemMailboxFrontierInput = {
+    at: now,
+    handledThroughSeq: projectedWorkspace.hostedMailboxSystemHandledThroughSeq ?? "0",
+    mailboxLag,
+    modelFreeWakeAt,
+    prisma,
+    userId: input.userId,
+  };
   const workspaceWithSystemMailboxFrontier = {
     ...projectedWorkspace,
-    systemMailboxFrontier: await readHostedRuntimeSystemMailboxFrontier({
-      at: now,
-      handledThroughSeq:
-        projectedWorkspace.hostedMailboxSystemHandledThroughSeq ?? "0",
-      mailboxLag,
-      modelFreeWakeAt,
-      prisma,
-      userId: input.userId,
-    }),
+    systemMailboxFrontier: await readHostedRuntimeSystemMailboxFrontier(systemMailboxFrontierInput),
   } satisfies HostedRuntimeReconciliationFactsWorkspace;
 
   reportStage?.("canonical_projection");
@@ -228,6 +228,13 @@ export async function readHostedRuntimeReconciliationFacts(
     }
 
     if (gate.status === "denied") {
+      // Only the canonical denial permits the broader deterministic selection.
+      // Keep the runner's imported watermark/projection authoritative under skew.
+      workspaceWithSystemMailboxFrontier.systemMailboxFrontier =
+        await readHostedRuntimeSystemMailboxFrontier({
+          ...systemMailboxFrontierInput,
+          assistantExecutionBlocked: true,
+        });
       let noticeRetryAt: Date | null = null;
       if ((input.usageGateMode ?? "mutating") === "mutating") {
         if (freshConversationMailboxLag) {
@@ -775,6 +782,7 @@ function readHostedRuntimeDefaultProcessingWake(
 }
 
 async function readHostedRuntimeSystemMailboxFrontier(input: {
+  assistantExecutionBlocked?: boolean;
   at: Date;
   handledThroughSeq: string;
   mailboxLag: readonly HostedMailboxLaneLag[];
@@ -801,7 +809,7 @@ async function readHostedRuntimeSystemMailboxFrontier(input: {
     return null;
   }
 
-  const executionClass = classifyHostedFirstLiveSystemItemOwnership(frontier);
+  const executionClass = classifyHostedFirstLiveSystemItemOwnership({ ...frontier, assistantExecutionBlocked: input.assistantExecutionBlocked });
   const legacyCheckpoint = input.modelFreeWakeAt === undefined;
   if (legacyCheckpoint && executionClass === "model_free") return executionClass;
   // Only the runtime knows whether an imported independent row is still pending.
@@ -812,11 +820,12 @@ async function readHostedRuntimeSystemMailboxFrontier(input: {
       : input.handledThroughSeq,
     at: input.at,
     modelFreeOnly: true,
+    assistantExecutionBlocked: input.assistantExecutionBlocked,
     prisma: input.prisma,
     userId: input.userId,
   });
   return independent
-    ? classifyHostedFirstLiveSystemItemOwnership(independent)
+    ? classifyHostedFirstLiveSystemItemOwnership({ ...independent, assistantExecutionBlocked: input.assistantExecutionBlocked })
     : executionClass === "default_owned" ? executionClass : null;
 }
 
@@ -832,6 +841,7 @@ function readHostedRuntimeSystemModelFreeWakeAt(
 }
 
 export function classifyHostedFirstLiveSystemItemOwnership(input: {
+  assistantExecutionBlocked?: boolean;
   dedupeKey: string | null | undefined;
   kind: string;
 }): HostedRuntimeSystemMailboxFrontierClass {

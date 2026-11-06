@@ -16,6 +16,7 @@ import { resolveAssistantStatePaths } from "@murphai/runtime-state/node/assistan
 import {
   findNextHostedSystemMailboxQueueItem,
   readHostedSystemMailboxState,
+  readHostedSystemMailboxProgress,
   removeHostedSystemMailboxPendingItemIfCurrent,
   resolveHostedSystemMailboxHandledThroughSeq,
   resolveHostedSystemMailboxProgress,
@@ -406,6 +407,25 @@ describe("hosted runtime mailbox import state", () => {
 });
 
 describe("hosted runtime system mailbox state", () => {
+  it.each([undefined, false, true])("projects preference ownership and retry checkpoints with blocked=%s", async (assistantExecutionBlocked) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-preference-owner-"));
+    const now = "2026-04-27T00:00:00.000Z";
+    const retryAt = "2026-04-27T00:05:00.000Z";
+    try {
+      const pending = buildPendingSystemMailboxItem({ itemId: "preference", mailboxLaneSeq: "1" });
+      await updateHostedSystemMailboxState(vaultRoot, () => ({ pending: [pending] }));
+      expect(await resolveHostedSystemMailboxWakeCandidates({ assistantExecutionBlocked, now: () => now, vaultRoot }))
+        .toMatchObject({
+          defaultOwned: { at: assistantExecutionBlocked ? null : now },
+          next: { at: now, executionClass: assistantExecutionBlocked ? "model_free" : "default_owned",
+            reason: assistantExecutionBlocked ? "mailbox" : "assistant" },
+        });
+      await updateHostedSystemMailboxState(vaultRoot, () => ({ pending: [{ ...pending, nextAttemptAt: retryAt }] }));
+      expect(await readHostedSystemMailboxProgress({ assistantExecutionBlocked, importedSeq: "1", now: () => now, vaultRoot }))
+        .toMatchObject({ handledThroughSeq: "0", modelFreeWakeAt: assistantExecutionBlocked ? retryAt : null });
+    } finally { await rm(vaultRoot, { recursive: true, force: true }); }
+  });
+
   it("acknowledges only the contiguous imported prefix before pending system work", () => {
     expect(resolveHostedSystemMailboxHandledThroughSeq({
       importedSeq: "9",

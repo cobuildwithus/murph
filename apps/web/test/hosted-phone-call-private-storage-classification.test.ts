@@ -10,17 +10,11 @@ type PrivateStorageClassification =
   | {
       kind: "encrypted-content";
       rationale: string;
-    }
-  | {
-      kind: "legacy-debt";
-      owner: string;
-      removalCondition: string;
     };
 
 const HOSTED_PHONE_CALL_FIELD_CLASSIFICATION = {
   analyzedAt: operational("Provider-analysis lifecycle timestamp; contains no call content."),
   briefEncrypted: encrypted("Member-private bounded call brief."),
-  briefJson: legacyDebt(),
   createdAt: operational("Row lifecycle timestamp; contains no call content."),
   endedAt: operational("Provider-call lifecycle timestamp; contains no call content."),
   id: operational("Opaque Murph row identity used for authority and AAD."),
@@ -39,7 +33,6 @@ const HOSTED_PHONE_CALL_FIELD_CLASSIFICATION = {
     "Result delivery lifecycle timestamp; contains no message content.",
   ),
   resultEncrypted: encrypted("Member-private bounded final call analysis."),
-  resultJson: legacyDebt(),
   resultNotificationChannel: operational(
     "Bounded initiating direct-channel discriminator used to route asynchronous results.",
   ),
@@ -61,21 +54,7 @@ describe("HostedPhoneCall private-storage classification", () => {
     );
   });
 
-  it("limits plaintext debt to the two legacy JSON columns with an owner and removal proof", () => {
-    const debt = Object.entries(HOSTED_PHONE_CALL_FIELD_CLASSIFICATION)
-      .filter(([, classification]) => classification.kind === "legacy-debt");
-
-    expect(debt.map(([field]) => field).sort()).toEqual(["briefJson", "resultJson"]);
-    for (const [, classification] of debt) {
-      expect(classification).toMatchObject({
-        kind: "legacy-debt",
-        owner: "apps/web phone-call private-content migration",
-        removalCondition: expect.stringContaining("zero remaining legacy values"),
-      });
-    }
-  });
-
-  it("keeps the expand migration additive and the old columns available for fallback", () => {
+  it("keeps the historical expand migration additive", () => {
     const migration = readFileSync(
       new URL(
         "../prisma/migrations/20260710190000_hosted_phone_call_private_content/migration.sql",
@@ -135,15 +114,6 @@ function operational(rationale: string): PrivateStorageClassification {
 
 function encrypted(rationale: string): PrivateStorageClassification {
   return { kind: "encrypted-content", rationale };
-}
-
-function legacyDebt(): PrivateStorageClassification {
-  return {
-    kind: "legacy-debt",
-    owner: "apps/web phone-call private-content migration",
-    removalCondition:
-      "Remove only after production backfill reports zero remaining legacy values and prior web functions have drained.",
-  };
 }
 
 function readHostedPhoneCallScalarFields(schema: string): string[] {

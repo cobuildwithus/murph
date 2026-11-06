@@ -1050,8 +1050,44 @@ envelope migration, capture/parser/projection redaction, and their earliest
 future deadline. An overdue pending-input pass runs before background input
 selection as well as during idle maintenance, so restored content cannot begin a
 reply after its deadline.
-`system_mailbox` admits eligible model-free work through the existing kind and
-exact-notification policy. Device, clinical, and Environment attempts belong to
+`system_mailbox` derives eligible kinds and runner routes from one shared policy
+in `orchestration-control.ts`, with the existing exact-notification restrictions.
+`classifyHostedSystemMailboxExecutionClass` defaults `assistantExecutionBlocked`
+to false. Member actions, member preferences and clinical acquisition become
+model-free only when that flag is true. Otherwise they retain default ownership,
+including the conversation-prefetch check before a queued action can mutate the
+vault. The runner passes its invocation flag through recovery, execution filters,
+wake selection, import/checkpoint projections and post-checkpoint receipts.
+Canonical use cases, ordered selection, checkpoint-before-outcome publication
+and replay receipts remain unchanged. Clinical enrichment and meal-photo
+estimation retain their model owner; capture/import can proceed without them.
+
+Mailbox store helpers have no allowance authority: their optional flag defaults
+to false. Reconciliation initially uses that default and broadens its frontier
+only after the existing canonical gate reports AI denial. It still honors a
+current runner model-free wake projection and searches beyond the imported
+watermark for fresh independent rows. The progress monitor deliberately keeps
+default ownership so imported heads dormant behind enrichment, or left pending
+by an old runner, remain eligible for its existing usage-denial exemption.
+Actual AI-allowed stalls and unimported aged rows remain alertable.
+
+No wire field or processing mode changes. New Web with an old runner can admit
+fresh work that the runner leaves pending. Once that runner publishes a current
+empty model-free projection, imported rows stay dormant rather than repeatedly
+relaunching. A checkpoint without a current projection retains the existing
+legacy handled-prefix fallback; it needs a compatible runner checkpoint to
+establish the stronger suppression evidence. Old Web with a new runner can
+withhold a wake until another eligible invocation imports the work. Both orders,
+including old warm containers, preserve AI blocking. Runner-first avoids
+runner-side delay when release coordination permits. The normal merge deploys
+Web first; then dispatch the compatible runner from main through manual
+murph-cloud before relying on the full outcome. Merging alone does not ship it.
+The private Temporal worker consumes existing frontier and wake facts, not raw
+kinds or route mappings; no worker protocol change is required. Rolling back
+either side can delay work again but grants no AI permission. Verify fresh and
+restored edits plus handled/wake projections after both deploys.
+
+Device, clinical, and Environment attempts belong to
 the fenced workspace and use existing mailbox claims; the invocation's policy
 still decides which families are allowed. Device and Environment work can start
 without assistant preparation. A conversation or canonically due assistant
@@ -2004,8 +2040,11 @@ conversation candidates above the effective floor must still have
 live-row semantics. An imported `default_owned` system head, including
 `member.action.requested`, is an intentional pause only while the
 canonical read-only usage gate reports `ai_usage_limit_exceeded`. The monitor
-classifies head ownership with the shared execution classifier, so
-model-free notifications and device heads remain alertable. Import must cover
+classifies head ownership with the shared execution classifier's default
+AI-allowed policy, including member preferences and clinical acquisition. It does
+not opt into blocked execution: enrichment can pin the frontier after acquisition
+finishes, and an old runner can leave these imported rows pending. Model-free
+notifications and device heads remain alertable. Import must cover
 the head and every live pending row already at least 15 minutes old,
 with the highest aged sequence derived in the same bounded mailbox scan. Fresh
 unimported suffix rows do not inherit the paused head's age; an unimported row
@@ -3466,7 +3505,8 @@ transport preparation failure. Cloudflare binds the denied allowance to the
 fresh write fence and narrows a default invocation to the existing
 `system_mailbox` path, which imports system work, may run one bounded
 model-free deterministic device-sync, member-channel reconciliation,
-operator-maintenance, browser-vault refresh, or reported-metric item, and exits
+operator-maintenance, browser-vault refresh, reported-metric, member-action,
+member-preference, or clinical-acquisition item, and exits
 before foreground assistant admission. Other system items retain their default
 owner and are not consumed by this recovery mode.
 It binds that effective processing mode into the same fence so controller

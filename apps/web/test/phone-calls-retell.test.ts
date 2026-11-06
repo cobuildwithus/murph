@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 
-import { Prisma, type HostedPhoneCall } from "@prisma/client";
+import type { HostedPhoneCall } from "@prisma/client";
 import type {
   HostedPhoneCallBrief,
   HostedPhoneCallResult,
@@ -9,6 +9,11 @@ import {
   hostedPhoneCallBriefSchema,
 } from "@murphai/hosted-execution/phone-calls";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+import {
+  encodeHostedPhoneCallBriefFixture,
+  encodeHostedPhoneCallResultFixture,
+} from "./support/phone-call-private-fixtures";
 
 import {
   readHostedPhoneCallResult,
@@ -1405,7 +1410,6 @@ describe("Retell phone-call result handling", () => {
         analyzedAt: expect.any(Date),
         endedAt: expect.any(Date),
         resultEncrypted: expect.stringMatching(/^hsb-test:/u),
-        resultJson: Prisma.DbNull,
         status: "completed",
       },
       where: {
@@ -1414,9 +1418,6 @@ describe("Retell phone-call result handling", () => {
         provider: "retell",
         providerCallId: "retell_call_123",
         resultEncrypted: null,
-        resultJson: {
-          equals: Prisma.DbNull,
-        },
         status: {
           in: ["starting", "calling", "ended"],
         },
@@ -1573,7 +1574,10 @@ describe("Retell phone-call result handling", () => {
       onEncryptResult: async (call) => ({
         ...call,
         analyzedAt: new Date("2026-06-25T12:00:00.000Z"),
-        resultJson: canonicalResult,
+        resultEncrypted: encodeHostedPhoneCallResultFixture({
+          memberId: call.memberId,
+          value: canonicalResult,
+        }),
         status: "needs_user",
       }),
     });
@@ -1598,20 +1602,33 @@ describe("Retell phone-call result handling", () => {
     expect(store.updateManyCalls).toHaveLength(1);
     expect(store.currentCall()).toMatchObject({
       analyzedAt: new Date("2026-06-25T12:00:00.000Z"),
-      resultEncrypted: null,
-      resultJson: canonicalResult,
+      resultEncrypted: encodeHostedPhoneCallResultFixture({
+        memberId: "member_123",
+        value: canonicalResult,
+      }),
       status: "needs_user",
     });
     expect(store.appendResultNotificationResults).toEqual([undefined]);
+    await expect(readHostedPhoneCallResult({ call: store.currentCall()! })).resolves.toEqual(
+      canonicalResult,
+    );
   });
 
   it("keeps a fallback result canonical when late provider analysis loses the result fence", async () => {
+    const fallbackResult: HostedPhoneCallResult = {
+      outcome: "not_completed",
+      summary: "Murph could not confirm the call outcome.",
+    };
+    const resultEncrypted = encodeHostedPhoneCallResultFixture({
+      memberId: "member_123",
+      value: fallbackResult,
+    });
     const store = createWebhookStore({
       call: buildHostedPhoneCall({
         analyzedAt: null,
         endedAt: new Date("2026-06-25T12:00:00.000Z"),
         id: "hpc_123",
-        resultEncrypted: "encrypted-fallback-result",
+        resultEncrypted,
         status: "failed",
       }),
     });
@@ -1637,17 +1654,16 @@ describe("Retell phone-call result handling", () => {
     expect(store.updateManyCalls).toHaveLength(1);
     expect(store.updateManyCalls[0]!.where).toMatchObject({
       resultEncrypted: null,
-      resultJson: {
-        equals: Prisma.DbNull,
-      },
     });
     expect(store.currentCall()).toMatchObject({
       analyzedAt: null,
-      resultEncrypted: "encrypted-fallback-result",
-      resultJson: null,
+      resultEncrypted,
       status: "failed",
     });
     expect(store.appendResultNotificationResults).toEqual([undefined]);
+    await expect(readHostedPhoneCallResult({ call: store.currentCall()! })).resolves.toEqual(
+      fallbackResult,
+    );
   });
 
   it("does not overwrite provider authority bound while result encryption is in flight", async () => {
@@ -1698,7 +1714,6 @@ describe("Retell phone-call result handling", () => {
       analyzedAt: null,
       providerCallId: "retell_other",
       resultEncrypted: null,
-      resultJson: null,
     });
     expect(store.appendResultNotificationCalls).toEqual([]);
   });
@@ -1794,7 +1809,6 @@ describe("Retell phone-call result handling", () => {
       analyzedAt: null,
       id: "hpc_123",
       resultEncrypted: null,
-      resultJson: null,
     });
     expect(store.findUniqueCalls).toEqual([
       { where: { providerCallId: "retell_call_123" } },
@@ -1992,10 +2006,13 @@ describe("Retell phone-call result handling", () => {
         endedAt: null,
         id: "hpc_123",
         providerCallId: null,
-        resultJson: {
-          outcome: "not_completed",
-          summary: "Murph could not start the phone call.",
-        },
+        resultEncrypted: encodeHostedPhoneCallResultFixture({
+          memberId: "member_123",
+          value: {
+            outcome: "not_completed",
+            summary: "Murph could not start the phone call.",
+          },
+        }),
         status: "failed",
       }),
     });
@@ -2027,10 +2044,13 @@ describe("Retell phone-call result handling", () => {
     expect(store.currentCall()).toMatchObject({
       endedAt: null,
       providerCallId: null,
-      resultJson: {
-        outcome: "not_completed",
-        summary: "Murph could not start the phone call.",
-      },
+      resultEncrypted: encodeHostedPhoneCallResultFixture({
+        memberId: "member_123",
+        value: {
+          outcome: "not_completed",
+          summary: "Murph could not start the phone call.",
+        },
+      }),
       status: "failed",
     });
   });
@@ -2067,7 +2087,6 @@ describe("Retell phone-call result handling", () => {
     expect(store.updateManyCalls[0]).toMatchObject({
       data: {
         resultEncrypted: expect.stringMatching(/^hsb-test:/u),
-        resultJson: Prisma.DbNull,
         status: "failed",
       },
       where: {
@@ -2088,7 +2107,6 @@ describe("Retell phone-call result handling", () => {
       endedAt,
       providerCallId: "retell_busy",
       resultEncrypted: expect.stringMatching(/^hsb-test:/u),
-      resultJson: null,
       status: "failed",
     });
     expect(store.appendResultNotificationCalls.map((callRecord) => callRecord.id)).toEqual([
@@ -2159,10 +2177,13 @@ describe("Retell phone-call result handling", () => {
         id: "hpc_late_analysis_replay",
         providerCallId: "retell_late_analysis_replay",
         resultDeliveryStatus: "pending",
-        resultJson: {
-          outcome: "not_completed",
-          summary: "The office line was busy.",
-        },
+        resultEncrypted: encodeHostedPhoneCallResultFixture({
+          memberId: "member_123",
+          value: {
+            outcome: "not_completed",
+            summary: "The office line was busy.",
+          },
+        }),
         resultNotificationChannel: "telegram",
         status: "failed",
       }),
@@ -2232,7 +2253,6 @@ describe("Retell phone-call result handling", () => {
       analyzedAt: null,
       endedAt,
       resultEncrypted: null,
-      resultJson: null,
       status: "failed",
     });
     expect(store.appendResultNotificationCalls).toEqual([]);
@@ -2248,7 +2268,6 @@ describe("Retell phone-call result handling", () => {
       analyzedAt: expect.any(Date),
       endedAt,
       resultEncrypted: expect.stringMatching(/^hsb-test:/u),
-      resultJson: null,
       status: "failed",
     });
     expect(store.appendResultNotificationCalls).toHaveLength(1);
@@ -2282,7 +2301,6 @@ describe("Retell phone-call result handling", () => {
     expect(store.currentCall()).toMatchObject({
       analyzedAt: expect.any(Date),
       resultEncrypted: expect.stringMatching(/^hsb-test:/u),
-      resultJson: null,
       status: "completed",
     });
 
@@ -2331,7 +2349,6 @@ describe("Retell phone-call result handling", () => {
     expect(store.currentCall()).toMatchObject({
       analyzedAt: expect.any(Date),
       resultEncrypted: expect.stringMatching(/^hsb-test:/u),
-      resultJson: null,
       status: "completed",
     });
     expect(store.appendResultNotificationCalls).toHaveLength(1);
@@ -2467,7 +2484,6 @@ describe("getHostedPhoneCallForConsultation", () => {
       hostedPhoneCall: {
         findUnique: async () => buildHostedPhoneCall({
           briefEncrypted: "encrypted-brief",
-          briefJson: null,
           status: "calling",
         }),
         updateMany: async () => ({ count: 0 }),
@@ -2501,8 +2517,10 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
   const now = new Date("2026-06-25T00:00:00.000Z");
   return {
     analyzedAt: null,
-    briefEncrypted: null,
-    briefJson: VALID_BRIEF,
+    briefEncrypted: encodeHostedPhoneCallBriefFixture({
+      memberId: overrides.memberId ?? "member_123",
+      value: VALID_BRIEF,
+    }),
     createdAt: now,
     endedAt: null,
     id: "hpc_test",
@@ -2515,7 +2533,6 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     resultDeliveryStatus: null,
     resultDeliveryTerminalAt: null,
     resultEncrypted: null,
-    resultJson: null,
     resultNotificationChannel: null,
     status: "starting",
     stopRequestedAt: null,
@@ -2582,9 +2599,6 @@ function createWebhookStore(input: {
           resultEncrypted: "resultEncrypted" in args.data
             ? args.data.resultEncrypted ?? currentCall.resultEncrypted
             : currentCall.resultEncrypted,
-          resultJson: "resultJson" in args.data
-            ? args.data.resultJson === Prisma.DbNull ? null : currentCall.resultJson
-            : currentCall.resultJson,
           status: args.data.status ?? currentCall.status,
         };
         return { count: 1 };
@@ -2628,15 +2642,7 @@ function createWebhookStore(input: {
       if (input.encryptResultError) {
         throw input.encryptResultError;
       }
-      return `hsb-test:${Buffer.from(
-        JSON.stringify({
-          lane: "hosted-member-private-field",
-          scope: "hosted-phone-call:result",
-          userId: memberId,
-          value: JSON.stringify(value),
-        }),
-        "utf8",
-      ).toString("base64url")}`;
+      return encodeHostedPhoneCallResultFixture({ memberId, value });
     },
   };
 
@@ -2696,9 +2702,6 @@ function matchesWebhookUpdateWhere(
     return false;
   }
   if (where.resultEncrypted === null && call.resultEncrypted !== null) {
-    return false;
-  }
-  if (where.resultJson && call.resultJson !== null) {
     return false;
   }
   if (where.endedAt === null && call.endedAt !== null) {
