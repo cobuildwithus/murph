@@ -9,8 +9,8 @@ import {
   GroupFundingSignInRequired,
 } from "@/src/components/hosted-groups/group-funding-sign-in-button";
 import {
+  GroupFundingFrame,
   GroupFundingMessage,
-  GroupFundingPage as GroupFundingPageFrame,
   GroupUsageFundingShell,
 } from "@/src/components/hosted-groups/group-usage-funding-shell";
 import {
@@ -212,7 +212,7 @@ export default async function GroupFundingPage({
   ) : null;
 
   return (
-    <GroupFundingPageFrame>
+    <GroupFundingFrame>
       <GroupUsageFundingShell groupName={groupName}>
         {!member ? (
           <div className="flex flex-1 flex-col justify-center gap-8">
@@ -243,7 +243,7 @@ export default async function GroupFundingPage({
           </p>
         )}
       </GroupUsageFundingShell>
-    </GroupFundingPageFrame>
+    </GroupFundingFrame>
   );
 }
 
@@ -256,7 +256,7 @@ function projectHostedMonthlyCapOptions(): GroupFundingMonthlyCapOption[] {
 
 function GroupFundingUnavailable() {
   return (
-    <GroupFundingPageFrame>
+    <GroupFundingFrame>
       <GroupFundingMessage
         action={
           <Link
@@ -269,7 +269,7 @@ function GroupFundingUnavailable() {
         description="Ask the group for its current link."
         title="This link isn’t available"
       />
-    </GroupFundingPageFrame>
+    </GroupFundingFrame>
   );
 }
 

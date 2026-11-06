@@ -26,6 +26,8 @@ interface HostedUsageTopUpPoll {
 interface HostedUsageTopUpSelectionScreen {
   attempt: HostedUsageTopUpSelectionAttempt;
   capacityConflict: boolean;
+  /** How the purchase this selection replaced ended, when it did not complete. */
+  endedPurchaseStatus: "expired" | "payment_failed" | null;
   kind: "selection";
   selectedOfferCode: string | null;
   unresolvedRequestKey: string | null;
@@ -182,7 +184,10 @@ function hostedUsageTopUpReducer(
         ...state,
         open: true,
         screen: action.reset
-          ? createSelectionScreen()
+          ? {
+              ...createSelectionScreen(),
+              endedPurchaseStatus: readEndedPurchaseStatus(state.screen),
+            }
           : state.screen,
       };
     case "offer_selected":
@@ -459,6 +464,15 @@ function screenFromResponse(
   };
 }
 
+function readEndedPurchaseStatus(
+  screen: HostedUsageTopUpScreen,
+): HostedUsageTopUpSelectionScreen["endedPurchaseStatus"] {
+  return screen.kind === "purchase" &&
+    (screen.status === "expired" || screen.status === "payment_failed")
+    ? screen.status
+    : null;
+}
+
 function createSelectionScreen(
   unresolvedRequestKey: string | null = null,
   capacityConflict = false,
@@ -466,6 +480,7 @@ function createSelectionScreen(
   return {
     attempt: { kind: "idle" },
     capacityConflict,
+    endedPurchaseStatus: null,
     kind: "selection",
     selectedOfferCode: null,
     unresolvedRequestKey,
@@ -516,7 +531,17 @@ function readHostedUsageTopUpPurchaseActions(
     !returnedFromSuccessfulCheckout &&
     (purchase?.status === "checkout_open" ||
       purchase?.cancelAllowed === true);
-  const canRetry =
+  const canRetry = canRetryPurchase(purchase, canResume);
+  const canCheckAgain =
+    !canResume && !canRetry && canCheckPurchaseAgain(purchase);
+  return { canCancel, canCheckAgain, canResume, canRetry };
+}
+
+function canRetryPurchase(
+  purchase: HostedUsageTopUpPurchaseScreen | null,
+  canResume: boolean,
+): boolean {
+  return (
     purchase !== null &&
     !purchase.targetConflict &&
     purchase.retryOfferCode !== null &&
@@ -524,17 +549,20 @@ function readHostedUsageTopUpPurchaseActions(
       (purchase.status === "checkout_open" && !canResume) ||
       (purchase.status === "payment_pending" &&
         (purchase.poll.kind === "exhausted" ||
-          purchase.poll.kind === "failed")));
-  const canCheckAgain = Boolean(
+          purchase.poll.kind === "failed")))
+  );
+}
+
+function canCheckPurchaseAgain(
+  purchase: HostedUsageTopUpPurchaseScreen | null,
+): boolean {
+  return Boolean(
     purchase &&
-      !canResume &&
-      !canRetry &&
       (purchase.poll.kind === "failed" ||
         (purchase.poll.kind === "exhausted" &&
           (purchase.status === null ||
             shouldPollPurchaseStatus(purchase.status)))),
   );
-  return { canCancel, canCheckAgain, canResume, canRetry };
 }
 
 export {

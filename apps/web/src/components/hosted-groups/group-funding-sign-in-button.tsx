@@ -7,21 +7,21 @@ import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/h
 import { Button } from "@/src/components/ui/button";
 
 import {
+  GroupFundingFrame,
   GroupFundingMessage,
-  GroupFundingPage,
 } from "./group-usage-funding-shell";
 
 export function GroupFundingSignInRequired(props: {
   initiallyOpen?: boolean;
 } = {}) {
   return (
-    <GroupFundingPage>
+    <GroupFundingFrame>
       <GroupFundingMessage
         action={<GroupFundingSignInButton initiallyOpen={props.initiallyOpen} />}
         description="We’ll bring you straight back here."
         title="Sign in to continue"
       />
-    </GroupFundingPage>
+    </GroupFundingFrame>
   );
 }
 

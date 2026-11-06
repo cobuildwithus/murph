@@ -6,7 +6,7 @@ import { cn } from "@/src/lib/utils";
 
 type GroupFundingStatusTone = "attention" | "done" | "working";
 
-function GroupFundingPage({ children }: { children: ReactNode }) {
+function GroupFundingFrame({ children }: { children: ReactNode }) {
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col px-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-[max(env(safe-area-inset-top),2.5rem)]">
       {children}
@@ -64,6 +64,7 @@ function GroupFundingNotice({
   action,
   description,
   ref,
+  role,
   title,
   tone = "neutral",
 }: {
@@ -71,6 +72,8 @@ function GroupFundingNotice({
   description: string;
   /** Pass a ref to move focus to the notice; it becomes focusable by script. */
   ref?: Ref<HTMLDivElement>;
+  /** Announce a result of what the person just did. Standing notices omit it. */
+  role?: "alert" | "status";
   title: string;
   tone?: "attention" | "neutral";
 }) {
@@ -83,7 +86,7 @@ function GroupFundingNotice({
       data-slot="group-funding-notice"
       data-tone={tone}
       ref={ref}
-      role={tone === "attention" ? "alert" : "status"}
+      role={role}
       tabIndex={ref ? -1 : undefined}
     >
       <p
@@ -105,12 +108,14 @@ function GroupFundingNotice({
 function GroupFundingStatusView({
   children,
   error,
+  headingRef,
   message,
   title,
   tone,
 }: {
   children?: ReactNode;
   error?: string | null;
+  headingRef?: Ref<HTMLHeadingElement>;
   message: string;
   title: string;
   tone: GroupFundingStatusTone;
@@ -133,7 +138,11 @@ function GroupFundingStatusView({
             <CheckIcon aria-hidden="true" className="size-6 stroke-[2.5]" />
           </span>
         ) : null}
-        <h2 className="font-serif text-2xl/8 font-semibold text-balance tracking-[-0.01em]">
+        <h2
+          className="font-serif text-2xl/8 font-semibold text-balance tracking-[-0.01em] outline-none"
+          ref={headingRef}
+          tabIndex={-1}
+        >
           {title}
         </h2>
         <p className="max-w-[32ch] text-base/6 text-pretty text-muted-foreground">
@@ -151,9 +160,9 @@ function GroupFundingStatusView({
 }
 
 export {
+  GroupFundingFrame,
   GroupFundingMessage,
   GroupFundingNotice,
-  GroupFundingPage,
   GroupFundingStatusView,
   GroupUsageFundingShell,
 };

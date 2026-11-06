@@ -83,7 +83,7 @@ function GroupFundingDial<Value extends number | string>({
   }
 
   function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
-    if (disabled) {
+    if (disabled || event.button !== 0) {
       return;
     }
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -216,9 +216,11 @@ function GroupFundingDial<Value extends number | string>({
         Drag the dot
       </span>
 
+      {/* The knob orbits a zero-size point: rotating anything larger would push
+          its corners past the dial and make the page scroll sideways. */}
       <div
         className={cn(
-          "pointer-events-none absolute inset-0",
+          "absolute left-1/2 top-1/2 size-0",
           !dragging && cn("transition-[rotate]", DIAL_SETTLE_TRANSITION),
         )}
         style={{ rotate: `${DIAL_START_DEGREES + sweepDegrees}deg` }}
@@ -231,7 +233,7 @@ function GroupFundingDial<Value extends number | string>({
           aria-valuenow={selectedIndex}
           aria-valuetext={`${selectedOption.amountLabel} ${caption}`}
           className={cn(
-            "group/knob pointer-events-auto absolute left-1/2 flex size-14 -translate-x-1/2 -translate-y-1/2 touch-none items-center justify-center rounded-full outline-none",
+            "group/knob absolute flex size-14 touch-none items-center justify-center rounded-full outline-none",
             disabled ? "cursor-default" : "cursor-grab active:cursor-grabbing",
           )}
           data-dragging={dragging ? "true" : undefined}
@@ -243,7 +245,9 @@ function GroupFundingDial<Value extends number | string>({
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerEnd}
           role="slider"
-          style={{ top: `${((DIAL_CENTER - DIAL_RADIUS) / DIAL_SIZE) * 100}%` }}
+          style={{
+            translate: `-50% calc(-50% - ${(DIAL_RADIUS / DIAL_SIZE) * 100}cqw)`,
+          }}
           tabIndex={disabled ? -1 : 0}
         >
           <span className="flex size-8 items-center justify-center rounded-full bg-primary ring-4 ring-background transition-[scale] duration-150 group-focus-visible/knob:outline-2 group-focus-visible/knob:outline-offset-4 group-focus-visible/knob:outline-ring group-data-[dragging=true]/knob:scale-110 motion-reduce:transition-none">

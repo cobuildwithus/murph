@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type Ref } from "react";
 import { AlertDialog as AlertDialogPrimitive } from "@base-ui/react/alert-dialog";
 
 import { Button } from "@/src/components/ui/button";
@@ -49,6 +49,26 @@ type GroupSponsorshipRecoveryProgress =
   | "recheck_required";
 
 const GROUP_SPONSORSHIP_RECOVERY_POLL_DELAYS_MS = [1_000, 2_000, 4_000] as const;
+
+const GROUP_SPONSORSHIP_RECOVERY_COPY = {
+  fulfilled: {
+    description: "Automatic refills are on.",
+    title: "Payment confirmed",
+  },
+  payment_pending: {
+    description:
+      "We’ll check this automatically. Refills start again once it’s confirmed.",
+    title: "Payment is processing",
+  },
+  recheck_required: {
+    description:
+      "You don’t need to pay again. Check the status of your last payment.",
+    title: "Check payment status",
+  },
+} as const satisfies Record<
+  GroupSponsorshipRecoveryProgress,
+  { description: string; title: string }
+>;
 
 export type GroupSponsorshipManagementConfirmation =
   | {
@@ -336,61 +356,17 @@ export function GroupSponsorshipManagementCard({
       className="flex flex-1 flex-col gap-6"
       data-component="group-sponsorship-management"
     >
-      {cancelOnly ? null : recoveryProgress ? (
-        <GroupFundingNotice
-          action={
-            recoveryProgress === "recheck_required" ? (
-              <Button
-                className="w-full"
-                disabled={busy || inert}
-                onClick={() => void recheckRecoveryStatus()}
-                size="lg"
-                type="button"
-              >
-                Check payment status
-              </Button>
-            ) : null
-          }
-          description={
-            recoveryProgress === "payment_pending"
-              ? "We’ll check this automatically. Refills start again once it’s confirmed."
-              : recoveryProgress === "fulfilled"
-                ? "Automatic refills are on."
-                : "You don’t need to pay again. Check the status of your last payment."
-          }
-          ref={recoveryStatusRef}
-          title={
-            recoveryProgress === "payment_pending"
-              ? "Payment is processing"
-              : recoveryProgress === "fulfilled"
-                ? "Payment confirmed"
-                : "Check payment status"
-          }
+      {cancelOnly ? null : (
+        <GroupSponsorshipStatusNotice
+          disabled={busy || inert}
+          onRecheck={() => void recheckRecoveryStatus()}
+          onReview={() => void submit({ action: "recover" })}
+          recoveryButtonRef={recoveryButtonRef}
+          recoveryProgress={recoveryProgress}
+          recoveryStatusRef={recoveryStatusRef}
+          status={management.status}
         />
-      ) : management.status === "recovery_required" ? (
-        <GroupFundingNotice
-          action={
-            <Button
-              className="w-full"
-              disabled={busy || inert}
-              onClick={() => void submit({ action: "recover" })}
-              ref={recoveryButtonRef}
-              size="lg"
-              type="button"
-            >
-              Review payment
-            </Button>
-          }
-          description="Automatic refills are paused until payment is fixed."
-          title="Payment needs attention"
-          tone="attention"
-        />
-      ) : management.status === "paused" ? (
-        <GroupFundingNotice
-          description="Murph won’t charge you until you resume."
-          title="Automatic refills are paused"
-        />
-      ) : null}
+      )}
 
       {!cancelOnly && management.status !== "pending_activation" ? (
         <div className="flex flex-1 items-center">
@@ -457,41 +433,16 @@ export function GroupSponsorshipManagementCard({
         ) : null}
       </div>
 
-      <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-1">
-        {!cancelOnly && management.status === "active" ? (
-          <Button
-            className="h-11 px-0 text-muted-foreground hover:text-foreground"
-            disabled={busy || inert}
-            onClick={() => void submit({ action: "pause" })}
-            type="button"
-            variant="link"
-          >
-            Pause automatic refills
-          </Button>
-        ) : !cancelOnly && management.status === "paused" ? (
-          <Button
-            className="h-11 px-0 text-muted-foreground hover:text-foreground"
-            disabled={busy || inert}
-            onClick={() => void submit({ action: "resume" })}
-            type="button"
-            variant="link"
-          >
-            Resume automatic refills
-          </Button>
-        ) : null}
-        <Button
-          className="h-11 px-0 text-muted-foreground hover:text-destructive"
-          disabled={busy || inert}
-          onClick={() => {
-            setError(null);
-            setConfirmation({ kind: "cancel" });
-          }}
-          type="button"
-          variant="link"
-        >
-          Cancel sponsorship
-        </Button>
-      </div>
+      <GroupSponsorshipLinks
+        disabled={busy || inert}
+        onCancel={() => {
+          setError(null);
+          setConfirmation({ kind: "cancel" });
+        }}
+        onPause={() => void submit({ action: "pause" })}
+        onResume={() => void submit({ action: "resume" })}
+        status={cancelOnly ? null : management.status}
+      />
 
       <GroupSponsorshipManagementConfirmationDialog
         busy={busy}
@@ -516,6 +467,119 @@ export function GroupSponsorshipManagementCard({
         }}
       />
     </section>
+  );
+}
+
+function GroupSponsorshipStatusNotice({
+  disabled,
+  onRecheck,
+  onReview,
+  recoveryButtonRef,
+  recoveryProgress,
+  recoveryStatusRef,
+  status,
+}: {
+  disabled: boolean;
+  onRecheck: () => void;
+  onReview: () => void;
+  recoveryButtonRef: Ref<HTMLButtonElement>;
+  recoveryProgress: GroupSponsorshipRecoveryProgress | null;
+  recoveryStatusRef: Ref<HTMLDivElement>;
+  status: GroupSponsorshipManagementProjection["status"];
+}) {
+  if (recoveryProgress) {
+    const copy = GROUP_SPONSORSHIP_RECOVERY_COPY[recoveryProgress];
+    return (
+      <GroupFundingNotice
+        action={
+          recoveryProgress === "recheck_required" ? (
+            <Button
+              className="w-full"
+              disabled={disabled}
+              onClick={onRecheck}
+              size="lg"
+              type="button"
+            >
+              Check payment status
+            </Button>
+          ) : null
+        }
+        description={copy.description}
+        ref={recoveryStatusRef}
+        role="status"
+        title={copy.title}
+      />
+    );
+  }
+  if (status === "recovery_required") {
+    return (
+      <GroupFundingNotice
+        action={
+          <Button
+            className="w-full"
+            disabled={disabled}
+            onClick={onReview}
+            ref={recoveryButtonRef}
+            size="lg"
+            type="button"
+          >
+            Review payment
+          </Button>
+        }
+        description="Automatic refills are paused until payment is fixed."
+        title="Payment needs attention"
+        tone="attention"
+      />
+    );
+  }
+  return status === "paused" ? (
+    <GroupFundingNotice
+      description="Murph won’t charge you until you resume."
+      title="Automatic refills are paused"
+    />
+  ) : null;
+}
+
+function GroupSponsorshipLinks({
+  disabled,
+  onCancel,
+  onPause,
+  onResume,
+  status,
+}: {
+  disabled: boolean;
+  onCancel: () => void;
+  onPause: () => void;
+  onResume: () => void;
+  /** Null when billing changes are unavailable, leaving only cancellation. */
+  status: GroupSponsorshipManagementProjection["status"] | null;
+}) {
+  const quietLink = "h-11 px-0 text-muted-foreground";
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-1">
+      {status === "active" || status === "paused" ? (
+        <Button
+          className={`${quietLink} hover:text-foreground`}
+          disabled={disabled}
+          onClick={status === "active" ? onPause : onResume}
+          type="button"
+          variant="link"
+        >
+          {status === "active"
+            ? "Pause automatic refills"
+            : "Resume automatic refills"}
+        </Button>
+      ) : null}
+      <Button
+        className={`${quietLink} hover:text-destructive`}
+        disabled={disabled}
+        onClick={onCancel}
+        type="button"
+        variant="link"
+      >
+        Cancel sponsorship
+      </Button>
+    </div>
   );
 }
 

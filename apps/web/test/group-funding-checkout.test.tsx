@@ -67,6 +67,7 @@ vi.mock("@/src/components/ui/button", () => ({
 }));
 
 beforeEach(() => {
+  vi.restoreAllMocks();
   mocks.randomUUID.mockReset();
   mocks.randomUUID.mockReturnValue(REQUEST_KEY);
   mocks.requestHostedOnboardingJson.mockReset();
@@ -587,6 +588,77 @@ test("explains a full group without a dead-end form", async () => {
   }
 });
 
+test("names a pending payment as a payment when offering to cancel it", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValue({
+    cancelAllowed: true,
+    purchaseId: "hucp_group_pending",
+    status: "payment_pending",
+  });
+  const rendered = await renderCheckout({
+    activePurchase: {
+      cancelAllowed: true,
+      offerCode: "usage_5_usd",
+      purchaseId: "hucp_group_pending",
+      retryAllowed: false,
+      status: "payment_pending",
+    },
+  });
+
+  try {
+    assert.ok(hasButton(rendered.container, "Cancel payment"));
+    assert.equal(hasButton(rendered.container, "Cancel checkout"), false);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("moves focus to the new state when an outcome replaces the control", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValue({
+    purchaseId: "hucp_group_recovered",
+    recovered: true,
+    status: "payment_pending",
+  });
+  const rendered = await renderCheckout();
+  const focused = recordFocus(rendered);
+
+  try {
+    await clickButton(rendered, "Sponsor up to $5 a month");
+
+    const heading = rendered.container.querySelector("h2");
+    assert.ok(heading);
+    assert.match(heading.textContent ?? "", /Confirming your payment/u);
+    assert.equal(focused.at(-1)?.tagName, "H2");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("moves focus to the note after a canceled checkout", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValue({
+    purchaseId: "hucp_group_canceled",
+    status: "expired",
+  });
+  const rendered = await renderClientComponent(createElement("div"), {
+    location: { href: "https://example.test/groups/fund/group_join_code_1234" },
+    requireButton: false,
+  });
+  const focused = recordFocus(rendered);
+
+  try {
+    await rendered.rerender(await checkoutElement({
+      purchaseReturn: { kind: "cancel", purchaseId: "hucp_group_canceled" },
+    }));
+    await settle();
+
+    assert.match(
+      focused.at(-1)?.textContent ?? "",
+      /Checkout canceled\. Nothing was charged\./u,
+    );
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("keeps the amount but blocks paying when the tab can't hold a request key", async () => {
   const sessionStorage = createMemoryStorage();
   sessionStorage.getItem = () => {
@@ -648,6 +720,17 @@ async function settle() {
 }
 
 type RenderedCheckout = Awaited<ReturnType<typeof renderCheckout>>;
+
+// The test DOM has no focus model, so record the calls instead.
+function recordFocus(rendered: Pick<RenderedCheckout, "window">): HTMLElement[] {
+  const focused: HTMLElement[] = [];
+  vi.spyOn(rendered.window.HTMLElement.prototype, "focus").mockImplementation(
+    function record(this: HTMLElement) {
+      focused.push(this);
+    },
+  );
+  return focused;
+}
 
 function postedPayloads(): Array<Record<string, unknown>> {
   return mocks.requestHostedOnboardingJson.mock.calls
