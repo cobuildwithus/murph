@@ -12,7 +12,7 @@ import { readHostedExecutionControlClientIfConfigured } from "../hosted-executio
 import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { requireActiveHostedMemberAuthFromBearerToken } from "../hosted-onboarding/request-auth";
 import { readHostedWorkspace } from "../hosted-workspace/store";
-import { submitMemberAction } from "../member-actions/submit";
+import { submitCompanionMemberAction } from "./companion-member-actions";
 import { getPrisma } from "../prisma";
 import { readRawBodyBuffer } from "../http";
 import { recoverCompanionMealUploadIds } from "./companion-meal-upload-links";
@@ -109,20 +109,13 @@ export async function queueCompanionMealRemoval(request: Request, id: string) {
     throw mealApiError("MEALS_INVALID_REQUEST", 400, "Meal removal does not accept a body.");
   }
   try {
-    const result = await submitMemberAction({
-      memberId: auth.member.id,
-      prisma,
-      assertCurrentAuthorityTx: async tx => {
-        await assertHostedNativeMemberAuthCurrentTx(auth, tx);
-        await assertBrowserVaultMemberAuthority({ memberId: auth.member.id, prisma: tx });
-      },
+    return await submitCompanionMemberAction({
+      auth, prisma,
       request: {
         action: { kind: "meal.delete", version: 1, mealId: id },
         actionId: randomUUID(), requestedAt: new Date().toISOString(), schemaVersion: 1,
       },
     });
-    if (result.dedupeConflict) throw new Error("Action identity collision.");
-    return { accepted: true as const, actionId: result.actionId };
   } catch (error) {
     if (isHostedOnboardingError(error) && (error.httpStatus === 401 || error.httpStatus === 403)) throw error;
     throw mealApiError("MEAL_REMOVAL_UNAVAILABLE", 503, "Meal removal is temporarily unavailable.");
