@@ -2,7 +2,7 @@ import type { AssistantWorkspaceArtifactUnavailableReason, AssistantWorkspaceArt
 import { HostedRuntimeMediaReadError } from "./platform.ts";
 import { createHostedMediaReferenceId } from "@murphai/hosted-execution";
 import { createHash, randomUUID } from "node:crypto";
-import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 
@@ -282,8 +282,9 @@ export async function materializeHostedWorkspaceMediaReferences(input: {
   relativePaths: readonly string[];
   signal?: AbortSignal | null;
   vaultRoot: string;
-  options?: { maxFileBytes?: number };
+  options?: { maxFileBytes?: number; maxTotalDownloadBytes?: number };
 }): Promise<AssistantWorkspaceArtifactMaterializationResult> {
+  let downloadedBytes = 0;
   const materializedArtifactPaths = new Set<string>();
   const missingArtifactPaths = new Map<string, AssistantWorkspaceArtifactUnavailableReason>();
   if (input.relativePaths.length === 0) {
@@ -303,35 +304,9 @@ export async function materializeHostedWorkspaceMediaReferences(input: {
   for (const entry of entries) {
     assertHostedMediaReferenceLive(input.signal);
     const key = toHostedArtifactPathKey({ path: entry.relativePath, root: "vault" });
-    if (
-      input.options?.maxFileBytes !== undefined
-      && entry.byteSize > input.options.maxFileBytes
-    ) {
-      missingArtifactPaths.set(key, "size");
-      continue;
-    }
-    try {
-      if (!await hostedMediaReferenceIsCurrent(input.vaultRoot, entry)) {
-        missingArtifactPaths.set(key, "obsolete");
-        continue;
-      }
-    } catch (error) {
-      if (!isHostedMediaCanonicalLockBusy(error)) throw error;
-      missingArtifactPaths.set(key, "transport");
-      continue;
-    }
-    if (entry.expiresAt !== null && Date.parse(entry.expiresAt) <= Date.now()) {
-      await withHostedMediaInstallGuard(input.vaultRoot, entry, async () => {
-        if (await localHostedMediaReferenceIsValid({ entry, signal: input.signal, vaultRoot: input.vaultRoot })) {
-          assertHostedMediaReferenceLive(input.signal);
-          const resolved = await resolveVaultPathOnDisk(input.vaultRoot, entry.relativePath);
-          await rm(resolved.absolutePath, { force: true });
-        }
-      }).catch((error: unknown) => {
-        // Eviction is best effort: the entry is reported expired either way.
-        if (!isHostedMediaCanonicalLockBusy(error)) throw error;
-      });
-      missingArtifactPaths.set(key, "expired");
+    const unavailable = await hostedMediaReferenceUnavailableReason(input, entry);
+    if (unavailable) {
+      missingArtifactPaths.set(key, unavailable);
       continue;
     }
     if (await localHostedMediaReferenceIsValid({
@@ -347,6 +322,12 @@ export async function materializeHostedWorkspaceMediaReferences(input: {
       missingArtifactPaths.set(key, "transport");
       continue;
     }
+    // Policy and the local cache already ran, so only a real download is charged.
+    if (downloadedBytes + entry.byteSize > (input.options?.maxTotalDownloadBytes ?? Infinity)) {
+      missingArtifactPaths.set(key, "size");
+      continue;
+    }
+    downloadedBytes += entry.byteSize;
     let bytes: Uint8Array | null;
     try {
       bytes = await input.mediaStore.get(
@@ -382,9 +363,17 @@ export async function materializeHostedWorkspaceMediaReferences(input: {
     try {
       await withHostedMediaInstallGuard(input.vaultRoot, entry, async () => {
         assertHostedMediaReferenceLive(input.signal);
-        // A canonical retirement may have committed while the remote read ran.
-        if (!await hostedMediaReferenceIsCurrent(input.vaultRoot, entry)) {
-          missingArtifactPaths.set(key, "obsolete");
+        // A backfill can detach or replace a later month's descriptor while an
+        // earlier download runs. Its local shard is now the canonical truth.
+        if (!await hostedColdIngestReferenceIsCurrent(input.vaultRoot, entry)) {
+          const resolved = await resolveVaultPathOnDisk(input.vaultRoot, entry.relativePath);
+          if (await lstat(resolved.absolutePath).then(file => file.isFile(), () => false)) materializedArtifactPaths.add(key);
+          else missingArtifactPaths.set(key, "missing");
+          return;
+        }
+        const denial = await hostedMediaReferenceDenialReason(input.vaultRoot, entry);
+        if (denial) {
+          missingArtifactPaths.set(key, denial);
           return;
         }
         if (entry.expiresAt !== null && Date.parse(entry.expiresAt) <= Date.now()) {
@@ -408,17 +397,51 @@ function isHostedCanonicalPhotoPath(relativePath: string): boolean {
   return relativePath.startsWith("raw/meals/") || relativePath.startsWith("raw/measurements/");
 }
 
-async function hostedMediaReferenceIsCurrent(vaultRoot: string, entry: HostedMediaReference): Promise<boolean> {
-  return !isHostedCanonicalPhotoPath(entry.relativePath) || canonicalRawArtifactMatches({ vaultRoot, ...entry });
+async function hostedMediaReferenceDenialReason(vaultRoot: string, entry: HostedMediaReference): Promise<AssistantWorkspaceArtifactUnavailableReason | null> {
+  if (!isHostedCanonicalPhotoPath(entry.relativePath)) return null;
+  try {
+    return await canonicalRawArtifactMatches({ vaultRoot, ...entry }) ? null : "obsolete";
+  } catch (error) {
+    return isHostedMediaCanonicalLockBusy(error) ? "transport" : "integrity";
+  }
+}
+
+async function hostedMediaReferenceUnavailableReason(
+  input: { vaultRoot: string; signal?: AbortSignal | null; options?: { maxFileBytes?: number } },
+  entry: HostedMediaReference,
+): Promise<AssistantWorkspaceArtifactUnavailableReason | null> {
+  const denial = await hostedMediaReferenceDenialReason(input.vaultRoot, entry);
+  if (denial) return denial;
+  if (entry.expiresAt !== null && Date.parse(entry.expiresAt) <= Date.now()) {
+    await withHostedMediaInstallGuard(input.vaultRoot, entry, async () => {
+      if (await localHostedMediaReferenceIsValid({ entry, signal: input.signal, vaultRoot: input.vaultRoot })) {
+        assertHostedMediaReferenceLive(input.signal);
+        const resolved = await resolveVaultPathOnDisk(input.vaultRoot, entry.relativePath);
+        await rm(resolved.absolutePath, { force: true });
+      }
+    }).catch((error: unknown) => {
+      // Eviction is best effort: the entry is reported expired either way.
+      if (!isHostedMediaCanonicalLockBusy(error)) throw error;
+    });
+    return "expired";
+  }
+  return input.options?.maxFileBytes !== undefined && entry.byteSize > input.options.maxFileBytes ? "size" : null;
+}
+
+async function hostedColdIngestReferenceIsCurrent(vaultRoot: string, entry: HostedMediaReference): Promise<boolean> {
+  if (entry.mediaKind !== "integration-ingest") return true;
+  return (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries.some(current =>
+    current.relativePath === entry.relativePath && current.mediaId === entry.mediaId && current.sha256 === entry.sha256);
 }
 
 // Foreground attachment reads reach this path, so inbox and capture media must
-// never queue behind a canonical writer. Only canonical photo paths can race a
-// retirement tombstone, and only their final install needs exclusion.
+// never queue behind a canonical writer. Photos can race retirement tombstones;
+// cold ingest shards can race a backfill. Their final installs need exclusion.
 function withHostedMediaInstallGuard<T>(
   vaultRoot: string, entry: HostedMediaReference, run: () => Promise<T>,
 ): Promise<T> {
-  return isHostedCanonicalPhotoPath(entry.relativePath) ? withCanonicalWriteLock(vaultRoot, run) : run();
+  return isHostedCanonicalPhotoPath(entry.relativePath) || entry.mediaKind === "integration-ingest"
+    ? withCanonicalWriteLock(vaultRoot, run) : run();
 }
 
 function isHostedMediaCanonicalLockBusy(error: unknown): boolean {

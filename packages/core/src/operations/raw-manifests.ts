@@ -290,18 +290,36 @@ export async function canonicalRawArtifactMatches(input: {
   byteSize: number;
   mimeType: string | null;
 }): Promise<boolean> {
+  const artifacts = await readCanonicalRawArtifacts(input);
+  const artifact = artifacts[0];
+  return artifacts.length === 1 && artifact !== undefined && artifact.role !== "privacy_tombstone"
+    && artifact.sha256 === input.sha256 && artifact.byteSize === input.byteSize && artifact.mediaType === input.mimeType;
+}
+
+/** Retirement remains authoritative after the hosted cleanup pointer is gone. */
+export async function canonicalRawArtifactIsPrivacyTombstone(input: {
+  vaultRoot: string;
+  relativePath: string;
+}): Promise<boolean> {
+  return (await readCanonicalRawArtifacts(input)).some(artifact => artifact.role === "privacy_tombstone");
+}
+
+async function readCanonicalRawArtifacts(input: {
+  vaultRoot: string;
+  relativePath: string;
+}): Promise<RawImportManifestArtifact[]> {
   const rawDirectory = path.posix.dirname(normalizeRelativeVaultPath(input.relativePath));
   const owner = inferRawAssetOwnerFromDirectory(rawDirectory);
-  if (!owner) return false;
+  if (!owner) return [];
   const directory = await resolveVaultPathOnDisk(input.vaultRoot, rawDirectory);
   let names: string[];
   try {
     names = await fs.readdir(directory.absolutePath);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
   }
-  let matches = 0;
+  const artifacts: RawImportManifestArtifact[] = [];
   for (const name of names.filter(isRawManifestFileName)) {
     const resolved = await resolveVaultPathOnDisk(input.vaultRoot, path.posix.join(rawDirectory, name));
     let content: string;
@@ -316,11 +334,8 @@ export async function canonicalRawArtifactMatches(input: {
     const manifest = rawImportManifestSchema.parse(JSON.parse(content));
     if (manifest.rawDirectory !== rawDirectory || manifest.owner.kind !== owner.kind || manifest.owner.id !== owner.id) continue;
     for (const artifact of manifest.artifacts) {
-      if (artifact.relativePath !== input.relativePath) continue;
-      if (artifact.role === "privacy_tombstone" || artifact.sha256 !== input.sha256
-        || artifact.byteSize !== input.byteSize || artifact.mediaType !== input.mimeType) return false;
-      matches += 1;
+      if (artifact.relativePath === input.relativePath) artifacts.push(artifact);
     }
   }
-  return matches === 1;
+  return artifacts;
 }

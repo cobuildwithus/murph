@@ -1,3 +1,6 @@
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { assistantVaultFileMaxBytes } from '@murphai/operator-config/assistant-cli-contracts'
 import { AssistantWorkspaceArtifactMaterializationError } from '../src/assistant/execution-context.js'
 import { createHash } from 'node:crypto'
 import {
@@ -153,6 +156,34 @@ afterEach(async () => {
 })
 
 describe('assistant vault-file send', () => {
+  it('rejects a finished ZIP over 100 MiB without dropping archive entries or requesting approval', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext('murph-large-zip-')
+    tempRoots.push(parentRoot)
+    const ref = 'exports/complete.zip'
+    await mkdir(path.join(vaultRoot, 'exports'), { recursive: true })
+    await promisify(execFile)('python3', ['-c', [
+      'import sys, zipfile',
+      'with zipfile.ZipFile(sys.argv[1], "w", compression=zipfile.ZIP_STORED) as z:',
+      ' with z.open("full-original.bin", "w") as f:',
+      '  for _ in range(100): f.write(bytes(1024 * 1024))',
+      ' z.writestr("last-original.txt", "keep this too")',
+    ].join('\n'), path.join(vaultRoot, ref)])
+    const before = await stat(path.join(vaultRoot, ref))
+    expect(before.size).toBeGreaterThan(assistantVaultFileMaxBytes)
+    const request = vi.fn()
+    await expect(requestAssistantVaultFileSend({
+      actionApprovalPort: { request, read: vi.fn() },
+      bindingDelivery: { kind: 'thread', target: 'synthetic-large-zip' },
+      channel: 'linq', ref, sessionId: 'synthetic-session', threadId: 'synthetic-large-zip',
+      threadIsDirect: true, turnId: 'synthetic-turn', vault: vaultRoot,
+    })).rejects.toMatchObject({ code: 'ASSISTANT_VAULT_FILE_SIZE_UNSUPPORTED' })
+    expect(request).not.toHaveBeenCalled()
+    expect((await stat(path.join(vaultRoot, ref))).size).toBe(before.size)
+    const inspected = await promisify(execFile)('python3', ['-c',
+      'import sys, zipfile; z=zipfile.ZipFile(sys.argv[1]); print(",".join(z.namelist())); assert z.testzip() is None', path.join(vaultRoot, ref)])
+    expect(inspected.stdout.trim()).toBe('full-original.bin,last-original.txt')
+  })
+
   it('captures exact export-pack receipts only for a generated ZIP', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'murph-vault-file-export-packs-',

@@ -3337,6 +3337,7 @@ describe('assistant Codex turn planning', () => {
     const toolNames = plan.dynamicTools.map((tool) => tool.name)
     expect(toolNames).toContain('pending_vault_files')
     expect(toolNames).not.toContain('send_vault_file')
+    expect(toolNames).not.toContain('materialize_vault_media')
   })
 
   it('exposes labs to private ordinary turns, including scheduled work', async () => {
@@ -4419,6 +4420,7 @@ describe('assistant Codex turn planning', () => {
       'plan_usage',
       'usage_diagnostics',
       'send_vault_file',
+      'materialize_vault_media',
       'subscription',
     ]) {
       expect(plan.dynamicTools.map((tool) => tool.name)).not.toContain(personalTool)
