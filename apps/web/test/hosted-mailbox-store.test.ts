@@ -2388,9 +2388,10 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
     });
   });
 
-  it("keeps model-free readiness scoped to live tenant rows and exact notification policy", async () => {
+  it.each([undefined, false, true])("keeps model-free readiness scoped to live tenant rows and exact notification policy (blocked=%s)", async (assistantExecutionBlocked) => {
     const findFirst = vi.fn<HostedMailboxItemFindFirst>(async () => null);
     await readHostedMailboxFirstLiveSystemItemAfterSeq({
+      assistantExecutionBlocked,
       afterSeq: "4",
       at: FIXED_NOW,
       modelFreeOnly: true,
@@ -2417,6 +2418,9 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
     const serialized = JSON.stringify(query, (_key, value) =>
       typeof value === "bigint" ? value.toString() : value,
     );
+    for (const kind of ["member.action.requested", "member.preferences.updated", "clinical-records.sync-requested"]) {
+      expect(serialized.includes(kind)).toBe(assistantExecutionBlocked === true);
+    }
     expect(serialized).not.toContain("assistant.ask.requested");
     expect(serialized).not.toContain("assistant.ask.completed");
     // Generic notifications have no bare kind admission: every such branch

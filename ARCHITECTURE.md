@@ -1210,6 +1210,10 @@ Media-to-Binary bridge). Provider credentials stay in Web and
 redirects remain disabled. Postgres contains operational counters and encrypted
 authority, never document bodies.
 
+When assistant execution is blocked, clinical acquisition can run on the
+model-free system-mailbox path. AI-allowed acquisition retains default ownership
+and conversation-prefetch ordering; enrichment retains its independent AI gate.
+
 The hosted runtime retrieves and imports one FHIR page with its attachments at
 a time. Private portable clinical checkpoints retain the pending ticket,
 accepted bytes, next cursor, predecessor manifest and cumulative saved counts.

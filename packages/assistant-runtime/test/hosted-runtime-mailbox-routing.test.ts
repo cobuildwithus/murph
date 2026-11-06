@@ -9,6 +9,7 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   createHostedMailboxRoutingPlan,
+  getHostedSystemMailboxModelFreeRouteActions,
   resolveExpectedLaneForHostedMailboxKind,
   type HostedMailboxImportAction,
 } from "../src/hosted-runtime/mailbox-routing.ts";
@@ -16,6 +17,18 @@ import {
 const TEST_NOW = "2026-04-26T00:00:00.000Z";
 
 describe("hosted mailbox routing", () => {
+  test("preserves default system routes and expands only for blocked assistant execution", () => {
+    const defaultRoutes = [
+      "apply-member-channels-update", "apply-runtime-control-request", "dispatch-assistant-notification",
+      "import-group-journal-fact", "import-reported-daily-metric", "run-device-sync-wake",
+    ];
+    assert.deepEqual(getHostedSystemMailboxModelFreeRouteActions().sort(), defaultRoutes);
+    assert.deepEqual(getHostedSystemMailboxModelFreeRouteActions(false).sort(), defaultRoutes);
+    assert.deepEqual(getHostedSystemMailboxModelFreeRouteActions(true).sort(), [
+      ...defaultRoutes, "apply-member-action", "apply-member-preferences", "run-clinical-records-sync",
+    ].sort());
+  });
+
   test("classifies every current hosted mailbox kind into a semantic import action", () => {
     const cases: Array<{
       action: HostedMailboxImportAction;

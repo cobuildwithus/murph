@@ -332,6 +332,21 @@ describe("hosted orchestration control contracts", () => {
     })).toThrow(/systemMailboxProgressGeneration must be a non-negative/u);
   });
 
+  it.each(["member.action.requested", "member.preferences.updated", "clinical-records.sync-requested"])(
+    "classifies deterministic %s as model-free only when assistant execution is blocked", (kind) => {
+      expect(classifyHostedSystemMailboxExecutionClass({ kind, dedupeKey: `${kind}:synthetic` })).toBe("default_owned");
+      expect(classifyHostedSystemMailboxExecutionClass({ kind, dedupeKey: `${kind}:synthetic`, assistantExecutionBlocked: false })).toBe("default_owned");
+      expect(classifyHostedSystemMailboxExecutionClass({ kind, dedupeKey: `${kind}:synthetic`, assistantExecutionBlocked: true })).toBe("model_free");
+    },
+  );
+
+  it.each(["clinical-records.enrichment-requested", "meal-photo.captured", "assistant.ask.requested"])(
+    "retains model-owned %s", (kind) => {
+      expect(classifyHostedSystemMailboxExecutionClass({ kind, dedupeKey: `${kind}:synthetic`, assistantExecutionBlocked: true })).toBe("default_owned");
+      expect(classifyHostedSystemMailboxExecutionClass({ kind, dedupeKey: `${kind}:synthetic` })).toBe("default_owned");
+    },
+  );
+
   it("classifies the generic first system-mailbox frontier", () => {
     expect(classifyHostedSystemMailboxExecutionClass({
       dedupeKey: "journal.group-fact.recorded:fact",
