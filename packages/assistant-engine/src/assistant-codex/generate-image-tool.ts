@@ -1,3 +1,4 @@
+import { AssistantWorkspaceArtifactMaterializationError } from '../assistant/execution-context.js'
 import { toolFailureDiagnostic, type ToolFailureDiagnostic } from './tool-failure-diagnostics.js'
 import { Buffer } from 'node:buffer'
 import { createHash, randomUUID } from 'node:crypto'
@@ -176,8 +177,8 @@ export async function executeGenerateImageTool(input: {
   })
   let existingCapture: ExistingGeneratedImageCapture = { status: 'missing' }
   if (vaultRoot) {
+    await input.materializeWorkspaceArtifacts?.([CAPTURE_LOOKUP_INDEX_PATH], { signal: input.abortSignal })
     try {
-      await input.materializeWorkspaceArtifacts?.([CAPTURE_LOOKUP_INDEX_PATH])
       existingCapture = await findExistingGeneratedImageCapture({
         captureIdentity,
         outputFormat: input.args.outputFormat,
@@ -213,12 +214,13 @@ export async function executeGenerateImageTool(input: {
         ? await resolveGenerateImageReferences({
             materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
             refs: referenceImageRefs,
+            signal: input.abortSignal,
             skillsRoot: resolveAssistantSkillsRoot(),
             vaultRoot: vaultRoot ?? '',
           })
         : []
     } catch (error) {
-      if (isAbortError(error)) {
+      if (isGenerateImageControlFlowError(error)) {
         throw error
       }
       return {
@@ -269,7 +271,7 @@ export async function executeGenerateImageTool(input: {
         size: input.args.size,
       })
     } catch (error) {
-      if (isAbortError(error)) {
+      if (isGenerateImageControlFlowError(error)) {
         throw error
       }
       return {
@@ -610,8 +612,9 @@ function isValidGeneratedImageBytes(input: {
   )
 }
 
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError'
+function isGenerateImageControlFlowError(error: unknown): boolean {
+  return error instanceof AssistantWorkspaceArtifactMaterializationError
+    || (error instanceof Error && error.name === 'AbortError')
 }
 
 function generatedImageBytesMatchFormat(

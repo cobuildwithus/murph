@@ -1,3 +1,4 @@
+import { AssistantWorkspaceArtifactMaterializationError } from '../src/assistant/execution-context.js'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -30,7 +31,7 @@ describe('assistant input attachment evidence model materialization', () => {
     const imageBytes = Buffer.from([0xff, 0xd8, 0xff, 0xdb])
     const materializeWorkspaceArtifacts = vi.fn(async () => ({
       materializedArtifactPaths: new Set([`vault:${imagePath}`]),
-      missingArtifactPaths: new Set<string>(),
+      missingArtifactPaths: new Map(),
     }))
     await writeVaultFile(vaultRoot, imagePath, imageBytes)
 
@@ -77,7 +78,7 @@ describe('assistant input attachment evidence model materialization', () => {
       type: 'text',
       text: 'Attachment image 1 (01__meal.jpg).',
     })
-    expect(materializeWorkspaceArtifacts).toHaveBeenCalledWith([imagePath])
+    expect(materializeWorkspaceArtifacts).toHaveBeenCalledWith([imagePath], { maxFileBytes: 50 * 1024 * 1024 })
   })
 
   it('keeps image galleries at high detail to bound visual input cost', async () => {
@@ -158,11 +159,11 @@ describe('assistant input attachment evidence model materialization', () => {
 
     const materializeWorkspaceArtifacts = vi.fn(async (paths: readonly string[]) => {
       if (paths.includes('derived/inbox/capture-1/attachments/att-2/manifest.json')) {
-        throw new Error('derived manifest unavailable')
+        return { materializedArtifactPaths: new Set<string>(), missingArtifactPaths: new Map(paths.map(ref => [`vault:${ref}`, 'transport' as const])) }
       }
       return {
         materializedArtifactPaths: new Set(paths.map((item) => `vault:${item}`)),
-        missingArtifactPaths: new Set<string>(),
+        missingArtifactPaths: new Map(),
       }
     })
 
@@ -221,14 +222,7 @@ describe('assistant input attachment evidence model materialization', () => {
     ])
     expect(bundles[1]?.combinedText).toContain(`storedPath: ${audioPath}`)
     expect(bundles[1]?.combinedText).not.toContain('derived-plain-text')
-    expect(evidenceReadFailures).toEqual([
-      {
-        attachmentOrdinal: 2,
-        details: 'attachment 2 derived evidence unavailable',
-        errorCode: 'derived_read_failed',
-        kind: 'derived',
-      },
-    ])
+    expect(evidenceReadFailures).toEqual([])
   })
 
   it.each([
@@ -648,8 +642,8 @@ describe('assistant input attachment evidence model materialization', () => {
       await new Promise((resolve) => setTimeout(resolve, 5))
       activeMaterializations -= 1
       return {
-        materializedArtifactPaths: new Set<string>(),
-        missingArtifactPaths: new Set<string>(),
+        materializedArtifactPaths: new Set(_paths.map(ref => `vault:${ref}`)),
+        missingArtifactPaths: new Map(),
       }
     })
 
@@ -724,9 +718,9 @@ describe('assistant input attachment evidence model materialization', () => {
 
   it('reads derived parser manifest text only from the declared allowed root', async () => {
     const vaultRoot = await createTempVaultRoot()
-    const materializeWorkspaceArtifacts = vi.fn(async () => ({
-      materializedArtifactPaths: new Set<string>(),
-      missingArtifactPaths: new Set<string>(),
+    const materializeWorkspaceArtifacts = vi.fn(async (paths: readonly string[]) => ({
+      materializedArtifactPaths: new Set(paths.map(ref => `vault:${ref}`)),
+      missingArtifactPaths: new Map(),
     }))
     await writeVaultFile(
       vaultRoot,
@@ -900,3 +894,20 @@ function createAttachmentEvidence(input: {
     sourceAttachmentId: 'att_source',
   }
 }
+
+
+it('honors rejected local evidence and propagates materialization control flow', async () => {
+  const vaultRoot = await createTempVaultRoot()
+  const rawPath = 'raw/inbox/synthetic/photo.jpg'
+  await writeVaultFile(vaultRoot, rawPath, Buffer.from([0xff, 0xd8, 0xff, 0xdb]))
+  const attachment = createAttachmentEvidence({ kind: 'image', mime: 'image/jpeg', rawPath })
+  const unavailable = await buildAssistantInputAttachmentPromptBundle({ attachment, vaultRoot,
+    materializeWorkspaceArtifacts: async () => ({ materializedArtifactPaths: new Set(), missingArtifactPaths: new Map([[`vault:${rawPath}`, 'integrity']]) }),
+  })
+  expect(unavailable.storedPath).toBeNull()
+  expect(unavailable.routingImage.eligible).toBe(false)
+  const interrupted = new AssistantWorkspaceArtifactMaterializationError(new Error('Synthetic owner lost'))
+  await expect(buildAssistantInputAttachmentPromptBundles({ attachments: [attachment], vaultRoot,
+    materializeWorkspaceArtifacts: async () => { throw interrupted },
+  })).rejects.toBe(interrupted)
+})

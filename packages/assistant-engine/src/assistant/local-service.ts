@@ -1,3 +1,4 @@
+import { AssistantWorkspaceArtifactMaterializationError } from './execution-context.js'
 import {
   assistantAskResultSchema,
   type AssistantAskResult,
@@ -1080,7 +1081,8 @@ export async function sendAssistantMessageLocal(
                     sessionId: currentSession.sessionId,
                     transcriptEntries,
                   })
-                } catch {
+                } catch (error) {
+                  if (error instanceof AssistantWorkspaceArtifactMaterializationError) throw error
                   return false
                 }
               },
@@ -1117,6 +1119,8 @@ export async function sendAssistantMessageLocal(
                         session: currentSession,
                       })
                       const result = await requestAssistantVaultFileSend({
+                        materializeWorkspaceArtifacts: hostedExecutionContext?.materializeWorkspaceArtifacts,
+                        signal: currentInput.abortSignal,
                         actionApprovalPort,
                         actorId: deliveryFields.actorId,
                         answeredMailboxItemIds: currentInput.answeredMailboxItemIds ?? [],

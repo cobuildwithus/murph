@@ -1,3 +1,4 @@
+import { AssistantWorkspaceArtifactMaterializationError } from '../src/assistant/execution-context.js'
 import { createHash } from 'node:crypto'
 import {
   chmod,
@@ -1769,3 +1770,10 @@ function createVaultFileIntent() {
     updatedAt: '2026-06-24T11:00:00.000Z',
   }
 }
+
+
+it('propagates secure-file materialization interruption through the dynamic tool', async () => {
+  const interrupted = new AssistantWorkspaceArtifactMaterializationError(new Error('Synthetic owner lost'))
+  await expect(dispatchVaultFile('raw/inbox/synthetic/photo.png', async () => { throw interrupted }))
+    .rejects.toBe(interrupted)
+})

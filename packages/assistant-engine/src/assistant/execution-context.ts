@@ -567,12 +567,31 @@ export interface AssistantHostedImageGenerationLauncher {
   readStatus?(scopeId: string): 'pending' | 'queued' | null
 }
 
+/** A failed invocation (including cancellation/owner loss), never a missing file.
+ * Best-effort evidence readers must propagate this control flow. */
+export class AssistantWorkspaceArtifactMaterializationError extends Error {
+  constructor(cause: unknown) {
+    super('Workspace artifact materialization interrupted.', { cause })
+    this.name = 'AssistantWorkspaceArtifactMaterializationError'
+  }
+
+  static rethrowIfInterrupted(error: unknown): void {
+    if (error instanceof AssistantWorkspaceArtifactMaterializationError) throw error
+  }
+}
+
+export type AssistantWorkspaceArtifactUnavailableReason =
+  | 'missing' | 'expired' | 'integrity' | 'size' | 'transport' | 'obsolete'
+
+/** Keys are canonical root-qualified paths, e.g. vault:raw/inbox/photo.jpg.
+ * A rejection is authoritative even when a local file remains at that path. */
 export interface AssistantWorkspaceArtifactMaterializationResult {
   materializedArtifactPaths: ReadonlySet<string>
-  missingArtifactPaths: ReadonlySet<string>
+  missingArtifactPaths: ReadonlyMap<string, AssistantWorkspaceArtifactUnavailableReason>
 }
 
 export interface AssistantWorkspaceArtifactMaterializationOptions {
+  signal?: AbortSignal | null
   maxFileBytes?: number
 }
 

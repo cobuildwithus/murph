@@ -1,3 +1,4 @@
+import type { AssistantWorkspaceArtifactMaterializer } from './execution-context.js'
 import { createHash } from 'node:crypto'
 import { constants, type Stats } from 'node:fs'
 import { lstat, open, readFile, stat } from 'node:fs/promises'
@@ -68,6 +69,8 @@ export type AssistantVaultFileSendRequestResult =
   & HostedActionApprovalResult
 
 export async function requestAssistantVaultFileSend(input: {
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
+  signal?: AbortSignal | null
   actionApprovalPort: AssistantActionApprovalPort
   actorId?: string | null
   answeredMailboxItemIds?: readonly string[] | null
@@ -127,6 +130,8 @@ export async function requestAssistantVaultFileSend(input: {
     })
   }
   const resolvedFile = await resolveAssistantVaultFileResponseMedia({
+    materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+    signal: input.signal,
     ...(generatedDelivery === null
       ? {}
       : { displayFilename: generatedDelivery.displayFilename }),
@@ -245,6 +250,8 @@ export function buildAssistantVaultFileApprovalFallbackWakeAt(
 }
 
 export async function resolveAssistantVaultFileResponseMedia(input: {
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
+  signal?: AbortSignal | null
   displayFilename?: string
   ref: string
   vaultRoot: string
@@ -320,10 +327,14 @@ async function adoptAssistantGeneratedDeliveryIntoStableName(input: {
 }
 
 export async function readVerifiedAssistantVaultFileBytes(input: {
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
+  signal?: AbortSignal | null
   file: AssistantVaultFileResponseMedia
   vaultRoot: string
 }): Promise<Uint8Array> {
   const snapshot = await readAssistantVaultFileSnapshot({
+    materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+    signal: input.signal,
     displayFilename: input.file.filename,
     ref: input.file.ref,
     vaultRoot: input.vaultRoot,
@@ -343,10 +354,14 @@ export async function readVerifiedAssistantVaultFileBytes(input: {
 }
 
 export async function readVerifiedAssistantVaultImageBytes(input: {
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
+  signal?: AbortSignal | null
   image: AssistantVaultImageResponseMedia
   vaultRoot: string
 }): Promise<Uint8Array> {
   const snapshot = await readAssistantVaultBytesSnapshot({
+    materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+    signal: input.signal,
     maxBytes: assistantVaultImageMaxBytes,
     ref: input.image.ref,
     vaultRoot: input.vaultRoot,
@@ -367,12 +382,16 @@ export async function readVerifiedAssistantVaultImageBytes(input: {
 }
 
 export async function resolveAssistantVaultImageResponseMedia(input: {
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
+  signal?: AbortSignal | null
   alt?: string | null
   ref: string
   source?: string | null
   vaultRoot: string
 }): Promise<AssistantVaultImageResponseMedia> {
   const snapshot = await readAssistantVaultBytesSnapshot({
+    materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+    signal: input.signal,
     maxBytes: assistantVaultImageMaxBytes,
     ref: input.ref,
     vaultRoot: input.vaultRoot,
@@ -772,6 +791,8 @@ export function deferAssistantVaultFileApprovalCheck(input: {
 }
 
 async function readAssistantVaultFileSnapshot(input: {
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
+  signal?: AbortSignal | null
   displayFilename?: string
   ref: string
   vaultRoot: string
@@ -780,6 +801,8 @@ async function readAssistantVaultFileSnapshot(input: {
   file: AssistantVaultFileResponseMedia
 }> {
   const snapshot = await readAssistantVaultBytesSnapshot({
+    materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+    signal: input.signal,
     maxBytes: assistantVaultFileMaxBytes,
     ref: input.ref,
     vaultRoot: input.vaultRoot,
@@ -800,6 +823,8 @@ async function readAssistantVaultFileSnapshot(input: {
 }
 
 async function readAssistantVaultBytesSnapshot(input: {
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
+  signal?: AbortSignal | null
   maxBytes: number
   ref: string
   vaultRoot: string
@@ -825,6 +850,15 @@ async function readAssistantVaultBytesSnapshot(input: {
     metadata = snapshot.metadata
     bytes = snapshot.bytes
   } else {
+    input.signal?.throwIfAborted()
+    const materialized = await input.materializeWorkspaceArtifacts?.([`vault:${ref}`], {
+      maxFileBytes: input.maxBytes,
+      signal: input.signal,
+    })
+    if (materialized && !materialized.materializedArtifactPaths.has(`vault:${ref}`)) {
+      throw new VaultCliError('ASSISTANT_VAULT_FILE_UNAVAILABLE', 'The vault file is unavailable and was not sent.')
+    }
+    input.signal?.throwIfAborted()
     metadata = await stat(absolutePath)
     assertAssistantVaultFileMetadataSupported(metadata, input.maxBytes)
     bytes = await readFile(absolutePath)

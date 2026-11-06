@@ -1,3 +1,6 @@
+import { readVerifiedAssistantVaultImageBytes, resolveAssistantVaultFileResponseMedia, resolveAssistantVaultImageResponseMedia } from "@murphai/assistant-engine/assistant-outbox";
+import { resolveGenerateImageReferences } from "@murphai/assistant-engine/assistant-codex";
+import { HostedRuntimeMediaReadError } from "../src/hosted-runtime/platform.ts";
 import { createMealMediaStore } from "./hosted-meal-media.harness.ts";
 import { runHostedMealMediaMaintenance, createHostedMealMediaBudget } from "../src/hosted-runtime/meal-media-maintenance.ts";
 import { HostedRuntimeMediaWriteError } from "../src/hosted-runtime/platform.ts";
@@ -9,7 +12,7 @@ import * as pendingInputIndex from "../src/hosted-runtime/pending-input-index.ts
 import { parseHostedCanonicalWriteReceiptArtifact } from "../src/hosted-runtime/canonical-write-receipt.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -113,7 +116,7 @@ test.each(["warm", "restored"])("retires an expired generated capture in a %s wo
     });
     const materializeCandidatePaths = async (paths: readonly string[]) => {
       const result = await materialize(paths);
-      return { missingStoredPaths: [...result.missingArtifactPaths].map((key) => key.slice("vault:".length)) };
+      return { missingStoredPaths: [...result.missingArtifactPaths.keys()].map((key) => key.slice("vault:".length)) };
     };
     const input = { vaultRoot, now: new Date(expiresAt), materializeCandidatePaths };
     expect(await runGeneratedImageCaptureRetention(input)).toMatchObject({
@@ -210,11 +213,11 @@ test("v2 materialization derives bounded local file availability without a cache
     const rejected = ["missing.txt", "directory", "../outside.txt", "linked/outside.txt", "linked-file"];
     const missing = await materialize(rejected);
     assert.equal(missing.materializedArtifactPaths.size, 0);
-    assert.deepEqual([...missing.missingArtifactPaths], rejected.map((p) => `vault:${p}`));
+    assert.deepEqual([...missing.missingArtifactPaths.keys()], rejected.map((p) => `vault:${p}`));
     const oversized = await materialize(["existing.txt"], { maxFileBytes: 4 });
-    assert.deepEqual([...oversized.missingArtifactPaths], ["vault:existing.txt"]);
+    assert.deepEqual([...oversized.missingArtifactPaths.keys()], ["vault:existing.txt"]);
     await rm(path.join(vaultRoot, "existing.txt"));
-    assert.deepEqual([...(await materialize(["existing.txt"])).missingArtifactPaths], ["vault:existing.txt"]);
+    assert.deepEqual([...(await materialize(["existing.txt"])).missingArtifactPaths.keys()], ["vault:existing.txt"]);
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -417,13 +420,13 @@ test.each([false, true])("hosted artifact materializer restores retained inbox m
     });
 
     const result = await materialize([imagePath, videoPath]);
-    assert.deepEqual([...result.missingArtifactPaths], []);
+    assert.deepEqual([...result.missingArtifactPaths.keys()], []);
     assert.deepEqual([...result.materializedArtifactPaths].sort(), [
       `vault:${imagePath}`,
       `vault:${videoPath}`,
     ].sort());
     const deniedLocalMedia = await materialize([imagePath], { maxFileBytes: 1 });
-    assert.deepEqual([...deniedLocalMedia.missingArtifactPaths], [`vault:${imagePath}`]);
+    assert.deepEqual([...deniedLocalMedia.missingArtifactPaths.keys()], [`vault:${imagePath}`]);
     assert.equal(deniedLocalMedia.materializedArtifactPaths.size, 0);
     assert.deepEqual(
       await readFile(path.join(vaultRoot, imagePath)),
@@ -441,7 +444,7 @@ test.each([false, true])("hosted artifact materializer restores retained inbox m
     assert.equal((await materialize([imagePath, videoPath])).missingArtifactPaths.size, 0);
     clock.mockReturnValue(Date.parse("2026-07-01T00:00:00.000Z"));
     const videoExpired = await materialize([imagePath, videoPath]);
-    assert.deepEqual([...videoExpired.missingArtifactPaths], [`vault:${videoPath}`]);
+    assert.deepEqual([...videoExpired.missingArtifactPaths.keys()], [`vault:${videoPath}`]);
     assert.deepEqual(await readFile(path.join(vaultRoot, imagePath)), imageBytes);
     await assert.rejects(readFile(path.join(vaultRoot, videoPath)), { code: "ENOENT" });
     clock.mockReturnValue(Date.parse("2026-08-29T23:59:59.999Z"));
@@ -697,7 +700,7 @@ test("acknowledged capture receipts recover media references without a newer sna
     });
     assert.equal((await reconstructed([relativePath])).missingArtifactPaths.size, 0);
     assert.equal(getCalls.length, 1);
-    assert.deepEqual([...(await reconstructed([relativePath], { maxFileBytes: 1 })).missingArtifactPaths], [`vault:${relativePath}`]);
+    assert.deepEqual([...(await reconstructed([relativePath], { maxFileBytes: 1 })).missingArtifactPaths.keys()], [`vault:${relativePath}`]);
     assert.equal(getCalls.length, 1);
     await writeFile(path.join(restoredRoot, relativePath), Buffer.alloc(bytes.length));
     assert.equal((await reconstructed([relativePath])).missingArtifactPaths.size, 0);
@@ -705,7 +708,7 @@ test("acknowledged capture receipts recover media references without a newer sna
     assert.equal(getCalls.length, 2);
     await rm(path.join(restoredRoot, relativePath));
     vi.spyOn(mediaStore, "get").mockResolvedValueOnce(null);
-    assert.deepEqual([...(await reconstructed([relativePath])).missingArtifactPaths], [`vault:${relativePath}`]);
+    assert.deepEqual([...(await reconstructed([relativePath])).missingArtifactPaths.keys()], [`vault:${relativePath}`]);
     await assert.rejects(stat(indexPath), { code: "ENOENT" });
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -1217,6 +1220,26 @@ test("meal thumbnail and full-photo deletion survives canonical receipt replay a
       await applyHostedCanonicalWriteReceiptWithMedia(input);
       await applyHostedCanonicalWriteReceiptWithMedia(input);
     }
+    // Exact and catalogue-wide reads must preserve canonical tombstones, both
+    // immediately after deletion and after receipt-only recovery.
+    for (const target of [vaultRoot, restoredRoot]) {
+      const before = await readHostedMediaReferenceCatalogue({ vaultRoot: target });
+      const entry = before.entries[0]!;
+      const tombstone = await readFile(path.join(target, entry.relativePath));
+      const directory = path.posix.dirname(entry.relativePath);
+      const manifests = (await readdir(path.join(target, directory))).filter(name => name.startsWith("manifest"));
+      const identities = await Promise.all(manifests.map(name => readFile(path.join(target, directory, name))));
+      const get = vi.fn(store.mediaStore.get);
+      const materialize = createHostedArtifactMaterializer({ vaultRoot: target, operatorHomeRoot: target, mediaStore: { ...store.mediaStore, get } });
+      for (const paths of [[entry.relativePath], before.entries.map(ref => ref.relativePath)]) {
+        const result = await materialize(paths);
+        expect(result.missingArtifactPaths.get(`vault:${entry.relativePath}`)).toBe("obsolete");
+        expect(await readFile(path.join(target, entry.relativePath))).toEqual(tombstone);
+      }
+      expect(await Promise.all(manifests.map(name => readFile(path.join(target, directory, name))))).toEqual(identities);
+      expect(get).not.toHaveBeenCalled();
+      expect(await readHostedMediaReferenceCatalogue({ vaultRoot: target })).toEqual(before);
+    }
     // Replay retains pending cleanup pointers without publishing deleted media.
     expect((await readHostedMediaReferenceCatalogue({ vaultRoot: restoredRoot })).entries[0]).toMatchObject({ pendingUpload: true });
     expect(store.storedBytesByMediaId.size).toBe(1);
@@ -1273,5 +1296,164 @@ test.each([false, true])("cold-restored meal reads retain inspectable bytes afte
       if (!expired) await expect(removeAutomaticMealPhotoRecord({ vault: target, lookup: meal.mealId })).resolves.toBeDefined();
     }
     expect(store.getCalls).toEqual([]);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
+test("real materialization rejects wrong local images and classifies mixed outcomes", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-materialization-outcomes-"));
+  const good = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==", "base64");
+  const names = ["good", "missing", "corrupt", "transport", "large", "expired"];
+  try {
+    const entries = names.map(name => ({ relativePath: `raw/inbox/synthetic/${name}.png`, mediaId: createHash("sha256").update(name).digest("hex"),
+      byteSize: name === "large" ? 1000 : good.length, sha256: createHash("sha256").update(good).digest("hex"),
+      mediaKind: "image" as const, mimeType: "image/png", recordedAt: "2030-01-01T00:00:00Z",
+      expiresAt: name === "expired" ? "2000-01-01T00:00:00Z" : null }));
+    await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue: { schema: "murph.hosted-media-refs.v1", entries } });
+    await mkdir(path.join(vaultRoot, "raw/inbox/synthetic"), { recursive: true });
+    // Valid-looking PNG bytes, with a different exact identity.
+    const wrong = Buffer.concat([good, Buffer.from("different")]);
+    for (const name of ["missing", "corrupt", "expired"]) await writeFile(path.join(vaultRoot, `raw/inbox/synthetic/${name}.png`), wrong);
+    const mediaStore: HostedRuntimeMediaStore = { put: async () => {}, get: async ({ mediaId }) => {
+      if (mediaId === createHash("sha256").update("transport").digest("hex")) throw new HostedRuntimeMediaReadError({ cause: new Error("Synthetic transport failure"), retryable: true });
+      return mediaId === createHash("sha256").update("missing").digest("hex") ? null : mediaId === createHash("sha256").update("corrupt").digest("hex") ? wrong : good;
+    } };
+    const materialize = createHostedArtifactMaterializer({ vaultRoot, operatorHomeRoot: vaultRoot, mediaStore });
+    const result = await materialize(entries.map(entry => entry.relativePath), { maxFileBytes: 500 });
+    expect([...result.materializedArtifactPaths]).toEqual(["vault:raw/inbox/synthetic/good.png"]);
+    expect(Object.fromEntries(result.missingArtifactPaths)).toEqual({
+      "vault:raw/inbox/synthetic/missing.png": "missing", "vault:raw/inbox/synthetic/corrupt.png": "integrity",
+      "vault:raw/inbox/synthetic/transport.png": "transport", "vault:raw/inbox/synthetic/large.png": "size",
+      "vault:raw/inbox/synthetic/expired.png": "expired",
+    });
+    for (const name of ["missing", "corrupt", "expired"]) {
+      expect(await readFile(path.join(vaultRoot, `raw/inbox/synthetic/${name}.png`))).toEqual(wrong);
+      await expect(resolveGenerateImageReferences({ vaultRoot, refs: [`raw/inbox/synthetic/${name}.png`], materializeWorkspaceArtifacts: materialize }))
+        .rejects.toMatchObject({ code: "ASSISTANT_IMAGE_REFERENCE_UNAVAILABLE" });
+    }
+    expect(await resolveGenerateImageReferences({ vaultRoot, refs: [entries[0]!.relativePath], materializeWorkspaceArtifacts: materialize })).toHaveLength(1);
+    const controller = new AbortController();
+    const ownerLost = new Error("Synthetic owner lost");
+    const cancelled = createHostedArtifactMaterializer({ vaultRoot, operatorHomeRoot: vaultRoot, mediaStore: {
+      ...mediaStore, get: async (_ref, options) => { expect(options?.signal).toBe(controller.signal); controller.abort(ownerLost); return good; },
+    } });
+    await expect(cancelled([entries[1]!.relativePath], { signal: controller.signal })).rejects.toMatchObject({ cause: ownerLost });
+    expect(await readFile(path.join(vaultRoot, entries[1]!.relativePath))).toEqual(wrong);
+    const stale = createHostedArtifactMaterializer({ vaultRoot, operatorHomeRoot: vaultRoot, mediaStore: { ...mediaStore, get: async () => { throw ownerLost; } } });
+    await expect(stale([entries[1]!.relativePath])).rejects.toMatchObject({ cause: ownerLost });
+  } finally { await rm(vaultRoot, { recursive: true, force: true }); }
+});
+
+test.each(["expired", "retired-during-fetch"])("full-photo materialization preserves canonical identity when %s", async (scenario) => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-photo-authority-"));
+  try {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const photoPath = path.join(vaultRoot, "source.png");
+    const bytes = Buffer.from("synthetic full photo");
+    await writeFile(photoPath, bytes);
+    const meal = await addMeal({ vaultRoot, photoPath, occurredAt: "2030-01-01T00:00:00Z" });
+    const relativePath = meal.photo!.relativePath;
+    const entry = { relativePath, mediaId: "f".repeat(64), mediaKind: "image" as const, mimeType: "image/png",
+      byteSize: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), recordedAt: "2030-01-01T00:00:00.000Z",
+      expiresAt: scenario === "expired" ? "2000-01-01T00:00:00.000Z" : null };
+    await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue: { schema: "murph.hosted-media-refs.v1", entries: [entry] } });
+    const get = vi.fn(async () => {
+      await deleteEvent({ vaultRoot, eventId: meal.event.id });
+      return bytes;
+    });
+    if (scenario === "expired") await deleteEvent({ vaultRoot, eventId: meal.event.id });
+    else await rm(path.join(vaultRoot, relativePath));
+    const materialize = createHostedArtifactMaterializer({ vaultRoot, operatorHomeRoot: vaultRoot, mediaStore: { get, put: async () => {} } });
+    const result = await materialize([relativePath]);
+    expect(result.missingArtifactPaths.get(`vault:${relativePath}`)).toBe("obsolete");
+    expect(JSON.parse(await readFile(path.join(vaultRoot, relativePath), "utf8"))).toMatchObject({ reason: "meal_deleted" });
+    expect(get).toHaveBeenCalledTimes(scenario === "expired" ? 0 : 1);
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toEqual([entry]);
+  } finally { await rm(vaultRoot, { recursive: true, force: true }); }
+});
+
+test("canonical reads, maintenance and reconciliation agree on shard tie-breaks and retain historical inbox refs", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-media-revision-"));
+  const store = createHostedRuntimeMediaStoreStub();
+  store.mediaStore.record = async () => {};
+  try {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const photoPath = path.join(vaultRoot, "source.png");
+    await writeFile(photoPath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==", "base64"));
+    const meal = await addMeal({ vaultRoot, photoPath, occurredAt: "2030-01-01T00:00:00Z", photoCapturedAt: "2030-01-01T00:00:00Z" });
+    await runMealPhotoMaintenance({ vaultRoot, now: new Date("2030-01-01T01:00:00Z") });
+    const current = (await readEvent({ vaultRoot, eventId: meal.event.id })).event;
+    if (current.kind !== "meal") throw new Error("Expected meal");
+    await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore: store.mediaStore });
+    await uploadCommittedHostedMealMediaReferences({ vaultRoot, mediaStore: store.mediaStore });
+    const thumbnail = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]!;
+    // Same revision and timestamps, later shard: canonical deletion wins.
+    await appendJsonlRecord({ vaultRoot, relativePath: "ledger/events/2030/2030-02.jsonl", record: { ...current, lifecycle: { ...current.lifecycle, state: "deleted" }, attachments: [], rawRefs: [], photoThumbnail: undefined } });
+    await expect(readEvent({ vaultRoot, eventId: meal.event.id })).rejects.toMatchObject({ code: "EVENT_MISSING" });
+    const materializeCandidatePaths = vi.fn();
+    expect(await runMealPhotoMaintenance({ vaultRoot, now: new Date("2030-04-02T00:00:00Z"), materializeCandidatePaths })).toMatchObject({ thumbnailCount: 0, retiredPhotoCount: 0 });
+    expect(materializeCandidatePaths).not.toHaveBeenCalled();
+    expect((await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore: store.mediaStore })).prunedMediaCount).toBe(1);
+    expect(store.deleteCalls).toContain(thumbnail.mediaId);
+    // A losing note revision still preserves durable inbox evidence.
+    const inbox = await normalizeParsedEmailMessage({ message: {
+      attachments: [{ fileName: "reference.png", contentType: "image/png", data: await readFile(photoPath), contentDisposition: "attachment", contentId: null, contentTransferEncoding: null }],
+      bcc: [], cc: [], from: "sender@example.test", to: ["assistant@example.test"], headers: {}, html: null, inReplyTo: null,
+      messageId: "history@example.test", occurredAt: "2030-01-01T00:00:00Z", receivedAt: "2030-01-01T00:00:00Z", rawHash: "b".repeat(64), rawSize: 0,
+      references: [], replyTo: [], subject: "Synthetic reference", text: "Synthetic history",
+    } });
+    await persistCanonicalInboxCapture({ vaultRoot, input: inbox, storedAt: "2030-01-01T00:00:00Z", captureId: "cap_history", eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2W3" });
+    await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore: store.mediaStore });
+    const historical = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]!;
+    const note = await upsertEvent({ vaultRoot, payload: { kind: "note", occurredAt: "2030-01-01T00:00:00Z", source: "manual", title: "Historical evidence", note: "Synthetic", rawRefs: [historical.relativePath] } });
+    await appendJsonlRecord({ vaultRoot, relativePath: "ledger/events/2030/2030-02.jsonl", record: { ...note.event, rawRefs: [], lifecycle: { revision: 2, state: "deleted" } } });
+    await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore: store.mediaStore });
+    expect(store.deleteCalls).not.toContain(historical.mediaId);
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toEqual([expect.objectContaining({ relativePath: historical.relativePath, expiresAt: null })]);
+  } finally { await rm(vaultRoot, { recursive: true, force: true }); }
+});
+
+
+test("image sends hydrate absent bytes for preparation and delivery, and refuse changed bytes", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-image-hydration-"));
+  const ref = "raw/inbox/synthetic/photo.png";
+  const bytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+  try {
+    await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue: { schema: "murph.hosted-media-refs.v1", entries: [{
+      relativePath: ref, mediaId: "c".repeat(64), mediaKind: "image", mimeType: "image/png", byteSize: bytes.length,
+      sha256: createHash("sha256").update(bytes).digest("hex"), recordedAt: "2030-01-01T00:00:00.000Z", expiresAt: null,
+    }] } });
+    const get = vi.fn(async (): Promise<Uint8Array | null> => bytes);
+    const materializeWorkspaceArtifacts = createHostedArtifactMaterializer({ vaultRoot, operatorHomeRoot: vaultRoot,
+      mediaStore: { put: async () => {}, get } });
+    const image = await resolveAssistantVaultImageResponseMedia({ ref, vaultRoot, materializeWorkspaceArtifacts });
+    expect(image.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
+    expect(get).toHaveBeenCalledTimes(1);
+    // A cold restore between approval and delivery leaves only the descriptor.
+    await rm(path.join(vaultRoot, ref));
+    expect(Buffer.from(await readVerifiedAssistantVaultImageBytes({ image, vaultRoot, materializeWorkspaceArtifacts }))).toEqual(bytes);
+    expect(get).toHaveBeenCalledTimes(2);
+    await rm(path.join(vaultRoot, ref));
+    get.mockResolvedValueOnce(null);
+    await expect(readVerifiedAssistantVaultImageBytes({ image, vaultRoot, materializeWorkspaceArtifacts }))
+      .rejects.toMatchObject({ code: "ASSISTANT_VAULT_FILE_UNAVAILABLE" });
+  } finally { await rm(vaultRoot, { recursive: true, force: true }); }
+});
+
+test("secure-file hydration preserves exact vault paths with workspace-root names", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "murph-exact-vault-path-"));
+  const vaultRoot = path.join(root, "vault"), operatorHomeRoot = path.join(root, "home");
+  try {
+    await mkdir(operatorHomeRoot, { recursive: true });
+    await writeFile(path.join(operatorHomeRoot, "report.pdf"), "operator data");
+    for (const ref of ["vault/report.pdf", "operator-home/report.pdf", "vault:report.pdf"]) {
+      await mkdir(path.dirname(path.join(vaultRoot, ref)), { recursive: true });
+      await writeFile(path.join(vaultRoot, ref), "vault data");
+      const file = await resolveAssistantVaultFileResponseMedia({ ref, vaultRoot,
+        materializeWorkspaceArtifacts: createHostedArtifactMaterializer({ vaultRoot, operatorHomeRoot }),
+      });
+      expect(file.sha256).toBe(createHash("sha256").update("vault data").digest("hex"));
+      expect(file.ref).toBe(ref);
+    }
   } finally { await rm(root, { recursive: true, force: true }); }
 });

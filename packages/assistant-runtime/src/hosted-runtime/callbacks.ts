@@ -1,3 +1,5 @@
+import { createHostedArtifactMaterializer } from "./artifacts.ts";
+import type { HostedWorkspaceArtifactMaterializer } from "./models.ts";
 import { parseHostedExecutionResolvedLinqDeliveryRoute } from "@murphai/hosted-execution/routes";
 import { createHash } from "node:crypto";
 
@@ -2234,7 +2236,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
   onBackgroundDeliveryYield?: (input: {
     yieldedEffectCount: number;
   }) => void;
-  platform?: Pick<HostedRuntimePlatform, "logPort" | "voicePort"> | null;
+  platform?: Pick<HostedRuntimePlatform, "logPort" | "voicePort" | "mediaStore"> | null;
   platformEnv?: Readonly<Record<string, string>>;
   preparedDispatches?: readonly HostedAssistantDeliveryPreparedDispatch[] | null;
   providerFetch?: typeof fetch | null;
@@ -3402,7 +3404,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   shouldYieldBackgroundDelivery: (() => boolean) | null;
   linqEnv: NodeJS.ProcessEnv;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
-  platform: Pick<HostedRuntimePlatform, "logPort" | "voicePort"> | null;
+  platform: Pick<HostedRuntimePlatform, "logPort" | "voicePort" | "mediaStore"> | null;
   preparedDispatch: HostedAssistantDeliveryPreparedDispatch | null;
   telegramEnv: NodeJS.ProcessEnv;
   telegramVoiceMemoEnv: NodeJS.ProcessEnv;
@@ -3876,6 +3878,8 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             expectedDedupeKey: input.assistantDeliveryEffect.fingerprint,
             intentId: intent.intentId,
             media: [request.file],
+            signal: input.signal,
+            materializeWorkspaceArtifacts: createHostedDeliveryMaterializer(input),
             vaultRoot: input.vaultRoot,
           });
           const dependencies = requireHostedProviderFetchDependencies({
@@ -3910,6 +3914,8 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         },
         sendTelegramImage: async (request) => {
           const verifiedVaultImages = await preloadHostedAssistantVaultImages({
+            materializeWorkspaceArtifacts: createHostedDeliveryMaterializer(input),
+            signal: input.signal,
             media: request.media,
             vaultRoot: input.vaultRoot,
           });
@@ -4774,7 +4780,7 @@ function createHostedAssistantLinqSendDependency(input: {
   }) => void;
   onProviderDispatchEntered?: () => void;
   onProviderDispatchSettledWithoutEffect?: () => void;
-  platform?: Pick<HostedRuntimePlatform, "logPort"> | null;
+  platform?: Pick<HostedRuntimePlatform, "logPort" | "mediaStore"> | null;
   providerFetch: typeof fetch | null;
   publicInternetFetch?: typeof fetch | null;
   shouldYieldBackgroundDelivery?: (() => boolean) | null;
@@ -4782,6 +4788,7 @@ function createHostedAssistantLinqSendDependency(input: {
   threadIsDirect?: boolean | null;
   vaultRoot?: string | null;
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinq"]> {
+  const materializeWorkspaceArtifacts = createHostedDeliveryMaterializer(input);
   const onAppCardFallbackError = createHostedLinqAppCardFallbackErrorObserver({
     intentId: input.intentId ?? null,
     platform: input.platform ?? null,
@@ -4923,9 +4930,13 @@ function createHostedAssistantLinqSendDependency(input: {
       expectedDedupeKey: input.expectedDedupeKey ?? null,
       intentId: input.intentId ?? null,
       media: request.media ?? [],
+      signal: input.signal,
+      materializeWorkspaceArtifacts,
       vaultRoot: input.vaultRoot ?? null,
     });
     const verifiedVaultImages = await preloadHostedAssistantVaultImages({
+      materializeWorkspaceArtifacts,
+      signal: input.signal,
       media: request.media ?? [],
       vaultRoot: input.vaultRoot ?? null,
     });
@@ -5402,7 +5413,20 @@ function hostedPrivateAssistantAskCompletionRoutesEqual(
     && left.threadIsDirect === right.threadIsDirect;
 }
 
+function createHostedDeliveryMaterializer(input: {
+  platform?: Pick<HostedRuntimePlatform, "mediaStore"> | null;
+  vaultRoot?: string | null;
+}): HostedWorkspaceArtifactMaterializer | null {
+  return input.vaultRoot
+    ? createHostedArtifactMaterializer({
+        mediaStore: input.platform?.mediaStore, vaultRoot: input.vaultRoot, operatorHomeRoot: input.vaultRoot,
+      })
+    : null;
+}
+
 async function preloadHostedAssistantVaultImages(input: {
+  materializeWorkspaceArtifacts: HostedWorkspaceArtifactMaterializer | null;
+  signal: AbortSignal | null;
   media: readonly AssistantResponseMedia[];
   vaultRoot: string | null;
 }): Promise<Map<string, Uint8Array>> {
@@ -5424,6 +5448,8 @@ async function preloadHostedAssistantVaultImages(input: {
     verified.set(
       buildHostedVaultImageMediaIdentity(image),
       await readVerifiedAssistantVaultImageBytes({
+        materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+        signal: input.signal,
         image,
         vaultRoot: input.vaultRoot,
       }),
@@ -5433,6 +5459,8 @@ async function preloadHostedAssistantVaultImages(input: {
 }
 
 async function preloadApprovedHostedAssistantVaultFiles(input: {
+  materializeWorkspaceArtifacts: HostedWorkspaceArtifactMaterializer | null;
+  signal: AbortSignal | null;
   actionApprovalPort: HostedRuntimeActionApprovalPort | null;
   expectedDedupeKey: string | null;
   intentId: string | null;
@@ -5521,6 +5549,8 @@ async function preloadApprovedHostedAssistantVaultFiles(input: {
   }
 
   const bytes = await readVerifiedAssistantVaultFileBytes({
+    materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+    signal: input.signal,
     file: persistedFile,
     vaultRoot: input.vaultRoot,
   });

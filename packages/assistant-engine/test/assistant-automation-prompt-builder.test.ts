@@ -2060,7 +2060,7 @@ describe('prepareAssistantAutoReplyInput', () => {
       }
       return {
         materializedArtifactPaths: new Set(paths.map((item) => `vault:${item}`)),
-        missingArtifactPaths: new Set<string>(),
+        missingArtifactPaths: new Map(),
       }
     })
     const events: unknown[] = []

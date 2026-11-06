@@ -7954,9 +7954,9 @@ export async function runHostedPendingInputProtectedIdleMaintenance(input: {
             input.generatedImageRetentionMaxCaptures,
         }),
     materializeRetentionCandidatePaths: async (storedPaths) => {
-      const materialized = await input.materializeWorkspaceArtifacts(storedPaths);
+      const materialized = await input.materializeWorkspaceArtifacts(storedPaths, { signal: input.shutdownSignal });
       return {
-        missingStoredPaths: [...materialized.missingArtifactPaths]
+        missingStoredPaths: [...materialized.missingArtifactPaths.keys()]
           .map((artifactPath) =>
             artifactPath.startsWith("vault:")
               ? artifactPath.slice("vault:".length)

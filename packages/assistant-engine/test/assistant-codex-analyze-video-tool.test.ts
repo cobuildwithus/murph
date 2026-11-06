@@ -713,7 +713,7 @@ describe('executeAnalyzeVideoTool', () => {
       args: { messageRef: missing.inputId, question: 'What happens?' },
       materializeWorkspaceArtifacts: async () => ({
         materializedArtifactPaths: new Set(),
-        missingArtifactPaths: new Set(missing.rawPaths),
+        missingArtifactPaths: new Map(missing.rawPaths.map(ref => [`vault:${ref}`, 'missing' as const])),
       }),
       vaultRoot: missing.vaultRoot,
     })).resolves.toMatchObject({
@@ -983,7 +983,7 @@ describe('executeAnalyzeVideoTool', () => {
     const fetchImpl = vi.fn<typeof fetch>()
     const materializeWorkspaceArtifacts = vi.fn(async () => ({
       materializedArtifactPaths: new Set<string>(),
-      missingArtifactPaths: new Set<string>(),
+      missingArtifactPaths: new Map(),
     }))
     const hostedToolContext = createAssistantHostedToolContext({
       getAnalyzeVideoAttachmentAuthorities: () => fixture.attachmentAuthorities,

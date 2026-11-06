@@ -63,7 +63,6 @@ export async function runMealPhotoMaintenance(input: MealPhotoMaintenanceInput):
         }
         if (processed >= limit) { result.hasMore = true; continue; }
         processed += 1;
-        await input.materializeCandidatePaths?.(photos.map(photo => photo.relativePath));
         input.signal?.throwIfAborted();
         const outcome = await maintainMeal({ input, record, capturedAt, expired, manifest, now });
         result.blockedMealCount += outcome.blockedMealCount;
@@ -94,6 +93,8 @@ async function maintainMeal(input: {
   const photo = photos[0]!;
   let thumbnail: { data: Buffer; width: number; height: number } | null = null;
   if (!record.photoThumbnail && record.lifecycle?.state !== "deleted") {
+    await input.input.materializeCandidatePaths?.(photos.map(photo => photo.relativePath));
+    input.input.signal?.throwIfAborted();
     try {
       thumbnail = await createThumbnail(input.input.vaultRoot, photo);
     } catch {

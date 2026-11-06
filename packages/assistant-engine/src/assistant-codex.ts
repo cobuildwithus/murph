@@ -6687,3 +6687,5 @@ function providerActionFallbackKeyFromNormalized(
       })
   }
 }
+
+export { resolveGenerateImageReferences } from "./assistant-codex/image-reference-resolver.js"

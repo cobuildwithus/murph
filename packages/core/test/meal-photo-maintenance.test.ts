@@ -2,7 +2,7 @@ import { appendFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import sharp from "sharp";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { INBOX_IMAGE_RETENTION_WINDOW_MS } from "@murphai/contracts";
 import { addMeal, deleteEvent, initializeVault, readEvent, removeAutomaticMealPhoto, runMealPhotoMaintenance, validateVault } from "../src/index.ts";
 
@@ -33,7 +33,9 @@ it("backfills an oriented metadata-free JPEG, preserves it at day 90, and delete
   expect(metadata.exif).toBeUndefined();
   expect(metadata.orientation).toBeUndefined();
   expect(await runMealPhotoMaintenance({ vaultRoot: input.vaultRoot, now: new Date(due.getTime() - 1) })).toMatchObject({ thumbnailCount: 0, retiredPhotoCount: 0 });
-  expect(await runMealPhotoMaintenance({ vaultRoot: input.vaultRoot, now: due })).toMatchObject({ thumbnailCount: 0, retiredPhotoCount: 1 });
+  const materializeCandidatePaths = vi.fn(async () => { throw new Error("Metadata-only retirement must not read images"); });
+  expect(await runMealPhotoMaintenance({ vaultRoot: input.vaultRoot, now: due, materializeCandidatePaths })).toMatchObject({ thumbnailCount: 0, retiredPhotoCount: 1 });
+  expect(materializeCandidatePaths).not.toHaveBeenCalled();
   expect(JSON.parse(await readFile(path.join(input.vaultRoot, meal.photo!.relativePath), "utf8"))).toMatchObject({ reason: "meal_photo_retention" });
   expect((await readFile(thumbnailPath)).length).toBeGreaterThan(0);
   await deleteEvent({ vaultRoot: input.vaultRoot, eventId: meal.event.id });
@@ -70,12 +72,14 @@ it("retires media left by historical hide-only deletion without reviving the mea
   const meal = await addMeal({ ...input, photoCapturedAt: capturedAt, occurredAt: capturedAt });
   await appendFile(path.join(input.vaultRoot, meal.eventPath), `${JSON.stringify({ ...meal.event,
     recordedAt: "2026-07-02T12:00:00.000Z", lifecycle: { revision: 2, state: "deleted" } })}\n`);
-  expect(await runMealPhotoMaintenance({ vaultRoot: input.vaultRoot, now: new Date("2026-07-03T12:00:00Z") }))
+  const materializeCandidatePaths = vi.fn(async () => { throw new Error("Deleted meal cleanup must not read images"); });
+  expect(await runMealPhotoMaintenance({ vaultRoot: input.vaultRoot, now: new Date("2026-07-03T12:00:00Z"), materializeCandidatePaths }))
     .toMatchObject({ thumbnailCount: 0, retiredPhotoCount: 1, blockedMealCount: 0 });
   expect(JSON.parse(await readFile(path.join(input.vaultRoot, meal.photo!.relativePath), "utf8")))
     .toMatchObject({ reason: "meal_photo_retention" });
   expect(await runMealPhotoMaintenance({ vaultRoot: input.vaultRoot, now: due }))
     .toMatchObject({ thumbnailCount: 0, retiredPhotoCount: 0 });
+  expect(materializeCandidatePaths).not.toHaveBeenCalled();
   await expect(readEvent({ vaultRoot: input.vaultRoot, eventId: meal.event.id })).rejects.toMatchObject({ code: "EVENT_MISSING" });
   expect(await validateVault({ vaultRoot: input.vaultRoot })).toMatchObject({ valid: true, issues: [] });
 });
