@@ -84,6 +84,12 @@ recovery hiding a deferred limit, three focus or announcement losses, and a retr
 that could not work in a tab with no request identity. It found no wrong-charge or
 double-payment path.
 
+Final ReviewGPT round 1 found that a raised limit was compared with this month's
+limit rather than the one the payer last chose, so undoing a scheduled decrease read
+as `Lower limit` and skipped confirmation. Accepted and fixed: every real increase
+now confirms, and names next month when that is all it changes. It also found the
+form's draft builder dead after the dialog deletion. Accepted and deleted.
+
 ## Backend removal
 
 Removal happens in three revisions so no running version sees a shape it cannot

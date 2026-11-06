@@ -51,53 +51,6 @@ export interface HostedGroupSponsorshipDraft {
   sponsorMessage: string | null;
 }
 
-export interface HostedGroupSponsorshipDraftInput {
-  creativeEnabled: boolean;
-  creativeFormat: HostedGroupSponsorshipCreativeFormat;
-  creativePrompt: string;
-  creativeStyleRequest: string;
-  publicAlias: string;
-  runningBitAvailable: boolean;
-  runningBitRequest: string;
-}
-
-export function buildHostedGroupSponsorshipDraftInput(
-  input: HostedGroupSponsorshipDraftInput,
-): HostedGroupSponsorshipDraft {
-  const creativeRequest = input.creativeEnabled
-    ? {
-        format: input.creativeFormat,
-        prompt: normalizeOptionalDraftText(input.creativePrompt),
-        styleRequest:
-          input.creativeFormat === "song"
-            ? normalizeOptionalDraftText(input.creativeStyleRequest)
-            : null,
-      }
-    : null;
-  const runningBitRequest = input.runningBitAvailable
-    ? normalizeOptionalDraftText(input.runningBitRequest)
-    : null;
-  const publicAlias = normalizeOptionalDraftText(input.publicAlias);
-
-  return {
-    ...(creativeRequest ? { creativeRequest } : {}),
-    publicAlias,
-    ...(publicAlias
-      ? {
-          publicAliasRecognition:
-            HOSTED_GROUP_FUNDING_RECOGNITION_CONSENT,
-        }
-      : {}),
-    runningBitRequest,
-    sponsorMessage: null,
-  };
-}
-
-function normalizeOptionalDraftText(value: string): string | null {
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
 export const HOSTED_GROUP_SPONSORSHIP_PUBLIC_ALIAS_MAX_CODE_POINTS = 80;
 export const HOSTED_GROUP_SPONSORSHIP_MESSAGE_MAX_CODE_POINTS = 280;
 export const HOSTED_GROUP_SPONSORSHIP_RUNNING_BIT_MAX_CODE_POINTS = 240;

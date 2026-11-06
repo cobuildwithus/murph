@@ -75,6 +75,8 @@ export type GroupSponsorshipManagementConfirmation =
     currentMonthlyCapMinor: MonthlyCapMinor;
     kind: "increase";
     nextMonthlyCapMinor: MonthlyCapMinor;
+    /** This only undoes part of a lower limit already set for next month. */
+    startsNextMonth?: boolean;
   }
   | { kind: "cancel" };
 
@@ -287,7 +289,8 @@ export function GroupSponsorshipManagementCard({
   };
 
   const capChanged = selectedMonthlyCapMinor !== appliedMonthlyCapMinor;
-  const capIncrease = selectedMonthlyCapMinor > management.monthlyCapMinor;
+  // Measured from the limit the person last chose, which may be next month's.
+  const capIncrease = selectedMonthlyCapMinor > appliedMonthlyCapMinor;
 
   if (canceled) {
     return <GroupSponsorshipCanceledReceipt headingRef={headingRef} />;
@@ -297,12 +300,15 @@ export function GroupSponsorshipManagementCard({
     if (selectedMonthlyCapMinor === appliedMonthlyCapMinor) {
       return;
     }
-    if (selectedMonthlyCapMinor > management.monthlyCapMinor) {
+    if (capIncrease) {
       setError(null);
       setConfirmation({
-        currentMonthlyCapMinor: management.monthlyCapMinor,
+        currentMonthlyCapMinor: appliedMonthlyCapMinor,
         kind: "increase",
         nextMonthlyCapMinor: selectedMonthlyCapMinor,
+        startsNextMonth:
+          management.pendingMonthlyCapMinor !== null &&
+          selectedMonthlyCapMinor <= management.monthlyCapMinor,
       });
       return;
     }
@@ -618,6 +624,7 @@ export function GroupSponsorshipManagementConfirmationDialog({
   const nextLimit = isIncrease
     ? formatMoney(confirmation.nextMonthlyCapMinor)
     : null;
+  const startsNextMonth = isIncrease && confirmation.startsNextMonth === true;
   const authoritativeRejection = error?.certainty === "authoritative";
   const indeterminateCancellation =
     error?.certainty === "indeterminate" && !isIncrease;
@@ -641,12 +648,12 @@ export function GroupSponsorshipManagementConfirmationDialog({
           <header className="grid place-items-start gap-2 text-left">
             <AlertDialogPrimitive.Title className="text-balance font-serif text-[30px] font-semibold leading-[34px] tracking-[-0.01em]">
               {isIncrease
-                ? `Raise your limit to ${nextLimit}?`
+                ? `Raise ${startsNextMonth ? "next month’s" : "your"} limit to ${nextLimit}?`
                 : "Cancel your sponsorship?"}
             </AlertDialogPrimitive.Title>
             <AlertDialogPrimitive.Description className="text-pretty text-base font-medium leading-[22px] text-[#FFFCF6]/60">
               {isIncrease
-                ? `When refills are on, Murph charges $5 at a time as the group uses it, up to ${nextLimit} a month instead of ${currentLimit}.`
+                ? `When refills are on, Murph charges $5 at a time as the group uses it, up to ${nextLimit} a month instead of ${currentLimit}${startsNextMonth ? ", starting next month" : ""}.`
                 : "Refills stop. Credit you already bought stays with the group."}
             </AlertDialogPrimitive.Description>
           </header>

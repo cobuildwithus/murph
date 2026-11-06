@@ -638,6 +638,60 @@ test("keeps an uncertain cap increase actionable and reloads on dismissal", asyn
   }
 });
 
+test.each([
+  { selected: "$50 a month", label: "$50" },
+  { selected: "$20 a month", label: "$20" },
+])("confirms undoing a scheduled lower limit at $label", async ({ label, selected }) => {
+  const fetchMock = vi.fn(async () => ({
+    json: async () => ({
+      management: {
+        ...baseManagement,
+        monthlyCapMinor: 5_000,
+        pendingMonthlyCapMinor: null,
+      },
+    }),
+    ok: true,
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { GroupSponsorshipManagementCard } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-management-card"
+  );
+  const rendered = await renderClientComponent(createElement(
+    GroupSponsorshipManagementCard,
+    {
+      endpoint: "/api/groups/fund/example/sponsorship",
+      groupName: "Sunday sleep crew",
+      management: {
+        ...baseManagement,
+        monthlyCapMinor: 5_000,
+        pendingMonthlyCapMinor: 500,
+      },
+    },
+  ));
+  try {
+    await clickLabel(rendered.container, selected);
+    expect(buttonLabels(rendered.container)).not.toContain(`Lower limit to ${label}`);
+
+    await clickLabel(rendered.container, `Raise limit to ${label}`);
+    expect(rendered.container.textContent).toContain(
+      `Raise next month’s limit to ${label}?`,
+    );
+    expect(rendered.container.textContent).toContain(
+      `up to ${label} a month instead of $5, starting next month.`,
+    );
+
+    await clickLabel(rendered.container, "Keep $5 limit");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await clickLabel(rendered.container, `Raise limit to ${label}`);
+    await clickLabel(rendered.container, `Raise to ${label}`);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("says when a lower limit starts, even right after a confirmed payment", async () => {
   const fetchMock = vi.fn(async () => ({
     json: async () => ({
