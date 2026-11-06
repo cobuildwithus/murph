@@ -183,6 +183,12 @@ landing; record the chosen posture here so the decision is reviewable.
   remains included in encrypted hosted checkpoints. This changes only download
   packaging, not live vault state or the separate hosted tar snapshot classifier.
 
+- Hosted tar snapshots omit empty descendants of `raw/inbox` and `derived/inbox`,
+  counting only files included in that archive. Both roots and all other
+  previously included directory entries remain to preserve restore permissions.
+  The [runtime-state contract](../../packages/runtime-state/README.md#contract)
+  owns materialization and rollback compatibility; no live deletion is needed.
+
 - One generated send may create one direct regular file with no sidecars in that
   exact runtime directory only when the same assistant turn establishes the
   delivery obligation and calls `send_vault_file`. Runtime adoption tightens
