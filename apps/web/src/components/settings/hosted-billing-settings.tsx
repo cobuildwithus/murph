@@ -1,3 +1,4 @@
+import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { CheckIcon } from "lucide-react";
@@ -91,6 +92,7 @@ export function HostedBillingSettings(props: {
   usageTopUpInitialOpen?: boolean;
   usageTopUpOffers?: readonly HostedUsageTopUpOffer[];
   usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
+  usageAddedContactOption?: MurphContactOption | null;
   usageTopUpScope?: "family" | "personal";
   usageTopUpTargetLabel?: string;
 }) {
@@ -590,6 +592,7 @@ export function HostedBillingSettings(props: {
           usageTopUpInitialOpen={props.usageTopUpInitialOpen}
           usageTopUpOffers={usageTopUpOffers}
           payerMemberId={props.payerMemberId}
+          usageAddedContactOption={props.usageAddedContactOption}
           usageTopUpPurchaseReturn={props.usageTopUpPurchaseReturn}
           usageTopUpScope={props.usageTopUpScope}
           usageTopUpTargetLabel={props.usageTopUpTargetLabel}
@@ -759,6 +762,7 @@ function PlanUsageBand(props: {
   usageTopUpOffers: readonly HostedUsageTopUpOffer[];
   payerMemberId?: string | null;
   usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
+  usageAddedContactOption?: MurphContactOption | null;
   usageTopUpScope?: "family" | "personal";
   usageTopUpTargetLabel?: string;
 }) {
@@ -779,6 +783,7 @@ function PlanUsageBand(props: {
         offers={[]}
         payerMemberId={payerMemberId}
         purchaseReturn={props.usageTopUpPurchaseReturn}
+        usageAddedContactOption={props.usageAddedContactOption}
         scope={props.usageTopUpScope}
         targetLabel={props.usageTopUpTargetLabel}
       />
@@ -820,6 +825,7 @@ function PlanUsageBand(props: {
         offers={eligibleUsageTopUpOffers}
         payerMemberId={payerMemberId}
         purchaseReturn={props.usageTopUpPurchaseReturn}
+        usageAddedContactOption={props.usageAddedContactOption}
         scope={props.usageTopUpScope}
         targetLabel={props.usageTopUpTargetLabel}
         triggerClassName="min-h-11 w-full sm:w-auto"
@@ -897,6 +903,7 @@ function PlanUsageBand(props: {
       offers={eligibleUsageTopUpOffers}
       payerMemberId={payerMemberId}
       purchaseReturn={props.usageTopUpPurchaseReturn}
+      usageAddedContactOption={props.usageAddedContactOption}
       quietSuccessfulReturn
       scope={props.usageTopUpScope}
       targetLabel={props.usageTopUpTargetLabel}

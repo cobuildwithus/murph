@@ -11,6 +11,9 @@ const MAX_PORTAL_CONFIGURATION_ENV =
 const originalMaxPortalConfiguration =
   process.env[MAX_PORTAL_CONFIGURATION_ENV];
 
+const VOICE_TEST_MESSAGE =
+  "just picked a new voice for you! send me a voice memo so I can hear it";
+
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
 
@@ -37,30 +40,17 @@ const mocks = vi.hoisted(() => ({
       null,
       `Hosted account settings ${String(props.murphPhoneNumber ?? "")}`,
     )),
-  resolveMurphContactOptions: vi.fn((input?: {
+  resolveMurphContactOptions: vi.fn((_input?: {
     contactChannels?: {
       email?: boolean;
       telegram?: boolean;
       text?: boolean;
     } | null;
-    message?: { body?: string | null } | null;
-  }) => {
-    if (
-      input?.message?.body
-        === "Hey Murph, what referral options can I choose from?"
-    ) {
-      return [{
-        href: "sms:+15550100001?body=Hey%20Murph%2C%20what%20referral%20options%20can%20I%20choose%20from%3F",
-        kind: "text",
-        label: "Messages",
-      }];
-    }
-    return [{
-      href: "sms:+15550100001?body=voice%20test",
-      kind: "text",
-      label: "Messages",
-    }];
-  }),
+  }): { href: string; kind: string; label: string }[] => [{
+    href: "sms:+15550100001",
+    kind: "text",
+    label: "Messages",
+  }]),
   HostedAiUsageActivity: vi.fn(() =>
     React.createElement("div", null, "Hosted AI usage activity")
   ),
@@ -267,7 +257,8 @@ vi.mock("@/src/components/settings/customize-murph-settings", () => ({
   CustomizeMurphSettings: mocks.CustomizeMurphSettings,
 }));
 
-vi.mock("@/src/lib/murph-contact-routing", () => ({
+vi.mock("@/src/lib/murph-contact-routing", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/murph-contact-routing")>(),
   resolveMurphContactOptions: mocks.resolveMurphContactOptions,
 }));
 
@@ -1176,39 +1167,30 @@ test("SettingsPage reads the app session and persisted account settings into the
       murphPhoneNumber: "+15550100001",
       openVoiceLink: true,
       voiceTestContactOption: {
-        href: "sms:+15550100001?body=voice%20test",
+        href: `sms:+15550100001?body=${encodeURIComponent(VOICE_TEST_MESSAGE)}`,
         kind: "text",
         label: "Messages",
       },
     }), undefined);
-    expect(mocks.resolveMurphContactOptions).toHaveBeenNthCalledWith(1, {
+    expect(mocks.resolveMurphContactOptions).toHaveBeenCalledTimes(1);
+    expect(mocks.resolveMurphContactOptions).toHaveBeenCalledWith({
       contactChannels: {
         email: false,
         telegram: true,
         text: true,
-      },
-      message: {
-        body: "just picked a new voice for you! send me a voice memo so I can hear it",
       },
       murphEmailAddress: null,
       murphPhoneNumber: "+15550100001",
       preferredKind: "text",
       userEmailAddress: "verified@example.com",
     });
-    expect(mocks.resolveMurphContactOptions).toHaveBeenNthCalledWith(2, {
-      contactChannels: {
-        email: false,
-        telegram: true,
-        text: true,
+    expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
+      usageAddedContactOption: {
+        href: "sms:+15550100001",
+        kind: "text",
+        label: "Messages",
       },
-      message: {
-        body: "Hey Murph, what referral options can I choose from?",
-      },
-      murphEmailAddress: null,
-      murphPhoneNumber: "+15550100001",
-      preferredKind: "text",
-      userEmailAddress: "verified@example.com",
-    });
+    }), undefined);
     expect(mocks.HostedAiUsageActivity).toHaveBeenCalledWith({
       activity: usageActivity,
       missionContactOption: {
@@ -2491,6 +2473,68 @@ test("SettingsPage passes a pending Murph text line to account settings", async 
   }), undefined);
 });
 
+const TEXT_ROUTE = { href: "sms:+15550100001", kind: "text", label: "Messages" };
+const TELEGRAM_ROUTE = { href: "https://t.me/murph_test_bot", kind: "telegram", label: "Telegram" };
+const EMAIL_ROUTE = { href: "mailto:mail@mail.withmurph.ai", kind: "email", label: "Email" };
+
+test.each([
+  { messages: true, missions: true, name: "text", route: TEXT_ROUTE },
+  { messages: true, missions: true, name: "Telegram", route: TELEGRAM_ROUTE },
+  { messages: false, missions: true, name: "email only", route: EMAIL_ROUTE },
+  { messages: false, missions: true, name: "no route", route: null },
+  { messages: true, missions: false, name: "missions off", route: TEXT_ROUTE },
+])("SettingsPage gives each surface the right link with $name", async ({
+  messages,
+  missions,
+  route,
+}) => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: { billingStatus: "active", id: "member_123", suspendedAt: null },
+    linkedAccounts: [],
+    session: {},
+  });
+  mockSettingsPageSnapshot({
+    account: {
+      email: { address: "member@example.com", verifiedAt: "2025-03-27T08:30:00.000Z" },
+      phone: { number: null, verifiedAt: null },
+      telegram: { telegramUserId: null },
+    },
+  });
+  mocks.readHostedAiUsageActivity.mockResolvedValue({
+    credits: [],
+    missions: [],
+    missionsEnabled: missions,
+  });
+  mocks.resolveMurphContactOptions.mockReturnValue(route ? [route] : []);
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
+
+  // The purchase handoff takes the plain route, with no message in it.
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({ usageAddedContactOption: route }),
+    undefined,
+  );
+  const voiceOption = (
+    mocks.CustomizeMurphSettings.mock.calls.at(-1)?.[0] as {
+      voiceTestContactOption?: { href: string } | null;
+    }
+  ).voiceTestContactOption;
+  if (messages) {
+    expect(decodeURIComponent(voiceOption?.href ?? "")).toContain(VOICE_TEST_MESSAGE);
+  } else {
+    expect(voiceOption).toBeNull();
+  }
+  if (messages && missions) {
+    expect(mocks.HostedAiUsageActivity).toHaveBeenCalled();
+  } else {
+    expect(mocks.HostedAiUsageActivity).not.toHaveBeenCalled();
+  }
+});
+
 test("SettingsPage omits an empty email-only invitation but preserves activity history", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
 
@@ -2556,9 +2600,6 @@ test("SettingsPage omits an empty email-only invitation but preserves activity h
         email: false,
         telegram: false,
         text: false,
-      },
-      message: {
-        body: "Hey Murph, what referral options can I choose from?",
       },
     }),
   );

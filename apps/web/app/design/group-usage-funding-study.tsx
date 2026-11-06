@@ -32,7 +32,10 @@ import {
 } from "@/src/components/hosted-groups/group-sponsorship-management-card";
 import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
-import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
+import {
+  HostedUsageAddedHandoff,
+  HostedUsageTopUpDialog,
+} from "@/src/components/settings/hosted-usage-top-up-dialog";
 import {
   readHostedUsageTopUpPurchaseActions,
   type HostedUsageTopUpPurchaseScreen,
@@ -648,6 +651,17 @@ function PersonalUsageCreditOwnerStudy() {
       data-design-study="personal-usage-credit-owner"
       id="personal-usage-credit-owner"
     >
+      <div
+        className="flex min-h-[46rem] max-w-[26rem] flex-col rounded-[2rem] bg-[#1C1915]"
+        data-design-study="usage-added-handoff"
+        inert
+      >
+        <LinkPageSurface>
+          <LinkPageScreen detail="Go back to your chat." title="Usage added.">
+            <HostedUsageAddedHandoff contactOption={DESIGN_USAGE_MISSION_CONTACT_OPTION} />
+          </LinkPageScreen>
+        </LinkPageSurface>
+      </div>
       <p className="text-sm text-muted-foreground">
         Static owner-layout preview keeps remaining capacity in one usage bar
         at the top. A fulfilled purchase starts that display at 0% used, while

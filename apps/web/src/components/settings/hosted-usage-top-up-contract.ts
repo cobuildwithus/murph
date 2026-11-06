@@ -1,3 +1,4 @@
+import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import type { VariantProps } from "class-variance-authority";
 
 import type { buttonVariants } from "@/src/components/ui/button";
@@ -60,6 +61,8 @@ interface HostedUsageTopUpDialogProps {
   triggerClassName?: string;
   triggerLabel?: string;
   triggerSize?: VariantProps<typeof buttonVariants>["size"];
+  /** The way back to the chat. With one, a verified purchase ends on a page that offers it. */
+  usageAddedContactOption?: MurphContactOption | null;
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
 }
 

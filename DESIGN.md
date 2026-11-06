@@ -627,13 +627,14 @@ Missions heading, and hide it when the member has no supported conversation
 route or new missions are disabled.
 
 Personal and owner-seat Family usage-credit checkout returns reconcile against
-the authenticated beneficiary's existing aggregate meter without opening a
-success confirmation when that meter is present. Expose the fulfilled transition
-through one visually hidden polite status region that is mounted before
-reconciliation and receives the verified result once, but do not add a
-post-purchase messaging handoff.
-Keep those returns visually quiet while payment is confirming and
-after fulfillment; if the bounded status check fails, remains unresolved, or
+the authenticated beneficiary's existing aggregate meter. Keep them visually quiet
+while payment is confirming. Once the purchase is verified as fulfilled with
+nothing left to resolve, and the member has a way to reach Murph, end on the night
+`Usage added.` page: a ticket, the chat pill, and a quiet way back to Settings.
+Hold the page refresh until they close it, because a refresh can unmount the page.
+A member with no way to reach Murph keeps the quiet return, through one visually
+hidden polite status region that is mounted before reconciliation and receives the
+verified result once. If the bounded status check fails, remains unresolved, or
 reports a terminal failure, open only the compact payment-recovery dialog with
 its safe check/retry and close actions. Another active Family member and
 former-member recovery keep one compact target-specific result because their
