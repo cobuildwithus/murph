@@ -1,6 +1,6 @@
 # Photos in encrypted R2 and complete workspace exports
 
-Status: active
+Status: completed
 Created: 2026-11-05
 Updated: 2026-11-06
 
@@ -544,7 +544,7 @@ tool, push, PR, deployment or production access. The plan remains **active**.
 
 ## PR 4 local producer implementation — 2026-11-06
 
-Status: active. One local scoped commit; no push, PR, merge or deploy.
+Status: completed
 
 Outcome: eligible full photos move to the existing encrypted media store after
 checkpoint acknowledgement; the following checkpoint omits settled photo bytes.
@@ -683,3 +683,31 @@ pointers survive ambiguous outcomes; canonical identity controls archive exclusi
 actual same-root encrypted cold restore recovers acknowledged-but-unobserved state.
 No production access, push, PR, deployment or plan closure. One scoped local commit
 includes the implementation, tests and this active execution record.
+
+## Outcome — 2026-11-06
+
+Shipped through #4614, #4631, #4636, #4641 and #4651. The preserver reached every
+runner first (RunnerContainer 1058 to 1059, 100% at 12:58:59 UTC), then the
+producer shipped (1059 to 1060, 100% at 16:32:16 UTC, deploy run 42248654795 with
+smoke and live-state verification passing).
+
+#4651 took seven ReviewGPT rounds plus a parallel deep review. Rounds 4 to 6 each
+found a retry bug caused by the previous fix, all from running proven tombstones
+ahead of the rotation. Deleting that ordering, the refund and the separate
+tombstone scan (net 18 fewer source lines, maximum complexity 20 to 17) closed all
+of them; round 7 passed on `ff4a18f9d5`. The only later change was test-only: two
+fixtures called the built CLI, which release coverage shards do not build, so they
+now call the same use cases in process.
+
+Accepted limits:
+
+- Rollback floor: a rollback to the preserver needs a shell meal delete and a
+  rejected checkpoint to matter, and affects only a photo being deleted. Recorded
+  in `ARCHITECTURE.md`.
+- Thumbnails with no delivery proof and voice notes stay inline.
+
+Not yet observed at closure, 27 minutes after the producer reached 100%: an `image`
+upload in production logs. Runner errors stayed at the existing rate. A photo
+becomes pending at a checkpoint and uploads on idle or the hourly wake, so fleet
+archive sizes need a later read before any claim about their reduction.
+Completed: 2026-11-06
