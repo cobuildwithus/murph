@@ -341,7 +341,8 @@ it has been explicitly elevated to a cross-cutting invariant.
   proof that the effect did not begin. A definite provider rejection proves
   only the attempt that received it: only the winning first dispatch may
   release an obligation, atomically and naming its exact attempt. A rejected
-  retry keeps earlier ambiguity. Acknowledge, clean up, or advance progress
+  retry keeps earlier ambiguity. It holds back only its exact send; a later
+  member message still commits and is answered. Acknowledge, clean up, or advance progress
   only after terminal or durable pending evidence. Accepted delivery
   needing confirmation settles through its existing delivery retry deadline;
   optional accounting may update its own marker but never moves that deadline.

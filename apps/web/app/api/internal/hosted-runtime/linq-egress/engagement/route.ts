@@ -17,6 +17,7 @@ import {
 import {
   recordHostedLinqRuntimeProviderDispatchFenceTx,
   resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionTx,
+  type HostedLinqInstantFirstTurnRuntimeEgressDisposition,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
   hostedOnboardingError,
@@ -170,18 +171,14 @@ export const POST = withJsonError(async (request: Request) => {
           linqChatId: finalAuthority.resolvedRoute.target,
           prisma: tx,
         });
-      if (instantFirstTurn !== "available") {
-        throw hostedOnboardingError({
-          code: instantFirstTurn === "already_answered"
-            ? "HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED"
-            : "HOSTED_LINQ_INSTANT_FIRST_TURN_OWNS_REPLY",
-          httpStatus: instantFirstTurn === "already_answered" ? 409 : 503,
-          message: instantFirstTurn === "already_answered"
-            ? "The exact inbound already has a Web-owned reply."
-            : "The exact inbound remains owned by its Web reply.",
-          retryable: instantFirstTurn !== "already_answered",
-        });
-      }
+      assertHostedLinqInstantFirstTurnEgress({
+        disposition: instantFirstTurn,
+        laterMemberMessage: finalAuthority.laterMemberMessage === true,
+        turnCommitProbe: isHostedLinqTurnCommitProbe({
+          authorityCheckOnly, idempotencyKey, intentId,
+          deliveryPurpose: body.deliveryPurpose,
+        }),
+      });
     }
 
     const health = await resolveHostedLinqEgressPolicyForRuntime({
@@ -294,6 +291,45 @@ export const POST = withJsonError(async (request: Request) => {
     ...readHostedLinqAckEngagementResponseFields(assertion),
   });
 });
+
+function assertHostedLinqInstantFirstTurnEgress(input: {
+  disposition: HostedLinqInstantFirstTurnRuntimeEgressDisposition;
+  laterMemberMessage: boolean;
+  turnCommitProbe: boolean;
+}): void {
+  if (
+    input.disposition === "available"
+    || (input.disposition === "held"
+      && input.laterMemberMessage
+      && input.turnCommitProbe)
+  ) {
+    return;
+  }
+  throw hostedOnboardingError({
+    code: input.disposition === "already_answered"
+      ? "HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED"
+      : "HOSTED_LINQ_INSTANT_FIRST_TURN_OWNS_REPLY",
+    httpStatus: input.disposition === "already_answered" ? 409 : 503,
+    message: input.disposition === "already_answered"
+      ? "The exact inbound already has a Web-owned reply."
+      : "The exact inbound remains owned by its Web reply.",
+    retryable: input.disposition !== "already_answered",
+  });
+}
+
+function isHostedLinqTurnCommitProbe(input: {
+  authorityCheckOnly: boolean;
+  deliveryPurpose: unknown;
+  idempotencyKey: string | null;
+  intentId: string | null;
+}): boolean {
+  // Real sends carry an intent and idempotency key; reaction and progress checks
+  // carry a purpose, so a changed probe shape restores the veto.
+  return input.authorityCheckOnly === true
+    && input.idempotencyKey === null
+    && input.intentId === null
+    && input.deliveryPurpose === undefined;
+}
 
 /** Tapback facts for the runtime; absent fields keep older runners unchanged. */
 function readHostedLinqAckEngagementResponseFields(assertion: {

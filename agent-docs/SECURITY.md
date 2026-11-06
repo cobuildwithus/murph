@@ -1189,8 +1189,11 @@ Existing product admission, delivery and runtime safety rules still apply.
   cannot reopen an untouched empty skip or a certified first-dispatch rejection.
   Only the winning first dispatch can atomically certify rejection and clear its
   payload with its exact attemptedAt version. Rejected retries retain the sealed
-  body, but Web does not resend them; they hold only their exact input without
-  blocking later messages in the chat.
+  body, but Web does not resend them. A held row keeps vetoing every real send
+  for its exact input and any turn with no later member message. A turn that
+  also holds a later member message commits and replies to that later message,
+  so the reply can repeat part of an earlier reply that landed. It is one reply
+  to a new message, never a second send for the held input.
   Legacy skipped payloads, uncertified empty
   failures, and incomplete tuples hold only their exact input. This template-specific
   rule does not change signup or notice retries.

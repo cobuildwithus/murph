@@ -1,5 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Response as OpenAiResponse } from "openai/resources/responses/responses";
+import { buildHostedExecutionLinqConversationMessageWake } from "@murphai/hosted-execution";
+import { appendHostedMailboxEnvelopeTx } from "@/src/lib/hosted-mailbox/store";
+import { assertHostedLinqRecentInboundEngagementForRuntime } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 import type { Prisma } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
@@ -104,6 +107,39 @@ async function seed() {
 }
 
 describe.skipIf(!enabled)("first-turn disposition with PostgreSQL", () => {
+  it.each(["none", "older", "edit", "echo", "other-chat", "later"])(
+    "derives the later-member witness from real mailbox rows: %s",
+    async (candidate) => withFixture(async (f) => {
+      const append = async (suffix: string) => {
+        const isCandidate = suffix !== "first";
+        const chatId = isCandidate && candidate === "other-chat" ? `other-${f.chatId}` : f.chatId;
+        const envelope = buildHostedExecutionLinqConversationMessageWake({
+          eventId: isCandidate ? `other-${f.eventId}` : f.eventId,
+          occurredAt: new Date().toISOString(), userId: f.memberId,
+          phoneLookupKey: createHostedPhoneLookupKey("+15550000001")!,
+          linqMessage: {
+            chatId, from: "+15550000001", isFromMe: isCandidate && candidate === "echo",
+            messageId: isCandidate && candidate !== "edit" ? "message-other" : "message-first",
+            parts: [{ type: "text", value: "Synthetic member message" }], threadIsDirect: true,
+          },
+        });
+        await f.prisma.$transaction(tx => appendHostedMailboxEnvelopeTx({ envelope, tx }));
+      };
+      if (candidate === "older") await append("other");
+      await append("first");
+      if (candidate !== "none" && candidate !== "older") await append("other");
+      const authority = await assertHostedLinqRecentInboundEngagementForRuntime({
+        authorityCheckOnly: true, memberId: f.memberId, prisma: f.prisma,
+        replyToMessageId: "message-first", target: f.chatId, targetKind: "thread",
+      });
+      expect(authority).toMatchObject({
+        sourceEventId: candidate === "edit" ? `other-${f.eventId}` : f.eventId,
+        resolvedRoute: { target: f.chatId, threadIsDirect: true },
+      });
+      expect("laterMemberMessage" in authority && authority.laterMemberMessage === true).toBe(candidate === "later");
+    }),
+  );
+
   it("B1: a losing request cannot abandon another request's sealed resume", async () => withFixture(async (f) => {
     const initial = await claimHostedLinqInstantFirstTurn(f.claimInput);
     if (initial.kind !== "generate") throw new Error("Expected generation");
@@ -147,7 +183,7 @@ describe.skipIf(!enabled)("first-turn disposition with PostgreSQL", () => {
       payloadCiphertext: before.payloadCiphertext,
       status: "failed",
     });
-    expect(await f.egress()).toBe("defer");
+    expect(await f.egress()).toBe("held");
     expect(await hasConflictingHostedLinqInstantFirstTurnForChatTx(conflictInput)).toBe(false);
     expect(await hasUnresolvedHostedLinqProviderDispatchForChatTx(unresolvedInput)).toBe(false);
     const distinct = await claimHostedLinqInstantFirstTurn({
@@ -161,7 +197,7 @@ describe.skipIf(!enabled)("first-turn disposition with PostgreSQL", () => {
     expect(provider.send).toHaveBeenCalledTimes(2);
     await expect(claimHostedLinqInstantFirstTurn(f.claimInput)).rejects.toMatchObject(retry);
     expect(await f.read()).toEqual(held);
-    expect(await f.egress()).toBe("defer");
+    expect(await f.egress()).toBe("held");
     expect(provider.send).toHaveBeenCalledTimes(2);
   }));
 
@@ -170,16 +206,16 @@ describe.skipIf(!enabled)("first-turn disposition with PostgreSQL", () => {
     { label: "absent", status: null, egress: "available", conflict: false, unresolved: false, claim: "generate" },
     { label: "reserved", status: "attempted", egress: "defer", conflict: true, unresolved: true, claim: "generate" },
     ...["attempted", "provider_dispatch_started", "failed"].map(status => ({ label: `sealed ${status}`, status, sealed: true, egress: "defer", conflict: true, unresolved: true, claim: "resume" })),
-    { label: "sealed retry rejected", status: "failed", sealed: true, failureCode: HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE, egress: "defer", conflict: false, unresolved: false, claim: "retry" },
+    { label: "sealed retry rejected", status: "failed", sealed: true, failureCode: HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE, egress: "held", conflict: false, unresolved: false, claim: "retry" },
     ...["accepted", "delivered"].map(status => ({ label: status, status, egress: "already_answered", conflict: false, unresolved: false, claim: "completed" })),
     ...["acceptedAt", "deliveredAt", "lastReceiptAt", "messageLookupKey"].map(correlation => ({ label: `correlated failed ${correlation}`, status: "failed", correlation, sealed: true, egress: "already_answered", conflict: false, unresolved: false, claim: "completed" })),
     { label: "skipped empty", status: "skipped", egress: "available", conflict: false, unresolved: false, claim: "unavailable" },
     { label: "certified failed empty", status: "failed", certified: true, egress: "available", conflict: false, unresolved: false, claim: "unavailable" },
-    { label: "skipped sealed", status: "skipped", sealed: true, egress: "defer", conflict: false, unresolved: false, claim: "retry" },
-    { label: "uncertified failed empty", status: "failed", egress: "defer", conflict: false, unresolved: false, claim: "retry" },
-    { label: "partial tuple", status: "attempted", partial: true, egress: "defer", conflict: true, unresolved: true, claim: "retry" },
-    { label: "started empty", status: "provider_dispatch_started", egress: "defer", conflict: false, unresolved: true, claim: "retry" },
-    { label: "unknown", status: "unknown", egress: "defer", conflict: false, unresolved: false, claim: "retry" },
+    { label: "skipped sealed", status: "skipped", sealed: true, egress: "held", conflict: false, unresolved: false, claim: "retry" },
+    { label: "uncertified failed empty", status: "failed", egress: "held", conflict: false, unresolved: false, claim: "retry" },
+    { label: "partial tuple", status: "attempted", partial: true, egress: "held", conflict: true, unresolved: true, claim: "retry" },
+    { label: "started empty", status: "provider_dispatch_started", egress: "held", conflict: false, unresolved: true, claim: "retry" },
+    { label: "unknown", status: "unknown", egress: "held", conflict: false, unresolved: false, claim: "retry" },
   ])("reads and claims $label consistently", async (row) => withFixture(async (f) => {
     if (row.status) {
       await f.sealed();
@@ -299,7 +335,7 @@ describe.skipIf(!enabled)("first-turn disposition with PostgreSQL", () => {
         status: "failed", skippedAt: null, payloadCiphertext: before.payloadCiphertext,
         failureCode: HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE,
       });
-      expect(await f.egress()).toBe("defer");
+      expect(await f.egress()).toBe("held");
       await expect(claimHostedLinqInstantFirstTurn(f.claimInput)).rejects.toMatchObject(retry);
       finish.resolve();
       expect(await settled).toMatchObject({ value: { kind: "accepted" } });
@@ -350,7 +386,7 @@ describe.skipIf(!enabled)("first-turn disposition with PostgreSQL", () => {
     await expect(claimHostedLinqInstantFirstTurn(f.claimInput)).rejects.toMatchObject(retry);
     await expect(f.abandon(null)).rejects.toMatchObject(retry);
     expect(await f.read()).toEqual(before);
-    expect(await f.egress()).toBe("defer");
+    expect(await f.egress()).toBe("held");
     expect(provider.send).not.toHaveBeenCalled();
     const next = await claimHostedLinqInstantFirstTurn({ ...f.claimInput, request: { ...f.claimInput.request, eventId: `next-${f.eventId}` } });
     expect(next.kind).toBe("generate");
