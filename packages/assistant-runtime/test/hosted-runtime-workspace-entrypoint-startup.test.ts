@@ -138,6 +138,8 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const logRequests: HostedRuntimeLogRequest[] = [];
     const attemptId = "attempt_synthetic_empty_system_mailbox_finished";
+    mocks.prepareHostedCodexAssistantProcess.mockClear();
+    mocks.prepareHostedCodexRuntimeEnvironment.mockClear();
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
@@ -189,6 +191,8 @@ describe("hosted workspace runtime entrypoint", () => {
       await drainHostedRuntimeLogWritesBestEffort();
 
       assert.equal(result.status, "idle");
+      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+      assert.equal(mocks.prepareHostedCodexRuntimeEnvironment.mock.calls.length, 0);
       const entries = logRequests.flatMap((request) => request.entries);
       const imported = entries.filter((entry) =>
         entry.attemptId === attemptId

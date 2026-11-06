@@ -130,9 +130,14 @@ import {
 } from "../src/hosted-runtime-contracts.ts";
 
 describe("hosted workspace runtime entrypoint", () => {
-  test.each([undefined, "system_mailbox", "default"] as const)(
-    "fresh foreground input with a %s wake before the initial system import upgrades in place",
-    async (requestedProcessingMode) => {
+  test.each([
+    { processingMode: "system_mailbox", requestedProcessingMode: undefined, channel: "linq" },
+    { processingMode: "system_mailbox", requestedProcessingMode: "system_mailbox", channel: "linq" },
+    { processingMode: "system_mailbox", requestedProcessingMode: "default", channel: "telegram" },
+    { processingMode: "default", requestedProcessingMode: "default", channel: "linq" },
+  ] as const)(
+    "staged $channel input prepares Codex once before the turn ($processingMode start, $requestedProcessingMode wake)",
+    async ({ processingMode, requestedProcessingMode, channel }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -151,6 +156,14 @@ describe("hosted workspace runtime entrypoint", () => {
     });
     const controller = new AbortController();
     const admitted = createDeferred<void>();
+    const releasePreparation = createDeferred<void>();
+    const cancelPending = vi.fn(async () => undefined);
+    mocks.prepareHostedCodexAssistantProcess.mockClear();
+    mocks.prepareHostedCodexAssistantProcess.mockImplementationOnce(async () => {
+      events.push("codex.preinitialize");
+      await releasePreparation.promise;
+      return { cancelPending };
+    });
     let runtimeCompletion: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
     let assistantCalls = 0;
     let qualifiedConversationReads = 0;
@@ -193,7 +206,7 @@ describe("hosted workspace runtime entrypoint", () => {
           request: {
             attemptId: "attempt_synthetic_system_mailbox_device_preempt_before",
             runnerIdleTtlMs: 0,
-            processingMode: "system_mailbox",
+            processingMode,
             workspaceVersion: "0",
           },
           resolvedConfig: createDeviceSyncResolvedConfig(),
@@ -204,10 +217,14 @@ describe("hosted workspace runtime entrypoint", () => {
               snapshotRef: createSnapshotFixtureRef({ hash: "a".repeat(64), size: 512 }),
             };
           },
-          async importItem({ item }) {
+          async importItem({ item }, context) {
             assert.equal(item.id, conversation.id, "Only the promoted conversation row is new.");
             events.push("foreground.imported");
             foregroundInputId = await stagePendingLinqAssistantInputForMailboxItem({ item, vaultRoot });
+            assert.ok(context?.onConversationInputStaged);
+            events.push("foreground.staged");
+            assert.equal(context.onConversationInputStaged(channel), undefined);
+            context.onConversationInputStaged(channel);
             return { assistantInputId: foregroundInputId, status: "imported" };
           },
           platform: createPlatform({
@@ -227,6 +244,9 @@ describe("hosted workspace runtime entrypoint", () => {
           signal: controller.signal,
           async runAssistantPhase(input) {
             assistantCalls += 1;
+            events.push("assistant.foreground");
+            assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 1);
+            assert.equal(cancelPending.mock.calls.length, 0);
             assert.ok(events.includes("foreground.imported"));
             assert.ok(foregroundInputId);
             assert.ok(input.initialMailboxImport.importResult.assistantInputIds?.includes(foregroundInputId));
@@ -239,19 +259,35 @@ describe("hosted workspace runtime entrypoint", () => {
 
       const winner = await withRealTimeout(Promise.race([
         admitted.promise.then(() => "admitted" as const),
-        runtimeCompletion.then(() => "returned" as const, () => "returned" as const),
+        runtimeCompletion.then(() => "returned" as const),
       ]), 15_000, () => events.join(","));
       assert.equal(winner, "admitted", "The same invocation must admit the foreground batch instead of releasing.");
       assert.equal(assistantCalls, 1);
       assert.equal(qualifiedConversationReads, 1);
-      assert.deepEqual(
-        fetchRequests[0]?.lanes.map(({ lane }) => lane),
-        ["system"],
-        "A system-mailbox start keeps its system-only initial fetch.",
+      assert.ok(
+        requireEventIndex(events, "foreground.staged")
+          < requireEventIndex(events, "codex.preinitialize"),
       );
+      assert.ok(
+        requireEventIndex(events, "codex.preinitialize")
+          < requireEventIndex(events, "assistant.foreground"),
+      );
+      if (processingMode === "system_mailbox") {
+        assert.deepEqual(
+          fetchRequests[0]?.lanes.map(({ lane }) => lane),
+          ["system"],
+          "A system-mailbox start keeps its system-only initial fetch.",
+        );
+      }
+      controller.abort();
+      releasePreparation.resolve();
+      await runtimeCompletion.catch(() => undefined);
+      assert.equal(cancelPending.mock.calls.length, 1);
     } finally {
+      releasePreparation.resolve();
       controller.abort();
       await runtimeCompletion?.catch(() => undefined);
+      mocks.prepareHostedCodexAssistantProcess.mockReset().mockResolvedValue(null);
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }
@@ -1194,6 +1230,7 @@ describe("hosted workspace runtime entrypoint", () => {
     let postStagingSystemReads = 0;
     let checkpointsBeforeCancellation = 0;
     let foregroundInputId: string | null = null;
+    mocks.prepareHostedCodexAssistantProcess.mockClear();
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
       vi.setSystemTime(new Date(TEST_NOW));
@@ -1231,7 +1268,7 @@ describe("hosted workspace runtime entrypoint", () => {
             if (arrival === "checkpoint") sendForeground();
             return { snapshotRef: createSnapshotFixtureRef({ hash: "d".repeat(64), size: 512 }) };
           },
-          async importItem({ item }) {
+          async importItem({ item }, context) {
             if (item.id === preferences.id) {
               events.push("preferences.imported");
               return { status: "imported" };
@@ -1239,6 +1276,8 @@ describe("hosted workspace runtime entrypoint", () => {
             assert.equal(item.id, conversation.id);
             events.push("foreground.imported");
             foregroundInputId = await stagePendingLinqAssistantInputForMailboxItem({ item, vaultRoot });
+            assert.ok(context?.onConversationInputStaged);
+            context.onConversationInputStaged("linq");
             return { assistantInputId: foregroundInputId, status: "imported" };
           },
           platform: createPlatform({
@@ -1277,6 +1316,8 @@ describe("hosted workspace runtime entrypoint", () => {
           }),
           async runAssistantPhase(input) {
             assistantCalls += 1;
+            assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 1,
+              "Promotion must reopen preparation after a system checkpoint closes admission.");
             if (arrival === "blocked checkpoint") {
               assert.ok(events.includes("checkpoint.cancelled"));
               assert.equal(checkpointRequests.length, checkpointsBeforeCancellation,
