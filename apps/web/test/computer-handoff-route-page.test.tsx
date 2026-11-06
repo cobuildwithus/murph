@@ -128,8 +128,8 @@ describe("computer handoff route and page", () => {
       params: Promise.resolve({ token: "handoff-token" }),
     }));
 
-    assert.match(markup, /Sign in to open this private page/);
-    assert.match(markup, /Log in or sign up/);
+    assert.match(markup, /Sign in to finish this step/);
+    assert.match(markup, /Send verification code/);
     expect(mocks.createComputerUseService).not.toHaveBeenCalled();
     expect(mocks.service.readHandoffPageState).not.toHaveBeenCalled();
   });

@@ -78,8 +78,8 @@ describe("hosted connected-app connect page and start route", () => {
       params: Promise.resolve({ claim: CLAIM }),
     }));
 
-    assert.match(markup, /Sign in to continue/);
-    assert.match(markup, /Log in or sign up/);
+    assert.match(markup, /Sign in to connect your app/);
+    assert.match(markup, /Send verification code/);
     expect(mocks.readHostedConnectedAppIntent).not.toHaveBeenCalled();
   });
 

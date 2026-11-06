@@ -1,11 +1,3 @@
-import {
-  ArrowRight,
-  CheckCircle2,
-  Clock3,
-  ShieldAlert,
-  XCircle,
-  type LucideIcon,
-} from "lucide-react";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
@@ -15,11 +7,12 @@ import {
   ACTION_APPROVAL_DENIED_DESCRIPTION,
   ACTION_APPROVAL_RECORDED_DESCRIPTION,
   ActionApprovalScreen,
+  readActionApprovalFileName,
 } from "@/src/components/sensitive-actions/action-approval-screen";
+import { LinkPageSheet } from "@/src/components/link-page/link-page-sheet";
+import { LINK_PAGE_PILL_CLASS, LinkPageFrame } from "@/src/components/link-page/link-page-shell";
 import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
 import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
-import { buttonVariants } from "@/src/components/ui/button";
-import { Separator } from "@/src/components/ui/separator";
 import {
   readHostedActionApproval,
   requireHostedActionApprovalId,
@@ -32,7 +25,6 @@ import { requireActiveHostedAppSession } from "@/src/lib/hosted-onboarding/app-s
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { getPrisma } from "@/src/lib/prisma";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
-import { cn } from "@/src/lib/utils";
 
 import { APPROVE_OG_ALT } from "./approve-share-card";
 
@@ -91,16 +83,24 @@ export default async function ActionApprovalPage({
       isHostedOnboardingError(error)
       && error.code === "ACTION_APPROVAL_NOT_FOUND"
     ) {
-      return <ActionApprovalUnavailableState />;
+      return (
+        <LinkPageFrame>
+          <ActionApprovalUnavailableState />
+        </LinkPageFrame>
+      );
     }
     throw error;
   }
 
-  if (!isTerminalActionApproval(approval)) {
-    return <ActionApprovalCard approval={approval} />;
-  }
-
-  return <ActionApprovalTerminalState approval={approval} />;
+  return (
+    <LinkPageFrame>
+      {isTerminalActionApproval(approval) ? (
+        <ActionApprovalTerminalState approval={approval} />
+      ) : (
+        <ActionApprovalCard approval={approval} />
+      )}
+    </LinkPageFrame>
+  );
 }
 
 async function ActionApprovalTerminalState({
@@ -130,41 +130,47 @@ async function ActionApprovalTerminalState({
   }
 
   const contactOption = contactOptions[0] ?? null;
+  const stamp = approval.status === "approved"
+    ? "Approved"
+    : approval.status === "denied"
+      ? "Denied"
+      : null;
 
   return (
     <ActionApprovalScreen
-      badgeIcon={content.icon}
-      badgeTone={approval.status === "approved" ? "primary" : "muted"}
+      actions={contactOption ? (
+        <MurphContactLink
+          actionLabel={content.actionLabel}
+          className={LINK_PAGE_PILL_CLASS}
+          option={contactOption}
+        >
+          {content.actionLabel}
+        </MurphContactLink>
+      ) : undefined}
       body={content.description}
       title={content.title}
     >
-      <div className="mt-7 flex flex-col gap-6">
-        <Separator />
-        {contactOption ? (
-          <MurphContactLink
-            actionLabel={content.actionLabel}
-            className={cn(buttonVariants({ size: "lg" }), "w-full sm:w-fit")}
-            option={contactOption}
-          >
-            {content.actionLabel}
-            <ArrowRight aria-hidden="true" data-icon="inline-end" />
-          </MurphContactLink>
-        ) : replyBody ? (
-          <div>
-            <p className="text-sm text-muted-foreground">
-              Return to the Murph conversation where this request started and
-              send:
-            </p>
-            <p className="mt-3 break-words rounded-lg bg-muted/40 px-4 py-3 font-mono text-sm text-foreground">
-              {replyBody}
-            </p>
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            Return to the Murph conversation where this request started.
+      {stamp ? (
+        <LinkPageSheet
+          name={readActionApprovalFileName(approval.presentation.body)}
+          stamp={stamp}
+        />
+      ) : null}
+      {!contactOption && replyBody ? (
+        <div className="flex flex-col gap-2">
+          <p className="text-base font-medium leading-[22px] text-[#FFFCF6]/60">
+            Return to the Murph conversation where this request started and send:
           </p>
-        )}
-      </div>
+          <p className="break-words rounded-[18px] bg-[#2A2622] px-4 py-3 text-base font-semibold leading-[22px]">
+            {replyBody}
+          </p>
+        </div>
+      ) : null}
+      {!contactOption && !replyBody ? (
+        <p className="text-center text-base font-medium leading-[22px] text-[#FFFCF6]/60">
+          Return to the Murph conversation where this request started.
+        </p>
+      ) : null}
     </ActionApprovalScreen>
   );
 }
@@ -185,10 +191,8 @@ function terminalReplyBody(
 function ActionApprovalUnavailableState() {
   return (
     <ActionApprovalScreen
-      badgeIcon={ShieldAlert}
-      badgeTone="muted"
       body="It may belong to another Murph account or no longer exist. Return to Murph and request a new approval link."
-      title="This link is unavailable"
+      title="This link isn’t available."
     />
   );
 }
@@ -196,7 +200,6 @@ function ActionApprovalUnavailableState() {
 interface TerminalContent {
   actionLabel: string;
   description: string;
-  icon: LucideIcon;
   title: string;
 }
 
@@ -208,23 +211,19 @@ function terminalContent(
       return {
         actionLabel: "Return to Murph",
         description: ACTION_APPROVAL_RECORDED_DESCRIPTION,
-        icon: CheckCircle2,
-        title: "Approved",
+        title: "Approved.",
       };
     case "denied":
       return {
         actionLabel: "Return to Murph",
         description: ACTION_APPROVAL_DENIED_DESCRIPTION,
-        icon: XCircle,
-        title: "Denied",
+        title: "Denied.",
       };
     case "expired":
       return {
         actionLabel: "Request a new link",
-        description:
-          "Approval links expire after a short time for your security. Nothing was approved or changed.",
-        icon: Clock3,
-        title: "Approval link expired",
+        description: "Nothing was approved or changed.",
+        title: "This link expired.",
       };
   }
 }

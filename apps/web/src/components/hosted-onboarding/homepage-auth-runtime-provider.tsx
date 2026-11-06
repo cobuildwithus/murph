@@ -31,9 +31,9 @@ function UnauthenticatedHomepageAuthRuntimeProvider({ authenticatedDestination, 
       ? authenticatedDestination ?? HOSTED_APP_HOME_PATH : payload.joinUrl);
   }, [authenticatedDestination]);
   const value = useMemo(() => ({
-    authenticated: false, authenticationStatus, openAuthDialog,
+    authenticated: false, authenticationStatus, completeAuthentication: handleAuthCompleted, openAuthDialog,
     prepareAuth: preloadHostedAuthPanelIsland, shared: true,
-  }), [authenticationStatus, openAuthDialog]);
+  }), [authenticationStatus, handleAuthCompleted, openAuthDialog]);
   return <AuthContext.Provider value={value}>
     {children}
     <AuthDialog autoSendPastedPhoneNumber onCompleted={handleAuthCompleted} onOpenChange={setOpen}

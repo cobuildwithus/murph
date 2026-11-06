@@ -91,11 +91,11 @@ describe("action approval page", () => {
     const stream = await renderToReadableStream(view);
     await stream.allReady;
     const markup = await new Response(stream).text();
-    const hrefs = [...markup.matchAll(/href="([^"]+)"/gu)].map(
+    const hrefs = [...markup.matchAll(/<a\s[^>]*href="([^"]+)"/gu)].map(
       (match) => match[1],
     );
 
-    assert.match(markup, /Approval link expired/);
+    assert.match(markup, /This link expired\./);
     assert.match(markup, /Nothing was approved or changed\./);
     assert.match(markup, /Request a new link/);
     assert.equal(markup.includes("Return in Telegram"), false);
@@ -116,8 +116,8 @@ describe("action approval page", () => {
     mocks.readHostedActionApproval.mockResolvedValue({ approvalId: "haa_test", status: "pending" });
     mocks.readApprovalPasskeyState.mockResolvedValue({ credentials: migrated ? [{ id: "synthetic" }] : [] });
     const view = await actionApprovalPage.default({ params: Promise.resolve({ approvalId: "haa_test" }) });
-    expect(view.props).not.toHaveProperty("legacyApprovalRequired");
-    expect(view.props.approval).toEqual({ approvalId: "haa_test", status: "pending" });
+    expect(view.props.children.props).not.toHaveProperty("legacyApprovalRequired");
+    expect(view.props.children.props.approval).toEqual({ approvalId: "haa_test", status: "pending" });
     expect(mocks.readApprovalPasskeyState).not.toHaveBeenCalled();
   });
 
@@ -125,8 +125,8 @@ describe("action approval page", () => {
     mocks.readHostedActionApproval.mockResolvedValue({ approvalId: "haa_test", status: "pending" });
     mocks.readApprovalPasskeyState.mockRejectedValue(new Error("storage unavailable"));
     const view = await actionApprovalPage.default({ params: Promise.resolve({ approvalId: "haa_test" }) });
-    expect(view.props).not.toHaveProperty("legacyApprovalRequired");
-    expect(view.props.approval).toEqual({ approvalId: "haa_test", status: "pending" });
+    expect(view.props.children.props).not.toHaveProperty("legacyApprovalRequired");
+    expect(view.props.children.props.approval).toEqual({ approvalId: "haa_test", status: "pending" });
   });
 
   it("shows the recovery reply when contact resolution is unavailable", async () => {
@@ -150,7 +150,7 @@ describe("action approval page", () => {
       /That approval link expired\. Please send a new one\./,
     );
     assert.equal(markup.includes("Request a new link"), false);
-    assert.equal(markup.includes('href="'), false);
+    assert.equal(/<a\s[^>]*href="/u.test(markup), false);
   });
 
   it("does not ask a group member to confirm an automatically resumed approval", async () => {
@@ -180,11 +180,11 @@ describe("action approval page", () => {
     );
     assert.match(
       markup,
-      /Approval recorded\. Murph will continue only if this request is still pending\./,
+      /Murph will continue if this request is still open\./,
     );
     assert.equal(markup.includes("Head back to Murph to continue."), false);
     assert.equal(markup.includes("I approved the secure request."), false);
-    assert.equal(markup.includes('href="'), false);
+    assert.equal(/<a\s[^>]*href="/u.test(markup), false);
   });
 
   it("redirects an approved revisit through the bare conversation link", async () => {
@@ -246,7 +246,7 @@ describe("action approval page", () => {
       /Return to the Murph conversation where this request started\./,
     );
     assert.equal(markup.includes("I approved the secure request."), false);
-    assert.equal(markup.includes('href="'), false);
+    assert.equal(/<a\s[^>]*href="/u.test(markup), false);
   });
 
   it("does not request a confirmation when contact resolution fails", async () => {

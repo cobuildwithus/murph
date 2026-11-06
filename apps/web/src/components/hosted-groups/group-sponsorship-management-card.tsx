@@ -13,11 +13,11 @@ import {
 
 import { GroupFundingDial } from "./group-funding-dial";
 import {
-  GroupFundingError,
-  GroupFundingLink,
-  GroupFundingPill,
-  GroupFundingScreen,
-} from "./group-usage-funding-shell";
+  LinkPageError,
+  LinkPageLink,
+  LinkPagePill,
+  LinkPageScreen,
+} from "@/src/components/link-page/link-page-shell";
 
 const MONTHLY_CAP_DIAL_OPTIONS = HOSTED_GROUP_SPONSORSHIP_MONTHLY_CAPS_MINOR.map(
   (monthlyCapMinor) => ({
@@ -380,7 +380,7 @@ export function GroupSponsorshipManagementCard({
   });
   const showDial = !cancelOnly && management.status === "active";
   const cancelLink = (
-    <GroupFundingLink
+    <LinkPageLink
       disabled={disabled}
       onClick={() => {
         setError(null);
@@ -388,7 +388,7 @@ export function GroupSponsorshipManagementCard({
       }}
     >
       Cancel sponsorship
-    </GroupFundingLink>
+    </LinkPageLink>
   );
 
   return (
@@ -396,11 +396,11 @@ export function GroupSponsorshipManagementCard({
       className="flex flex-1 flex-col"
       data-component="group-sponsorship-management"
     >
-      <GroupFundingScreen
+      <LinkPageScreen
         actions={
           <>
             {error && confirmation === null ? (
-              <GroupFundingError>{error.message}</GroupFundingError>
+              <LinkPageError>{error.message}</LinkPageError>
             ) : null}
             <GroupSponsorshipActions
               cancelLink={cancelLink}
@@ -434,7 +434,7 @@ export function GroupSponsorshipManagementCard({
             value={selectedMonthlyCapMinor}
           />
         ) : null}
-      </GroupFundingScreen>
+      </LinkPageScreen>
 
       <GroupSponsorshipManagementConfirmationDialog
         busy={busy}
@@ -551,9 +551,9 @@ function GroupSponsorshipActions({
   if (recoveryProgress === "recheck_required") {
     return (
       <>
-        <GroupFundingPill disabled={disabled} onClick={onRecheck}>
+        <LinkPagePill disabled={disabled} onClick={onRecheck}>
           Check payment status
-        </GroupFundingPill>
+        </LinkPagePill>
         {cancelLink}
       </>
     );
@@ -564,13 +564,13 @@ function GroupSponsorshipActions({
   if (status === "recovery_required") {
     return (
       <>
-        <GroupFundingPill
+        <LinkPagePill
           disabled={disabled}
           onClick={onReview}
           ref={recoveryButtonRef}
         >
           Review payment
-        </GroupFundingPill>
+        </LinkPagePill>
         {cancelLink}
       </>
     );
@@ -578,26 +578,26 @@ function GroupSponsorshipActions({
   if (status === "paused") {
     return (
       <>
-        <GroupFundingPill disabled={disabled} onClick={onResume}>
+        <LinkPagePill disabled={disabled} onClick={onResume}>
           Resume refills
-        </GroupFundingPill>
+        </LinkPagePill>
         {cancelLink}
       </>
     );
   }
   if (status === "active" && capChanged) {
     return (
-      <GroupFundingPill disabled={disabled} onClick={onApplyCap}>
+      <LinkPagePill disabled={disabled} onClick={onApplyCap}>
         {`${capIncrease ? "Raise" : "Lower"} limit to ${formatMoney(selectedMonthlyCapMinor)}`}
-      </GroupFundingPill>
+      </LinkPagePill>
     );
   }
   return (
     <div className="flex flex-wrap items-center justify-center gap-x-4">
       {status === "active" ? (
-        <GroupFundingLink disabled={disabled} onClick={onPause}>
+        <LinkPageLink disabled={disabled} onClick={onPause}>
           Pause refills
-        </GroupFundingLink>
+        </LinkPageLink>
       ) : null}
       {cancelLink}
     </div>
@@ -673,7 +673,7 @@ export function GroupSponsorshipManagementConfirmationDialog({
 
           <footer className="flex flex-col items-center gap-1.5">
             {authoritativeRejection ? null : (
-              <GroupFundingPill
+              <LinkPagePill
                 className={isIncrease ? undefined : "bg-[#2A2622] text-[#E27B6E]"}
                 data-slot="alert-dialog-action"
                 disabled={busy}
@@ -687,12 +687,12 @@ export function GroupSponsorshipManagementConfirmationDialog({
                     : error
                       ? "Check cancellation status"
                       : "Cancel sponsorship"}
-              </GroupFundingPill>
+              </LinkPagePill>
             )}
             {indeterminateCancellation ? null : (
               <AlertDialogPrimitive.Close
                 disabled={busy}
-                render={<GroupFundingLink className="text-base" />}
+                render={<LinkPageLink className="text-base" />}
               >
                 {authoritativeRejection
                   ? "Refresh current setup"
@@ -743,7 +743,7 @@ export function GroupSponsorshipCanceledReceipt({
       data-component="group-sponsorship-management"
       data-state="canceled"
     >
-      <GroupFundingScreen
+      <LinkPageScreen
         detail="Credit you already bought stays with the group."
         headingRef={headingRef}
         title="Sponsorship canceled."

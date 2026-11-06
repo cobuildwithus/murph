@@ -108,7 +108,7 @@ test("records approval without promising that a cancelled request will run", asy
     });
 
     expect(rendered.container.textContent).toContain(
-      "Approval recorded. Murph will continue only if this request is still pending.",
+      "Murph will continue if this request is still open.",
     );
     expect(rendered.container.textContent).not.toContain(
       "Approval saved.",
@@ -149,8 +149,12 @@ test("reports a denied decision truthfully when no return link is available", as
     });
 
     expect(rendered.container.querySelector("[role='status']")?.textContent).toBe("Denied.");
+    expect(rendered.container.textContent).toContain("Denied.");
     expect(rendered.container.textContent).toContain(
-      "Denied. Murph will not continue with this action.",
+      "Murph will not continue with this action.",
+    );
+    expect(rendered.container.textContent).toContain(
+      "Return to the Murph conversation where this request started.",
     );
     expect(rendered.container.textContent).not.toContain("Approval recorded.");
     expect(rendered.container.textContent).not.toContain("Murph will continue");
