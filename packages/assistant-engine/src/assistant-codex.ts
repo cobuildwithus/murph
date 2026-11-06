@@ -3,6 +3,7 @@ import {
   completeDynamicToolFailureDiagnostics,
   createDynamicToolFailureIssue,
   createDynamicToolRuntimeIssueInput,
+  assertCanonicalWriteOutcomeKnown,
   dynamicToolFailureEndsTurn,
   toolFailureDiagnostic,
   type ToolFailureReason,
@@ -4823,6 +4824,8 @@ async function runCodexAppServerTurnOnProcess(
             requirement,
           )
         }
+        // Last check before dispatch: tool admission above can await local I/O.
+        assertCanonicalWriteOutcomeKnown(input.abortSignal)
         const result = await executeMurphDynamicToolRequest({
           authorizeAcceptedMessageTarget:
             input.authorizeAcceptedMessageTarget ?? null,
@@ -4905,6 +4908,7 @@ async function runCodexAppServerTurnOnProcess(
         return result
       },
     ).then(async (result) => {
+      assertCanonicalWriteOutcomeKnown(input.abortSignal)
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()
       }
@@ -5117,6 +5121,7 @@ async function runCodexAppServerTurnOnProcess(
         releaseDynamicProgressPending?.()
       }
       if (dynamicToolFailureEndsTurn(dynamicToolRequestSettled, error)) {
+        // An interrupted turn needs no response for its pending tool request.
         rejectOnce(error)
         return
       }

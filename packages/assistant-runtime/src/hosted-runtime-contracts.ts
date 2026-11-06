@@ -75,7 +75,6 @@ export {
   HOSTED_RUNTIME_MEDIA_READ_PURPOSES,
   HostedRuntimeArtifactReadError,
   HostedRuntimeArtifactWriteError,
-  HostedRuntimeCanonicalCheckpointError,
   HostedRuntimeMediaReadError,
   HostedRuntimeMediaWriteError,
 } from "./hosted-runtime/platform.ts";

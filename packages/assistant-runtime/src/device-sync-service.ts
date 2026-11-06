@@ -1,3 +1,4 @@
+import { HostedCanonicalWriteOutcomeUnknownError } from "@murphai/core";
 import { HostedColdHistoryUnavailableError } from "@murphai/runtime-state/node";
 import path from "node:path";
 
@@ -32,7 +33,6 @@ import type {
 import {
   HostedRuntimeArtifactReadError,
   HostedRuntimeArtifactWriteError,
-  HostedRuntimeCanonicalCheckpointError,
   type HostedRuntimeDeviceSyncPort,
 } from "./hosted-runtime/platform.ts";
 import { hostedSourceStateUnavailable } from "./hosted-device-sync-source-state.ts";
@@ -124,7 +124,7 @@ function translateHostedRuntimeDeviceSyncImporterError(error: unknown): unknown 
       retryable: error.retryable,
     });
   }
-  if (error instanceof HostedRuntimeCanonicalCheckpointError) {
+  if (error instanceof HostedCanonicalWriteOutcomeUnknownError) {
     return deviceSyncError({
       cause: error,
       code: "HOSTED_DEVICE_SYNC_CANONICAL_CHECKPOINT_FAILED",

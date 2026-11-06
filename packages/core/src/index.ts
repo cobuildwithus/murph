@@ -257,6 +257,7 @@ export {
   withCanonicalWriteLock,
   inspectCanonicalWriteLock,
   withCanonicalWriteLockScope,
+  HostedCanonicalWriteOutcomeUnknownError,
   applyHostedCanonicalWriteReceipt,
   isProtectedCanonicalPath,
   listProtectedCanonicalPaths,

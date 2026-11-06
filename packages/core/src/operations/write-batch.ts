@@ -158,6 +158,17 @@ export interface HostedCanonicalWritePersistenceInput {
   receipt: HostedCanonicalWriteReceipt;
 }
 
+export class HostedCanonicalWriteOutcomeUnknownError extends Error {
+  readonly retryable = true;
+
+  constructor(input: { cause: unknown }) {
+    super("Hosted canonical write outcome is unknown.", { cause: input.cause });
+    this.name = "HostedCanonicalWriteOutcomeUnknownError";
+  }
+}
+
+// HostedCanonicalWriteOutcomeUnknownError means the submission may have committed.
+// Any other rejection means it did not.
 export interface HostedCanonicalWritePort {
   persistCanonicalWrite(input: HostedCanonicalWritePersistenceInput): Promise<void>;
   persistRuntimeState?(): Promise<void>;
@@ -2365,6 +2376,9 @@ export class WriteBatch {
         this.record.error = toStoredOperationError(error);
         this.record.updatedAt = nowIso();
         await this.persistBestEffort();
+        if (error instanceof HostedCanonicalWriteOutcomeUnknownError) {
+          throw error;
+        }
 
         let rollbackFailed = false;
         try {
@@ -2404,11 +2418,7 @@ export class WriteBatch {
         this.record.error = toStoredOperationError(error);
         this.record.updatedAt = nowIso();
 
-        try {
-          await this.persist();
-        } catch {
-          // Leaving the stage artifacts in place is the primary diagnostic fallback.
-        }
+        await this.persistBestEffort();
       }
     } finally {
       await lock?.release();

@@ -1,3 +1,4 @@
+import { HostedCanonicalWriteOutcomeUnknownError } from "@murphai/core";
 import assert from "node:assert/strict";
 
 import { beforeEach, expect, test, vi } from "vitest";
@@ -6,7 +7,6 @@ import type { CreateDeviceSyncServiceInput } from "@murphai/device-syncd/service
 import type { DeviceSyncImporterPort } from "@murphai/device-syncd/types";
 import {
   HostedRuntimeArtifactReadError,
-  HostedRuntimeCanonicalCheckpointError,
 } from "../src/hosted-runtime/platform.ts";
 
 const mocks = vi.hoisted(() => ({
@@ -68,7 +68,7 @@ test.each([
   },
   {
     code: "HOSTED_DEVICE_SYNC_CANONICAL_CHECKPOINT_FAILED",
-    error: new HostedRuntimeCanonicalCheckpointError({
+    error: new HostedCanonicalWriteOutcomeUnknownError({
       cause: new DOMException("Synthetic checkpoint timeout.", "TimeoutError"),
     }),
     httpStatus: 503,

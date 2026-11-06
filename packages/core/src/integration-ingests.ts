@@ -38,6 +38,7 @@ import {
 import { applyJsonlAppendTarget, INTEGRATION_INGEST_ARCHIVE_SUFFIXES } from "./write-policy.ts";
 import { VAULT_LAYOUT } from "./constants.ts";
 import { VaultError } from "./errors.ts";
+import { isErrnoException } from "./types.ts";
 import { pathExists, walkVaultFiles } from "./fs.ts";
 import { toMonthlyShardRelativePath } from "./jsonl.ts";
 import { withCanonicalWriteLock } from "./operations/canonical-write-lock.ts";
@@ -2645,7 +2646,8 @@ async function* readBoundedIntegrationIngestArchiveChunks(
     }
   } catch (error) {
     signal?.throwIfAborted();
-    if (error instanceof VaultError) {
+    // A failed read proves nothing about the archive; only decoding can.
+    if (error instanceof VaultError || (isErrnoException(error) && error.syscall !== undefined)) {
       throw error;
     }
     throw new VaultError(

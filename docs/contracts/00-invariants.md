@@ -365,6 +365,9 @@ it has been explicitly elevated to a cross-cutting invariant.
 - Canonical vault writes go through the owning canonical API with provenance.
   Importers prepare data; CLIs, assistants, and runtimes call the owner.
   Transcripts, projections, and runtime state are never promoted implicitly.
+  Failure to observe publication does not prove rejection: once a submission may
+  have committed, its evidence stays and the invocation stops until exact
+  reconciliation or cold restore follows Web.
 - Workspace packages use declared public entrypoints and keep dependencies
   one-way and acyclic. Shared behavior moves to the lower owning package instead
   of reaching into sibling internals or creating circular re-exports.

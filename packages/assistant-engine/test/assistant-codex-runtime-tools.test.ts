@@ -1,3 +1,4 @@
+import { HostedCanonicalWriteOutcomeUnknownError } from '@murphai/core'
 import { withCodexToolInputContract } from '../src/assistant-codex/tool-input-contract.ts'
 import {
   MURPH_DYNAMIC_TOOLS,
@@ -1390,6 +1391,90 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
       expect(deviceRequest).toHaveBeenCalledTimes(1)
     }
     expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+  })
+
+  it('fences a caught automation publication failure before results or queued tools', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-publication-fence-')
+    const child = new MockChildProcess()
+    codexMocks.spawn.mockReturnValue(child)
+    const controller = new AbortController()
+    const error = new HostedCanonicalWriteOutcomeUnknownError({ cause: new Error('Lost acknowledgement.') })
+    const release = createDeferred<void>()
+    const request = vi.fn(async () => {
+      await release.promise
+      controller.abort(error)
+      throw error
+    })
+    const execution = executeCodexAppServerTurn({
+      abortSignal: controller.signal,
+      hostedToolContext: { ...createHostedToolContext(), automationTool: { request } },
+      prompt: 'Save the reminder.',
+      workingDirectory,
+    })
+    const rejection = expect(execution).rejects.toBe(error)
+    const initialize = await waitForRpcMethod(child, 'initialize')
+    child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+    const thread = await waitForRpcMethod(child, 'thread/start')
+    child.stdout.write(jsonLine({ id: thread.id, result: { thread: { id: 'thread-fence' } } }))
+    const turn = await waitForRpcMethod(child, 'turn/start')
+    child.stdout.write([
+      { id: turn.id, result: { turn: { id: 'turn-fence' } } },
+      ...[901, 902].map((id) => ({
+        id, method: 'item/tool/call',
+        params: {
+          namespace: 'murph', tool: 'automation', threadId: 'thread-fence', turnId: 'turn-fence',
+          arguments: { action: 'save', title: 'Synthetic reminder', instructions: 'Send a reminder.',
+            schedule: { kind: 'dailyLocal', localTime: '09:00', timeZone: 'UTC' } },
+        },
+      })),
+    ].map(jsonLine).join(''))
+    await waitForMockCall(request, 1)
+    release.resolve(undefined)
+    await rejection
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(readWrittenRpcMessages(child).filter((message) => message.id === 901 || message.id === 902)).toEqual([])
+    expect(JSON.stringify(readWrittenRpcMessages(child))).not.toContain('automation operation is unavailable')
+  })
+
+  it('does not dispatch a tool when the fence lands during its admission', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-admission-fence-')
+    const child = new MockChildProcess()
+    codexMocks.spawn.mockReturnValue(child)
+    const controller = new AbortController()
+    const error = new HostedCanonicalWriteOutcomeUnknownError({ cause: new Error('Lost acknowledgement.') })
+    const request = vi.fn(async (): Promise<never> => {
+      throw new Error('Tool must not run after the fence.')
+    })
+    const execution = executeCodexAppServerTurn({
+      abortSignal: controller.signal,
+      hostedToolContext: {
+        ...createHostedToolContext(),
+        automationTool: { request },
+        beforeToolExecution: async () => { controller.abort(error) },
+      },
+      prompt: 'Save the reminder.',
+      workingDirectory,
+    })
+    const rejection = expect(execution).rejects.toBe(error)
+    const initialize = await waitForRpcMethod(child, 'initialize')
+    child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+    const thread = await waitForRpcMethod(child, 'thread/start')
+    child.stdout.write(jsonLine({ id: thread.id, result: { thread: { id: 'thread-admission' } } }))
+    const turn = await waitForRpcMethod(child, 'turn/start')
+    child.stdout.write([
+      { id: turn.id, result: { turn: { id: 'turn-admission' } } },
+      {
+        id: 903, method: 'item/tool/call',
+        params: {
+          namespace: 'murph', tool: 'automation', threadId: 'thread-admission', turnId: 'turn-admission',
+          arguments: { action: 'save', title: 'Synthetic reminder', instructions: 'Send a reminder.',
+            schedule: { kind: 'dailyLocal', localTime: '09:00', timeZone: 'UTC' } },
+        },
+      },
+    ].map(jsonLine).join(''))
+    await rejection
+    expect(request).not.toHaveBeenCalled()
+    expect(readWrittenRpcMessages(child).filter((message) => message.id === 903)).toEqual([])
   })
 
   it('requires exact active-turn identity for invocation-scoped root tools', async () => {
