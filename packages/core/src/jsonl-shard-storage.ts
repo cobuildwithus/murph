@@ -3,6 +3,7 @@ import { createReadStream, createWriteStream, promises as fs } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 import { Transform, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 
 import { prepareFileAtomicExclusive, writeFileAtomic } from "./atomic-write.ts";
 import {
@@ -237,19 +238,23 @@ export function createJsonlShardStorage(relativeDirectory: string, errorPrefix: 
     } finally { endDecode(); }
   }
 
-  function parseJsonlRows(
-    bytes: Uint8Array,
+  async function parseJsonlRows(
+    bytes: Buffer,
     relativePath: string,
-  ): Array<{ lineNumber: number; value: UnknownRecord }> {
-    const content = Buffer.from(bytes).toString("utf8");
+  ): Promise<Array<{ lineNumber: number; value: UnknownRecord }>> {
     const rows: Array<{ lineNumber: number; value: UnknownRecord }> = [];
-    for (const [index, line] of content.split("\n").entries()) {
+    for (let offset = 0, lineNumber = 1; offset <= bytes.length; lineNumber += 1) {
+      if (lineNumber > 1 && (lineNumber - 1) % 256 === 0) await yieldToEventLoop();
+      const newline = bytes.indexOf(0x0a, offset);
+      const end = newline < 0 ? bytes.length : newline;
+      const line = bytes.toString("utf8", offset, end);
+      offset = end + 1;
       if (!line) {
         continue;
       }
       rows.push({
-        lineNumber: index + 1,
-        value: parseJsonlRow(line, index + 1, relativePath),
+        lineNumber,
+        value: parseJsonlRow(line, lineNumber, relativePath),
       });
     }
     return rows;
@@ -296,7 +301,7 @@ export function createJsonlShardStorage(relativeDirectory: string, errorPrefix: 
     } finally { endSource(); }
     const bytes = await readBoundedJsonlSourceBytes(input.vaultRoot, source);
     const endParse = startEventOwnerOperation("parse");
-    try { return parseJsonlRows(bytes, logicalPath); }
+    try { return await parseJsonlRows(bytes, logicalPath); }
     finally { endParse(); }
   }
 
@@ -350,8 +355,8 @@ export function createJsonlShardStorage(relativeDirectory: string, errorPrefix: 
     // Retain archive validation before callbacks, but decode only visited lines.
     // Include the trailing empty physical line in the continuation checks.
     for (let offset = 0, lineNumber = 1; offset <= bytes.length; lineNumber += 1) {
-      if ((input.signal || input.shouldContinue) && lineNumber > 1 && (lineNumber - 1) % 256 === 0) {
-        await new Promise<void>((resolve) => setImmediate(resolve));
+      if (lineNumber > 1 && (lineNumber - 1) % 256 === 0) {
+        await yieldToEventLoop();
       }
       input.signal?.throwIfAborted();
       if (input.shouldContinue?.() === false) {
@@ -396,7 +401,7 @@ export function createJsonlShardStorage(relativeDirectory: string, errorPrefix: 
       return null;
     }
     const bytes = await readBoundedJsonlSourceBytes(vaultRoot, source);
-    parseJsonlRows(bytes, source.logicalPath);
+    await parseJsonlRows(bytes, source.logicalPath);
     return createContentReceipt(bytes);
   }
 
@@ -516,7 +521,7 @@ export function createJsonlShardStorage(relativeDirectory: string, errorPrefix: 
       );
     }
     const payload = Buffer.from(input.payload, "utf8");
-    parseJsonlRows(payload, source.logicalPath);
+    await parseJsonlRows(payload, source.logicalPath);
     const state = await inspectArchivedJsonlShardAppend({
       expectedBaseByteLength: input.expectedBaseByteLength,
       expectedBaseSha256: input.expectedBaseSha256,
@@ -816,13 +821,13 @@ export function createJsonlShardStorage(relativeDirectory: string, errorPrefix: 
       fs.stat(resolveVaultPath(vaultRoot, candidate.sourcePath).absolutePath)
     ));
     const content = await readBoundedJsonlSourceBytes(vaultRoot, source, signal);
-    parseJsonlRows(content, source.logicalPath);
+    await parseJsonlRows(content, source.logicalPath);
     const verified: string[] = [];
     for (const candidate of sources) {
       signal?.throwIfAborted();
       if (candidate === source) continue;
       const bytes = await readBoundedJsonlSourceBytes(vaultRoot, candidate, signal);
-      parseJsonlRows(bytes, candidate.logicalPath);
+      await parseJsonlRows(bytes, candidate.logicalPath);
       if (!content.equals(bytes)) {
         throw new VaultError(`${errorPrefix}_SHARD_AMBIGUOUS`, "Ledger representations differ.", {
           relativePath: source.logicalPath,

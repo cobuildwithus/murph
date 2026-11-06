@@ -2459,7 +2459,7 @@ async function refreshEventExternalRefMatches(
   const changedRefs = new Set<string>();
   let count = 0;
   for (const id of changedIds) {
-    if (signal && ++count % 256 === 0) await yieldToEventLoop();
+    if (++count % 256 === 0) await yieldToEventLoop();
     signal?.throwIfAborted();
     const state = index.entriesById.get(id)!;
     if (state.indexedRefKey) {
@@ -2486,7 +2486,7 @@ async function refreshEventExternalRefMatches(
     changedRefs.add(refKey);
   }
   for (const refKey of changedRefs) {
-    if (signal && ++count % 256 === 0) await yieldToEventLoop();
+    if (++count % 256 === 0) await yieldToEventLoop();
     signal?.throwIfAborted();
     const old = index.latestByRefKey.get(refKey);
     if (old) updateJunctionNoIdProfilePredecessor(index, old, false);
