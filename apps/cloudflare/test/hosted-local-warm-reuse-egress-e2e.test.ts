@@ -1,11 +1,10 @@
+import { HOSTED_ASSISTANT_DEFAULT_MODEL } from "@murphai/hosted-execution/assistant-model";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   startHostedLocalLinqEgressScenario,
   type HostedLocalEgressScenario,
 } from "./helpers/hosted-local-egress-scenario.js";
-
-const defaultProductModel = "gpt-6.1-sol";
 
 let egress: HostedLocalEgressScenario | null = null;
 
@@ -54,7 +53,7 @@ describe("hosted local resident-container egress e2e", () => {
     expect(providerRequests.length).toBeGreaterThanOrEqual(3);
     for (const request of providerRequests) {
       const providerRequestBody = request.body ?? "";
-      expect(readProviderRequestModel(providerRequestBody)).toBe(defaultProductModel);
+      expect(readProviderRequestModel(providerRequestBody)).toBe(HOSTED_ASSISTANT_DEFAULT_MODEL);
       expectCurrentResponsesLiteToolEnvelope(providerRequestBody);
     }
     await harness.assertHealthy({ expectAssistantProviderRequest: true });

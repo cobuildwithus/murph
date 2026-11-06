@@ -90,6 +90,9 @@ describe("hosted local Linq group route drift e2e", () => {
         LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
         LINQ_API_TOKEN: linqApiToken,
         LINQ_WEBHOOK_SECRET: linqWebhookSecret,
+        // Game lore independently reads the live audience before each group turn.
+        // Keep these exact read counts scoped to durable route provisioning.
+        MURPH_GAME_ENABLED: "false",
         MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
       },
       localDatabaseUrl,
