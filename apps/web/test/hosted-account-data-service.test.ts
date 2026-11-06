@@ -541,7 +541,7 @@ beforeEach(() => {
   serviceMocks.deleteHostedPhoneCallsForAccountDeletion.mockReset();
   serviceMocks.deleteHostedPhoneCallsForAccountDeletion.mockResolvedValue(undefined);
   serviceMocks.prepareGameAccountDeletion.mockReset();
-  serviceMocks.prepareGameAccountDeletion.mockResolvedValue({ games: [] });
+  serviceMocks.prepareGameAccountDeletion.mockResolvedValue({ games: [], more: false });
   serviceMocks.applyGameAccountDeletionTx.mockReset();
   serviceMocks.applyGameAccountDeletionTx.mockResolvedValue({ calledOff: 0, deleted: 0, kept: 0 });
   serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort.mockReset();
@@ -1053,7 +1053,7 @@ describe("deleteHostedAccountData", () => {
 
   it("seals game departures before the transaction and applies them before member removal", async () => {
     const order: string[] = [];
-    const prepared = { games: [{ id: "game_1", fingerprint: "f", departure: null }] };
+    const prepared = { games: [{ id: "game_1", fingerprint: "f", kept: null }], more: false };
     serviceMocks.prepareGameAccountDeletion.mockImplementation(async () => {
       order.push("prepare:games");
       return prepared;

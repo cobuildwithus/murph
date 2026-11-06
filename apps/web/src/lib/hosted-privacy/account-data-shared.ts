@@ -3,6 +3,8 @@ export const HOSTED_ACCOUNT_DELETION_CONNECTED_APP_SETUP_IN_PROGRESS_MESSAGE =
   "Connected-app setup is still finishing. Try account deletion again after it finishes or times out.";
 export const HOSTED_ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG_MESSAGE =
   "Multiple connected-app setups are still finishing. Try account deletion again after they finish or time out.";
+export const HOSTED_ACCOUNT_DELETION_GAME_HISTORY_PENDING_MESSAGE =
+  "We're still removing your game history. Retry account deletion.";
 export const HOSTED_ACCOUNT_DATA_DELETION_SCHEMA = "murph.hosted-account-data-deletion-result.v2";
 export const HOSTED_ACCOUNT_PRIVACY_REQUEST_BODY_LIMIT_BYTES = 4 * 1024;
 

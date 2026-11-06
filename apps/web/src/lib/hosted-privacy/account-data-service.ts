@@ -87,6 +87,7 @@ import {
   HOSTED_ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG_MESSAGE,
   HOSTED_ACCOUNT_DELETION_CONNECTED_APP_SETUP_IN_PROGRESS_MESSAGE,
   HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
+  HOSTED_ACCOUNT_DELETION_GAME_HISTORY_PENDING_MESSAGE,
   HOSTED_ACCOUNT_EXIT_NOTE_MAX_LENGTH,
   type HostedAccountExitReasonCode,
   isHostedAccountExitReasonCode,
@@ -116,6 +117,7 @@ export type HostedAccountStoreDeletionMode =
   | "documented-retention";
 
 const HOSTED_ACCOUNT_DELETION_CONNECTED_APP_INTENT_LIMIT = 20;
+const HOSTED_ACCOUNT_DELETION_GAME_PAGES_PER_REQUEST = 20;
 const HOSTED_ACCOUNT_DELETION_SUSPENSION_FENCE_TRANSACTION_OPTIONS = {
   ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   // Group-aware provider fences expire after fifteen seconds. Deletion gets a
@@ -1017,11 +1019,45 @@ async function deleteHostedAccountDataInternal(input: {
     prisma: input.prisma,
   });
   // Name snapshots and game words are sealed for the remaining players before
-  // the transaction, while the leaving members' keys still exist.
-  const preparedGames = await prepareGameAccountDeletion({
+  // each transaction, while the leaving members' keys still exist. Excess
+  // history commits here under the suspension fence; the last page and key
+  // removal stay together in the final transaction.
+  let preparedGames = await prepareGameAccountDeletion({
     memberIds: deletionMemberIds,
     prisma: input.prisma,
   });
+  for (let pages = 0; preparedGames.more; pages += 1) {
+    if (pages === HOSTED_ACCOUNT_DELETION_GAME_PAGES_PER_REQUEST) {
+      throw hostedOnboardingError({
+        code: "ACCOUNT_DELETION_GAME_HISTORY_PENDING",
+        httpStatus: 503,
+        message: HOSTED_ACCOUNT_DELETION_GAME_HISTORY_PENDING_MESSAGE,
+        retryable: true,
+      });
+    }
+    await input.prisma.$transaction(async (tx) => {
+      await lockHostedMembersForAccountDeletionTx({
+        memberIds: deletionMemberIds,
+        prisma: tx,
+        requiredMemberIds: deletionMemberIds,
+      });
+      await refreshHostedMembersAccountDeletionFenceTx({
+        memberIds: deletionMemberIds,
+        now: deletionStartedAt,
+        prisma: tx,
+      });
+      await applyGameAccountDeletionTx({
+        memberIds: deletionMemberIds,
+        now: deletionStartedAt,
+        prepared: preparedGames,
+        tx,
+      });
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    preparedGames = await prepareGameAccountDeletion({
+      memberIds: deletionMemberIds,
+      prisma: input.prisma,
+    });
+  }
   const deleteHostedAccountDataCallback = async (
     tx: Prisma.TransactionClient,
   ): Promise<HostedAccountDeletionDatabaseResult> => {

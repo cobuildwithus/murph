@@ -546,6 +546,48 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
+    it("commits twenty game pages and resumes account deletion with keys intact", async () => {
+      const deletion = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const memberId = `hbm_game_pages_${randomUUID()}`;
+      const holder = globalThis as typeof globalThis & { __murphHostedSecureBoxStringTestCodec?: Parameters<typeof setHostedSecureBoxStringTestCodecForTests>[0] };
+      const codec = holder.__murphHostedSecureBoxStringTestCodec ?? null;
+      setHostedSecureBoxStringTestCodecForTests(null);
+      try {
+        const { sealGameText } = await import("@/src/lib/game/crypto");
+        await deletion.hostedMember.create({ data: { id: memberId } });
+        const { prepareHostedDomainRootForWeb, revalidatePreparedHostedDomainRootForWebTx } = await import("@/src/lib/hosted-crypto/domain-root-store");
+        const { runWithHostedDomainRootUnwrapCache } = await import("@/src/lib/hosted-crypto/domain-root-unwrap-cache");
+        await runWithHostedDomainRootUnwrapCache(async () => {
+          const prepared = await prepareHostedDomainRootForWeb({ domain: "control", reason: "test", userId: memberId });
+          await deletion.$transaction(tx => revalidatePreparedHostedDomainRootForWebTx({ prepared, tx }));
+        });
+        expect(await runGameCommand({ actorMemberId: memberId, command: { type: "setProfile", firstName: "Player", timeZone: "UTC" } })).toMatchObject({ ok: true });
+        const rows: Prisma.GameCreateManyInput[] = [];
+        for (let i = 0; i < 2_101; i++) {
+          const id = randomUUID();
+          rows.push({ id, createdBy: memberId, wordsOwnerMemberId: memberId, status: "void", terms: [],
+            termsWordsEncrypted: (await sealGameText({ table: "game", field: "terms_words", rowId: id, memberId }, "Synthetic game words"))! });
+        }
+        await deletion.game.createMany({ data: rows });
+        await deletion.gamePlayer.createMany({ data: rows.map(row => ({ gameId: row.id, memberId, seat: 0, joinedAt: new Date(), timeZone: "UTC" })) });
+        const envelopes = await deletion.hostedUserCryptoEnvelope.findMany({ where: { userId: memberId }, orderBy: { id: "asc" } });
+        expect(envelopes.length).toBeGreaterThan(0);
+        const request = () => deleteHostedAccountData({ memberId, prisma: deletion, request: new Request("https://app.example.test/settings") });
+        await expect(request()).rejects.toMatchObject({ code: "ACCOUNT_DELETION_GAME_HISTORY_PENDING", retryable: true });
+        expect(await deletion.game.count({ where: { wordsOwnerMemberId: memberId } })).toBe(101);
+        expect(await deletion.hostedMember.findUnique({ where: { id: memberId } })).toMatchObject({ suspendedAt: expect.any(Date) });
+        expect(await deletion.hostedUserCryptoEnvelope.findMany({ where: { userId: memberId }, orderBy: { id: "asc" } })).toEqual(envelopes);
+        expect(await deletion.gameProfile.findUnique({ where: { memberId } })).not.toBeNull();
+        await expect(request()).resolves.toMatchObject({ memberId });
+        expect(await deletion.hostedMember.findUnique({ where: { id: memberId } })).toBeNull();
+      } finally {
+        setHostedSecureBoxStringTestCodecForTests(codec);
+        await deletion.game.deleteMany({ where: { wordsOwnerMemberId: memberId } });
+        await deletion.hostedMember.deleteMany({ where: { id: memberId } });
+        await disconnectClients([deletion]);
+      }
+    }, 180_000);
+
     it("calls off a deleted member's live game and keeps it for the other player", async () => {
       const deletion = createPrismaClient({ databaseUrl, poolMax: 1 });
       const fixtureId = randomUUID();

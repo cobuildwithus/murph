@@ -1,3 +1,8 @@
+Residual game deletion, the final key-dependency proof and surviving group
+invitation authority are owned by [Weekly Game](product-specs/weekly-game.md)
+and [Architecture](../ARCHITECTURE.md#weekly-game). Local proof is recorded in
+the [execution record](exec-plans/completed/2026-11-06-game-deletion-progress-survivors.md).
+
 Game report recovery from the stored receipt and its frozen alert inputs are owned by [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md).
 Recap moderation witnesses, transactional takedown clearing and read-time hiding of affected stored stories are owned by [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md#weekly-game). Existing ciphertext cleanup is held for a separate approved PR. Local verification is recorded in [the recap moderation execution plan](exec-plans/completed/2026-11-06-recap-moderation-witness.md).
 

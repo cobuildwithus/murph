@@ -1552,6 +1552,11 @@ but admits its suspended owner, so a provider failure can be retried with the
 existing session. This exception grants only deletion; ordinary session reads,
 runtime access, and transaction-time session guards still reject suspension.
 Revoked or expired sessions never qualify.
+Game history beyond one page commits in separate transactions under the suspension
+fence; a request stops after 20 partial pages with a retryable error, and the
+delete dialog stays open for that retry because a suspended account cannot reload
+Settings. Keys remain until the final transaction applies the last page and proves
+no dependency remains.
 
 Account deletion first locks and suspends the owner plus every owned thread
 container, and every relationship writer that can add a runtime, Stripe, or Family
@@ -5722,8 +5727,13 @@ invitation loses its member, lookup and private label; `pending_label` only ever
 means the inviter's private invitation label.
 Open pairs become `void`; storage-level groups stay live with at least two joined
 survivors. Settled scores and ticket seats stay frozen. Nobody remaining means
-explicit game deletion. The bounded preparation reads at most 1,001 games and
-rejects overflow above 1,000; apply uses one caller-owned database-only transaction.
+explicit game deletion. Preparation reads at most 101 residual games and counts
+at most 101 residual Talk notes; each caller-owned database-only transaction
+applies at most 100 of each. Processed games leave the participant selector,
+and redacted notes leave the author selector. Each page clears its departing
+invitees so an unjoined pair seat cannot be inserted again. The final page
+proves neither selector has residual dependencies before global reference
+cleanup and member-key removal.
 Names, tasks, stakes, labels and excuse transcripts are app-encrypted before any
 transaction; rule and settlement structure remains plain.
 
