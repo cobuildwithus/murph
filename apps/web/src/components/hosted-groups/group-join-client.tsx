@@ -407,7 +407,7 @@ export function GroupJoinAcceptForm(props: {
             </div>
             <div
               aria-label="Sharing choices"
-              className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain rounded-[18px] outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+              className="flex min-h-[10.5rem] flex-1 flex-col gap-2 overflow-y-auto overscroll-contain rounded-[18px] outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
               role="region"
               tabIndex={0}
             >
@@ -634,7 +634,7 @@ function GroupJoinDrawer({
     <DialogPrimitive.Portal>
       <DialogPrimitive.Backdrop className="fixed inset-0 isolate z-50 bg-[#0B0A08]/70 duration-150 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
       <DialogPrimitive.Popup
-        className="fixed inset-x-0 bottom-0 z-50 flex max-h-[85dvh] w-auto flex-col gap-4 rounded-t-[28px] bg-[#1F1C19] px-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-7 text-[#FFFCF6] duration-150 outline-none data-open:animate-in data-open:fade-in-0 data-open:slide-in-from-bottom-4 data-closed:animate-out data-closed:fade-out-0 sm:inset-x-auto sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:w-full sm:max-w-md sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-[28px] sm:pb-7"
+        className="fixed inset-x-0 bottom-0 z-50 flex max-h-[85dvh] w-auto flex-col gap-4 overflow-y-auto overscroll-contain rounded-t-[28px] bg-[#1F1C19] px-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-7 text-[#FFFCF6] duration-150 outline-none data-open:animate-in data-open:fade-in-0 data-open:slide-in-from-bottom-4 data-closed:animate-out data-closed:fade-out-0 sm:inset-x-auto sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:w-full sm:max-w-md sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-[28px] sm:pb-7"
         data-component="group-join-drawer"
         style={LINK_PAGE_NIGHT_TOKENS}
       >

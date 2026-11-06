@@ -142,10 +142,9 @@ test("links an active Family draft conflict to Settings and preserves the invite
   const inviteCode = "invite_return_target";
   const rendered = await renderClientComponent(
     createElement(FamilyInviteWebAcceptScreen, {
-      children: null,
       inviteCode,
       title: "The Ridgeline crew invited you to Murph Family.",
-    }),
+    }, null),
   );
   cleanupRender = rendered.cleanup;
 
@@ -181,10 +180,9 @@ test("turns the whole page into the welcome once the invite is accepted", async 
   );
   const rendered = await renderClientComponent(
     createElement(FamilyInviteWebAcceptScreen, {
-      children: createElement("p", null, "They pay for your Murph access."),
       inviteCode: "invite_accept",
       title: "The Ridgeline crew invited you to Murph Family.",
-    }),
+    }, createElement("p", null, "They pay for your Murph access.")),
   );
   cleanupRender = rendered.cleanup;
 
@@ -218,10 +216,9 @@ test("keeps the invite on the page with the error when accepting fails", async (
   );
   const rendered = await renderClientComponent(
     createElement(FamilyInviteWebAcceptScreen, {
-      children: null,
       inviteCode: "invite_accept",
       title: "The Ridgeline crew invited you to Murph Family.",
-    }),
+    }, null),
   );
   cleanupRender = rendered.cleanup;
 

@@ -361,7 +361,8 @@ test("keeps a comprehensive default checklist bounded and keyboard-scrollable", 
   expect(markup).toContain("tabular-nums");
   expect(markup).toContain('aria-label="Sharing choices"');
   expect(markup).toContain('role="region"');
-  expect(markup).toMatch(/class="[^"]*min-h-0[^"]*flex-1[^"]*overflow-y-auto[^"]*"/u);
+  // A long group name must never squeeze the choices away: a member needs them to stop sharing.
+  expect(markup).toMatch(/class="[^"]*min-h-\[10\.5rem\][^"]*flex-1[^"]*overflow-y-auto[^"]*"/u);
   expect(markup).toContain('tabindex="0"');
   expect(markup).toContain("shrink-0 overflow-hidden");
   expect(markup).toContain("Join group");
