@@ -1,8 +1,17 @@
 # Reuse the Junction sandbox safely for native iOS E2E
 
-Status: active
+Status: completed
 Created: 2026-08-17
-Updated: 2026-08-17
+Updated: 2026-11-05
+
+## Outcome
+
+Superseded, not delivered. The native lanes became trusted production canaries
+that receive no database, Privy, Junction, or reset authority, so the isolated
+candidate lane this plan set up was never needed. Tasks 4 to 6 are abandoned.
+On 2026-11-05 the unused PlanetScale database, Vercel project, and the two
+database secrets in the `native-ios-hosted-e2e` GitHub environment were removed.
+The database had no application queries or writes in the prior 35 days.
 
 ## Goal
 
@@ -115,3 +124,4 @@ Updated: 2026-08-17
   - Default and explicit Junction prefixes are validated and deterministic.
   - No secret value appears in the diff, logs, plan, PR body, or tool output.
   - ReviewGPT gates, required CI, and the first live candidate sweep pass.
+Completed: 2026-11-05
