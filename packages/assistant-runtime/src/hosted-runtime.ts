@@ -4019,6 +4019,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               },
               write: async () => {
                 await drainHostedPreparedAssistantDeliveries({
+                  materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
                   deliveryTraceContext: {
                     latencyTracePort: foregroundRuntime.platform.latencyTracePort,
                     runtimeAttemptId: input.request.attemptId,

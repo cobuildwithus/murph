@@ -17874,7 +17874,7 @@ describe("hosted runtime callbacks", () => {
         deliveryChannel: "telegram", deliveryStatus: "sent", providerMessageId: "7",
       })]);
       expect(actionApprovalPort.consume).toHaveBeenCalledTimes(1);
-      expect(mocks.readVerifiedAssistantVaultFileBytes).toHaveBeenCalledWith({ file: vaultFile, vaultRoot: HOSTED_WAKE.vaultRoot, materializeWorkspaceArtifacts: expect.any(Function), signal: null });
+            expect(mocks.readVerifiedAssistantVaultFileBytes).toHaveBeenCalledWith(expect.objectContaining({ file: vaultFile, vaultRoot: HOSTED_WAKE.vaultRoot }));
       expect(providerFetch).toHaveBeenCalledTimes(1);
       expect(actionApprovalPort.consume.mock.invocationCallOrder[0]).toBeLessThan(providerFetch.mock.invocationCallOrder[0]!);
       const [url, init] = providerFetch.mock.calls[0]!;
@@ -17987,12 +17987,10 @@ describe("hosted runtime callbacks", () => {
     });
     expect(actionApprovalPort.request).not.toHaveBeenCalled();
     expect(actionApprovalPort.read).not.toHaveBeenCalled();
-    expect(mocks.readVerifiedAssistantVaultFileBytes).toHaveBeenCalledWith({
+    expect(mocks.readVerifiedAssistantVaultFileBytes).toHaveBeenCalledWith(expect.objectContaining({
       file: vaultFile,
       vaultRoot: HOSTED_WAKE.vaultRoot,
-      materializeWorkspaceArtifacts: expect.any(Function),
-      signal: null,
-    });
+    }));
     expect(assertRecentInbound).toHaveBeenCalledTimes(2);
     expect(mocks.readVerifiedAssistantVaultFileBytes.mock.invocationCallOrder[0])
       .toBeLessThan(assertRecentInbound.mock.invocationCallOrder[1]!);
@@ -20566,7 +20564,8 @@ it.each(["telegram", "linq"] as const)("hydrates approved %s files after a cold 
       const result = drainHostedPreparedAssistantDeliveries({
         actionApprovalPort: { consume, request, read: vi.fn() }, assistantDeliveryEffects: [effect],
         effectsPort: createHostedRuntimeEffectsPortStub({ assertLinqRecentInboundEngagement: vi.fn(async value => buildClaimedLinqEngagementResult(value)) }),
-        providerFetch, platform: { mediaStore }, platformEnv: { TELEGRAM_BOT_TOKEN: "synthetic-token" },
+        providerFetch, platformEnv: { TELEGRAM_BOT_TOKEN: "synthetic-token" },
+        materializeWorkspaceArtifacts: createHostedArtifactMaterializer({ vaultRoot: cold, operatorHomeRoot: cold, mediaStore }),
         vaultRoot: cold, wake: HOSTED_WAKE.wake,
       });
       if (scenario === "available") {

@@ -6682,6 +6682,7 @@ async function drainHostedPostCheckpointDelivery(input: {
   let backgroundDeliveryDrainYieldedCount = 0;
   const outcomes = input.assistantDeliveryEffects.length > 0
     ? await drainHostedPreparedAssistantDeliveries({
+        materializeWorkspaceArtifacts: input.input.materializeWorkspaceArtifacts,
         deliveryTraceContext: {
           foregroundDeliveryPhaseStartedAtMonotonicMs:
             input.foregroundDeliveryPhaseStartedAtMonotonicMs,
