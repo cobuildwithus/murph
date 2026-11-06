@@ -9,6 +9,6 @@
     "summary": "Once your monthly sponsorship is confirmed, you'll see that the group has more Murph, with one tap back to Messages.",
     "details": "Your monthly limit, pausing, and canceling are one tap away under Manage sponsorship.",
     "relevanceTags": ["billing"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [4677]
   }
 }
