@@ -473,11 +473,14 @@ describe("hosted runtime Temporal signaling", () => {
       userId: "member_123",
     });
 
+    const abortSignal = new AbortController().signal;
     await signalHostedDeviceSyncMailboxRuntime({
+      abortSignal,
       client: buildClient(),
       mailboxItemId: "mailbox_123",
     });
 
+    expect(mocks.withAbortSignal).toHaveBeenCalledWith(abortSignal, expect.any(Function));
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.signalWithStart).toHaveBeenCalledWith(
       HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
@@ -1047,6 +1050,9 @@ describe("hosted runtime Temporal signaling", () => {
 
 function buildClient() {
   return {
+    async withDeadline<R>(_deadline: number, operation: () => Promise<R>): Promise<R> {
+      return operation();
+    },
     async withAbortSignal<R>(
       signal: AbortSignal,
       operation: () => Promise<R>,

@@ -926,8 +926,9 @@ export class PrismaHostedConnectionStore {
   async materializeStoredConnectionAccount(
     record: HostedConnectionRecord,
     prisma: HostedSecureBoxPrismaClient = this.prisma,
+    signal?: AbortSignal,
   ): Promise<HostedStoredDeviceSyncAccount | null> {
-    return this.buildStoredConnectionAccount(record, prisma);
+    return this.buildStoredConnectionAccount(record, prisma, signal);
   }
 
   async prepareRuntimeApplyTokenWrites(
@@ -1488,9 +1489,10 @@ export class PrismaHostedConnectionStore {
   private async buildStoredConnectionAccount(
     record: HostedConnectionRecord,
     prisma: HostedSecureBoxPrismaClient = this.prisma,
+    signal?: AbortSignal,
   ): Promise<HostedStoredDeviceSyncAccount | null> {
     const mappedRecord = mapHostedConnectionRecord(record);
-    mappedRecord.externalAccountId = await readHostedStoredExternalAccountId(record, this.testCodec, prisma);
+    mappedRecord.externalAccountId = await readHostedStoredExternalAccountId(record, this.testCodec, prisma, signal);
 
     const publicConnection = buildHostedPublicDeviceSyncAccount({
       record: mappedRecord,
@@ -1498,7 +1500,7 @@ export class PrismaHostedConnectionStore {
 
     switch (mappedRecord.credentialKind) {
       case "oauth_tokens": {
-        const tokenBundle = await readHostedStoredTokenBundle(record, this.testCodec, prisma);
+        const tokenBundle = await readHostedStoredTokenBundle(record, this.testCodec, prisma, signal);
 
         if (!tokenBundle) {
           return null;

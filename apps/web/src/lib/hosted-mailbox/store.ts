@@ -300,6 +300,7 @@ export type PreparedHostedMailboxItemAppendCrypto =
  */
 export async function prepareHostedMailboxItemAppendCrypto(input: {
   prisma: PrismaClient;
+  signal?: AbortSignal;
   userId: string;
 }): Promise<PreparedHostedMailboxItemAppendCrypto> {
   const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
@@ -307,6 +308,7 @@ export async function prepareHostedMailboxItemAppendCrypto(input: {
     domain: HOSTED_MAILBOX_APPEND_CRYPTO_DOMAIN,
     prepareMissing: false,
     prisma: input.prisma,
+    signal: input.signal,
     reason: "hosted-mailbox.append-payload",
     userId,
   });
@@ -325,6 +327,7 @@ export async function runWithPreparedHostedMailboxItemAppendCrypto<TResult>(
     ) => Promise<TResult>;
     prepareExisting?: () => Promise<void>;
     prisma: PrismaClient;
+    signal?: AbortSignal;
     userId: string;
   },
 ): Promise<TResult> {
@@ -337,6 +340,7 @@ export async function runWithPreparedHostedMailboxItemAppendCrypto<TResult>(
     const runAttempt = async () => {
       const prepared = await prepareHostedMailboxItemAppendCrypto({
         prisma: input.prisma,
+        signal: input.signal,
         userId,
       });
       await input.prepareExisting?.();

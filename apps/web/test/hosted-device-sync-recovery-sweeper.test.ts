@@ -39,10 +39,10 @@ describe("hosted device-sync scheduled wake sweeper", () => {
 
     expect(dueReconcileSweeper).toHaveBeenCalledTimes(1);
     expect(preferenceHandoffSweeper).toHaveBeenCalledTimes(1);
-    expect(preferenceHandoffSweeper).toHaveBeenCalledWith({ now: expect.any(Date) });
+    expect(preferenceHandoffSweeper).toHaveBeenCalledWith({ deadlineMs: expect.any(Number) });
   });
 
-  it("releases deferred routine wakes before the scheduled sweep", async () => {
+  it("runs old handoffs before deferred and due producers", async () => {
     const order: string[] = [];
     await runHostedDeviceSyncRecoverySweep({
       runDeferredWakeSweeper: async () => {
@@ -53,9 +53,12 @@ describe("hosted device-sync scheduled wake sweeper", () => {
         order.push("due");
         return buildDueReconcileSweepResult();
       },
-      runPreferenceHandoffSweeper: async () => buildPreferenceHandoffSweepResult(),
+      runPreferenceHandoffSweeper: async () => {
+        order.push("handoff");
+        return buildPreferenceHandoffSweepResult();
+      },
     });
-    expect(order).toEqual(["deferred", "due"]);
+    expect(order).toEqual(["handoff", "deferred", "due"]);
   });
 
   it("fails the retryable command after the other sweeps when a deferred release fails", async () => {

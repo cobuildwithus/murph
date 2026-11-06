@@ -12,6 +12,8 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({ readActiveHostedMe
 vi.mock("@/src/lib/legal/consent", () => ({ readHostedHealthDataConsentState: mocks.consent }));
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({ acquireHostedMailboxCausalAppendLockTx: mocks.mailboxLock }));
 
+import { abortAtHostedRecoveryDeadline } from "@/src/lib/hosted-orchestration/recovery-batch";
+
 import { preflightHostedScheduledReconcile } from "@/src/lib/device-sync/scheduled-reconcile-preflight";
 
 const now = new Date("2026-09-10T12:00:00.000Z");
@@ -67,7 +69,7 @@ function fixture() {
         disconnectGeneration: 0, tokenVersion: null, updatedAt: now.toISOString(),
       };
     }),
-    withHealthDataAdmissionLock: vi.fn(async (_userId: string, _connectionId: string, run: (client: typeof tx) => Promise<unknown>) => {
+    withHealthDataAdmissionLock: vi.fn(async (_userId: string, _connectionId: string, run: (client: typeof tx) => Promise<unknown>, _options?: object) => {
       inTransaction = true;
       try { return await run(tx); } finally { inTransaction = false; }
     }),
@@ -99,7 +101,9 @@ beforeEach(() => {
 
 it("advances only cadence after unchanged contents and exact authority revalidation", async () => {
   const f = fixture();
-  const result = await preflightHostedScheduledReconcile({ connection: due, now });
+  const signal = new AbortController().signal;
+  const result = await preflightHostedScheduledReconcile({ connection: due, now, signal });
+  expect(f.store.materializeStoredConnectionAccount).toHaveBeenCalledWith(expect.any(Object), undefined, signal);
   expect(result.wakeAvoided).toBe(true);
   expect(result.webhookAgeBucket).toBe("1to6h");
   expect(f.update).toHaveBeenCalledWith({
@@ -107,6 +111,10 @@ it("advances only cadence after unchanged contents and exact authority revalidat
     data: { nextReconcileAt: new Date(unchanged.nextReconcileAt) },
   });
   expect(mocks.mailboxLock).toHaveBeenCalledTimes(3);
+  for (const call of f.store.withHealthDataAdmissionLock.mock.calls) {
+    expect(call[3]).toEqual({ requireActiveMember: true, memberRowLockTimeoutMs: 1_000,
+      transaction: { timeout: 3_000 } });
+  }
   const [account, probeNow, options] = mocks.probe.mock.calls[0];
   expect(account.sources[0]).toMatchObject({ lifecycleEpoch: 1, resourceCount: 1, sourceProviderSlug: "garmin" });
   expect(probeNow).toBe(now.toISOString());
@@ -115,7 +123,7 @@ it("advances only cadence after unchanged contents and exact authority revalidat
 
 it.each(["dirty", "payload", "pending"] as const)("does not fetch over existing %s work", async (kind) => {
   const f = fixture(); f[kind]();
-  expect((await preflightHostedScheduledReconcile({ connection: due, now })).wakeAvoided).toBe(false);
+  expect((await preflightHostedScheduledReconcile({ connection: due, now, signal: new AbortController().signal })).wakeAvoided).toBe(false);
   expect(mocks.probe).not.toHaveBeenCalled();
   expect(f.store.materializeStoredConnectionAccount).not.toHaveBeenCalled();
 });
@@ -123,14 +131,14 @@ it.each(["dirty", "payload", "pending"] as const)("does not fetch over existing 
 it.each(["changeConnection", "changeSource", "changeSourceSameTimestamp", "reconnect", "pending", "retained", "payload", "checkpoint", "dirty"] as const)("retains the wake when %s races with the provider read", async (kind) => {
   const f = fixture();
   mocks.probe.mockImplementation(async () => { f[kind](); return unchanged; });
-  expect((await preflightHostedScheduledReconcile({ connection: due, now })).wakeAvoided).toBe(false);
+  expect((await preflightHostedScheduledReconcile({ connection: due, now, signal: new AbortController().signal })).wakeAvoided).toBe(false);
   expect(f.update).not.toHaveBeenCalled();
 });
 
 it("checks consent again after secure account materialization and before provider egress", async () => {
   const f = fixture();
   mocks.consent.mockResolvedValueOnce("granted").mockResolvedValue("revoked");
-  expect((await preflightHostedScheduledReconcile({ connection: due, now })).wakeAvoided).toBe(false);
+  expect((await preflightHostedScheduledReconcile({ connection: due, now, signal: new AbortController().signal })).wakeAvoided).toBe(false);
   expect(mocks.probe).not.toHaveBeenCalled();
   expect(f.update).not.toHaveBeenCalled();
 });
@@ -139,21 +147,21 @@ it("keeps changed, ineligible, and failed CAS outcomes on the existing wake path
   const f = fixture();
   for (const outcome of ["changed", "ineligible"]) {
     mocks.probe.mockResolvedValue({ ...unchanged, outcome });
-    expect((await preflightHostedScheduledReconcile({ connection: due, now })).wakeAvoided).toBe(false);
+    expect((await preflightHostedScheduledReconcile({ connection: due, now, signal: new AbortController().signal })).wakeAvoided).toBe(false);
   }
   expect(f.update).not.toHaveBeenCalled();
   mocks.probe.mockResolvedValue(unchanged);
   f.update.mockResolvedValue({ count: 0 });
-  expect((await preflightHostedScheduledReconcile({ connection: due, now })).wakeAvoided).toBe(false);
+  expect((await preflightHostedScheduledReconcile({ connection: due, now, signal: new AbortController().signal })).wakeAvoided).toBe(false);
 });
 
-it("aborts the owned provider probe on its deadline without advancing cadence", async () => {
+it("aborts the provider probe on the supplied deadline without advancing cadence", async () => {
   vi.useFakeTimers();
   try {
     const f = fixture();
     mocks.probe.mockImplementation(async (_account, _now, { signal }: { signal: AbortSignal }) =>
       new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true })));
-    const run = preflightHostedScheduledReconcile({ connection: due, now });
+    const run = preflightHostedScheduledReconcile({ connection: due, now, signal: abortAtHostedRecoveryDeadline(Date.now() + 100) });
     const rejected = expect(run).rejects.toThrow();
     await vi.runAllTimersAsync();
     await rejected;
@@ -161,15 +169,15 @@ it("aborts the owned provider probe on its deadline without advancing cadence", 
   } finally { vi.useRealTimers(); }
 });
 
-it("retains provider timeout metrics and the webhook age bucket", async () => {
+it.each(["ineligible", "unchanged"])("retains timeout metrics without advancing cadence for late %s results", async (outcome) => {
   vi.useFakeTimers();
   try {
     const f = fixture();
     mocks.probe.mockImplementation(async (_account, _now, { signal }: { signal: AbortSignal }) =>
       new Promise((resolve) => signal.addEventListener("abort", () => resolve({
-        ...unchanged, outcome: "ineligible", reason: "probe_timeout", requestCount: 2,
+        ...unchanged, outcome, reason: "probe_timeout", requestCount: 2,
       }), { once: true })));
-    const run = preflightHostedScheduledReconcile({ connection: due, now });
+    const run = preflightHostedScheduledReconcile({ connection: due, now, signal: abortAtHostedRecoveryDeadline(Date.now() + 100) });
     await vi.runAllTimersAsync();
     expect(await run).toMatchObject({ wakeAvoided: false, reason: "probe_timeout", requestCount: 2, webhookAgeBucket: "1to6h" });
     expect(f.update).not.toHaveBeenCalled();
@@ -178,7 +186,7 @@ it("retains provider timeout metrics and the webhook age bucket", async () => {
 
 it("compares ordinary cadence with checkpoint-owned continuation work", async () => {
   const f = fixture(); f.retained();
-  expect((await preflightHostedScheduledReconcile({ connection: due, now })).wakeAvoided).toBe(true);
+  expect((await preflightHostedScheduledReconcile({ connection: due, now, signal: new AbortController().signal })).wakeAvoided).toBe(true);
   expect(f.update.mock.calls[0]).toEqual([expect.objectContaining({
     data: { nextReconcileAt: new Date(unchanged.nextReconcileAt) },
   })]);
@@ -187,21 +195,21 @@ it("compares ordinary cadence with checkpoint-owned continuation work", async ()
 it.each([null, ["0"], ["2"], ["1", "1"], [1], ["01"], ["bad"]])(
   "rejects malformed or uncovered continuation ownership: %j", async (value) => {
     const f = fixture(); f.setContinuations(value);
-    expect((await preflightHostedScheduledReconcile({ connection: due, now })).wakeAvoided).toBe(false);
+    expect((await preflightHostedScheduledReconcile({ connection: due, now, signal: new AbortController().signal })).wakeAvoided).toBe(false);
     expect(mocks.probe).not.toHaveBeenCalled();
   },
 );
 
 it("compares a checkpoint-proven empty source inventory", async () => {
   const f = fixture(); f.emptySources();
-  expect((await preflightHostedScheduledReconcile({ connection: due, now })).wakeAvoided).toBe(true);
+  expect((await preflightHostedScheduledReconcile({ connection: due, now, signal: new AbortController().signal })).wakeAvoided).toBe(true);
   expect(mocks.probe.mock.calls[0][0].sources).toEqual([]);
 });
 
 it("retains the wake when a source appears during empty-inventory comparison", async () => {
   const f = fixture(); f.emptySources();
   mocks.probe.mockImplementation(async () => { f.addSource(); return unchanged; });
-  expect((await preflightHostedScheduledReconcile({ connection: due, now })).wakeAvoided).toBe(false);
+  expect((await preflightHostedScheduledReconcile({ connection: due, now, signal: new AbortController().signal })).wakeAvoided).toBe(false);
   expect(mocks.probe).toHaveBeenCalledOnce();
   expect(f.update).not.toHaveBeenCalled();
 });

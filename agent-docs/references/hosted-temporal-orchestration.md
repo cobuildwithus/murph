@@ -458,6 +458,14 @@ key and the fixed callback identity `hosted-device-sync-reconciler`. The
 request body is empty JSON. The response is count-only. Temporal history may
 contain counts, timestamps, workflow ids, retry metadata, and schedule ids only.
 
+Web sets one absolute 22-second deadline before authentication, cancels external
+work at that deadline, and joins started work with bounded transaction settling.
+Temporal cancellation reaches only the first gRPC attempt, so the deadline is
+also set on the client's call context; a retry can outlive it by one backoff,
+about six seconds at most.
+A budget stop returns a normal result with unstarted rows left due.
+Lowering the caller's HTTP timeout below this budget requires a Web budget change.
+
 `apps/web` remains the only owner of canonical device-sync facts. The
 signed sweep command reads `DeviceConnection.nextReconcileAt`, records
 due-reconcile `DeviceSyncSignal` facts, and appends bounded `device-sync.wake`

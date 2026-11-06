@@ -1,4 +1,4 @@
-import { runHostedRecoveryBatch } from "../hosted-orchestration/recovery-batch";
+import { abortAtHostedRecoveryDeadline, HOSTED_RECOVERY_BUDGET_MS, runHostedRecoveryBatch } from "../hosted-orchestration/recovery-batch";
 import { formatHostedExecutionSafeLogErrorDetails } from "../hosted-execution/logging";
 import { getPrisma } from "../prisma";
 import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
@@ -19,6 +19,7 @@ export interface HostedDeviceSyncDeferredWakeSweeperResult {
 type HostedDeviceSyncDeferredWakeSweeperLogger = Pick<Console, "info" | "warn">;
 
 export async function runHostedDeviceSyncDeferredWakeSweeper(input: {
+  deadlineMs?: number;
   logger?: HostedDeviceSyncDeferredWakeSweeperLogger;
   now?: Date;
   release?: typeof releaseHostedDeviceSyncDeferredDirtyWake;
@@ -28,6 +29,8 @@ export async function runHostedDeviceSyncDeferredWakeSweeper(input: {
     "listDueDeferredDirtyConnectionWakes" | "postponeDeferredDirtyConnectionWake"
   >;
 } = {}): Promise<HostedDeviceSyncDeferredWakeSweeperResult> {
+  const deadlineMs = input.deadlineMs ?? Date.now() + HOSTED_RECOVERY_BUDGET_MS;
+  const stop = abortAtHostedRecoveryDeadline(deadlineMs);
   const logger = input.logger ?? console;
   const now = input.now ?? new Date();
   const releaseLimit = input.releaseLimit ?? DEFAULT_RELEASE_LIMIT;
@@ -42,12 +45,13 @@ export async function runHostedDeviceSyncDeferredWakeSweeper(input: {
   let releaseCleared = 0;
   let releaseFailed = 0;
 
-  await runHostedRecoveryBatch(selected, async (deferred) => {
+  const unstarted = await runHostedRecoveryBatch(selected, async (deferred) => {
     try {
-      const result = await release({ ...deferred, now });
+      const result = await release({ ...deferred, now, abortSignal: stop });
       if (result.outcome === "released") released += 1;
       else releaseCleared += 1;
     } catch (error) {
+      if (stop.aborted) return;
       // The deadline stays durable and retries after a delay, so a persistent
       // failure cannot keep the oldest sweep slots from other batches.
       releaseFailed += 1;
@@ -62,11 +66,11 @@ export async function runHostedDeviceSyncDeferredWakeSweeper(input: {
         retryAt: new Date(now.getTime() + RELEASE_RETRY_DELAY_MS),
       }).catch(() => undefined);
     }
-  }, true);
+  }, true, stop);
 
   const result = {
     dueConnections: selected.length,
-    hasMoreDueConnections: due.length > selected.length,
+    hasMoreDueConnections: due.length > selected.length || unstarted > 0,
     releaseCleared,
     releaseFailed,
     releaseLimit,

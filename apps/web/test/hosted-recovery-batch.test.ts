@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { runHostedRecoveryBatch } from "@/src/lib/hosted-orchestration/recovery-batch";
+import { abortAtHostedRecoveryDeadline, runHostedRecoveryBatch } from "@/src/lib/hosted-orchestration/recovery-batch";
 
 describe("bounded individual recovery jitter", () => {
   beforeEach(() => {
@@ -8,6 +8,47 @@ describe("bounded individual recovery jitter", () => {
     vi.setSystemTime(0);
   });
   afterEach(() => vi.useRealTimers());
+
+  it("uses an absolute deadline, including an already expired deadline", async () => {
+    const signal = abortAtHostedRecoveryDeadline(Date.now() + 100);
+    await vi.advanceTimersByTimeAsync(99);
+    expect(signal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(signal.aborted).toBe(true);
+    expect(abortAtHostedRecoveryDeadline(Date.now() - 1).aborted).toBe(true);
+  });
+
+  it("stops during jitter and counts every unstarted item", async () => {
+    const controller = new AbortController();
+    const worker = vi.fn();
+    const batch = runHostedRecoveryBatch([{ userId: "synthetic-jitter" }], worker, true, controller.signal);
+    controller.abort();
+    expect(await batch).toBe(1);
+    expect(worker).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("joins started work after stopping and leaves later rows unstarted", async () => {
+    const controller = new AbortController();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const worker = vi.fn(async () => held);
+    let settled = false;
+    const batch = runHostedRecoveryBatch(Array.from({ length: 8 }, (_, i) => ({ userId: `join-${i}` })), worker, false, controller.signal)
+      .then((unstarted) => { settled = true; return unstarted; });
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
+    expect(worker).toHaveBeenCalledTimes(5);
+    release();
+    expect(await batch).toBe(3);
+  });
+
+  it("starts nothing for an already aborted stop", async () => {
+    const worker = vi.fn();
+    expect(await runHostedRecoveryBatch([{ userId: "synthetic" }], worker, false, AbortSignal.abort())).toBe(1);
+    expect(worker).not.toHaveBeenCalled();
+  });
 
   it("spreads 250 users across five seconds and keeps the same offsets on retry", async () => {
     const users = Array.from({ length: 250 }, (_, index) => ({
@@ -18,7 +59,7 @@ describe("bounded individual recovery jitter", () => {
       const start = performance.now();
       const batch = runHostedRecoveryBatch(items, async (item) => {
         starts.set(item.userId, performance.now() - start);
-      }, true);
+      }, true, new AbortController().signal);
       expect(starts.size).toBe(0);
       await vi.runAllTimersAsync();
       await batch;
@@ -54,6 +95,7 @@ describe("bounded individual recovery jitter", () => {
         completed++;
       },
       true,
+      new AbortController().signal,
     );
     await vi.runAllTimersAsync();
     await batch;
@@ -76,7 +118,7 @@ describe("bounded individual recovery jitter", () => {
       if (userId === "fails") throw failure;
       await held;
       throw new Error("later failure from the earlier slot");
-    }, false);
+    }, false, new AbortController().signal);
     const observed = batch.catch((error: unknown) => { settled = true; return error; });
     await vi.advanceTimersByTimeAsync(0);
     expect(started).toEqual(["held", "fails"]);
@@ -88,7 +130,7 @@ describe("bounded individual recovery jitter", () => {
 
   it("does no work or waiting for an empty batch", async () => {
     const worker = vi.fn();
-    await runHostedRecoveryBatch([], worker, true);
+    await runHostedRecoveryBatch([], worker, true, new AbortController().signal);
     expect(worker).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
   });

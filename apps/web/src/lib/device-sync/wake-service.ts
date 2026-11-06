@@ -1,3 +1,4 @@
+import { HOSTED_RECOVERY_LOCK_TIMEOUT_MS, HOSTED_RECOVERY_TRANSACTION_OPTIONS } from "../hosted-orchestration/recovery-batch";
 import {
   buildJunctionProviderSourceInstanceKey,
   canonicalizeJunctionProviderSlug,
@@ -2521,7 +2522,13 @@ export async function appendHostedDeviceSyncManualReconcileWake(input: {
   };
 }
 
+const RECOVERY_ADMISSION_OPTIONS = {
+  memberRowLockTimeoutMs: HOSTED_RECOVERY_LOCK_TIMEOUT_MS,
+  transaction: HOSTED_RECOVERY_TRANSACTION_OPTIONS,
+} as const;
+
 export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
+  abortSignal?: AbortSignal;
   connectionId: string;
   createdAt: string;
   eventId: string;
@@ -2568,9 +2575,12 @@ export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
     userId: input.userId,
   });
   const appendResult = await runWithPreparedHostedMailboxItemAppendCrypto({
+    signal: input.abortSignal,
     prisma,
     userId: input.userId,
     append: (prepared) => persistHostedDeviceSyncWake({
+      abortSignal: input.abortSignal,
+      admission: RECOVERY_ADMISSION_OPTIONS,
       appendMailbox: (tx) => runWithHostedDomainRootProviderCallsDisabled(() =>
         appendHostedScheduledDeviceSyncWakeEnvelopeTx({
           envelope: wake,
@@ -2667,6 +2677,7 @@ export type HostedDeviceSyncDeferredWakeReleaseResult =
  * rechecks the deadline, dirt and connection before appending and clearing it.
  */
 export async function releaseHostedDeviceSyncDeferredDirtyWake(input: {
+  abortSignal?: AbortSignal;
   connectionId: string;
   now: Date;
   userId: string;
@@ -2730,9 +2741,12 @@ export async function releaseHostedDeviceSyncDeferredDirtyWake(input: {
   let lockedRevision: bigint | null = null;
   try {
     const appendResult = await runWithPreparedHostedMailboxItemAppendCrypto({
+      signal: input.abortSignal,
       prisma,
       userId: input.userId,
       append: (prepared) => persistHostedDeviceSyncWake({
+        abortSignal: input.abortSignal,
+        admission: RECOVERY_ADMISSION_OPTIONS,
         appendMailbox: (tx) => appendHostedMailboxEnvelopeWithPreparedCryptoTx({
           envelope: wake,
           prepared,
@@ -2818,6 +2832,8 @@ type HostedDeviceSyncMailboxAppendResult = AppendHostedMailboxItemResult & {
 };
 
 async function persistHostedDeviceSyncWake(input: {
+  abortSignal?: AbortSignal;
+  admission?: Parameters<PrismaDeviceSyncControlPlaneStore["withHealthDataAdmissionLock"]>[3];
   appendMailbox?(
     tx: HostedPrismaTransactionClient,
   ): Promise<HostedDeviceSyncMailboxAppendResult>;
@@ -2855,11 +2871,13 @@ async function persistHostedDeviceSyncWake(input: {
     mailboxAppendState.result = mailboxAppend;
     await input.persistAfterAppend?.(tx, mailboxAppend);
   };
+  input.abortSignal?.throwIfAborted();
   if (input.healthDataUserId && input.healthDataConnectionId) {
     await input.store.withHealthDataAdmissionLock(
       input.healthDataUserId,
       input.healthDataConnectionId,
       persistInTransaction,
+      input.admission,
     );
   } else {
     await input.store.prisma.$transaction(persistInTransaction);
@@ -2886,6 +2904,7 @@ async function persistHostedDeviceSyncWake(input: {
     )
   ) {
     await startHostedDeviceSyncWakeWorkflow(mailboxItemId, {
+      abortSignal: input.abortSignal,
       failureMode: input.signalFailureMode ?? "best_effort",
     });
   }
@@ -2903,11 +2922,13 @@ async function persistHostedDeviceSyncWake(input: {
 async function startHostedDeviceSyncWakeWorkflow(
   mailboxItemId: string,
   options: {
+    abortSignal?: AbortSignal;
     failureMode?: "best_effort" | "throw";
   } = {},
 ): Promise<void> {
   try {
     await signalHostedDeviceSyncMailboxRuntime({
+      abortSignal: options.abortSignal,
       mailboxItemId,
     });
   } catch (error) {

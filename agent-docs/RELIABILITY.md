@@ -688,28 +688,30 @@ Current product admission, delivery and native runtime safety rules remain.
   rather than introducing a daemon or lease-recovery owner.
 - Use the concrete runtime contracts first: hosted runner wake/checkpoint behavior lives in `agent-docs/references/hosted-runtime-protocol.md` plus `apps/cloudflare/README.md`; deploy recovery and smoke expectations live in `apps/cloudflare/DEPLOY.md`; local device-sync and assistant daemon retry/control-plane behavior live in their package READMEs and tests.
 
-- Web recovery sweeps spread each selected due-device wake and shared mailbox
-  handoff across a stable zero-to-five-second per-user jitter window. The
-  device sweep defaults to 100 items; the shared mailbox handoff remains at
-  25. Both retain the 250-item limit and five-operation concurrency cap;
-  selection/access checks stay bounded and selected items are ordered
-  by offset before taking execution slots. Pacing happens before transaction or
-  signal entry and holds no pooled connection. Offsets use monotonic elapsed
-  time within each batch, so delays do not accumulate per item. The shared
-  handoff deadline includes the pacing window in addition to its existing work
-  budget; both sequential phases add at most ten seconds of intentional pacing
-  to the existing callback. Slow operations can still bunch eligible work under
-  the concurrency cap. No new persistence, retry owner, or schedule is added;
-  interrupted work remains discoverable through existing due state and mailbox
-  ownership. Direct ingress, exact reminders, and runtime/provider retry
-  deadlines do not enter this executor. Jitter reduces recovery bursts, not
-  total work or a guaranteed global requests-per-second ceiling. The device
-  sweep reports its limit-plus-one sentinel as `hasMoreDueConnections`, not an
-  exact backlog count. Optional device preflights stop starting after 60 seconds
-  of monotonic batch time, including jitter; already-started preflights are
-  awaited and provider calls retain their existing timeout. Remaining connections
-  use the ordinary scheduled wake path. This admission budget does not bound the full
-  callback or alter provider cadence, retry ownership, or live authority checks.
+- Web recovery sweeps share one absolute 22-second deadline, set before callback
+  authentication. Old mailbox handoffs run first, then deferred device wakes,
+  then due-device wakes; clinical admission runs alongside those stages. The
+  handoff age gate keeps new producer work out of recovery. Due-device batches
+  default to 100 items and handoffs to 25, both capped at 250; deferred batches
+  default to 100. Each batch runs at most five operations concurrently. Stable
+  per-user offsets spread eligibility over zero to five seconds from each batch's
+  start; slow work can still bunch eligible items. Pacing holds no database
+  connection and adds no per-item delay
+  once an offset has passed. Handoffs also retain their five-second work cap plus
+  the jitter window. Optional probes stop six seconds before the shared deadline
+  so skipped or cancelled probes can still receive ordinary wakes. At the
+  deadline, batches stop taking items and cancel and join their started calls.
+  Temporal cancellation reaches only the first gRPC attempt, so the deadline is
+  also set on the client's call context; a retry can outlive it by one backoff,
+  about six seconds at most.
+  Transactions use a one-second member lock bound and three-second duration bound.
+  Acquisition stays on the pool's five-second checkout limit, with no recovery
+  `maxWait` override. Ordinary database operations are awaited.
+  A budget stop returns normal counts; unstarted rows remain due, and device
+  backlog reporting includes both overflow and unstarted candidates. Transient
+  clinical admission failures and started cancellations retry after 14 minutes;
+  conclusive ineligibility waits a day. Successful admission owns its date.
+  Existing due state and mailbox ownership remain the recovery authority.
 
 ## Runtime Expectations
 

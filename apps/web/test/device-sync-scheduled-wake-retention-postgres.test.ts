@@ -6,6 +6,7 @@ import * as deviceProviders from "@/src/lib/device-sync/providers";
 import type { PrismaClient } from "@prisma/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { encryptHostedConnectionSecret } from "@/src/lib/device-sync/prisma-store/connection-secrets";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 import { buildHostedDeviceSyncWake } from "@/src/lib/device-sync/wake";
 import { runHostedDeviceSyncDueReconcileSweeper } from "@/src/lib/device-sync/due-reconcile-sweeper";
@@ -14,6 +15,7 @@ import { runHostedDeviceSyncDeferredWakeSweeper } from "@/src/lib/device-sync/de
 import { appendHostedDeviceSyncScheduledReconcileWake } from "@/src/lib/device-sync/wake-service";
 import * as cryptoEnv from "@/src/lib/hosted-crypto/env";
 import * as runtimeSignal from "@/src/lib/hosted-orchestration/signal-runtime";
+import { HOSTED_RECOVERY_TRANSACTION_OPTIONS } from "@/src/lib/hosted-orchestration/recovery-batch";
 import * as prismaModule from "@/src/lib/prisma";
 import {
   appendHostedMailboxEnvelopeTx,
@@ -69,6 +71,163 @@ describe.skipIf(!runPostgresProof)(
       restoreCrypto();
     });
 
+    async function seedDueBudgetConnection(deferred = false) {
+      const client = requirePrisma(prisma);
+      const memberId = `member-budget-${randomUUID()}`;
+      const connectionId = `dsc-budget-${randomUUID()}`;
+      const now = new Date("2026-09-04T12:00:00Z");
+      memberIds.push(memberId);
+      await client.hostedMember.create({ data: { id: memberId, billingStatus: "active" } });
+      await provisionActiveHostedDomainRootEnvelopeForUserOnly({ domain: "ingress", prisma: client, reason: "synthetic-budget", userId: memberId });
+      await client.deviceConnection.create({ data: {
+        id: connectionId, userId: memberId, provider: "oura", status: "active",
+        providerAccountBlindIndex: `synthetic-${connectionId}`, connectedAt: new Date(now.getTime() - 3_600_000),
+        nextReconcileAt: deferred ? null : now,
+        ...(deferred ? { dirtyState: { create: {
+          userId: memberId, provider: "oura", dirtyRevision: 2n, processedRevision: 1n,
+          firstDirtyAt: now, latestDirtyAt: now, wakeDeferredUntil: now,
+        } } } : {}),
+      } });
+      vi.spyOn(prismaModule, "getPrisma").mockReturnValue(client);
+      const signal = vi.spyOn(runtimeSignal, "signalHostedDeviceSyncMailboxRuntime")
+        .mockResolvedValue({ signalAccepted: true, workflowId: "synthetic" });
+      const store = new PrismaDeviceSyncControlPlaneStore({ prisma: client });
+      const options = { now, store, logger: { info() {}, warn() {} } };
+      const read = () => client.deviceConnection.findUniqueOrThrow({ where: { id: connectionId }, include: { dirtyState: true } });
+      return { client, memberId, connectionId, now, options, signal, read };
+    }
+
+    it("waits for pool checkout without returning an open transaction to the pool", async () => {
+      const f = await seedDueBudgetConnection();
+      const client = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const store = new PrismaDeviceSyncControlPlaneStore({ prisma: client });
+      let release!: () => void;
+      let acquired!: () => void;
+      const held = new Promise<void>((resolve) => { release = resolve; });
+      const ready = new Promise<void>((resolve) => { acquired = resolve; });
+      const lock = client.$transaction(async () => {
+        acquired();
+        await held;
+      }, { timeout: 10_000 });
+      let releaseTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await ready;
+        const admission = store.withHealthDataAdmissionLock(
+          f.memberId, f.connectionId, async () => "admitted",
+          { transaction: HOSTED_RECOVERY_TRANSACTION_OPTIONS },
+        ).then((value) => ({ value }), (error: unknown) => ({ error }));
+        releaseTimer = setTimeout(release, 1_500);
+        expect.soft(await admission).toEqual({ value: "admitted" });
+        await lock;
+
+        const nextReconcileAt = new Date(f.now.getTime() + 60_000);
+        await client.deviceConnection.update({
+          where: { id: f.connectionId }, data: { nextReconcileAt },
+        });
+        expect((await f.read()).nextReconcileAt).toEqual(nextReconcileAt);
+      } finally {
+        clearTimeout(releaseTimer);
+        release();
+        try { await lock; } finally { await client.$disconnect(); }
+      }
+    });
+
+    it.each([false, true])("leaves a due device row untouched after the deadline (deferred=%s)", async (deferred) => {
+      const f = await seedDueBudgetConnection(deferred);
+      const before = await f.read();
+      const sweep = (deadlineMs: number) => deferred
+        ? runHostedDeviceSyncDeferredWakeSweeper({ ...f.options, deadlineMs })
+        : runHostedDeviceSyncDueReconcileSweeper({ ...f.options, deadlineMs });
+      expect(await sweep(Date.now() - 1)).toMatchObject({ hasMoreDueConnections: true });
+      expect(await f.read()).toEqual(before);
+      expect(await f.client.hostedMailboxItem.count({ where: { userId: f.memberId } })).toBe(0);
+      expect(f.signal).not.toHaveBeenCalled();
+      expect(await sweep(Date.now() + 22_000)).toMatchObject(deferred ? { released: 1, releaseFailed: 0 } : { wakeAccepted: 1, wakeFailed: 0 });
+      await sweep(Date.now() + 22_000);
+      expect(await f.client.hostedMailboxItem.count({ where: { userId: f.memberId } })).toBe(1);
+      expect(f.signal).toHaveBeenCalledOnce();
+      expect(f.signal.mock.calls[0][0].abortSignal).toBeInstanceOf(AbortSignal);
+    });
+
+    it("rolls back a contended scheduled wake near the member lock bound and wakes once later", async () => {
+      const f = await seedDueBudgetConnection();
+      const before = await f.read();
+      const locker = createPrismaClient({ databaseUrl, poolMax: 1 });
+      let release!: () => void;
+      let locked!: () => void;
+      const held = new Promise<void>((resolve) => { release = resolve; });
+      const ready = new Promise<void>((resolve) => { locked = resolve; });
+      const lock = locker.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM hosted_member WHERE id = ${f.memberId} FOR UPDATE`;
+        locked(); await held;
+      }, { timeout: 30_000 });
+      try {
+        await ready;
+        // Measure admission separately from deterministic pre-admission jitter.
+        let admissionStarted = 0;
+        const result = await runHostedDeviceSyncDueReconcileSweeper({ ...f.options,
+          requestWake: (input) => { admissionStarted = performance.now(); return appendHostedDeviceSyncScheduledReconcileWake(input); },
+        });
+        expect(performance.now() - admissionStarted).toBeGreaterThanOrEqual(900);
+        expect(performance.now() - admissionStarted).toBeLessThan(5_000);
+        expect(result).toMatchObject({ wakeFailed: 1, wakeAccepted: 0 });
+        expect(await f.read()).toEqual(before);
+        expect(await f.client.hostedMailboxItem.count({ where: { userId: f.memberId } })).toBe(0);
+      } finally { release(); await lock; await locker.$disconnect(); }
+      expect(await runHostedDeviceSyncDueReconcileSweeper(f.options)).toMatchObject({ wakeAccepted: 1, wakeFailed: 0 });
+      await runHostedDeviceSyncDueReconcileSweeper(f.options);
+      expect(await f.client.hostedMailboxItem.count({ where: { userId: f.memberId } })).toBe(1);
+      expect(f.signal).toHaveBeenCalledOnce();
+    });
+
+    it("forwards the preflight signal through account materialization to KMS", async () => {
+      const client = requirePrisma(prisma);
+      const f = await seedRetiredScheduledWake({ client, memberIds, importedSeq: "1", consumedSeq: 1n,
+        firstPendingSeq: null, deviceSyncContinuationSeqs: [], sidecar: true });
+      const connectionId = f.wake.connectionId!;
+      const now = new Date("2026-09-04T12:00:00Z");
+      setHostedSecureBoxStringTestCodecForTests(null);
+      await provisionActiveHostedDomainRootEnvelopeForUserOnly({ domain: "device", prisma: client, reason: "synthetic-probe", userId: f.memberId });
+      const externalAccountIdEncrypted = await encryptHostedConnectionSecret({
+        connectionId, provider: "junction", prisma: client, purpose: "device-sync-external-account-id",
+        userId: f.memberId, value: "synthetic-external-account",
+      });
+      await client.deviceConnection.create({ data: {
+        id: connectionId, userId: f.memberId, provider: "junction", status: "active",
+        providerAccountBlindIndex: `synthetic-${connectionId}`, externalAccountIdEncrypted,
+        credentialKind: "provider_config", providerConfigKey: "junction", setupPhase: "source_confirmed",
+        connectedAt: new Date(f.wake.expectedConnectedAt!), nextReconcileAt: now,
+        metadataJson: { junctionReconcileProofV1: "synthetic-proof" },
+      } });
+      const config = cryptoEnv.getHostedWebCryptoConfig();
+      vi.spyOn(cryptoEnv, "getHostedWebCryptoConfig").mockReturnValue(config);
+      let started!: () => void;
+      const ready = new Promise<void>((resolve) => { started = resolve; });
+      const controller = new AbortController();
+      const decrypt = vi.spyOn(config.gcpKms, "decrypt").mockImplementation(async ({ signal }) => {
+        expect(signal).toBe(controller.signal);
+        started();
+        return new Promise<never>((_, reject) => signal?.addEventListener("abort", () => reject(signal.reason), { once: true }));
+      });
+      const probe = vi.fn();
+      vi.spyOn(deviceProviders, "createHostedDeviceSyncRegistry").mockReturnValue({
+        list: () => [], register: () => undefined,
+        get: () => ({ provider: "junction", descriptor: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
+          jobExecutor: { probeScheduledReconcile: probe, executeJob: async () => { throw new Error("Unexpected execution"); } } }),
+      });
+      const run = preflightHostedScheduledReconcile({ signal: controller.signal, now,
+        store: new PrismaDeviceSyncControlPlaneStore({ prisma: client }), connection: {
+          connectionId, userId: f.memberId, provider: "junction", connectedAt: f.wake.expectedConnectedAt!, nextReconcileAt: now.toISOString(),
+        } });
+      const rejected = expect(run).rejects.toThrow();
+      await ready;
+      controller.abort();
+      await rejected;
+      expect(decrypt).toHaveBeenCalledOnce();
+      expect(probe).not.toHaveBeenCalled();
+      expect((await client.deviceConnection.findUniqueOrThrow({ where: { id: connectionId } })).nextReconcileAt).toEqual(now);
+    });
+
     it.each(["unchanged", "source_added", "checkpoint_changed", "mailbox_append"] as const)(
       "preflights ordinary cadence without changing a retained retry: %s", async (scenario) => {
         const client = requirePrisma(prisma);
@@ -116,7 +275,7 @@ describe.skipIf(!runPostgresProof)(
           }),
         });
         try {
-          const result = await preflightHostedScheduledReconcile({ store, now, connection: {
+          const result = await preflightHostedScheduledReconcile({ store, now, signal: new AbortController().signal, connection: {
             connectionId, userId: fixture.memberId, provider: "junction",
             connectedAt: fixture.wake.expectedConnectedAt!, nextReconcileAt: now.toISOString(),
           } });
