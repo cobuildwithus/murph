@@ -1192,6 +1192,18 @@ The behavior and deploy contract live in
 
 ## Hosted Clinical Records
 
+Clinical enrichment reads and writes only `extraction-v4` under
+`.runtime/operations/clinical-records/enrichment/`. Ordinary idle checkpoint
+maintenance removes other `extraction-v*` directories within its existing
+30-second storage-maintenance budget, checking cancellation between filesystem
+operations. Interrupted cleanup resumes from remaining files on a later idle pass.
+The current cache, `pending.json`, job records and retrieval checkpoints retain
+their existing contents and retention. The clinical subtree remains portable and
+non-rebuildable because accepted jobs and retrieval checkpoints are recovery
+state; that classification does not require retaining superseded extraction
+caches. Deploy only with v4-capable readers and writers; reverting this cleanup
+on a v4-capable runner is safe, but deleted caches are not restored.
+
 `apps/web` owns the Epic directory, browser connection, SMART authorization,
 encrypted patient/token binding, retrieval generation, provider egress and
 operational status. The existing records launcher still asks the member to

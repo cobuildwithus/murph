@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, stat } from "node:fs/promises";
+import { mkdir, opendir, readFile, rm, rmdir, stat } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -55,6 +55,7 @@ export type ClinicalEnrichmentWork =
   | { status: "deferred"; jobId: string; nextAttemptAt: string }
   | { status: "apply" | "advance"; jobId: string };
 const indexSchema = z.object({ schema: z.literal("murph.clinical-enrichment-index.v1"), pending: z.array(digestSchema).max(128) }).strict();
+const currentExtractionCacheDirectory = "extraction-v4";
 const families = ["labs", "measurements", "history"] as const;
 const hash = (value: string | Uint8Array) => createHash("sha256").update(value).digest("hex");
 const rootPath = (vaultRoot: string) => path.join(resolveRuntimePaths(vaultRoot).clinicalRecordsRuntimeRoot, "enrichment");
@@ -273,10 +274,46 @@ export async function persistClinicalEnrichmentProposals(input: { vaultRoot: str
   });
 }
 
+// Only obsolete cache directories are disposable; pending.json and accepted jobs
+// remain recovery evidence. The idle owner supplies its existing deadline/wake signal.
+export async function pruneSupersededClinicalExtractionCaches(input: {
+  vaultRoot: string;
+  signal: AbortSignal;
+}): Promise<void> {
+  input.signal.throwIfAborted();
+  const relativeRoot = ".runtime/operations/clinical-records/enrichment";
+  const root = await resolveVaultPathOnDisk(input.vaultRoot, relativeRoot);
+  let directory;
+  try { directory = await opendir(root.absolutePath); }
+  catch (error) { if (error instanceof Error && "code" in error && error.code === "ENOENT") return; throw error; }
+  for await (const entry of directory) {
+    input.signal.throwIfAborted();
+    if (entry.isDirectory() && entry.name.startsWith("extraction-v") && entry.name !== currentExtractionCacheDirectory) {
+      await removeCacheDirectory(path.posix.join(relativeRoot, entry.name));
+    }
+  }
+
+  async function removeCacheDirectory(relativePath: string): Promise<void> {
+    input.signal.throwIfAborted();
+    const resolved = await resolveVaultPathOnDisk(input.vaultRoot, relativePath);
+    for await (const entry of await opendir(resolved.absolutePath)) {
+      input.signal.throwIfAborted();
+      if (entry.isDirectory()) {
+        await removeCacheDirectory(path.posix.join(relativePath, entry.name));
+      } else {
+        // Unlink symlinks themselves; never traverse them or their targets.
+        await rm(path.join(resolved.absolutePath, entry.name), { force: true });
+      }
+    }
+    input.signal.throwIfAborted();
+    await rmdir(resolved.absolutePath);
+  }
+}
+
 // Version the cache when extraction semantics change. It is private, disposable
 // runtime state; current parent evidence and canonical authority are still checked.
 function extractionCachePath(vaultRoot: string, sha256: string, mediaType: string, page: number, clinicalOccurredAt?: string): string {
-  return path.join(rootPath(vaultRoot), "extraction-v4", hash(JSON.stringify([digestSchema.parse(sha256), mediaType, clinicalOccurredAt ?? null])), `${page}.json`);
+  return path.join(rootPath(vaultRoot), currentExtractionCacheDirectory, hash(JSON.stringify([digestSchema.parse(sha256), mediaType, clinicalOccurredAt ?? null])), `${page}.json`);
 }
 
 function stable(value: unknown): string {

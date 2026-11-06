@@ -1949,3 +1949,8 @@ Ordinary reminder input replay is recorded in the [execution plan](exec-plans/co
 Typed companion VO2 input, its consumer-first local commit boundary and backend
 proof are tracked in [the active plan](exec-plans/active/2026-11-06-companion-vo2-reading-input.md).
 The measurement action and rollback floor are owned by `../ARCHITECTURE.md`.
+
+Obsolete clinical extraction cache cleanup and unused hot snapshot producer removal
+are recorded in [dead runtime weight](exec-plans/completed/2026-11-06-dead-runtime-weight.md).
+`../ARCHITECTURE.md` owns cache retention; staged-operation expiry remains excluded
+because age and canonical lock ownership do not prove abandonment.
