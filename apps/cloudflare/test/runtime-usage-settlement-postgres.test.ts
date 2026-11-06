@@ -250,12 +250,10 @@ describe("Provider identity and usage settlement with native receipts", () => {
 
   it("keeps native denial after a voice close replays the immutable record whose Web response was lost", async () => {
     const h = harness();
-    const ledger = new Map<string, AssistantUsageRecord>();
     const forwarded: Array<{ usage: AssistantUsageRecord }> = [];
     vi.mocked(fetchHostedExecutionWebControlPlaneResponse).mockImplementation(async input => {
       const body = JSON.parse(input.body!) as { usage: AssistantUsageRecord };
       forwarded.push(body);
-      ledger.set(body.usage.usageId, body.usage);
       if (forwarded.length === 1) throw new Error("synthetic response lost after accounting");
       return Response.json({ platformAiUsageAllowedAfter: true, recorded: true, usageId: body.usage.usageId });
     });
@@ -288,7 +286,6 @@ describe("Provider identity and usage settlement with native receipts", () => {
       expect(onError).not.toHaveBeenCalled();
       expect(forwarded).toHaveLength(2);
       expect(forwarded[1]!.usage).toEqual(forwarded[0]!.usage);
-      expect(ledger.size).toBe(1);
       expect(commandHostedRuntimeOwner).toHaveBeenCalledExactlyOnceWith({ source: h.env, userId: h.userId,
         command: { operation: "revoke_ai_usage", userId: h.userId, ...h.identity } });
       expect(h.sql.exec("SELECT state FROM runner_usage_settlement").toArray()).toEqual([{ state: "denied" }]);

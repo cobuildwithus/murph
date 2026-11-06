@@ -335,7 +335,8 @@ at its next request. An active one keeps its code until it hibernates or reaches
 the deferred `max_delay`, then resets. This repository sets no
 `code_update_strategy`, so that delay is Cloudflare's 300-second default. Before
 the first deploy of the denying Worker, a version carrying #4646 must have been
-at 100% for longer than that delay, with no rollback since.
+at 100% for that delay plus at least a minute, with no rollback since. Observed
+resets have landed up to 25 seconds after the delay.
 
 The protected workflow's log names each activated version and its time. For
 corroboration without production secrets, count `murph-hosted` rows by
