@@ -63,6 +63,7 @@ function fixture(metricRows?: BrowserVaultMetricRow[]): BrowserVaultReplica {
     row("steps", addDaysToIsoDate(stepsThrough, -offset), 8000.2, "count"),
   ]);
   return {
+    displayName: "Avery",
     assistantSummary: { highlights: [], latestDate: through }, entities: [],
     generatedAt: savedAt, generation: 18, labResultRows: [],
     meals: { schemaVersion: 1, timeZone: "America/New_York", days: [] },
@@ -357,4 +358,11 @@ it.each(["missing object", "empty session"])("keeps the empty answer for a gener
   const response = await GET(request());
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({ numbers: null, demographics: null, freshness: "stale" });
+});
+
+
+it("does not expose the core display name in Numbers", async () => {
+  const response = await GET(request());
+  expect(response.status).toBe(200);
+  expect(await response.text()).not.toMatch(/displayName|Avery/u);
 });

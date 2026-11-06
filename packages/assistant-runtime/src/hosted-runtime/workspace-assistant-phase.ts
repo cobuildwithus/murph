@@ -83,12 +83,15 @@ import {
 } from "@murphai/contracts";
 import {
   AutomationAvailabilityConflictBlockError,
+  createAutomationForInputs,
   patchAutomation,
   reconcileAutomationSupportSeries,
   showAutomation,
   stripAutomationAvailabilityConflictBlock,
   upsertAutomation,
   type AutomationRecord,
+  type UpsertAutomationInput,
+  type UpsertAutomationResult,
 } from "@murphai/core";
 import {
   findAssistantAutoReplyDeliveryIntentIds,
@@ -955,6 +958,28 @@ type MemberNotificationRouteResolver = (
   context?: { signal?: AbortSignal | null },
 ) => Promise<HostedExecutionAssistantNotificationRoute | null>;
 
+function saveHostedAutomation(
+  writeFields: Omit<UpsertAutomationInput, "automationId" | "createOnly" | "slug">,
+  automationId: string | undefined,
+  slug: string | undefined,
+  acceptedInputIds: readonly string[] | undefined,
+  claimedAutomationIds: Set<string>,
+): Promise<Pick<UpsertAutomationResult, "created" | "record">> {
+  if (!automationId && !slug && acceptedInputIds?.length) {
+    return createAutomationForInputs({
+      ...writeFields,
+      acceptedInputIds,
+      claimedAutomationIds,
+    });
+  }
+  return upsertAutomation({
+    ...writeFields,
+    ...(automationId ? { automationId } : {}),
+    ...(slug ? { slug } : {}),
+    createOnly: true,
+  });
+}
+
 function createHostedAssistantAutomationTool(input: {
   resolveMemberNotificationRoute: MemberNotificationRouteResolver;
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
@@ -986,6 +1011,7 @@ function createHostedAssistantAutomationTool(input: {
     return automationRouteSchema.parse(buildHostedNotificationAutomationRoute(route));
   };
   let onboardingFirstReadCompletionTransitionConsumed = false;
+  const claimedAutomationIds = new Set<string>();
   return {
     async request(request, context) {
       context?.signal?.throwIfAborted();
@@ -1061,7 +1087,7 @@ function createHostedAssistantAutomationTool(input: {
           route: currentRoute,
           status,
         });
-        const result = await upsertAutomation({
+        const writeFields: Omit<UpsertAutomationInput, "automationId" | "createOnly" | "slug"> = {
           ...await resolveHostedAutomationActiveUntilWrite({
             existing: null,
             requestedActiveUntil: request.activeUntil,
@@ -1071,12 +1097,10 @@ function createHostedAssistantAutomationTool(input: {
           ...(request.assistantTargetOverride === undefined
             ? {}
             : { assistantTargetOverride: request.assistantTargetOverride }),
-          ...(request.automationId ? { automationId: request.automationId } : {}),
           continuityPolicy: request.continuityPolicy ?? "preserve",
           ...(request.contextReferences === undefined
             ? {}
             : { contextReferences: [...request.contextReferences] }),
-          createOnly: true,
           instructions: stripHostedAssistantAvailabilityConflictBlock(
             request.instructions,
           ),
@@ -1085,7 +1109,6 @@ function createHostedAssistantAutomationTool(input: {
             : { plannedOccurrenceOffsetMs: request.plannedOccurrenceOffsetMs }),
           route: currentRoute,
           schedule: request.schedule,
-          ...(request.slug ? { slug: request.slug } : {}),
           status,
           ...(request.summary === undefined ? {} : { summary: request.summary }),
           ...(request.supportKind === undefined
@@ -1103,7 +1126,14 @@ function createHostedAssistantAutomationTool(input: {
           ),
           title: request.title,
           vaultRoot: input.vaultRoot,
-        });
+        };
+        const result = await saveHostedAutomation(
+          writeFields,
+          request.automationId,
+          request.slug,
+          context?.acceptedInputIds,
+          claimedAutomationIds,
+        );
         return await buildHostedAutomationToolResponse({
           action: "save",
           redactedLogEntries: input.redactedLogEntries,
@@ -1301,7 +1331,7 @@ type HostedAutomationToolResponseInput =
   | {
       action: "patch" | "save";
       redactedLogEntries: HostedExecutionRedactedLogEntry[];
-      result: Awaited<ReturnType<typeof upsertAutomation>>;
+      result: Pick<UpsertAutomationResult, "created" | "record">;
       routeBinding: "current_conversation" | "member_notification" | "preserved";
       vaultRoot: string;
     };
@@ -1438,6 +1468,15 @@ async function projectHostedAutomationResponseFields(input: {
   };
 }
 
+function hostedAutomationReplayFields(
+  input: Extract<HostedAutomationToolResponseInput, { action: "patch" | "save" }>,
+  record: AutomationRecord,
+) {
+  return input.action === "save" && !input.result.created
+    ? { title: record.title, instructions: record.instructions, routeBinding: "preserved" as const }
+    : {};
+}
+
 async function buildHostedAutomationToolResponse(
   input: HostedAutomationToolResponseInput,
 ): Promise<Awaited<ReturnType<HostedAssistantAutomationTool["request"]>>> {
@@ -1486,6 +1525,7 @@ async function buildHostedAutomationToolResponse(
     ...responseFields,
     created: input.result.created,
     routeBinding: input.routeBinding,
+    ...hostedAutomationReplayFields(input, record),
   };
   if (response.occurrenceProjection.status !== "unavailable") {
     return response;
@@ -1520,6 +1560,7 @@ async function buildHostedAutomationToolResponse(
         ...readbackFields,
         created: input.result.created,
         routeBinding: input.routeBinding,
+        ...hostedAutomationReplayFields(input, readbackRecord),
       };
       const recordChanged =
         readbackRecord.updatedAt !== record.updatedAt

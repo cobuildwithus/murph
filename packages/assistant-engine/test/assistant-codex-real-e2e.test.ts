@@ -49134,3 +49134,67 @@ describeRealCodex('plan D group lifecycle copy', () => {
     } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths]) }
   }, 360_000)
 })
+
+
+describeRealCodex('ordinary input replay reminder journeys', () => {
+  it.each([
+    { name: 'F7 matching replay confirms daily stretch with exactly one save', mismatch: false },
+    { name: 'F7 mismatching replay saves daily stretch after unrelated stored reminder', mismatch: true },
+  ])('$name', async ({ name, mismatch }) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-input-replay-e2e-'))
+    const saves: Extract<AssistantHostedAutomationToolRequest, { action: 'save' }>[] = []
+    const schedule = { kind: 'dailyLocal', localTime: '09:00', timeZone: 'UTC' } as const
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
+        developerInstructions: buildAssistantSystemPrompt({ assistantCliContract: null,
+          assistantKnowledgeToolsAvailable: false, assistantHostedAutomationAvailable: true,
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'direct',
+          currentLocalDate: '2030-01-15', currentInstant: '2030-01-15T12:00:00.000Z', currentTimeZone: 'UTC',
+          hostedRuntime: true, onboardingGuidance: false, turnTrigger: null }),
+        dynamicTools: [MURPH_AUTOMATION_TOOL],
+        hostedToolContext: {
+          computerToolsAvailable: false, vaultFileSendAvailable: false,
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          currentUserActionScope: () => ({ acceptedInputIds: ['ain_synthetic_stretch'], conversationId: 'synthetic-stretch',
+            conversationScope: 'direct', inboundMailboxItemIds: [], originSessionId: 'synthetic-stretch-session', recipientKey: null }),
+          sendVaultFile: async () => { throw new Error('No file sends authorized.'); },
+          automationTool: { request: async (request, context) => {
+            if (request.action !== 'save') throw new Error('Only the requested reminder save is authorized.')
+            expect(context?.acceptedInputIds).toEqual(['ain_synthetic_stretch'])
+            saves.push(request)
+            const replay = saves.length === 1
+            return { action: 'save', automationId: replay ? 'automation_stored' : 'automation_new_stretch',
+              created: !replay, title: mismatch && replay ? 'Water the fern' : 'Daily stretch',
+              instructions: mismatch && replay ? 'Remind me to water the fern.' : 'Remind me to stretch for five minutes.',
+              schedule, effectiveTimeZone: 'UTC', lookupId: 'synthetic-reminder',
+              occurrenceProjection: { status: 'resolved', nextOccurrenceAt: '2030-01-16T09:00:00.000Z' },
+              routeBinding: replay ? 'preserved' : 'current_conversation', status: 'active', updatedAt: '2030-01-15T12:00:00.000Z' }
+          } },
+        },
+        prompt: 'Please remind me here every day at 9 AM UTC to stretch for five minutes.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      expect(saves).toHaveLength(mismatch ? 2 : 1)
+      for (const request of saves) {
+        expect(request.slug).toBeUndefined()
+        expect(request.instructions).toMatch(/stretch/iu)
+        expect(['gpt-6-luna', 'gpt-6.1-sol']).toContain(request.assistantTargetOverride?.model)
+        if (request.schedule.kind === 'dailyLocal') expect(request.schedule.localTime).toBe('09:00')
+        else if (request.schedule.kind === 'cron') expect(request.schedule.expression).toBe('0 9 * * *')
+        else throw new Error('Expected a daily stretch schedule.')
+        expect(request.schedule.timeZone).toBe('UTC')
+      }
+      expect(result.finalMessage).toMatch(/stretch/iu)
+      expect(result.finalMessage).toMatch(/set|saved|scheduled|remind|every day|daily/iu)
+      expect(result.finalMessage).toMatch(/9(?::00)?\s*(?:a\.?m\.?|in the morning)/iu)
+      expect(result.finalMessage).not.toMatch(/fern|water(?:ing)? the|created=false|replay|slot|automationId/iu)
+      process.stdout.write(`[automation-input-replay-e2e] ${JSON.stringify({ journey: name, saves: saves.length, reply: result.finalMessage })}\n`)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})

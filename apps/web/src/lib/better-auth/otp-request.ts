@@ -55,7 +55,7 @@ export async function verifyHostedAuthOtpRequest(request: Request, transport: Ho
       headers: request.headers, occurredAt: new Date(), surface: transport === "browser" ? "website" : "mobile_app", timeZone,
     }) : undefined;
     try {
-      return await commitHostedAuthOtp({
+      return { timeZone, ...await commitHostedAuthOtp({
         ...requireHostedBetterAuthConfig(), ...prepared, prisma,
         commitMember: async (tx) => {
           await prepared.commitMember(tx);
@@ -63,7 +63,7 @@ export async function verifyHostedAuthOtpRequest(request: Request, transport: Ho
           if (context) await writeHostedMemberSignupNotificationContextIfPendingTx({ memberId: prepared.memberId, context, preparedControlRoot: prepared.preparedControlRoot, prisma: tx });
         },
         otp,
-      });
+      }) };
     } catch (error) {
       if (error instanceof APIError && ["INVALID_OTP", "OTP_NOT_FOUND", "OTP_EXPIRED", "TOO_MANY_ATTEMPTS"].includes(error.body?.code ?? "")) throw invalidCode();
       throw error;

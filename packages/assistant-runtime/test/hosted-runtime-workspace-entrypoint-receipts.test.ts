@@ -49,6 +49,8 @@ import {
   runCanonicalWrite,
   showAutomation,
   upsertAutomation,
+  createAutomationForInputs,
+  listAutomations,
   validateVault,
 } from "@murphai/core";
 import {
@@ -2556,6 +2558,118 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
       expect(restoredRead).toBe(true);
       expect(restore).toHaveBeenCalledTimes(2);
       expect(await readJsonlRecords({ vaultRoot, relativePath: "ledger/publication.jsonl" })).toEqual([{ id: "write-once" }]);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test.each([true, false])("replays ordinary input creation after unknown publication and cold restore Web committed=%s", async (webCommitted) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-publication-fence-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const error = new HostedCanonicalWriteOutcomeUnknownError({ cause: new Error("Lost checkpoint acknowledgement.") });
+    const markerPath = path.join(path.dirname(vaultRoot), ".hosted-workspace-clean-checkpoint.json");
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    const createReminder = (claimedAutomationIds = new Set<string>()) => createAutomationForInputs({
+      vaultRoot, claimedAutomationIds, acceptedInputIds: ["ain_synthetic_recovery"],
+      title: "Daily stretch", instructions: "Remind me to stretch.", continuityPolicy: "fresh", status: "active",
+      schedule: { kind: "dailyLocal", localTime: "09:00", timeZone: "UTC" },
+      route: { channel: "linq", deliveryTarget: "synthetic-thread", threadIsDirect: true,
+        identityId: null, participantId: null, threadId: "synthetic-thread" },
+    });
+    let originalId = "";
+    const snapshot = vi.fn(async () => {
+      const bundle = await createVaultSnapshotBundle({ vaultRoot });
+      artifactBytesByHash.set(bundle.hash, bundle.bytes);
+      return { snapshotRef: bundle.snapshotRef };
+    });
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const base = await createVaultSnapshotBundle({ vaultRoot });
+      artifactBytesByHash.set(base.hash, base.bytes);
+      let workspace = createWorkspaceState({ snapshotRef: base.snapshotRef, version: "0" });
+      let failPublication = true;
+      const platform = createPlatform({
+        artifactBytesByHash, events,
+        mailboxPort: createMailboxPort({ events, items: [] }),
+        workspacePort: {
+          async read() { return { fetchedAt: TEST_NOW, workspace }; },
+          async checkpoint(request) {
+            checkpointRequests.push(request);
+            if (!failPublication || webCommitted) {
+              workspace = createWorkspaceState({
+                ...request, version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+              });
+            }
+            if (failPublication) throw error;
+            return { checkpointed: true, workspace };
+          },
+        },
+      });
+      const restore = vi.spyOn(platform.workspaceSnapshotPort!, "restoreWorkspaceSnapshot");
+      const artifactPut = vi.spyOn(platform.artifactStore, "put");
+      let passUnwound = false;
+      let caught: unknown;
+      await expect(runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+        platform, vaultRoot, createCheckpointSnapshot: snapshot,
+        async importItem() { throw new Error("No mailbox input expected."); },
+        async runAssistantPhase(input) {
+          expect(await writeHostedWorkspaceCleanCheckpointMarkerBestEffort({ vaultRoot, workspace })).toBe(true);
+          try {
+            await createReminder();
+          } catch (failure) {
+            caught = failure; // Simulate a generic tool catch; the publication owner must already have fenced effects.
+          }
+          expect(caught).toBe(error);
+          await expect(input.platform.artifactStore.put({ bytes: Buffer.from("later effect"), sha256: sha256Hex(Buffer.from("later effect")) })).rejects.toBe(error);
+          passUnwound = true;
+          return { progressed: false };
+        },
+      })).rejects.toBe(error);
+      expect(caught).toBe(error);
+      expect(passUnwound).toBe(true);
+      expect(checkpointRequests).toHaveLength(1);
+      expect(snapshot).not.toHaveBeenCalled();
+      expect(artifactPut.mock.calls.length).toBeGreaterThanOrEqual(3);
+      expect(artifactBytesByHash.has(sha256Hex(Buffer.from("later effect")))).toBe(false);
+      const originalRecords = (await listAutomations({ vaultRoot })).items;
+      expect(originalRecords).toHaveLength(1);
+      originalId = originalRecords[0]!.automationId;
+      expect(listHostedCanonicalWriteReceiptLogArtifacts(artifactBytesByHash).at(-1)?.entries).toHaveLength(1);
+      await expect(access(markerPath)).rejects.toMatchObject({ code: "ENOENT" });
+
+      failPublication = false;
+      let restoredRead = false;
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({ request: { workspaceVersion: workspace.version } }), {
+        platform, vaultRoot, createCheckpointSnapshot: snapshot,
+        async importItem() { throw new Error("No mailbox input expected."); },
+        async runAssistantPhase() {
+          expect((await listAutomations({ vaultRoot })).items).toHaveLength(webCommitted ? 1 : 0);
+          const canonicalWritesBefore = checkpointRequests.filter(request => request.reason === "canonical_runtime_commit").length;
+          const putsBefore = artifactPut.mock.calls.length;
+          const logsBefore = listHostedCanonicalWriteReceiptLogArtifacts(artifactBytesByHash).length;
+          const replay = await createReminder();
+          expect(replay.created).toBe(!webCommitted);
+          expect(replay.record.automationId).toBe(originalId);
+          expect(checkpointRequests.filter(request => request.reason === "canonical_runtime_commit")).toHaveLength(canonicalWritesBefore + (webCommitted ? 0 : 1));
+          if (webCommitted) {
+            expect(artifactPut).toHaveBeenCalledTimes(putsBefore);
+            expect(listHostedCanonicalWriteReceiptLogArtifacts(artifactBytesByHash)).toHaveLength(logsBefore);
+          }
+          const afterCreatePuts = artifactPut.mock.calls.length;
+          const afterCreateWrites = checkpointRequests.length;
+          const afterCreateLogs = listHostedCanonicalWriteReceiptLogArtifacts(artifactBytesByHash).length;
+          expect(await createReminder()).toMatchObject({ created: false, record: replay.record });
+          expect(artifactPut).toHaveBeenCalledTimes(afterCreatePuts);
+          expect(checkpointRequests).toHaveLength(afterCreateWrites);
+          expect(listHostedCanonicalWriteReceiptLogArtifacts(artifactBytesByHash)).toHaveLength(afterCreateLogs);
+          restoredRead = true;
+          return { progressed: false };
+        },
+      });
+      expect(restoredRead).toBe(true);
+      expect(restore).toHaveBeenCalledTimes(2);
+      expect((await listAutomations({ vaultRoot })).items.map(record => record.automationId)).toEqual([originalId]);
     } finally {
       await removeTempRoot(vaultRoot);
     }

@@ -5,16 +5,20 @@ import { existsSync, promises as fs, readdirSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  automationFrontmatterSchema,
   AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
   buildAutomationSupportSeriesTag,
 } from "@murphai/contracts";
 
+import { withHostedCanonicalWritePort } from "../src/operations/write-batch.ts";
+import { normalizeId } from "../src/bank/shared.ts";
 import { parseFrontmatterDocument } from "../src/frontmatter.ts";
 import {
   resolveSlugMarkdownDocumentTarget,
   writeCanonicalMarkdownDocument,
 } from "../src/markdown-documents.ts";
 import {
+  createAutomationForInputs,
   advanceAutomationDeviceActivityCursor,
   archiveAutomationIfActiveUntilElapsed,
   buildAutomationMarkdownPreview,
@@ -1334,4 +1338,67 @@ it("reads retired stored Sol overrides as 6.1 Sol but rejects explicit writes", 
   await expect(upsertAutomation({ vaultRoot, ...createAutomationPayload({
     assistantTargetOverride: { model: "gpt-5.6-sol" },
   }) })).rejects.toThrow("retired");
+});
+
+describe("ordinary automation input slots", () => {
+  const acceptedInputIds = ["ain_synthetic_first"];
+  const payload = () => {
+    const { slug: _slug, ...fields } = createAutomationPayload();
+    return fields;
+  };
+
+  it("rejects an empty accepted scope without claiming or writing anything", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const claimedAutomationIds = new Set<string>();
+    await expect(createAutomationForInputs({ ...payload(), vaultRoot, acceptedInputIds: [], claimedAutomationIds }))
+      .rejects.toMatchObject({ code: "VAULT_INVALID_INPUT" });
+    expect(claimedAutomationIds.size).toBe(0);
+    expect((await listAutomations({ vaultRoot })).items).toEqual([]);
+  });
+
+  it("claims nothing after a failed write and reuses the first slot after correction", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const claimedAutomationIds = new Set<string>();
+    const input = { ...payload(), vaultRoot, acceptedInputIds, claimedAutomationIds };
+    const failure = new Error("Synthetic canonical publication rejection.");
+    await expect(withHostedCanonicalWritePort({ persistCanonicalWrite: async () => { throw failure; } },
+      () => createAutomationForInputs(input))).rejects.toBe(failure);
+    expect(claimedAutomationIds.size).toBe(0);
+    expect((await listAutomations({ vaultRoot })).items).toEqual([]);
+    const saved = await createAutomationForInputs(input);
+    expect(saved.created).toBe(true);
+    expect([...claimedAutomationIds]).toEqual([saved.record.automationId]);
+    expect(await createAutomationForInputs({ ...input, claimedAutomationIds: new Set() }))
+      .toMatchObject({ created: false, record: saved.record });
+  });
+
+  it("cannot prevent another record when the scope omits the owning input", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const first = await createAutomationForInputs({ ...payload(), vaultRoot, acceptedInputIds, claimedAutomationIds: new Set() });
+    const second = await createAutomationForInputs({ ...payload(), vaultRoot, acceptedInputIds: ["ain_synthetic_other"], claimedAutomationIds: new Set() });
+    expect(second.created).toBe(true);
+    expect(second.record.automationId).not.toBe(first.record.automationId);
+    expect((await listAutomations({ vaultRoot })).items).toHaveLength(2);
+  });
+
+  it("writes an id accepted by normalizeId and the existing frontmatter schema", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const { record } = await createAutomationForInputs({ ...payload(), vaultRoot, acceptedInputIds, claimedAutomationIds: new Set() });
+    expect(normalizeId(record.automationId, "automationId", "automation")).toBe(record.automationId);
+    const document = parseFrontmatterDocument(await fs.readFile(path.join(vaultRoot, record.relativePath), "utf8"));
+    expect(automationFrontmatterSchema.safeParse(document.attributes).success).toBe(true);
+    expect(document.attributes).not.toHaveProperty("acceptedInputIds");
+    expect(document.attributes).not.toHaveProperty("claimedAutomationIds");
+  });
+
+  it("serializes concurrent saves sharing a claimed set into distinct records", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const claimedAutomationIds = new Set<string>();
+    const input = { ...payload(), vaultRoot, acceptedInputIds, claimedAutomationIds };
+    const saved = await Promise.all([createAutomationForInputs(input), createAutomationForInputs(input)]);
+    expect(saved.every(result => result.created)).toBe(true);
+    expect(new Set(saved.map(result => result.record.automationId)).size).toBe(2);
+    expect(claimedAutomationIds.size).toBe(2);
+    expect((await listAutomations({ vaultRoot })).items).toHaveLength(2);
+  });
 });

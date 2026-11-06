@@ -31,6 +31,10 @@ The two-lane production Web admission, the Cloudflare predeploy gates, and the p
 Vault display-name replication and deterministic actions are owned by
 [Architecture](../ARCHITECTURE.md#vault-display-name-projection-and-actions);
 the [execution record](exec-plans/completed/2026-11-06-vault-display-name-runtime.md) holds the design decisions.
+Login and Home adoption and app saves are owned by
+[iOS game](product-specs/ios-game.md#first-name-persistence) and
+[Weekly Game](product-specs/weekly-game.md);
+the [execution record](exec-plans/completed/2026-11-05-vault-first-name.md) holds the design decisions.
 
 Shared demographic memory, generation-18 projection and native action contracts are owned by [Architecture](../ARCHITECTURE.md#canonical-memory-demographics) and [private numbers](product-specs/ios-meals.md#shared-demographics).
 The [backend execution record](exec-plans/completed/2026-11-04-vault-demographics-backend.md) contains local verification evidence for the parent-owned integration.
@@ -1939,3 +1943,5 @@ The durable contract remains in `references/hosted-runtime-protocol.md`.
 
 The native usage denial contract is owned by `references/hosted-postgres-runtime.md`;
 its controller drain gate and rollback floor are in `../apps/cloudflare/DEPLOY.md`.
+
+Ordinary reminder input replay is recorded in the [execution plan](exec-plans/completed/2026-11-06-automation-input-replay.md).

@@ -5670,6 +5670,52 @@ text(JSON.stringify(result));
     expect(result.transcriptMessage).toBe(result.finalMessage)
   })
 
+  it.each([false, true])('keeps replayed DST correction pending until a real create (resolved=%s)', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async resolved => {
+    const scenario = await prepareScriptedTurnScenario()
+    const failed = { action: 'save', instructions: 'Remind me to stretch.',
+      schedule: { kind: 'at', localAt: { relativeDay: 'tomorrow', time: '02:30', timeZone: 'America/New_York' } },
+      title: 'Stretch reminder' }
+    const independent = { ...failed, title: 'Walk reminder', instructions: 'Remind me to walk.' }
+    const retry = { ...failed, localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failed),
+      schedule: { kind: 'at', localAt: { date: '2026-03-08', time: '03:30', timeZone: 'America/New_York' } } }
+    for (const request of [failed, independent, retry, ...(resolved ? [retry] : [])]) {
+      scenario.stub.queue({ customToolCall: { name: 'exec',
+        input: `const result = await tools.murph__automation(${JSON.stringify(request)}); text(JSON.stringify(result));` } })
+    }
+    scenario.stub.queue({ text: resolved ? 'Your stretch reminder is set.' : 'I found an earlier reminder.' })
+    let saves = 0
+    const automationRequest = vi.fn(async (request: AssistantHostedAutomationToolRequest, context: { acceptedInputIds?: readonly string[] } | undefined) => {
+      expect(context?.acceptedInputIds).toEqual(['ain_synthetic_dst'])
+      if (request.action !== 'save') throw new Error('Expected save.')
+      saves++
+      return { action: 'save' as const, automationId: saves === 1 ? 'automation_unrelated' : 'automation_stretch',
+        created: saves > 1, title: saves === 1 ? 'Water plants' : request.title,
+        instructions: saves === 1 ? 'Water the plants.' : request.instructions,
+        schedule: request.schedule, effectiveTimeZone: 'America/New_York', lookupId: 'synthetic',
+        occurrenceProjection: { status: 'resolved' as const, nextOccurrenceAt: '2026-03-08T07:30:00.000Z' },
+        routeBinding: 'preserved' as const, status: 'active' as const, updatedAt: '2026-03-08T05:01:00.000Z' }
+    })
+    const result = await executeCodexAppServerTurn({ ...scenario.turnInput,
+      automationRelativeDateReferenceWindow: { earliestAt: '2026-03-08T04:59:00.000Z', latestAt: '2026-03-08T04:59:00.000Z' },
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: { automationTool: { request: automationRequest }, computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+        currentUserActionScope: () => ({ acceptedInputIds: ['ain_synthetic_dst'], conversationId: 'synthetic-dst',
+          conversationScope: 'direct', inboundMailboxItemIds: [], originSessionId: 'synthetic-dst-session', recipientKey: null }),
+        sendVaultFile: async () => { throw new Error('No file sends.'); }, vaultFileSendAvailable: false },
+      prompt: 'Set stretch and walk reminders for tomorrow.',
+    })
+    expect(automationRequest).toHaveBeenCalledTimes(resolved ? 2 : 1)
+    const question = (title: string) => `For reminder "${title}", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?`
+    for (const text of [result.finalMessage, result.transcriptMessage]) {
+      expect(text).toContain(question('Walk reminder'))
+      if (resolved) expect(text).not.toContain(question('Stretch reminder'))
+      else expect(text).toContain(question('Stretch reminder'))
+    }
+  })
+
   it('keeps a correlated DST clarification pending after create conflict', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {

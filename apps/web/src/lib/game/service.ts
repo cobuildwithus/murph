@@ -6,7 +6,12 @@ import { parseGameRecapEventId, hostedGameRecapSchema, type GameNoticeRoom, type
 import { groupGameRecapPlayers } from "./recap-cohort";
 import { gameChatProgress } from "./chat-progress";
 import { buildGameChallengeInstructions } from "./challenge";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
+import { memoryDisplayNameSchema } from "@murphai/contracts";
+import type { HostedNativeMemberAuth } from "../better-auth/native-auth";
+import { assertBrowserVaultMemberAuthority } from "../browser-vault/authority";
+import { submitMemberAction } from "../member-actions/submit";
+import { adoptVaultGameProfile } from "./vault-profile";
 
 import { Prisma, type Game, type GameEntry, type GameInvitee, type GamePlayer, type GameProfile, type GameReport } from "@prisma/client";
 
@@ -544,6 +549,9 @@ async function setProfile(context: CommandContext, command: Extract<GameCommand,
     ...(command.timeZone === undefined ? {} : { timeZone: command.timeZone }),
     ...(command.photoKey === undefined ? {} : { photoKey: command.photoKey }),
   };
+  const prisma = getPrisma();
+  const previous = command.firstName === undefined ? null
+    : await prisma.gameProfile.findUnique({ where: { memberId: actor }, select: { firstNameEncrypted: true } });
   // Partial updates never read then rewrite unrelated fields. RETURNING also
   // makes the response describe this write, not a later concurrent update.
   const profile = await commandTransaction(context, async tx => {
@@ -557,6 +565,27 @@ async function setProfile(context: CommandContext, command: Extract<GameCommand,
   });
   if (!profile) return reject("PROFILE_REQUIRED", "Add your first name and time zone first.");
   const [firstName] = await openGameTexts([{ ...target, value: profile.firstNameEncrypted }]);
+  const memoryName = memoryDisplayNameSchema.safeParse(command.firstName);
+  if (memoryName.success) {
+    try {
+      const [previousName] = previous ? await openGameTexts([{ ...target, value: previous.firstNameEncrypted }]) : [];
+      if (previousName !== command.firstName) {
+        await submitMemberAction({
+          assertCurrentAuthorityTx: async tx => {
+            await context.beforeMutationTx?.(tx);
+            await assertBrowserVaultMemberAuthority({ memberId: actor, prisma: tx });
+          },
+          memberId: actor, prisma,
+          request: {
+            actionId: randomUUID(), requestedAt: new Date().toISOString(), schemaVersion: 1,
+            action: { kind: "display-name.set", version: 1, displayName: memoryName.data },
+          },
+        });
+      }
+    } catch {
+      // Game profiles also serve free invitees. Vault refusal never undoes a save.
+    }
+  }
   return {
     avatarUrl: profile.photoKey ? gameMediaUrl(profile.photoKey) : null,
     firstName: firstName ?? "",
@@ -2976,10 +3005,27 @@ function sortForHome(games: readonly LoadedGame[], memberId: string, clock: Date
   return [...games].sort((a, b) => rank(a) - rank(b) || newest(b) - newest(a));
 }
 
-export async function readHome(memberId: string, multiplayer = false): Promise<GameHomeView> {
+async function readHomeProfile(memberId: string, auth?: HostedNativeMemberAuth): Promise<(GameProfile & { firstName: string | null }) | null> {
+  const prisma = getPrisma();
+  const profile = await prisma.gameProfile.findUnique({ where: { memberId } });
+  const target: GameSealTarget = { field: "first_name", memberId, rowId: memberId, table: "game_profile" };
+  if (profile) {
+    const [firstName] = await openGameTexts([{ ...target, value: profile.firstNameEncrypted }]);
+    return { ...profile, firstName: firstName ?? null };
+  }
+  if (!auth || auth.member.id !== memberId) return null;
+  try {
+    return await adoptVaultGameProfile(auth, { timeoutMs: 1_500 });
+  } catch {
+    // Optional adoption must not turn an ordinary Home read into a failure.
+    return null;
+  }
+}
+
+export async function readHome(memberId: string, multiplayer = false, auth?: HostedNativeMemberAuth): Promise<GameHomeView> {
   const prisma = getPrisma();
   const [profile, seats, addressed, tickets, usualEntry] = await Promise.all([
-    prisma.gameProfile.findUnique({ where: { memberId } }),
+    readHomeProfile(memberId, auth),
     // Apply active-game priority before the bounded history window, so new
     // invitations and completed games cannot displace an older live game.
     prisma.$queryRaw<Array<{ gameId: string }>>(Prisma.sql`
@@ -3023,9 +3069,6 @@ export async function readHome(memberId: string, multiplayer = false): Promise<G
   ]);
   const inputsById = new Map(inputs.map(input => [input.state.game.id, input]));
   const views = games.map(game => buildGameView(inputsById.get(game.row.id)!));
-  const [firstName] = await openGameTexts(profile
-    ? [{ field: "first_name", memberId, rowId: memberId, table: "game_profile", value: profile.firstNameEncrypted }]
-    : []);
   const wallet = kept.map(ticket => {
     const input = inputsById.get(ticket.gameId)!;
     return ticketView(toTicketRow(ticket, ticket.game.players), input.words, memberId, input.now,
@@ -3036,7 +3079,7 @@ export async function readHome(memberId: string, multiplayer = false): Promise<G
     games: views,
     canStartGames: isGameEnabledFor(memberId),
     ...(multiplayer ? { canStartGroups: areGameGroupsEnabled() && isGameEnabledFor(memberId) } : {}),
-    me: { usualKind: usualEntry ? toEntryKind(usualEntry.kind) : null, avatarUrl: profile?.photoKey ? gameMediaUrl(profile.photoKey) : null, firstName: firstName ?? null, memberId, timeZone: profile?.timeZone ?? null },
+    me: { usualKind: usualEntry ? toEntryKind(usualEntry.kind) : null, avatarUrl: profile?.photoKey ? gameMediaUrl(profile.photoKey) : null, firstName: profile?.firstName ?? null, memberId, timeZone: profile?.timeZone ?? null },
     wallet: {
       // Expired tickets stay where they were, marked expired.
       held: wallet.filter((ticket) => ticket.status !== "redeemed" && ticket.youHold),

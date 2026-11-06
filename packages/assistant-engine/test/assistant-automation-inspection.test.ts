@@ -55,7 +55,6 @@ describe('automation definition inspection', () => {
   })
 })
 
-
 describe('automation model patch readback', () => {
   it('returns canonical model and managed ownership after a versioned patch', async () => {
     const selected = { model: 'gpt-6-luna', reasoningEffort: 'high' } as const
@@ -71,8 +70,36 @@ describe('automation model patch readback', () => {
         expectedUpdatedAt: '2030-01-15T10:00:00.000Z', assistantTargetOverride: selected } },
     })
     expect(result.rpcResult.success).toBe(true)
+    expect(result.automationSaveReplayed).toBeUndefined()
     expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toMatchObject({
       assistantTargetOverride: selected, managed: false, updatedAt: '2030-01-15T10:01:00.000Z',
     })
   })
+})
+
+describe('ordinary save replay serialization', () => {
+  it.each(['Stored A: remind me to stretch.', '\u0001'.repeat(50_000)])(
+    'returns complete stored instructions and private replay metadata (%#)', async instructions => {
+      const schedule = { kind: 'dailyLocal', localTime: '09:00', timeZone: 'UTC' } as const
+      const title = 'Daily reminder'
+      const result = await executeAutomationDynamicTool({
+        acceptedInputIds: ['ain_host_owned'],
+        request: { kind: 'automation', request: { action: 'save', title,
+          instructions: 'Requested B: remind me to water the plants.', schedule } },
+        automationTool: { async request(request, context) {
+          expect(request).toMatchObject({ title, schedule, instructions: 'Requested B: remind me to water the plants.' })
+          expect(context?.acceptedInputIds).toEqual(['ain_host_owned'])
+          return { action: 'save', automationId: 'automation_stored_a', created: false,
+            title, instructions, schedule, effectiveTimeZone: 'UTC', lookupId: 'stored-a',
+            occurrenceProjection: { status: 'resolved', nextOccurrenceAt: '2030-01-16T09:00:00.000Z' },
+            routeBinding: 'preserved', status: 'active', updatedAt: '2030-01-15T10:00:00.000Z' }
+        } },
+      })
+      expect(result.rpcResult.success).toBe(true)
+      expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toMatchObject({ title, instructions, created: false })
+      expect(result.automationSaveReplayed).toBe(true)
+      expect(result.rpcResult).not.toHaveProperty('automationSaveReplayed')
+      expect(JSON.stringify(result.rpcResult)).not.toContain('automationSaveReplayed')
+    },
+  )
 })
