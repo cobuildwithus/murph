@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-06",
+  "order": 100,
+  "item": {
+    "id": "model-reasoning-save-mid-reply",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Model and reasoning changes save when you send a follow-up",
+    "summary": "If you ask Murph to change its model or reasoning and send another message while it's working, the change now saves.",
+    "details": "Plan changes are the exception. If a new message arrives while Murph is making one, it stops and asks you to confirm again.",
+    "relevanceTags": ["assistant", "conversation", "reliability"],
+    "sourcePullRequests": [4698]
+  }
+}
