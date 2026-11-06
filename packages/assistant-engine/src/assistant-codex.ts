@@ -4407,6 +4407,7 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
     const {
+      automationRequestApplied,
       claimCurrentSenderTurnDecision,
       executeMurphDynamicToolRequest,
       isComputerDynamicToolRequest,
@@ -5096,7 +5097,7 @@ async function runCodexAppServerTurnOnProcess(
       }
       if (
         dynamicToolRequest.kind === 'automation' &&
-        result.rpcResult.success &&
+        automationRequestApplied(result) &&
         dynamicToolRequest.localAtRecovery
       ) {
         const recoveryKey = buildRequiredAutomationLocalAtClarificationKey({

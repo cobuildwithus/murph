@@ -715,6 +715,70 @@ describe('Codex canonical tool input contract upgrade guard', () => {
     },
   )
 
+  it.skipIf(process.env.MURPH_MEASURE_AUTOMATION_REPLAY_INPUT !== '1').each(['direct', 'group'] as const)(
+    'automation replay guidance: complete first provider input (%s)', { timeout: 180_000 }, async (scope) => {
+      stub ??= await startScriptedResponsesStub()
+      const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths)
+      const headTools = resolveMurphDynamicTools({
+        allowFinishWithoutReply: true, automationAvailable: true, personalizationAvailable: true,
+        groupSharedReadAvailable: scope === 'group', responseCardsAvailable: scope === 'direct',
+        imageGenerationAvailable: false, progressUpdatesAvailable: false,
+      })
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: true,
+        assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
+        conversationScope: scope, currentLocalDate: '2026-10-01',
+        currentInstant: '2026-10-01T08:00:00.000Z', currentTimeZone: 'Europe/Paris',
+        hostedRuntime: true,
+        onboardingGuidance: false, ordinaryInboundTurn: true,
+      })
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
+      })
+      // The base keeps every field and removes only the replay guidance.
+      const removeReplayGuidance = (description: string) => description
+        .replace('receive a host-generated automationId', 'receive a new host-generated automationId')
+        .replace(/ For an ordinary save only, created=false means .+? never report it as saved from this result\./u, '')
+        .replace(/For an ordinary save with created=false, first decide .+? the confirmations here apply only if they are\. /u, '')
+      const baseTools = headTools.map(tool => ({ ...tool, description: removeReplayGuidance(tool.description) }))
+      assert.notDeepEqual(baseTools, headTools)
+      assert.ok(!JSON.stringify(baseTools).includes('created=false'))
+      const developerInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
+      const prompt = [layers.dynamicTurnContextPrompt, 'Remind me every day at 9 to stretch.'].filter(Boolean).join('\n\n')
+      const measurements = []
+      for (const phase of ['base', 'head'] as const) {
+        await stopWarmCodexAppServer()
+        stub.markRequestBaseline()
+        stub.captureProviderRequestDiagnostics({ completeInput: true })
+        stub.queue({ text: CONTRACT_CAPTURE_DONE })
+        const tools = phase === 'base' ? baseTools : headTools
+        const result = await executeCodexAppServerTurn({
+          ...scenario.turnInput, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          dynamicTools: tools, developerInstructions, prompt, groupConversation: scope === 'group',
+          env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+        })
+        assert.equal(result.finalMessage, CONTRACT_CAPTURE_DONE)
+        assert.equal(stub.requestCountSinceBaseline(), 1)
+        const captured = stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+        assert.ok(captured)
+        const body = readRecord(JSON.parse(captured.json))
+        assert.ok(body)
+        delete body.prompt_cache_key
+        measurements.push({ phase, decodedRequestUtf8Bytes: Buffer.byteLength(JSON.stringify(body)),
+          registeredToolsUtf8Bytes: Buffer.byteLength(JSON.stringify(tools)),
+          instructionsUtf8Bytes: Buffer.byteLength([developerInstructions, prompt].join('\n\n')),
+          firstRequestCarriesReplayGuidance: captured.json.includes('created=false'),
+          exclusions: [...new Set([...captured.excludedTransportFields, 'prompt_cache_key'])],
+        })
+      }
+      process.stdout.write('[automation-replay-input-proof] ' + JSON.stringify({ scope, measurements,
+        tokens: null, tokenLimitation: 'No exact tokenizer configured; scripted usage is not tokenization.',
+        baseline: 'In-fixture ablation of the two added tool description passages; same prompt, tools and history.',
+      }) + '\n')
+    },
+  )
+
   it.skipIf(process.env.MURPH_MEASURE_WORKSPACE_EXPORT_INPUT !== '1').each(['direct', 'group'] as const)(
     'workspace export: complete first provider input (%s)', { timeout: 90_000 }, async (scope) => {
       stub ??= await startScriptedResponsesStub()

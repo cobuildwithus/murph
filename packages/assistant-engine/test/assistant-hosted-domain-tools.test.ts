@@ -13,6 +13,34 @@ import type {
 } from '../src/assistant/hosted-tool-context.js'
 
 describe('hosted domain dynamic tools', () => {
+  it('takes automation accepted inputs only from the trusted current host scope', async () => {
+    const modelArguments = { action: 'save', title: 'Daily stretch', instructions: 'Stretch gently.',
+      schedule: { kind: 'dailyLocal', localTime: '09:00', timeZone: 'UTC' },
+      acceptedInputIds: ['ain_model_forged'] }
+    const request = readToolRequest('automation', modelArguments)
+    expect(request).toMatchObject({ kind: 'invalid-automation-arguments' })
+    const { acceptedInputIds: _forged, ...validArguments } = modelArguments
+    const parsed = readToolRequest('automation', validArguments)
+    if (!parsed || parsed.kind !== 'automation') throw new Error('Expected automation request.')
+    expect(parsed.request).not.toHaveProperty('acceptedInputIds')
+    const automationTool = { request: vi.fn(async () => ({
+      action: 'save' as const, automationId: 'automation_synthetic', created: true,
+      effectiveTimeZone: 'UTC', lookupId: 'synthetic', routeBinding: 'current_conversation' as const,
+      schedule: { kind: 'dailyLocal' as const, localTime: '09:00', timeZone: 'UTC' }, status: 'active' as const,
+      occurrenceProjection: { status: 'resolved' as const, nextOccurrenceAt: null }, updatedAt: '2030-01-15T10:00:00.000Z',
+    })) }
+    const result = await executeMurphDynamicToolRequest({ env: {}, fetchImpl: fetch,
+      nextUsageOrdinal: () => 0, progressDelivery: null, request: parsed,
+      hostedToolContext: { ...createHostedToolContext({ automationTool }), currentUserActionScope: () => ({
+        acceptedInputIds: ['ain_host_owned'], conversationId: 'synthetic-conversation', conversationScope: 'direct',
+        inboundMailboxItemIds: ['synthetic-mailbox'], originSessionId: 'synthetic-session', recipientKey: null,
+      }) },
+    })
+    expect(result.rpcResult.success).toBe(true)
+    expect(automationTool.request).toHaveBeenCalledWith(parsed.request, { signal: null, acceptedInputIds: ['ain_host_owned'] })
+    expect(JSON.stringify(automationTool.request.mock.calls)).not.toContain('ain_model_forged')
+  })
+
   it('keeps device and automation default-off', () => {
     expect(resolveMurphDynamicTools({})).not.toContain(MURPH_DEVICE_TOOL)
     expect(resolveMurphDynamicTools({})).not.toContain(MURPH_AUTOMATION_TOOL)

@@ -301,6 +301,8 @@ export type AssistantHostedAutomationToolResponse =
     }
   | {
       action: 'patch' | 'save'
+      instructions?: string
+      title?: string
       automationId: string
       assistantTargetOverride?: AutomationAssistantTargetOverride | null
       managed?: boolean
@@ -329,6 +331,7 @@ export interface AssistantHostedAutomationTool {
     request: AssistantHostedAutomationToolRequest,
     context?: {
       onboardingFirstReadCompletionTransition?: true
+      acceptedInputIds?: readonly string[]
       signal?: AbortSignal | null
     },
   ): Promise<AssistantHostedAutomationToolResponse>
