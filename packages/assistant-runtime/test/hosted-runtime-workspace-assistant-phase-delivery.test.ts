@@ -5197,6 +5197,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       includeBackgroundDueIntents: false,
       messageVolumeReceiptPort: expect.any(Object),
       preferredIntentIds: [],
+      workspaceCheckpointedAt: "2026-04-27T00:00:00.000Z",
       vaultRoot: "/tmp/murph-vault",
     });
     expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalledWith(

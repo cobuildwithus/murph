@@ -201,7 +201,8 @@ vi.mock("@murphai/assistant-engine", async (importOriginal) => {
   };
 });
 
-vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
+vi.mock("../src/hosted-runtime/callbacks.ts", async (importOriginal) => ({
+  HOSTED_PUBLISHED_CLAIM_MAX_WAIT_MS: (await importOriginal<typeof import("../src/hosted-runtime/callbacks.ts")>()).HOSTED_PUBLISHED_CLAIM_MAX_WAIT_MS,
   assertHostedAssistantLinqTurnCommitAuthority:
     mocks.assertHostedAssistantLinqTurnCommitAuthority,
   collectHostedAssistantDeliverySideEffects: mocks.collectHostedAssistantDeliverySideEffects,

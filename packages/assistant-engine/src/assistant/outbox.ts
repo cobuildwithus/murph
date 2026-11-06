@@ -833,8 +833,10 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       }
     }
 
-    if (input.allowPreparedSending === true && intent.status === 'sending') {
+    if (input.preparedDispatch || (input.allowPreparedSending === true && intent.status === 'sending')) {
       if (
+        input.allowPreparedSending !== true ||
+        intent.status !== 'sending' ||
         !input.preparedDispatch ||
         !assistantOutboxIntentMatchesPreparedDispatch(intent, input.preparedDispatch)
       ) {
@@ -1111,19 +1113,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
     const staleDeliveryError = new Error(
       'Stale non-idempotent outbound delivery had no persisted delivery to reconcile after restart.',
     )
-    const ambiguousError = terminalConfirmationRequired &&
-        prepared.intent.channel === 'telegram'
-      ? Object.assign(
-          new VaultCliError(
-            'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
-            staleDeliveryError.message,
-          ),
-          {
-            deliveryMayHaveSucceeded: true as const,
-            retryable: false as const,
-          },
-        )
-      : createAssistantDeliveryAmbiguousError(staleDeliveryError)
+    const ambiguousError = createAssistantDeliveryAmbiguousError(staleDeliveryError)
     const failedIntent = terminalConfirmationRequired
       ? await finalizeAssistantOutboxTerminalFailure({
           deliveryMayHaveSucceeded: true,
@@ -1446,7 +1436,7 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
   }
 }
 
-function assistantOutboxIntentIntrinsicallyRequiresTerminalConfirmation(intent: AssistantOutboxIntent): boolean {
+export function assistantOutboxIntentIntrinsicallyRequiresTerminalConfirmation(intent: AssistantOutboxIntent): boolean {
   return (intent.threadIsDirect === true && containsNutritionGoalInvitation(intent.message)) ||
     intent.followUpRequest !== undefined
 }

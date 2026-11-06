@@ -3018,6 +3018,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         // another quiet window or weakening Ask authority.
         setIdleCheckpointStartBy(Date.now());
       }
+      const effectDeadline = Math.min(
+        ...[...pendingDurableCheckpointEffects, ...passResult.afterDurableCheckpoint]
+          .map((effect) => effect.checkpointStartByMs ?? Infinity),
+      );
+      if (effectDeadline < (idleCheckpointStartByMs ?? Infinity)) {
+        setIdleCheckpointStartBy(effectDeadline);
+      }
     };
     if (runtimeStateDirty) {
       ensureIdleCheckpointTimerAfterDirtyWork();
@@ -3798,6 +3805,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                   messageVolumeReceiptPort: foregroundRuntime.platform.effectsPort,
                   preferredIntentIds,
                   vaultRoot: restored.vaultRoot,
+                  workspaceCheckpointedAt: activeWorkspace?.checkpointedAt,
                 })).filter((effect) =>
                   preferredIntentIdSet.has(effect.effectId)
                 );
@@ -6939,6 +6947,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       let pendingCheckpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null = null;
       const readBackgroundCheckpointWaitDeadline = (): number | null => {
         if (options.shutdownSignal?.aborted) return null;
+        if (pendingDurableCheckpointEffects.some((effect) =>
+          effect.checkpointStartByMs !== undefined && effect.checkpointStartByMs <= Date.now()
+        )) return null;
         const backgroundReadDeadline = resolveHostedBackgroundReadCheckpointDeadline({
           assistantAskDeadline: detachedAssistantAskController?.activeDeadline() ?? null,
           clinicalDeadline: clinicalEnrichmentController?.activeDeadline() ?? null,
@@ -7673,6 +7684,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         if (
           mayRunPostCheckpointWork()
           && !mailboxBudgetExhausted()
+          && !readyDurableCheckpointEffects.some((effect) =>
+            effect.checkpointStartByMs !== undefined && effect.checkpointStartByMs <= Date.now()
+          )
         ) {
           vaultShareOpportunity = await runOptionalPostCheckpointWork(
             async () =>

@@ -28,7 +28,7 @@ import {
   buildHostedAssistantDeliveryEffect,
   type HostedAssistantDeliveryMedia,
   type HostedAssistantDeliveryPayload,
-  type HostedAssistantDeliveryEffect,
+  type HostedAssistantDeliveryEffect as HostedExecutionAssistantDeliveryEffect,
   type HostedAssistantDeliveryPhase,
 } from "@murphai/hosted-execution/side-effects";
 import type {
@@ -48,6 +48,7 @@ import {
   AssistantWorkspaceArtifactMaterializationError,
   applyAssistantVaultFileSendApprovalResult,
   assistantOutboxAcceptedDeliveryRequiresConfirmation,
+  assistantOutboxIntentIntrinsicallyRequiresTerminalConfirmation,
   beginAssistantOutboxIntentMirrorPreparedDispatch,
   buildAssistantVaultFileSendApprovalRequest,
   compareAssistantOutboxDeliverySequenceOrder,
@@ -172,12 +173,19 @@ const HOSTED_MESSAGE_VOLUME_RECEIPT_RETRY_DELAY_MS = 60_000;
 const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_outbox";
 const HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS = 2 * 60 * 1000;
 const HOSTED_SENDING_STALE_RECONCILIATION_MS = 10 * 60 * 1000;
+export const HOSTED_PUBLISHED_CLAIM_MAX_WAIT_MS =
+  HOSTED_SENDING_STALE_RECONCILIATION_MS - HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS;
 const HOSTED_DELIVERY_CONTROL_PLANE_WRITE_TIMEOUT_MS = 2_000;
 const HOSTED_LINQ_REPLY_BUBBLE_PAUSE_MS = 1_500;
 const HOSTED_PHONE_CALL_RESULT_DELIVERY_KEY_PREFIX = "phone-call-result:";
 const HOSTED_TELEGRAM_VOICE_MEMO_DELIVERY_OPERATION =
   "Hosted assistant Telegram voice memo delivery";
 type HostedAssistantDeliveryDetails = Record<string, boolean | number | null | string>;
+
+export type HostedAssistantDeliveryEffect = HostedExecutionAssistantDeliveryEffect & {
+  /** Dispatch only after this effect's exact prepared claim is in a published snapshot. */
+  publishBeforeDispatch?: true;
+};
 
 interface HostedAssistantDeliveryBoundaryFields {
   actorId: string | null;
@@ -204,6 +212,7 @@ export interface CollectHostedAssistantDeliverySideEffectsInput {
   preferredEffectIds?: readonly string[];
   preferredIntentIds?: readonly string[];
   vaultRoot: string;
+  workspaceCheckpointedAt?: string | null;
 }
 
 export async function collectHostedAssistantDeliverySideEffects(
@@ -405,16 +414,63 @@ export async function collectHostedAssistantDeliverySideEffects(
       backgroundBacklogBudget -= 1;
     }
   }
-  const effects = [
-    ...foregroundCandidates.map((intent) =>
-      buildHostedAssistantDeliveryEffectFromIntent(intent, "foreground_current_turn")
-    ),
-    ...cappedBackgroundCandidates.map((intent) =>
-      buildHostedAssistantDeliveryEffectFromIntent(intent, "background_retry")
-    ),
-  ];
+  const obligationBoundaryKeys = new Set(
+    intents.filter(hostedLinqIntentCarriesDurableObligation)
+      .map(readHostedAssistantDeliveryBoundaryKey),
+  );
+  const claimedBoundaryKeys = new Set<string>();
+  const effects: HostedAssistantDeliveryEffect[] = [];
+  for (const [candidates, phase] of [
+    [foregroundCandidates, "foreground_current_turn"],
+    [cappedBackgroundCandidates, "background_retry"],
+  ] as const) {
+    for (const intent of candidates) {
+      const boundaryKey = readHostedAssistantDeliveryBoundaryKey(intent);
+      if (claimedBoundaryKeys.has(boundaryKey)) continue;
+      const effect = buildHostedAssistantDeliveryEffectFromIntent(intent, phase);
+      if (
+        hostedAssistantIntentRetryNeedsPublishedClaim(intent, input.workspaceCheckpointedAt)
+        || (hostedAssistantIntentOwesProviderSend(intent) && (
+          (intent.channel === "telegram" && intent.media.some((media) => media.kind === "vault_file"))
+          || obligationBoundaryKeys.has(boundaryKey)
+        ))
+      ) {
+        effect.publishBeforeDispatch = true;
+        // A blocked successor must get its own published claim in a later pass.
+        if (!intent.deliveryTransportIdempotent) claimedBoundaryKeys.add(boundaryKey);
+      }
+      effects.push(effect);
+    }
+  }
 
   return effects;
+}
+
+function hostedAssistantIntentOwesProviderSend(intent: AssistantOutboxIntent): boolean {
+  return (intent.status === "pending" || intent.status === "retryable")
+    && intent.delivery === null
+    && !intent.deliveryConfirmationPending;
+}
+
+function hostedAssistantIntentRetryNeedsPublishedClaim(
+  intent: AssistantOutboxIntent,
+  workspaceCheckpointedAt: string | null | undefined,
+): boolean {
+  return !intent.deliveryTransportIdempotent
+    && intent.operation?.kind !== "message-reaction"
+    && hostedAssistantIntentOwesProviderSend(intent)
+    && (intent.status === "retryable"
+      || intent.attemptCount > 0
+      || Date.parse(intent.createdAt) <= Date.parse(workspaceCheckpointedAt ?? ""));
+}
+
+function hostedLinqIntentCarriesDurableObligation(intent: AssistantOutboxIntent): boolean {
+  return intent.channel === "linq" && (
+    (intent.status === "awaiting_approval"
+      && parseHostedActionApprovalCycleOwnerKey(intent.deliveryIdempotencyKey) !== null)
+    || (hostedAssistantIntentOwesProviderSend(intent)
+      && assistantOutboxIntentIntrinsicallyRequiresTerminalConfirmation(intent))
+  );
 }
 
 /**
@@ -2040,6 +2096,7 @@ function shouldPrepareHostedAssistantDeliveryEffectForDispatch(
   effect: HostedAssistantDeliveryEffect,
   explicitlyPrepareNonIdempotent: boolean,
 ): boolean {
+  if (effect.publishBeforeDispatch === true) return true;
   if (hasHostedAssistantVaultFileMedia(effect.payload)) {
     return effect.payload.channel === "telegram";
   }
@@ -3507,6 +3564,13 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     });
     if (disabledAutoReplyOutcome) {
       return disabledAutoReplyOutcome;
+    }
+    if (input.assistantDeliveryEffect.publishBeforeDispatch === true && !input.preparedDispatch) {
+      return buildHostedAssistantDeliveryOutcome({
+        deliveryStatus: "pending",
+        effect: input.assistantDeliveryEffect,
+        retryable: true,
+      });
     }
     assertHostedBackgroundDeliveryNotYielded(input);
     const telegramAuthorityBoundTarget =

@@ -7483,7 +7483,7 @@ describe('assistant outbox runtime', () => {
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
   })
 
-  it('keeps stale tracked non-idempotent ambiguity callback-replayable without provider reentry', async () => {
+  it.each(['telegram', 'linq'] as const)('keeps stale tracked non-idempotent %s ambiguity callback-replayable without provider reentry', async (channel) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-15T13:20:00.000Z'))
     const { vaultRoot } = await createAssistantVault(
@@ -7492,6 +7492,11 @@ describe('assistant outbox runtime', () => {
     const deliveryIdempotencyKey =
       'phone-call-result:hpc_stale_ambiguous:generation:1'
     const seeded = await createIntent(vaultRoot, {
+      channel,
+      media: channel === 'linq' ? [{
+        kind: 'voice_memo', filename: 'memo.mp3', transcript: 'Synthetic voice reply.',
+        transport: { kind: 'linq_attachment', attachmentId: 'attachment_stale_voice' },
+      }] : [],
       deliveryIdempotencyKey,
       deliveryTransportIdempotent: false,
       explicitTarget: 'telegram-call-result',
@@ -7499,6 +7504,7 @@ describe('assistant outbox runtime', () => {
       threadId: 'telegram-call-result',
       turnId: 'turn-phone-call-stale-ambiguous',
     })
+    expect(seeded.deliveryTransportIdempotent).toBe(false)
     await saveAssistantOutboxIntent(vaultRoot, {
       ...seeded,
       attemptCount: 1,
@@ -8305,7 +8311,7 @@ describe('assistant outbox runtime', () => {
     expect(persisted?.delivery).toBe(null)
   })
 
-  it('does not dispatch a prepared sending intent when the prepared ownership token mismatches', async () => {
+  it.each(['sending', 'retryable', 'pending'] as const)('does not dispatch a %s intent when the prepared ownership token mismatches', async (status) => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-prepared-stale-')
     const seeded = await createIntent(vaultRoot, {
       explicitTarget: '123',
@@ -8320,6 +8326,12 @@ describe('assistant outbox runtime', () => {
       vault: vaultRoot,
     })
 
+    if (status !== 'sending') {
+      await saveAssistantOutboxIntent(vaultRoot, {
+        ...prepared!.intent, status, preparedDispatchToken: null,
+        nextAttemptAt: '2026-04-08T05:00:02.000Z',
+      })
+    }
     const skipped = await dispatchAssistantOutboxIntent({
       allowPreparedSending: true,
       intentId: seeded.intentId,
@@ -8332,7 +8344,7 @@ describe('assistant outbox runtime', () => {
       vault: vaultRoot,
     })
 
-    expect(skipped.intent.status).toBe('sending')
+    expect(skipped.intent.status).toBe(status)
     expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
   })
 

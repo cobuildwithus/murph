@@ -116,6 +116,7 @@ import {
 import {
   assertHostedAssistantLinqTurnCommitAuthority,
   collectHostedAssistantDeliverySideEffects,
+  HOSTED_PUBLISHED_CLAIM_MAX_WAIT_MS,
   createHostedAssistantProgressDeliveryDependencies,
   drainHostedPreparedAssistantDeliveries,
   prepareHostedAssistantDeliveryEffectsForDispatch,
@@ -2510,6 +2511,7 @@ export async function runHostedWorkspaceAssistantPhase(
         input.shouldYieldBackgroundMaintenance?.() !== true,
       messageVolumeReceiptPort: input.runtime.platform.effectsPort,
       preferredIntentIds: currentTurnDeliveryIntentIds,
+      workspaceCheckpointedAt: input.workspace?.checkpointedAt,
       vaultRoot: input.restored.vaultRoot,
     });
     const deliveryEffectsPreparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
@@ -2538,7 +2540,7 @@ export async function runHostedWorkspaceAssistantPhase(
         }),
         assistantCronWakeAfterPassCandidate,
       ]);
-      const postDelivery = await drainHostedDeliveryWithFileCheckpoint({
+      const postDelivery = await drainHostedDeliveryAfterRequiredPublication({
         assistantMetrics,
         assistantDeliveryEffects: deliveryEffects,
         assistantDeliveryPreparation: deliveryEffectsPreparation,
@@ -2609,6 +2611,7 @@ export async function runHostedWorkspaceAssistantPhase(
       return await withHostedAutoReplyRouteMaintenanceAfterDelivery({
         input,
         result: mergeContinuingSystemMailboxResult({
+          ...carryHostedDeliveryDurableContinuation(postDelivery),
           checkpointReason: postDelivery.checkpointReason,
           nextWakeAt,
           ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
@@ -2739,7 +2742,7 @@ export async function runHostedWorkspaceAssistantPhase(
                   },
                 };
               }
-              return await drainHostedDeliveryWithFileCheckpoint({
+              return await drainHostedDeliveryAfterRequiredPublication({
                 assistantMetrics,
                 assistantDeliveryEffects: deliveryEffects,
                 assistantDeliveryPreparation: deliveryEffectsPreparation,
@@ -3730,7 +3733,7 @@ async function finalizeHostedBackgroundMaintenanceResult(input: {
     baseNextWake: HostedRuntimeWakeCandidate,
   ) => {
     assertHostedAssistantPhaseLiveness(input.input.signal);
-    return await drainHostedDeliveryWithFileCheckpoint({
+    return await drainHostedDeliveryAfterRequiredPublication({
       assistantDeliveryEffects: [],
       baseNextWake,
       checkpointReason: "provider_cleanup",
@@ -5261,6 +5264,7 @@ async function prepareSystemMailboxDelivery(input: {
           systemMailboxPreparation,
         ),
         vaultRoot: phaseInput.restored.vaultRoot,
+        workspaceCheckpointedAt: phaseInput.workspace?.checkpointedAt,
       })
       : [];
   const systemMailboxDeliveryEffectsForDispatch =
@@ -6120,7 +6124,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
           redactedStatus: deliveryInput.redactedStatus,
         };
       }
-      return await drainHostedDeliveryWithFileCheckpoint({
+      return await drainHostedDeliveryAfterRequiredPublication({
         afterDurableCheckpoint,
         ...deliveryInput,
       });
@@ -6144,7 +6148,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
 function deferHostedDeliveryUntilDurableCheckpoint(
   input: Parameters<typeof drainHostedPostCheckpointDelivery>[0],
 ): HostedWorkspaceDurableCheckpointEffect {
-  return async () => {
+  const effect: HostedWorkspaceDurableCheckpointEffect = async () => {
     const postDelivery = await drainHostedPostCheckpointDelivery(input);
     return {
       nextWakeAt: postDelivery.nextWakeAt ?? null,
@@ -6153,6 +6157,19 @@ function deferHostedDeliveryUntilDurableCheckpoint(
       requiresFollowUpCheckpoint: true,
     };
   };
+  const markedEffects = input.assistantDeliveryEffects.filter((effect) => effect.publishBeforeDispatch === true);
+  return markedEffects.length === 0 ? effect : Object.assign(effect, {
+    checkpointStartByMs: Date.now() + (markedEffects.some((effect) =>
+      effect.deliveryPhase === "foreground_current_turn") ? 0 : HOSTED_PUBLISHED_CLAIM_MAX_WAIT_MS),
+  });
+}
+
+function carryHostedDeliveryDurableContinuation(
+  postDelivery: HostedWorkspaceRunnerAssistantPhasePostCheckpoint,
+): Pick<HostedWorkspaceRunnerAssistantPhaseResult, "afterCheckpoint"> {
+  return postDelivery.afterDurableCheckpoint
+    ? { afterCheckpoint: async () => postDelivery }
+    : {};
 }
 
 function resolveHostedSystemMailboxMetricsWakeReason(input: {
@@ -6214,6 +6231,7 @@ async function collectForegroundDeliveryEffects(input: {
   messageVolumeReceiptPort: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["effectsPort"];
   preferredIntentIds: readonly string[];
   vaultRoot: string;
+  workspaceCheckpointedAt?: string | null;
 }): Promise<HostedPreparedAssistantDeliveryEffects> {
   const deliveryEffects = await collectHostedAssistantDeliverySideEffects({
     platform: input.platform,
@@ -6222,6 +6240,7 @@ async function collectForegroundDeliveryEffects(input: {
     messageVolumeReceiptPort: input.messageVolumeReceiptPort,
     preferredIntentIds: input.preferredIntentIds,
     vaultRoot: input.vaultRoot,
+    workspaceCheckpointedAt: input.workspaceCheckpointedAt,
   });
   const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
     platform: input.platform,
@@ -6260,6 +6279,7 @@ async function runForegroundAssistantReplyPhase(input: {
     signal: input.input.signal,
     messageVolumeReceiptPort: input.input.runtime.platform.effectsPort,
     preferredIntentIds: input.currentTurnDeliveryIntentIds,
+    workspaceCheckpointedAt: input.input.workspace?.checkpointedAt,
     vaultRoot: input.input.restored.vaultRoot,
   });
   const deliveryEffects = preparedDeliveryEffects.effects;
@@ -6296,7 +6316,7 @@ async function runForegroundAssistantReplyPhase(input: {
       systemMailboxWake: input.systemMailboxWake,
       systemMailboxWakeAt: input.systemMailboxWakeAt,
     });
-    const postDelivery = await drainHostedDeliveryWithFileCheckpoint({
+    const postDelivery = await drainHostedDeliveryAfterRequiredPublication({
       assistantMetrics: input.assistantMetrics,
       assistantDeliveryEffects: deliveryEffects,
       assistantDeliveryPreparation: preparedDeliveryEffects.preparation,
@@ -6360,6 +6380,7 @@ async function runForegroundAssistantReplyPhase(input: {
       };
     }
     return {
+      ...carryHostedDeliveryDurableContinuation(postDelivery),
       checkpointReason: postDelivery.checkpointReason,
       foregroundReplyFailed,
       ...invocationLocalAssistantWake,
@@ -6454,7 +6475,7 @@ async function runForegroundAssistantReplyPhase(input: {
               input.skippedDeviceSyncWake,
               input.systemMailboxWake,
             ]);
-            const postDelivery = await drainHostedDeliveryWithFileCheckpoint({
+            const postDelivery = await drainHostedDeliveryAfterRequiredPublication({
               assistantMetrics: input.assistantMetrics,
               assistantDeliveryEffects: deliveryEffects,
               assistantDeliveryPreparation: preparedDeliveryEffects.preparation,
@@ -6589,35 +6610,43 @@ async function runHostedProviderCleanupPostCheckpointStep(input: {
   };
 }
 
-async function drainHostedDeliveryWithFileCheckpoint(
+async function drainHostedDeliveryAfterRequiredPublication(
   input: Parameters<typeof drainHostedPostCheckpointDelivery>[0],
 ): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint> {
-  // afterCheckpoint only marks local state dirty. The durable hook runs after
-  // publication of the prepared sending claim, before the file upload.
-  if (input.assistantDeliveryEffects.some((effect) =>
-    effect.payload.channel === "telegram"
-    && effect.payload.media.some((media) => media.kind === "vault_file")
-  )) {
-    const afterDurableCheckpoint = composeHostedAssistantPhaseDurableCheckpointEffects(
-      input.afterDurableCheckpoint ?? null,
-      deferHostedDeliveryUntilDurableCheckpoint(input),
-    );
-    const nextWake = selectHostedRuntimeWakeCandidate([
-      input.baseNextWake,
-      createHostedRuntimeWakeCandidate(
-        await resolveHostedAssistantOutboxNextWakeAt({ vaultRoot: input.input.restored.vaultRoot }),
-        HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
-      ),
-    ]);
-    return {
-      ...(afterDurableCheckpoint ? { afterDurableCheckpoint } : {}),
-      checkpointReason: "outbox_sending",
-      nextWakeAt: nextWake.at,
-      nextWakeReason: nextWake.reason,
-      redactedStatus: input.redactedStatus ?? {},
-    };
-  }
-  return await drainHostedPostCheckpointDelivery(input);
+  const afterPublication = input.assistantDeliveryEffects.filter((effect) => effect.publishBeforeDispatch === true);
+  if (afterPublication.length === 0) return await drainHostedPostCheckpointDelivery(input);
+
+  const immediate = input.assistantDeliveryEffects.filter((effect) => effect.publishBeforeDispatch !== true);
+  const afterDurableCheckpoint = composeHostedAssistantPhaseDurableCheckpointEffects(
+    input.afterDurableCheckpoint ?? null,
+    deferHostedDeliveryUntilDurableCheckpoint({
+      ...input,
+      assistantDeliveryEffects: afterPublication,
+      providerCleanupPlan: immediate.length > 0
+        ? { ...input.providerCleanupPlan, due: false }
+        : input.providerCleanupPlan,
+    }),
+  );
+  const nextWake = selectHostedRuntimeWakeCandidate([
+    input.baseNextWake,
+    createHostedRuntimeWakeCandidate(
+      await resolveHostedAssistantOutboxNextWakeAt({ vaultRoot: input.input.restored.vaultRoot }),
+      HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+    ),
+  ]);
+  const deferred: HostedWorkspaceRunnerAssistantPhasePostCheckpoint = {
+    ...(afterDurableCheckpoint ? { afterDurableCheckpoint } : {}),
+    checkpointReason: "outbox_sending",
+    nextWakeAt: nextWake.at,
+    nextWakeReason: nextWake.reason,
+    redactedStatus: input.redactedStatus ?? {},
+  };
+  if (immediate.length === 0) return deferred;
+  return mergeHostedAssistantPhasePostCheckpoint(deferred, await drainHostedPostCheckpointDelivery({
+    ...input,
+    afterDurableCheckpoint: null,
+    assistantDeliveryEffects: immediate,
+  }));
 }
 
 async function drainHostedPostCheckpointDelivery(input: {
