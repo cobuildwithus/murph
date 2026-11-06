@@ -352,6 +352,11 @@ Product access after billing lapses, kept separate from AI usage, is owned by
 The caller audit and local proof are in the
 [execution record](exec-plans/completed/2026-11-06-lapsed-member-access.md).
 
+Deterministic edits and clinical acquisition with AI denied are owned by
+[Hosted runtime protocol](references/hosted-runtime-protocol.md) and
+[Architecture · Hosted Clinical Records](../ARCHITECTURE.md#hosted-clinical-records).
+Implementation and replay proof: [model-free actions](exec-plans/completed/2026-11-06-lapsed-actions.md).
+
 # Murph Agent Docs Index
 
 The weekly game's flag-gated Terms check on app writes

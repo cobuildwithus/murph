@@ -444,6 +444,7 @@ export type HostedWorkspaceRunnerMailboxImportItem =
   HostedMailboxImporter<HostedWorkspaceRunnerMailboxImportContext>;
 
 export interface HostedWorkspaceRunnerInput {
+  assistantExecutionBlocked?: boolean;
   awaitBackgroundMaintenanceBarrier?: ((input: {
     drainPendingForegroundWake(): Promise<void>;
     foregroundConversationWorkObserved(): boolean;
@@ -2489,6 +2490,7 @@ async function importHostedMailboxForWorkspaceRunnerUntracked(
     },
   );
   const result = await importHostedMailboxPrefixAndCheckpoint({
+    assistantExecutionBlocked: input.input.assistantExecutionBlocked,
     checkpointReason: input.checkpointReason,
     createCheckpointRequest: (requestInput) =>
       input.checkpointRequestBuilder.createRequest({

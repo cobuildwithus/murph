@@ -781,7 +781,7 @@ describe("hosted orchestration reconciliation facts", () => {
     "does not read completed independent rows as runnable work behind a blocked %s head",
     async (reason) => {
       const rows = [
-        { dedupeKey: "member.action.requested:synthetic", kind: "member.action.requested", laneSeq: "5" },
+        { dedupeKey: "clinical-records.enrichment-requested:synthetic", kind: "clinical-records.enrichment-requested", laneSeq: "5" },
         { dedupeKey: "device-sync.wake:completed", kind: "device-sync.wake", laneSeq: "6" },
       ];
       mocks.readHostedMailboxFirstLiveSystemItemAfterSeq.mockImplementation(async (input) =>
@@ -863,8 +863,8 @@ describe("hosted orchestration reconciliation facts", () => {
       ]);
       mocks.readHostedMailboxFirstLiveSystemItemAfterSeq.mockImplementation(async (input) =>
         input.modelFreeOnly ? null : {
-          dedupeKey: scenario === "default head" ? "member.action.requested:synthetic" : "device-sync.wake:imported",
-          kind: scenario === "default head" ? "member.action.requested" : "device-sync.wake", laneSeq: "5",
+          dedupeKey: scenario === "default head" ? "clinical-records.enrichment-requested:synthetic" : "device-sync.wake:imported",
+          kind: scenario === "default head" ? "clinical-records.enrichment-requested" : "device-sync.wake", laneSeq: "5",
         },
       );
       mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
@@ -878,6 +878,65 @@ describe("hosted orchestration reconciliation facts", () => {
       expect(future.blocked?.retryAt).toBe(retryAt);
       vi.setSystemTime(new Date(retryAt));
       expect((await readFacts()).workspace?.systemMailboxFrontier).toBe("model_free");
+    },
+  );
+
+  it.each(["member.action.requested", "member.preferences.updated", "clinical-records.sync-requested"])(
+    "only projects fresh %s as independent after a confirmed denial", async (kind) => {
+      mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+        nextWakeAt: FIXED_NOW, nextWakeReason: "assistant",
+        nextDefaultProcessingWakeAt: FIXED_NOW, nextDefaultProcessingWakeReason: "assistant",
+        systemMailboxProgressGeneration: "7",
+        redactedStatusJson: { hostedMailboxSystemHandledThroughSeq: "4", hostedMailboxSystemImportedSeq: "4",
+          hostedMailboxSystemModelFreeWakeAt: null, hostedMailboxSystemModelFreeWakeVersion: "4" },
+      }));
+      mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+        { lane: "conversation", maxSeq: "0" }, { lane: "system", maxSeq: "5" },
+      ]);
+      mocks.readHostedMailboxFirstLiveSystemItemAfterSeq.mockImplementation(async (input) =>
+        input.modelFreeOnly && !input.assistantExecutionBlocked ? null
+          : { dedupeKey: `${kind}:synthetic`, kind, laneSeq: "5" },
+      );
+      const readFacts = async () => parseHostedRuntimeReconciliationFacts(await (await reconciliationRoute.GET(requestForFacts(), routeContext())).json());
+      mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
+      expect((await readFacts()).workspace?.systemMailboxFrontier).toBe("default_owned");
+      expect(mocks.readHostedMailboxFirstLiveSystemItemAfterSeq.mock.calls.every(([input]) => input.assistantExecutionBlocked !== true)).toBe(true);
+      mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ decision: buildUsageLimitExceededGateDecision(), status: "denied" });
+      const denied = await readFacts();
+      expect(denied.blocked?.reason).toBe("ai_usage_denied");
+      expect(denied.workspace?.systemMailboxFrontier).toBe("model_free");
+      expect(mocks.readHostedMailboxFirstLiveSystemItemAfterSeq).toHaveBeenLastCalledWith(
+        expect.objectContaining({ afterSeq: "4", modelFreeOnly: true, assistantExecutionBlocked: true }),
+      );
+    },
+  );
+
+  it.each(["member.action.requested", "member.preferences.updated", "clinical-records.sync-requested"])(
+    "keeps new-Web/old-runner imported %s dormant after an authoritative empty model-free projection", async (kind) => {
+      mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+        nextWakeAt: FIXED_NOW, nextWakeReason: "assistant",
+        nextDefaultProcessingWakeAt: FIXED_NOW, nextDefaultProcessingWakeReason: "assistant",
+        systemMailboxProgressGeneration: "7",
+        redactedStatusJson: { hostedMailboxSystemHandledThroughSeq: "4", hostedMailboxSystemImportedSeq: "5",
+          hostedMailboxSystemModelFreeWakeAt: null, hostedMailboxSystemModelFreeWakeVersion: "4" },
+      }));
+      mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+        { lane: "conversation", maxSeq: "0" }, { lane: "system", maxSeq: "5" },
+      ]);
+      mocks.readHostedMailboxFirstLiveSystemItemAfterSeq.mockImplementation(async (input) =>
+        BigInt(input.afterSeq) < 5n ? { dedupeKey: `${kind}:synthetic`, kind, laneSeq: "5" } : null,
+      );
+      mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ decision: buildUsageLimitExceededGateDecision(), status: "denied" });
+      for (const elapsedMinutes of [0, 20, 40]) {
+        vi.setSystemTime(new Date(Date.parse(FIXED_NOW) + elapsedMinutes * 60_000));
+        const facts = parseHostedRuntimeReconciliationFacts(await (await reconciliationRoute.GET(requestForFacts(), routeContext())).json());
+        expect(facts.workspace?.systemMailboxFrontier).toBeNull();
+        expect(facts.blocked?.reason).toBe("ai_usage_denied");
+        expect(facts.blocked?.retryAt).toBe("2026-06-01T00:00:00.000Z");
+        expect(mocks.readHostedMailboxFirstLiveSystemItemAfterSeq).toHaveBeenLastCalledWith(
+          expect.objectContaining({ afterSeq: "5", modelFreeOnly: true, assistantExecutionBlocked: true }),
+        );
+      }
     },
   );
 
@@ -901,7 +960,7 @@ describe("hosted orchestration reconciliation facts", () => {
         ? BigInt(input.afterSeq) < 6n
           ? { dedupeKey: "device-sync.wake:imported", kind: "device-sync.wake", laneSeq: "6" }
           : null
-        : { dedupeKey: "member.action.requested:synthetic", kind: "member.action.requested", laneSeq: "5" },
+        : { dedupeKey: "clinical-records.enrichment-requested:synthetic", kind: "clinical-records.enrichment-requested", laneSeq: "5" },
     );
     const facts = parseHostedRuntimeReconciliationFacts(
       await (await reconciliationRoute.GET(requestForFacts(), routeContext())).json(),

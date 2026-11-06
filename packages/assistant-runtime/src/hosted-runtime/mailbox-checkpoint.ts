@@ -34,6 +34,7 @@ import type {
 } from "./platform.ts";
 
 export interface HostedMailboxImportCheckpointInput {
+  assistantExecutionBlocked?: boolean;
   deferConversationUntil?: HostedMailboxConversationDeferral | null;
   deferCheckpoint?: boolean;
   expectedUserId: string;
@@ -191,6 +192,7 @@ export async function importHostedMailboxPrefixAndCheckpoint(
   let checkpoint: HostedWorkspaceCheckpointResponse;
   try {
     const systemMailboxProgress = await readHostedSystemMailboxProgress({
+      assistantExecutionBlocked: input.assistantExecutionBlocked,
       importedSeq: importResult.state.watermarks.system,
       now: input.now,
       vaultRoot: input.vaultRoot,

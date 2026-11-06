@@ -1,3 +1,4 @@
+import { getHostedSystemMailboxModelFreeKinds } from "@murphai/hosted-execution/orchestration-control";
 import type {
   HostedMailboxItem,
   HostedMailboxKind,
@@ -96,6 +97,11 @@ const ACTION_BY_KIND = {
   "vault-share.delivery": "import-vault-share-delivery",
   "vault-share.revoke": "import-vault-share-revoke",
 } satisfies Record<HostedMailboxKind, HostedMailboxImportAction>;
+
+export function getHostedSystemMailboxModelFreeRouteActions(assistantExecutionBlocked = false) {
+  return [...new Set(getHostedSystemMailboxModelFreeKinds(assistantExecutionBlocked)
+    .map((kind) => ACTION_BY_KIND[kind]))];
+}
 
 export function createHostedMailboxRoutingPlan(
   item: HostedMailboxItem,
