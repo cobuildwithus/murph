@@ -650,6 +650,27 @@ describe("alarm recovery of native outcomes", () => {
     },
   );
 
+  it("retries a failed alarm stop until the exact completed attempt settles without demand", async () => {
+    let stopFails = true;
+    const { h, web } = await failedInvocation({
+      invoke: async () => { throw new Error("Network connection lost"); },
+      destroy: async () => { if (stopFails) throw new Error("synthetic stop failure"); },
+    });
+    new RunnerInvocationReceiptStore(h.sql).complete({ attemptId: "attempt-starting", generation: "1" }, false);
+    await alarm(h);
+    const failedStops = h.calls.destroy;
+    assert.ok(failedStops > 0);
+    assert.equal((await h.container.readActiveRuntimeUserFence()).active, true);
+    assert.equal(web.current.phase, "active");
+    stopFails = false;
+    await alarm(h);
+    assert.equal(h.calls.destroy, failedStops + 1);
+    await alarm(h);
+    assert.equal(web.current.phase, "idle");
+    assert.deepEqual(web.commands.filter(c => c.operation === "complete"), [{ operation: "complete",
+      attemptId: "attempt-starting", generation: "1", settledRunnerContainerName: GLOBAL_SLOT, immediateRecheckRequested: false }]);
+  });
+
   it.each(["acknowledged", "lost-ack", "evict-after-retirement", "evict-before-notify"] as const)(
     "retires a stopped voice-only failure and durably routes notification: %s", async condition => {
       const { h: initial, web } = await failedInvocation();

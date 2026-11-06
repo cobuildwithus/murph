@@ -2261,8 +2261,7 @@ export class RunnerContainer extends Container {
     try {
       const receipt = this.readRunnerSlotBindingOptional()?.state === "bound"
         ? this.requireInvocationReceiptStore().read() : null;
-      if (preserved.requiresFailClosedStopReason === "transport_uncertain"
-        && receipt?.state === "completed" && receipt.attemptId === preserved.attemptId
+      if (receipt?.state === "completed" && receipt.attemptId === preserved.attemptId
         && receipt.generation === preserved.leaseGeneration) {
         await this.settleExactWorkspaceInvocationForWake(preserved);
       } else {
