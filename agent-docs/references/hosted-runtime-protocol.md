@@ -4125,19 +4125,21 @@ consolidates it through an idle snapshot before foreground mailbox or assistant
 work; the remaining active-prefix capacity lets one already-admitted
 background append finish before cooperative yield is observed, while
 foreground writes can compact the v1 log until the next quiescent checkpoint.
-That recovery snapshot publishes an immediate
-mailbox-continuation wake so web accepts it even when foreground conversation
-rows are already pending; immediately after that snapshot, a status-only
-checkpoint durably restores the prior wake projection before foreground work
-or any early return, and the runner then drains any queued runtime wake. The
-recovery snapshot retains the receipt-log pointer and the original prior wake
-as its retry marker; only the wake-reset status checkpoint clears them, so a
-crash or ambiguous failure between those checkpoints safely repeats idempotent
-receipt replay and consolidation without losing or replacing that prior wake.
-The two receipt-log pointer fields and three recovery-marker fields are
-reserved outside the ordinary 96-field redacted-status budget at both
-transport parsing and workspace persistence boundaries; ordinary status
-remains capped at 96 fields.
+One workspace-version CAS publishes the recovered files, current wake and
+cleared receipt-log status together. Web accepts a snapshot with a valid owner
+and version even when conversation rows are pending; `conversationInputAhead`
+is an observation in the response, not a rejection
+(`apps/web/src/lib/hosted-workspace/store.ts`). Pending rows stay durable, and
+a default-mode invocation imports them in the foreground pass that follows.
+A failure before acceptance leaves the prior snapshot, receipt log and wake,
+so the next invocation repeats idempotent replay and consolidation. After a
+lost acknowledgement, the next invocation reads the cleared successor.
+Earlier runners wrote a recovery marker and a temporary mailbox wake. Current
+runners write neither, but still restore a retained marker's saved wake,
+including a saved null wake. The two receipt-log pointer fields and three
+recovery-marker fields stay reserved outside the ordinary 96-field
+redacted-status budget at transport parsing and workspace persistence
+boundaries; ordinary status remains capped at 96 fields.
 Later idle snapshots omit the receipt-log status. The pending-log limits bound
 log traversal and retained receipt-reference count, not receipt/payload body
 bytes or all replay work. They also do not govern object retention: encrypted

@@ -1881,3 +1881,7 @@ The durable contract remains in `references/hosted-runtime-protocol.md`.
 
 Hosted delivery uncertainty, accepted confirmation, approval consume retries, and
 accounting deadline proofs are recorded in the [delivery settlement execution record](exec-plans/completed/2026-11-06-delivery-settlement.md).
+
+Single-checkpoint receipt recovery and the accepted workspace owner are tracked in
+[`single checkpoint receipt recovery`](exec-plans/completed/2026-11-06-single-checkpoint-receipt-recovery.md).
+The durable contract remains in `references/hosted-runtime-protocol.md`.
