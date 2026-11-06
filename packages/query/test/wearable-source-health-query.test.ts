@@ -124,7 +124,9 @@ function inspectProjection(root: string) {
       globalTables: existingGlobalTables,
       currentSchema: hasCurrentQueryProjectionSchema(database),
       global: globalTables.map(table => existingGlobalTables.includes(table)
-        ? database.prepare(`SELECT rowid, * FROM ${table} ORDER BY rowid`).all() : []),
+        ? database.prepare(table === "query_metric_points"
+          ? "SELECT * FROM query_metric_points ORDER BY metric_key, effective_date DESC, observed_at DESC, id"
+          : `SELECT rowid, * FROM ${table} ORDER BY rowid`).all() : []),
       globalMeta: database.prepare("SELECT * FROM query_meta WHERE key != 'wearable_source_manifest' ORDER BY key").all(),
       wearableMeta: database.prepare("SELECT value FROM query_meta WHERE key = 'wearable_source_manifest'").get()?.value,
       wearable: database.prepare("SELECT * FROM query_wearable_summaries ORDER BY id").all(),

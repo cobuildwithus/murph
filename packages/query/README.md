@@ -46,6 +46,22 @@ index includes source labels, values, status, coding and qualifiers without
 recursing into raw attributes. Safe shared search still excludes structured
 payloads. This projection remains rebuildable from canonical notes.
 
+Version 36 clusters metric points in a `WITHOUT ROWID` table keyed by
+`(metric_key, effective_date DESC, observed_at DESC, id)`. It removes the unused
+metric `sort_rank` and separate metric sort index; the partial biomarker index
+remains. An insertion-local ID set preserves global duplicate-ID rejection,
+including hash collisions between distinct full identities. Query filters,
+ordering, limits and decoded results are unchanged. The existing unsupported
+version reset rebuilds both v35-to-v36 upgrades and v36-to-v35 rollbacks from
+canonical evidence before writable schema setup. Full schema promotion and row
+publication remain one transaction; older in-flight readers reject partial
+stores through the required-table guard.
+
+Run `pnpm exec tsx --expose-gc --tsconfig tsconfig.base.json packages/query/bench/query-projection.ts`
+from the repository root with `zstd` installed to measure synthetic rebuild time,
+plain bytes, `zstd -9 --long=27` bytes, read correctness and sorted-insertion
+packing. The default fixture interleaves four metric keys across 8,000 points.
+
 Version 34 shares ordered JSON field-name dictionaries across wearable summary
 rows in `query_wearable_summary_shapes`. Tagged object/array values preserve all
 summary facts and internal composition evidence; public summary JSON is unchanged.

@@ -69,13 +69,13 @@ export function insertMetricPoints(
   // Full publication inserts one generation under the existing transaction.
   // Share exact codec output without a persistent duplicate-text index.
   const payloadIds = new Map<string, number | bigint>();
+  const pointIds = new Set<string>();
   const insertPayload = database.prepare(`
     INSERT INTO query_metric_payloads (metric_point_json) VALUES (?)
   `);
   const insertMetricPoint = database.prepare(`
     INSERT INTO query_metric_points (
       id,
-      sort_rank,
       metric_key,
       biomarker_key,
       value,
@@ -97,10 +97,16 @@ export function insertMetricPoints(
       source_path,
       confidence,
       payload_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  metricPoints.forEach((point, index) => {
+  metricPoints.forEach((point) => {
+    // Identity dedupe compares full tuples; distinct tuples can hash to one ID.
+    // Preserve the old global ID constraint without a persistent unique index.
+    if (pointIds.has(point.id)) {
+      throw new Error("UNIQUE constraint failed: query_metric_points.id");
+    }
+    pointIds.add(point.id);
     const payload = stringifyStoredMetricPointPayload(point);
     let payloadId = payloadIds.get(payload);
     if (payloadId === undefined) {
@@ -109,7 +115,6 @@ export function insertMetricPoints(
     }
     insertMetricPoint.run(
       point.id,
-      index,
       point.metricKey,
       point.biomarkerKey,
       point.canonicalValue ?? point.value,

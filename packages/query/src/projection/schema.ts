@@ -33,7 +33,8 @@ export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
 // 33: Retire untouched legacy Junction oxygen analytics from default queries.
 // 34: Share wearable JSON field dictionaries and pin search rowids for rebuild compaction.
 // 35: Index allowlisted clinical-fact fields in private search.
-export const QUERY_PROJECTION_SQLITE_VERSION = 35;
+// 36: Cluster metric points by metric and descending time without a sort index.
+export const QUERY_PROJECTION_SQLITE_VERSION = 36;
 
 export interface QueryProjectionLocation {
   absolutePath: string;
@@ -221,8 +222,7 @@ export function ensureQueryProjectionSchema(database: DatabaseSync): void {
     );
 
     CREATE TABLE IF NOT EXISTS query_metric_points (
-      id TEXT PRIMARY KEY,
-      sort_rank INTEGER NOT NULL,
+      id TEXT NOT NULL,
       metric_key TEXT NOT NULL,
       biomarker_key TEXT,
       value REAL,
@@ -243,10 +243,10 @@ export function ensureQueryProjectionSchema(database: DatabaseSync): void {
       source_result_index INTEGER,
       source_path TEXT NOT NULL,
       confidence TEXT NOT NULL,
-      payload_id INTEGER NOT NULL REFERENCES query_metric_payloads(payload_id)
-    );
+      payload_id INTEGER NOT NULL REFERENCES query_metric_payloads(payload_id),
+      PRIMARY KEY (metric_key, effective_date DESC, observed_at DESC, id)
+    ) WITHOUT ROWID;
 
-    CREATE INDEX IF NOT EXISTS query_metric_points_metric_latest_idx ON query_metric_points(metric_key, effective_date DESC, observed_at DESC);
     CREATE INDEX IF NOT EXISTS query_metric_points_biomarker_latest_idx
       ON query_metric_points(biomarker_key, effective_date DESC, observed_at DESC)
       WHERE biomarker_key IS NOT NULL;
