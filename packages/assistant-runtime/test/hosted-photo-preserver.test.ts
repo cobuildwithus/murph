@@ -246,5 +246,9 @@ test("a photo whose identity cannot be established is kept rather than pruned", 
     expect(mediaStore.delete).not.toHaveBeenCalled();
     expect(objects.size).toBe(1);
     expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries.map(entry => entry.relativePath)).toEqual([relativePath]);
+    // A read of that photo is denied for that one file, not an aborted turn.
+    const materialize = createHostedArtifactMaterializer({ vaultRoot, operatorHomeRoot: vaultRoot, mediaStore });
+    expect((await materialize([relativePath])).missingArtifactPaths.get(`vault:${relativePath}`)).toBe("integrity");
+    expect(mediaStore.get).not.toHaveBeenCalled();
   } finally { await rm(vaultRoot, { recursive: true, force: true }); }
 });
