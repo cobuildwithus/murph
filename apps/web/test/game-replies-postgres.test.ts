@@ -5,7 +5,7 @@ import type { ApplePushRequest } from "@/src/lib/apple-push/send";
 
 const mocks = vi.hoisted(() => ({ send: vi.fn(), actor: "" }));
 vi.mock("@/src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: vi.fn(async () => {}) }));
-vi.mock("@/src/lib/game/http/auth", () => ({ requireGameMember: async () => mocks.actor, requireCurrentTermsFor: async () => {} }));
+vi.mock("@/src/lib/game/http/auth", () => ({ requireGameMember: async () => mocks.actor, requireGameMemberAuth: async () => ({ member: { id: mocks.actor }, sessionId: "synthetic-session" }), assertGameMemberAuthCurrentTx: async () => {}, requireCurrentTermsFor: async () => {} }));
 // The provider boundary is fake; real AES envelopes still bind bytes to owner and row.
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
   unwrapHostedDomainRootForWeb: async () => ({ rootKey: Buffer.alloc(32, 7), envelope: { rootKeyId: "synthetic-reply-root" } }),
@@ -44,7 +44,7 @@ async function member(name: string) {
   await ok(id, { type: "setProfile", firstName: name, timeZone: "UTC" });
   return id;
 }
-async function pair(existing?: { owner: string; peer: string }) {
+async function pair(existing?: { owner: string; peer: string }, postOwner = true) {
   const owner = existing?.owner ?? await member("Ava"), peer = existing?.peer ?? await member("Sam");
   const gameId = randomUUID();
   const created = await ok(owner, { type: "createGame", gameId, inviteeFirstName: "Sam", terms: {
@@ -53,7 +53,7 @@ async function pair(existing?: { owner: string; peer: string }) {
   await ok(peer, { type: "join", token: created!.inviteToken!, termsVersion: 1, timeZone: "UTC" });
   await devStartNow(gameId, owner).catch(() => undefined);
   const entryId = randomUUID(), peerEntry = randomUUID();
-  await ok(owner, { type: "post", gameId, entryId, kind: "words", text: "Owner post", mediaKeys: [] });
+  if (postOwner) await ok(owner, { type: "post", gameId, entryId, kind: "words", text: "Owner post", mediaKeys: [] });
   await ok(peer, { type: "post", gameId, entryId: peerEntry, kind: "words", text: "Peer post", mediaKeys: [] });
   return { owner, peer, gameId, entryId, peerEntry };
 }
@@ -73,6 +73,41 @@ describe.skipIf(!enabled)("post reply PostgreSQL contract", () => {
   afterAll(async () => {
     await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: members } } });
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: members } } });
+  });
+
+  it("preserves an occupied slot and its reply on a guarded different-ID post, and replays the committed ID", async () => {
+    const { owner, peer, gameId, entryId } = await pair();
+    await ok(peer, textReply(gameId, entryId));
+    const snapshot = async () => ({
+      entries: await getPrisma().gameEntry.findMany({ where: { gameId }, orderBy: { id: "asc" } }),
+      replies: await getPrisma().gameReply.findMany({ where: { entry: { gameId } } }),
+      events: await getPrisma().gameEvent.findMany({ where: { gameId }, orderBy: { id: "asc" } }),
+    });
+    const before = await snapshot();
+    const command = { type: "post", gameId, entryId: randomUUID(), kind: "words", text: "Delayed post", expectEmptySlot: true };
+    expect(await runGameCommand({ actorMemberId: owner, command })).toMatchObject({
+      ok: false, status: 409, error: { code: "SLOT_TAKEN" },
+    });
+    expect(await snapshot()).toEqual(before);
+    expect(await runGameCommand({ actorMemberId: owner, command: { ...command, entryId } })).toMatchObject({ ok: true });
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it.each([false, true])("accepts a guarded empty slot, including an explicit withdrawal retake=%s", async retake => {
+    const { owner, gameId, entryId } = await pair(undefined, retake);
+    if (retake) await ok(owner, { type: "withdraw", gameId, entryId });
+    const nextId = randomUUID();
+    expect(await runGameCommand({ actorMemberId: owner, command: {
+      type: "post", gameId, entryId: nextId, kind: "words", text: "Next post", expectEmptySlot: true,
+    } })).toMatchObject({ ok: true });
+    expect(await getPrisma().gameEntry.findUniqueOrThrow({ where: { id: nextId } })).toMatchObject({ attempt: retake ? 2 : 1, withdrawnAt: null });
+  });
+
+  it.each([false, null, "true", 1])("rejects an invalid empty-slot expectation: %s", async expectEmptySlot => {
+    const { owner, gameId } = await pair();
+    expect(await runGameCommand({ actorMemberId: owner, command: {
+      type: "post", gameId, entryId: randomUUID(), kind: "words", text: "Delayed post", expectEmptySlot,
+    } })).toMatchObject({ ok: false, status: 400, error: { code: "INVALID_REQUEST" } });
   });
 
   it("serializes two racing replies and keeps only content-free receipts", async () => {

@@ -466,6 +466,22 @@ resulting avatar. No private photo is shared with the subject or other players.
   current day began (one the phone kept and sent later) counts for no day and
   is refused with `DAY_CLOSED`; a post without a capture age counts for today.
   This is an honor rule for friends, not league evidence.
+- **Empty-slot post.** A native post may carry `expectEmptySlot: true`, meaning
+  the phone saw no live post in the slot it is filling. Under the game lock,
+  after same-ID replay and the ordinary day decision, a live post in that slot
+  refuses the new entry with HTTP 409 `SLOT_TAKEN`. The existing post, its reply
+  and the retake stay as they are. The field names no day, so capture-age
+  placement is unchanged. A client that omits it keeps the older rule: a new
+  entry ID replaces the live post.
+- **Write outcomes.** Every native game command rechecks its exact session
+  inside the transaction that commits it. A session revoked after admission
+  returns 401 `UNAUTHENTICATED` and writes nothing. Once a command or upload has
+  read its request, a server failure is not a refusal: it returns
+  `retryable: true`, as `INTERNAL_ERROR` (500) or `GAME_MEDIA_UNAVAILABLE` (503),
+  and the app keeps its unsent shot or reply. Same-ID replay makes that retry
+  safe after a commit whose response failed. Malformed input, a foreign or
+  genuinely missing media key, an image the store refuses and every rule refusal
+  stay final.
 - **Settle.** When the last player's last day ends, the game is over; it waits
   one more hour only while a player's last day can still take an offline-grace
   post. Once a player's own last day is over, their view carries `settlesAt`

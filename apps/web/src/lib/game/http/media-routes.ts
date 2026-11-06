@@ -13,7 +13,7 @@ import {
 import { authorizeLockedPreviewReads, authorizeMediaRead, authorizeMediaReads, mediaKeyPrefixFor } from "../service";
 import { gameMediaKeyOf } from "../views";
 import { readRawBodyBuffer } from "../../http";
-import { gameHttpError, invalidGameRequest } from "./errors";
+import { gameHttpError, gameMediaUnavailable, invalidGameRequest, withGameServiceFailures } from "./errors";
 
 /**
  * Stores a photo under the member's prefix, keyed by its bytes: a retry
@@ -28,7 +28,7 @@ export async function uploadGameMedia(input: { memberId: string; request: Reques
   if (bytes.byteLength === 0 || !matchesGameMediaContentType(bytes, contentType)) {
     throw invalidGameRequest("The upload doesn't match its Content-Type.");
   }
-  return putGameMedia({ bytes, contentType, prefix: mediaKeyPrefixFor(input.memberId) });
+  return withGameServiceFailures(() => putGameMedia({ bytes, contentType, prefix: mediaKeyPrefixFor(input.memberId) }));
 }
 
 /**
@@ -160,7 +160,7 @@ async function isViewable(memberId: string, key: string, multiplayer = false): P
 
 function requireStorage(): void {
   if (!isGameMediaStorageAvailable()) {
-    throw gameHttpError("GAME_MEDIA_UNAVAILABLE", 503, "Game media isn't available here yet.");
+    throw gameMediaUnavailable();
   }
 }
 
