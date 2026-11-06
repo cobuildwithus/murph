@@ -1229,7 +1229,8 @@ boundaries are owned by `agent-docs/operations/verification-and-runtime.md`.
   fixture prerequisite before the private selecting change, prove that exact
   selected public source, then merge the public requirement. This full lane runs
   on private PRs and main pushes; public production admission retains its
-  separately bounded five-lane production-core contract.
+  separately bounded two-lane production-core contract, and the private nightly
+  proof owns the reminder, foreground, and Codex cache-prefix journeys.
 - Live consumer compatibility is independently enforced at hosted activation.
   `apps/cloudflare/DEPLOY.md` owns the signed serving-Web audience and runtime-log
   admission protocol. Its actual parser/encoder witnesses reject unsupported

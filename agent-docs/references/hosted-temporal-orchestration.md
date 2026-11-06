@@ -1007,15 +1007,19 @@ The hard-cut architecture is accepted when:
   domains stay on the previous deployment until the pinned public candidate,
   current private `main`, and current live readers produce one accepted proof.
   That same private run selects the `production_core` scope from its canonical
-  integration manifest: Linq delivery, scheduled reminder, hosted-web browser
-  smoke, foreground reply priority, and foreground checkpoint ordering. It
-  forces and observes standby allocation in the foreground proof and emits a
+  integration manifest: Linq delivery and hosted-web browser smoke. It emits a
   second digest bound to both exact main SHAs, the fixed scope, and the public
-  protected environment's expected production Temporal target digest. All five
+  protected environment's expected production Temporal target digest. Both
   lanes must have unique successful job receipts bound to that same digest;
   missing, skipped, canceled, duplicated, malformed, or stale receipts block
-  admission. Deploy private scope support before the public controller; older
-  foreground-only proof cannot satisfy or downgrade the new request. Private
+  admission. The public controller rejects both missing and unknown lanes, so
+  a change to this lane list merges in Murph Cloud first and in public `main`
+  right after; older foreground-only proof cannot satisfy or downgrade the
+  request. Scheduled reminder, foreground reply priority, foreground checkpoint
+  ordering, and Codex cache-prefix journeys do not gate Web admission or
+  Cloudflare deploys. Murph Cloud runs them once a night against public `main`
+  and opens or updates a GitHub issue when that run fails, so a regression in
+  those journeys can reach production before it is reported. Private
   setup and final attestation derive the live target from protected
   configuration and reject mismatch without exporting its component values.
   The release mode rejects an arbitrary public ref; public pull requests remain

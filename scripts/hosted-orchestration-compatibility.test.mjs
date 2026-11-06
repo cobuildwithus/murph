@@ -186,10 +186,7 @@ function proofJobs({
     });
     for (const lane of [
       "linq-delivery",
-      "linq-scheduled-reminder",
       "hosted-web-browser-smoke",
-      "foreground-reply-priority",
-      "foreground-checkpoint-ordering",
     ]) {
       jobs.push({
         conclusion: "success",
@@ -676,9 +673,10 @@ test("production core proof rejects duplicate, unknown, malformed, and stale jou
   const last = jobs.at(-1);
   for (const name of [
     jobs.at(-2).name,
-    last.name.replace("foreground-checkpoint-ordering", "unrelated-scenario"),
+    last.name.replace("hosted-web-browser-smoke", "unrelated-scenario"),
+    last.name.replace("hosted-web-browser-smoke", "linq-scheduled-reminder"),
     last.name.replace(/ [0-9a-f]{64}$/u, ` ${"0".repeat(64)}`),
-    "Hosted production core proof / foreground-checkpoint-ordering / invalid",
+    "Hosted production core proof / hosted-web-browser-smoke / invalid",
   ]) {
     assert.throws(() => inspectAttestationJobs([
       ...jobs.slice(0, -1),
@@ -1037,10 +1035,8 @@ for (const releaseScope of [HOSTED_RELEASE_SCOPE_FOREGROUND, HOSTED_RELEASE_SCOP
         }
         if (url.endsWith(`/actions/runs/${RUN_ID}`)) return jsonResponse(privateRun());
         if (url.includes(`/actions/runs/${RUN_ID}/jobs`)) {
-          return jsonResponse({
-            jobs: proofJobs({ releaseScope }),
-            total_count: releaseScope === HOSTED_RELEASE_SCOPE_PRODUCTION_CORE ? 10 : 5,
-          });
+          const jobs = proofJobs({ releaseScope });
+          return jsonResponse({ jobs, total_count: jobs.length });
         }
         throw new Error(`unexpected URL ${url}`);
       }, async () => {
