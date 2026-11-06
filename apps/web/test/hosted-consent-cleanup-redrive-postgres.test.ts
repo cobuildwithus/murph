@@ -74,6 +74,8 @@ describe.skipIf(!enabled)("Postgres consent cleanup redrive", () => {
   beforeEach(() => {
     now = new Date();
     revokeAccess.mockClear();
+    // The fixture and the real service both read this, and CI's shared value is not a valid key.
+    vi.stubEnv("HOSTED_DEVICE_ROUTING_INDEX_KEY", Buffer.alloc(32, 7).toString("base64url"));
     vi.spyOn(prismaModule, "getPrisma").mockReturnValue(prisma);
     vi.spyOn(providers, "createHostedDeviceSyncRegistry").mockReturnValue(createDeviceSyncRegistry([
       provider,
@@ -92,6 +94,7 @@ describe.skipIf(!enabled)("Postgres consent cleanup redrive", () => {
     failedAccounts.clear();
     setHostedSecureBoxStringTestCodecForTests(null);
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
   afterAll(async () => { await prisma?.$disconnect(); });
 
