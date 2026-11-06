@@ -35390,6 +35390,7 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
         deleted: (mealId: string) => commands.filter(command => isMealDeleteCommand(command, mealId)).length,
         editedAt: (mealId: string) => commands.findIndex(command => isMealEditMutationCommand(command) && command.includes(mealId)),
         deletedAt: (mealId: string) => commands.findIndex(command => isMealDeleteCommand(command, mealId)),
+        readBackAt: (mealId: string, after: number) => commands.findIndex((command, index) => index > after && command.startsWith(`meal show ${mealId}`)),
         reviewedAt: (mealId: string) => commands.findIndex(command => isMealRemovePhotoCommand(command, mealId)),
       }
     }
@@ -35409,7 +35410,8 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
       const photo = await capture('2026-08-24')
       const merged = await closeout('2026-08-24')
       expect(merged.editedAt(photo.mealId)).toBeGreaterThanOrEqual(0)
-      expect(merged.deletedAt(typed.mealId)).toBeGreaterThan(merged.editedAt(photo.mealId))
+      expect(merged.readBackAt(photo.mealId, merged.editedAt(photo.mealId))).toBeGreaterThan(merged.editedAt(photo.mealId))
+      expect(merged.deletedAt(typed.mealId)).toBeGreaterThan(merged.readBackAt(photo.mealId, merged.editedAt(photo.mealId)))
       expect(merged.reviewedAt(photo.mealId)).toBeGreaterThan(merged.deletedAt(typed.mealId))
       expect(merged.deleted(photo.mealId)).toBe(0)
       await expectMealGone(typed.mealId)
