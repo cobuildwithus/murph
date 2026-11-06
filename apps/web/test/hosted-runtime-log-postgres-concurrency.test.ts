@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import pg, { type Client, type Pool } from "pg";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   verifyHostedRuntimeLogDatabaseEndpoints,
@@ -192,6 +192,96 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
     );
     database = pool;
   }, 30_000);
+
+  it.each(["between statements", "during a statement"])(
+    "rejects a lost connection %s without an uncaught exception",
+    async (timing) => {
+      const postgres = requirePool(pool);
+      const userId = `member_runtime_log_disconnect_${randomToken()}`;
+      const subjectKey = rememberSubject(subjectKeys, userId);
+      const lockKey = hostedRuntimeLogLockKey(subjectKey);
+      const betweenStatements = timing === "between statements";
+      const uncaught: Error[] = [];
+      const onUncaught = (error: Error) => { uncaught.push(error); };
+      let runtimePool: Pool | undefined;
+      let clientEnded = false;
+      const lockClient = betweenStatements ? null : await postgres.connect();
+
+      vi.resetModules();
+      vi.stubGlobal("__murphHostedRuntimeLogPool", undefined);
+      vi.stubEnv("HOSTED_RUNTIME_LOG_DATABASE_URL", postgresDatabaseUrl(primaryDatabaseUrl, testDatabaseName));
+      vi.stubEnv("HOSTED_RUNTIME_LOG_DIRECT_DATABASE_URL", undefined);
+      process.on("uncaughtException", onUncaught);
+      try {
+        const { getHostedRuntimeLogPool } = await import("@/src/lib/hosted-runtime-log/database");
+        const { recordHostedRuntimeLogs: record } = await import("@/src/lib/hosted-runtime-log/store");
+        runtimePool = getHostedRuntimeLogPool();
+        runtimePool.once("acquire", (client) => {
+          client.once("end", () => { clientEnded = true; });
+        });
+
+        const terminateWriter = async () => {
+          let pid = 0;
+          await vi.waitFor(async () => {
+            const result = await postgres.query<{ pid: number }>(`
+              SELECT a.pid FROM pg_stat_activity a JOIN pg_locks l ON l.pid = a.pid
+              WHERE a.datname = $1 AND l.locktype = 'advisory' AND l.objsubid = 1
+                AND l.classid = (($2::bigint >> 32) & 4294967295)::oid
+                AND l.objid = ($2::bigint & 4294967295)::oid
+                AND a.state = $3 AND ($4::text IS NULL OR a.wait_event_type = $4)
+            `, [testDatabaseName, lockKey, betweenStatements ? "idle in transaction" : "active",
+              betweenStatements ? null : "Lock"]);
+            expect(result.rows).toHaveLength(1);
+            pid = result.rows[0]!.pid;
+          }, { timeout: 30_000 });
+          await expect(postgres.query("SELECT pg_terminate_backend($1) AS terminated", [pid]))
+            .resolves.toMatchObject({ rows: [{ terminated: true }] });
+        };
+
+        if (lockClient) {
+          await lockClient.query("BEGIN");
+          await lockClient.query("SELECT pg_advisory_xact_lock($1::bigint)", [lockKey]);
+        }
+        const write = record({
+          entries: [runtimeEntry()],
+          isUserActive: async () => {
+            if (betweenStatements) {
+              await terminateWriter();
+              // Without a client error listener, pg throws before emitting end.
+              await vi.waitFor(() => {
+                expect(clientEnded || uncaught.length > 0).toBe(true);
+              }, { timeout: 30_000 });
+            }
+            return true;
+          },
+          userId,
+        });
+        const rejection = expect(write).rejects.toThrow(/connection|terminating/iu);
+        if (!betweenStatements) await terminateWriter();
+        await rejection;
+        await lockClient?.query("ROLLBACK");
+        expect(uncaught).toEqual([]);
+
+        expect(getHostedRuntimeLogPool()).toBe(runtimePool);
+        await expect(record({ entries: [runtimeEntry()], isUserActive: async () => true, userId }))
+          .resolves.toBe(1);
+        await expect(postgres.query(
+          "SELECT event_code FROM hosted_runtime_log WHERE subject_key = $1", [subjectKey],
+        )).resolves.toMatchObject({ rows: [{ event_code: "mailbox.imported" }] });
+      } finally {
+        try {
+          await lockClient?.query("ROLLBACK");
+        } finally {
+          lockClient?.release();
+          await runtimePool?.end();
+          process.removeListener("uncaughtException", onUncaught);
+          vi.unstubAllEnvs();
+          vi.unstubAllGlobals();
+          vi.resetModules();
+        }
+      }
+    },
+  );
 
   it("keeps later writes visible after a query timeout strands rollback", async () => {
     const postgres = requirePool(pool);
