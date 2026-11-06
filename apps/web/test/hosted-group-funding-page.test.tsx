@@ -310,6 +310,55 @@ describe("hosted group funding page", () => {
     );
   });
 
+  it.each([
+    { authorizationId: "hgsa_abcdefghijklmnop", expected: true },
+    { authorizationId: "hgsa_othersponsorship", expected: false },
+  ])("keeps only a sponsor's own activating return for the next refresh ($expected)", async ({
+    authorizationId,
+    expected,
+  }) => {
+    mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValueOnce({
+      offerCode: "usage_5_usd",
+      purchaseId: PURCHASE_ID,
+      retryAllowed: false,
+      status: "payment_pending",
+      target: {
+        beneficiaryMemberId: "member_group_runtime",
+        groupJoinCode: "group_join_code_1234",
+        kind: "group",
+      },
+    });
+    mocks.readHostedGroupSponsorshipManagementProjection.mockResolvedValueOnce({
+      authorizationId: "hgsa_abcdefghijklmnop",
+      chargedThisPeriodMinor: 0,
+      monthlyCapMinor: 2_000,
+      pendingThisPeriodMinor: 0,
+      pendingMonthlyCapMinor: null,
+      periodEnd: "2026-08-30T12:00:00.000Z",
+      status: "pending_activation",
+    });
+    mocks.readHostedGroupSponsorshipAuthorizationByPurchase.mockResolvedValueOnce({
+      authorizationId,
+      chargeOrdinal: 1,
+      monthlyCapMinor: 2_000,
+      payerMemberId: "member_payer",
+      periodStartedAt: new Date("2026-08-01T12:00:00.000Z"),
+    });
+
+    renderToStaticMarkup(await GroupFundingPage({
+      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+      searchParams: Promise.resolve({
+        usageCheckout: "success",
+        usagePurchase: PURCHASE_ID,
+      }),
+    }));
+
+    expect(mocks.GroupFundingCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({ keepPurchaseReturnQuery: expected }),
+      undefined,
+    );
+  });
+
   it("ignores a checkout return belonging to another funding target", async () => {
     mocks.readHostedUsageCreditPurchaseStatus.mockRejectedValueOnce(
       new Error("purchase target mismatch"),
