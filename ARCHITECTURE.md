@@ -6425,12 +6425,15 @@ bound eligible game through indexed player rows, preserving one allowance for
 primary and alternate rooms regardless of game count.
 
 The missed-day sweep shards and keyset-pages bound room identities, completing
-each room before claiming. A group room proven unsendable claims nothing and
-logs one fixed-reason warning, and the sweep continues. Nothing is recorded, so
-its next shard visit inside the window retries. A result that proves nothing
-about the room still stops the pass and reaches the cron's `cron_failed`
-diagnostic: a route that cannot be opened, an unreadable provider response, a
-failed provider read or a database outage.
+each room before claiming. A group room makes no provider or audience read
+unless some candidate game is due by its own horizon. The room's horizon is the
+latest of its games', so this gate can add a read but never lose a claim. Once
+read, a group room proven unsendable claims nothing and logs one fixed-reason
+warning, and the sweep continues. Nothing is recorded, so its next shard visit
+inside the window retries. A result that proves nothing about the room still
+stops the pass and reaches the cron's `cron_failed` diagnostic: a route that
+cannot be opened, an unreadable provider response, a failed provider read or a
+database outage.
 Pair-only timing, event identities and copy remain
 unchanged. Canonical miss-run derivation supplies both single-game and combined
 messages, excluding incomplete artifacts, any-N days, open/off days, pre-join

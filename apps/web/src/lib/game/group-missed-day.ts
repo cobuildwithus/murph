@@ -17,12 +17,13 @@ import { loadGameMissedCheckInGames } from "./service";
 type Games = Awaited<ReturnType<typeof loadGameMissedCheckInGames>>;
 
 /** Complete room candidates, independently of the ten-card chat projection. */
-export async function readGroupMissedDayRoom(roomId: string, gameIds?: readonly string[]) {
+export async function readGroupMissedDayRoom(roomId: string, gameIds?: readonly string[], worthProving: (candidates: Games) => boolean = () => true) {
   const prisma = getPrisma();
   const ids = gameIds ?? (await prisma.game.findMany({ where: { chatContainerMemberId: roomId, status: "live" },
     select: { id: true }, take: GAME_MISSED_ROOM_MAX_GAMES + 1 })).map(row => row.id);
   if (ids.length > GAME_MISSED_ROOM_MAX_GAMES) return null;
   const candidates = await loadGameMissedCheckInGames(prisma, ids);
+  if (!worthProving(candidates)) return null;
   let audience: GameChatAudience | undefined;
   const games: Games = [];
   for (const game of candidates.filter(game => game.row.maxPlayers === 10)) {
@@ -63,8 +64,18 @@ function skipUnprovableRoom(error: unknown): null {
   return null;
 }
 
+/**
+ * Gates the provider read and never decides a claim. A room's horizon is the latest of its games', so a room that would
+ * claim always has a candidate due by its own horizon. Checked per game because a game the audience check excludes must
+ * not move the room's horizon, and over every candidate's miss dates because the game setting it may have no miss itself.
+ */
+function hasDueCandidate(candidates: Games, now: Date): boolean {
+  const dates = new Set(candidates.flatMap(game => gameMissedCheckInRuns(game.state, now).map(run => run.firstMissedDate)));
+  return candidates.some(game => [...gameMissedCheckInHorizons([game.state], dates).values()].some(dueAt => isMissedCheckInDueNow({ dueAt, now })));
+}
+
 export async function reserveGroupGameMissedDay(roomId: string, gameIds: readonly string[], now: Date): Promise<number> {
-  const room = await readGroupMissedDayRoom(roomId, gameIds).catch(skipUnprovableRoom);
+  const room = await readGroupMissedDayRoom(roomId, gameIds, candidates => hasDueCandidate(candidates, now)).catch(skipUnprovableRoom);
   if (!room) return 0;
   let reserved = 0;
   const dates = new Set(room.games.flatMap(game => gameMissedCheckInRuns(game.state, now).map(run => run.firstMissedDate)));
