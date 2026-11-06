@@ -34,6 +34,8 @@ import { ChangelogArchiveStudy } from "./changelog-archive-study";
 import { CalendarLinkStudy } from "./calendar-link-study";
 import { ClinicalRecordsConnectLauncherStudy } from "./clinical-records-connect-launcher-study";
 import { ClubsPageStudy } from "./clubs-page-study";
+import { WearableConnectLinkStudy } from "./wearable-connect-link-study";
+import { ComputerHandoffStudy } from "./computer-handoff-study";
 import { ConnectedAppAuthorizationStudy } from "./connected-app-authorization-study";
 import {
   AppleHealthRelaySetupStudy,
@@ -570,8 +572,20 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Connected app authorization handoff">
+          <StudySection title="Connect a wearable link">
+            <WearableConnectLinkStudy />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Connect an app link">
             <ConnectedAppAuthorizationStudy />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Take over a browser link">
+            <ComputerHandoffStudy />
           </StudySection>
 
           <Separator />

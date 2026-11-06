@@ -44,6 +44,11 @@ vi.mock("@/src/components/hosted-onboarding/hosted-first-party-auth-panel", () =
   },
 }));
 
+vi.mock("next/image", () => ({
+  default: ({ alt, src }: { alt?: string; src: string }) =>
+    createElement("img", { alt: alt ?? "", src }),
+}));
+
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
   AuthDialog(props: {
     description?: string;
@@ -95,6 +100,17 @@ vi.mock("@/src/lib/browser-vault/session-invalidation", () => ({
     };
   },
 }));
+
+const desktopMatchMedia: typeof window.matchMedia = (query) => ({
+  addEventListener: () => {},
+  addListener: () => {},
+  dispatchEvent: () => false,
+  matches: false,
+  media: query,
+  onchange: null,
+  removeEventListener: () => {},
+  removeListener: () => {},
+});
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -1203,6 +1219,149 @@ test("ComputerHandoffAuthRequiredState keeps sign-in on the page", async () => {
   expect(mocks.authPanelProps?.methods).toEqual(["phone"]);
   expect(mocks.authPanelProps?.requireLaunchConsentOnCompletion).toBe(true);
   expect(mocks.authDialogProps?.open).toBe(false);
+
+  await rendered.cleanup();
+});
+
+test("a dashboard link with a device connect intent signs in on its own page", async () => {
+  const { AuthProvider } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  const claim = `dc_${"a".repeat(32)}`;
+  mocks.segment = "(dashboard)";
+  mocks.pathname = "/connect";
+
+  const rendered = await renderClientComponent(
+    createElement(AuthProvider, { authenticated: false }),
+    {
+      location: {
+        hash: `#deviceConnectIntent=${claim}&connectSource=whoop`,
+        href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=whoop`,
+        origin: "https://join.example.test",
+        pathname: "/connect",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+
+  expect(mocks.authDialogProps?.open).toBe(false);
+
+  await rendered.cleanup();
+});
+
+test.each([
+  ["no fragment", ""],
+  ["a source card fragment", "#whoop"],
+  ["a malformed claim", "#deviceConnectIntent=not-a-claim&connectSource=whoop"],
+  ["no source", `#deviceConnectIntent=dc_${"a".repeat(32)}`],
+])("the ordinary Connect hub keeps its sign-in dialog with %s", async (_label, hash) => {
+  const { AuthProvider } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  mocks.segment = "(dashboard)";
+  mocks.pathname = "/connect";
+
+  const rendered = await renderClientComponent(
+    createElement(AuthProvider, { authenticated: false }),
+    {
+      location: {
+        hash,
+        href: `https://join.example.test/connect${hash}`,
+        origin: "https://join.example.test",
+        pathname: "/connect",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+
+  expect(mocks.authDialogProps?.open).toBe(true);
+
+  await rendered.cleanup();
+});
+
+test("sign-in on a device connect link returns to the same URL, fragment included", async () => {
+  const { AuthProvider, useAuth } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  const claim = `dc_${"b".repeat(32)}`;
+  const hash = `#deviceConnectIntent=${claim}&connectSource=whoop`;
+  mocks.segment = "(dashboard)";
+  mocks.pathname = "/connect";
+
+  let pageCompletion: unknown;
+  function CompleteOnPage() {
+    pageCompletion = useAuth().completeAuthentication;
+    return null;
+  }
+
+  const rendered = await renderClientComponent(
+    createElement(
+      AuthProvider,
+      { authenticated: false },
+      createElement(CompleteOnPage),
+    ),
+    {
+      location: {
+        hash,
+        href: `https://join.example.test/connect${hash}`,
+        origin: "https://join.example.test",
+        pathname: "/connect",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+
+  // The form on the page finishes through the dialog's own handler.
+  expect(pageCompletion).toBe(mocks.authDialogProps?.onCompleted);
+  await act(async () => {
+    await mocks.authDialogProps?.onCompleted?.({
+      activationPending: false,
+      inviteCode: "invite-code",
+      joinUrl: "/join/invite-code",
+      stage: "active",
+    });
+  });
+
+  expect(rendered.reload).toHaveBeenCalledTimes(1);
+  expect(rendered.assign).not.toHaveBeenCalled();
+
+  await rendered.cleanup();
+});
+
+test("sign-in on a records link returns to the same URL with extra parameters", async () => {
+  const { AuthProvider } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  mocks.pathname = "/records/connect";
+
+  const rendered = await renderClientComponent(
+    createElement(AuthProvider, { authenticated: false }),
+    {
+      location: {
+        hash: "#portal",
+        href: "https://join.example.test/records/connect?launch=clinical-records&utm_source=chat#portal",
+        origin: "https://join.example.test",
+        pathname: "/records/connect",
+        search: "?launch=clinical-records&utm_source=chat",
+      },
+      requireButton: false,
+    },
+  );
+
+  await act(async () => {
+    await mocks.authDialogProps?.onCompleted?.({
+      activationPending: false,
+      inviteCode: "invite-code",
+      joinUrl: "/join/invite-code",
+      stage: "active",
+    });
+  });
+
+  expect(rendered.reload).toHaveBeenCalledTimes(1);
+  expect(rendered.assign).not.toHaveBeenCalled();
 
   await rendered.cleanup();
 });

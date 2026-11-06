@@ -520,9 +520,9 @@ uses `LinkPageSurface`, because the frame repaints the whole document.
 
 Give a page one object where the funding dial sits, when it has something real
 to show: `LinkPageSheet` for a file or a record, a ticket for an invite, a
-calendar page for a date, and `LinkPageDots`, the logo's dot grid, while the page
-is working on something. Do not add one to a page with nothing to act on, such as
-a dead link.
+calendar page for a date, `LinkPagePair` for a connection, and `LinkPageDots`, the
+logo's dot grid, while the page is working on something. Do not add one to a page
+with nothing to act on, such as a dead link.
 
 A choice between plans is one row per plan and one pill that names the selected
 plan. The rows lock while that plan's checkout runs, so the plan that opens is
@@ -533,6 +533,12 @@ sign-in form on the page under a headline that names the task, and finishes the
 way the sign-in dialog does unless the page owns its own finish, as group join
 and group start do. Never show the private subject of a link, such as a file
 name, before sign-in.
+
+A link can share its URL with a dashboard page: `/connect` with a connect intent
+in the fragment, or `/home` returning from a connection. It cannot replace the
+dashboard frame, so `LinkPageTakeover` covers the frame, and `LinkPageVeil` hides
+it until then, because a fragment never reaches the server. The plain page under
+it stays as it was. A consent gate always sits above a takeover.
 
 Consent wording, sharing descriptions, and privacy promises keep their exact
 words on these pages. A group's sharing descriptions keep them in the Details

@@ -417,6 +417,43 @@ describe("computer handoff route and page", () => {
     assert.equal(markup.includes("Try again"), false);
   });
 
+  it("never names the sign-in vendor while a managed login finishes", async () => {
+    mocks.service.readHandoffPageState.mockResolvedValueOnce({
+      kind: "managed_login",
+      suggestedReply: "Done",
+    });
+
+    const markup = renderToStaticMarkup(await computerHandoffPage.default({
+      params: Promise.resolve({ token: "handoff-token" }),
+      searchParams: Promise.resolve({ managed: "waiting" }),
+    }));
+
+    assert.match(markup, /Finishing secure sign-in\./);
+    assert.match(markup, /Check again in a moment\./);
+    assert.match(
+      markup,
+      /href="\/api\/computer\/handoff\/handoff-token\/managed-login"[^>]*>Check again</,
+    );
+    assert.doesNotMatch(markup, /Kernel/i);
+  });
+
+  it("offers a way back to the chat from an expired handoff", async () => {
+    mocks.service.readHandoffPageState.mockResolvedValueOnce({
+      kind: "expired",
+      returnContactKind: "text",
+      suggestedReply: "finished_browser_step",
+    });
+
+    const markup = renderToStaticMarkup(await computerHandoffPage.default({
+      params: Promise.resolve({ token: "handoff-token" }),
+    }));
+
+    assert.match(markup, /This link expired\./);
+    assert.match(markup, /Return to Murph and ask for a new link\./);
+    assert.match(markup, /Open Messages/);
+    assert.equal(markup.includes("finished_browser_step"), false);
+  });
+
   it("renders email-origin completed handoffs as reply-in-thread instructions", async () => {
     mocks.service.readHandoffPageState.mockResolvedValueOnce({
       kind: "completed",
@@ -441,7 +478,7 @@ describe("computer handoff route and page", () => {
     const markup = renderToStaticMarkup(await computerHandoffPage.default({
       params: Promise.resolve({ token: "handoff-token" }),
     }));
-    const hrefs = [...markup.matchAll(/href="([^"]+)"/gu)].map((match) => match[1]);
+    const hrefs = [...markup.matchAll(/<a [^>]*href="([^"]+)"/gu)].map((match) => match[1]);
 
     assert.match(markup, /All set/);
     assert.match(markup, /Reply to Murph to continue\./);

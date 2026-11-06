@@ -4,12 +4,18 @@ import { useState, type ReactNode } from "react";
 
 import {
   RecordsConnectLauncherState,
-} from "@/app/(dashboard)/records/connect/records-connect-client";
+  UnavailableIntentState,
+} from "@/app/records/connect/records-connect-client";
 
-import { ProviderSearchView, type ProviderSearchViewProps } from "@/app/(dashboard)/records/connect/provider-search-view";
+import { ProviderSearchView, type ProviderSearchViewProps } from "@/app/records/connect/provider-search-view";
 
 import { ConnectionRow, DisconnectDialog, RecordsPageClient, RecordsPrivacyControls } from "@/app/(dashboard)/records/records-page-client";
+import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-provider";
+import { HostedLaunchConsentPrompt } from "@/src/components/legal/hosted-legal-consent-card";
+import { LINK_PAGE_NIGHT_TOKENS } from "@/src/components/link-page/link-page-shell";
 import type { ClinicalRecordConnectionContract } from "@/src/lib/clinical-records/client-contracts";
+
+import { LinkPageStudyState } from "./link-page-study-state";
 
 const savedSource: ClinicalRecordConnectionContract = {
   connectedAt: "2026-09-04T12:00:00.000Z",
@@ -67,18 +73,38 @@ export function ClinicalRecordsConnectLauncherStudy() {
           }]}
         />
       </div>
-      <StudyState label="Find your provider">
+      <LinkPageStudyState label="Results">
         <ProviderSearchView {...searchPreview} />
-      </StudyState>
-      <StudyState label="Finding a provider">
+      </LinkPageStudyState>
+      <LinkPageStudyState label="Consent">
+        <div className="flex flex-1 flex-col justify-center py-6" style={LINK_PAGE_NIGHT_TOKENS}>
+          <HostedLaunchConsentPrompt
+            documents={[
+              { href: "/legal/terms", id: "terms-of-service", pdfHref: "/legal/terms.pdf", title: "Murph Terms of Service", version: "2026-07-23" },
+              { href: "/legal/privacy", id: "privacy-policy", pdfHref: "/legal/privacy.pdf", title: "Murph Privacy Policy", version: "2026-07-23" },
+            ]}
+            onContinue={() => {}}
+          />
+        </div>
+      </LinkPageStudyState>
+      <LinkPageStudyState label="Search">
+        <ProviderSearchView {...searchPreview} query="" providers={[]} hasSearched={false} keepUpdated={false} />
+      </LinkPageStudyState>
+      <LinkPageStudyState label="Finding a provider">
         <ProviderSearchView {...searchPreview} providers={[]} hasSearched={false} searchPending />
-      </StudyState>
-      <StudyState label="No matching provider">
-        <ProviderSearchView {...searchPreview} providers={[]} />
-      </StudyState>
-      <StudyState label="Search retry">
-        <ProviderSearchView {...searchPreview} providers={[]} searchError="Hospitals and clinics could not be searched right now. Try again." />
-      </StudyState>
+      </LinkPageStudyState>
+      <LinkPageStudyState label="No matching provider">
+        <ProviderSearchView {...searchPreview} query="Northwood" providers={[]} />
+      </LinkPageStudyState>
+      <LinkPageStudyState label="Search retry">
+        <ProviderSearchView {...searchPreview} providers={[]} hasSearched={false} searchError="Hospitals and clinics could not be searched right now. Try again." />
+      </LinkPageStudyState>
+      <LinkPageStudyState label="Portal couldn’t open">
+        <ProviderSearchView {...searchPreview} startError="Could not continue with Mayo Clinic. Try this portal again, or start a new connection to choose another." />
+      </LinkPageStudyState>
+      <LinkPageStudyState label="Opening a portal">
+        <ProviderSearchView {...searchPreview} selectedProviderId="epic-958" startingProviderId="epic-958" />
+      </LinkPageStudyState>
       <StudyState label="Saved lab results">
         <ul>
           <ConnectionRow connection={savedSource} disabled={false} onDisconnect={() => setDisconnectOpen(true)} />
@@ -131,15 +157,20 @@ export function ClinicalRecordsConnectLauncherStudy() {
         </ul>
       </StudyState>
       <StudyState label="Record privacy controls"><RecordsPrivacyControls /></StudyState>
-      <StudyState label="Authenticated launcher loading">
+      <LinkPageStudyState label="Authenticated launcher loading">
         <RecordsConnectLauncherState state="loading" />
-      </StudyState>
-      <StudyState label="Launcher needs sign-in">
-        <RecordsConnectLauncherState state="authentication-required" />
-      </StudyState>
-      <StudyState label="Launcher can be retried">
+      </LinkPageStudyState>
+      <LinkPageStudyState label="Launcher needs sign-in">
+        <AuthProvider authenticated={false}>
+          <RecordsConnectLauncherState state="authentication-required" />
+        </AuthProvider>
+      </LinkPageStudyState>
+      <LinkPageStudyState label="Launcher can be retried">
         <RecordsConnectLauncherState state="launch-failed" />
-      </StudyState>
+      </LinkPageStudyState>
+      <LinkPageStudyState label="Link unavailable">
+        <UnavailableIntentState />
+      </LinkPageStudyState>
       <DisconnectDialog connection={disconnectOpen ? savedSource : null} errorMessage={null} onConfirm={() => setDisconnectOpen(false)} onOpenChange={setDisconnectOpen} pending={false} />
     </div>
   );

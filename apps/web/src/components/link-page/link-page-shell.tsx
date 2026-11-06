@@ -12,6 +12,11 @@ const LINK_PAGE_LINK_CLASS =
 const LINK_PAGE_GOLD =
   "linear-gradient(135deg, #EBD18B 0%, #D9B969 55%, #C59D4E 100%)";
 
+/** The night ground reaches past the page: overscroll and Safari's bars. */
+function LinkPageNightGround() {
+  return <style>{"html,body{background:#1C1915}"}</style>;
+}
+
 /** A name from outside the page, as a headline that ends in one period. */
 function linkPageHeadline(text: string): string {
   return /[.!?…]$/u.test(text) ? text : `${text}.`;
@@ -69,8 +74,7 @@ function LinkPageFrame({
         fit ? "h-dvh min-h-[34rem]" : "min-h-dvh",
       )}
     >
-      {/* The night ground reaches past the page: overscroll and Safari's bars. */}
-      <style>{"html,body{background:#1C1915}"}</style>
+      <LinkPageNightGround />
       <LinkPageSurface fit={fit}>{children}</LinkPageSurface>
     </main>
   );
@@ -283,6 +287,7 @@ export {
   LinkPageError,
   LinkPageFrame,
   LinkPageLink,
+  LinkPageNightGround,
   LinkPagePill,
   LinkPageScreen,
   LinkPageSurface,

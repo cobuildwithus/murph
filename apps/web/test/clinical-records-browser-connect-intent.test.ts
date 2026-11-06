@@ -75,7 +75,7 @@ describe("Clinical Records browser connect intent", () => {
     expect(hasStagedClinicalRecordsConnectIntentForCurrentPath()).toBe(true);
   });
 
-  it("recognizes only the exact generic Clinical Records launcher", () => {
+  it("recognizes the Clinical Records launcher the way the page does", () => {
     const browser = installBrowser(
       "https://join.example.test/records/connect?launch=clinical-records",
       {},
@@ -85,7 +85,7 @@ describe("Clinical Records browser connect intent", () => {
     browser.setUrl(
       "https://join.example.test/records/connect?launch=clinical-records&extra=1",
     );
-    expect(isClinicalRecordsConnectLauncherForCurrentPath()).toBe(false);
+    expect(isClinicalRecordsConnectLauncherForCurrentPath()).toBe(true);
     browser.setUrl("https://join.example.test/records/connect?launch=other");
     expect(isClinicalRecordsConnectLauncherForCurrentPath()).toBe(false);
   });
