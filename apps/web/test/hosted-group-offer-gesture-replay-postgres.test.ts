@@ -330,7 +330,7 @@ describe.skipIf(!runPostgres)("group offer gesture PostgreSQL replay boundaries"
     });
   });
 
-  it("does not spend a legacy disclosure gesture for a different current member", async () => {
+  it("keeps a legacy disclosure gesture from granting a different current member", async () => {
     await withFixture({ kind: "disclosure" }, async (f) => {
       const callback = f.callback("disclosure", "legacy");
       expect((await f.tap(callback)).handled).toBe(true);
@@ -355,7 +355,9 @@ describe.skipIf(!runPostgres)("group offer gesture PostgreSQL replay boundaries"
       expect(await f.prisma.hostedGroupDisclosureGrant.count({ where: {
         membership: { memberId: f.ownerMemberId, groupId: f.groupId },
       } })).toBe(0);
-      expect(await f.receipts()).toHaveLength(0);
+      // The legacy grant already spent this gesture, so a receipt is accurate.
+      expect(await f.receipts()).toHaveLength(1);
+      expect(await f.tap(callback)).toEqual({ handled: false, reason: "replayed-telegram-group-offer" });
     });
   });
 

@@ -1,3 +1,6 @@
+Redelivery identity for direct Telegram messages and group offer gestures is owned by [the invariants](../docs/contracts/00-invariants.md) and [Reliability](RELIABILITY.md).
+The [execution record](exec-plans/completed/2026-11-06-ingress-identity-replay.md) holds the design decisions.
+
 The two-lane production Web admission, the Cloudflare predeploy gates, and the private nightly proof that owns reminder, foreground, and Codex cache-prefix journeys are owned by [Hosted Temporal orchestration](references/hosted-temporal-orchestration.md) and `../apps/cloudflare/DEPLOY.md`.
 
 Shared demographic memory, generation-18 projection and native action contracts are owned by [Architecture](../ARCHITECTURE.md#canonical-memory-demographics) and [private numbers](product-specs/ios-meals.md#shared-demographics).

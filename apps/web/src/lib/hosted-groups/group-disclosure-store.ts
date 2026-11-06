@@ -428,6 +428,8 @@ export async function acceptHostedGroupDisclosurePermissionReactionTx(input: {
     return { kind: "not_found" };
   }
 
+  // Spent before the no-op check below: a tap that changes nothing is still an
+  // accepted decision, and its redelivery must not grant after a revocation.
   if (!await spendHostedGroupOfferGestureTx({
     affirmationEventId: input.reactionEventId,
     groupId: permission.group.id,
@@ -436,6 +438,7 @@ export async function acceptHostedGroupDisclosurePermissionReactionTx(input: {
     return { kind: "replayed" };
   }
 
+  // Grants written before receipts existed carry the gesture in their own id.
   const grantId = createHostedGroupDisclosureReactionGrantId(
     input.reactionEventId,
   );
@@ -444,19 +447,10 @@ export async function acceptHostedGroupDisclosurePermissionReactionTx(input: {
     select: { membershipId: true, permissionId: true },
   });
   if (replayedGrant) {
-    if (
-      replayedGrant.membershipId !== membership.id
-      || replayedGrant.permissionId !== permission.id
-    ) {
-      // Roll back the receipt too: this legacy gesture did not accept this offer.
-      throw hostedOnboardingError({
-        code: "HOSTED_GROUP_RUNTIME_UNSUPPORTED",
-        httpStatus: 409,
-        message: "This gesture belongs to a different disclosure grant.",
-        retryable: false,
-      });
-    }
-    return { kind: "accepted" };
+    return replayedGrant.membershipId === membership.id
+      && replayedGrant.permissionId === permission.id
+      ? { kind: "accepted" }
+      : { kind: "not_found" };
   }
 
   const existingOrSupersedingGrant = await input.tx.hostedGroupDisclosureGrant.findFirst({

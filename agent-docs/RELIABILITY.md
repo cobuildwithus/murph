@@ -3681,18 +3681,25 @@ Current product admission, delivery and native runtime safety rules remain.
   only from the lock statement to the fresh update statement; it must not
   escape that callback or appear in logs. The writer must not lock an unbounded
   collection or open one transaction per trace.
-- Chat-affirmation group joins (Linq reaction, Telegram inline button) are
-  at-least-once, not exactly-once. The provider-event ledger records that an
-  event was *received*, not that it was *applied*, so a redelivered event
-  re-runs acceptance. Membership creation is the only non-idempotent step: the
-  disclosure path derives its grant id from the affirmation event, but
-  `leaveHostedGroupMemberTx` deletes the membership row, so a redelivery that
-  lands after a departure can silently rejoin that member. Gating acceptance on
-  the ledger's duplicate flag is not the fix: it would drop legitimate joins
-  whenever a first attempt failed after the ledger write. Closing this needs a
-  consumed-event record written in the same transaction as acceptance; it is
-  deliberately deferred until a real occurrence or a broader offer-state change
-  justifies the table.
+- Chat-affirmation group grants (Linq reaction, Telegram inline button) spend
+  their provider gesture once. `hosted_group_offer_gesture_receipt` holds an
+  opaque digest of the gesture id, written in the same transaction as the
+  acceptance decision and after the group lock, including accepted no-ops. It
+  is keyed to the group, not the membership, so it survives leave, revocation,
+  relink, and deletion of the tapper's account, and it dies with the group.
+  A redelivery that loses the spend mutates nothing. A rollback removes the
+  receipt, so a failed tap stays unseen and can be retried. A genuinely new tap
+  has a new provider id and is a new decision. The Linq provider-event marker
+  remains the fast duplicate exit; the receipt is what closes two deliveries
+  that both pass it. Taps accepted before receipts existed cannot be
+  reconstructed, and Telegram supplies no tap time, so a first delivery that
+  arrives after a later revocation is still applied.
+- A direct Telegram update keeps the owner its first admission recorded. The
+  planner serializes on the update id and reads retained mailbox owners by
+  metadata across members before any fresh effect. A replay reuses its pointer
+  only for that same owner. A different or conflicting owner acknowledges with
+  no append, wake, or pointer. An erased row, or a first delivery after a relink,
+  has no earlier owner to find.
 
 ## Scheduled tool parity and replay
 

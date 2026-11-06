@@ -44,7 +44,8 @@ export type HostedGroupOfferAffirmationKind = "disclosure" | "join";
  * The one place a chat affirmation becomes a durable group grant. Provider
  * adapters classify the gesture and resolve the actor; this owns matching the
  * offer, running the existing acceptance transactions, and the post-commit work
- * that must happen identically on every channel.
+ * that must happen identically on every channel. A redelivered gesture that was
+ * already accepted returns `replayed` and changes nothing.
  */
 export async function acceptHostedGroupOfferAffirmation(input: {
   affirmationEventId: string;

@@ -139,25 +139,18 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     return buildIgnoredTelegramWebhookPlan("unsupported-update");
   }
 
-  const retainedOwnerIds = summary.isDirect
-    ? await lockAndReadHostedTelegramUpdateOwnerIdsTx({ eventId, tx: input.prisma })
-    : [];
-  if (retainedOwnerIds.length > 0) {
-    const sender = await resolveHostedMemberCoreByTelegramUserId({
-      prisma: input.prisma,
-      telegramUserId: senderTelegramUserId,
-    });
-    if (
-      retainedOwnerIds.length !== 1
-      || sender.status !== "found"
-      || sender.core.id !== retainedOwnerIds[0]
-      || input.preparedDirectTelegramRouting?.kind === "family"
-    ) {
-      return buildIgnoredTelegramWebhookPlan("telegram-update-already-admitted");
-    }
+  const directAdmission = await readHostedDirectTelegramAdmissionTx({
+    eventId,
+    isDirect: summary.isDirect,
+    preparedRouting: input.preparedDirectTelegramRouting,
+    prisma: input.prisma,
+    senderTelegramUserId,
+  });
+  if (directAdmission === "fenced") {
+    return buildIgnoredTelegramWebhookPlan("telegram-update-already-admitted");
   }
 
-  if (summary.isDirect && retainedOwnerIds.length === 0) {
+  if (directAdmission === "fresh") {
     const familyInviteTokenPresent = await resolveHostedFamilyInviteTokenForInbound({
       prisma: input.prisma,
       text: telegramMessage.text ?? null,
@@ -706,6 +699,41 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       wakeMailboxCheckpoint: { lane: mailboxAppend.item.lane, laneSeq: mailboxAppend.item.laneSeq },
     }],
   };
+}
+
+/**
+ * An admitted DM keeps its first owner even after the Telegram identity moves.
+ * Decide before any fresh effect can reinterpret the replay. Only that same
+ * owner continues, because the ordinary append returns its existing pointer. A
+ * family preparation cannot continue once the family branch is skipped.
+ */
+async function readHostedDirectTelegramAdmissionTx(input: {
+  eventId: string;
+  isDirect: boolean;
+  preparedRouting: HostedDirectTelegramRoutingPreparation | undefined;
+  prisma: Prisma.TransactionClient;
+  senderTelegramUserId: string;
+}): Promise<"fenced" | "fresh" | "not_direct" | "replay"> {
+  if (!input.isDirect) {
+    return "not_direct";
+  }
+  const ownerIds = await lockAndReadHostedTelegramUpdateOwnerIdsTx({
+    eventId: input.eventId,
+    tx: input.prisma,
+  });
+  if (ownerIds.length === 0) {
+    return "fresh";
+  }
+  const sender = await resolveHostedMemberCoreByTelegramUserId({
+    prisma: input.prisma,
+    telegramUserId: input.senderTelegramUserId,
+  });
+  return ownerIds.length === 1
+    && sender.status === "found"
+    && sender.core.id === ownerIds[0]
+    && input.preparedRouting?.kind !== "family"
+    ? "replay"
+    : "fenced";
 }
 
 async function revalidatePreparedDirectTelegramRouteTx(input: {

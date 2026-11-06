@@ -2652,7 +2652,11 @@ async function acquireHostedMailboxDedupeAppendLockTx(input: {
   `;
 }
 
-/** Serializes direct Telegram admission across mutable member bindings. */
+/**
+ * Serializes direct Telegram admission across mutable member bindings, then
+ * reads retained owners by metadata only. `(user_id, dedupe_key)` is unique, so
+ * two rows prove two owners. The literal LIKE selects the partial index.
+ */
 export async function lockAndReadHostedTelegramUpdateOwnerIdsTx(input: {
   eventId: string;
   tx: HostedMailboxMutationTx;

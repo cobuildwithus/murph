@@ -3315,7 +3315,12 @@ export async function lockHostedGroupRow(
   await tx.$queryRaw`select 1 from "hosted_group" where "id" = ${groupId} for update`;
 }
 
-/** Call only after validating the offer under its group row lock. */
+/**
+ * Spends one provider gesture in the transaction that decides it. Call only
+ * after validating the offer under its group row lock. The receipt is keyed to
+ * the group, so it survives leave, revocation, and relink, and a rollback leaves
+ * the gesture unseen. False means the gesture was already accepted.
+ */
 export async function spendHostedGroupOfferGestureTx(input: {
   affirmationEventId: string;
   groupId: string;
