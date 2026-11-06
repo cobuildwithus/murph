@@ -201,7 +201,6 @@ export function createRunnerReleaseProvider(input: {
       name: string;
       namespaceId: string;
       specification: RunnerApplicationSpecification;
-      rolloutStepPercentage?: number | readonly number[];
     }): Promise<"created" | "modified" | "unchanged"> {
       const desired = { ...input.specification, name: input.name, durable_objects: { namespace_id: input.namespaceId } };
       if (input.applicationId === null) {
@@ -222,11 +221,10 @@ export function createRunnerReleaseProvider(input: {
       // A matching application target without distribution evidence is a lost
       // PATCH/POST pair. Preserve its version and complete the existing target.
       if (!matches) await request("Modify application", pathname, "PATCH", input.specification);
-      const steps = input.rolloutStepPercentage ?? 100;
+      // One step: connection-age grace, not percentage cohorts, paces replacement.
+      // Native steps were never health gates, and each step can wait out the grace.
       await request("Start application rollout", `${pathname}/rollouts`, "POST", {
-        description: "Update runner image", strategy: "rolling", kind: "full_auto",
-        ...(typeof steps === "number" ? { step_percentage: steps }
-          : { steps: steps.map(percentage => ({ step_size: { percentage }, description: `Roll out to ${percentage}% of instances` })) }),
+        description: "Update runner image", strategy: "rolling", kind: "full_auto", step_percentage: 100,
         target_configuration: input.specification.configuration,
       });
       return "modified";
@@ -235,13 +233,11 @@ export function createRunnerReleaseProvider(input: {
       name: string;
       specification: RunnerApplicationSpecification;
       listApplications: (name: string) => Promise<unknown>;
-      rolloutStepCount?: number;
     }): Promise<void> {
-      // Each native step can spend fifteen minutes draining, plus grace/startup.
-      const steps = input.rolloutStepCount ?? 1;
-      if (!Number.isInteger(steps) || steps < 1 || steps > 4) throw unavailable();
-      const attempts = 150 * steps;
-      for (let attempt = 0; attempt < attempts; attempt++) {
+      // A young shell becomes eligible once it passes the grace period, then
+      // may drain for fifteen minutes; ten more cover startup and observation.
+      const deadline = Date.now() + (input.specification.rollout_active_grace_period + 25 * 60) * 1000;
+      for (;;) {
         const result = await input.listApplications(input.name);
         if (!Array.isArray(result) || result.length !== 1 || !isObjectRecord(result[0])) throw unavailable();
         const live = result[0];
@@ -250,7 +246,8 @@ export function createRunnerReleaseProvider(input: {
           const rollout = await readMatchingRollout(live.id, live, input.specification);
           if (rollout?.status === "completed" || (!rollout && live.version === 1)) return;
         }
-        if (attempt < attempts - 1) await delay(10_000);
+        if (Date.now() >= deadline) break;
+        await delay(10_000);
       }
       throw new Error("Native runner rollout did not converge; the compatible Worker and pending image remain selected.");
     },

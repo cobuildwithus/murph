@@ -418,15 +418,37 @@ describe("single-fleet rollout recovery", () => {
     expect(fetchImpl.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
   });
 
-  it.each([0, 300])("preserves numeric grace %s while updating the application and gradual steps", async grace => {
+  it.each([0, 1200])("preserves numeric grace %s while updating the application in one rollout step", async grace => {
     const specification = { ...input.specification, rollout_active_grace_period: grace };
     const fetchImpl = vi.fn<typeof fetch>(async (_url, init) => envelope(init?.method === "GET"
       ? { ...live, configuration: { ...configuration, image: "old-image" } } : {}));
-    await createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl }).admitApplication({ ...input, specification, rolloutStepPercentage: [10, 25, 50, 100] });
+    await createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl }).admitApplication({ ...input, specification });
     expect(fetchImpl.mock.calls.map(([, init]) => init?.method)).toEqual(["GET", "PATCH", "POST"]);
     expect(fetchImpl.mock.calls[1]?.[1]?.headers).toEqual({ Authorization: "Bearer fixture", "Content-Type": "application/json" });
     expect(JSON.parse(String(fetchImpl.mock.calls[1]?.[1]?.body))).toEqual(specification);
-    expect(JSON.parse(String(fetchImpl.mock.calls.at(-1)?.[1]?.body))).toMatchObject({ strategy: "rolling", kind: "full_auto", steps: [10, 25, 50, 100].map(percentage => ({ step_size: { percentage }, description: expect.any(String) })) });
+    const rollout = JSON.parse(String(fetchImpl.mock.calls.at(-1)?.[1]?.body));
+    expect(rollout).toMatchObject({ strategy: "rolling", kind: "full_auto", step_percentage: 100, target_configuration: configuration });
+    expect(rollout).not.toHaveProperty("steps");
+  });
+
+  // Each list call stands in for one ten-second poll, so the deadline is visible as a call count.
+  it.each([[0, 150], [1200, 270]])("waits out grace %ss plus drain and startup before reporting non-convergence", async (grace, polls) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const listApplications = vi.fn(async () => {
+        vi.setSystemTime(Date.now() + 10_000);
+        return [{ ...live, active_rollout_id: "pending" }];
+      });
+      const fetchImpl = vi.fn<typeof fetch>();
+      const work = createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl }).assertApplicationReady({
+        name: input.name, specification: { ...specification, rollout_active_grace_period: grace }, listApplications,
+      });
+      await expect(work).rejects.toThrow("did not converge; the compatible Worker and pending image remain selected");
+      expect(listApplications).toHaveBeenCalledTimes(polls);
+      expect(fetchImpl).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each([0, 1, 2])("accounts for smoke and every other application before expansion (other=%s)", async others => {

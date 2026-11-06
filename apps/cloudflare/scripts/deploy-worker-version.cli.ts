@@ -68,6 +68,7 @@ export async function runDeployWorkerVersionCli(
     dependencies: {
       async deployDirect(input) {
         const retainServingRunner = input.containerRolloutMode === "worker-only";
+        const immediate = input.containerRolloutMode === "immediate";
         const recovery = readRecoveryVersion(env, input.includeSecrets);
         // Retaining an image does not attest an older protocol requirement.
         // Worker-only deployments must preserve the same Web consumer floor.
@@ -115,12 +116,12 @@ export async function runDeployWorkerVersionCli(
         const preparedConfigPath = await prepareHostedContainerDeployImage({
           accountId: requireConfiguredString(env.CLOUDFLARE_ACCOUNT_ID, "CLOUDFLARE_ACCOUNT_ID"),
           configPath: input.configPath,
-          ...(retainServingRunner ? {} : { release: { currentVersion, releaseSha, listApplications: containerProvider.listApplications } }),
+          ...(retainServingRunner ? {} : { release: { currentVersion, immediate, releaseSha, listApplications: containerProvider.listApplications } }),
         });
         await applyHostedTransientLifecycleRules({ deployRoot, source: env });
         const staged = await stageHostedRunnerRelease({
           configPath: preparedConfigPath,
-          currentVersion, releaseSha, retainServingRunner,
+          currentVersion, releaseSha, retainServingRunner, immediate,
           currentVersionId,
           listApplications: containerProvider.listApplications,
         });
@@ -204,13 +205,8 @@ export async function runDeployWorkerVersionCli(
             },
           });
           await assertActivationAllowed(stageVersionId);
-          const rolloutSteps = input.containerRolloutMode === "gradual"
-            ? [10, 25, 50, 100].slice(-Math.min(serving.specification.max_instances, 4)) : [100];
-          await releaseProvider.admitApplication({ ...serving,
-            rolloutStepPercentage: rolloutSteps.length === 1 ? 100 : rolloutSteps,
-          });
-          await releaseProvider.assertApplicationReady({ ...serving, listApplications: containerProvider.listApplications,
-            rolloutStepCount: rolloutSteps.length });
+          await releaseProvider.admitApplication(serving);
+          await releaseProvider.assertApplicationReady({ ...serving, listApplications: containerProvider.listApplications });
         }
         const prepared = await readCloudflareContainerApplicationIdentities(
           renderedContainers, containerProvider.listApplications, "after", containerProvider.readRollout,

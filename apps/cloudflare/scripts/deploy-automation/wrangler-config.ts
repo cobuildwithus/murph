@@ -12,20 +12,14 @@ const DEFAULT_DEPLOY_ROOT = path.resolve(
   "..",
   "..",
 );
-// Connection age is not the checkpoint deadline; SIGTERM draining protects accepted work.
-const RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 0;
+// A rollout leaves a member shell alone until it has been connected this long.
+// Idle shells stop after the conversation idle TTL (10 minutes by default) and
+// start on the new image, so most conversations are never interrupted; older
+// shells still drain through SIGTERM. Immediate releases stage zero instead.
+const RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 1200;
 const DEPLOY_SMOKE_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 0;
-const CONTAINER_ROLLOUT_STEP_PERCENTAGE = [10, 25, 50, 100] as const;
 const DEVICE_WEBHOOK_QUEUE_SUFFIX = "device-webhooks";
 const DEVICE_WEBHOOK_DLQ_SUFFIX = "device-webhooks-dlq";
-
-function resolveContainerRolloutStepPercentage(maxInstances: number): number[] {
-  if (maxInstances >= CONTAINER_ROLLOUT_STEP_PERCENTAGE.length) {
-    return [...CONTAINER_ROLLOUT_STEP_PERCENTAGE];
-  }
-
-  return CONTAINER_ROLLOUT_STEP_PERCENTAGE.slice(-maxInstances);
-}
 
 export function buildHostedWranglerDeployConfig(
   environment: HostedDeployAutomationEnvironment,
@@ -73,11 +67,6 @@ export function buildHostedWranglerDeployConfig(
       instance_type: environment.containerInstanceType,
       max_instances: input.maxInstances,
       rollout_active_grace_period: input.rolloutActiveGracePeriodSeconds,
-      // Wrangler limits the array length to max_instances. A retained zero-cap
-      // legacy application must omit this option (slice(-0) would keep all steps).
-      ...(input.maxInstances > 0
-        ? { rollout_step_percentage: resolveContainerRolloutStepPercentage(input.maxInstances) }
-        : {}),
       ssh: { enabled: false },
     };
 

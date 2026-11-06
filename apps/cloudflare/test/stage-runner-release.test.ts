@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runnerApplicationExecutionIdentity, runnerApplicationSpecification } from "../scripts/runner-release-application.ts";
-import { stageHostedRunnerRelease } from "../scripts/stage-runner-release.ts";
+import { readReusableHostedRunnerImage, stageHostedRunnerRelease } from "../scripts/stage-runner-release.ts";
 
 let directory: string;
 const primary = { bank: "primary", id: "primary-old", bundleFingerprint: "a".repeat(64), sourceFingerprint: "b".repeat(64) };
@@ -178,6 +178,35 @@ describe("runner deployment staging", () => {
       containers: config.containers.map(entry => ({ ...entry, rollout_active_grace_period: 0 })),
     }));
     await expect(stageHostedRunnerRelease(retry)).rejects.toThrow("different candidate");
+  });
+
+  it("lets an immediate release replace recently connected member shells", async () => {
+    const staged = await stageHostedRunnerRelease({ releaseSha: "1".repeat(40), immediate: true,
+      configPath: path.join(directory, "source.json"), currentVersionId: "worker-live",
+      currentVersion: version({ active: primary, candidate: null, previous: next }), listApplications,
+    });
+    expect(staged.applications.map(application => [application.className, application.specification.rollout_active_grace_period]))
+      .toEqual([["DeploySmokeRunnerContainer", 300], ["RunnerContainer", 0]]);
+    const effective: { containers: Array<{ class_name: string; rollout_active_grace_period: number }> }
+      = JSON.parse(await readFile(staged.configPath, "utf8"));
+    expect(effective.containers.map(container => [container.class_name, container.rollout_active_grace_period])).toEqual([
+      ["RunnerContainer", 0], ["NextRunnerContainer", 300], ["DeploySmokeRunnerContainer", 300],
+      ["StandbyRunnerContainer", 300], ["SmallRunnerContainer", 300],
+    ]);
+  });
+
+  it("retries a pending immediate candidate only as immediate", async () => {
+    const input = { releaseSha: "1".repeat(40), configPath: path.join(directory, "source.json"),
+      currentVersionId: "worker-live", currentVersion: version(), listApplications };
+    const first = await stageHostedRunnerRelease({ ...input, immediate: true });
+    const pending = version(first.deployment);
+    const retry = { ...input, currentVersionId: "staged-worker", currentVersion: pending };
+    expect((await stageHostedRunnerRelease({ ...retry, immediate: true })).deployment).toEqual(first.deployment);
+    await expect(stageHostedRunnerRelease(retry)).rejects.toThrow("different candidate");
+    const reuse = (immediate: boolean) => readReusableHostedRunnerImage({ config, currentVersion: pending,
+      immediate, releaseSha: input.releaseSha, listApplications });
+    await expect(reuse(true)).resolves.toBe(image);
+    await expect(reuse(false)).rejects.toThrow("different candidate");
   });
 
   it("reuses already admitted pending inventory after an interrupted staging smoke", async () => {

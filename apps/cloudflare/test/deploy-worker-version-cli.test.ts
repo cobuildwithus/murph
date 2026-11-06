@@ -196,7 +196,8 @@ describe("runDeployWorkerVersionCli", () => {
     await syntheticDeployment("gradual");
     expect(releaseMocks.runSmokeHostedDeploy).toHaveBeenCalledWith(expect.objectContaining({ source: expect.objectContaining({ HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify(deployment) }) }));
     expect(trace).toEqual(["drained", "retired", "quota", "activate", "artifact smoke", "native rollout", "distributed", "serving smoke", "activate"]);
-    expect(releaseMocks.admitApplication).toHaveBeenCalledWith({ ...serving, rolloutStepPercentage: [10, 25, 50, 100] });
+    expect(releaseMocks.admitApplication).toHaveBeenCalledWith(serving);
+    expect(releaseMocks.assertApplicationReady).toHaveBeenLastCalledWith({ ...serving, listApplications: expect.any(Function) });
   });
 
   it("leaves the serving image untouched when isolated behavioral smoke fails", async () => {
@@ -454,15 +455,16 @@ describe("runDeployWorkerVersionCli", () => {
     expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledOnce();
 
     await syntheticDeployment(mode, { ...recoveryEnv, HOSTED_EXECUTION_RECOVERY_VERSION_TAG: "synthetic" }, true);
+    // Immediate replaces recently connected shells; both modes stage the same flag for image reuse.
     expect(imageMocks.prepareHostedContainerDeployImage).toHaveBeenLastCalledWith(expect.objectContaining({
-      release: expect.objectContaining({ currentVersion: expect.objectContaining(currentVersion), releaseSha: "1".repeat(40) }),
+      release: expect.objectContaining({ currentVersion: expect.objectContaining(currentVersion),
+        immediate: mode === "immediate", releaseSha: "1".repeat(40) }),
     }));
     expect(releaseMocks.stageHostedRunnerRelease).toHaveBeenLastCalledWith(expect.objectContaining({
-      currentVersion: expect.objectContaining(currentVersion), currentVersionId: "version-direct", retainServingRunner: false,
+      currentVersion: expect.objectContaining(currentVersion), currentVersionId: "version-direct",
+      immediate: mode === "immediate", retainServingRunner: false,
     }));
-    expect(releaseMocks.admitApplication).toHaveBeenCalledExactlyOnceWith({ ...serving,
-      rolloutStepPercentage: mode === "gradual" ? [10, 25, 50, 100] : 100,
-    });
+    expect(releaseMocks.admitApplication).toHaveBeenCalledExactlyOnceWith(serving);
     expect(releaseMocks.runSmokeHostedDeploy).toHaveBeenCalledTimes(2);
     expect(wranglerMocks.runWranglerLoggedCaptured.mock.calls.map(([args]) => args[3]))
       .toEqual(["/tmp/config.jsonc", "/tmp/config.jsonc", "/tmp/config.jsonc.promote"]);
