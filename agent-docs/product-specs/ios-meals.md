@@ -146,8 +146,9 @@ Murph removes a meal the same way, through `deleteMealRecord`, when inspection
 shows an automatically captured photo is not food the member ate, or, while it
 is still pending review, repeats a meal already saved, and the meal has no
 member-written note. A meal can therefore leave the list without a member action, normally after the 9pm
-closeout. Notes already saved on older non-food
-meals stay until the member removes them.
+closeout. A typed meal can leave the list the same way: when a pending capture repeats
+it, its details move onto the capture so the one entry keeps the photo. Notes
+already saved on older non-food meals stay until the member removes them.
 
 Hide the meal optimistically after acceptance. Until a new projection is saved,
 or if the runtime rejects removal, it may reappear on a read. Missing canonical

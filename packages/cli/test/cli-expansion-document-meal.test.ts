@@ -661,6 +661,67 @@ test('meal edit leaves source to the host and keeps the capture reviewable', asy
   }
 })
 
+test('the meal commands move a typed meal onto its capture', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'murph-capture-merge-'))
+
+  try {
+    const vaultRoot = path.join(root, 'vault')
+    const photoPath = path.join(root, 'capture.jpg')
+    await initializeVault({ vaultRoot, timezone: 'UTC' })
+    await writeFile(photoPath, 'synthetic image bytes')
+    const typed = await addMeal({
+      vaultRoot,
+      occurredAt: '2030-01-15T12:00:30.000Z',
+      name: 'Grain bowl',
+      note: 'Typed note.',
+      ingredients: ['rice'],
+      tags: ['lunch'],
+      nutrition: { totals: { calories: 520 }, provenance: { source: 'estimated', confidence: 'low' } },
+    })
+    const capture = await addMeal({
+      vaultRoot,
+      photoPath,
+      source: 'device',
+      occurredAt: '2030-01-15T12:00:00.000Z',
+      externalRef: { system: 'meal-photo-capture', resourceType: 'photo', resourceId: 'synthetic-capture' },
+    })
+    const cli = createDocumentMealSchemaCli()
+    const run = (args: string[]) => runInProcessJsonCli<{
+      entity: { data: {
+        attachments: Array<{ role: string }>
+        externalRef: { system: string }
+        ingredients: string[]
+        note: string
+        nutrition: { totals: { calories: number } }
+        tags: string[]
+        title: string
+      } }
+      mealCount: number
+      totals: { calories: { total: number } }
+    }>(cli, ['meal', ...args, '--vault', vaultRoot])
+
+    await run([
+      'edit', capture.mealId, '--name', 'Grain bowl', '--note', 'Typed note.', '--ingredient', 'rice', '--tag', 'lunch',
+      '--nutrition-calories', '520', '--nutrition-source', 'estimated', '--nutrition-confidence', 'low',
+    ])
+    assert.equal((await run(['delete', typed.mealId])).envelope.ok, true)
+    const merged = requireData((await run(['remove-photo', capture.mealId])).envelope).entity.data
+
+    assert.equal(merged.title, 'Grain bowl')
+    assert.equal(merged.note, 'Typed note.')
+    assert.deepEqual(merged.ingredients, ['rice'])
+    assert.deepEqual(merged.tags, ['lunch'])
+    assert.equal(merged.nutrition.totals.calories, 520)
+    assert.equal(merged.externalRef.system, 'meal-photo-capture')
+    assert.deepEqual(merged.attachments.map(attachment => attachment.role), ['reviewed_photo'])
+    const totals = requireData((await run(['totals', '--from', '2030-01-15', '--to', '2030-01-15'])).envelope)
+    assert.equal(totals.mealCount, 1)
+    assert.equal(totals.totals.calories.total, 520)
+  } finally {
+    await rm(root, { force: true, recursive: true })
+  }
+})
+
 test('meal import-json help documents the structured payload path and override rule', async () => {
   const help = await runRawSourceCli(['meal', 'import-json', '--help'])
 

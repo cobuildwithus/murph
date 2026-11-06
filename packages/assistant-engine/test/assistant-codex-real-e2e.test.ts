@@ -35396,6 +35396,113 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
     }
   })
 
+  it('merges a typed meal into its pending capture and keeps a meal it cannot carry', { timeout: 1_800_000 }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-typed-merge-e2e-'))
+    const vaultRoot = path.join(root, 'vault')
+    const binDirectory = path.join(root, 'bin')
+    const skillsRoot = path.join(root, 'skills')
+    const commandLog = path.join(root, 'commands.log')
+    const photoPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../apps/web/public/meal-snap-2.jpg')
+    const note = 'Grain bowl with sweet potato, avocado, arugula and chickpeas for lunch. Roughly one large bowl from the place near work, with extra lemon on the side and the dressing kept light, eaten at the desk around noon.'
+    const ingredients = ['brown rice', 'sweet potato', 'avocado', 'arugula', 'chickpeas', 'olive oil', 'lemon juice']
+    const nutrition = { totals: { calories: 520 }, provenance: { source: 'estimated', confidence: 'low' } } as const
+    const typedMeal = async (date: string, extra: Partial<Parameters<typeof addMeal>[0]> = {}) => await addMeal({
+      vaultRoot, occurredAt: `${date}T16:00:15.000Z`, name: 'Grain bowl', note, ingredients, nutrition, ...extra })
+    const capture = async (date: string) => await addMeal({ vaultRoot, source: 'device', occurredAt: `${date}T16:00:00.000Z`,
+      photoPath, externalRef: { system: 'meal-photo-capture', resourceType: 'photo', resourceId: `capture-${date}` } })
+    const expectMealGone = async (mealId: string) =>
+      await expect(showMealRecord(vaultRoot, mealId)).rejects.toMatchObject({ code: 'not_found' })
+    const closeout = async (currentLocalDate: string, failMealDelete = false) => {
+      const day = Number(currentLocalDate.slice(-2))
+      const scheduledOccurrenceAt = `2026-08-${day + 1}T01:00:00.000Z`
+      await materializeAutomaticMealClarificationVaultCli({ binDirectory, commandLog, vaultRoot, failMealDelete })
+      await writeFile(commandLog, '', 'utf8')
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAutomaticMealCloseoutDeveloperInstructions({ currentLocalDate, scheduledOccurrenceAt }),
+        env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot },
+        fixtureBinDirectory: binDirectory, groupConversation: false,
+        model: config.model, modelProvider: config.modelProvider,
+        reasoningEffort: 'low', sandbox: 'workspace-write', vaultRoot, workingDirectory: vaultRoot,
+        prompt: [MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions,
+          `Scheduled occurrence context: Occurrence local date: ${currentLocalDate}. Occurrence instant: ${scheduledOccurrenceAt}.`,
+          'The member prefers nonnumeric tracking.',
+        ].join('\n\n'),
+      })
+      const commands = (await readFile(commandLog, 'utf8')).trim().split('\n')
+      expect(commands.some(command => /meal (?:add|import-json)\b/u.test(command))).toBe(false)
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      process.stdout.write(`[typed-merge-closeout-proof] ${JSON.stringify({ currentLocalDate, failMealDelete, reply: result.finalMessage })}\n`)
+      return {
+        decision: parseAssistantNotificationDecision(result.finalMessage),
+        deleted: (mealId: string) => commands.filter(command => isMealDeleteCommand(command, mealId)).length,
+        editedAt: (mealId: string) => commands.findIndex(command => isMealEditMutationCommand(command) && command.includes(mealId)),
+        deletedAt: (mealId: string) => commands.findIndex(command => isMealDeleteCommand(command, mealId)),
+        readBackAt: (mealId: string, after: number) => commands.findIndex((command, index) => index > after && command.startsWith(`meal show ${mealId}`)),
+        reviewedAt: (mealId: string) => commands.findIndex(command => isMealRemovePhotoCommand(command, mealId)),
+      }
+    }
+    const expectMerged = async (mealId: string) => {
+      const state = await readAutomaticMealClarificationState({ vaultRoot, mealId })
+      expect(state.savedNote).toBe(note)
+      expect(state.savedCalories).toBe(520)
+      expect(state.savedAttachmentCount).toBe(0)
+      expect((await showMealRecord(vaultRoot, mealId)).entity.data.title).toBe('Grain bowl')
+      expect([...(await showMealRecord(vaultRoot, mealId)).entity.data.ingredients as string[]].sort()).toEqual([...ingredients].sort())
+    }
+    try {
+      await initializeVault({ vaultRoot, timezone: 'America/New_York' })
+      await Promise.all((['automatic-meal-capture', 'food-journal'] as const).map(slug =>
+        materializeAssistantSkill({ skillsRoot, slug })))
+
+      const typed = await typedMeal('2026-08-24')
+      const photo = await capture('2026-08-24')
+      const merged = await closeout('2026-08-24')
+      expect(merged.editedAt(photo.mealId)).toBeGreaterThanOrEqual(0)
+      expect(merged.readBackAt(typed.mealId, -1)).toBeGreaterThanOrEqual(0)
+      expect(merged.readBackAt(typed.mealId, -1)).toBeLessThan(merged.editedAt(photo.mealId))
+      expect(merged.readBackAt(photo.mealId, merged.editedAt(photo.mealId))).toBeGreaterThan(merged.editedAt(photo.mealId))
+      expect(merged.deletedAt(typed.mealId)).toBeGreaterThan(merged.readBackAt(photo.mealId, merged.editedAt(photo.mealId)))
+      expect(merged.reviewedAt(photo.mealId)).toBeGreaterThan(merged.deletedAt(typed.mealId))
+      expect(merged.deleted(photo.mealId)).toBe(0)
+      await expectMealGone(typed.mealId)
+      await expectMerged(photo.mealId)
+
+      const interrupted = await typedMeal('2026-08-25')
+      const pending = await capture('2026-08-25')
+      const failed = await closeout('2026-08-25', true)
+      expect(failed.deleted(interrupted.mealId)).toBeGreaterThanOrEqual(1)
+      expect(failed.reviewedAt(pending.mealId)).toBe(-1)
+      expect(failed.decision.privateSummary).toMatch(/fail|couldn|unable|error/iu)
+      expect((await readAutomaticMealClarificationState({ vaultRoot, mealId: pending.mealId })).savedAttachmentCount).toBe(1)
+      const resumed = await closeout('2026-08-26')
+      expect(resumed.deleted(interrupted.mealId)).toBe(1)
+      expect(resumed.deleted(pending.mealId)).toBe(0)
+      await expectMealGone(interrupted.mealId)
+      await expectMerged(pending.mealId)
+
+      const uncarried = [
+        await typedMeal('2026-08-27', { source: 'device', externalRef: { system: 'junction', resourceType: 'meal', resourceId: 'synthetic-provider-meal' } }),
+        await typedMeal('2026-08-28', { nutrition: { ...nutrition, micros: { calciumMg: 400 } } }),
+      ]
+      for (const [index, saved] of uncarried.entries()) {
+        const date = `2026-08-${27 + index}`
+        const repeat = await capture(date)
+        const kept = await closeout(date)
+        expect(kept.deleted(repeat.mealId)).toBe(1)
+        expect(kept.deleted(saved.mealId)).toBe(0)
+        expect(kept.editedAt(saved.mealId)).toBe(-1)
+        await expectMealGone(repeat.mealId)
+        expect((await readAutomaticMealClarificationState({ vaultRoot, mealId: saved.mealId })).savedCalories).toBe(520)
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths])
+    }
+  })
+
   it('recovers one automatic meal edit and retains unresolved photos', {
     timeout: 900_000,
   }, async () => {

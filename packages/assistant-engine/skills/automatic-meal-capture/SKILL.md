@@ -158,9 +158,9 @@ When enriching a captured meal:
 2. Before editing, compare nearby canonical meals for a likely manual,
    conversation, provider, or second-photo record of the same eating occasion.
    Count each occasion once. When inspection shows a capture repeats a meal
-   already saved, apply the deletion rule below and leave that meal unchanged.
-   When you cannot tell, do not enrich both or sum both; ask only when resolving
-   it materially affects tracking.
+   already saved, apply the deletion or merge rule below. When you cannot tell,
+   do not enrich both or sum both; ask only when resolving it materially affects
+   tracking.
 3. Show each candidate and inspect its actual photo attachment. Do not infer
    foods from the fact that the on-device classifier accepted it.
 4. Resolve exact visible package or menu labels with the food-journal label
@@ -201,8 +201,9 @@ material uncertainty; never replace a member-written note. Add `--ingredient`
 values only for identities the photo supports. An imported photo stub is not
 evidence of consumption. After actually inspecting an imported device stub,
 if it shows a non-food image, food/drink the member did not consume, or, while
-its attachment role is still `photo`, a meal already saved, and has no
-member-written note, run `vault-cli meal delete <meal-id>` and confirm it is
+its attachment role is still `photo`, a meal already saved that the merge rule
+below does not cover, and has no member-written note, run
+`vault-cli meal delete <meal-id>` and confirm it is
 absent with a fresh bounded `meal list` for its capture date. Write no note and
 run no `remove-photo` for that meal. This applies to interactive enrichment and
 scheduled closeout. Never delete from classifier acceptance, a guess, or
@@ -214,6 +215,19 @@ not a confidence check: ask
 one narrow identity or portion question only when actual attachment inspection
 leaves identity or amount too indeterminate for any meaningful bounded estimate
 and the answer would materially help.
+
+A pending capture that repeats a typed meal merges instead, so the one entry
+keeps the photo. This applies when the saved meal has no attachment and no
+`externalRef` and shares the capture's local date, and the capture has no
+member-written note. Read the saved meal with `meal show`, because `meal list`
+shortens fields. Copy its name, note, ingredients, tags and nutrition onto the
+capture with `meal edit`, read the capture back against that record, run
+`vault-cli meal delete <saved-meal-id>`, confirm it is absent,
+then continue the capture's normal review. If that delete fails, run no
+`remove-photo`, so the capture stays pending; a later run that finds those
+details already on the capture resumes at the delete. When the saved meal holds
+anything `meal edit` cannot set, such as micronutrients, keep it and delete the
+capture instead.
 
 A recent captured meal remains unresolved after its attachment becomes a privacy
 tombstone when its saved identity, amount or ingredients, and nutrition cannot
@@ -267,8 +281,8 @@ On a scheduled run:
    never recreate or delete them again. For food without supported nutrition,
    save and read back the observation fallback above.
 5. For surviving meals only, after read-back proves saved nutrition, the food
-   observation fallback, or a preserved member-written note,
-   run `vault-cli meal remove-photo <meal-id>` and read the meal back again.
+   observation fallback, or a preserved member-written note, and any merge
+   delete has succeeded, run `vault-cli meal remove-photo <meal-id>` and read the meal back again.
    This compatibility-named command marks pending attachments `reviewed_photo`
    and records `photoReviewedAt`; it preserves the structured meal and media.
    Full photos expire 90 days after capture. A private thumbnail remains while
