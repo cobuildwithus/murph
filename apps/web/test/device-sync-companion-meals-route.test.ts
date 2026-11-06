@@ -41,7 +41,7 @@ beforeEach(() => {
   mocks.auth.mockResolvedValue({ member: { id: "member_native" } });
   mocks.workspace.mockResolvedValue({ browserVaultReplicaRef: replicaRef, version: "v1" });
   mocks.control.mockResolvedValue({ state: "ready" });
-  mocks.decode.mockResolvedValue({ client: { replica: { generation: 17, generatedAt: savedAt, meals: projection, entities: [], privateNotes: ["must not leave reader"] } } });
+  mocks.decode.mockResolvedValue({ client: { replica: { displayName: "Avery", generation: 17, generatedAt: savedAt, meals: projection, entities: [], privateNotes: ["must not leave reader"] } } });
   mocks.submit.mockResolvedValue({ accepted: true, actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243" });
 });
 

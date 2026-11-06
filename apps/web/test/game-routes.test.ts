@@ -635,7 +635,7 @@ describe("weekly game routes", () => {
       const history = await routes.history.GET(new Request(`${BASE}/history?memberId=${AVA}`, { headers: { "x-member-id": AVA } }));
       const game = await routes.game.GET(new Request(`${BASE}/games/${GAME_ID}?memberId=${AVA}`), params({ id: GAME_ID }));
 
-      expect(mocks.readHome).toHaveBeenCalledWith(LEO, false);
+      expect(mocks.readHome).toHaveBeenCalledWith(LEO, false, expect.objectContaining({ member: { id: LEO } }));
       expect(mocks.readHistory).toHaveBeenCalledWith(LEO, false);
       expect(mocks.readGame).toHaveBeenCalledWith(GAME_ID, LEO, false);
       expect(await home.json()).toEqual({ games: [VIEW], me: { memberId: LEO }, ok: true, wallet: { held: [], owed: [], redeemed: [] } });

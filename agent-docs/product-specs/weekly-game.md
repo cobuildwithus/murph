@@ -350,6 +350,12 @@ them, in every game with that person; the photo is that player's fallback pictur
 in the challenger's views. The latest invite wins: a name, photo or relationship
 typed for that person replaces what the challenger typed before.
 
+A member without a game profile can silently adopt a usable single-word vault
+name at native login or on Home. Explicit app name changes also submit a best-effort canonical
+memory update; time-zone-only changes do not. Existing game profiles remain
+authoritative. See [first-name persistence](ios-game.md#first-name-persistence)
+for validation, authority, timeout and concurrent-save behavior.
+
 Each member may also upload, replace or remove their own profile photo. It syncs
 across devices and becomes their default when creating or joining a game. Inside
 the app, the person's own profile photo wins, then the viewer's private contact
