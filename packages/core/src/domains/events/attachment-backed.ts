@@ -96,6 +96,7 @@ export interface AddCaptureWithLookupInput extends AddCaptureInput {
 }
 
 export interface AddMeasurementInput {
+  onExisting?: "keep";
   vaultRoot: string;
   draft: AttachmentBackedEventDraft<"measurement">;
   attachments?: readonly EventAttachmentSourceInput[];
@@ -541,6 +542,7 @@ interface WriteAttachmentBackedEventInput<
   draft: AttachmentBackedEventDraft<K>;
   attachments?: readonly EventAttachmentSourceInput[];
   rawImport?: RawImportOptions;
+  onExisting?: "keep";
   specializedKind: K;
   writeLabel: string;
   operationType: string;
@@ -596,6 +598,17 @@ export async function writeAttachmentBackedEvent<
     : [];
   ensureSpecializedEventKind(input.specializedKind, eventId, matchedShards);
   const latestMatchedEvent = selectLatestMatchedEvent(matchedShards);
+  // The public stable-id measurement entrypoint holds the canonical write lock.
+  // Keep tombstones too: replay must never restore a corrected or deleted record.
+  if (input.onExisting === "keep" && latestMatchedEvent) {
+    return {
+      eventId,
+      ledgerFile: latestMatchedEvent.relativePath,
+      created: false,
+      event: latestMatchedEvent.record as EventRecordByKind<TStoredKind>,
+      manifestPath: null,
+    };
+  }
   let rehydratedDraft = rehydrateDraftFromLatest(
     latestMatchedEvent
       ? input.toLatestDraft(latestMatchedEvent.record as EventRecordByKind<TStoredKind>)
@@ -898,6 +911,7 @@ export async function addMeasurement(
     draft: input.draft,
     attachments: input.attachments,
     rawImport: input.rawImport,
+    onExisting: input.onExisting,
     specializedKind: "measurement",
     writeLabel: "measurement",
     operationType: "measurement_write",

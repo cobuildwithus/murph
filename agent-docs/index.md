@@ -1945,3 +1945,7 @@ The native usage denial contract is owned by `references/hosted-postgres-runtime
 its controller drain gate and rollback floor are in `../apps/cloudflare/DEPLOY.md`.
 
 Ordinary reminder input replay is recorded in the [execution plan](exec-plans/completed/2026-11-06-automation-input-replay.md).
+
+Typed companion VO2 input, its consumer-first local commit boundary and backend
+proof are tracked in [the active plan](exec-plans/active/2026-11-06-companion-vo2-reading-input.md).
+The measurement action and rollback floor are owned by `../ARCHITECTURE.md`.

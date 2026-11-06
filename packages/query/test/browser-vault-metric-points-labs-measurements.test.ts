@@ -51,6 +51,27 @@ test("reported VO2 aliases become daily Numbers readings while other measurement
   assert.equal(rows[0]?.sourceLabel, "Manual");
 });
 
+test("a reported VO2 taken in the evening stays on its canonical day, past the UTC date", async () => {
+  const vault = createVaultReadModel({
+    entities: [createEvent("evt_evening_vo2", "measurement", {
+      occurredAt: "2026-11-07T01:30:00.000Z",
+      attributes: { source: "manual", dayKey: "2026-11-06", measurements: [
+        { metric: "estimated-vo2-max", value: 44, unit: "ml/kg/min" },
+      ] },
+    })],
+    metadata: null, vaultRoot: "browser://vault",
+  });
+  const points = buildMetricProjection(vault).metricPoints;
+  assert.equal(points[0]?.effectiveDate, "2026-11-06");
+  assert.equal(points[0]?.observedAt, "2026-11-07T01:30:00.000Z", "order keeps the real moment");
+  const replica = await createBrowserVaultReplica({ vault, metricPoints: points,
+    generatedAt: "2026-11-07T02:00:00.000Z", sourceBundleHash: "f".repeat(64) });
+  const rows = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica)).metrics.series({
+    metricKey: "estimated-vo2-max", grain: "day", from: "2026-11-01", to: "2026-11-06",
+  });
+  assert.equal(rows.length, 1, "Numbers reads through the member's today");
+});
+
 async function createBrowserVaultReplicaFromVault(input: CreateReplicaInput) {
   return createBrowserVaultReplica({
     ...input,

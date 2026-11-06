@@ -461,13 +461,16 @@ function measurementMetricPoints(entity: CanonicalEntity, sourceKind: MetricSour
     const value = readNumber(record?.value);
     const unit = readString(record?.unit);
     if (!metric || value === null) return [];
+    // Reported VO2 estimates are dated readings consumed by daily shares and Numbers.
+    const reportedDaily = resolveMetricDefinition(metric)?.key === "estimated-vo2-max";
 
     return [scalarMetricPoint({
       confidence: eventConfidence(entity),
       context: { qualifiers: readQualifiers(record?.qualifiers) },
+      // The canonical day, not the UTC slice: an evening reading stays on today.
+      effectiveDate: reportedDaily ? readString(entity.attributes.dayKey) : undefined,
       entity,
-      // Reported VO2 estimates are dated readings consumed by daily shares and Numbers.
-      grain: resolveMetricDefinition(metric)?.key === "estimated-vo2-max" ? "day" : undefined,
+      grain: reportedDaily ? "day" : undefined,
       index,
       metric,
       sourceKind,
