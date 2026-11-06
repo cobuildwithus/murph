@@ -1,4 +1,5 @@
 import { linqRoster } from "./support/linq-roster";
+import { reviewGameReport } from "@/src/lib/game/report-review";
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getPrisma } from "@/src/lib/prisma";
@@ -1106,7 +1107,16 @@ describe.skipIf(!enabled)("exact group chat and composer persistence", () => {
     expect(shared?.validation.result).toHaveLength(3);
     expect(new Set(shared?.players).size).toBe(3);
     expect(JSON.stringify(shared?.game)).not.toContain('"missed"');
-    await ok(people[0].id, { type: "report", gameId: game.id, reportId: randomUUID(), about: "post", reason: "other", entryId: post.id });
+    const sealInput = await queuedGroupRecap({ game, room, people, members });
+    expect(await sealGameRecap(sealInput)).toEqual(sealInput.recap);
+    const before = await db.game.findUniqueOrThrow({ where: { id: game.id } });
+    const reportId = randomUUID();
+    await ok(people[0].id, { type: "report", gameId: game.id, reportId, about: "post", reason: "other", entryId: post.id });
+    expect((await readGame(game.id, people[2].id, true))?.recap).toEqual(sealInput.recap);
+    expect(await reviewGameReport({ reportId, removePost: true })).toEqual({ found: true });
+    expect((await readGame(game.id, people[2].id, true))?.recap).toBeNull();
+    const after = await db.game.findUniqueOrThrow({ where: { id: game.id } });
+    expect(after).toEqual({ ...before, recapEncrypted: null, updatedAt: after.updatedAt });
     expect(await readGameRecapMaterial(game.id, room, members)).toBeNull();
     await db.gameReport.deleteMany({ where: { gameId: game.id } });
     await db.gameBlock.create({ data: { blockerMemberId: people[0].id, blockedMemberId: people[1].id } });

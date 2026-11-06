@@ -1,4 +1,5 @@
 import "server-only";
+import { readGameRecapEntryIdsTx } from "./recap-witness";
 
 import { groupGameRecapPlayers } from "./recap-cohort";
 import { readCurrentGameTalk, type GameNoticeAudience } from "./talk";
@@ -89,6 +90,7 @@ async function assertGameChallengeDeliveryCurrentTx(input: Parameters<typeof ass
 async function assertGameRecapDeliveryCurrentTx(
   input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], gameId: string, regenerationId?: string,
 ): Promise<true> {
+  await input.tx.$queryRaw`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
   const players = input.playerMemberIds ?? [];
   const game = await input.tx.game.findFirst({
     where: { id: gameId, chatContainerMemberId: input.containerMemberId, status: "settled", OR: [{ maxPlayers: 10 }, { maxPlayers: 2, players: { none: { leftAt: { not: null } } } }],
@@ -96,7 +98,7 @@ async function assertGameRecapDeliveryCurrentTx(
     include: { invitees: true, players: { take: 11 } },
   });
   if (!game || game.maxPlayers === 10 && !groupGameRecapPlayers(game) || !await deliveryAudienceCurrent(input, game, players)) return stale();
-  if (game.maxPlayers === 10 && await input.tx.gameReport?.findFirst({ where: { gameId }, select: { id: true } })) return stale();
+  if (!await readGameRecapEntryIdsTx(input.tx, game, input.deliveryIdempotencyKey!)) return stale();
   return true;
 }
 

@@ -54,7 +54,7 @@ export async function requestGameRecapRegeneration(input: GameRecapRegenerationR
     if (await hasGameChatBlock(tx, game.players.flatMap(player => player.memberId ? [player.memberId] : []))) return result("players_blocked");
     const prior = await tx.gameEvent.findUnique({ where: { commandKey: eventId }, select: { id: true } });
     if (prior) return result("already_requested");
-    if (!game.recapEncrypted) return result("recap_unavailable");
+    if (!game.recapEncrypted && !await tx.gameEntry.findFirst({ where: { gameId: input.gameId, withdrawnReason: "removed" }, select: { id: true } })) return result("recap_unavailable");
     const latest = await tx.gameEvent.findFirst({ where: { gameId: input.gameId, type: "recap_regeneration_requested" },
       orderBy: { id: "desc" }, select: { commandKey: true } });
     // Do not overlap generations or replace the story while its delivery is

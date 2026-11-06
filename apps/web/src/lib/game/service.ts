@@ -1,4 +1,5 @@
 import "server-only";
+import { clearGameRecapQuotingEntryTx, gameRecapStoryMayQuoteEntry, readGameRecapEntryIdsTx, readGameRecapStoryWitnesses, readPermittedGameRecapEntryIds } from "./recap-witness";
 import { compareGroupRematch, rematchSeat } from "./rematch";
 
 import { parseGameRecapEventId, hostedGameRecapSchema, type GameNoticeRoom, type HostedGameChatState, type HostedGameUpdate, type HostedGameRecap } from "@murphai/hosted-execution/runtime-control";
@@ -1763,7 +1764,8 @@ async function isReportAlertDue(row: Pick<GameReport, "createdAt" | "reporterMem
 /**
  * Ops review: take down a reported post. Its row stays as a withdrawn
  * tombstone with its words, summary, blur and media cleared, so it counts for
- * no one and nobody but its poster can read its upload again.
+ * no one and nobody but its poster can read its upload again. Clear any recap
+ * that may quote it in the same game-locked transaction; the settled result stays.
  */
 export async function removeGamePostForReview(entryId: string): Promise<boolean> {
   const entry = await getPrisma().gameEntry.findUnique({ select: { gameId: true }, where: { id: entryId } });
@@ -1775,6 +1777,7 @@ export async function removeGamePostForReview(entryId: string): Promise<boolean>
     const changed = await tx.gameEntry.updateMany({ where: { id: entryId, OR: [{ withdrawnReason: null }, { withdrawnReason: { not: "removed" } }] },
       data: { blurHash: null, mediaKeys: [], payloadEncrypted: null, textEncrypted: null, withdrawnAt: clock, withdrawnReason: "removed" } });
     removed = changed.count === 1;
+    if (removed) await clearGameRecapQuotingEntryTx(tx, entry.gameId, entryId);
     return removed ? [{ payload: { entryId }, type: "removed" }] : [];
   });
   return removed;
@@ -2473,8 +2476,8 @@ export type GameRecapMaterial = {
   };
 };
 
-/** Finished shared projection for the bound recap turn; private contact labels stay out. */
-export async function readGameRecapMaterial(gameId: string, containerMemberId: string, expectedPlayers: readonly string[]): Promise<GameRecapMaterial | null> {
+/** Finished shared projection for the bound recap turn; omit eventId only before publication, when nothing has been exposed. */
+export async function readGameRecapMaterial(gameId: string, containerMemberId: string, expectedPlayers: readonly string[], eventId?: string): Promise<GameRecapMaterial | null> {
   const prisma = getPrisma();
   const row = await prisma.game.findFirst({ where: { id: gameId, chatContainerMemberId: containerMemberId, status: "settled", OR: [{ maxPlayers: 10 }, { maxPlayers: 2, players: { none: { leftAt: { not: null } } } }] }, include: { invitees: true, players: { orderBy: { seat: "asc" } }, tickets: true } });
   if (!row || !row.result) return null;
@@ -2484,13 +2487,13 @@ export async function readGameRecapMaterial(gameId: string, containerMemberId: s
   if (await hasGameChatBlock(prisma, expectedPlayers)) return null;
   if (row.maxPlayers === 10 && !await readGroupGameChatAuthority(row, containerMemberId)) return null;
   const rowEntries = await prisma.gameEntry.findMany({ where: { gameId, ...(row.maxPlayers === 10 ? { memberId: { in: memberIds } } : {}) }, orderBy: { receivedAt: "asc" } });
+  const allowed = await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
+    return eventId ? readGameRecapEntryIdsTx(tx, row, eventId) : readPermittedGameRecapEntryIds(tx, row);
+  });
+  if (!allowed) return null;
+  const shownEntries = rowEntries.filter(entry => allowed.has(entry.id));
   const profiles = await prisma.gameProfile.findMany({ where: { memberId: { in: memberIds } }, select: { memberId: true, firstNameEncrypted: true } });
-  const reports = await prisma.gameReport.findMany({ where: { gameId, ...(row.maxPlayers === 10 ? {} : { entryId: { not: null } }) }, select: { entryId: true } });
-  // A single shared story cannot honor different report masks. Keep the shared
-  // recap quiet while any room member has hidden material from this game.
-  if (row.maxPlayers === 10 && reports.length) return null;
-  const hidden = new Set(reports.flatMap((report) => report.entryId ? [report.entryId] : []));
-  const shownEntries = rowEntries.filter((entry) => entry.attempt > 0 && entry.withdrawnAt === null && !hidden.has(entry.id));
   const plain = await openGameTexts([
     { ...gameTarget(row, "terms_words"), value: row.termsWordsEncrypted },
     ...profiles.map((profile) => ({ field: "first_name", memberId: profile.memberId, rowId: profile.memberId, table: "game_profile" as const, value: profile.firstNameEncrypted })),
@@ -2566,6 +2569,7 @@ export async function sealGameRecap(input: {
     if (!current || current.wordsOwnerMemberId !== row.wordsOwnerMemberId) return null;
     if (current.maxPlayers === 10 ? !groupGameRecapPlayers(current) || !audience || !await readGroupGameChatAuthority(current, input.containerMemberId, audience, tx)
       : !sameGamePlayers(current.players.map((player) => player.memberId), input.playerMemberIds) || await hasGameChatBlock(tx, input.playerMemberIds)) return null;
+    if (!await readGameRecapEntryIdsTx(tx, current, input.eventId)) return null;
     if (scope.regenerationId) {
       const requested = await tx.gameEvent.findUnique({ where: { commandKey: input.eventId }, select: { gameId: true, type: true } });
       if (requested?.gameId !== input.gameId || requested.type !== "recap_regeneration_requested") return null;
@@ -3437,7 +3441,8 @@ async function buildViewInputs(
   const pairGames = history ? [] : games.filter(game => game.row.maxPlayers === 2);
   const pairEntryIds = pairGames.flatMap(game => game.entries.map(entry => entry.id));
   const pairPeers = pairEntryIds.length ? [...new Set(pairGames.flatMap(game => gameMemberIds(game.row.players)))].filter(id => id !== viewerId) : [];
-  const [profiles, labels, tickets, pendingViews, blocks, reported, challenges, talkViews, replies, replyReported, recapsWatched] = await Promise.all([
+  const recapCandidates = games.filter(game => !history && game.row.recapEncrypted && game.entries.some(entry => entry.withdrawnReason === "removed"));
+  const [profiles, labels, tickets, pendingViews, blocks, reported, challenges, talkViews, replies, replyReported, recapsWatched, storyWitnesses] = await Promise.all([
     prisma.gameProfile.findMany({ where: { memberId: { in: labelSubjects } } }),
     prisma.gameContactLabel.findMany({ where: { ownerMemberId: viewerId, subjectMemberId: { in: labelSubjects } } }),
     history ? [] : prisma.gameTicket.findMany({
@@ -3451,12 +3456,20 @@ async function buildViewInputs(
     pairEntryIds.length ? prisma.gameReply.findMany({ where: { entryId: { in: pairEntryIds } }, select: replyMetadataSelect }) : [],
     readReplyReportedMembers(prisma, viewerId, pairPeers),
     readRecapsWatched(games.filter(game => game.row.status === "settled").map(game => game.row.id), viewerId, history),
+    recapCandidates.length ? readGameRecapStoryWitnesses(prisma, recapCandidates.map(game => game.row.id)) : new Map<string, readonly string[] | null>(),
   ]);
+  // The row was read first; a replacement since then would pair its clean witness with older words.
+  const currentRecaps = new Map((recapCandidates.length ? await prisma.game.findMany({
+    where: { id: { in: recapCandidates.map(game => game.row.id) } }, select: { id: true, recapEncrypted: true },
+  }) : []).map(game => [game.id, game.recapEncrypted]));
   const hiddenEntryIds = reported.entries;
   const hiddenMemberIds = new Set([...blocks.blocked, ...blocks.blockedBy]);
   const recapSuppressed = games.map((game) => game.state.players.some((player) => hiddenMemberIds.has(player.memberId))
     || game.entries.some((entry) => hiddenEntryIds.has(entry.id))
-    || game.state.players.some((player) => player.memberId !== viewerId && reported.players.has(player.memberId)));
+    || game.state.players.some((player) => player.memberId !== viewerId && reported.players.has(player.memberId))
+    || storyWitnesses.has(game.row.id) && (currentRecaps.get(game.row.id) !== game.row.recapEncrypted
+      || game.entries.some(entry => entry.withdrawnReason === "removed"
+        && gameRecapStoryMayQuoteEntry(storyWitnesses.get(game.row.id) ?? null, entry.id))));
 
   // One decrypt batch: words, names, labels, invite bits, visible entries.
   const requests: Array<GameSealTarget & { value: string | null }> = [];

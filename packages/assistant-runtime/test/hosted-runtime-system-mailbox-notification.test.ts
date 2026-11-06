@@ -270,6 +270,64 @@ beforeEach(() => {
   });
 });
 
+describe("game recap generation retirement", () => {
+  const eventId = "game-recap:synthetic_game";
+  const wake = (kind: "recap" | "other" | "mismatch" = "recap") => buildHostedExecutionAssistantNotificationRequestedWake({
+    eventId, memberId: "member_123", occurredAt: FIXED_NOW,
+    notification: { instructions: "Write the synthetic recap.",
+      route: { channel: "linq", delivery: { kind: "thread", target: "synthetic-chat" }, actorId: null, identityId: null, threadId: null, threadIsDirect: false },
+      responsePolicy: kind === "other" ? { kind: "require_send" } : {
+        kind: "require_game_recap", gameId: "synthetic_game", eventId: kind === "mismatch" ? "game-recap:other_game" : eventId,
+        pairFingerprint: "synthetic-pair",
+      } },
+  });
+  const response = (error?: string) => ({ action: "read_game" as const,
+    result: error ? { status: "unavailable" as const, error } : { status: "ok" as const, state: { games: [] } } });
+
+  it.each(["retired", "unavailable", "ok", "missing", "other", "mismatch"] as const)("prepares %s recap work before model execution", async scenario => {
+    const request = vi.fn<NonNullable<HostedRuntimePlatform["groupToolPort"]>["request"]>().mockResolvedValue(
+      response(scenario === "retired" ? "recap_generation_retired" : scenario === "unavailable" ? "recap_authority_unavailable" : undefined));
+    const notification = wake(scenario === "other" || scenario === "mismatch" ? scenario : "recap");
+    const signal = new AbortController().signal;
+    const prepared = await prepareHostedAssistantNotificationSystemMailboxWake({
+      assertExternalThreadRouteAuthority: undefined, executionContext: { hosted: { memberId: "member_123", userEnvKeys: [] } }, mailboxDedupeKey: eventId, signal, wake: notification,
+      groupToolPort: scenario === "missing" ? undefined : { request },
+    });
+    if (scenario === "retired") {
+      expect(prepared).toMatchObject({ kind: "terminal_no_send", reason: "game_recap_generation_retired",
+        outcome: { conversationMetrics: null, deliveryIntentIds: [], mailboxLane: "assistant-notification", redactedLogEntries: [expect.objectContaining({
+          redacted: expect.objectContaining({ eventCode: "assistant.notification.game_recap_generation_retired", terminalDisposition: "game_recap_generation_retired" }),
+        })] } });
+    } else expect(prepared).toEqual({ kind: "execute", wake: notification });
+    if (["missing", "other", "mismatch"].includes(scenario)) expect(request).not.toHaveBeenCalled();
+    else expect(request).toHaveBeenCalledExactlyOnceWith({ action: "read_game", origin: { kind: "game_recap", gameId: "synthetic_game", eventId } }, { signal });
+  });
+
+  it.each([false, true])("normal mailbox consumption handles retirement; port throws=%s", async throws => {
+    const workspace = await createHostedRuntimeWorkspace("recap-retirement-");
+    const request = vi.fn<NonNullable<HostedRuntimePlatform["groupToolPort"]>["request"]>();
+    if (throws) request.mockRejectedValue(new Error("Synthetic storage unavailable"));
+    else request.mockResolvedValue(response("recap_generation_retired"));
+    try {
+      await enqueueHostedSystemMailboxItem({ item: createResolvedNotificationItem({ dedupeKey: eventId }), wake: wake(), vaultRoot: workspace.vaultRoot });
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({ executionContext: null, now: () => FIXED_NOW,
+        runtime: createRuntime({ groupToolPort: { request } }), runtimeEnv: {}, vaultRoot: workspace.vaultRoot });
+      expect(mocks.executeHostedMailboxEvent).not.toHaveBeenCalled();
+      const state = await readHostedSystemMailboxState(workspace.vaultRoot);
+      if (throws) {
+        expect(prepared?.status).toBe("retryable_failed");
+        expect(state.pending).toHaveLength(1);
+        expect(state.pending[0]?.nextAttemptAt).not.toBeNull();
+        expect(Date.parse(state.pending[0]!.nextAttemptAt!)).toBeGreaterThan(Date.parse(FIXED_NOW));
+      } else {
+        expect(prepared).toMatchObject({ status: "processed", metrics: { deliveryIntentIds: [], nextWakeAt: null } });
+        expect(state.pending).toEqual([]);
+        expect(await resolveHostedSystemMailboxNextWakeAt({ vaultRoot: workspace.vaultRoot, now: () => FIXED_NOW })).toBeNull();
+      }
+    } finally { await workspace.cleanup(); }
+  });
+});
+
 describe("hosted system mailbox notification execution context", () => {
   it.each(["approval", "device", "same-deadline", "retry-only"] as const)(
     "preserves the selected wake owner after a device callback fails (%s)",

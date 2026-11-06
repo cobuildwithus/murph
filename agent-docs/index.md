@@ -1,4 +1,5 @@
 Game report recovery from the stored receipt and its frozen alert inputs are owned by [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md).
+Recap moderation witnesses, transactional takedown clearing and read-time hiding of affected stored stories are owned by [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md#weekly-game). Existing ciphertext cleanup is held for a separate approved PR. Local verification is recorded in [the recap moderation execution plan](exec-plans/completed/2026-11-06-recap-moderation-witness.md).
 
 Native game write outcomes, the empty-slot post guard and the Messages member-action session recheck are owned by [Weekly Game](product-specs/weekly-game.md) and [Security](SECURITY.md).
 
