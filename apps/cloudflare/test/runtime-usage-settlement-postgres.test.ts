@@ -116,7 +116,7 @@ describe("Provider identity and usage settlement with native receipts", () => {
 
   it("denies a completed invocation even when its old credential remains available", async () => {
     const h = harness();
-    h.receipt().complete(h.identity, false);
+    h.receipt().complete(h.identity);
     expect(await readNativeRuntimeProviderAuthority(h.env, caller)).toBeNull();
     expect(commandHostedRuntimeOwner).not.toHaveBeenCalled();
   });
@@ -382,7 +382,7 @@ describe("Provider identity and usage settlement with native receipts", () => {
     const rejected = expect(delivery).rejects.toThrow("synthetic response lost");
     await forwarded;
     const next = { attemptId: "synthetic-next-attempt", generation: "2" };
-    h.receipt().complete(h.identity, false);
+    h.receipt().complete(h.identity);
     h.receipt().register(next, { workspaceVersion: "0", platformAiUsageAllowed: true });
     lose(new Error("synthetic response lost"));
     await rejected;

@@ -185,12 +185,12 @@ reconciliation facts are idle. Blocked facts discard the wake; accepted
 processing clears it only when no newer wake arrived during that call. A warm
 invocation compares its invocation provider with the Web-owned provider fact
 returned by its existing mailbox fetch, including empty and usage-denied fetches.
-A mismatch stops that invocation from servicing further wakes, makes its dirty
-workspace checkpoint, and returns the existing `immediateRecheckRequested` edge
-so Cloudflare releases the provider-specific invocation and starts a fresh one.
+A mismatch stops further wakes, checkpoints the dirty workspace and ends the
+invocation. Its ending drives Cloudflare release; final release wakes Temporal
+to admit a fresh invocation.
 When the package invocation settles, Cloudflare closes runtime-wake admission
 and drains the coalesced signal in the same synchronous turn. An already
-accepted wake becomes that same positive immediate-recheck edge; a later wake
+accepted wake becomes a positive immediate-recheck edge; a later wake
 is rejected for the existing outer reconciliation owner.
 A failed best-effort signal
 leaves the durable preference intact; the next invocation or mailbox fetch

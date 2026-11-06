@@ -239,11 +239,11 @@ describe("completion client, router, and native receipt composition", () => {
     expect(f.recorded).toHaveBeenCalledTimes(2);
     expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([call]) => call.command)).toEqual([
       { operation: "reconcile" },
-      { operation: "complete", ...f.identity, settledRunnerContainerName: null, immediateRecheckRequested: true },
+      { operation: "complete", ...f.identity, settledRunnerContainerName: null, immediateRecheckRequested: false },
       { operation: "reconcile" },
       { operation: "complete", ...f.identity, settledRunnerContainerName: null, immediateRecheckRequested: false },
     ]);
-    expect(f.receipts.read()).toEqual({ ...f.identity, state: "completed", immediateRecheckRequested: true });
+    expect(f.receipts.read()).toEqual({ ...f.identity, state: "completed" });
     expect(f.input).toEqual(before);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledTimes(4);
     const receiptLogs = mocks.emitHostedExecutionStructuredLog.mock.calls.filter(
@@ -283,7 +283,7 @@ describe("completion client, router, and native receipt composition", () => {
     f.state.cutover = cutover;
     f.state.owner = owner === null ? null : { ...f.owner, ...owner };
     if (generation) f.input.job.request.leaseGeneration = generation;
-    if (reason === "already_completed" || reason === "superseded") f.receipts.complete(f.identity, false);
+    if (reason === "already_completed" || reason === "superseded") f.receipts.complete(f.identity);
     if (reason === "superseded" && f.state.owner?.attemptId) {
       f.receipts.register({ attemptId: f.state.owner.attemptId, generation: f.state.owner.generation });
     }
@@ -305,7 +305,7 @@ describe("completion client, router, and native receipt composition", () => {
     { reason: "superseded", owner: { attemptId: "attempt_other_slot", generation: "8", runnerContainerName: "other-slot" } },
   ] as const)("needs canonical facts for $reason with the same completed native receipt", async ({ owner, reason }) => {
     const f = createRoutedCompletion();
-    f.receipts.complete(f.identity, false);
+    f.receipts.complete(f.identity);
     const receipt = f.receipts.read();
     f.state.owner = { ...f.owner, ...owner };
     f.canonicalStatus = "stale";
@@ -338,7 +338,7 @@ describe("completion client, router, and native receipt composition", () => {
       { operation: "reconcile" },
       ...(canonicalRejected ? [{ operation: "complete", ...f.identity, settledRunnerContainerName: null, immediateRecheckRequested: false }] : []),
     ]);
-    expect(f.receipts.read()).toEqual(canonicalRejected ? { ...f.identity, state: "completed", immediateRecheckRequested: false } : before);
+    expect(f.receipts.read()).toEqual(canonicalRejected ? { ...f.identity, state: "completed" } : before);
     expectCompletionLog("warn", false, reason, canonicalRejected);
   });
 

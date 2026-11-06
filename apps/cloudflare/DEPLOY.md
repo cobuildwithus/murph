@@ -76,6 +76,14 @@ producer before rolling Web below that reader. After deployment, inspect bounded
 ownership callback failures and confirm completion still progresses through
 retiring to idle without stale attempts changing a successor.
 
+The Worker always sends `immediateRecheckRequested: false`. Web ignores the
+value and signals on every successful final release, so a native receipt neither
+stores nor rebuilds it. The SQLite column, the required wire boolean and the
+protocol witness stay. Older controllers select the column, and a rollback reader
+forwards whatever it finds, which Web also ignores. Remove them only after older
+controllers and rollback readers have drained and Web's parser and live admission
+no longer require the boolean.
+
 ### Live Web protocol admission
 
 `deploy-worker-version.cli.ts` admits the **served** `HOSTED_WEB_BASE_URL` before

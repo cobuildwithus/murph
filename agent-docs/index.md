@@ -1,5 +1,7 @@
 Runtime logs are diagnostic only: an accepted-attempt failure log no longer triggers a recheck, and its historical rows stay parseable; [the hosted runtime protocol](references/hosted-runtime-protocol.md) owns that contract, and [the removal plan](exec-plans/completed/2026-11-06-sm-f11b-log-triggered-wake.md) records the drain evidence.
 
+Native invocation receipts no longer store or rebuild the completion recheck bit, while the SQLite column and wire boolean stay for older controllers; [Cloudflare deployment](../apps/cloudflare/DEPLOY.md#runtime-completion-consolidation) owns the remaining drain, and [the plan](exec-plans/completed/2026-11-06-sm-f11a-completion-recheck-bit.md) records the evidence.
+
 Failed account deletion recovery, where any retryable answer keeps the delete dialog open because a suspended account cannot reload Settings, is owned by [Architecture](../ARCHITECTURE.md#hosted-account-deletion) and [the invariants](../docs/contracts/00-invariants.md).
 
 The board sharing session recheck and its group, member, game lock order are owned by [Weekly Game](product-specs/weekly-game.md) and [the invariants](../docs/contracts/00-invariants.md).

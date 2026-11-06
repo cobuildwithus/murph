@@ -108,7 +108,7 @@ describe.each([false, true])("native supervised invocation with launch preparati
     }));
     const recovered = create();
     const replay = vi.spyOn(recovered, "invoke");
-    expect(await recovered.readSupervisedInvocation({ userId })).toEqual({ attemptId: "attempt-a", generation: "1", state: "completed", immediateRecheckRequested: true });
+    expect(await recovered.readSupervisedInvocation({ userId })).toEqual({ attemptId: "attempt-a", generation: "1", state: "completed" });
     await recovered.startSupervisedInvocation(payload());
     expect(replay).not.toHaveBeenCalled();
   });
@@ -143,17 +143,29 @@ describe.each([false, true])("native supervised invocation with launch preparati
   it("releases the retained assignment only after the native invocation settles", async () => {
     const { create, pending } = harness();
     const container = create();
-    let finish!: (result: { status: "idle" }) => void;
+    const completion = await vi.importActual<typeof import("../src/runtime-owner-completion.ts")>("../src/runtime-owner-completion.ts");
+    vi.mocked(recordHostedRuntimeOwnerCompletion).mockImplementation(completion.recordHostedRuntimeOwnerCompletion);
+    const result = { status: "idle", immediateRecheckRequested: true } as const;
+    let finish!: (completed: typeof result) => void;
     vi.spyOn(container, "invoke").mockImplementation(() => new Promise(resolve => { finish = resolve; }));
     await container.startSupervisedInvocation(payload());
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover: "postgres", status: "updated", owner: null });
+    vi.spyOn(container, "onRuntimeCompletionRecorded").mockResolvedValue();
     expect(recordHostedRuntimeOwnerCompletion).not.toHaveBeenCalled();
-    await container.recordSupervisedRuntimeCompletion({ userId, attemptId: "attempt-a", generation: "1", result: { status: "idle" } });
-    expect(recordHostedRuntimeOwnerCompletion).toHaveBeenLastCalledWith(expect.not.objectContaining({ settledRunnerContainerName: expect.anything() }));
-    finish({ status: "idle" });
+    await container.recordSupervisedRuntimeCompletion({ userId, attemptId: "attempt-a", generation: "1", result });
+    expect(recordHostedRuntimeOwnerCompletion).toHaveBeenLastCalledWith({
+      source: expect.anything(), userId, attemptId: "attempt-a", generation: "1",
+    });
+    finish(result);
     await Promise.all(pending);
-    expect(recordHostedRuntimeOwnerCompletion).toHaveBeenLastCalledWith(expect.objectContaining({
-      attemptId: "attempt-a", generation: "1", settledRunnerContainerName: target,
-    }));
+    expect(recordHostedRuntimeOwnerCompletion).toHaveBeenLastCalledWith({
+      source: expect.anything(), userId, attemptId: "attempt-a", generation: "1", settledRunnerContainerName: target,
+    });
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([call]) => call.command)
+      .filter(command => command.operation === "complete")).toEqual([
+      { operation: "complete", attemptId: "attempt-a", generation: "1", settledRunnerContainerName: null, immediateRecheckRequested: false },
+      { operation: "complete", attemptId: "attempt-a", generation: "1", settledRunnerContainerName: target, immediateRecheckRequested: false },
+    ]);
   });
 
   it("rejects revoked or mismatched workspace authority before registering execution", async () => {
