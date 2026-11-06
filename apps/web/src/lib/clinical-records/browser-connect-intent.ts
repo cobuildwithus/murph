@@ -73,11 +73,9 @@ export function isClinicalRecordsConnectLauncherForCurrentPath(): boolean {
     return false;
   }
 
-  const params = new URLSearchParams(window.location.search);
-  return params.size === 1
-    && params.getAll(CLINICAL_RECORDS_LAUNCH_PARAM).length === 1
-    && params.get(CLINICAL_RECORDS_LAUNCH_PARAM)
-      === CLINICAL_RECORDS_LAUNCH_VALUE;
+  // The same rule as the page: the first value counts, and other parameters don't.
+  return new URLSearchParams(window.location.search).get(CLINICAL_RECORDS_LAUNCH_PARAM)
+    === CLINICAL_RECORDS_LAUNCH_VALUE;
 }
 
 export function stageClinicalRecordsConnectIntentInBrowser(claim: string): void {

@@ -103,7 +103,10 @@ describe("hosted device connect intent route", () => {
 
     expect(response.status).toBe(410);
     expect(response.headers.get("location")).toBeNull();
-    expect(await response.text()).toContain("This connection link has expired.");
+    const body = await response.text();
+    expect(body).toContain("This link expired.");
+    expect(body).toContain("Nothing changed. Ask Murph for a new one.");
+    expect(body).toContain("background: #1C1915");
   });
 
   it("claims the intent for the active member before starting provider OAuth", async () => {

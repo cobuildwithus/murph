@@ -1,10 +1,6 @@
 "use client";
 
 import {
-  LockKeyholeIcon,
-  RefreshCwIcon,
-} from "lucide-react";
-import {
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -17,10 +13,15 @@ import {
   HostedOnboardingApiError,
   requestHostedOnboardingJson,
 } from "@/src/components/hosted-onboarding/client-api";
-import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { reloadCurrentHostedAuthDocument } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
-import { Button, buttonVariants } from "@/src/components/ui/button";
-import { Skeleton } from "@/src/components/ui/skeleton";
+import { LinkPageDots } from "@/src/components/link-page/link-page-dots";
+import {
+  LINK_PAGE_NIGHT_TOKENS,
+  LINK_PAGE_PILL_CLASS,
+  LinkPagePill,
+  LinkPageScreen,
+} from "@/src/components/link-page/link-page-shell";
+import { LinkPageSignInScreen } from "@/src/components/link-page/link-page-sign-in";
 import {
   clearClinicalRecordsConnectIntentFromBrowser,
   stageClinicalRecordsConnectIntentInBrowser,
@@ -33,7 +34,6 @@ import {
   parseClinicalRecordConnectStartResponse,
   type ClinicalProviderSearchResultContract,
 } from "@/src/lib/clinical-records/client-contracts";
-import { cn } from "@/src/lib/utils";
 
 import { ProviderSearchView } from "./provider-search-view";
 
@@ -50,10 +50,8 @@ export function RecordsConnectClient({
   const [intentClaim, setIntentClaim] = useState<string | null | undefined>(undefined);
   const [launchFailed, setLaunchFailed] = useState(false);
   const [consentRequired, setConsentRequired] = useState<boolean | null>(null);
-  const authOpenedRef = useRef(false);
   const capturedIntentRef = useRef<string | null | undefined>(undefined);
   const launchPromiseRef = useRef<Promise<string> | null>(null);
-  const { openAuthDialog } = useAuth();
 
   useLayoutEffect(() => {
     if (capturedIntentRef.current === undefined) {
@@ -72,19 +70,6 @@ export function RecordsConnectClient({
       cancelled = true;
     };
   }, [authenticated]);
-
-  useEffect(() => {
-    if (
-      authenticated
-      || (!intentClaim && !launchConnectIntent)
-      || authOpenedRef.current
-    ) {
-      return;
-    }
-
-    authOpenedRef.current = true;
-    openAuthDialog();
-  }, [authenticated, intentClaim, launchConnectIntent, openAuthDialog]);
 
   useEffect(() => {
     if (
@@ -144,35 +129,32 @@ export function RecordsConnectClient({
       );
     }
     if (launchConnectIntent && !authenticated) {
-      return (
-        <RecordsConnectLauncherState
-          onSignIn={openAuthDialog}
-          state="authentication-required"
-        />
-      );
+      return <RecordsConnectLauncherState state="authentication-required" />;
     }
     return <UnavailableIntentState />;
   }
 
   if (!authenticated) {
-    return <AuthRequiredState onSignIn={openAuthDialog} />;
+    return <RecordsConnectLauncherState state="authentication-required" />;
+  }
+
+  if (consentRequired === false) {
+    return (
+      <ProviderSearch intentClaim={intentClaim} onConsentRequired={() => setConsentRequired(true)} />
+    );
   }
 
   return (
-    <div className="flex max-w-2xl flex-col gap-6">
-      {consentRequired !== false ? (
-        <HostedLegalConsentCard
-          acceptedPendingLabel="Opening records search"
-          initialStatus={null}
-          mode="compact"
-          onAccepted={reloadCurrentHostedAuthDocument}
-          onRequirementChange={setConsentRequired}
-          preferredScope="launch.legal"
-          source="clinical-records-connect"
-        />
-      ) : (
-        <ProviderSearch intentClaim={intentClaim} onConsentRequired={() => setConsentRequired(true)} />
-      )}
+    <div className="flex flex-1 flex-col justify-center py-6" style={LINK_PAGE_NIGHT_TOKENS}>
+      <HostedLegalConsentCard
+        acceptedPendingLabel="Opening records search"
+        initialStatus={null}
+        mode="compact"
+        onAccepted={reloadCurrentHostedAuthDocument}
+        onRequirementChange={setConsentRequired}
+        preferredScope="launch.legal"
+        source="clinical-records-connect"
+      />
     </div>
   );
 }
@@ -409,90 +391,59 @@ export function ProviderSearch({
 
 export function RecordsConnectLauncherState({
   onRetry,
-  onSignIn,
   state,
 }: {
   onRetry?: () => void;
-  onSignIn?: () => void;
   state: "authentication-required" | "launch-failed" | "loading";
 }) {
-  if (state === "loading") return <ConnectPageSkeleton />;
+  if (state === "loading") return <ConnectPageLoading />;
   if (state === "launch-failed") {
     return <LaunchFailedState onRetry={onRetry ?? (() => undefined)} />;
   }
-  return <AuthRequiredState onSignIn={onSignIn ?? (() => undefined)} />;
-}
-
-function ConnectPageSkeleton() {
   return (
-    <div aria-busy="true" aria-label="Preparing records connection" className="flex max-w-2xl flex-col gap-4" role="status">
-      <Skeleton className="h-7 w-64" />
-      <Skeleton className="h-11 w-full" />
-    </div>
+    <LinkPageSignInScreen
+      detail="Then find the hospital or clinic whose portal you use."
+      title="Sign in to connect your records."
+    />
   );
 }
 
-function AuthRequiredState({ onSignIn }: { onSignIn: () => void }) {
+function ConnectPageLoading() {
   return (
-    <section className="max-w-2xl rounded-xl border border-border bg-card p-6 sm:p-8">
-      <span className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
-        <LockKeyholeIcon aria-hidden="true" className="size-5" />
-      </span>
-      <h2 className="mt-5 font-serif text-2xl font-medium text-foreground">Sign in to continue</h2>
-      <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
-        This private link belongs to your Murph account. Sign in, then find the hospital or clinic whose patient portal you use.
-      </p>
-      <Button className="mt-6 w-full sm:w-auto" onClick={onSignIn} size="lg" type="button">
-        Log in or sign up
-      </Button>
-    </section>
+    <div
+      aria-busy="true"
+      aria-label="Preparing records connection"
+      className="flex flex-1 flex-col"
+      role="status"
+    >
+      <LinkPageScreen title="One moment.">
+        <LinkPageDots />
+      </LinkPageScreen>
+    </div>
   );
 }
 
 function LaunchFailedState({ onRetry }: { onRetry: () => void }) {
   return (
-    <section
-      aria-atomic="true"
-      aria-live="polite"
-      className="max-w-2xl rounded-xl border border-border bg-card p-6 sm:p-8"
-      role="status"
-    >
-      <span className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
-        <RefreshCwIcon aria-hidden="true" className="size-5" />
-      </span>
-      <h2 className="mt-5 text-balance font-serif text-2xl font-medium text-foreground">
-        Couldn&apos;t start Clinical Records
-      </h2>
-      <p className="mt-2 max-w-xl text-pretty text-sm leading-6 text-muted-foreground">
-        The secure connection could not be prepared. Your link is still valid, so you can try again now.
-      </p>
-      <Button className="mt-6 w-full sm:w-auto" onClick={onRetry} size="lg" type="button">
-        <RefreshCwIcon aria-hidden="true" data-icon="inline-start" />
-        Try again
-      </Button>
-    </section>
+    <LinkPageScreen
+      actions={<LinkPagePill onClick={onRetry}>Try again</LinkPagePill>}
+      detail="Your link is still valid, so you can try again now."
+      title="Couldn’t start this."
+    />
   );
 }
 
-function UnavailableIntentState() {
+export function UnavailableIntentState() {
   return (
-    <section
-      aria-atomic="true"
-      aria-live="polite"
-      className="max-w-2xl rounded-xl border border-border bg-card p-6 sm:p-8"
-      role="status"
-    >
-      <h2 className="font-serif text-2xl font-medium text-foreground">Connection link unavailable</h2>
-      <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
-        This private link is missing, expired, or already used. Start a new connection from Medical records.
-      </p>
-      <a
-        href="/records/connect?launch=clinical-records"
-        className={cn(buttonVariants({ size: "lg" }), "mt-6 w-full sm:w-auto")}
-      >
-        Start a new connection
-      </a>
-    </section>
+    <LinkPageScreen
+      actions={
+        <a className={LINK_PAGE_PILL_CLASS} href="/records/connect?launch=clinical-records">
+          Start a new connection
+        </a>
+      }
+      detail="It’s missing, expired, or already used."
+      title="This link isn’t working."
+    />
   );
 }
 

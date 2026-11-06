@@ -1,4 +1,10 @@
-import { act, createElement } from "react";
+import {
+  act,
+  createElement,
+  type ButtonHTMLAttributes,
+  type HTMLAttributes,
+  type ReactNode,
+} from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, expect, test, vi } from "vitest";
 
@@ -13,17 +19,14 @@ import { projectHostedVaultShareProjectionDisplays, resolveHostedGroupAccessOffe
 import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
-  authDialogProps: null as {
+  authPanelProps: null as {
     autoSendPastedPhoneNumber?: boolean;
-    description: string;
     inviteCode?: string | null;
-    methods?: readonly ("phone" | "telegram" | "email")[];
+    methods: readonly ("phone" | "telegram" | "email")[];
     onCompleted?: (payload: {
       stage: "active" | "activating" | "blocked" | "checkout";
     }) => Promise<void> | void;
-    onOpenChange: (open: boolean) => void;
-    open: boolean;
-    title: string;
+    requireLaunchConsentOnCompletion?: boolean;
   } | null,
   navigateHostedAuthRedirect: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
@@ -40,26 +43,86 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
-vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
-  AuthDialog(props: {
-    autoSendPastedPhoneNumber?: boolean;
-    description: string;
-    inviteCode?: string | null;
-    methods?: readonly ("phone" | "telegram" | "email")[];
-    onCompleted?: (payload: {
-      stage: "active" | "activating" | "blocked" | "checkout";
-    }) => Promise<void> | void;
+// Base UI's popups need a real browser; the drawers' focus and dismissal are
+// proved in Playwright. These keep their open state, role, and close wiring.
+vi.mock("@base-ui/react/dialog", async () => {
+  const React = await vi.importActual<typeof import("react")>("react");
+  const DrawerContext = React.createContext<{
     onOpenChange: (open: boolean) => void;
     open: boolean;
-    title: string;
-  }) {
-    mocks.authDialogProps = props;
-    return props.open
-      ? createElement("div", {
-          "data-auth-description": props.description,
-          "data-auth-title": props.title,
-        })
-      : null;
+    role: string;
+  }>({ onOpenChange: () => {}, open: false, role: "dialog" });
+  const passThrough = ({ children, ...props }: HTMLAttributes<HTMLElement>) =>
+    createElement("div", props, children);
+
+  return {
+    Dialog: {
+      Backdrop: () => null,
+      Close: ({
+        children,
+        render: _render,
+        ...props
+      }: ButtonHTMLAttributes<HTMLButtonElement> & { render?: ReactNode }) => {
+        const context = React.useContext(DrawerContext);
+        void _render;
+        return createElement("button", {
+          ...props,
+          onClick: () => context.onOpenChange(false),
+          type: "button",
+        }, children);
+      },
+      Description: passThrough,
+      Popup: ({ children, ...props }: HTMLAttributes<HTMLDivElement>) => {
+        const context = React.useContext(DrawerContext);
+        return context.open
+          ? createElement("div", { ...props, role: context.role }, children)
+          : null;
+      },
+      Portal: ({ children }: { children?: ReactNode }) => children,
+      Root: ({
+        children,
+        onOpenChange = () => {},
+        open = false,
+        role = "dialog",
+      }: {
+        children?: ReactNode;
+        onOpenChange?: (open: boolean) => void;
+        open?: boolean;
+        role?: string;
+      }) => createElement(
+        DrawerContext.Provider,
+        { value: { onOpenChange, open, role } },
+        children,
+      ),
+      Title: passThrough,
+    },
+  };
+});
+
+vi.mock("@base-ui/react/alert-dialog", async () => {
+  const { Dialog } = await import("@base-ui/react/dialog");
+  const MockRoot = Dialog.Root as unknown as (props: {
+    children?: ReactNode;
+    onOpenChange?: (open: boolean) => void;
+    open?: boolean;
+    role?: string;
+  }) => ReactNode;
+
+  return {
+    AlertDialog: {
+      Root: (props: {
+        children?: ReactNode;
+        onOpenChange?: (open: boolean) => void;
+        open?: boolean;
+      }) => createElement(MockRoot, { ...props, role: "alertdialog" }),
+    },
+  };
+});
+
+vi.mock("@/src/components/hosted-onboarding/hosted-first-party-auth-panel", () => ({
+  HostedFirstPartyAuthPanel(props: NonNullable<typeof mocks.authPanelProps>) {
+    mocks.authPanelProps = props;
+    return createElement("div", { "data-auth-panel": "true" });
   },
 }));
 
@@ -121,9 +184,37 @@ afterEach(async () => {
     await cleanupRender();
     cleanupRender = null;
   }
-  mocks.authDialogProps = null;
+  mocks.authPanelProps = null;
   vi.clearAllMocks();
 });
+
+function findButton(root: ParentNode, label: string): HTMLButtonElement {
+  const match = Array.from(root.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === label,
+  );
+  if (!match) throw new Error(`Expected a ${label} button.`);
+  return match;
+}
+
+async function click(target: Element, window: Window & typeof globalThis) {
+  await act(async () => {
+    target.dispatchEvent(new window.Event("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+}
+
+/** Opens Details and returns the drawer, which portals out of the form. */
+async function openDetails(
+  container: HTMLElement,
+  window: Window & typeof globalThis,
+): Promise<HTMLElement> {
+  await click(findButton(container, "Details"), window);
+  return vi.waitFor(() => {
+    const drawer = window.document.querySelector<HTMLElement>('[role="dialog"]');
+    if (!drawer) throw new Error("Expected the Details drawer.");
+    return drawer;
+  });
+}
 
 test("renders a not-now escape link with the group join legal consent gate", async () => {
   const { GroupJoinLegalConsentGate } = await import(
@@ -132,8 +223,10 @@ test("renders a not-now escape link with the group join legal consent gate", asy
 
   const markup = renderToStaticMarkup(
     createElement(GroupJoinLegalConsentGate, {
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       initialStatus: null,
       notNowHref: "/home",
+      title: "Join Sunday Sleep Crew.",
     }),
   );
 
@@ -149,8 +242,10 @@ test("keeps the home destination on the consent gate not-now link", async () => 
 
   const markup = renderToStaticMarkup(
     createElement(GroupJoinLegalConsentGate, {
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       initialStatus: null,
       notNowHref: "/home",
+      title: "Join Sunday Sleep Crew.",
     }),
   );
 
@@ -167,9 +262,11 @@ test("renders optional sharing cards with visible keyboard focus treatment", asy
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [],
       alreadyActiveMember: false,
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
+      memberCount: 4,
       permissions: [{
         description:
           "Shares which health sources are connected, not their health values.",
@@ -183,11 +280,93 @@ test("renders optional sharing cards with visible keyboard focus treatment", asy
   );
 
   expect(markup).toContain("Health source connection status");
-  expect(markup).toContain(
+  expect(markup).not.toContain(
     "Shares which health sources are connected, not their health values.",
   );
   expect(markup).toContain("has-[:focus-visible]:ring-2");
   expect(markup).toContain('type="checkbox"');
+});
+
+test("keeps every exact description one tap away in Details", async () => {
+  const { GroupJoinAcceptForm } = await import(
+    "@/src/components/hosted-groups/group-join-client"
+  );
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(GroupJoinAcceptForm, {
+      activeVaultShareProjectionScopes: [],
+      alreadyActiveMember: false,
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
+      expectedMembershipId: null,
+      groupName: "Sunday Sleep Crew",
+      joinCode: "JOIN123",
+      memberCount: 4,
+      permissions: comprehensiveGroupJoinPermissions,
+      postJoinContactOption: null,
+      postJoinDestination: "/home",
+    }),
+  );
+  cleanupRender = cleanup;
+
+  expect(container.textContent).toContain("Your name and what you pick from the last 90 days.");
+  expect(container.textContent).not.toContain("Shares ");
+
+  const drawer = await openDetails(container, window);
+  expect(drawer.textContent).toContain("What they’ll see");
+  expect(drawer.textContent).toContain(
+    "Your name and what you pick from the last 90 days, in the chat and the Murph app. Everything else stays private.",
+  );
+  const groups = groupJoinPermissionsForDisplay(
+    comprehensiveGroupJoinPermissions,
+    new Set(comprehensiveGroupJoinPermissions.map((permission) => permission.projectionScopeKey)),
+  );
+  expect(Array.from(drawer.querySelectorAll("dd")).map((row) => row.textContent)).toEqual(
+    groups.map((group) => group.description),
+  );
+  expect(Array.from(drawer.querySelectorAll("dt")).map((row) => row.textContent)).toEqual(
+    groups.map((group) => group.label),
+  );
+
+  await click(findButton(drawer, "Done"), window);
+  await vi.waitFor(() => {
+    expect(window.document.querySelector('[role="dialog"]')).toBeNull();
+  });
+});
+
+test("says the name is shared before joining an invite with no optional choices", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ redirectTo: null });
+  const { GroupJoinAcceptForm } = await import(
+    "@/src/components/hosted-groups/group-join-client"
+  );
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(GroupJoinAcceptForm, {
+      activeVaultShareProjectionScopes: [],
+      alreadyActiveMember: false,
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
+      expectedMembershipId: null,
+      groupName: "Sunday Sleep Crew",
+      joinCode: "JOIN123",
+      memberCount: 4,
+      permissions: [],
+      postJoinContactOption: null,
+      postJoinDestination: "/home",
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = cleanup;
+
+  expect(container.textContent).toContain("They’ll see your name");
+  expect(container.textContent).not.toContain("Details");
+
+  const join = Array.from(container.querySelectorAll("button"))
+    .find((candidate) => candidate.textContent === "Join group");
+  await act(async () => {
+    join?.dispatchEvent(new window.Event("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith(expect.objectContaining({
+    payload: expect.objectContaining({ selectedVaultShareProjectionScopes: [] }),
+  }));
 });
 
 test("keeps a comprehensive default checklist bounded and keyboard-scrollable", async () => {
@@ -199,9 +378,11 @@ test("keeps a comprehensive default checklist bounded and keyboard-scrollable", 
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [],
       alreadyActiveMember: false,
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
+      memberCount: 4,
       permissions: comprehensiveGroupJoinPermissions,
       postJoinContactOption: null,
       postJoinDestination: "/home",
@@ -209,15 +390,16 @@ test("keeps a comprehensive default checklist bounded and keyboard-scrollable", 
   );
 
   expect(markup).toContain(
-    `${comprehensivePermissionGroupCount} of ${comprehensivePermissionGroupCount} choices selected`,
+    `Sharing ${comprehensivePermissionGroupCount} of ${comprehensivePermissionGroupCount}`,
   );
-  expect(markup).toContain("Clear optional sharing");
+  expect(markup).toContain("Clear all");
   expect(markup).toContain("min-h-10");
   expect(markup).toContain("focus-visible:ring-3");
   expect(markup).toContain("tabular-nums");
   expect(markup).toContain('aria-label="Sharing choices"');
   expect(markup).toContain('role="region"');
-  expect(markup).toContain("max-h-[26rem]");
+  // A long group name must never squeeze the choices away: a member needs them to stop sharing.
+  expect(markup).toMatch(/class="[^"]*min-h-\[10\.5rem\][^"]*flex-1[^"]*overflow-y-auto[^"]*"/u);
   expect(markup).toContain('tabindex="0"');
   expect(markup).toContain("shrink-0 overflow-hidden");
   expect(markup).toContain("Join group");
@@ -247,9 +429,11 @@ test("clears, retries, and selectively restores comprehensive optional sharing",
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [],
       alreadyActiveMember: false,
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
+      memberCount: 4,
       permissions: comprehensiveGroupJoinPermissions,
       postJoinContactOption: null,
       postJoinDestination: "/home",
@@ -258,7 +442,7 @@ test("clears, retries, and selectively restores comprehensive optional sharing",
   cleanupRender = cleanup;
 
   const clearButton = Array.from(container.querySelectorAll("button")).find(
-    (candidate) => candidate.textContent === "Clear optional sharing",
+    (candidate) => candidate.textContent === "Clear all",
   );
   const joinButton = Array.from(container.querySelectorAll("button")).find(
     (candidate) => candidate.textContent === "Join group",
@@ -270,7 +454,7 @@ test("clears, retries, and selectively restores comprehensive optional sharing",
     clearButton.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
   expect(container.textContent).toContain(
-    `0 of ${comprehensivePermissionGroupCount} choices selected`,
+    `Sharing 0 of ${comprehensivePermissionGroupCount}`,
   );
   expect(Array.from(container.querySelectorAll<HTMLInputElement>(
     'input[type="checkbox"]',
@@ -292,7 +476,7 @@ test("clears, retries, and selectively restores comprehensive optional sharing",
     url: "/api/groups/join/JOIN123/accept",
   });
   expect(container.textContent).toContain(
-    `0 of ${comprehensivePermissionGroupCount} choices selected`,
+    `Sharing 0 of ${comprehensivePermissionGroupCount}`,
   );
 
   const firstCheckbox = container.querySelector<HTMLInputElement>('input[type="checkbox"]');
@@ -301,7 +485,7 @@ test("clears, retries, and selectively restores comprehensive optional sharing",
     firstCheckbox.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
   expect(container.textContent).toContain(
-    `1 of ${comprehensivePermissionGroupCount} choices selected`,
+    `Sharing 1 of ${comprehensivePermissionGroupCount}`,
   );
 
   await act(async () => {
@@ -331,9 +515,11 @@ test("clears every visible optional grant for an existing member", async () => {
       activeVaultShareProjectionScopes:
         HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
       alreadyActiveMember: true,
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: "membership_existing",
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
+      memberCount: 4,
       permissions: comprehensiveGroupJoinPermissions,
       postJoinContactOption: null,
       postJoinDestination: "/home",
@@ -342,7 +528,7 @@ test("clears every visible optional grant for an existing member", async () => {
   cleanupRender = cleanup;
 
   const clearButton = Array.from(container.querySelectorAll("button")).find(
-    (candidate) => candidate.textContent === "Clear optional sharing",
+    (candidate) => candidate.textContent === "Clear all",
   );
   const saveButton = Array.from(container.querySelectorAll("button")).find(
     (candidate) => candidate.textContent === "Save changes",
@@ -353,7 +539,7 @@ test("clears every visible optional grant for an existing member", async () => {
     clearButton.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
   expect(container.textContent).toContain(
-    `0 of ${comprehensivePermissionGroupCount} choices selected`,
+    `Sharing 0 of ${comprehensivePermissionGroupCount}`,
   );
   await act(async () => {
     saveButton.dispatchEvent(new window.Event("click", { bubbles: true }));
@@ -387,9 +573,11 @@ test.each([false, true])(
       createElement(GroupJoinAcceptForm, {
         activeVaultShareProjectionScopes: alreadyActiveMember ? [offer.projectionScopes[0]!] : [],
         alreadyActiveMember,
+        detail: "4 people. They’ll see your name, and anything you choose to share.",
         expectedMembershipId: alreadyActiveMember ? "membership_existing" : null,
         groupName: "Synthetic group",
         joinCode: "JOIN123",
+        memberCount: 4,
         permissions: projectHostedVaultShareProjectionDisplays(offer.projectionScopes),
         postJoinContactOption: null,
         postJoinDestination: "/home",
@@ -401,13 +589,17 @@ test.each([false, true])(
     expect(choices.map((choice) => choice.checked)).toEqual(
       alreadyActiveMember ? [true, false] : [true, true],
     );
-    expect(container.textContent).toContain("Shares 90 days of total sleep duration");
-    expect(container.textContent).toContain("Shares 90 days of step counts");
-    expect(container.textContent).toContain("The people in Synthetic group");
-    expect(container.textContent).toContain("over the last 90 days");
-    expect(container.textContent).toContain("in the chat and in the Murph app");
-    expect(container.textContent).toContain("compare how they’ve changed");
+    const drawer = await openDetails(container, window);
+    expect(drawer.textContent).toContain("Shares 90 days of total sleep duration");
+    expect(drawer.textContent).toContain("Shares 90 days of step counts");
+    expect(drawer.textContent).toContain("from the last 90 days");
+    expect(drawer.textContent).toContain("in the chat and the Murph app");
+    expect(drawer.textContent).not.toMatch(/seven days|7 days|expand history|history checkbox/i);
     expect(container.textContent).not.toMatch(/seven days|7 days|expand history|history checkbox/i);
+    await click(findButton(drawer, "Done"), window);
+    await vi.waitFor(() => {
+      expect(window.document.querySelector('[role="dialog"]')).toBeNull();
+    });
     const submit = [...container.querySelectorAll("button")].find((button) =>
       button.textContent === (alreadyActiveMember ? "Save changes" : "Join group")
     );
@@ -434,13 +626,15 @@ test("discloses and submits source-aware sleep metadata on the link-only join pa
   const { GroupJoinAcceptForm } = await import(
     "@/src/components/hosted-groups/group-join-client"
   );
-  const { button, cleanup, container, window } = await renderClientComponent(
+  const { cleanup, container, window } = await renderClientComponent(
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [],
       alreadyActiveMember: false,
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
+      memberCount: 4,
       permissions: [
         {
           description: "Shares 90 days of deep sleep minutes and recorded times by source.",
@@ -464,23 +658,25 @@ test("discloses and submits source-aware sleep metadata on the link-only join pa
   cleanupRender = cleanup;
 
   expect(Array.from(container.querySelectorAll("label")).map((label) =>
-    label.querySelector(".flex.flex-col > span:first-child")?.textContent
+    label.textContent
   )).toEqual(["Deep sleep", "REM sleep"]);
 
-  expect(container.textContent).toContain(
+  const drawer = await openDetails(container, window);
+  expect(drawer.textContent).toContain(
     "Shares 90 days of deep sleep minutes and recorded times by source.",
   );
-  expect(container.textContent).toContain(
+  expect(drawer.textContent).toContain(
     "Shares 90 days of REM sleep minutes and recorded times by source.",
   );
+  await click(findButton(drawer, "Done"), window);
+  await vi.waitFor(() => {
+    expect(window.document.querySelector('[role="dialog"]')).toBeNull();
+  });
   expect(Array.from(container.querySelectorAll<HTMLInputElement>(
     'input[type="checkbox"]',
   )).every((checkbox) => checkbox.checked)).toBe(true);
 
-  await act(async () => {
-    button.dispatchEvent(new window.Event("click", { bubbles: true }));
-    await Promise.resolve();
-  });
+  await click(findButton(container, "Join group"), window);
 
   expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
     method: "POST",
@@ -511,9 +707,11 @@ test.each([
           { projectionKind: "deep-sleep-days.v0" as const },
         ],
         alreadyActiveMember: true,
+        detail: "4 people. They’ll see your name, and anything you choose to share.",
         expectedMembershipId: "membership_existing",
         groupName: "Sunday Sleep Crew",
         joinCode: "JOIN123",
+        memberCount: 4,
         permissions: [{
           description: "Shares 90 days of deep sleep minutes and recorded times by source.",
           label: "Deep sleep",
@@ -530,10 +728,15 @@ test.each([
     const checkbox = container.querySelector<HTMLInputElement>('input[type="checkbox"]');
     if (!checkbox) throw new Error("Expected the Deep sleep checkbox.");
     expect(checkbox.checked).toBe(true);
-    expect(container.textContent).toContain(
+    const drawer = await openDetails(container, window);
+    expect(drawer.textContent).toContain(
       "Shares 90 days of deep sleep minutes and recorded times by source.",
     );
-    expect(container.textContent).not.toContain("Include source details");
+    expect(drawer.textContent).not.toContain("Include source details");
+    await click(findButton(drawer, "Done"), window);
+    await vi.waitFor(() => {
+      expect(window.document.querySelector('[role="dialog"]')).toBeNull();
+    });
 
     if (action === "off") {
       await act(async () => {
@@ -646,14 +849,16 @@ test("renders one Daily macros card that toggles every macro scope together", as
     projectionScope: { projectionKind },
     projectionScopeKey: projectionKind,
   });
-  const { button, cleanup, container, window } = await renderClientComponent(
+  const { cleanup, container, window } = await renderClientComponent(
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [],
       alreadyActiveMember: false,
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
       inviteCode: "invite_phone_bound",
       joinCode: "JOIN123",
+      memberCount: 4,
       permissions: [
         macroPermission("protein-days.v0", "protein"),
         macroPermission("carbs-days.v0", "carbohydrate"),
@@ -679,10 +884,7 @@ test("renders one Daily macros card that toggles every macro scope together", as
   expect(container.textContent).toContain("Daily calories");
   expect(container.textContent).not.toContain("Daily protein");
 
-  await act(async () => {
-    button.dispatchEvent(new window.Event("click", { bubbles: true }));
-    await Promise.resolve();
-  });
+  await click(findButton(container, "Join group"), window);
 
   // All four macro scopes plus calories start selected (preselected requested scopes),
   // proving one grouped card carries four separate underlying grants.
@@ -747,13 +949,15 @@ test("shows revocable individual macro cards for an existing mixed macro grant",
     projectionScope: { projectionKind },
     projectionScopeKey: projectionKind,
   });
-  const { button, cleanup, container, window } = await renderClientComponent(
+  const { cleanup, container, window } = await renderClientComponent(
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [{ projectionKind: "protein-days.v0" }],
       alreadyActiveMember: true,
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: "membership_existing",
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
+      memberCount: 4,
       permissions: [
         macro("protein-days.v0", "protein"),
         macro("carbs-days.v0", "carbohydrate"),
@@ -774,10 +978,7 @@ test("shows revocable individual macro cards for an existing mixed macro grant",
 
   // Saving without touching anything preserves exactly the active protein grant and
   // never silently broadens sharing to the other macros.
-  await act(async () => {
-    button.dispatchEvent(new window.Event("click", { bubbles: true }));
-    await Promise.resolve();
-  });
+  await click(findButton(container, "Save changes"), window);
 
   expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
     method: "POST",
@@ -789,13 +990,16 @@ test("shows revocable individual macro cards for an existing mixed macro grant",
   });
 });
 
-test("automatically opens the intent-first auth prompt on a valid group join page", async () => {
-  const { GroupJoinSignInButton } = await import(
+test("keeps a phone-bound invite to phone sign-in on the page", async () => {
+  const { GroupJoinSignIn } = await import(
     "@/src/components/hosted-groups/group-join-client"
   );
   const { cleanup, container } = await renderClientComponent(
-    createElement(GroupJoinSignInButton, {
+    createElement(GroupJoinSignIn, {
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       inviteCode: "invite_opaque",
+      memberCount: 4,
+      title: "Join Sunday Sleep Crew.",
     }),
     {
       location: {
@@ -804,46 +1008,35 @@ test("automatically opens the intent-first auth prompt on a valid group join pag
         pathname: "/groups/join/JOIN123",
         search: "",
       },
+      requireButton: false,
     },
   );
   cleanupRender = cleanup;
 
   await vi.waitFor(() => {
-    expect(mocks.authDialogProps?.open).toBe(true);
+    expect(mocks.authPanelProps).not.toBeNull();
   });
 
-  expect(container.textContent).toContain("Continue to join");
-  expect(mocks.authDialogProps?.inviteCode).toBe("invite_opaque");
-  expect(mocks.authDialogProps?.methods).toEqual(["phone"]);
-  expect(mocks.authDialogProps?.autoSendPastedPhoneNumber).toBeUndefined();
-  expect(container.querySelector(
-    '[data-auth-title="Continue to join this Murph group"]',
-  )).toBeTruthy();
-  expect(container.textContent).not.toContain("Sign in to join");
-
-  await act(async () => {
-    mocks.authDialogProps?.onOpenChange(false);
-  });
-
-  expect(mocks.authDialogProps?.open).toBe(false);
-  expect(container.textContent).toContain("Continue to join");
-
-  const continueButton = container.querySelector("button");
-  expect(continueButton).toBeTruthy();
-
-  await act(async () => {
-    continueButton?.dispatchEvent(new Event("click", { bubbles: true }));
-  });
-
-  expect(mocks.authDialogProps?.open).toBe(true);
+  expect(container.textContent).toContain("Join Sunday Sleep Crew.");
+  expect(container.textContent).toContain("4 people. They’ll see your name, and anything you choose to share.");
+  expect(mocks.authPanelProps?.inviteCode).toBe("invite_opaque");
+  expect(mocks.authPanelProps?.methods).toEqual(["phone"]);
+  expect(mocks.authPanelProps?.requireLaunchConsentOnCompletion).toBe(true);
+  expect(mocks.authPanelProps?.autoSendPastedPhoneNumber).toBeUndefined();
+  // Telegram or email can never complete on a phone-bound invite.
+  expect(container.textContent).not.toContain("Use Telegram or email");
 });
 
 test("returns an authenticated new member to the same group intent", async () => {
-  const { GroupJoinSignInButton } = await import(
+  const { GroupJoinSignIn } = await import(
     "@/src/components/hosted-groups/group-join-client"
   );
-  const { cleanup } = await renderClientComponent(
-    createElement(GroupJoinSignInButton),
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(GroupJoinSignIn, {
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
+      memberCount: 4,
+      title: "Join Sunday Sleep Crew.",
+    }),
     {
       location: {
         hash: "#sharing",
@@ -856,13 +1049,16 @@ test("returns an authenticated new member to the same group intent", async () =>
   cleanupRender = cleanup;
 
   await vi.waitFor(() => {
-    expect(mocks.authDialogProps?.open).toBe(true);
+    expect(mocks.authPanelProps).not.toBeNull();
   });
 
-  expect(mocks.authDialogProps?.methods).toBeUndefined();
+  // A link with no invite keeps every sign-in method.
+  expect(mocks.authPanelProps?.methods).toEqual(["phone"]);
+  await click(findButton(container, "Use Telegram or email"), window);
+  expect(mocks.authPanelProps?.methods).toEqual(["phone", "telegram", "email"]);
 
   await act(async () => {
-    await mocks.authDialogProps?.onCompleted?.({
+    await mocks.authPanelProps?.onCompleted?.({
       stage: "active",
     });
   });
@@ -886,10 +1082,12 @@ test("offers same-link account recovery for a mismatched phone-bound invite", as
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [],
       alreadyActiveMember: false,
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
       inviteCode: "invite_phone_bound",
       joinCode: "JOIN123",
+      memberCount: 4,
       permissions: [],
       postJoinContactOption: null,
       postJoinDestination: "/home",
@@ -936,9 +1134,11 @@ test("returns to the dashboard through a real link once membership succeeds", as
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [],
       alreadyActiveMember: false,
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
+      memberCount: 4,
       permissions: [],
       postJoinContactOption: null,
       postJoinDestination: "/home",
@@ -985,9 +1185,11 @@ test("continues an incomplete account into canonical setup after membership succ
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [],
       alreadyActiveMember: false,
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
+      memberCount: 4,
       permissions: [],
       postJoinContactOption: null,
       postJoinDestination: "/join",
@@ -1030,9 +1232,11 @@ test("hands a messaging member back to the channel Murph reaches them on", async
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [],
       alreadyActiveMember: false,
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
+      memberCount: 4,
       permissions: [],
       postJoinContactOption: {
         href: "https://t.me/withmurph_bot",
@@ -1071,9 +1275,11 @@ test("uses the canonical home destination when no completed-member contact retur
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [],
       alreadyActiveMember: false,
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
+      memberCount: 4,
       permissions: [],
       postJoinContactOption: null,
       postJoinDestination: "/home",
@@ -1102,9 +1308,11 @@ test("binds an existing-member sharing update to the rendered membership id", as
     createElement(GroupJoinAcceptForm, {
       activeVaultShareProjectionScopes: [],
       alreadyActiveMember: true,
+      detail: "4 people. They’ll see your name, and anything you choose to share.",
       expectedMembershipId: "membership_existing",
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
+      memberCount: 4,
       permissions: [],
       postJoinContactOption: null,
       postJoinDestination: "/home",
@@ -1127,6 +1335,18 @@ test("binds an existing-member sharing update to the rendered membership id", as
   });
 });
 
+async function openLeaveDrawer(
+  button: HTMLButtonElement,
+  window: Window & typeof globalThis,
+): Promise<HTMLElement> {
+  await click(button, window);
+  return vi.waitFor(() => {
+    const drawer = window.document.querySelector<HTMLElement>('[role="alertdialog"]');
+    if (!drawer) throw new Error("Expected the Leave group drawer.");
+    return drawer;
+  });
+}
+
 test("confirms the provider boundary before leaving and returns home", async () => {
   mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ ok: true, status: "left" });
   const { GroupJoinLeaveButton } = await import(
@@ -1139,28 +1359,27 @@ test("confirms the provider boundary before leaving and returns home", async () 
     }),
   );
   cleanupRender = cleanup;
-  const confirmLeave = vi.fn(() => true);
-  Object.defineProperty(window, "confirm", {
-    configurable: true,
-    value: confirmLeave,
-  });
 
-  await act(async () => {
-    button.dispatchEvent(new window.Event("click", { bubbles: true }));
-    await Promise.resolve();
-  });
+  const drawer = await openLeaveDrawer(button, window);
 
-  expect(confirmLeave).toHaveBeenCalledWith(expect.stringMatching(
-    /ends your Murph membership.*queues its shared copies for cleanup.*won't remove you from the iMessage chat.*provider history.*backups.*outside Murph/u,
-  ));
+  expect(drawer.textContent).toContain("Leave Sunday Sleep Crew?");
+  expect(drawer.textContent).toContain(
+    "Sharing stops and Murph starts cleaning up its copies. You stay in the iMessage chat, and past messages, backups, and copies outside Murph aren’t erased.",
+  );
+  expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+
+  await click(findButton(drawer, "Leave group"), window);
+
   expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
     method: "POST",
     url: "/api/groups/join/JOIN123/leave",
   });
-  expect(mocks.routerPush).toHaveBeenCalledWith("/home");
+  await vi.waitFor(() => {
+    expect(mocks.routerPush).toHaveBeenCalledWith("/home");
+  });
 });
 
-test("does not leave when the confirmation is cancelled", async () => {
+test("does not leave when the member stays", async () => {
   const { GroupJoinLeaveButton } = await import(
     "@/src/components/hosted-groups/group-join-client"
   );
@@ -1171,18 +1390,68 @@ test("does not leave when the confirmation is cancelled", async () => {
     }),
   );
   cleanupRender = cleanup;
-  const confirmLeave = vi.fn(() => false);
-  Object.defineProperty(window, "confirm", {
-    configurable: true,
-    value: confirmLeave,
-  });
 
-  await act(async () => {
-    button.dispatchEvent(new window.Event("click", { bubbles: true }));
-    await Promise.resolve();
-  });
+  const drawer = await openLeaveDrawer(button, window);
+  await click(findButton(drawer, "Stay"), window);
 
-  expect(confirmLeave).toHaveBeenCalledOnce();
+  await vi.waitFor(() => {
+    expect(window.document.querySelector('[role="alertdialog"]')).toBeNull();
+  });
   expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
   expect(mocks.routerPush).not.toHaveBeenCalled();
+});
+
+test("keeps the drawer open with the error when leaving fails", async () => {
+  mocks.requestHostedOnboardingJson.mockRejectedValueOnce(new Error("Temporary leave failure."));
+  const { GroupJoinLeaveButton } = await import(
+    "@/src/components/hosted-groups/group-join-client"
+  );
+  const { button, cleanup, window } = await renderClientComponent(
+    createElement(GroupJoinLeaveButton, {
+      groupName: "Sunday Sleep Crew",
+      joinCode: "JOIN123",
+    }),
+  );
+  cleanupRender = cleanup;
+
+  const drawer = await openLeaveDrawer(button, window);
+  await click(findButton(drawer, "Leave group"), window);
+
+  await vi.waitFor(() => {
+    expect(drawer.querySelector('[role="alert"]')?.textContent).toBe(
+      "Temporary leave failure.",
+    );
+  });
+  expect(findButton(drawer, "Leave group").disabled).toBe(false);
+  expect(mocks.routerPush).not.toHaveBeenCalled();
+});
+
+test("lets Leave group take the quiet place, unless setup is still owed", async () => {
+  const { GroupJoinAcceptForm } = await import(
+    "@/src/components/hosted-groups/group-join-client"
+  );
+  const member = {
+    activeVaultShareProjectionScopes: [],
+    alreadyActiveMember: true,
+    detail: "4 people. They’ll see your name, and anything you choose to share.",
+    expectedMembershipId: "membership_existing",
+    groupName: "Sunday Sleep Crew",
+    joinCode: "JOIN123",
+    leaveAction: createElement("button", { type: "button" }, "Leave group"),
+    memberCount: 4,
+    permissions: [],
+    postJoinContactOption: null,
+  };
+
+  const settled = renderToStaticMarkup(
+    createElement(GroupJoinAcceptForm, { ...member, postJoinDestination: "/home" }),
+  );
+  expect(settled).toContain("Leave group");
+  expect(settled).not.toContain("Go home");
+
+  const setupOwed = renderToStaticMarkup(
+    createElement(GroupJoinAcceptForm, { ...member, postJoinDestination: "/join" }),
+  );
+  expect(setupOwed).toContain("Leave group");
+  expect(setupOwed).toContain("Finish setting up Murph");
 });

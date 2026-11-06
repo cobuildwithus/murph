@@ -1,4 +1,5 @@
 import { GameRecapView } from "@/app/recap/[gameId]/game-recap-view";
+import { LinkPageSurface } from "@/src/components/link-page/link-page-shell";
 import { GameInviteView } from "@/app/g/[token]/game-invite-view";
 import { GameInviteShareCard } from "@/app/g/[token]/invite-share-card";
 import { gameInviteAppUrl } from "@/src/lib/game/access";
@@ -84,8 +85,10 @@ const LINK_PREVIEWS: ReadonlyArray<{ id: string; label: string; preview: GameInv
 export function GameInviteStudy() {
   return (
     <div className="flex flex-col gap-8" data-design-study="game-invite" id="game-invite">
-      <div id="game-recap-iphone" className="max-w-md bg-background px-6 py-7 text-foreground" inert>
-        <GameRecapView appUrl="ai.withmurph.app://recap/game_synthetic" />
+      <div id="game-recap-iphone" className="flex min-h-[46rem] max-w-[402px] flex-col overflow-hidden rounded-[2rem] bg-[#1C1915]" inert>
+        <LinkPageSurface>
+          <GameRecapView appUrl="ai.withmurph.app://recap/game_synthetic" />
+        </LinkPageSurface>
       </div>
       <div id="game-recap" className="bg-background text-foreground" inert>
         <GameRecapView recapUrl="https://www.withmurph.ai/recap/game_synthetic" />

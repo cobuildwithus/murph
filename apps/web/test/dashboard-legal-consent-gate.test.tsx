@@ -364,7 +364,7 @@ test.each([
     mocks.requestHostedOnboardingJson.mockResolvedValueOnce(acceptedStatus);
   }
   const { RecordsConnectClient } = await import(
-    "../app/(dashboard)/records/connect/records-connect-client"
+    "../app/records/connect/records-connect-client"
   );
 
   const rendered = await renderClientComponent(

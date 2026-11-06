@@ -1,14 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, CheckIcon, ContactRound, Monitor } from "lucide-react";
+import { CheckIcon, ContactRound } from "lucide-react";
 import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
 import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types";
 import {
   DeviceSyncCompletionDialog,
   DeviceSyncSetupGuideDialog,
 } from "@/app/(dashboard)/home/device-sync-completion-dialog";
-import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
+import { ComputerHandoffIsland } from "@/src/components/computer-use/computer-handoff-active-view";
 import {
   LinkPageSurface,
 } from "@/src/components/link-page/link-page-shell";
@@ -144,6 +144,7 @@ import { ApprovalPasskeyStudy } from "./approval-passkey-study";
 import { BetterAuthAdoptionStudy } from "./better-auth-adoption-study";
 import { DataExportControlStudy } from "./data-export-study";
 import { HealthDataConsentControlStudy } from "./health-data-consent-study";
+import { GroupJoinDrawerStudy } from "./group-join-study";
 import { SignupReferralComponentStudy } from "./signup-referral-study";
 import { DashboardSidebarStudy } from "./dashboard-sidebar-study";
 
@@ -214,7 +215,7 @@ const WHOOP_COMPLETION_DIALOG_MODEL: DeviceSyncCompletionDialogModel = {
   contactAction: {
     href: "sms:?body=I%20just%20connected%20my%20WHOOP",
     kind: "imessage",
-    label: "Text Murph",
+    label: "Open Messages",
   },
   detail:
     "Heads up: WHOOP doesn't share all of your data automatically. Syncing through Apple Health gives Murph the complete picture.",
@@ -222,7 +223,7 @@ const WHOOP_COMPLETION_DIALOG_MODEL: DeviceSyncCompletionDialogModel = {
   kind: "device-sync",
   retryHref: null,
   setupGuide: WHOOP_COMPLETION_SETUP_GUIDE,
-  title: "WHOOP is connected",
+  title: "WHOOP is connected.",
   unverified: false,
 };
 
@@ -232,7 +233,7 @@ const FITBIT_LINK_FAILED_DIALOG_MODEL: DeviceSyncCompletionDialogModel = {
   failed: true,
   kind: "device-sync",
   retryHref: "/connect",
-  title: "Fitbit connection did not finish",
+  title: "Fitbit didn’t connect.",
   unverified: false,
 };
 
@@ -1208,6 +1209,7 @@ export function ComponentsContent() {
               </LinkPageSurface>
             </div>
             <GroupSponsorshipManagementConfirmationStudy />
+            <GroupJoinDrawerStudy />
             <div
               className="rounded-3xl border border-border bg-card p-6"
               data-design-component="family-member-usage-top-up"
@@ -1901,22 +1903,11 @@ export function ComponentsContent() {
 
         <Section title="Floating Island">
           <p className="-mt-3 text-xs text-muted-foreground">
-            Used on the computer handoff page to confirm a manual browser step. Drag the chip by the icon.
+            Used on the computer handoff page to confirm a manual browser step. Drag it by its words.
           </p>
           <div className="relative h-64 overflow-hidden rounded-2xl bg-foreground">
             <div className="absolute inset-x-0 bottom-0 flex justify-center px-3 pb-4">
-              <ComputerHandoffFloatingIsland persistKey={null}
-                handle={
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
-                    <Monitor className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-                  </span>
-                }
-              >
-                <Button size="lg" type="button">
-                  <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-                  Done
-                </Button>
-              </ComputerHandoffFloatingIsland>
+              <ComputerHandoffIsland keepInViewport={false} persistKey={null} />
             </div>
           </div>
         </Section>

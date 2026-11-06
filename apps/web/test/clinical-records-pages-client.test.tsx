@@ -35,6 +35,10 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
   useAuth: () => ({ authenticated: true, openAuthDialog: mocks.openAuthDialog }),
 }));
 
+vi.mock("@/src/components/hosted-onboarding/hosted-first-party-auth-panel", () => ({
+  HostedFirstPartyAuthPanel: () => createElement("div", null, "Sign-in form"),
+}));
+
 vi.mock("@/src/components/hosted-onboarding/client-api", async (importOriginal) => {
   const actual = await importOriginal<
     typeof import("@/src/components/hosted-onboarding/client-api")
@@ -126,7 +130,7 @@ afterEach(async () => {
 describe("Clinical Records connect page", () => {
   it("debounces typing, aborts superseded searches, and never restores an older result", async () => {
     vi.useFakeTimers();
-    const { ProviderSearch } = await import("../app/(dashboard)/records/connect/records-connect-client");
+    const { ProviderSearch } = await import("../app/records/connect/records-connect-client");
     const pending: Array<(value: unknown) => void> = [];
     mocks.requestHostedOnboardingJson.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
     const rendered = await renderClientComponent(createElement(ProviderSearch, {
@@ -166,11 +170,71 @@ describe("Clinical Records connect page", () => {
     expect(rendered.container.textContent).toContain("Start typing");
   });
 
+  it("signs in on the page for a signed-out launcher, with no dialog and no claim", async () => {
+    const { RecordsConnectClient } = await import(
+      "../app/records/connect/records-connect-client"
+    );
+    const rendered = await renderClientComponent(
+      createElement(RecordsConnectClient, {
+        authenticated: false,
+        launchConnectIntent: true,
+      }),
+      {
+        location: {
+          hash: "",
+          href: "https://join.example.test/records/connect?launch=clinical-records",
+          origin: "https://join.example.test",
+          pathname: "/records/connect",
+          search: "?launch=clinical-records",
+        },
+        requireButton: false,
+      },
+    );
+    cleanup = rendered.cleanup;
+
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Sign in to connect your records.");
+      expect(rendered.container.textContent).toContain("Sign-in form");
+    });
+    expect(mocks.openAuthDialog).not.toHaveBeenCalled();
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+  });
+
+  it("keeps a signed-out link's claim staged for the sign-in reload", async () => {
+    const claim = `cr_${"s".repeat(32)}`;
+    const { RecordsConnectClient } = await import(
+      "../app/records/connect/records-connect-client"
+    );
+    const rendered = await renderClientComponent(
+      createElement(RecordsConnectClient, { authenticated: false }),
+      {
+        location: {
+          hash: `#clinicalRecordsIntent=${claim}`,
+          href: `https://join.example.test/records/connect#clinicalRecordsIntent=${claim}`,
+          origin: "https://join.example.test",
+          pathname: "/records/connect",
+          search: "",
+        },
+        requireButton: false,
+      },
+    );
+    cleanup = rendered.cleanup;
+
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Sign in to connect your records.");
+    });
+    expect(mocks.openAuthDialog).not.toHaveBeenCalled();
+    expect(String(rendered.replaceState.mock.lastCall?.[2])).not.toContain(claim);
+    expect(rendered.replaceState.mock.lastCall?.[0]).toEqual(
+      expect.objectContaining({ __murphClinicalRecordsConnectIntent: claim }),
+    );
+  });
+
   it("announces preparation while the private connection claim is loading", async () => {
     const queueMicrotask = vi.fn();
     vi.stubGlobal("queueMicrotask", queueMicrotask);
     const { RecordsConnectClient } = await import(
-      "../app/(dashboard)/records/connect/records-connect-client"
+      "../app/records/connect/records-connect-client"
     );
     const rendered = await renderClientComponent(
       createElement(RecordsConnectClient, { authenticated: true }),
@@ -193,7 +257,7 @@ describe("Clinical Records connect page", () => {
       ok: true,
     });
     const { RecordsConnectClient } = await import(
-      "../app/(dashboard)/records/connect/records-connect-client"
+      "../app/records/connect/records-connect-client"
     );
     const rendered = await renderClientComponent(
       createElement(
@@ -248,7 +312,7 @@ describe("Clinical Records connect page", () => {
         ok: true,
       });
     const { RecordsConnectClient } = await import(
-      "../app/(dashboard)/records/connect/records-connect-client"
+      "../app/records/connect/records-connect-client"
     );
     const rendered = await renderClientComponent(
       createElement(RecordsConnectClient, {
@@ -271,7 +335,7 @@ describe("Clinical Records connect page", () => {
     await vi.waitFor(() => {
       expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
       expect(rendered.container.textContent).toContain(
-        "Couldn't start Clinical Records",
+        "Couldn’t start this.",
       );
     });
     const retryButton = Array.from(
@@ -313,7 +377,7 @@ describe("Clinical Records connect page", () => {
       });
 
     const { RecordsConnectClient } = await import(
-      "../app/(dashboard)/records/connect/records-connect-client"
+      "../app/records/connect/records-connect-client"
     );
     const rendered = await renderClientComponent(
       createElement(RecordsConnectClient, { authenticated: true }),
@@ -379,7 +443,7 @@ describe("Clinical Records connect page", () => {
 
     await restoreFromBackForwardCache(rendered);
 
-    expect(rendered.container.textContent).toContain("Connection link unavailable");
+    expect(rendered.container.textContent).toContain("This link isn’t working.");
     expect(rendered.container.textContent).not.toContain("Piedmont Healthcare");
   });
 
@@ -391,7 +455,7 @@ describe("Clinical Records connect page", () => {
     }));
 
     const { RecordsConnectClient } = await import(
-      "../app/(dashboard)/records/connect/records-connect-client"
+      "../app/records/connect/records-connect-client"
     );
     const rendered = await renderClientComponent(
       createElement(RecordsConnectClient, { authenticated: true }),
@@ -467,7 +531,7 @@ describe("Clinical Records connect page", () => {
       }));
 
     const { RecordsConnectClient } = await import(
-      "../app/(dashboard)/records/connect/records-connect-client"
+      "../app/records/connect/records-connect-client"
     );
     const rendered = await renderClientComponent(
       createElement(RecordsConnectClient, { authenticated: true }),
@@ -511,7 +575,7 @@ describe("Clinical Records connect page", () => {
     });
 
     expect(rendered.assign).not.toHaveBeenCalled();
-    expect(rendered.container.textContent).toContain("Connection link unavailable");
+    expect(rendered.container.textContent).toContain("This link isn’t working.");
   });
 
   it("marks earlier results stale while a new search is pending", async () => {
@@ -533,7 +597,7 @@ describe("Clinical Records connect page", () => {
       }));
 
     const { RecordsConnectClient } = await import(
-      "../app/(dashboard)/records/connect/records-connect-client"
+      "../app/records/connect/records-connect-client"
     );
     const rendered = await renderClientComponent(
       createElement(RecordsConnectClient, { authenticated: true }),
@@ -583,7 +647,7 @@ describe("Clinical Records connect page", () => {
   it("moves keyboard focus into the provider search field when it appears", async () => {
     const claim = `cr_${"g".repeat(32)}`;
     const { RecordsConnectClient } = await import(
-      "../app/(dashboard)/records/connect/records-connect-client"
+      "../app/records/connect/records-connect-client"
     );
     const rendered = await renderClientComponent(
       createElement(RecordsConnectClient, { authenticated: true }),
@@ -610,7 +674,7 @@ describe("Clinical Records connect page", () => {
   it("leaves focus alone when the member is already interacting elsewhere", async () => {
     const claim = `cr_${"h".repeat(32)}`;
     const { RecordsConnectClient } = await import(
-      "../app/(dashboard)/records/connect/records-connect-client"
+      "../app/records/connect/records-connect-client"
     );
     const rendered = await renderClientComponent(
       createElement(RecordsConnectClient, { authenticated: true }),
@@ -644,7 +708,7 @@ describe("Clinical Records connect page", () => {
   it("uses native required validation for an empty provider search", async () => {
     const claim = `cr_${"e".repeat(32)}`;
     const { RecordsConnectClient } = await import(
-      "../app/(dashboard)/records/connect/records-connect-client"
+      "../app/records/connect/records-connect-client"
     );
     const rendered = await renderClientComponent(
       createElement(RecordsConnectClient, { authenticated: true }),
@@ -688,7 +752,7 @@ describe("Clinical Records connect page", () => {
       message: technicalMessage,
     }));
     const { RecordsConnectClient } = await import(
-      "../app/(dashboard)/records/connect/records-connect-client"
+      "../app/records/connect/records-connect-client"
     );
     const rendered = await renderClientComponent(
       createElement(RecordsConnectClient, { authenticated: true }),
@@ -745,7 +809,7 @@ describe("Clinical Records connect page", () => {
         authorizationUrl: "https://epic.example.test/oauth2/authorize",
         expiresAt: "2026-07-16T18:15:00.000Z", ok: true,
       });
-    const { ProviderSearch } = await import("../app/(dashboard)/records/connect/records-connect-client");
+    const { ProviderSearch } = await import("../app/records/connect/records-connect-client");
     const rendered = await renderClientComponent(createElement(ProviderSearch, {
       intentClaim: claim, onConsentRequired: vi.fn(),
     }));
@@ -792,7 +856,7 @@ describe("Clinical Records connect page", () => {
       });
 
     const { RecordsConnectClient } = await import(
-      "../app/(dashboard)/records/connect/records-connect-client"
+      "../app/records/connect/records-connect-client"
     );
     const rendered = await renderClientComponent(
       createElement(RecordsConnectClient, { authenticated: true }),
@@ -822,7 +886,7 @@ describe("Clinical Records connect page", () => {
     await clickButton(rendered, "Continue to Piedmont Healthcare patient portal");
 
     await vi.waitFor(() => {
-      expect(rendered.container.textContent).toContain("Connection link unavailable");
+      expect(rendered.container.textContent).toContain("This link isn’t working.");
     });
     expect(rendered.assign).not.toHaveBeenCalled();
   });
@@ -846,7 +910,7 @@ describe("Clinical Records connect page", () => {
       }));
 
     const { RecordsConnectClient } = await import(
-      "../app/(dashboard)/records/connect/records-connect-client"
+      "../app/records/connect/records-connect-client"
     );
     const rendered = await renderClientComponent(
       createElement(RecordsConnectClient, { authenticated: true }),
@@ -874,7 +938,7 @@ describe("Clinical Records connect page", () => {
     });
     await clickButton(rendered, "Continue to Piedmont Healthcare patient portal");
     await vi.waitFor(() => {
-      expect(rendered.container.textContent).toContain("Connection link unavailable");
+      expect(rendered.container.textContent).toContain("This link isn’t working.");
     });
 
     await rendered.rerender(createElement(RecordsConnectClient, {
@@ -882,7 +946,7 @@ describe("Clinical Records connect page", () => {
       key: "reloaded",
     }));
 
-    expect(rendered.container.textContent).toContain("Connection link unavailable");
+    expect(rendered.container.textContent).toContain("This link isn’t working.");
     expect(rendered.container.textContent).not.toContain("Accept health-data consent");
     expect(JSON.stringify(rendered.window.history.state)).not.toContain(claim);
   });

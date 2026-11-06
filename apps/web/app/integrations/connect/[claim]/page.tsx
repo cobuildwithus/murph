@@ -1,19 +1,23 @@
-import { Link2 } from "lucide-react";
-import type { ReactNode } from "react";
-
 import { IntegrationsConnectAuthRequired } from "@/src/components/connected-apps/integrations-connect-auth-required";
-import { IntegrationsConnectLauncher } from "@/src/components/connected-apps/integrations-connect-launcher";
+import {
+  IntegrationsConnectLauncher,
+  IntegrationsConnectUnavailableScreen,
+} from "@/src/components/connected-apps/integrations-connect-launcher";
+import { LinkPageFrame } from "@/src/components/link-page/link-page-shell";
+import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
 import { formatHostedConnectedAppToolkitLabel } from "@/src/lib/connected-apps/config";
 import { readHostedConnectedAppIntent } from "@/src/lib/connected-apps/service";
+import { resolveConnectLogoSrc } from "@/src/lib/device-sync/connect-logos";
 import { requireActiveHostedAppSession } from "@/src/lib/hosted-onboarding/app-session";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   InvalidRouteParamEncodingError,
   resolveDecodedRouteParam,
 } from "@/src/lib/http";
-import { cn } from "@/src/lib/utils";
 
-const CONNECT_EYEBROW = "Connected apps";
+const LINK_NOT_WORKING_TITLE = "This link isn’t working.";
+const ASK_FOR_A_NEW_LINK = "Ask Murph for a new one.";
+const NEW_LINK_REPLY_BODY = "Can you send me a new connection link?";
 
 export default async function IntegrationsConnectPage({
   params,
@@ -30,12 +34,10 @@ export default async function IntegrationsConnectPage({
     claim = await resolveDecodedRouteParam(params, "claim");
   } catch (error) {
     if (error instanceof InvalidRouteParamEncodingError) {
-      return (
-        <ConnectScreen
-          title="Connection link unavailable"
-          description="This connection link is invalid. Ask Murph for a new one."
-        />
-      );
+      return await renderConnectUnavailable({
+        detail: ASK_FOR_A_NEW_LINK,
+        title: LINK_NOT_WORKING_TITLE,
+      });
     }
     throw error;
   }
@@ -48,43 +50,32 @@ export default async function IntegrationsConnectPage({
     });
   } catch (error) {
     if (isHostedOnboardingError(error)) {
-      return (
-        <ConnectScreen
-          title="Connection unavailable"
-          description={error.message}
-        />
-      );
+      return await renderConnectUnavailable({
+        detail: error.message,
+        title: LINK_NOT_WORKING_TITLE,
+      });
     }
     throw error;
   }
 
   if (renderable.kind === "unavailable") {
-    return (
-      <ConnectScreen
-        title="Connection link unavailable"
-        description={renderable.message}
-      />
-    );
+    return await renderConnectUnavailable(renderable);
   }
 
   return (
-    <ConnectScreen
-      icon={
-        <span className="flex h-14 w-14 items-center justify-center rounded-full border border-border bg-card">
-          <Link2 className="h-6 w-6 text-primary" aria-hidden="true" />
-        </span>
-      }
-      title={`Connect ${renderable.accountLabel}`}
-      description={`Murph uses Composio to securely connect ${renderable.accountLabel}. On the next screen, you’ll review and approve access.`}
-    >
-      <IntegrationsConnectLauncher claim={claim} />
-    </ConnectScreen>
+    <LinkPageFrame>
+      <IntegrationsConnectLauncher
+        accountLabel={renderable.accountLabel}
+        claim={claim}
+        logoSrc={renderable.logoSrc}
+      />
+    </LinkPageFrame>
   );
 }
 
 type ConnectRenderable =
-  | { kind: "ready"; accountLabel: string }
-  | { kind: "unavailable"; message: string };
+  | { kind: "ready"; accountLabel: string; logoSrc: string | null }
+  | { detail: string; kind: "unavailable"; title: string };
 
 async function resolveConnectRenderable(input: {
   claim: string;
@@ -93,56 +84,53 @@ async function resolveConnectRenderable(input: {
   const intent = await readHostedConnectedAppIntent({ claim: input.claim });
   if (intent.memberId !== input.memberId) {
     return {
-      kind: "unavailable",
-      message:
+      detail:
         "This link is expired, already used, or belongs to another Murph account.",
+      kind: "unavailable",
+      title: LINK_NOT_WORKING_TITLE,
     };
   }
-  if (intent.completedAt || intent.startedAt || intent.expiresAt <= new Date()) {
+  if (intent.completedAt || intent.startedAt) {
     return {
+      detail: `It was already used. ${ASK_FOR_A_NEW_LINK}`,
       kind: "unavailable",
-      message: "This link is expired or already used. Ask Murph for a new one.",
+      title: LINK_NOT_WORKING_TITLE,
+    };
+  }
+  if (intent.expiresAt <= new Date()) {
+    return {
+      detail: `Nothing changed. ${ASK_FOR_A_NEW_LINK}`,
+      kind: "unavailable",
+      title: "This link expired.",
     };
   }
   const label = formatHostedConnectedAppToolkitLabel(intent.toolkit);
   return {
     accountLabel: intent.alias ? `${intent.alias} ${label}` : label,
     kind: "ready",
+    logoSrc: resolveConnectLogoSrc(intent.toolkit),
   };
 }
 
-function ConnectScreen({
-  children,
-  description,
-  icon,
+async function renderConnectUnavailable({
+  detail,
   title,
 }: {
-  children?: ReactNode;
-  description: ReactNode;
-  icon?: ReactNode;
+  detail: string;
   title: string;
 }) {
+  const contactOption = await resolveHostedMurphContactOption({
+    message: { body: NEW_LINK_REPLY_BODY },
+  }).catch(() => null);
+
   return (
-    <main className="min-h-dvh bg-background px-4 py-8 text-foreground sm:px-6">
-      <section className="mx-auto flex min-h-[70vh] max-w-xl flex-col items-center justify-center text-center">
-        {icon}
-        <p
-          className={cn(
-            "font-mono text-xs uppercase tracking-wide text-muted-foreground",
-            icon ? "mt-6" : null,
-          )}
-        >
-          {CONNECT_EYEBROW}
-        </p>
-        <h1 className="mt-3 font-serif text-3xl leading-tight text-balance break-words sm:text-4xl">
-          {title}
-        </h1>
-        <p className="mt-4 max-w-lg text-sm leading-6 text-muted-foreground text-pretty break-words">
-          {description}
-        </p>
-        {children}
-      </section>
-    </main>
+    <LinkPageFrame>
+      <IntegrationsConnectUnavailableScreen
+        contactOption={contactOption}
+        detail={detail}
+        title={title}
+      />
+    </LinkPageFrame>
   );
 }
 

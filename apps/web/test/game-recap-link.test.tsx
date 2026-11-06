@@ -23,7 +23,10 @@ describe("public recap handoff", () => {
   it("renders the same generic page for any valid ID without reading a game", async () => {
     vi.stubEnv("MURPH_GAME_APP_URL_SCHEME", "ai.withmurph.app.dev");
     const html = renderToStaticMarkup(await GameRecapPage({ params: Promise.resolve({ gameId: id }) }));
+    expect(html).toContain("Your week, in pictures.");
     expect(html).toContain("Your recap is in Murph.");
+    expect(html).toContain("Admit two");
+    expect(html).toContain("The Recap");
     expect(html).toContain(`href="ai.withmurph.app.dev://recap/${id}"`);
     expect(html).toContain("Open in Murph");
     expect(html).toContain('href="https://apps.apple.com/us/app/murph-ai/id6786145859"');

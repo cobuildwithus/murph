@@ -16,7 +16,14 @@ for (const width of [390, 1280]) {
     const choices = upgrade.getByRole("checkbox");
     await expect(choices).toHaveCount(1);
     await expect(choices.nth(0)).toBeChecked();
-    await expect(upgrade).toContainText("90 days");
+    const details = page.getByRole("dialog");
+    const readDetails = async (surface: typeof upgrade, text: string) => {
+      await surface.getByRole("button", { name: "Details" }).click();
+      await expect(details).toContainText(text);
+      await details.getByRole("button", { name: "Done" }).click();
+      await expect(details).toHaveCount(0);
+    };
+    await readDetails(upgrade, "90 days");
     const output = process.env.DESIGN_PROOF_OUTPUT_DIR;
     if (output) {
       await mkdir(output, { recursive: true });
@@ -28,7 +35,7 @@ for (const width of [390, 1280]) {
     await expect(choices.nth(0)).toBeChecked();
     const fresh = page.locator('[data-design-state="group-join-comprehensive-default"]');
     await expect(fresh).toContainText("90 days");
-    await expect(fresh).toContainText("Apple Health sharing includes when the Murph app last checked in.");
+    await readDetails(fresh, "Apple Health sharing includes when the Murph app last checked in.");
     for (const choice of await fresh.getByRole("checkbox").all()) await expect(choice).toBeChecked();
     for (const surface of [upgrade, fresh]) {
       expect(await surface.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);

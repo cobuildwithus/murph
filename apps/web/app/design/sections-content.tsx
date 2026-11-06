@@ -34,6 +34,8 @@ import { ChangelogArchiveStudy } from "./changelog-archive-study";
 import { CalendarLinkStudy } from "./calendar-link-study";
 import { ClinicalRecordsConnectLauncherStudy } from "./clinical-records-connect-launcher-study";
 import { ClubsPageStudy } from "./clubs-page-study";
+import { WearableConnectLinkStudy } from "./wearable-connect-link-study";
+import { ComputerHandoffStudy } from "./computer-handoff-study";
 import { ConnectedAppAuthorizationStudy } from "./connected-app-authorization-study";
 import {
   AppleHealthRelaySetupStudy,
@@ -217,7 +219,7 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Stateless calendar link">
+          <StudySection title="Calendar invite link: a page off the calendar, and a broken link">
             <CalendarLinkStudy />
           </StudySection>
 
@@ -546,7 +548,7 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Family plan invite acceptance">
+          <StudySection title="Family invite link: the ticket, three promises, and every way to accept">
             <FamilyInviteJoinStudy />
           </StudySection>
 
@@ -570,8 +572,20 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Connected app authorization handoff">
+          <StudySection title="Connect a wearable link">
+            <WearableConnectLinkStudy />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Connect an app link">
             <ConnectedAppAuthorizationStudy />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Take over a browser link">
+            <ComputerHandoffStudy />
           </StudySection>
 
           <Separator />
@@ -642,7 +656,7 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Group join invites, source-aware sharing, and setup recovery">
+          <StudySection title="Group join link: names first, exact wording in Details, Leave group drawer">
             <GroupJoinStudy
               comprehensivePermissions={projectHostedVaultShareProjectionDisplays(
                 resolveHostedGroupAccessOfferProjectionScopes(undefined),
@@ -652,7 +666,7 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Unknown iMessage group setup and recovery">
+          <StudySection title="Group start link: setup, recovery, and back to the group">
             <GroupStartStudy />
           </StudySection>
 
@@ -675,7 +689,7 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Reusable signup referral link, shared authentication, recipient claim, and signed-in recovery states">
+          <StudySection title="Friend’s invite link: the ticket, shared authentication, recipient claim, and signed-in recovery states">
             <SignupReferralFlowStudy />
           </StudySection>
 

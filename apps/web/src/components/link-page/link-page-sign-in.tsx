@@ -5,6 +5,7 @@ import { useState, type ReactNode } from "react";
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import {
   HostedFirstPartyAuthPanel,
+  type HostedFirstPartyAuthPanelProps,
   type HostedFirstPartyAuthPanelView,
 } from "@/src/components/hosted-onboarding/hosted-first-party-auth-panel";
 import {
@@ -19,6 +20,11 @@ import { cn } from "@/src/lib/utils";
 type LinkPageSignInProps = {
   children?: ReactNode;
   detail?: ReactNode;
+  inviteCode?: string | null;
+  /** The only ways in, for a link that can't finish any other way. */
+  methods?: HostedFirstPartyAuthPanelProps["methods"];
+  /** A page with its own finish, rather than the app-wide one. */
+  onCompleted?: HostedFirstPartyAuthPanelProps["onCompleted"];
   /** Settings skips this: a member may be there to change that very consent. */
   requireLaunchConsent?: boolean;
   title: string;
@@ -40,6 +46,9 @@ export function LinkPageSignIn(props: LinkPageSignInProps) {
 export function LinkPageSignInScreen({
   children,
   detail,
+  inviteCode,
+  methods,
+  onCompleted,
   requireLaunchConsent = true,
   title,
 }: LinkPageSignInProps) {
@@ -57,13 +66,14 @@ export function LinkPageSignInScreen({
         >
           <div className="w-full">
             <HostedFirstPartyAuthPanel
-              methods={otherMethods ? ["phone", "telegram", "email"] : ["phone"]}
-              onCompleted={completeAuthentication}
+              {...(inviteCode !== undefined ? { inviteCode } : {})}
+              methods={methods ?? (otherMethods ? ["phone", "telegram", "email"] : ["phone"])}
+              onCompleted={onCompleted ?? completeAuthentication}
               onViewChange={setView}
               requireLaunchConsentOnCompletion={requireLaunchConsent}
             />
           </div>
-          {!otherMethods && view === "auth" ? (
+          {!methods && !otherMethods && view === "auth" ? (
             <LinkPageLink onClick={() => setOtherMethods(true)}>
               Use Telegram or email
             </LinkPageLink>

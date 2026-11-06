@@ -1,16 +1,17 @@
 "use client";
 
+import { AlertDialog as AlertDialogPrimitive } from "@base-ui/react/alert-dialog";
+import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { Check } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   buildHostedVaultShareProjectionScopeKey,
   type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 
 import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
-import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
 import {
   HostedOnboardingApiError,
   requestHostedOnboardingJson,
@@ -19,10 +20,25 @@ import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/h
 import {
   JoinInviteSignOutButtonIsland,
 } from "@/src/components/hosted-onboarding/join-invite-islands";
-import { groupJoinPermissionsForDisplay } from "@/src/components/hosted-groups/group-join-permission-groups";
+import {
+  groupJoinPermissionsForDisplay,
+  type GroupJoinPermissionGroup,
+} from "@/src/components/hosted-groups/group-join-permission-groups";
+import {
+  LINK_PAGE_GOLD,
+  LINK_PAGE_LINK_CLASS,
+  LINK_PAGE_NIGHT_TOKENS,
+  LINK_PAGE_PILL_CLASS,
+  LinkPageError,
+  LinkPageLink,
+  LinkPagePill,
+  LinkPageScreen,
+  linkPageHeadline,
+} from "@/src/components/link-page/link-page-shell";
+import { LinkPageSignInScreen } from "@/src/components/link-page/link-page-sign-in";
 import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { toErrorMessage } from "@/src/components/settings/hosted-settings-sync-helpers";
-import { Button, buttonVariants } from "@/src/components/ui/button";
+import { Button } from "@/src/components/ui/button";
 import {
   buildGroupJoinPostAuthReturnPath,
   type GroupJoinPostJoinDestination,
@@ -34,6 +50,9 @@ import { cn } from "@/src/lib/utils";
 
 const GROUP_JOIN_RETURN_LABEL = "Back to Murph";
 const GROUP_JOIN_SETUP_LABEL = "Finish setting up Murph";
+// A member's short list leaves Clear all out; a long one keeps the one-tap exit.
+const GROUP_JOIN_LONG_LIST_LENGTH = 12;
+const GROUP_JOIN_PEOPLE_TONES = ["#5A6E32", "#8B5D3F", "#B4935A", "#6B7F86"];
 
 export interface GroupJoinPermissionDisplay {
   description: string;
@@ -43,11 +62,12 @@ export interface GroupJoinPermissionDisplay {
   projectionScopeKey: string;
 }
 
-export function GroupJoinSignInButton(input: {
+export function GroupJoinSignIn(input: {
+  detail: string;
   inviteCode?: string | null;
+  memberCount: number;
+  title: string;
 }) {
-  const [open, setOpen] = useState(true);
-
   function handleCompleted(payload: HostedAuthenticationCompletionPayload) {
     navigateHostedAuthRedirect(buildGroupJoinPostAuthReturnPath({
       currentPath: readCurrentGroupJoinPath(),
@@ -56,35 +76,35 @@ export function GroupJoinSignInButton(input: {
   }
 
   return (
-    <>
-      <Button type="button" size="xl" onClick={() => setOpen(true)}>
-        Continue to join
-      </Button>
-      <AuthDialog
-        inviteCode={input.inviteCode}
-        // A group-join invite reached by cold outreach is phone-bound: the
-        // provisional member was created from an inbound text, and
-        // authentication-service resolves that invite to the phone method and
-        // rejects an account without a verified phone. Offering Telegram or email here
-        // would let someone finish an entire sign-in that cannot complete.
-        {...(input.inviteCode ? { methods: ["phone"] as const } : {})}
-        open={open}
-        onCompleted={handleCompleted}
-        onOpenChange={setOpen}
-        requireLaunchConsentOnCompletion
-        title="Continue to join this Murph group"
-        description="Create or open your private Murph account, then we'll bring you back here."
-      />
-    </>
+    <LinkPageSignInScreen
+      detail={input.detail}
+      inviteCode={input.inviteCode}
+      // A group-join invite reached by cold outreach is phone-bound: the
+      // provisional member was created from an inbound text, and
+      // authentication-service resolves that invite to the phone method and
+      // rejects an account without a verified phone. Offering Telegram or email here
+      // would let someone finish an entire sign-in that cannot complete.
+      {...(input.inviteCode ? { methods: ["phone"] as const } : {})}
+      onCompleted={handleCompleted}
+      title={input.title}
+    >
+      <GroupJoinPeople memberCount={input.memberCount} />
+    </LinkPageSignInScreen>
   );
 }
 
 export function GroupJoinLegalConsentGate({
+  detail,
   initialStatus,
+  leaveAction,
   notNowHref,
+  title,
 }: {
+  detail: string;
   initialStatus: HostedConsentStatus | null;
+  leaveAction?: ReactNode;
   notNowHref: GroupJoinPostJoinDestination;
+  title: string;
 }) {
   const router = useRouter();
 
@@ -93,26 +113,34 @@ export function GroupJoinLegalConsentGate({
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <HostedLegalConsentCard
-        acceptedPendingLabel="Continuing..."
-        initialStatus={initialStatus}
-        mode="compact"
-        onAccepted={refreshRoute}
-        onRequirementChange={(required) => {
-          if (!required) {
-            refreshRoute();
-          }
-        }}
-        preferredScope="launch.legal"
-        source="group-join"
-      />
-      <Link
-        href={notNowHref}
-        className="inline-flex min-h-10 items-center justify-center text-center text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+    <div className="flex flex-1 flex-col" style={LINK_PAGE_NIGHT_TOKENS}>
+      <LinkPageScreen
+        actions={
+          <>
+            <Link className={LINK_PAGE_LINK_CLASS} href={notNowHref}>
+              Not now
+            </Link>
+            {leaveAction}
+          </>
+        }
+        announceDetail={false}
+        detail={detail}
+        title={title}
       >
-        Not now
-      </Link>
+        <HostedLegalConsentCard
+          acceptedPendingLabel="Continuing..."
+          initialStatus={initialStatus}
+          mode="compact"
+          onAccepted={refreshRoute}
+          onRequirementChange={(required) => {
+            if (!required) {
+              refreshRoute();
+            }
+          }}
+          preferredScope="launch.legal"
+          source="group-join"
+        />
+      </LinkPageScreen>
     </div>
   );
 }
@@ -120,6 +148,7 @@ export function GroupJoinLegalConsentGate({
 export function GroupJoinSuccess(props: {
   alreadyActiveMember: boolean;
   groupName: string;
+  memberCount: number;
   postJoinContactOption: MurphContactOption | null;
   postJoinDestination: GroupJoinPostJoinDestination;
 }) {
@@ -128,32 +157,32 @@ export function GroupJoinSuccess(props: {
     : GROUP_JOIN_RETURN_LABEL;
 
   return (
-    <div className="flex flex-col items-center gap-4 text-center">
-      <div className="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
-        <Check className="size-6" strokeWidth={2.5} />
-      </div>
-      <p className="text-base font-medium text-foreground" role="status">
-        {props.alreadyActiveMember ? "Your sharing is updated." : `You're in ${props.groupName}.`}
-      </p>
-      {props.postJoinContactOption ? (
-        <MurphContactLink
-          actionLabel={returnLabel}
-          className={buttonVariants({ className: "w-full", size: "xl" })}
-          option={props.postJoinContactOption}
-        >
-          {returnLabel}
-        </MurphContactLink>
-      ) : (
-        <Button
-          render={<Link href={props.postJoinDestination} />}
-          nativeButton={false}
-          size="xl"
-          className="w-full"
-        >
-          {returnLabel}
-        </Button>
+    <LinkPageScreen
+      actions={
+        props.postJoinContactOption ? (
+          <MurphContactLink
+            actionLabel={returnLabel}
+            className={LINK_PAGE_PILL_CLASS}
+            option={props.postJoinContactOption}
+          >
+            {returnLabel}
+          </MurphContactLink>
+        ) : (
+          <Link className={LINK_PAGE_PILL_CLASS} href={props.postJoinDestination}>
+            {returnLabel}
+          </Link>
+        )
+      }
+      title={
+        props.alreadyActiveMember
+          ? "Your sharing is updated."
+          : linkPageHeadline(`You're in ${props.groupName}`)
+      }
+    >
+      {props.alreadyActiveMember ? null : (
+        <GroupJoinPeople joined memberCount={props.memberCount} />
       )}
-    </div>
+    </LinkPageScreen>
   );
 }
 
@@ -161,9 +190,13 @@ export function GroupJoinAcceptForm(props: {
   activeVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
   alreadyActiveMember: boolean;
   expectedMembershipId: string | null;
+  /** The sentence for a group with nothing to choose. */
+  detail: string;
   groupName: string;
   inviteCode?: string | null;
   joinCode: string;
+  leaveAction?: ReactNode;
+  memberCount: number;
   permissions: readonly GroupJoinPermissionDisplay[];
   postJoinContactOption: MurphContactOption | null;
   postJoinDestination: GroupJoinPostJoinDestination;
@@ -182,6 +215,7 @@ export function GroupJoinAcceptForm(props: {
   const [status, setStatus] = useState<"idle" | "submitting" | "joined">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [inviteMismatch, setInviteMismatch] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const selectedVaultShareProjectionScopes = useMemo(
     () => props.permissions.flatMap((permission) => {
       const selectedScopes: HostedVaultShareProjectionScope[] = [];
@@ -208,7 +242,9 @@ export function GroupJoinAcceptForm(props: {
     ),
     [props.permissions, initialSelectedScopeKeys],
   );
-  const usesScrollablePermissionReview = permissionGroups.length > 12;
+  const hasChoices = permissionGroups.length > 0;
+  const showClearAll = !props.alreadyActiveMember
+    || permissionGroups.length > GROUP_JOIN_LONG_LIST_LENGTH;
   const selectedPermissionGroupCount = permissionGroups.reduce(
     (count, group) => (
       group.scopeKeys.every((scopeKey) => selected.has(scopeKey))
@@ -283,123 +319,26 @@ export function GroupJoinAcceptForm(props: {
       <GroupJoinSuccess
         alreadyActiveMember={props.alreadyActiveMember}
         groupName={props.groupName}
+        memberCount={props.memberCount}
         postJoinContactOption={props.postJoinContactOption}
         postJoinDestination={props.postJoinDestination}
       />
     );
   }
 
-  return (
-    <div className="flex flex-col gap-6">
-      {props.permissions.length > 0 ? (
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1">
-            <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-              Optional sharing
-            </span>
-            <p className="text-[13px] leading-5 text-muted-foreground">
-              Uncheck anything you don&apos;t want to share. Join either way. Change anytime.
-            </p>
-            <p className="text-[13px] leading-5 text-muted-foreground">
-              The people in {props.groupName} can see the numbers you pick over the last 90 days,
-              and compare how they’ve changed, in the chat and in the Murph app.
-              Uncheck a number and save to stop sharing it.
-            </p>
-            {usesScrollablePermissionReview ? (
-              <div className="flex min-h-10 items-center justify-between gap-3">
-                <p
-                  aria-live="polite"
-                  className="text-[12px] leading-5 text-muted-foreground tabular-nums"
-                >
-                  {selectedPermissionGroupCount} of {permissionGroups.length} choices selected. Scroll to review every choice.
-                </p>
-                <Button
-                  className="min-h-10 shrink-0 px-2 text-xs text-muted-foreground"
-                  disabled={status === "submitting" || selectedPermissionGroupCount === 0}
-                  onClick={() => setSelected(() => new Set())}
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  Clear optional sharing
-                </Button>
-              </div>
-            ) : null}
-          </div>
-          <div
-            aria-label={usesScrollablePermissionReview ? "Sharing choices" : undefined}
-            className={cn(
-              "flex flex-col gap-2.5",
-              usesScrollablePermissionReview
-                ? "max-h-[26rem] overflow-y-auto overscroll-contain rounded-xl pr-1"
-                : null,
-            )}
-            role={usesScrollablePermissionReview ? "region" : undefined}
-            tabIndex={usesScrollablePermissionReview ? 0 : undefined}
-          >
-            {permissionGroups.map((group) => {
-              const currentSelected = group.scopeKeys.every((scopeKey) =>
-                selected.has(scopeKey)
-              );
-              const legacySelected = !currentSelected && group.legacyScopeKeys.some(
-                (scopeKey) => selected.has(scopeKey),
-              );
-              const checked = currentSelected || legacySelected;
-              return (
-                <div
-                  key={group.key}
-                  className={cn(
-                    "shrink-0 overflow-hidden rounded-xl border transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring",
-                    checked
-                      ? "border-primary bg-primary/[0.06]"
-                      : "border-border bg-card hover:border-primary/40",
-                  )}
-                >
-                  <label className="flex cursor-pointer gap-3 p-3.5">
-                    <input
-                      type="checkbox"
-                      className="sr-only"
-                      checked={checked}
-                      onChange={() => togglePermissionGroup(
-                        group.scopeKeys,
-                        group.legacyScopeKeys,
-                      )}
-                    />
-                    <span
-                      aria-hidden
-                      className={cn(
-                        "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors",
-                        checked
-                          ? "border-primary bg-primary text-primary-foreground"
-                          : "border-muted-foreground/50",
-                      )}
-                    >
-                      {checked ? <Check className="size-3.5" strokeWidth={3} /> : null}
-                    </span>
-                    <span className="flex flex-col gap-0.5">
-                      <span className="text-sm font-semibold text-foreground">{group.label}</span>
-                      <span className="text-[13px] leading-5 text-muted-foreground">
-                        {group.description}
-                      </span>
-                    </span>
-                  </label>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ) : null}
+  if (inviteMismatch) {
+    return <GroupJoinInviteMismatchRecovery />;
+  }
 
-      <div className="flex flex-col gap-2">
-        {inviteMismatch ? (
-          <GroupJoinInviteMismatchRecovery />
-        ) : (
+  return (
+    <div className="flex min-h-0 flex-1 flex-col" style={LINK_PAGE_NIGHT_TOKENS}>
+      <LinkPageScreen
+        actions={
           <>
-            <Button
-              type="button"
-              size="xl"
-              onClick={() => void submit()}
+            {errorMessage ? <LinkPageError>{errorMessage}</LinkPageError> : null}
+            <LinkPagePill
               disabled={status === "submitting"}
+              onClick={() => void submit()}
             >
               {status === "submitting"
                 ? props.alreadyActiveMember
@@ -408,42 +347,135 @@ export function GroupJoinAcceptForm(props: {
                 : props.alreadyActiveMember
                   ? "Save changes"
                   : "Join group"}
-            </Button>
-            {errorMessage ? (
-              <p role="alert" className="text-sm text-destructive [overflow-wrap:anywhere]">
-                {errorMessage}
-              </p>
-            ) : null}
+            </LinkPagePill>
+            {/* Leave group takes the quiet place, unless setup is still owed. */}
+            {props.leaveAction && props.postJoinDestination !== "/join" ? null : (
+              <Link className={LINK_PAGE_LINK_CLASS} href={props.postJoinDestination}>
+                {secondaryLabel}
+              </Link>
+            )}
+            {props.leaveAction}
           </>
+        }
+        announceDetail={false}
+        detail={
+          hasChoices ? (
+            <>
+              {props.alreadyActiveMember
+                ? "Uncheck to stop sharing."
+                : "Your name and what you pick from the last 90 days."}{" "}
+              <Button
+                className="relative font-semibold text-[#FFFCF6] underline underline-offset-2 after:absolute after:-inset-x-2 after:-inset-y-3"
+                onClick={() => setDetailsOpen(true)}
+                size="unstyled"
+                type="button"
+                variant="unstyled"
+              >
+                Details
+              </Button>
+            </>
+          ) : props.detail
+        }
+        fill={hasChoices}
+        title={linkPageHeadline(
+          props.alreadyActiveMember
+            ? `You're in ${props.groupName}`
+            : `Join ${props.groupName}`,
         )}
-      </div>
-      <Link
-        href={props.postJoinDestination}
-        className="inline-flex min-h-10 items-center justify-center text-center text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
       >
-        {secondaryLabel}
-      </Link>
+        {hasChoices ? (
+          <>
+            <div className="flex min-h-10 shrink-0 items-center justify-between gap-3 px-0.5 pt-2">
+              <p
+                aria-live="polite"
+                className="text-sm font-semibold leading-5 text-[#FFFCF6]/60 tabular-nums"
+              >
+                Sharing {selectedPermissionGroupCount} of {permissionGroups.length}
+              </p>
+              {showClearAll ? (
+                <Button
+                  className="min-h-10 shrink-0 rounded-lg px-0.5 text-sm font-semibold text-[#FFFCF6]"
+                  disabled={status === "submitting" || selectedPermissionGroupCount === 0}
+                  onClick={() => setSelected(() => new Set())}
+                  size="unstyled"
+                  type="button"
+                  variant="unstyled"
+                >
+                  Clear all
+                </Button>
+              ) : null}
+            </div>
+            <div
+              aria-label="Sharing choices"
+              className="flex min-h-[10.5rem] flex-1 flex-col gap-2 overflow-y-auto overscroll-contain rounded-[18px] outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+              role="region"
+              tabIndex={0}
+            >
+              {permissionGroups.map((group) => {
+                const currentSelected = group.scopeKeys.every((scopeKey) =>
+                  selected.has(scopeKey)
+                );
+                const legacySelected = !currentSelected && group.legacyScopeKeys.some(
+                  (scopeKey) => selected.has(scopeKey),
+                );
+                const checked = currentSelected || legacySelected;
+                return (
+                  <div
+                    key={group.key}
+                    className="shrink-0 overflow-hidden rounded-[18px] bg-[#2A2622] has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset has-[:focus-visible]:ring-ring"
+                  >
+                    <label className="flex cursor-pointer items-center gap-3 px-4 py-[15px]">
+                      <input
+                        type="checkbox"
+                        className="sr-only"
+                        checked={checked}
+                        onChange={() => togglePermissionGroup(
+                          group.scopeKeys,
+                          group.legacyScopeKeys,
+                        )}
+                      />
+                      <span className="min-w-0 flex-1 break-words text-[17px] font-semibold leading-[22px]">
+                        {group.label}
+                      </span>
+                      <span
+                        aria-hidden
+                        className={cn(
+                          "flex size-[26px] shrink-0 items-center justify-center rounded-full",
+                          checked
+                            ? "bg-[#FFFCF6] text-[#2D3436]"
+                            : "border-[1.5px] border-[#FFFCF6]/35",
+                        )}
+                      >
+                        {checked ? <Check className="size-3.5" strokeWidth={3} /> : null}
+                      </span>
+                    </label>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          <GroupJoinPeople memberCount={props.memberCount} />
+        )}
+      </LinkPageScreen>
+      <GroupJoinDetailsDrawer
+        choices={permissionGroups}
+        onOpenChange={setDetailsOpen}
+        open={detailsOpen}
+      />
     </div>
   );
 }
 
 export function GroupJoinInviteMismatchRecovery() {
   return (
-    <div
-      className="flex flex-col gap-3 rounded-2xl border border-border bg-muted/40 p-4"
-      role="alert"
-    >
-      <div className="flex flex-col gap-1">
-        <p className="text-sm font-semibold text-foreground">
-          Use the invited phone number
-        </p>
-        <p className="text-sm leading-5 text-muted-foreground">
-          This browser is signed into a different Murph account. Sign out, then
-          verify the phone number that received this invite.
-        </p>
-      </div>
-      <JoinInviteSignOutButtonIsland idleLabel="Sign out and continue" />
-    </div>
+    <LinkPageScreen
+      actions={
+        <JoinInviteSignOutButtonIsland appearance="pill" idleLabel="Sign out and continue" />
+      }
+      detail="This browser is signed into a different Murph account. Sign out, then verify the phone number that received this invite."
+      title="Use the invited phone number."
+    />
   );
 }
 
@@ -452,20 +484,11 @@ export function GroupJoinLeaveButton(props: {
   joinCode: string;
 }) {
   const router = useRouter();
+  const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   async function leaveGroup() {
-    const confirmed = window.confirm(
-      `Leave ${props.groupName}? This ends your Murph membership and future sharing. `
-      + "Murph queues its shared copies for cleanup, but this won't remove you from "
-      + "the iMessage chat or erase past messages, provider history, backups, or "
-      + "copies already held outside Murph.",
-    );
-    if (!confirmed) {
-      return;
-    }
-
     setErrorMessage(null);
     setSubmitting(true);
     try {
@@ -481,22 +504,181 @@ export function GroupJoinLeaveButton(props: {
   }
 
   return (
-    <div className="flex flex-col items-center gap-1">
-      <Button
-        type="button"
-        size="lg"
-        variant="link"
-        onClick={() => void leaveGroup()}
+    <>
+      <LinkPageLink
+        className="text-base"
         disabled={submitting}
-        className="w-full text-destructive hover:text-destructive"
+        onClick={() => {
+          setErrorMessage(null);
+          setOpen(true);
+        }}
       >
-        {submitting ? "Leaving..." : "Leave group"}
-      </Button>
-      {errorMessage ? (
-        <p role="alert" className="text-center text-sm text-destructive [overflow-wrap:anywhere]">
-          {errorMessage}
-        </p>
-      ) : null}
+        Leave group
+      </LinkPageLink>
+      <GroupJoinLeaveDrawer
+        errorMessage={errorMessage}
+        groupName={props.groupName}
+        onConfirm={() => void leaveGroup()}
+        onOpenChange={setOpen}
+        open={open}
+        submitting={submitting}
+      />
+    </>
+  );
+}
+
+export function GroupJoinDetailsDrawer({
+  choices,
+  onOpenChange,
+  open,
+}: {
+  choices: readonly Pick<GroupJoinPermissionGroup, "description" | "key" | "label">[];
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+}) {
+  return (
+    <DialogPrimitive.Root onOpenChange={onOpenChange} open={open}>
+      <GroupJoinDrawer
+        detail="Your name and what you pick from the last 90 days, in the chat and the Murph app. Everything else stays private."
+        title="What they’ll see"
+      >
+        <dl
+          aria-label="What each choice shares"
+          className="flex min-h-0 flex-col gap-3 overflow-y-auto overscroll-contain rounded-lg outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          role="region"
+          tabIndex={0}
+        >
+          {choices.map((choice) => (
+            <div className="flex flex-col gap-px" key={choice.key}>
+              <dt className="text-base font-semibold leading-[22px]">{choice.label}</dt>
+              <dd className="text-[15px] font-medium leading-5 text-[#FFFCF6]/60 [overflow-wrap:anywhere]">
+                {choice.description}
+              </dd>
+            </div>
+          ))}
+        </dl>
+        <footer className="flex shrink-0 flex-col items-center">
+          <DialogPrimitive.Close render={<LinkPageLink className="text-base" />}>
+            Done
+          </DialogPrimitive.Close>
+        </footer>
+      </GroupJoinDrawer>
+    </DialogPrimitive.Root>
+  );
+}
+
+export function GroupJoinLeaveDrawer({
+  errorMessage = null,
+  groupName,
+  onConfirm,
+  onOpenChange,
+  open,
+  submitting = false,
+}: {
+  errorMessage?: string | null;
+  groupName: string;
+  onConfirm: () => void;
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+  submitting?: boolean;
+}) {
+  return (
+    <AlertDialogPrimitive.Root
+      onOpenChange={(next) => {
+        if (!submitting) {
+          onOpenChange(next);
+        }
+      }}
+      open={open}
+    >
+      <GroupJoinDrawer
+        detail="Sharing stops and Murph starts cleaning up its copies. You stay in the iMessage chat, and past messages, backups, and copies outside Murph aren’t erased."
+        title={`Leave ${groupName}?`}
+      >
+        <footer className="flex shrink-0 flex-col items-center gap-1.5">
+          {errorMessage ? <LinkPageError>{errorMessage}</LinkPageError> : null}
+          <LinkPagePill
+            className="bg-[#2A2622] text-[#E27B6E]"
+            disabled={submitting}
+            onClick={onConfirm}
+          >
+            {submitting ? "Leaving..." : "Leave group"}
+          </LinkPagePill>
+          <DialogPrimitive.Close
+            disabled={submitting}
+            render={<LinkPageLink className="text-base" />}
+          >
+            Stay
+          </DialogPrimitive.Close>
+        </footer>
+      </GroupJoinDrawer>
+    </AlertDialogPrimitive.Root>
+  );
+}
+
+function GroupJoinDrawer({
+  children,
+  detail,
+  title,
+}: {
+  children: ReactNode;
+  detail: string;
+  title: string;
+}) {
+  return (
+    <DialogPrimitive.Portal>
+      <DialogPrimitive.Backdrop className="fixed inset-0 isolate z-50 bg-[#0B0A08]/70 duration-150 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
+      <DialogPrimitive.Popup
+        className="fixed inset-x-0 bottom-0 z-50 flex max-h-[85dvh] w-auto flex-col gap-4 overflow-y-auto overscroll-contain rounded-t-[28px] bg-[#1F1C19] px-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-7 text-[#FFFCF6] duration-150 outline-none data-open:animate-in data-open:fade-in-0 data-open:slide-in-from-bottom-4 data-closed:animate-out data-closed:fade-out-0 sm:inset-x-auto sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:w-full sm:max-w-md sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-[28px] sm:pb-7"
+        data-component="group-join-drawer"
+        style={LINK_PAGE_NIGHT_TOKENS}
+      >
+        <header className="flex shrink-0 flex-col gap-2 text-left">
+          <DialogPrimitive.Title className="text-balance font-serif text-[30px] font-semibold leading-[34px] tracking-[-0.01em]">
+            {title}
+          </DialogPrimitive.Title>
+          <DialogPrimitive.Description className="text-pretty text-base font-medium leading-[22px] text-[#FFFCF6]/60">
+            {detail}
+          </DialogPrimitive.Description>
+        </header>
+        {children}
+      </DialogPrimitive.Popup>
+    </DialogPrimitive.Portal>
+  );
+}
+
+/** The people in the group and a place for you, filled once you've joined. */
+function GroupJoinPeople({
+  joined = false,
+  memberCount,
+}: {
+  joined?: boolean;
+  memberCount: number;
+}) {
+  return (
+    <div aria-hidden="true" className="flex items-center justify-center">
+      {GROUP_JOIN_PEOPLE_TONES.slice(0, memberCount).map((tone, index) => (
+        <span
+          className={cn(
+            "size-[68px] shrink-0 rounded-full border-4 border-[#1C1915]",
+            index > 0 && "-ml-5",
+          )}
+          key={tone}
+          style={{ background: tone }}
+        />
+      ))}
+      <span
+        className={cn(
+          "flex size-[68px] shrink-0 items-center justify-center rounded-full text-[15px] leading-5",
+          memberCount > 0 && (joined ? "-ml-5" : "-ml-4"),
+          joined
+            ? "border-4 border-[#1C1915] font-bold text-[#3B2A12]"
+            : "border-2 border-dashed border-[#FFFCF6]/50 bg-[#1C1915] font-semibold",
+        )}
+        style={joined ? { background: LINK_PAGE_GOLD } : undefined}
+      >
+        You
+      </span>
     </div>
   );
 }

@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   readHostedConnectedAppIntent: vi.fn(),
   requireActiveHostedAppSession: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
+  resolveHostedMurphContactOption: vi.fn(),
   startHostedConnectedAppConnection: vi.fn(),
 }));
 
@@ -26,6 +27,10 @@ vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
   requireActiveHostedAppSession: mocks.requireActiveHostedAppSession,
   requireActiveHostedAppSessionFromRequest:
     mocks.requireActiveHostedAppSessionFromRequest,
+}));
+
+vi.mock("@/src/components/murph/hosted-murph-contact-action", () => ({
+  resolveHostedMurphContactOption: mocks.resolveHostedMurphContactOption,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
@@ -60,6 +65,11 @@ describe("hosted connected-app connect page and start route", () => {
       createSession(),
     );
     mocks.readHostedConnectedAppIntent.mockResolvedValue(createIntent());
+    mocks.resolveHostedMurphContactOption.mockResolvedValue({
+      href: "sms:+15550100001",
+      kind: "text",
+      label: "Messages",
+    });
     mocks.startHostedConnectedAppConnection.mockResolvedValue({
       redirectUrl: "https://provider.example.test/link/abc",
     });
@@ -109,9 +119,47 @@ describe("hosted connected-app connect page and start route", () => {
       params: Promise.resolve({ claim: CLAIM }),
     }));
 
-    assert.match(markup, /Connection link unavailable/);
+    assert.match(markup, /This link isn’t working\./);
+    assert.match(markup, /belongs to another Murph account/);
+    assert.match(markup, /Open Messages/);
     assert.equal(markup.includes("private-work-calendar"), false);
     assert.equal(markup.includes("Google Calendar"), false);
+  });
+
+  it("tells expired and used links apart", async () => {
+    mocks.readHostedConnectedAppIntent.mockResolvedValueOnce(createIntent({
+      expiresAt: new Date("2020-01-01T00:00:00.000Z"),
+    }));
+    const expired = renderToStaticMarkup(await connectPage.default({
+      params: Promise.resolve({ claim: CLAIM }),
+    }));
+    assert.match(expired, /This link expired\./);
+    assert.match(expired, /Nothing changed\. Ask Murph for a new one\./);
+
+    mocks.readHostedConnectedAppIntent.mockResolvedValueOnce(createIntent({
+      startedAt: new Date("2026-01-01T00:00:00.000Z"),
+    }));
+    const used = renderToStaticMarkup(await connectPage.default({
+      params: Promise.resolve({ claim: CLAIM }),
+    }));
+    assert.match(used, /This link isn’t working\./);
+    assert.match(used, /It was already used\./);
+  });
+
+  it("still shows a dead link when no way back to the chat resolves", async () => {
+    mocks.resolveHostedMurphContactOption.mockRejectedValueOnce(
+      new Error("contact context unavailable"),
+    );
+    mocks.readHostedConnectedAppIntent.mockResolvedValueOnce(createIntent({
+      memberId: "member_other",
+    }));
+
+    const markup = renderToStaticMarkup(await connectPage.default({
+      params: Promise.resolve({ claim: CLAIM }),
+    }));
+
+    assert.match(markup, /This link isn’t working\./);
+    assert.equal(markup.includes("Open Messages"), false);
   });
 
   it("renders same-member connect pages with long-label wrapping and the auto-redirect launcher", async () => {
@@ -128,15 +176,16 @@ describe("hosted connected-app connect page and start route", () => {
       markup,
       /Connect work-account-with-a-long-unbroken-display-name Gmail/,
     );
-    assert.match(markup, /Murph uses Composio to securely connect/);
     assert.match(
       markup,
-      /On the next screen, you’ll review and approve access\./,
+      /You’ll review and approve access on the next screen, through Composio\./,
     );
+    assert.match(markup, /brand-logos\/connect\/gmail\.svg/);
     assert.match(markup, /break-words/);
     // The launcher renders the pre-authorization handoff; the actual POST +
     // navigation fires from the client timeout or button, not from a form.
     assert.match(markup, /Continuing in 5 seconds…/);
+    assert.match(markup, />Continuing in 5</);
     assert.match(markup, /Continue now/);
     assert.match(markup, /Stay here/);
     assert.equal(markup.includes("<form"), false);

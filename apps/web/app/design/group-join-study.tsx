@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import {
   buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
@@ -8,16 +9,64 @@ import {
 
 import {
   GroupJoinAcceptForm,
+  GroupJoinDetailsDrawer,
   GroupJoinInviteMismatchRecovery,
   GroupJoinLeaveButton,
+  GroupJoinLeaveDrawer,
+  GroupJoinLegalConsentGate,
+  GroupJoinSignIn,
   GroupJoinSuccess,
   type GroupJoinPermissionDisplay,
 } from "@/src/components/hosted-groups/group-join-client";
-import { HostedFirstPartyAuthPanel } from "@/src/components/hosted-onboarding/hosted-first-party-auth-panel";
+import { groupJoinPermissionsForDisplay } from "@/src/components/hosted-groups/group-join-permission-groups";
+import { LinkPageSurface } from "@/src/components/link-page/link-page-shell";
+import { Button } from "@/src/components/ui/button";
 import { HOSTED_VAULT_SHARE_TIME_ZONE_DESCRIPTION } from "@/src/lib/hosted-groups/projection-display-copy";
+import type { HostedConsentStatus } from "@/src/lib/legal/consent";
+import { cn } from "@/src/lib/utils";
 
-const DESIGN_GROUP_NAME = "Sunday Sleep Crew";
+const DESIGN_GROUP_NAME = "Sunday sleep crew";
 const DESIGN_JOIN_CODE = "DESIGN_JOIN";
+const DESIGN_MEMBER_COUNT = 4;
+const DESIGN_DETAIL = "4 people. They’ll see your name, and anything you choose to share.";
+const DESIGN_CONSENT_DOCUMENTS: HostedConsentStatus["documents"] = [
+  {
+    href: "/legal/terms",
+    id: "terms-of-service",
+    pdfHref: "/legal/terms.pdf",
+    title: "Murph Terms of Service",
+    version: "2026-04-29",
+  },
+  {
+    href: "/legal/privacy",
+    id: "privacy-policy",
+    pdfHref: "/legal/privacy.pdf",
+    title: "Murph Privacy Policy",
+    version: "2026-06-24",
+  },
+];
+const DESIGN_CONSENT_STATUS: HostedConsentStatus = {
+  documents: DESIGN_CONSENT_DOCUMENTS,
+  generatedAt: "2026-07-23T12:00:00.000Z",
+  launchGranted: false,
+  launchScopes: [{
+    granted: false,
+    missingDocuments: DESIGN_CONSENT_DOCUMENTS,
+    scope: "launch.legal",
+  }],
+  ok: true,
+  schema: "murph.hosted-consent-status.v1",
+  scopes: [{
+    current: false,
+    documents: DESIGN_CONSENT_DOCUMENTS,
+    grant: null,
+    granted: false,
+    label: "Terms",
+    missingDocuments: DESIGN_CONSENT_DOCUMENTS,
+    revocable: false,
+    scope: "launch.legal",
+  }],
+};
 
 const DESIGN_ACTIVITY_SCOPE: HostedVaultShareProjectionScope = {
   projectionKind: "activity-days.v0",
@@ -118,26 +167,63 @@ export function GroupJoinStudy({
 
   return (
     <div
-      className="grid gap-6 rounded-3xl border border-border bg-background px-4 py-12 sm:px-8 lg:grid-cols-2"
+      className="grid gap-6 md:grid-cols-2 xl:grid-cols-3"
       data-design-study="group-join"
       id="group-join"
       inert
     >
       <GroupJoinVariant
-        caption="An existing activity permission now shares 90 days automatically and remains selected. Unchecking it stops sharing."
-        title="History · existing permission"
+        caption="A signed-out invitee who arrived from a group text sees only the phone-bound account path. The invite code stays attached through authentication so Murph can return them to this group."
+        title="Message invite · signed out"
       >
-        <GroupJoinPageMock alreadyActiveMember designState="group-join-history-existing">
-          <GroupJoinAcceptForm
-            activeVaultShareProjectionScopes={[DESIGN_ACTIVITY_SCOPE]}
-            alreadyActiveMember
-            expectedMembershipId="membership_design"
-            groupName={DESIGN_GROUP_NAME}
-            joinCode={DESIGN_JOIN_CODE}
-            permissions={comprehensivePermissions.filter(({ projectionScope }) => projectionScope.projectionKind === "activity-days.v0")}
-            postJoinContactOption={null}
-            postJoinDestination="/home"
+        <GroupJoinPageMock>
+          <GroupJoinSignIn
+            detail={DESIGN_DETAIL}
+            inviteCode="hinv_design_group_message"
+            memberCount={DESIGN_MEMBER_COUNT}
+            title={`Join ${DESIGN_GROUP_NAME}.`}
           />
+        </GroupJoinPageMock>
+      </GroupJoinVariant>
+
+      <GroupJoinVariant
+        caption="A signed-in invitee who hasn't accepted Murph's terms sees the consent card first. The join form stays behind it, and Not now is the way out."
+        title="Legal consent gate"
+      >
+        <GroupJoinPageMock fit={false}>
+          <GroupJoinLegalConsentGate
+            detail={DESIGN_DETAIL}
+            initialStatus={DESIGN_CONSENT_STATUS}
+            notNowHref="/home"
+            title={`Join ${DESIGN_GROUP_NAME}.`}
+          />
+        </GroupJoinPageMock>
+      </GroupJoinVariant>
+
+      <GroupJoinVariant
+        caption="Names only, with the exact wording one tap away in Details. Every choice stays selected until the invitee unchecks it, and Clear all makes joining with no sharing one action. Nothing is shared until they join."
+        title="New invitee · pick what to share"
+      >
+        <GroupJoinPageMock designState="group-join-new-invitee">
+          <DesignForm alreadyActiveMember={false} permissions={DESIGN_PERMISSIONS} />
+        </GroupJoinPageMock>
+      </GroupJoinVariant>
+
+      <GroupJoinVariant
+        caption="A new member sees every available sharing choice selected. The list stays a bounded scroll region, so Join group stays in view however long the catalog is."
+        title="New invitee · comprehensive default"
+      >
+        <GroupJoinPageMock designState="group-join-comprehensive-default">
+          <DesignForm alreadyActiveMember={false} permissions={comprehensivePermissions} />
+        </GroupJoinPageMock>
+      </GroupJoinVariant>
+
+      <GroupJoinVariant
+        caption="Selector-based activity choices name the same 90-day history window as every other recent-data permission in Details, so approval is informed before sharing starts."
+        title="Recent activity · exact consent window"
+      >
+        <GroupJoinPageMock designState="group-join-selector-permissions">
+          <DesignForm alreadyActiveMember={false} permissions={selectorPermissions} />
         </GroupJoinPageMock>
       </GroupJoinVariant>
 
@@ -145,16 +231,34 @@ export function GroupJoinStudy({
         caption="Deep sleep is one exact consent choice that includes source names, each source's recorded time, and every available value across both stored scope versions."
         title="Sleep sources · exact consent"
       >
-        <GroupJoinPageMock alreadyActiveMember={false}>
-          <GroupJoinAcceptForm
-            activeVaultShareProjectionScopes={[]}
-            alreadyActiveMember={false}
-            expectedMembershipId={null}
-            groupName={DESIGN_GROUP_NAME}
-            joinCode={DESIGN_JOIN_CODE}
-            permissions={DESIGN_SLEEP_SOURCE_PERMISSIONS}
-            postJoinContactOption={null}
-            postJoinDestination="/home"
+        <GroupJoinPageMock>
+          <DesignForm alreadyActiveMember={false} permissions={DESIGN_SLEEP_SOURCE_PERMISSIONS} />
+        </GroupJoinPageMock>
+      </GroupJoinVariant>
+
+      <GroupJoinVariant
+        caption="An existing member reopens the link with only their active shares selected. Save changes is the pill and Leave group is the quiet link."
+        title="Existing member"
+      >
+        <GroupJoinPageMock>
+          <DesignForm
+            activeScopes={[DESIGN_ACTIVITY_SCOPE]}
+            alreadyActiveMember
+            canLeave
+            permissions={DESIGN_PERMISSIONS}
+          />
+        </GroupJoinPageMock>
+      </GroupJoinVariant>
+
+      <GroupJoinVariant
+        caption="An existing activity permission now shares 90 days automatically and remains selected. Unchecking it stops sharing."
+        title="History · existing permission"
+      >
+        <GroupJoinPageMock designState="group-join-history-existing">
+          <DesignForm
+            activeScopes={[DESIGN_ACTIVITY_SCOPE]}
+            alreadyActiveMember
+            permissions={comprehensivePermissions.filter(({ projectionScope }) => projectionScope.projectionKind === "activity-days.v0")}
           />
         </GroupJoinPageMock>
       </GroupJoinVariant>
@@ -163,92 +267,72 @@ export function GroupJoinStudy({
         caption="An existing v0 grant remains visible under the same source-labelled sleep permission. Saving preserves its scope key, and unchecking still stops every stored version of that share."
         title="Sleep sources · existing sharing active"
       >
-        <GroupJoinPageMock alreadyActiveMember>
-          <GroupJoinAcceptForm
-            activeVaultShareProjectionScopes={[
+        <GroupJoinPageMock>
+          <DesignForm
+            activeScopes={[
               { projectionKind: "deep-sleep-days.v0" },
               { projectionKind: "rem-sleep-days.v0" },
             ]}
             alreadyActiveMember
-            expectedMembershipId="membership_design"
-            groupName={DESIGN_GROUP_NAME}
-            joinCode={DESIGN_JOIN_CODE}
             permissions={DESIGN_SLEEP_SOURCE_PERMISSIONS}
-            postJoinContactOption={null}
-            postJoinDestination="/home"
           />
         </GroupJoinPageMock>
       </GroupJoinVariant>
 
       <GroupJoinVariant
-        caption="A signed-out invitee who arrived from a group text sees only the phone-bound account path. The invite code stays attached through authentication so Murph can return them to this group."
-        title="Message invite · signed out"
+        caption="Existing member sharing only protein while the group also requests carbs, fat, and fiber. A mixed macro grant expands to per-nutrient rows so the active grant stays visible and revocable instead of hiding behind an unchecked group."
+        title="Existing member · mixed macros"
       >
-        <GroupJoinPageMock alreadyActiveMember={false}>
-          <HostedFirstPartyAuthPanel
-            inviteCode="hinv_design_group_message"
-            methods={["phone"]}
-            requireLaunchConsentOnCompletion
-            size="compact"
-          />
-        </GroupJoinPageMock>
-      </GroupJoinVariant>
-
-      <GroupJoinVariant
-        caption="Existing member re-opens the invite link. Save changes and Leave group stay as buttons; Back to Murph is the new quiet exit."
-        title="Existing member"
-      >
-        <GroupJoinPageMock alreadyActiveMember>
-          <GroupJoinAcceptForm
-            activeVaultShareProjectionScopes={[DESIGN_ACTIVITY_SCOPE]}
+        <GroupJoinPageMock>
+          <DesignForm
+            activeScopes={[
+              DESIGN_ACTIVITY_SCOPE,
+              { projectionKind: "protein-days.v0" },
+            ]}
             alreadyActiveMember
-            expectedMembershipId="membership_design"
-            groupName={DESIGN_GROUP_NAME}
-            joinCode={DESIGN_JOIN_CODE}
+            canLeave
             permissions={DESIGN_PERMISSIONS}
-            postJoinContactOption={null}
-            postJoinDestination="/home"
-          />
-          <GroupJoinLeaveButton groupName={DESIGN_GROUP_NAME} joinCode={DESIGN_JOIN_CODE} />
-        </GroupJoinPageMock>
-      </GroupJoinVariant>
-
-      <GroupJoinVariant
-        caption="A new member sees every available sharing choice selected, including the exact 90-day window for recent activity distance and session counts. They can clear optional sharing in one action and re-enable exact choices before joining. Nothing is shared until they join."
-        title="New invitee · comprehensive default"
-      >
-        <GroupJoinPageMock
-          alreadyActiveMember={false}
-          designState="group-join-comprehensive-default"
-        >
-          <GroupJoinAcceptForm
-            activeVaultShareProjectionScopes={[]}
-            alreadyActiveMember={false}
-            expectedMembershipId={null}
-            groupName={DESIGN_GROUP_NAME}
-            joinCode={DESIGN_JOIN_CODE}
-            permissions={comprehensivePermissions}
-            postJoinContactOption={null}
-            postJoinDestination="/home"
           />
         </GroupJoinPageMock>
       </GroupJoinVariant>
 
       <GroupJoinVariant
-        caption="Selector-based activity choices name the same 90-day history window as every other recent-data permission, so approval is informed before sharing starts."
-        title="Recent activity · exact consent window"
+        caption="A first-checkout member who reloads after joining keeps the same sharing controls, while every secondary action names the setup destination truthfully."
+        title="Existing member · setup recovery"
       >
-        <GroupJoinPageMock
-          alreadyActiveMember={false}
-          designState="group-join-selector-permissions"
-        >
-          <GroupJoinAcceptForm
-            activeVaultShareProjectionScopes={[]}
+        <GroupJoinPageMock>
+          <DesignForm
+            alreadyActiveMember
+            permissions={DESIGN_SLEEP_SOURCE_PERMISSIONS}
+            postJoinDestination="/join"
+          />
+        </GroupJoinPageMock>
+      </GroupJoinVariant>
+
+      <GroupJoinVariant
+        caption="Your circle fills in, and the one action goes back to the chat."
+        title="Joined"
+      >
+        <GroupJoinPageMock>
+          <GroupJoinSuccess
             alreadyActiveMember={false}
-            expectedMembershipId={null}
             groupName={DESIGN_GROUP_NAME}
-            joinCode={DESIGN_JOIN_CODE}
-            permissions={selectorPermissions}
+            memberCount={DESIGN_MEMBER_COUNT}
+            postJoinContactOption={null}
+            postJoinDestination="/home"
+          />
+        </GroupJoinPageMock>
+      </GroupJoinVariant>
+
+      <GroupJoinVariant
+        caption="Nothing else to do."
+        title="Saved"
+      >
+        <GroupJoinPageMock>
+          <GroupJoinSuccess
+            alreadyActiveMember
+            groupName={DESIGN_GROUP_NAME}
+            memberCount={DESIGN_MEMBER_COUNT}
             postJoinContactOption={null}
             postJoinDestination="/home"
           />
@@ -259,28 +343,11 @@ export function GroupJoinStudy({
         caption="After the membership and explicit sharing save succeed, Murph continues into the existing account setup route. If navigation stalls, this real success state keeps one direct setup action."
         title="New invitee · setup success fallback"
       >
-        <GroupJoinPageMock alreadyActiveMember={false}>
+        <GroupJoinPageMock>
           <GroupJoinSuccess
             alreadyActiveMember={false}
             groupName={DESIGN_GROUP_NAME}
-            postJoinContactOption={null}
-            postJoinDestination="/join"
-          />
-        </GroupJoinPageMock>
-      </GroupJoinVariant>
-
-      <GroupJoinVariant
-        caption="A first-checkout member who reloads after joining keeps the same sharing controls, while every secondary action names the setup destination truthfully."
-        title="Existing member · setup recovery"
-      >
-        <GroupJoinPageMock alreadyActiveMember>
-          <GroupJoinAcceptForm
-            activeVaultShareProjectionScopes={[]}
-            alreadyActiveMember
-            expectedMembershipId="membership_design"
-            groupName={DESIGN_GROUP_NAME}
-            joinCode={DESIGN_JOIN_CODE}
-            permissions={DESIGN_SLEEP_SOURCE_PERMISSIONS}
+            memberCount={DESIGN_MEMBER_COUNT}
             postJoinContactOption={null}
             postJoinDestination="/join"
           />
@@ -291,33 +358,87 @@ export function GroupJoinStudy({
         caption="The phone-bound invite belongs to a different account than the current browser session. The unsafe join stays blocked, and one existing sign-out action preserves this group link for phone verification."
         title="Different account · recovery"
       >
-        <GroupJoinPageMock alreadyActiveMember={false}>
+        <GroupJoinPageMock>
           <GroupJoinInviteMismatchRecovery />
         </GroupJoinPageMock>
       </GroupJoinVariant>
-
-      <GroupJoinVariant
-        caption="Existing member sharing only protein while the group also requests carbs, fat, and fiber. A mixed macro grant expands to per-nutrient rows so the active grant stays visible and revocable instead of hiding behind an unchecked group."
-        title="Existing member · mixed macros"
-      >
-        <GroupJoinPageMock alreadyActiveMember>
-          <GroupJoinAcceptForm
-            activeVaultShareProjectionScopes={[
-              DESIGN_ACTIVITY_SCOPE,
-              { projectionKind: "protein-days.v0" },
-            ]}
-            alreadyActiveMember
-            expectedMembershipId="membership_design"
-            groupName={DESIGN_GROUP_NAME}
-            joinCode={DESIGN_JOIN_CODE}
-            permissions={DESIGN_PERMISSIONS}
-            postJoinContactOption={null}
-            postJoinDestination="/home"
-          />
-          <GroupJoinLeaveButton groupName={DESIGN_GROUP_NAME} joinCode={DESIGN_JOIN_CODE} />
-        </GroupJoinPageMock>
-      </GroupJoinVariant>
     </div>
+  );
+}
+
+export function GroupJoinDrawerStudy() {
+  const [drawer, setDrawer] = useState<"details" | "leave" | "leave-error" | null>(null);
+  const close = (open: boolean) => {
+    if (!open) {
+      setDrawer(null);
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-start gap-3" data-design-component="group-join-drawers">
+      <p className="max-w-[48ch] text-sm/6 text-muted-foreground">
+        Preview the night drawers: the exact wording of every choice, and the
+        confirmation that replaced the browser pop-up on Leave group.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button onClick={() => setDrawer("details")} variant="outline">
+          Preview Details
+        </Button>
+        <Button onClick={() => setDrawer("leave")} variant="outline">
+          Preview Leave group
+        </Button>
+        <Button onClick={() => setDrawer("leave-error")} variant="outline">
+          Preview Leave group error
+        </Button>
+      </div>
+      <GroupJoinDetailsDrawer
+        choices={groupJoinPermissionsForDisplay(
+          DESIGN_PERMISSIONS,
+          new Set(DESIGN_PERMISSIONS.map((permission) => permission.projectionScopeKey)),
+        )}
+        onOpenChange={close}
+        open={drawer === "details"}
+      />
+      <GroupJoinLeaveDrawer
+        errorMessage={drawer === "leave-error" ? "Could not leave this group right now." : null}
+        groupName={DESIGN_GROUP_NAME}
+        onConfirm={() => undefined}
+        onOpenChange={close}
+        open={drawer === "leave" || drawer === "leave-error"}
+      />
+    </div>
+  );
+}
+
+function DesignForm({
+  activeScopes = [],
+  alreadyActiveMember,
+  canLeave = false,
+  permissions,
+  postJoinDestination = "/home",
+}: {
+  activeScopes?: readonly HostedVaultShareProjectionScope[];
+  alreadyActiveMember: boolean;
+  canLeave?: boolean;
+  permissions: readonly GroupJoinPermissionDisplay[];
+  postJoinDestination?: "/home" | "/join";
+}) {
+  return (
+    <GroupJoinAcceptForm
+      activeVaultShareProjectionScopes={activeScopes}
+      alreadyActiveMember={alreadyActiveMember}
+      detail={DESIGN_DETAIL}
+      expectedMembershipId={alreadyActiveMember ? "membership_design" : null}
+      groupName={DESIGN_GROUP_NAME}
+      joinCode={DESIGN_JOIN_CODE}
+      leaveAction={canLeave ? (
+        <GroupJoinLeaveButton groupName={DESIGN_GROUP_NAME} joinCode={DESIGN_JOIN_CODE} />
+      ) : null}
+      memberCount={DESIGN_MEMBER_COUNT}
+      permissions={permissions}
+      postJoinContactOption={null}
+      postJoinDestination={postJoinDestination}
+    />
   );
 }
 
@@ -331,74 +452,36 @@ function GroupJoinVariant({
   title: string;
 }) {
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-w-0 flex-col gap-4">
       <div className="flex flex-col gap-1">
         <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
           {title}
         </span>
         <p className="max-w-md text-sm text-muted-foreground">{caption}</p>
       </div>
-      <div className="rounded-2xl border border-dashed border-border px-6 py-10">
-        {children}
-      </div>
+      {children}
     </div>
   );
 }
 
 function GroupJoinPageMock({
-  alreadyActiveMember,
   children,
   designState,
+  fit = true,
 }: {
-  alreadyActiveMember: boolean;
   children: React.ReactNode;
   designState?: string;
+  fit?: boolean;
 }) {
   return (
     <div
-      className="mx-auto flex w-full max-w-md flex-col gap-8"
+      className={cn(
+        "flex max-w-[402px] flex-col overflow-hidden rounded-[2rem] bg-[#1C1915]",
+        fit ? "h-[46rem]" : "min-h-[46rem]",
+      )}
       data-design-state={designState}
     >
-      <header className="flex flex-col items-center gap-4 text-center">
-        <div className="flex size-[76px] items-center justify-center rounded-full bg-[#d4c4a8] font-serif text-[2rem] font-semibold text-[#2d3436]">
-          S
-        </div>
-        <div className="flex flex-col items-center gap-2.5">
-          <span className="font-mono text-[11px] font-medium uppercase tracking-[0.13em] text-muted-foreground">
-            Family · 4 members
-          </span>
-          <h1 className="font-serif text-[2rem] leading-[1.05] font-semibold tracking-tight text-balance text-foreground">
-            {alreadyActiveMember
-              ? `You're in ${DESIGN_GROUP_NAME}`
-              : `Join ${DESIGN_GROUP_NAME}`}
-          </h1>
-          <p className="max-w-[20rem] text-pretty text-[15px] leading-relaxed text-muted-foreground">
-            Get healthier with people you trust. You choose exactly what you share.
-          </p>
-        </div>
-      </header>
-
-      <div className="flex flex-col gap-3">
-        <div className="flex gap-4">
-          <span className="w-[74px] shrink-0 pt-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-            Shared
-          </span>
-          <p className="text-sm leading-relaxed text-foreground">
-            Your name and the numbers you pick, with the people in this group, in the chat and in the Murph app.
-          </p>
-        </div>
-        <div className="h-px bg-border" />
-        <div className="flex gap-4">
-          <span className="w-[74px] shrink-0 pt-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-            Private
-          </span>
-          <p className="text-sm leading-relaxed text-foreground">
-            Your chats and vault. Anything you don&apos;t choose to share stays private.
-          </p>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-2">{children}</div>
+      <LinkPageSurface fit={fit}>{children}</LinkPageSurface>
     </div>
   );
 }

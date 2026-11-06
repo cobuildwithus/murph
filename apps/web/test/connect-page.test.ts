@@ -103,6 +103,17 @@ vi.mock("@/src/components/legal/hosted-legal-consent-card", () => ({
     ),
 }));
 
+const desktopMatchMedia: typeof window.matchMedia = (query) => ({
+  addEventListener: () => {},
+  addListener: () => {},
+  dispatchEvent: () => false,
+  matches: false,
+  media: query,
+  onchange: null,
+  removeEventListener: () => {},
+  removeListener: () => {},
+});
+
 const mocks = vi.hoisted(() => ({
   authDialogProps: null as { open?: boolean } | null,
   buildHostedDeviceSyncSettingsResponse: vi.fn(),
@@ -3630,7 +3641,7 @@ test("ConnectPage keeps configured sources visible but renders sign-in actions w
   expectSettingResponseNotLoaded();
 });
 
-test("ConnectSourcesGrid opens auth for a pending device connect intent while signed out without a pre-auth source target", async () => {
+test("ConnectSourcesGrid signs in on the page for a pending device connect intent while signed out without a pre-auth source target", async () => {
   const claim = "dc_12345678901234567890123456789012";
   const fetch = vi.fn();
   vi.stubGlobal("fetch", fetch);
@@ -3669,15 +3680,17 @@ test("ConnectSourcesGrid opens auth for a pending device connect intent while si
         pathname: "/connect",
         search: "",
       },
+      matchMedia: desktopMatchMedia,
       requireButton: false,
     },
   );
 
   await vi.waitFor(() => {
-    assert.equal(mocks.authDialogProps?.open, true);
-    assert.match(rendered.container.textContent ?? "", /Auth dialog/);
+    assert.match(rendered.container.textContent ?? "", /Sign in to connect Whoop\./u);
   });
 
+  assert.equal(mocks.authDialogProps?.open, false);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Auth dialog/);
   assert.equal(fetch.mock.calls.length, 0);
 
   await rendered.cleanup();
@@ -3733,7 +3746,7 @@ test("ConnectSourcesGrid ignores malformed pending device connect intents while 
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid ignores unmatched pending device connect intents while signed out", async () => {
+test("ConnectSourcesGrid keeps sign-in on the page for unmatched device connect intents", async () => {
   const claim = "dc_12345678901234567890123456789012";
   const fetch = vi.fn();
   vi.stubGlobal("fetch", fetch);
@@ -3773,12 +3786,14 @@ test("ConnectSourcesGrid ignores unmatched pending device connect intents while 
         pathname: "/connect",
         search: "",
       },
+      matchMedia: desktopMatchMedia,
       requireButton: false,
     },
   );
 
   assert.equal(mocks.authDialogProps?.open, false);
   assert.doesNotMatch(rendered.container.textContent ?? "", /Auth dialog/);
+  assert.match(rendered.container.textContent ?? "", /Sign in to connect your device\./u);
   assert.equal(fetch.mock.calls.length, 0);
 
   await rendered.cleanup();
@@ -3996,7 +4011,7 @@ test("ConnectSourcesGrid explains Vital before redeeming a WHOOP device connect 
   await vi.waitFor(() => {
     assert.match(
       rendered.container.textContent ?? "",
-      /Connect Whoop to Murph/u,
+      /Connect Whoop\./u,
     );
   });
   assert.equal(fetch.mock.calls.length, 0);
@@ -4095,7 +4110,7 @@ test("ConnectSourcesGrid clears signed-intent progress when Vital redemption fai
   );
 
   await vi.waitFor(() => {
-    assert.match(rendered.container.textContent ?? "", /Connect Oura to Murph/u);
+    assert.match(rendered.container.textContent ?? "", /Connect Oura\./u);
   });
   const continueButton = [...rendered.container.querySelectorAll("button")]
     .find((button) => button.textContent === "Continue to Oura");
@@ -4109,7 +4124,7 @@ test("ConnectSourcesGrid clears signed-intent progress when Vital redemption fai
   await vi.waitFor(() => {
     assert.match(
       rendered.container.textContent ?? "",
-      /Connection link unavailable/u,
+      /This link isn’t working\./u,
     );
   });
   assert.equal(fetch.mock.calls.length, 1);
@@ -4172,7 +4187,7 @@ test("ConnectSourcesGrid shows a recovery dialog when a device connect intent is
     assert.equal(fetch.mock.calls.length, 1);
     assert.match(
       rendered.container.textContent ?? "",
-      /Connection link unavailable/,
+      /This link isn’t working\./,
     );
     assert.match(
       rendered.container.textContent ?? "",
@@ -4182,12 +4197,178 @@ test("ConnectSourcesGrid shows a recovery dialog when a device connect intent is
 
   const contactLink = rendered.container.querySelector("a[href^='sms:']");
   assert.ok(contactLink instanceof rendered.window.HTMLAnchorElement);
-  assert.equal(contactLink.textContent, "Text Murph");
+  assert.equal(contactLink.textContent, "Open Messages");
   assert.match(
     contactLink.getAttribute("aria-label") ?? "",
     /fresh Whoop connection link/,
   );
   assert.equal(rendered.assign.mock.calls.length, 0);
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid offers a retry of the same link when an intent cannot start", async () => {
+  const claim = "dc_12345678901234567890123456789012";
+  const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+    void _input;
+    void _init;
+    return Response.json(
+      {
+        error: {
+          code: "DEVICE_PROVIDER_UNAVAILABLE",
+          message: "Connection could not be started.",
+          retryable: true,
+        },
+      },
+      { status: 503 },
+    );
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const rendered = await renderClientComponent(
+    createElement(ConnectSourcesGrid, {
+      sources: [
+        {
+          description: "Recovery, strain, sleep, and heart rate.",
+          id: "whoop",
+          logo: {
+            className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+            height: 15,
+            src: "/brand-logos/connect/whoop.svg",
+            width: 96,
+          },
+          name: "Whoop",
+        },
+      ],
+    }),
+    {
+      location: {
+        hash: `#deviceConnectIntent=${claim}&connectSource=whoop`,
+        href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=whoop`,
+      },
+    },
+  );
+
+  await vi.waitFor(() => {
+    assert.match(rendered.container.textContent ?? "", /Whoop didn’t connect\./u);
+  });
+  assert.match(rendered.container.textContent ?? "", /Nothing changed\. Try again\./u);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Connecting Whoop/u);
+
+  const retryButton = [...rendered.container.querySelectorAll("button")]
+    .find((button) => button.textContent === "Try again");
+  assert.ok(retryButton instanceof rendered.window.HTMLButtonElement);
+  await act(async () => {
+    retryButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  await vi.waitFor(() => {
+    assert.equal(fetch.mock.calls.length, 2);
+  });
+  assert.equal(fetch.mock.calls[1]?.[0], `/device/connect/${claim}`);
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid settles an intent for a source that is already connected", async () => {
+  const claim = "dc_12345678901234567890123456789012";
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const rendered = await renderClientComponent(
+    createElement(ConnectSourcesGrid, {
+      sources: [
+        {
+          connected: true,
+          description: "Recovery, strain, sleep, and heart rate.",
+          id: "whoop",
+          logo: {
+            className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+            height: 15,
+            src: "/brand-logos/connect/whoop.svg",
+            width: 96,
+          },
+          name: "Whoop",
+        },
+      ],
+    }),
+    {
+      location: {
+        hash: `#deviceConnectIntent=${claim}&connectSource=whoop`,
+        href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=whoop`,
+      },
+    },
+  );
+
+  await vi.waitFor(() => {
+    assert.match(rendered.container.textContent ?? "", /Whoop is connected\./u);
+  });
+  assert.equal(fetch.mock.calls.length, 0);
+
+  const exploreButton = [...rendered.container.querySelectorAll("button")]
+    .find((button) => button.textContent === "Continue exploring");
+  assert.ok(exploreButton instanceof rendered.window.HTMLButtonElement);
+  await act(async () => {
+    exploreButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Whoop is connected\./u);
+  assert.ok(
+    rendered.container.querySelector("input[aria-label='Search sources']"),
+  );
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid keeps the Garmin Historical Data reminder on a link's Ready page", async () => {
+  const claim = "dc_12345678901234567890123456789012";
+  vi.stubGlobal("fetch", vi.fn());
+
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const rendered = await renderClientComponent(
+    createElement(ConnectSourcesGrid, {
+      sources: [
+        {
+          description: "Workouts, sleep, stress, heart rate, and body battery.",
+          id: "garmin",
+          logo: {
+            className: "size-11 object-contain",
+            height: 44,
+            src: "/brand-logos/connect/garmin.png",
+            width: 44,
+          },
+          name: "Garmin",
+          requiresVitalDisclosure: true,
+        },
+      ],
+    }),
+    {
+      location: {
+        hash: `#deviceConnectIntent=${claim}&connectSource=garmin&connectProvider=junction`,
+        href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=garmin&connectProvider=junction`,
+      },
+    },
+  );
+
+  await vi.waitFor(() => {
+    assert.match(
+      rendered.container.textContent ?? "",
+      /When Garmin opens, turn on Historical Data before approving\./u,
+    );
+  });
+  assert.match(rendered.container.textContent ?? "", /Connect Garmin\./u);
 
   await rendered.cleanup();
 });
@@ -4247,7 +4428,7 @@ test("ConnectSourcesGrid opens the WHOOP setup dialog when an intent reaches cap
   assert.doesNotMatch(rendered.container.textContent ?? "", /Connecting Whoop/);
   assert.doesNotMatch(
     rendered.container.textContent ?? "",
-    /Connection link unavailable/,
+    /This link isn’t working\./,
   );
   assert.ok(
     rendered.container.querySelector("input[aria-label='Search sources']"),
@@ -4542,7 +4723,7 @@ test("ConnectSourcesGrid labels Telegram recovery as texting Murph", async () =>
     assert.equal(fetch.mock.calls.length, 1);
     assert.match(
       rendered.container.textContent ?? "",
-      /Connection link unavailable/,
+      /This link isn’t working\./,
     );
   });
 
@@ -4606,7 +4787,7 @@ test("ConnectSourcesGrid falls back to email when no preferred recovery contact 
   await vi.waitFor(() => {
     assert.match(
       rendered.container.textContent ?? "",
-      /Connection link unavailable/,
+      /This link isn’t working\./,
     );
   });
 
