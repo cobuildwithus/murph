@@ -641,6 +641,8 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
 
 });
 
+// Authentication is stubbed here, so its commit-time recheck is too; game-api-postgres proves the real one.
+vi.mock("@/src/lib/better-auth/native-auth", async importOriginal => ({ ...await importOriginal<object>(), assertHostedNativeMemberAuthCurrentTx: async () => {} }));
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
   requireHostedMemberAuthFromBearerToken: async (request: Request) => ({ member: { id: request.headers.get("x-test-member") } }),
 }));
