@@ -31,80 +31,95 @@ export function FamilyInviteScreen(input: {
   webAcceptInitialState?: FamilyInviteWebAcceptInitialState;
 }): ReactNode {
   const { view } = input;
+  const closed = readClosedInvite(view);
 
-  if (!view) {
+  if (closed || !view) {
     return (
       <LinkPageScreen
-        detail="This family invite is no longer available. Ask the person who invited you to send a new one."
-        title="This invite isn't valid."
-      />
-    );
-  }
-
-  if (view.status === "expired") {
-    return (
-      <LinkPageScreen
-        detail="Ask the plan owner to send you a fresh family invite."
-        title="This invite has expired."
-      />
-    );
-  }
-
-  if (view.status === "revoked") {
-    return (
-      <LinkPageScreen
-        detail="Ask the plan owner for a new invite."
-        title="This invite was canceled."
-      />
-    );
-  }
-
-  if (view.status === "accepted") {
-    return (
-      <LinkPageScreen
-        actions={
+        actions={view?.status === "accepted" ? (
           <Link className={LINK_PAGE_PILL_CLASS} href="/home" prefetch={false}>
             Open Murph
           </Link>
-        }
-        detail="If that was you, open Murph to continue."
-        title="This invite was already used."
+        ) : undefined}
+        detail={closed?.detail}
+        title={closed?.title ?? ""}
       />
     );
   }
 
+  return <FamilyInviteOpenScreen {...input} view={view} />;
+}
+
+/** Why this invite can't be accepted, in the order those reasons apply. */
+function readClosedInvite(view: FamilyInviteView): { detail: string; title: string } | null {
+  if (!view) {
+    return {
+      detail: "This family invite is no longer available. Ask the person who invited you to send a new one.",
+      title: "This invite isn't valid.",
+    };
+  }
+  if (view.status === "expired") {
+    return {
+      detail: "Ask the plan owner to send you a fresh family invite.",
+      title: "This invite has expired.",
+    };
+  }
+  if (view.status === "revoked") {
+    return { detail: "Ask the plan owner for a new invite.", title: "This invite was canceled." };
+  }
+  if (view.status === "accepted") {
+    return {
+      detail: "If that was you, open Murph to continue.",
+      title: "This invite was already used.",
+    };
+  }
   if (!view.groupActive) {
-    return (
-      <LinkPageScreen
-        detail="Ask the plan owner to finish setting up billing, then open this invite again."
-        title="This family plan isn't active yet."
-      />
-    );
+    return {
+      detail: "Ask the plan owner to finish setting up billing, then open this invite again.",
+      title: "This family plan isn't active yet.",
+    };
   }
-
   if (!view.seatAvailable) {
-    return (
-      <LinkPageScreen
-        detail="The plan has no open paid seats. Ask the owner to add a Family seat."
-        title="This family plan is full."
-      />
-    );
+    return {
+      detail: "The plan has no open paid seats. Ask the owner to add a Family seat.",
+      title: "This family plan is full.",
+    };
   }
+  return null;
+}
 
+/** Which identity the invite was sent to, for the web sign-in path. */
+function readWebBinding(view: NonNullable<FamilyInviteView>) {
+  const isFullyUnbound = !view.isPhoneBound && !view.isEmailBound && !view.isTelegramBound;
+  if (isFullyUnbound) {
+    return {
+      description: "Sign in with your own phone number or email address. We'll bring you back here.",
+      isFullyUnbound,
+      label: "your phone number or email address",
+    };
+  }
+  const label = view.isEmailBound && view.isPhoneBound
+    ? "phone number or email address"
+    : view.isEmailBound
+      ? "email address"
+      : "phone number";
+  return { description: undefined, isFullyUnbound, label };
+}
+
+function FamilyInviteOpenScreen(input: {
+  authenticated: boolean;
+  messagesAcceptHref: string | null;
+  view: NonNullable<FamilyInviteView>;
+  webAcceptInitialState?: FamilyInviteWebAcceptInitialState;
+}): ReactNode {
+  const { view } = input;
   const inviter = view.groupDisplayName ?? "Your family plan owner";
   const title = `${inviter} invited you to Murph Family.`;
-  const isFullyUnbound = !view.isPhoneBound && !view.isEmailBound && !view.isTelegramBound;
-  const webBindingLabel =
-    isFullyUnbound
-      ? "your phone number or email address"
-      : view.isEmailBound && view.isPhoneBound
-        ? "phone number or email address"
-        : view.isEmailBound
-          ? "email address"
-          : "phone number";
-  const webSignInDescription = isFullyUnbound
-    ? "Sign in with your own phone number or email address. We'll bring you back here."
-    : undefined;
+  const {
+    description: webSignInDescription,
+    isFullyUnbound,
+    label: webBindingLabel,
+  } = readWebBinding(view);
   const webSignInDescriptionProps = webSignInDescription
     ? { description: webSignInDescription }
     : {};
