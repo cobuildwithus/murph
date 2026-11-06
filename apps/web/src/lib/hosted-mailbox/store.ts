@@ -1592,6 +1592,19 @@ export async function readHostedMailboxConsumedSeqByLane(input: {
   return result;
 }
 
+/** System checkpoints advance the lane floor without stamping the item. */
+export async function isHostedMailboxItemConsumed(input: {
+  item: Pick<HostedMailboxItemRecord, "lane" | "laneSeq" | "userId">;
+  prisma?: HostedMailboxStoreClient;
+}): Promise<boolean> {
+  const [progress] = await readHostedMailboxConsumedSeqByLane({
+    lanes: [input.item.lane],
+    prisma: input.prisma,
+    userId: input.item.userId,
+  });
+  return BigInt(input.item.laneSeq) <= BigInt(progress.consumedSeq);
+}
+
 export async function advanceHostedMailboxConsumedSeqByLane(input: {
   lanes: readonly { consumedSeq: bigint | number | string; lane: HostedMailboxLane | string }[];
   prisma?: HostedMailboxStoreClient;

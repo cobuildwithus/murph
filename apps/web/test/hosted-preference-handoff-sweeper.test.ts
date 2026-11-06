@@ -278,9 +278,9 @@ describe("hosted preference handoff sweeper", () => {
     } | undefined;
     const sql = query?.strings?.join("?") ?? "";
     expect(sql).not.toContain('"lane_counter"."consumed_seq"');
-    expect(sql.match(/LEFT JOIN "hosted_workspace" AS "workspace"/gu)).toHaveLength(3);
-    expect(sql.match(/"item"\."lane_seq" >\s+CASE/gu)).toHaveLength(3);
-    expect(sql.match(/hostedMailboxSystemImportedSeq/gu)).toHaveLength(6);
+    expect(sql.match(/LEFT JOIN "hosted_workspace" AS "workspace"/gu)).toHaveLength(2);
+    expect(sql.match(/"item"\."lane_seq" >\s+CASE/gu)).toHaveLength(2);
+    expect(sql.match(/hostedMailboxSystemImportedSeq/gu)).toHaveLength(4);
   });
 
   it("selects exact current Clinical Records wakes in the shared mailbox sweep", async () => {
@@ -307,7 +307,7 @@ describe("hosted preference handoff sweeper", () => {
     } | undefined;
     const sql = query?.strings?.join("?") ?? "";
     expect(sql).toContain('"pending_handoff_candidates"');
-    expect(sql.match(/"item"\."created_at" <= \?/gu)).toHaveLength(3);
+    expect(sql.match(/"item"\."created_at" <= \?/gu)).toHaveLength(2);
     expect(query?.values).toContainEqual(new Date(now.getTime() - 60_000));
     expect(sql).toContain('SELECT DISTINCT ON ("userId")');
     expect(sql).toContain('"connection"."retrieval_generation" = "run"."generation"');
@@ -354,7 +354,7 @@ describe("hosted preference handoff sweeper", () => {
       strings?: readonly string[];
     } | undefined;
     const sql = query?.strings?.join("?") ?? "";
-    expect(sql).toContain('"pending_runtime_control_users"');
+    expect(sql).toContain('"pending_system_users"');
     expect(sql).toContain(
       "'device-sync.wake'",
     );

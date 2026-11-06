@@ -12,7 +12,7 @@ import { readCurrentGameTalk, readGameTalkReceiptIdentity, prepareGameTalkAudien
 import { assertGameProposalDeliveryCurrentTx } from "./chat-delivery-authority";
 import { isRecord } from "../primitives";
 import { getPrisma } from "../prisma";
-import { appendPreparedHostedMailboxEnvelopeTx, prepareHostedMailboxEnvelopeAppend, readHostedMailboxItemByDedupeKey } from "../hosted-mailbox/store";
+import { isHostedMailboxItemConsumed, appendPreparedHostedMailboxEnvelopeTx, prepareHostedMailboxEnvelopeAppend, readHostedMailboxItemByDedupeKey } from "../hosted-mailbox/store";
 import { assertHostedAssistantNotificationRouteAuthority, bindHostedAssistantNotificationDestination, resolveHostedAssistantNotificationDestination } from "../hosted-routing/assistant-notification-destination";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
@@ -303,7 +303,7 @@ async function recoverGameNotificationPointer(receiptId: string, roomId: string,
   const prisma = getPrisma();
   const mailbox = await readHostedMailboxItemByDedupeKey({ dedupeKey: eventId, userId: roomId, prisma });
   if (!mailbox) return false;
-  if (mailbox.consumedAt !== null) {
+  if (await isHostedMailboxItemConsumed({ item: mailbox, prisma })) {
     // Consumption hands retry ownership to the existing runtime/outbox. Keep
     // provider truth intact and stop this pre-generation wake sweep.
     await prisma.hostedLinqDelivery.updateMany({ where: { id: receiptId, status: "generation_queued" }, data: { retryAfterAt: null } });
@@ -480,7 +480,7 @@ async function deliverGroupMissedDayLifecycle(roomId: string, firstMissedDate: s
   // Publication may have committed before its signal failed. Never replace frozen evidence.
   const existing = await readHostedMailboxItemByDedupeKey({ userId: roomId, dedupeKey: eventId });
   if (existing) {
-    if (existing.consumedAt === null && await readGroupMissedDayDeliveryAuthority(eventId, roomId)) {
+    if (!await isHostedMailboxItemConsumed({ item: existing }) && await readGroupMissedDayDeliveryAuthority(eventId, roomId)) {
       await signalHostedMailboxAppendRuntime({ expectedUserId: roomId, mailboxItemId: existing.id });
     }
     return true;
@@ -631,7 +631,7 @@ async function enqueueGameLifecycle(input: {
       if (!current || revision !== currentTerms(parseStoredTerms(current.terms)).n) return false;
     }
     await markGameChatGenerationQueuedTx(input.eventId, prisma, input.containerMemberId);
-    if (existing.consumedAt === null) await signalHostedMailboxAppendRuntime({ expectedUserId: input.containerMemberId, mailboxItemId: existing.id });
+    if (!await isHostedMailboxItemConsumed({ item: existing, prisma })) await signalHostedMailboxAppendRuntime({ expectedUserId: input.containerMemberId, mailboxItemId: existing.id });
     return true;
   }
   const bound = bindHostedAssistantNotificationDestination({ destination: input.destination, memberId: input.containerMemberId });
@@ -676,7 +676,7 @@ async function enqueueGameLifecycle(input: {
     return skipGameNotice(createHostedLinqDeliveryIdempotencyLookupKey(input.eventId)!, prisma, new Date());
   }
   if (!appended) return false;
-  if (existing?.consumedAt != null) return true;
+  if (existing && await isHostedMailboxItemConsumed({ item: existing, prisma })) return true;
   await signalHostedMailboxAppendRuntime({ expectedUserId: input.containerMemberId, mailboxItemId: appended.mailboxItemId });
   return true;
 }

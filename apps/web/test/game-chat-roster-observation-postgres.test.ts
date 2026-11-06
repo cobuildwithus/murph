@@ -68,7 +68,10 @@ describe.skipIf(!enabled)("game roster leases and pointer recovery on migrated P
     const receipt = await db.hostedLinqDelivery.update({ where: { idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(eventId)! },
       data: { status: "generation_queued", retryAfterAt: old, payloadOwnerMemberId: room } });
     await db.hostedMailboxItem.create({ data: { id: randomUUID(), userId: room, dedupeKey: eventId, kind: "assistant.notification.requested",
-      lane: "system", laneSeq: 1n, occurredAt: old, payloadSchema: "murph.hosted-execution.assistant-notification-requested.v1", consumedAt: consumed ? now : null } });
+      lane: "system", laneSeq: 1n, occurredAt: old, payloadSchema: "murph.hosted-execution.assistant-notification-requested.v1" } });
+    // System checkpoints advance the lane floor; they never stamp consumedAt.
+    if (consumed) await db.hostedMailboxLaneCounter.upsert({ where: { userId_lane: { userId: room, lane: "system" } },
+      create: { userId: room, lane: "system", nextSeq: 2n, consumedSeq: 1n }, update: { nextSeq: 2n, consumedSeq: 1n } });
     return receipt.id;
   }
   const rows = () => db.hostedThreadContainerParticipant.findMany({ where: { containerMemberId: room } });

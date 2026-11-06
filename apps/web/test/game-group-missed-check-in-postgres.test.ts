@@ -14,7 +14,7 @@ import { GameChatAudienceError } from "@/src/lib/game/chat-membership";
 import { readGroupMissedDayDeliveryAuthority, prepareGroupMissedDay, reserveGroupGameMissedDay, isGroupMissedDayBatchCurrentTx } from "@/src/lib/game/group-missed-day";
 import { assertGameProposalDeliveryCurrentTx } from "@/src/lib/game/chat-delivery-authority";
 import { readGameProposalDeliveryPlayers } from "@/src/lib/game/chat-delivery";
-import { acquireHostedMailboxCausalAppendLockTx, readHostedMailboxWakeByDedupeKey } from "@/src/lib/hosted-mailbox/store";
+import { advanceHostedMailboxConsumedSeqByLane, acquireHostedMailboxCausalAppendLockTx, readHostedMailboxWakeByDedupeKey } from "@/src/lib/hosted-mailbox/store";
 import { recordHostedLinqRuntimeProviderDispatchFenceTx } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import { createHostedEmailLookupKey, createHostedExternalThreadIdentityLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
@@ -505,7 +505,10 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
 
   it.each([["unconsumed", null], ["consumed", now]] as const)("takes a published %s check-in out of the sweep past its deadline without dropping it", async (_state, consumedAt) => {
     const f = await fixture(), authority = await publish(f.roomId, [await f.addGame()]), eventId = authority.policy.eventId;
-    await db.hostedMailboxItem.updateMany({ where: { userId: f.roomId }, data: { consumedAt } });
+    if (consumedAt) {
+      const item = await db.hostedMailboxItem.findFirstOrThrow({ where: { userId: f.roomId, lane: "system" } });
+      await advanceHostedMailboxConsumedSeqByLane({ userId: f.roomId, prisma: db, lanes: [{ lane: "system", consumedSeq: item.laneSeq }] });
+    }
     proof.rooms.set(f.roomId, [f.people[0]!.email]); proof.audienceReads.length = 0; proof.signal.mockClear();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(await turn(eventId, justLate)).toMatchObject({ attempted: 1, queued: 0 });

@@ -9,13 +9,13 @@ import { deliverGameChangeProposal } from "@/src/lib/game/chat-delivery";
 import { requireHostedRuntimeMailboxActiveAccess } from "@/src/lib/hosted-mailbox/runtime-access";
 import { drainGameChatLifecycle } from "@/src/lib/game/chat-lifecycle";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
-import { readHostedMailboxItemByDedupeKey, readHostedMailboxWakeByDedupeKey } from "@/src/lib/hosted-mailbox/store";
-const m = vi.hoisted(() => ({ create: vi.fn(), capacity: vi.fn(), activeAccess: vi.fn(), lineKey: "", firstPlayer: "" }));
+import { advanceHostedMailboxConsumedSeqByLane, readHostedMailboxItemByDedupeKey, readHostedMailboxWakeByDedupeKey } from "@/src/lib/hosted-mailbox/store";
+const m = vi.hoisted(() => ({ create: vi.fn(), capacity: vi.fn(), activeAccess: vi.fn(), signal: vi.fn(), lineKey: "", firstPlayer: "" }));
 // The fixture uses the repository secure-box test codec; no external KMS calls.
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (original) => ({ ...await original<typeof import("@/src/lib/hosted-crypto/domain-root-store")>(),
   unwrapHostedDomainRootForWeb: async () => ({ rootKey: new Uint8Array(32), envelope: { rootKeyId: "synthetic-control-root" } }),
 }));
-vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: vi.fn() }));
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: m.signal }));
 vi.mock("@/src/lib/hosted-execution/runtime-owner", async (original) => ({ ...await original<typeof import("@/src/lib/hosted-execution/runtime-owner")>(), requireHostedRuntimeCallbackTx: vi.fn() }));
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", async (original) => ({ ...await original<typeof import("@/src/lib/hosted-mailbox/runtime-access")>(), requireHostedRuntimeActiveAccessForUpdateTx: m.activeAccess }));
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({ readHostedMemberIdentity: async ({ memberId }: { memberId: string }) => ({ phoneNumber: memberId === m.firstPlayer ? "+15555550101" : "+15555550102", phoneNumberVerifiedAt: new Date() }) }));
@@ -87,6 +87,21 @@ describe.skipIf(!enabled)("game bootstrap lifecycle recovery against PostgreSQL"
     const nextWake = await readHostedMailboxItemByDedupeKey({ userId: room, dedupeKey: nextEvent, prisma: db });
     expect(firstWake?.consumedAt).toBeNull(); expect(nextWake?.consumedAt).toBeNull();
     expect(nextWake?.id).not.toBe(firstWake?.id);
+    // Imported progress alone does not finish the notice. Only the consumed floor does.
+    await db.hostedWorkspace.upsert({ where: { userId: room }, create: { userId: room, redactedStatusJson: { hostedMailboxSystemImportedSeq: "100" } }, update: { redactedStatusJson: { hostedMailboxSystemImportedSeq: "100" } } });
+    const queued = await db.hostedLinqDelivery.findUniqueOrThrow({ where: { idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(nextEvent)! } });
+    if (!receiptIds.includes(queued.id)) receiptIds.push(queued.id);
+    await db.hostedLinqDelivery.update({ where: { id: queued.id }, data: { retryAfterAt: new Date(0), attemptedAt: new Date(0) } });
+    m.signal.mockClear();
+    await drainGameChatLifecycle({ prisma: db });
+    expect(m.signal).toHaveBeenCalledWith({ expectedUserId: room, mailboxItemId: nextWake!.id });
+    await advanceHostedMailboxConsumedSeqByLane({ userId: room, prisma: db, lanes: [{ lane: "system", consumedSeq: nextWake!.laneSeq }] });
+    await db.hostedLinqDelivery.update({ where: { id: queued.id }, data: { retryAfterAt: new Date(0), attemptedAt: new Date(0) } });
+    m.signal.mockClear();
+    await drainGameChatLifecycle({ prisma: db });
+    expect(m.signal).not.toHaveBeenCalled();
+    expect(await db.hostedLinqDelivery.findUnique({ where: { id: queued.id } })).toMatchObject({ retryAfterAt: null });
+    expect(await db.hostedMailboxItem.findUnique({ where: { id: nextWake!.id } })).toMatchObject({ consumedAt: null });
     const control = (eventId: string, text?: string) => handleGameChatBootstrapControl({ memberId: room, runtimeIdentity: null,
       request: { action: "game_chat_bootstrap", gameId, eventId, ...(text === undefined ? { operation: "recover" } : { operation: "send", text }) } });
     await expect(control(firstEvent)).resolves.toMatchObject({ result: { status: "unavailable" } });
@@ -161,7 +176,9 @@ describe.skipIf(!enabled)("game bootstrap lifecycle recovery against PostgreSQL"
     expect(await db.hostedLinqDelivery.findUnique({ where: { idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(newerEvent)! } })).toMatchObject({
       status: "accepted", payloadSchema: "game_chat_bootstrap_v1", bootstrapRouteAttachedAt: expect.any(Date),
     });
-    await db.hostedMailboxItem.updateMany({ where: { userId: room, dedupeKey: newerEvent }, data: { consumedAt: new Date() } });
+    const consumed = await readHostedMailboxItemByDedupeKey({ userId: room, dedupeKey: newerEvent, prisma: db });
+    // The old fixture stamped a timestamp that system checkpoints never write.
+    await advanceHostedMailboxConsumedSeqByLane({ userId: room, prisma: db, lanes: [{ lane: "system", consumedSeq: consumed!.laneSeq }] });
     await expect(deliverGameChangeProposal(older, proposals.get(older)!)).resolves.toBe(true);
     await expect(deliverGameChangeProposal(older, proposals.get(older)!)).resolves.toBe(true);
     const wake = await readHostedMailboxWakeByDedupeKey({ userId: room, dedupeKey: olderEvent, prisma: db });
