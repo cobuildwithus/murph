@@ -154,6 +154,7 @@ import {
   readHostedExecutionSnapshotBaseRef,
 } from "@murphai/hosted-execution/parsers";
 import { describe, expect, test, vi } from "vitest";
+import * as hostedExecution from "@murphai/hosted-execution";
 import {
   createCoalescingRuntimeWakeSignal,
   HostedRuntimeCheckpointInterruptedByWakeError,
@@ -1503,6 +1504,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
   });
 
   test.each(["covered", "during_checkpoint", "during_publication", "equal", "manual", "new_epoch", "other_connection", "after_bound", "budget", "foreground_fetch", "abort_fetch", "checkpoint_failure", "followup_failure"] as const)("system mailbox completion imports one bounded late device prefix: %s", async (scenario) => {
+    const timingLog = vi.spyOn(hostedExecution, "emitHostedExecutionStructuredLog");
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
@@ -1690,6 +1692,17 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         assert.equal(remoteItems.at(-1)?.laneSeq, "2");
         return;
       }
+      const returnTiming = timingLog.mock.results.map((entry) => entry.value)
+        .find((entry) => entry?.message === "Hosted system mailbox return timing.");
+      assert.ok(returnTiming);
+      assert.equal(typeof returnTiming.details?.totalMs, "number");
+      for (const field of ["totalMs", "completionTailImportMs", "checkpointMs"]) {
+        const value = returnTiming.details?.[field];
+        if (value === undefined) continue;
+        assert.ok(typeof value === "number" && Number.isInteger(value) && value >= 0, field);
+      }
+      assert.equal(typeof returnTiming.details?.checkpointStage,
+        returnTiming.details?.checkpointMs === undefined ? "undefined" : "string");
       assert.equal(lateArrived, true);
       assert.equal(providerFetch.mock.calls.length, 4, "one Junction summary pass plus source authority and historical status reads");
       assert.equal(canonicalNextReconcileAt, cadenceAt);
@@ -1718,6 +1731,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         assert.equal(restored.redactedStatus?.hostedMailboxSystemImportedSeq, "2");
       }
     } finally {
+      timingLog.mockRestore();
       vi.unstubAllGlobals();
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
