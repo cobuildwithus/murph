@@ -1,8 +1,8 @@
 # Link pages on the night design
 
-Status: active
+Status: completed
 Created: 2026-11-05
-Updated: 2026-11-05
+Updated: 2026-11-06
 
 ## Goal
 
@@ -47,7 +47,11 @@ Updated: 2026-11-05
 
 - The approval keeps the server's sentence word for word, and the sheet reads the file name from it, so no backend or schema change is needed.
 - The server title "Send a file from your vault?" stays for now, because changing it needs a runner deploy.
+- Group join rows show names only after owner review. The exact wording is one tap away, and the visible sentence always says the name is shared.
+- Add usage has no dial. The button can charge a saved card straight away, so the amount is never preselected.
+- The `Usage added` handoff is not built: `DESIGN.md` keeps personal usage returns quiet, and that is the owner's call.
 
 ## Verification
 
 - Commands to run: focused `apps/web` tests, typecheck, and a phone-width render of each state.
+Completed: 2026-11-06

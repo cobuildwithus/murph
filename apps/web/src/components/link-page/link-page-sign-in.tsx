@@ -25,6 +25,8 @@ type LinkPageSignInProps = {
   methods?: HostedFirstPartyAuthPanelProps["methods"];
   /** A page with its own finish, rather than the app-wide one. */
   onCompleted?: HostedFirstPartyAuthPanelProps["onCompleted"];
+  /** Settings skips this: a member may be there to change that very consent. */
+  requireLaunchConsent?: boolean;
   title: string;
 };
 
@@ -47,6 +49,7 @@ export function LinkPageSignInScreen({
   inviteCode,
   methods,
   onCompleted,
+  requireLaunchConsent = true,
   title,
 }: LinkPageSignInProps) {
   const { completeAuthentication } = useAuth();
@@ -67,7 +70,7 @@ export function LinkPageSignInScreen({
               methods={methods ?? (otherMethods ? ["phone", "telegram", "email"] : ["phone"])}
               onCompleted={onCompleted ?? completeAuthentication}
               onViewChange={setView}
-              requireLaunchConsentOnCompletion
+              requireLaunchConsentOnCompletion={requireLaunchConsent}
             />
           </div>
           {!methods && !otherMethods && view === "auth" ? (

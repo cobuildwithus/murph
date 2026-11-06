@@ -1223,6 +1223,23 @@ test("ComputerHandoffAuthRequiredState keeps sign-in on the page", async () => {
   await rendered.cleanup();
 });
 
+test("Settings signs in on its own page, with no dialog over it", async () => {
+  const { AuthProvider } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  mocks.segment = "(dashboard)";
+  mocks.pathname = "/settings";
+
+  const rendered = await renderClientComponent(
+    createElement(AuthProvider, { authenticated: false }),
+    { requireButton: false },
+  );
+
+  expect(mocks.authDialogProps?.open).toBe(false);
+
+  await rendered.cleanup();
+});
+
 test("a dashboard link with a device connect intent signs in on its own page", async () => {
   const { AuthProvider } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"

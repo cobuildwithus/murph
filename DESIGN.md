@@ -540,6 +540,15 @@ dashboard frame, so `LinkPageTakeover` covers the frame, and `LinkPageVeil` hide
 it until then, because a fragment never reaches the server. The plain page under
 it stays as it was. A consent gate always sits above a takeover.
 
+A signed-out link on a dashboard route that renders on the server, such as
+Settings, uses `LinkPageCover`, which also hides the frame from the tab order and
+screen readers.
+
+A link to Add usage opens the same purchase as a night page, with the amount left
+unselected. The button can charge a saved card straight away, so a link must
+never arrive with an amount already chosen. This is why it has no dial: the
+funding dial always shows an amount, and funding confirms at Stripe.
+
 Consent wording, sharing descriptions, and privacy promises keep their exact
 words on these pages. A group's sharing descriptions keep them in the Details
 drawer. An approval keeps the server's sentence word for word, because it is

@@ -86,10 +86,12 @@ export function AuthProvider({
 }) {
   const pathname = usePathname();
   const dashboardRoute = useSelectedLayoutSegment() === "(dashboard)";
-  // A wearable link signs in on its own page, so the dialog never opens over it.
+  // A wearable link and Settings sign in on their own pages, so the dialog never
+  // opens over them.
   const autoOpenPath = dashboardRoute
     && !authenticated
     && authenticationStatus === "ready"
+    && pathname !== SETTINGS_PATH
     && !isCurrentDeviceConnectIntentUrl()
     ? pathname
     : null;

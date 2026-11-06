@@ -126,6 +126,7 @@ export default async function SettingsPage({
   if (!authenticated) {
     return (
       <SettingsAuthRequired
+        addUsage={request.openPersonalUsageTopUp || request.requestedFamilyOwnerUsageTopUp}
         billingReturn={request.familyInviteReturnPath !== null
           || request.groupPaymentMethodSaved
           || request.planChangeReturn !== null

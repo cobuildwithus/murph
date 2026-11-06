@@ -1,43 +1,44 @@
 "use client";
 
-import { CreditCard, Gauge, Settings } from "lucide-react";
+import { LinkPageCover, LinkPageSurface } from "@/src/components/link-page/link-page-shell";
+import { LinkPageSignInScreen } from "@/src/components/link-page/link-page-sign-in";
 
-import {
-  HostedAuthRequiredScreen,
-  HostedAuthRequiredScreenView,
-} from "@/src/components/hosted-onboarding/hosted-auth-required-screen";
-
-const ACCOUNT_AUTH_REQUIRED_PROPS = {
-  description: "Sign in to manage your account and health data consent.",
-  eyebrow: "Settings",
-  eyebrowIcon: Settings,
-  title: "Continue to Settings",
-  loginLabel: "Log in",
+const ACCOUNT_COPY = {
+  detail: "Sign in to manage your account and health data consent.",
+  title: "Continue to Settings.",
 };
 
-const SETTINGS_AUTH_REQUIRED_PROPS = {
-  description: "Sign in to verify and finish your billing update.",
-  eyebrow: "Subscription",
-  eyebrowIcon: CreditCard,
-  footer: "We will check this link against your account after you sign in.",
-  title: "One more step",
+const ADD_USAGE_COPY = {
+  detail: "We’ll check this link against your account.",
+  title: "Sign in to add usage.",
 };
 
-const USAGE_RECOVERY_AUTH_REQUIRED_PROPS = {
-  description: "Sign in to review the recovery options available for your account.",
-  eyebrow: "AI usage",
-  eyebrowIcon: Gauge,
-  footer: "Settings will resolve plan eligibility and Family access after you sign in.",
-  title: "Continue in Settings",
+const BILLING_RETURN_COPY = {
+  detail: "Sign in to verify and finish your billing update.",
+  title: "One more step.",
 };
 
-const FAMILY_RECOVERY_AUTH_REQUIRED_PROPS = {
-  description: "Sign in to continue to Family Settings.",
-  eyebrow: "Family access",
-  eyebrowIcon: Gauge,
-  footer: "After sign in, you can choose the Family member and review their available options.",
-  title: "Continue to Family Settings",
+const USAGE_RECOVERY_COPY = {
+  detail: "Sign in to review the recovery options available for your account.",
+  title: "Continue in Settings.",
 };
+
+const FAMILY_RECOVERY_COPY = {
+  detail: "Sign in to continue to Family Settings.",
+  title: "Continue to Family Settings.",
+};
+
+type SettingsSignInCopy = typeof ACCOUNT_COPY;
+
+function SettingsSignIn({ copy }: { copy: SettingsSignInCopy }) {
+  return (
+    <LinkPageSignInScreen
+      detail={copy.detail}
+      requireLaunchConsent={false}
+      title={copy.title}
+    />
+  );
+}
 
 // The payment link Murph sends over text can open in a browser that has never
 // held a Murph session, so this screen is a normal return state, not an error.
@@ -46,35 +47,48 @@ const FAMILY_RECOVERY_AUTH_REQUIRED_PROPS = {
 // bound to a member id absent from the URL, so anyone could put these
 // parameters in a link. Murph must not vouch for an unchecked payment.
 export function SettingsAuthRequired(props: {
+  addUsage?: boolean;
   billingReturn?: boolean;
   familyRecovery?: boolean;
   usageRecovery?: boolean;
 }) {
+  const copy = props.familyRecovery
+    ? FAMILY_RECOVERY_COPY
+    : props.usageRecovery
+      ? USAGE_RECOVERY_COPY
+      : props.billingReturn
+        ? BILLING_RETURN_COPY
+        : props.addUsage
+          ? ADD_USAGE_COPY
+          : ACCOUNT_COPY;
+
   return (
-    <HostedAuthRequiredScreen
-      {...(
-        props.familyRecovery
-          ? FAMILY_RECOVERY_AUTH_REQUIRED_PROPS
-          : props.usageRecovery
-            ? USAGE_RECOVERY_AUTH_REQUIRED_PROPS
-            : props.billingReturn
-              ? SETTINGS_AUTH_REQUIRED_PROPS
-              : ACCOUNT_AUTH_REQUIRED_PROPS
-      )}
-    />
+    <LinkPageCover>
+      <SettingsSignIn copy={copy} />
+    </LinkPageCover>
+  );
+}
+
+function SettingsSignInStudy({ copy }: { copy: SettingsSignInCopy }) {
+  return (
+    <div className="flex min-h-[46rem] flex-col rounded-[2rem] bg-[#1C1915]">
+      <LinkPageSurface>
+        <SettingsSignIn copy={copy} />
+      </LinkPageSurface>
+    </div>
   );
 }
 
 // One source of copy for the live screen and its design study, so the catalog
 // cannot drift from what a member returning from Stripe actually reads.
 export function SettingsAuthRequiredView() {
-  return <HostedAuthRequiredScreenView {...SETTINGS_AUTH_REQUIRED_PROPS} />;
+  return <SettingsSignInStudy copy={BILLING_RETURN_COPY} />;
 }
 
 export function SettingsFamilyRecoveryAuthRequiredView() {
-  return <HostedAuthRequiredScreenView {...FAMILY_RECOVERY_AUTH_REQUIRED_PROPS} />;
+  return <SettingsSignInStudy copy={FAMILY_RECOVERY_COPY} />;
 }
 
 export function SettingsAccountAuthRequiredView() {
-  return <HostedAuthRequiredScreenView {...ACCOUNT_AUTH_REQUIRED_PROPS} />;
+  return <SettingsSignInStudy copy={ACCOUNT_COPY} />;
 }
