@@ -74,7 +74,7 @@ interface SelectionPresentation {
 // A link from Murph opens this as a full night page. The purchase is the same,
 // and the amount stays unselected: the button can charge a saved card at once.
 const USAGE_LINK_PAGE_CLASS =
-  "left-0 top-0 h-dvh max-h-dvh w-full max-w-none translate-x-0 translate-y-0 content-start rounded-none border-0 bg-[#1C1915] px-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-14 text-[#FFFCF6] sm:max-w-none sm:rounded-none sm:px-[max(1.5rem,calc(50vw-13rem))] [&_button[data-slot=button]]:rounded-full";
+  "left-0 top-0 h-dvh max-h-dvh w-full max-w-none translate-x-0 translate-y-0 content-start rounded-none border-0 bg-[#1C1915] px-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-14 text-[#FFFCF6] sm:max-w-none sm:rounded-none sm:px-[max(1.5rem,calc(50vw-13rem))] [&_[data-slot=usage-top-up-actions]]:flex [&_[data-slot=usage-top-up-actions]]:flex-col-reverse [&_button[data-slot=button]]:rounded-full";
 
 interface DialogHeaderPresentation {
   description: string | null;
@@ -569,7 +569,7 @@ function SelectionActions({
   }
 
   return (
-    <div className="grid gap-3 sm:grid-cols-[auto_minmax(0,1fr)]">
+    <div className="grid gap-3 sm:grid-cols-[auto_minmax(0,1fr)]" data-slot="usage-top-up-actions">
       <Button
         type="button"
         variant="ghost"
