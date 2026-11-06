@@ -88,6 +88,10 @@ import {
   writeHostedBundleTextFile,
 } from "@murphai/runtime-state/node";
 import {
+  HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_AT_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_REASON_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS,
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   readHostedRuntimeFailurePhaseCode,
@@ -129,8 +133,6 @@ import {
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_YIELD_THRESHOLD,
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
-  hostedCanonicalWriteReceiptRecoveryStatusFields,
-  readHostedCanonicalWriteReceiptRecoveryWake,
 } from "../src/hosted-runtime/canonical-write-receipt-log.ts";
 import {
   createEmptyHostedMailboxImportState,
@@ -1274,13 +1276,14 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
     }
   });
 
-  test("consolidates a restored receipt log at the admission boundary before foreground writes", async () => {
+  test.each([false, true])("consolidates a restored receipt log before foreground writes (pending conversation: %s)", async (pendingConversation) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const artifactGetCalls: string[] = [];
     const events: string[] = [];
     let assistantPhaseCalls = 0;
-    let foregroundPendingGuardChecks = 0;
+    const importedIds: string[] = [];
+    const items = pendingConversation ? [createMailboxItem({ laneSeq: "1" })] : [];
     let snapshotCalls = 0;
 
     try {
@@ -1315,8 +1318,10 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
             ),
           };
         },
-        async importItem() {
-          throw new Error("Mailbox import should not run without mailbox items.");
+        async importItem(input) {
+          events.push("import");
+          importedIds.push(input.item.id);
+          return { status: "imported" };
         },
         platform: createPlatform({
           artifactBytesByHash,
@@ -1324,25 +1329,14 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
           events,
           mailboxPort: createMailboxPort({
             events,
-            items: [],
+            items,
           }),
           workspacePort: createWorkspacePort({
             checkpointRequests,
             checkpointResponse(request) {
-              if (
-                request.reason === "idle_shutdown"
-                && request.expectedWorkspaceVersion === "0"
-              ) {
-                foregroundPendingGuardChecks += 1;
-                if (request.nextWakeAt === null || request.nextWakeReason !== "mailbox") {
-                  return {
-                    checkpointConflictReason: "foreground_pending",
-                    checkpointed: false,
-                    workspace: initialWorkspace,
-                  };
-                }
-              }
               return {
+                ...(pendingConversation && request.expectedWorkspaceVersion === "0"
+                  ? { conversationInputAhead: true } : {}),
                 checkpointed: true,
                 workspace: createWorkspaceState({
                   inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
@@ -1360,6 +1354,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
         }),
         async runAssistantPhase(input) {
           assistantPhaseCalls += 1;
+          assert.deepEqual(importedIds, items.map((item) => item.id));
           await runCanonicalWrite({
             vaultRoot: input.restored.vaultRoot,
             operationType: "hosted_canonical_write_test",
@@ -1378,7 +1373,11 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
       });
 
       assert.equal(assistantPhaseCalls, 1);
-      assert.equal(foregroundPendingGuardChecks, 1);
+      assert.deepEqual(importedIds, items.map((item) => item.id));
+      if (pendingConversation) {
+        assert.ok(requireEventIndex(events, "workspace.checkpoint") < requireEventIndex(events, "import"));
+        assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation, "1");
+      }
       assert.deepEqual(artifactGetCalls, [receiptLogHash, receiptHash]);
       assert.deepEqual(events.filter((event) => event.startsWith("snapshot:")), [
         "snapshot:idle_shutdown",
@@ -1386,7 +1385,6 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "idle_shutdown",
-        "import",
         "canonical_runtime_commit",
         "idle_shutdown",
       ]);
@@ -1394,40 +1392,18 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
         "0",
         "1",
         "2",
-        "3",
       ]);
-      assert.equal(checkpointRequests[0]?.nextWakeReason, "mailbox");
-      assert.ok(checkpointRequests[0]?.nextWakeAt);
-      assert.notEqual(checkpointRequests[0]?.nextWakeAt, priorNextWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, priorNextWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
       assert.equal(checkpointRequests[1]?.nextWakeAt, priorNextWakeAt);
       assert.equal(checkpointRequests[1]?.nextWakeReason, "assistant");
+      // The status-only canonical publication uses the accepted recovery version and snapshot.
       assert.deepEqual(checkpointRequests[1]?.snapshotRef, checkpointRequests[0]?.snapshotRef);
-      assert.equal(checkpointRequests[2]?.nextWakeAt, priorNextWakeAt);
-      assert.equal(checkpointRequests[2]?.nextWakeReason, "assistant");
-      assert.deepEqual(checkpointRequests[2]?.snapshotRef, checkpointRequests[0]?.snapshotRef);
-      assert.equal(
-        checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
-        receiptLogHash,
-      );
-      assert.deepEqual(
-        readHostedCanonicalWriteReceiptRecoveryWake(checkpointRequests[0]?.redactedStatus),
-        {
-          nextWakeAt: priorNextWakeAt,
-          nextWakeReason: "assistant",
-        },
-      );
-      assert.equal(
-        checkpointRequests[1]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
-        undefined,
-      );
-      assert.equal(
-        readHostedCanonicalWriteReceiptRecoveryWake(checkpointRequests[1]?.redactedStatus),
-        null,
-      );
-      assert.equal(
-        checkpointRequests[3]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
-        undefined,
-      );
+      for (const index of [0, 2]) {
+        for (const key of HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS) {
+          assert.equal(checkpointRequests[index]?.redactedStatus?.[key], undefined);
+        }
+      }
       assert.equal(
         await readFile(
           path.join(vaultRoot, "journal", "saturated-receipt-recovery.md"),
@@ -1585,7 +1561,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
     }
   });
 
-  test("restores the original wake from a persisted saturated recovery marker", async () => {
+  test.each(["2099-07-09T00:00:00.000Z", null])("restores the original wake from a persisted saturated recovery marker (saved: %s)", async (priorNextWakeAt) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -1594,7 +1570,7 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
       receiptLogBytes,
       receiptLogHash,
     } = createSaturatedCanonicalReceiptLogArtifacts();
-    const priorNextWakeAt = "2099-07-09T00:00:00.000Z";
+    const priorNextWakeReason = priorNextWakeAt === null ? null : "assistant";
 
     try {
       const result = await runHostedWorkspaceRuntimeJobInProcess(
@@ -1626,10 +1602,9 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
                 redactedStatus: {
                   hostedCanonicalWriteReceiptLogByteSize: receiptLogBytes.byteLength,
                   hostedCanonicalWriteReceiptLogSha256: receiptLogHash,
-                  ...hostedCanonicalWriteReceiptRecoveryStatusFields({
-                    nextWakeAt: priorNextWakeAt,
-                    nextWakeReason: "assistant",
-                  }),
+                  [HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_STATUS_KEY]: "pending",
+                  [HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_AT_STATUS_KEY]: priorNextWakeAt,
+                  [HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_REASON_STATUS_KEY]: priorNextWakeReason,
                 },
                 version: "0",
               }),
@@ -1642,136 +1617,144 @@ describe("hosted workspace runtime entrypoint", () => {test("runs assistant outb
         },
       );
 
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "idle_shutdown",
-        "import",
-      ]);
-      assert.deepEqual(checkpointRequests.map((request) => request.expectedWorkspaceVersion), [
-        "0",
-        "1",
-      ]);
-      assert.equal(checkpointRequests[0]?.nextWakeReason, "mailbox");
-      assert.ok(checkpointRequests[0]?.nextWakeAt);
-      assert.equal(checkpointRequests[1]?.nextWakeAt, priorNextWakeAt);
-      assert.equal(checkpointRequests[1]?.nextWakeReason, "assistant");
-      assert.deepEqual(checkpointRequests[1]?.snapshotRef, checkpointRequests[0]?.snapshotRef);
-      assert.equal(
-        checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
-        receiptLogHash,
-      );
-      assert.deepEqual(
-        readHostedCanonicalWriteReceiptRecoveryWake(checkpointRequests[0]?.redactedStatus),
-        {
-          nextWakeAt: priorNextWakeAt,
-          nextWakeReason: "assistant",
-        },
-      );
-      assert.equal(
-        checkpointRequests[1]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
-        undefined,
-      );
-      assert.equal(
-        readHostedCanonicalWriteReceiptRecoveryWake(checkpointRequests[1]?.redactedStatus),
-        null,
-      );
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), ["idle_shutdown"]);
+      assert.deepEqual(checkpointRequests.map((request) => request.expectedWorkspaceVersion), ["0"]);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, priorNextWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, priorNextWakeReason);
+      for (const key of HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS) {
+        assert.equal(checkpointRequests[0]?.redactedStatus?.[key], undefined);
+      }
       assert.equal(result.nextWakeAt, priorNextWakeAt);
     } finally {
       await removeTempRoot(vaultRoot);
     }
   });
 
-  test("retains the saturated recovery marker when the wake reset checkpoint fails", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const events: string[] = [];
-    const wakeResetFailure = new Error("Synthetic wake reset checkpoint failure.");
-    const {
-      artifactBytesByHash,
-      receiptLogBytes,
-      receiptLogHash,
-    } = createSaturatedCanonicalReceiptLogArtifacts();
-    const initialWorkspace = createWorkspaceState({
-      redactedStatus: {
-        hostedCanonicalWriteReceiptLogByteSize: receiptLogBytes.byteLength,
-        hostedCanonicalWriteReceiptLogSha256: receiptLogHash,
-      },
-      version: "0",
-    });
-
-    try {
-      await expect(runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput(),
+  test.each(["snapshot failure", "rejected", "lost acknowledgement"] as const)(
+    "retries restored receipt recovery after a %s publication",
+    async (failure) => {
+      const firstRoot = await mkdtemp(path.join(tmpdir(), "murph-receipt-recovery-"));
+      const retryRoot = await mkdtemp(path.join(tmpdir(), "murph-receipt-recovery-"));
+      const recoveredBytes = Buffer.from("recovered canonical write\n", "utf8");
+      const recoveredHash = sha256Hex(recoveredBytes);
+      const receipts = createSaturatedCanonicalReceiptLogArtifacts({
+        bytes: recoveredBytes,
+        targetRelativePath: "journal/recovered-receipt-write.md",
+      });
+      const artifactGetCalls: string[] = [];
+      const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const events: string[] = [];
+      const genuineWake = "2099-07-09T00:00:00.000Z";
+      const initialWorkspace = createWorkspaceState({
+        nextWakeAt: genuineWake, nextWakeReason: "assistant", version: "0",
+        redactedStatus: {
+          hostedCanonicalWriteReceiptLogByteSize: receipts.receiptLogBytes.byteLength,
+          hostedCanonicalWriteReceiptLogSha256: receipts.receiptLogHash,
+        },
+      });
+      let persisted = initialWorkspace;
+      let injectFailure = true;
+      let imports = 0;
+      let assistantCalls = 0;
+      const run = (vaultRoot: string) => runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({ request: { workspaceVersion: persisted.version } }),
         {
           async createCheckpointSnapshot() {
-            return {
-              snapshotRef: createWorkspaceSnapshotV2Ref(
-                "snapshot-saturated-receipt-reset-failure",
-              ),
-            };
+            if (injectFailure && failure === "snapshot failure") {
+              throw new Error("Synthetic recovery snapshot failure.");
+            }
+            events.push("snapshot");
+            const bundle = await createVaultSnapshotBundle({ vaultRoot });
+            receipts.artifactBytesByHash.set(bundle.hash, bundle.bytes);
+            return { snapshotRef: createSnapshotFixtureRef({ hash: bundle.hash, size: bundle.bytes.byteLength }) };
           },
           async importItem() {
-            throw new Error("Mailbox import must not start before wake reset succeeds.");
+            events.push("import");
+            imports += 1;
+            return { status: "imported" };
+          },
+          async runAssistantPhase() {
+            assistantCalls += 1;
+            return { progressed: false };
           },
           platform: createPlatform({
-            artifactBytesByHash,
-            events,
-            mailboxPort: createMailboxPort({
-              events,
-              items: [],
-            }),
+            artifactBytesByHash: receipts.artifactBytesByHash, artifactGetCalls, events,
+            mailboxPort: createMailboxPort({ events, items: [createMailboxItem({ laneSeq: "1" })] }),
             workspacePort: createWorkspacePort({
-              checkpointRequests,
+              checkpointRequests, events, workspace: persisted,
               checkpointResponse(request) {
-                if (request.expectedWorkspaceVersion === "1") {
-                  throw wakeResetFailure;
+                if (injectFailure && failure === "rejected") {
+                  return { checkpointed: false, checkpointConflictReason: "workspace_version", workspace: persisted };
                 }
-                return {
-                  checkpointed: true,
-                  workspace: createWorkspaceState({
-                    nextWakeAt: request.nextWakeAt ?? null,
-                    nextWakeReason: request.nextWakeReason ?? null,
-                    redactedStatus: request.redactedStatus ?? null,
-                    snapshotRef: request.snapshotRef,
-                    version: "1",
-                  }),
-                };
+                persisted = createWorkspaceState({
+                  version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                  nextWakeAt: request.nextWakeAt ?? null, nextWakeReason: request.nextWakeReason ?? null,
+                  redactedStatus: request.redactedStatus ?? null, snapshotRef: request.snapshotRef,
+                });
+                if (injectFailure) throw new Error("Synthetic lost recovery acknowledgement.");
+                return { checkpointed: true, workspace: persisted };
               },
-              events,
-              workspace: initialWorkspace,
             }),
           }),
-          async runAssistantPhase() {
-            throw new Error("Assistant work must not start before wake reset succeeds.");
-          },
           vaultRoot,
         },
-      )).rejects.toThrow(wakeResetFailure.message);
-
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "idle_shutdown",
-        "import",
-      ]);
-      assert.equal(
-        checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
-        receiptLogHash,
       );
-      assert.deepEqual(
-        readHostedCanonicalWriteReceiptRecoveryWake(checkpointRequests[0]?.redactedStatus),
-        {
-          nextWakeAt: null,
-          nextWakeReason: null,
-        },
-      );
-      assert.equal(
-        checkpointRequests[1]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
-        undefined,
-      );
-      assert.equal(checkpointRequests[0]?.nextWakeReason, "mailbox");
-      assert.equal(checkpointRequests[1]?.nextWakeReason, null);
-    } finally {
-      await removeTempRoot(vaultRoot);
-    }
-  });
+      try {
+        await assert.rejects(run(firstRoot), {
+          "snapshot failure": /Synthetic recovery snapshot failure/u,
+          rejected: /checkpoint/iu,
+          "lost acknowledgement": /Synthetic lost recovery acknowledgement/u,
+        }[failure]);
+        assert.equal(imports, 0);
+        assert.equal(assistantCalls, 0);
+        assert.deepEqual(artifactGetCalls, [receipts.receiptLogHash, receipts.receiptHash, recoveredHash]);
+        if (failure === "snapshot failure") {
+          assert.equal(checkpointRequests.length, 0);
+        } else {
+          assert.equal(checkpointRequests.length, 1);
+          assert.equal(checkpointRequests[0]?.nextWakeAt, genuineWake);
+          assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
+        }
+        if (failure !== "lost acknowledgement") assert.deepEqual(persisted, initialWorkspace);
+        else {
+          assert.equal(persisted.version, "1");
+          for (const key of HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS) {
+            assert.equal(persisted.redactedStatus?.[key], undefined);
+          }
+        }
+        injectFailure = false;
+        artifactGetCalls.length = 0;
+        checkpointRequests.length = 0;
+        events.length = 0;
+        const result = await run(retryRoot);
+        assert.equal(imports, 1);
+        assert.equal(assistantCalls, 1);
+        assert.equal(result.nextWakeAt, genuineWake);
+        assert.equal(persisted.nextWakeAt, genuineWake);
+        assert.equal(persisted.nextWakeReason, "assistant");
+        // After a lost acknowledgement this file can only come from the published snapshot.
+        assert.deepEqual(
+          await readFile(path.join(retryRoot, "journal", "recovered-receipt-write.md")),
+          recoveredBytes,
+        );
+        const receiptReads = artifactGetCalls.filter((hash) =>
+          hash === receipts.receiptLogHash || hash === receipts.receiptHash || hash === recoveredHash);
+        if (failure !== "lost acknowledgement") {
+          assert.deepEqual(receiptReads, [receipts.receiptLogHash, receipts.receiptHash, recoveredHash]);
+          assert.ok(requireEventIndex(events, "workspace.checkpoint") < requireEventIndex(events, "import"));
+          assert.deepEqual(checkpointRequests.map((request) => request.expectedWorkspaceVersion), ["0", "1"]);
+        } else {
+          assert.deepEqual(receiptReads, []);
+          assert.ok(requireEventIndex(events, "import") < requireEventIndex(events, "snapshot"));
+          assert.deepEqual(checkpointRequests.map((request) => request.expectedWorkspaceVersion), ["1"]);
+        }
+        assert.equal(checkpointRequests[0]?.nextWakeAt, genuineWake);
+      } finally {
+        await removeTempRoot(firstRoot);
+        await removeTempRoot(retryRoot);
+      }
+    },
+  );
 
   test.each([false, true])("preserves restored receipts across metadata publication and another crash (append: %s)", async (append) => {
     const firstVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
