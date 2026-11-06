@@ -67,7 +67,7 @@ export function gameMissedDayEventId(gameId: string, memberId: string, firstMiss
 const MISSED_DATE_CLAIM_LOOKBACK_MS = 26 * 60 * 60 * 1000;
 
 type MissedDayReservation = {
-  firstMissedDate: string; dueAt: Date; tx: Prisma.TransactionClient;
+  firstMissedDate: string; dueAt: Date; now: Date; tx: Prisma.TransactionClient;
   beforeClaim?: (tx: Prisma.TransactionClient) => Promise<boolean>;
 } & ({ gameId: string; memberId: string; playerMemberIds: readonly string[]; roomId?: never }
   | { roomId: string; pairMemberIds: readonly string[] });
@@ -99,7 +99,7 @@ export async function reserveGameMissedDayTx(input: MissedDayReservation): Promi
   const created = await tx.hostedLinqDelivery.createMany({ data: [{ id: buildHostedLinqDeliveryId(key), idempotencyKey: key,
     source: "game_lifecycle", sourceRef: group ? `${roomId}:${input.firstMissedDate}` : `${input.gameId}:${input.memberId}:${input.firstMissedDate}`,
     template: group ? "game_group_missed" : "game_missed", status: "awaiting_generation", targetKind: "thread",
-    payloadOwnerMemberId: roomId, attemptedAt: input.dueAt, retryAfterAt: input.dueAt }], skipDuplicates: true });
+    payloadOwnerMemberId: roomId, attemptedAt: input.dueAt, retryAfterAt: input.dueAt, createdAt: input.now }], skipDuplicates: true });
   return created.count === 1;
 }
 

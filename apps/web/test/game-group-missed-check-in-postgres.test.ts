@@ -108,8 +108,8 @@ async function fixture(count = 3, roomId = `missed_room_${randomUUID()}`) {
   return { roomId, people, addGame };
 }
 /** Rooms the sweep visits at the pinned `now`, in visiting order, so no case depends on the wall clock. */
-async function shardRooms(count: number) {
-  const prefix = `missed_room_${randomUUID()}_`, shard = Math.floor(now.getTime() / 60_000) % 60;
+async function shardRooms(count: number, shard = Math.floor(now.getTime() / 60_000) % 60) {
+  const prefix = `missed_room_${randomUUID()}_`;
   const rooms = await db.$queryRaw<Array<{ id: string }>>`SELECT ${prefix} || n AS id FROM generate_series(1, 2000) AS n
     WHERE mod(abs(hashtext(${prefix} || n)::bigint), 60) = ${shard} ORDER BY id LIMIT ${count}`;
   expect(rooms).toHaveLength(count);
@@ -245,7 +245,7 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     const early = new Date("2030-03-05T00:00:00Z"), late = new Date("2030-03-05T17:00:00Z");
     expect(await reserveGroupGameMissedDay(f.roomId, [pair, group], early)).toBe(0);
     expect(await db.$transaction(tx => reserveGameMissedDayTx({ tx, gameId: pair, memberId: f.people[0]!.id,
-      playerMemberIds: f.people.map(person => person.id), firstMissedDate: date, dueAt: early }))).toBe(false);
+      playerMemberIds: f.people.map(person => person.id), firstMissedDate: date, dueAt: early, now: early }))).toBe(false);
     const authority = await publish(f.roomId, [pair, group], late);
     expect(authority.policy.batch.find(game => game.gameId === group)?.misses).toHaveLength(posted ? 1 : 2);
     expect(authority.policy.batch.find(game => game.gameId === pair)?.misses).toHaveLength(2);
@@ -421,12 +421,166 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  const hours = (count: number) => new Date(now.getTime() + count * 3_600_000);
+  const deadline = hours(2), justLate = new Date(deadline.getTime() + 1);
+  const outage = () => hostedOnboardingError({ code: "LINQ_SEND_FAILED", httpStatus: 502, message: "Linq chat read timed out.", retryable: true });
+  const heldUp = [
+    ["an unsendable room", (f: Fixture) => { proof.rooms.set(f.roomId, [f.people[0]!.email]); }],
+    ["a provider outage", (f: Fixture) => { proof.chatFailures.set(f.roomId, outage()); }],
+  ] as const;
+  const recover = (f: Fixture) => { proof.chatFailures.clear(); proof.rooms.set(f.roomId, f.people.map(person => person.email)); };
+  /** Shard 17 is off every drain below, so the pre-sweep never meets this room's injected outage. */
+  async function reservedRoom() {
+    const [roomId] = await shardRooms(1, 17), f = await fixture(3, roomId), id = await f.addGame();
+    expect(await reserveGroupGameMissedDay(f.roomId, [id], now)).toBe(1);
+    return { f, id, eventId: gameGroupMissedDayEventId(f.roomId, date) };
+  }
+  /** First in the single-slot batch, so another suite's leftover room in this shared database cannot take the turn. */
+  async function turn(eventId: string, at: Date) {
+    await db.hostedLinqDelivery.update({ where: { id: (await receipt(eventId)).id }, data: { attemptedAt: new Date(0) } });
+    return drainGameChatLifecycle({ now: at });
+  }
+  async function expectEnded(f: Fixture, eventId: string, warn: { mock: { calls: unknown[][] } }) {
+    expect(await receipt(eventId)).toMatchObject({ status: "skipped", skipReason: "game_missed_check_in_expired", skippedAt: justLate, retryAfterAt: null });
+    expect(proof.audienceReads).toEqual([]);
+    expect(await db.hostedMailboxItem.count({ where: { userId: f.roomId } })).toBe(0);
+    expect(warn.mock.calls).toContainEqual([expect.any(String), { warning: "game.missed-day.expired", reason: "past_deadline" }]);
+    const logged = JSON.stringify(warn.mock.calls);
+    for (const value of [f.roomId, eventId, ...f.people.flatMap(person => [person.id, person.email])]) expect(logged).not.toContain(value);
+  }
+
+  it.each(heldUp)("keeps a fresh receipt held up by %s pending, then delivers once the room recovers", async (_cause, breakRoom) => {
+    const { f, eventId } = await reservedRoom();
+    breakRoom(f);
+    expect(await turn(eventId, hours(.5))).toMatchObject({ attempted: 1, queued: 0 });
+    expect((await receipt(eventId)).status).toBe("awaiting_generation");
+    expect(proof.audienceReads).toContain(`chat:${f.roomId}`);
+    recover(f);
+    expect(await turn(eventId, hours(1))).toMatchObject({ attempted: 1, queued: 1 });
+    expect((await receipt(eventId)).status).toBe("generation_queued");
+    expect(await db.hostedMailboxItem.count({ where: { userId: f.roomId } })).toBe(1);
+  });
+
+  it.each(heldUp)("ends a receipt held up by %s past its deadline with no Linq read", async (_cause, breakRoom) => {
+    const { f, eventId } = await reservedRoom();
+    breakRoom(f);
+    await turn(eventId, hours(.5));
+    proof.audienceReads.length = 0;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(await turn(eventId, justLate)).toMatchObject({ attempted: 1, queued: 0 });
+    await expectEnded(f, eventId, warn);
+  });
+
+  it.each(heldUp)("sends nothing to a room that recovers after %s outlasted the deadline", async (_cause, breakRoom) => {
+    const { f, eventId } = await reservedRoom();
+    breakRoom(f);
+    await turn(eventId, hours(.5));
+    recover(f); proof.audienceReads.length = 0;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await turn(eventId, justLate);
+    await expectEnded(f, eventId, warn);
+    await drainGameChatLifecycle({ now: hours(73) });
+    expect((await receipt(eventId)).attemptedAt).toEqual(justLate);
+    expect(await db.hostedMailboxItem.count({ where: { userId: f.roomId } })).toBe(0);
+    expect(proof.signal).not.toHaveBeenCalled();
+  });
+
+  it.each([["exactly at", deadline, "awaiting_generation"], ["just past", justLate, "skipped"]] as const)("treats a receipt %s its deadline correctly", async (_side, at, status) => {
+    const { f, eventId } = await reservedRoom();
+    proof.rooms.set(f.roomId, [f.people[0]!.email]);
+    await turn(eventId, at);
+    expect((await receipt(eventId)).status).toBe(status);
+  });
+
+  it("does not drop an unpublished-status receipt whose mailbox item exists", async () => {
+    const f = await fixture(), authority = await publish(f.roomId, [await f.addGame()]), eventId = authority.policy.eventId;
+    await db.hostedLinqDelivery.update({ where: { id: (await receipt(eventId)).id }, data: { status: "awaiting_generation", retryAfterAt: justLate } });
+    proof.audienceReads.length = 0; proof.signal.mockClear();
+    expect(await turn(eventId, justLate)).toMatchObject({ attempted: 1, queued: 1 });
+    expect(await receipt(eventId)).toMatchObject({ status: "awaiting_generation", skippedAt: null });
+    expect(await db.hostedMailboxItem.count({ where: { userId: f.roomId } })).toBe(1);
+    expect(proof.audienceReads).toEqual([]);
+  });
+
+  it.each([["unconsumed", null], ["consumed", now]] as const)("takes a published %s check-in out of the sweep past its deadline without dropping it", async (_state, consumedAt) => {
+    const f = await fixture(), authority = await publish(f.roomId, [await f.addGame()]), eventId = authority.policy.eventId;
+    await db.hostedMailboxItem.updateMany({ where: { userId: f.roomId }, data: { consumedAt } });
+    proof.rooms.set(f.roomId, [f.people[0]!.email]); proof.audienceReads.length = 0; proof.signal.mockClear();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(await turn(eventId, justLate)).toMatchObject({ attempted: 1, queued: 0 });
+    expect(await receipt(eventId)).toMatchObject({ status: "generation_queued", retryAfterAt: null, skippedAt: null });
+    expect(proof.audienceReads).toEqual([]);
+    expect(proof.signal).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.any(String), { warning: "game.missed-day.expired", reason: "past_deadline" });
+    await drainGameChatLifecycle({ now: hours(3) });
+    expect((await receipt(eventId)).attemptedAt).toEqual(justLate);
+  });
+
+  it.each([["exactly at", deadline, true], ["just past", justLate, false]] as const)("egress allows an outbox retry %s the deadline only if fresh", async (_side, at, allowed) => {
+    const f = await fixture(), authority = await publish(f.roomId, [await f.addGame()]);
+    const dispatch = db.$transaction(tx => assertAndDispatch(authority, tx, at));
+    if (allowed) expect((await dispatch).claimed).toBe(true);
+    else await expect(dispatch).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    expect((await receipt(authority.policy.eventId)).status).toBe(allowed ? "provider_dispatch_started" : "generation_queued");
+  });
+
+  it("leaves a receipt alone once dispatch has started", async () => {
+    const f = await fixture(), authority = await publish(f.roomId, [await f.addGame()]);
+    await db.$transaction(tx => assertAndDispatch(authority, tx));
+    await db.hostedLinqDelivery.update({ where: { id: (await receipt(authority.policy.eventId)).id }, data: { retryAfterAt: justLate } });
+    await turn(authority.policy.eventId, justLate);
+    expect(await receipt(authority.policy.eventId)).toMatchObject({ status: "provider_dispatch_started", attemptedAt: new Date(0), skippedAt: null });
+  });
+
+  it("stops a publication that loses the race to an expiry", async () => {
+    const { f, eventId } = await reservedRoom();
+    proof.afterPrepare = async () => { await db.hostedLinqDelivery.update({ where: { id: (await receipt(eventId)).id }, data: { status: "skipped" } }); };
+    expect(await turn(eventId, hours(.5))).toMatchObject({ attempted: 1, queued: 0 });
+    expect(await db.hostedMailboxItem.count({ where: { userId: f.roomId } })).toBe(0);
+  });
+
+  it("frees the batch once a stuck receipt ends, so a healthy one behind it proceeds", async () => {
+    const stuck = await reservedRoom(), healthy = await fixture(), healthyId = await healthy.addGame();
+    proof.rooms.set(stuck.f.roomId, [stuck.f.people[0]!.email]);
+    expect(await reserveGroupGameMissedDay(healthy.roomId, [healthyId], hours(1.5))).toBe(1);
+    const healthyEvent = gameGroupMissedDayEventId(healthy.roomId, date);
+    expect(await turn(stuck.eventId, justLate)).toMatchObject({ attempted: 1, queued: 0 });
+    expect((await receipt(stuck.eventId)).status).toBe("skipped");
+    expect((await receipt(healthyEvent)).status).toBe("awaiting_generation");
+    proof.audienceReads.length = 0;
+    expect(await turn(healthyEvent, new Date(justLate.getTime() + 60_000))).toMatchObject({ attempted: 1, queued: 1 });
+    expect((await receipt(healthyEvent)).status).toBe("generation_queued");
+    expect(proof.audienceReads.filter(read => read.endsWith(stuck.f.roomId))).toEqual([]);
+  });
+
+  it("clears a receipt that was already stuck, with no migration", async () => {
+    const { f, eventId } = await reservedRoom();
+    proof.rooms.set(f.roomId, [f.people[0]!.email]);
+    // A row from before this change: a database-default createdAt and a months-old retry history.
+    await db.hostedLinqDelivery.update({ where: { id: (await receipt(eventId)).id }, data: { createdAt: hours(-24 * 90), retryAfterAt: hours(-1) } });
+    await turn(eventId, now);
+    expect(await receipt(eventId)).toMatchObject({ status: "skipped", skipReason: "game_missed_check_in_expired" });
+  });
+
+  it.each([["while live", false], ["after the game settled", true]])("ends a stuck pair receipt past its deadline %s", async (_when, settled) => {
+    const f = await fixture(2), id = await f.addGame(2), eventId = gameMissedDayEventId(id, f.people[0]!.id, date);
+    events.push(eventId);
+    expect(await db.$transaction(tx => reserveGameMissedDayTx({ tx, gameId: id, memberId: f.people[0]!.id, playerMemberIds: f.people.map(person => person.id), firstMissedDate: date, dueAt: now, now }))).toBe(true);
+    if (settled) await db.game.update({ where: { id }, data: { status: "settled", settledAt: now } });
+    expect(await turn(eventId, hours(.5))).toMatchObject({ attempted: 1, queued: 0 });
+    expect((await receipt(eventId)).status).toBe("awaiting_generation");
+    proof.audienceReads.length = 0;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await turn(eventId, justLate);
+    await expectEnded(f, eventId, warn);
+  });
+
   it("serializes pair and group contenders under the verified two-contact pair lock", async () => {
     const f = await fixture(2), pair = await f.addGame(2), group = await f.addGame();
     const prepared = await prepareGroupMissedDay(f.roomId, date, now);
     if (!prepared) throw new Error("Expected authorized mixed room");
     const locked = barrier(), release = barrier();
-    const groupClaim = db.$transaction(tx => reserveGameMissedDayTx({ tx, roomId: f.roomId, firstMissedDate: date, dueAt: now,
+    const groupClaim = db.$transaction(tx => reserveGameMissedDayTx({ tx, roomId: f.roomId, firstMissedDate: date, dueAt: now, now,
       pairMemberIds: prepared.audience.memberIds, beforeClaim: async tx => {
         const current = await isGroupMissedDayBatchCurrentTx(prepared.policy, prepared.audience, tx, now);
         locked.release(); await release.promise; return current;
@@ -436,7 +590,7 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
       await expect(db.$transaction(async tx => {
         await tx.$executeRawUnsafe("SET LOCAL lock_timeout = '100ms'");
         return reserveGameMissedDayTx({ tx, gameId: pair, memberId: f.people[0]!.id,
-          playerMemberIds: f.people.map(person => person.id), firstMissedDate: date, dueAt: now });
+          playerMemberIds: f.people.map(person => person.id), firstMissedDate: date, dueAt: now, now });
       })).rejects.toThrow(/lock timeout/u);
     } finally { release.release(); }
     expect(await groupClaim).toBe(true);
@@ -449,7 +603,7 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     const f = await fixture(2), pair = await f.addGame(2), eventId = gameMissedDayEventId(pair, f.people[0]!.id, date);
     events.push(eventId);
     expect(await db.$transaction(tx => reserveGameMissedDayTx({ tx, gameId: pair, memberId: f.people[0]!.id,
-      playerMemberIds: f.people.map(person => person.id), firstMissedDate: date, dueAt: now }))).toBe(true);
+      playerMemberIds: f.people.map(person => person.id), firstMissedDate: date, dueAt: now, now }))).toBe(true);
     await db.hostedLinqDelivery.update({ where: { id: (await receipt(eventId)).id }, data: state === "quiet" ? { status: "skipped", skippedAt: now }
       : { status: state === "uncertain" ? "provider_dispatch_started" : "sent", source: "hosted_runtime_linq_delivery", template: null, sourceRef: "rewritten" } });
     if (state === "settled") await db.game.update({ where: { id: pair }, data: { status: "settled", settledAt: now } });

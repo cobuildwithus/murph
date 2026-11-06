@@ -11,6 +11,11 @@ export function isMissedCheckInDueNow(input: { dueAt: Date; now: Date }): boolea
   return lateness >= 0 && lateness <= GAME_MISSED_CHECK_IN_MAX_LATENESS_MS;
 }
 
+/** A reserved check-in retries until this bound. Reservation is itself within it of the due time. */
+export function isMissedCheckInExpired(input: { reservedAt: Date; now: Date }): boolean {
+  return input.now.getTime() - input.reservedAt.getTime() > GAME_MISSED_CHECK_IN_MAX_LATENESS_MS;
+}
+
 export async function visitGameMissedCheckInPages(input: {
   readPage(cursor: string, limit: number): Promise<readonly string[]>;
   visit(ids: readonly string[]): Promise<void>;

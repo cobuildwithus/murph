@@ -34,7 +34,7 @@ const now = new Date("2030-03-04T12:00:00Z");
 const players = ["person-a", "person-b"];
 const game = { id: "game", status: "live", chatContainerMemberId: "room", players: players.map((memberId) => ({ memberId })) };
 const pending = { v: 1, id: "proposal", proposedByMemberId: "person-a", expectedTermsVersion: 1, change: { kind: "edit", lengthDays: 10 }, effectiveFromDay: 1, startsOn: null, origin: "app", deliveryStatus: "pending" };
-const receipt = { id: "receipt", status: "awaiting_generation", sourceRef: "game", template: "game_started", attemptedAt: now, idempotencyKey: "hash:game-started:game" };
+const receipt = { id: "receipt", status: "awaiting_generation", sourceRef: "game", template: "game_started", attemptedAt: now, createdAt: now, payloadOwnerMemberId: "room", idempotencyKey: "hash:game-started:game" };
 
 describe("durable game chat lifecycle", () => {
   it.each([false, true])("publishes compact group facts only at the prepared revision; edited before append: %s", async edited => {

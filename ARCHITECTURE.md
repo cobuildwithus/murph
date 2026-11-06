@@ -6467,6 +6467,11 @@ The mailbox causal-append lock also protects a conversation watermark recheck:
 new conversation conservatively suppresses the notice, including unrelated
 chatter; notification-lane writes do not. The daily claim remains consumed.
 Recovery reuses the exact mailbox pointer and room batch, never an arbitrary game.
+A pair or group check-in retries while fresh. Two hours after its receipt was
+created it ends, whatever held it up and without a provider read: an unpublished
+receipt is skipped unless its mailbox item already exists, and a published one
+leaves the sweep without being skipped. Final egress refuses either past the same
+deadline, which also bounds outbox retries.
 
 The isolated runner exposes only lore and quiet tools and returns text or skip.
 It omits individually explained misses, stays quiet if all are explained, or

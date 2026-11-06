@@ -25,6 +25,8 @@ import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboardi
 import { currentTerms, parseStoredTerms, gameChallengeKey, isGameInviteExpired } from "./rules";
 import type { HostedGameGroupMissedCheckInPolicy } from "@murphai/hosted-execution/runtime-control";
 import { isGroupMissedDayBatchCurrentTx, prepareGroupMissedDay, readGroupMissedDayDeliveryAuthority } from "./group-missed-day";
+import { isMissedCheckInExpired } from "./missed-check-in";
+import { logHostedOnboardingWarning } from "../hosted-onboarding/logging";
 import { gameGroupLoreFingerprint, gamePairLoreFingerprint } from "./audience";
 import { readGameRematchDeliveryRevision } from "./chat-delivery-authority";
 
@@ -52,7 +54,7 @@ export async function drainGameChatLifecycle(input: { prisma?: PrismaClient; now
       { status: "generation_queued", retryAfterAt: { lte: now } },
     ] },
     orderBy: [{ attemptedAt: "asc" }, { id: "asc" }], take: LIFECYCLE_BATCH,
-    select: { id: true, sourceRef: true, template: true, attemptedAt: true, idempotencyKey: true, status: true },
+    select: { id: true, sourceRef: true, template: true, attemptedAt: true, idempotencyKey: true, status: true, createdAt: true, payloadOwnerMemberId: true },
   });
   let queued = 0;
   let attempted = 0;
@@ -98,7 +100,7 @@ export async function drainGameChatLifecycle(input: { prisma?: PrismaClient; now
   return { attempted, queued, deferred: attempted - queued };
 }
 
-type GameChatIntent = Pick<HostedLinqDelivery, "id" | "sourceRef" | "template" | "status" | "idempotencyKey">;
+type GameChatIntent = Pick<HostedLinqDelivery, "id" | "sourceRef" | "template" | "status" | "idempotencyKey" | "createdAt" | "payloadOwnerMemberId">;
 
 async function processGameChatIntent(receipt: GameChatIntent, now: Date, prisma: PrismaClient): Promise<boolean> {
   if (receipt.template === "game_group_missed") return processGroupMissedDayIntent(receipt, now);
@@ -130,9 +132,26 @@ async function processPairMissedDayIntent(receipt: GameChatIntent, now: Date): P
   if (!parts) return false;
   const [, gameId, memberId, firstMissedDate] = parts;
   const eventId = gameMissedDayEventId(gameId, memberId, firstMissedDate);
+  if (await endExpiredMissedDay(receipt, eventId, now)) return false;
   return receipt.status === "generation_queued"
     ? recoverGameNotificationWake(receipt.id, gameId, eventId, now, "missed")
     : deliverGameMissedDayLifecycle(gameId, memberId, firstMissedDate, now);
+}
+
+/**
+ * Retry while fresh. Past the deadline a check-in ends whatever held it up, with no provider read. An existing mailbox
+ * item is frozen evidence, so nothing here drops a published check-in: it leaves the sweep and egress refuses it.
+ */
+async function endExpiredMissedDay(receipt: GameChatIntent, eventId: string, now: Date): Promise<boolean> {
+  if (!isMissedCheckInExpired({ reservedAt: receipt.createdAt, now })) return false;
+  const prisma = getPrisma();
+  const published = receipt.status === "generation_queued";
+  const room = receipt.payloadOwnerMemberId;
+  if (!published && room && await readHostedMailboxItemByDedupeKey({ dedupeKey: eventId, userId: room, prisma })) return false;
+  const ended = await prisma.hostedLinqDelivery.updateMany({ where: { id: receipt.id, status: receipt.status },
+    data: published ? { retryAfterAt: null } : { status: "skipped", skippedAt: now, skipReason: "game_missed_check_in_expired", retryAfterAt: null } });
+  if (ended.count === 1) logHostedOnboardingWarning("game.missed-day.expired", { reason: "past_deadline" });
+  return true;
 }
 
 async function processGroupMissedDayIntent(receipt: GameChatIntent, now: Date): Promise<boolean> {
@@ -140,6 +159,7 @@ async function processGroupMissedDayIntent(receipt: GameChatIntent, now: Date): 
   if (!parts) return false;
   const eventId = `game-missed:${parts[1]}:group:${parts[2]}`;
   if (receipt.idempotencyKey !== createHostedLinqDeliveryIdempotencyLookupKey(eventId)) return false;
+  if (await endExpiredMissedDay(receipt, eventId, now)) return false;
   return receipt.status === "generation_queued"
     ? recoverGameNotificationWake(receipt.id, parts[1], eventId, now, "missed")
     : deliverGroupMissedDayLifecycle(parts[1], parts[2], now);

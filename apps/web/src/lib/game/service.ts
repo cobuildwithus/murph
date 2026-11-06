@@ -2379,7 +2379,7 @@ export async function reserveDueGameMissedDayCheckIns(now = new Date()): Promise
             if (!run.dueAt || !isMissedCheckInDueNow({ dueAt: run.dueAt, now })) continue;
             if (await prisma.$transaction(tx => reserveGameMissedDayTx({
               gameId: game.row.id, memberId: run.memberId, playerMemberIds: game.state.players.map(player => player.memberId),
-              firstMissedDate: run.firstMissedDate, dueAt: run.dueAt!, tx,
+              firstMissedDate: run.firstMissedDate, dueAt: run.dueAt!, now, tx,
             }))) reserved += 1;
           }
         }
