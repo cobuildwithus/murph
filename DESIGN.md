@@ -600,8 +600,9 @@ When funding is fulfilled, the headline is `This group has more Murph.` with a
 small gold ticket and one **Open Messages** pill. Messages has no group deep link.
 The ticket prints no amount. A monthly sponsor back from checkout gets the same
 ending once the payment is confirmed, with `Automatic refills are on.` as the
-sentence and a quiet `Manage sponsorship` link to the dial. A payment recovered
-on the page without leaving it stays on the controls with `Payment confirmed.`
+sentence and a quiet `Manage sponsorship` link to the dial, however long the
+payment took to confirm. A payment recovered on the page without leaving it stays
+on the controls with `Payment confirmed.`
 
 An active sponsor sees the same dial set to their monthly limit, with what was
 charged and when the month resets in the sentence. The pill appears only after

@@ -79,6 +79,7 @@ function GroupFundingCheckout({
   initialMode,
   initialMonthlyCapMinor,
   inert = false,
+  keepPurchaseReturnQuery,
   monthly = null,
   oneTimeOffers,
   payerMemberId,
@@ -92,6 +93,8 @@ function GroupFundingCheckout({
   initialMode?: GroupFundingMode;
   initialMonthlyCapMinor?: HostedGroupSponsorshipMonthlyCapMinor;
   inert?: boolean;
+  /** A confirmed activation refreshes into the sponsor card, which ends the return. */
+  keepPurchaseReturnQuery?: boolean;
   monthly?: GroupFundingMonthlyPlan | null;
   oneTimeOffers: readonly HostedUsageTopUpOffer[];
   payerMemberId: string;
@@ -121,6 +124,7 @@ function GroupFundingCheckout({
     checkoutUrl,
     inert,
     initialOpen: true,
+    keepPurchaseReturnQuery,
     offers: monthly && mode === "monthly" ? [monthly.offer] : oneTimeOffers,
     payerMemberId,
     purchaseReturn,

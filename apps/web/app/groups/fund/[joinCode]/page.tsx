@@ -192,6 +192,7 @@ export default async function GroupFundingPage({
       initialMonthlyCapMinor={
         activatingSponsorship ? sponsorshipManagement.monthlyCapMinor : undefined
       }
+      keepPurchaseReturnQuery={sponsorshipCheckoutReturned}
       monthly={
         sponsoredByAnother || managingSponsorship
           ? null
