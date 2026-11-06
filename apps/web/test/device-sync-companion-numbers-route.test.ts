@@ -375,20 +375,17 @@ it.each(["app", "chat", "device"] as const)("reports the canonical provenance fo
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const { addMeasurement, initializeVault } = await import("@murphai/core");
-  const { addMeasurementDraftRecord, buildMeasurementEventDraft } = await import("@murphai/vault-usecases/measurements");
   const { readVault, listMetricPoints } = await import("@murphai/query");
   const { createBrowserVaultReplica } = await import("@murphai/query/browser");
   const vaultRoot = await mkdtemp(join(tmpdir(), "numbers-provenance-"));
   const observedAt = `${through}T15:10:00.000Z`;
   try {
     await initializeVault({ vaultRoot, timezone: "America/New_York" });
-    const draft = buildMeasurementEventDraft({ occurredAt: observedAt, source: source === "device" ? "device" : "manual",
-      measurements: [{ metric: "estimated-vo2-max", value: 42.5, unit: "ml/kg/min" }] });
-    if (source === "app") {
-      await addMeasurement({ vaultRoot, onExisting: "keep", draft: { ...draft, id: "evt_01JSHY3D0V5A8XJQF8M0Q0Q0A4" } });
-    } else {
-      await addMeasurementDraftRecord({ vault: vaultRoot, draft });
-    }
+    const draft = { occurredAt: observedAt, source: source === "device" ? "device" as const : "manual" as const,
+      title: "VO2 max", measurements: [{ metric: "estimated-vo2-max", value: 42.5, unit: "ml/kg/min" }] };
+    await addMeasurement(source === "app"
+      ? { vaultRoot, onExisting: "keep", draft: { ...draft, id: "evt_01JSHY3D0V5A8XJQF8M0Q0Q0A4" } }
+      : { vaultRoot, draft });
     const replica = await createBrowserVaultReplica({ vault: await readVault(vaultRoot),
       metricPoints: await listMetricPoints(vaultRoot, { metricKey: "estimated-vo2-max", limit: null }),
       generatedAt: savedAt, sourceBundleHash: "f".repeat(64) });
