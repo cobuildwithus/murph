@@ -29,6 +29,7 @@ import {
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { assertActiveHostedMemberAccessAllowed } from "../hosted-onboarding/member-access";
+import { readHostedAiUsageGate } from "../hosted-execution/usage-allowance";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
@@ -930,6 +931,16 @@ function resolveHostedPhoneCallStore(
         };
       }
 
+      // Product admission includes lapsed people. A new paid provider effect
+      // additionally needs current AI capacity; replaying an existing call does not.
+      const usage = await readHostedAiUsageGate({ memberId: input.data.memberId, prisma: tx });
+      if (!usage.allowed) {
+        throw hostedOnboardingError({
+          code: "HOSTED_PHONE_CALL_USAGE_REQUIRED",
+          httpStatus: 403,
+          message: "AI usage is unavailable for a new phone call.",
+        });
+      }
       const pendingCall = await tx.hostedPhoneCall.findFirst({
         where: hostedPhoneCallNewRequestBlockerWhere(input.data.memberId),
       });

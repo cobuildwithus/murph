@@ -22,7 +22,8 @@ fitting short copy and asks about the message only when authorship, relationship
 signature, or meaning is materially ambiguous.
 
 Each hosted member receives one complimentary note under the versioned
-`physical-note-v1` offer. A hosted group receives its own complimentary note
+`physical-note-v1` offer. A member with product access but no runtime access,
+such as lapsed billing, also needs available AI usage for it. A hosted group receives its own complimentary note
 because its synthetic thread-container runtime is already a hosted member and
 the existing usage beneficiary. Later notes consume the configured Lob provider
 cost from that beneficiary's ordinary Murph usage; there is no note-specific

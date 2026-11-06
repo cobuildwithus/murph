@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-06",
+  "order": 100,
+  "item": {
+    "id": "app-access-after-plan-ends",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Keep using the app after your plan ends",
+    "summary": "You can still sign in, play games, and see your saved meals and health data after your plan ends or pauses.",
+    "details": "Murph only replies while you have AI usage available. You can restart your plan any time in Settings.",
+    "relevanceTags": ["account", "companion"],
+    "sourcePullRequests": []
+  }
+}

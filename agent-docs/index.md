@@ -1,3 +1,8 @@
+Product access after billing lapses, kept separate from AI usage, is owned by
+[Companion App](product-specs/companion-app.md) and [Architecture](../ARCHITECTURE.md).
+The caller audit and local proof are in the
+[execution record](exec-plans/completed/2026-11-06-lapsed-member-access.md).
+
 Meal fiber reader compatibility and deployment boundaries are owned by
 [iOS Meals](product-specs/ios-meals.md#release-order-and-compatibility); focused
 proof is recorded in [the reader plan](exec-plans/completed/2026-11-06-meals-fiber-reader.md).

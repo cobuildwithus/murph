@@ -84,10 +84,12 @@ describe("native companion canonical admission", () => {
   });
 
   it.each(Object.values(HostedBillingStatus).filter((status) => status !== HostedBillingStatus.not_started))(
-    "does not reinterpret %s billing as fresh Starter access", async (billingStatus) => {
+    "does not reenroll %s billing and follows the product guard", async (billingStatus) => {
       mocks.auth.mockResolvedValue({ kind: "better-auth", member: { ...member, billingStatus } });
-      mocks.requireAccess.mockRejectedValue(denied("HOSTED_ACCESS_REQUIRED"));
-      expect((await POST(request())).status).toBe(403);
+      if (billingStatus === HostedBillingStatus.incomplete) {
+        mocks.requireAccess.mockRejectedValue(denied("HOSTED_ACCESS_REQUIRED"));
+      }
+      expect((await POST(request())).status).toBe(billingStatus === HostedBillingStatus.incomplete ? 403 : 200);
       expect(mocks.enroll).not.toHaveBeenCalled();
     },
   );
