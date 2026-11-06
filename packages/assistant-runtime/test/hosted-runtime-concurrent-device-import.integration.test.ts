@@ -22,10 +22,10 @@ import {
   withRealTimeout,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, utimes } from "node:fs/promises";
+import { cp, mkdtemp, readdir, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { test, vi } from "vitest";
+import { afterAll, beforeAll, test, vi } from "vitest";
 import { importDeviceBatch, withCanonicalWriteLock, initializeVault, patchAutomation, upsertAutomation } from "@murphai/core";
 import { EVENT_LEDGER_DIRECTORY, eventRecordSchema } from "@murphai/contracts";
 import { prepareSyntheticFinalization } from "./device-import-finalization.fixture.ts";
@@ -52,6 +52,32 @@ function createTestDeadline(events: string[]) {
     within: <T>(step: Promise<T>) => withRealTimeout(step, remainingMs(), () => events.join(",")),
   };
 }
+
+// Building this history is the heaviest work in the file, so build it once and outside any
+// test's deadline. Both finalization scenarios start from a copy.
+let identityHistoryVault: string;
+
+beforeAll(async () => {
+  identityHistoryVault = await mkdtemp(path.join(tmpdir(), "murph-identity-history-"));
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(TEST_NOW));
+  await initializeVault({ createdAt: TEST_NOW, vaultRoot: identityHistoryVault });
+  for (let batch = 0; batch < 4; batch += 1) {
+    await importDeviceBatch({ vaultRoot: identityHistoryVault, provider: "synthetic",
+      events: Array.from({ length: 8_000 }, (_, i) => ({
+        kind: "observation" as const, occurredAt: "2026-01-01T00:00:00.000Z",
+        recordedAt: TEST_NOW, title: "Synthetic identity history",
+        externalRef: { system: "synthetic", resourceType: "metric", resourceId: `history-${batch}-${i}` },
+        fields: { metric: "synthetic", unit: "count", value: 1 },
+      })),
+    });
+  }
+  vi.useRealTimers();
+});
+
+afterAll(async () => {
+  await removeTempRoot(identityHistoryVault);
+});
 
 test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "acknowledgment", "empty-wake", "finalization", "long-finalization"] as const)("preserves foreground delivery with a %s concurrent device import", async (scenario) => {
   const finalization = scenario === "finalization" || scenario === "long-finalization";
@@ -345,25 +371,15 @@ test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "
         async importItem(item) {
           if (item.item.lane === "conversation") {
             if (!inputId && !cold) {
-              await initializeVault({ createdAt: TEST_NOW, vaultRoot });
               if (finalization) {
-                for (let batch = 0; batch < 4; batch += 1) {
-                  await importDeviceBatch({ vaultRoot, provider: "synthetic",
-                    events: Array.from({ length: 8_000 }, (_, i) => ({
-                      kind: "observation" as const, occurredAt: "2026-01-01T00:00:00.000Z",
-                      recordedAt: TEST_NOW, title: "Synthetic identity history",
-                      externalRef: { system: "synthetic", resourceType: "metric", resourceId: `history-${batch}-${i}` },
-                      fields: { metric: "synthetic", unit: "count", value: 1 },
-                    })),
-                  });
-                }
+                await cp(identityHistoryVault, vaultRoot, { recursive: true });
                 // Model a fresh restore: shard metadata this process never observed
                 // invalidates the warm identity cache, forcing the cold build.
                 const restoredAt = new Date(Date.parse(TEST_NOW) + 60_000);
                 for (const entry of await readdir(path.join(vaultRoot, EVENT_LEDGER_DIRECTORY), { recursive: true, withFileTypes: true })) {
                   if (entry.isFile()) await utimes(path.join(entry.parentPath, entry.name), restoredAt, restoredAt);
                 }
-              }
+              } else await initializeVault({ createdAt: TEST_NOW, vaultRoot });
             }
             inputId = await stagePendingLinqAssistantInputForMailboxItem({ item: item.item, vaultRoot });
             return { assistantInputId: inputId, status: "imported" };
