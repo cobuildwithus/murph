@@ -8,7 +8,7 @@ import { brotliCompressSync } from "node:zlib";
 import { materializeVaultMedia } from "@murphai/assistant-engine/assistant-codex";
 import { restoreHostedBundleRoots, snapshotHostedBundleRoots } from "@murphai/runtime-state/node";
 import { expect, test, vi } from "vitest";
-import { addMeal, addMeasurement, archiveClosedIntegrationIngestShards, buildIntegrationEvidencePart, buildIntegrationIngestRecord, importDeviceBatch, initializeVault, readIntegrationIngestEntries, listIntegrationIngestsForEvent, withIntegrationIngestMaterializer } from "@murphai/core";
+import { addMeal, addMeasurement, archiveClosedIntegrationIngestShards, buildIntegrationEvidencePart, buildIntegrationIngestRecord, deleteEvent, importDeviceBatch, initializeVault, readIntegrationIngestEntries, listIntegrationIngestsForEvent, withIntegrationIngestMaterializer } from "@murphai/core";
 import type { HostedRuntimeMediaStore } from "../src/hosted-runtime/platform.ts";
 import {
   type HostedMediaReferenceCatalogue,
@@ -97,10 +97,16 @@ test("failed media pruning retains newly uploaded cold history and the cleanup p
   };
   try {
     await initializeVault({ vaultRoot, timezone: "UTC" });
-    const stale = { byteSize: 3, expiresAt: null, mediaId: "a".repeat(64), mediaKind: "image" as const,
+    const photoPath = path.join(vaultRoot, "fixture.jpg");
+    const bytes = Buffer.from("synthetic retired photo");
+    await writeFile(photoPath, bytes);
+    const meal = await addMeal({ vaultRoot, photoPath, occurredAt: "2020-01-01T00:00:00.000Z" });
+    const stale = { byteSize: bytes.length, expiresAt: null, mediaId: "a".repeat(64), mediaKind: "image" as const,
       mimeType: "image/jpeg", recordedAt: "2020-01-01T00:00:00.000Z",
-      relativePath: "raw/meals/synthetic/thumbnail-stale.jpg", sha256: "b".repeat(64) };
-    objects.set(stale.mediaId, new Uint8Array([1, 2, 3]));
+      relativePath: meal.photo!.relativePath, sha256: createHash("sha256").update(bytes).digest("hex") };
+    objects.set(stale.mediaId, bytes);
+    // Pruning requires the canonical retirement evidence written by meal deletion.
+    await deleteEvent({ vaultRoot, eventId: meal.event.id });
     await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue: { schema: HOSTED_MEDIA_REFS_SCHEMA, entries: [stale] } });
     await mkdir(path.dirname(path.join(vaultRoot, closedPath)), { recursive: true });
     await writeFile(path.join(vaultRoot, closedPath), brotliCompressSync(Buffer.from('{"synthetic":true}\n')));

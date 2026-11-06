@@ -2583,7 +2583,11 @@ not regress an exact matching settled reference to pending.
 
 Photo preservation is independent of upload eligibility. Canonical raw manifests
 retain measurement evidence even after event deletion; meal photo retirement
-replaces that authority with a privacy tombstone. Core closeout and validation
+replaces that authority with a privacy tombstone. Checkpoint reconciliation never
+prunes measurement raw evidence and prunes meal photos only on a canonical privacy
+tombstone; missing, disagreeing or unreadable manifests preserve the object.
+Read authorization accepts one or more agreeing manifests, but rejects any
+tombstone or identity disagreement. Core closeout and validation
 may resolve absent bytes through a settled, unexpired descriptor only when its
 path, hash, size, media kind and canonical owner match. Local bytes still undergo
 local integrity checks and cannot be overridden by a descriptor. The preserver

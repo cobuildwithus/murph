@@ -300,10 +300,9 @@ export async function canonicalRawArtifactMatches(input: {
   mediaKind?: "image" | "video" | "integration-ingest";
 }): Promise<boolean> {
   const artifacts = await readCanonicalRawArtifacts(input);
-  const artifact = artifacts[0];
-  return artifacts.length === 1 && artifact !== undefined && artifact.role !== "privacy_tombstone"
+  return artifacts.length > 0 && artifacts.every(artifact => artifact.role !== "privacy_tombstone"
     && artifact.sha256 === input.sha256 && artifact.byteSize === input.byteSize && artifact.mediaType === input.mimeType
-    && (input.mediaKind === undefined || artifact.mediaType.startsWith(`${input.mediaKind}/`));
+    && (input.mediaKind === undefined || artifact.mediaType.startsWith(`${input.mediaKind}/`)));
 }
 
 /** Retirement remains authoritative after the hosted cleanup pointer is gone. */

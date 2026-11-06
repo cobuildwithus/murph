@@ -252,3 +252,107 @@ test("a photo whose identity cannot be established is kept rather than pruned", 
     expect(mediaStore.get).not.toHaveBeenCalled();
   } finally { await rm(vaultRoot, { recursive: true, force: true }); }
 });
+
+
+test.each(["repeat", "rewrite"])("measurement %s preserves the original object and pointer", async operation => {
+  const root = await mkdtemp(path.join(tmpdir(), "measurement-manifests-"));
+  const vaultRoot = path.join(root, "vault");
+  const { objects, mediaStore } = storeFixture();
+  try {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const sourcePath = path.join(root, "fixture.png");
+    await writeFile(sourcePath, png);
+    const attachments = [{ role: "media_1", sourcePath, allowExistingMatch: true }];
+    const draft = { title: "Synthetic measurement", occurredAt: at,
+      measurements: [{ metric: "weight", value: 70, unit: "kg" }] };
+    const first = await addMeasurement({ vaultRoot, attachments, draft, rawImport: { importedAt: at } });
+    const relativePath = first.event.attachments![0]!.relativePath;
+    // Repeated imports reuse existing bytes; rewrites happen after externalization.
+    const entries = operation === "rewrite" ? await externalizeFixture(vaultRoot, [relativePath], objects) : null;
+    if (operation === "rewrite") await writeFile(sourcePath, Buffer.concat([png, Buffer.from("synthetic revision")]));
+    const second = await addMeasurement({ vaultRoot, attachments, draft: { ...draft, id: first.event.id },
+      rawImport: { importedAt: "2026-01-02T00:00:00.000Z" } });
+    expect(second.event.attachments![0]!.relativePath).toBe(relativePath);
+    expect(second.manifestPath).not.toBe(first.manifestPath);
+    const expectedEntries = entries ?? await externalizeFixture(vaultRoot, [relativePath], objects);
+    expect(await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore }))
+      .toMatchObject({ prunedMediaCount: 0, uploadedMediaCount: 0 });
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toEqual(expectedEntries);
+    expect(objects.get(expectedEntries[0]!.mediaId)).toEqual(png);
+    expect(mediaStore.delete).not.toHaveBeenCalled();
+    if (operation === "rewrite") await rm(path.join(vaultRoot, relativePath));
+    const materialize = createHostedArtifactMaterializer({ vaultRoot, operatorHomeRoot: root, mediaStore });
+    const result = await materialize([relativePath]);
+    if (operation === "repeat") {
+      expect(result.missingArtifactPaths.size).toBe(0);
+      expect(await readFile(path.join(vaultRoot, relativePath))).toEqual(png);
+      expect(mediaStore.get).toHaveBeenCalledTimes(1);
+    } else {
+      expect(result.missingArtifactPaths.get(`vault:${relativePath}`)).toBe("obsolete");
+      expect(mediaStore.get).not.toHaveBeenCalled();
+      await expect(readFile(path.join(vaultRoot, relativePath))).rejects.toMatchObject({ code: "ENOENT" });
+    }
+    expect(mediaStore.put).not.toHaveBeenCalled();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a missing measurement manifest preserves bytes for recovery after its restoration", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "missing-measurement-manifest-"));
+  const vaultRoot = path.join(root, "vault");
+  const { objects, mediaStore } = storeFixture();
+  try {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const sourcePath = path.join(root, "fixture.png");
+    await writeFile(sourcePath, png);
+    const measurement = await addMeasurement({ vaultRoot, attachments: [{ role: "media_1", sourcePath }],
+      draft: { title: "Synthetic measurement", occurredAt: at, measurements: [{ metric: "weight", value: 70, unit: "kg" }] } });
+    const relativePath = measurement.event.attachments![0]!.relativePath;
+    const entries = await externalizeFixture(vaultRoot, [relativePath], objects);
+    const manifestPath = path.join(vaultRoot, measurement.manifestPath!);
+    const manifest = await readFile(manifestPath);
+    await rm(manifestPath);
+    expect(await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).toMatchObject({ prunedMediaCount: 0 });
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toEqual(entries);
+    expect(objects.get(entries[0]!.mediaId)).toEqual(png);
+    expect(mediaStore.delete).not.toHaveBeenCalled();
+    const materialize = createHostedArtifactMaterializer({ vaultRoot, operatorHomeRoot: root, mediaStore });
+    expect((await materialize([relativePath])).missingArtifactPaths.get(`vault:${relativePath}`)).toBe("obsolete");
+    expect(mediaStore.get).not.toHaveBeenCalled();
+    await writeFile(manifestPath, manifest);
+    expect((await materialize([relativePath])).missingArtifactPaths.size).toBe(0);
+    expect(await readFile(path.join(vaultRoot, relativePath))).toEqual(png);
+    expect(mediaStore.get).toHaveBeenCalledTimes(1);
+    expect(mediaStore.put).not.toHaveBeenCalled();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test.each(["absent", "disagreeing"])("meal with %s manifest evidence is preserved but cannot be read", async evidence => {
+  const root = await mkdtemp(path.join(tmpdir(), "uncertain-meal-manifest-"));
+  const vaultRoot = path.join(root, "vault");
+  const { objects, mediaStore } = storeFixture();
+  try {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const photoPath = path.join(root, "fixture.png");
+    await writeFile(photoPath, png);
+    const meal = await addMeal({ vaultRoot, photoPath, occurredAt: at });
+    const relativePath = meal.photo!.relativePath;
+    const entries = await externalizeFixture(vaultRoot, [relativePath], objects);
+    const manifestPath = path.join(vaultRoot, meal.manifestPath!);
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    if (evidence === "absent") manifest.artifacts = [];
+    else {
+      const artifact = manifest.artifacts.find((value: { relativePath: string }) => value.relativePath === relativePath);
+      expect(artifact).toBeDefined();
+      artifact.sha256 = "0".repeat(64);
+    }
+    await writeFile(evidence === "absent" ? manifestPath : path.join(path.dirname(manifestPath), "manifest.conflict.json"), JSON.stringify(manifest));
+    expect(await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).toMatchObject({ prunedMediaCount: 0 });
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toEqual(entries);
+    expect(objects.get(entries[0]!.mediaId)).toEqual(png);
+    expect(mediaStore.delete).not.toHaveBeenCalled();
+    const materialize = createHostedArtifactMaterializer({ vaultRoot, operatorHomeRoot: root, mediaStore });
+    expect((await materialize([relativePath])).missingArtifactPaths.get(`vault:${relativePath}`)).toBe("obsolete");
+    expect(mediaStore.get).not.toHaveBeenCalled();
+    expect(mediaStore.put).not.toHaveBeenCalled();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
