@@ -6475,17 +6475,19 @@ deadline, which also bounds outbox retries.
 
 The minute drain handles up to ten lifecycle receipts a pass, four at a time. It
 takes the oldest due receipt of each chat before applying that limit, so a chat
-with a long backlog takes one slot and hides no other chat; the dedupe covers the
-oldest 100,000 due rows. A receipt's chat comes from its game's binding, or the
-room in a group check-in's reference, because the room owner is unset on most
-receipts until they publish. Every receipt with no known chat shares one slot.
+with a long backlog takes one slot and hides no other chat. That query reads
+every due row, so its cost grows with the backlog. A receipt's chat comes from its
+game's binding, or the room in a group check-in's reference, because the room owner
+is unset on most receipts until they publish. Every receipt with no known chat
+shares one slot.
 Claims stop 90 seconds of real time after the drain starts, counting the
 missed-day sweep, so the drain ends inside the 180-second cron it shares with
 Stripe reconciliation. A claim leases its receipt for 180 seconds from the actual
-claim time, the cron's maximum, so an overlapping drain cannot take a receipt its
-claimer is still processing. A failing receipt therefore retries about every
-three minutes. Frozen recovery handles one receipt a pass under the same budget
-and lease. Each failed item logs one diagnostic with its template and a fixed
+claim time, the cron's maximum, until its first status transition: publication
+replaces the lease with a 60-second recovery timer and provider acceptance clears
+it, after which the mailbox item and frozen provider identity contain any repeat
+work. A receipt that fails before then retries about every three minutes. Frozen
+recovery handles one receipt a pass under the same budget and lease. Each failed item logs one diagnostic with its template and a fixed
 code. Ten a pass is about 600 turns an hour. A burst publishes at that rate
 because older receipts go first, but each notice also costs a recovery turn, so
 sustained capacity is about 300 notices an hour. A check-in backlog that cannot

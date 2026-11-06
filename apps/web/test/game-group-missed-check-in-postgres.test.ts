@@ -8,7 +8,7 @@ import { gameAudienceKeys } from "@/src/lib/game/audience";
 import { sealGameText } from "@/src/lib/game/crypto";
 import { readGameChatTranscript } from "@/src/lib/game/chat-tool";
 import { gameChatLifecycleEventId, reserveGameChatLifecycleTx, reserveGameMissedDayTx, gameGroupMissedDayEventId, gameMissedDayEventId } from "@/src/lib/game/chat-lifecycle-receipt";
-import { drainGameChatLifecycle } from "@/src/lib/game/chat-lifecycle";
+import { drainGameChatLifecycle, readOldestReceiptPerChat } from "@/src/lib/game/chat-lifecycle";
 import { GameChatAudienceError } from "@/src/lib/game/chat-membership";
 import { readGroupMissedDayDeliveryAuthority, prepareGroupMissedDay, reserveGroupGameMissedDay, isGroupMissedDayBatchCurrentTx } from "@/src/lib/game/group-missed-day";
 import { assertGameProposalDeliveryCurrentTx } from "@/src/lib/game/chat-delivery-authority";
@@ -761,17 +761,33 @@ describe.skipIf(!enabled)("lifecycle batch", () => {
     return eventId;
   }
   const untouched = async (eventId: string, attemptedAt: Date) => expect(await receipt(eventId)).toMatchObject({ status: "awaiting_generation", attemptedAt });
-  /** The backlog repeated propose-and-cancel builds: one distinct receipt per cancellation, oldest first. */
-  async function cancellations(gameId: string, count: number) {
-    const rows = Array.from({ length: count }, (_, index) => {
-      const proposalId = randomUUID(), eventId = gameChatLifecycleEventId(gameId, "change_cancelled", proposalId);
-      events.push(eventId);
-      return { id: `cancelled_${randomUUID()}`, idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(eventId)!, source: "game_lifecycle",
-        sourceRef: `${gameId}:${proposalId}`, template: "game_change_cancelled", status: "awaiting_generation", targetKind: "thread", attemptedAt: new Date(index + 1) };
-    });
-    await db.hostedLinqDelivery.createMany({ data: rows });
-    return rows;
-  }
+
+  it("selects exactly the due lifecycle receipts", async () => {
+    const before = new Date(now.getTime() - 1), after = new Date(now.getTime() + 1);
+    const cases = [
+      ["awaiting, no retry time", true, { retryAfterAt: null }],
+      ["awaiting, past", true, { retryAfterAt: before }],
+      ["awaiting, exactly now", true, { retryAfterAt: now }],
+      ["awaiting, future", false, { retryAfterAt: after }],
+      ["queued, no retry time", false, { status: "generation_queued", retryAfterAt: null }],
+      ["queued, past", true, { status: "generation_queued", retryAfterAt: before }],
+      ["queued, exactly now", true, { status: "generation_queued", retryAfterAt: now }],
+      ["queued, future", false, { status: "generation_queued", retryAfterAt: after }],
+      ["skipped", false, { status: "skipped" }],
+      ["sent", false, { status: "sent" }],
+      ["template this build cannot process", false, { template: "game_from_a_newer_build" }],
+      ["no source reference", false, { sourceRef: null }],
+      ["another source", false, { source: "hosted_runtime_linq_delivery" }],
+    ] as const;
+    // Each row is its own chat, so only the due filter can exclude it.
+    const rows = cases.map(([name, due, override], index) => ({ name, due, row: { id: `selection_${randomUUID()}`, source: "game_lifecycle", status: "awaiting_generation",
+      template: "game_group_missed", sourceRef: `selection_room_${randomUUID()}:${date}`, attemptedAt: new Date(index), ...override } }));
+    await db.hostedLinqDelivery.createMany({ data: rows.map(({ row }) => row) });
+    try {
+      const selected = new Set((await readOldestReceiptPerChat(db, now)).map(receipt => receipt.id));
+      expect(rows.map(({ name, row }) => [name, selected.has(row.id)])).toEqual(rows.map(({ name, due }) => [name, due]));
+    } finally { await db.hostedLinqDelivery.deleteMany({ where: { id: { in: rows.map(({ row }) => row.id) } } }); }
+  });
 
   it("publishes ten rooms in one pass and leaves the eleventh for the next", async () => {
     const rooms = await dueRooms(11);
@@ -817,15 +833,21 @@ describe.skipIf(!enabled)("lifecycle batch", () => {
     await untouched(newer, new Date(2_000));
   });
 
-  it("publishes another room's check-in behind 180 older cancellations in one chat", async () => {
+  it("publishes another room's check-in behind more older cancellations in one chat than any scan window", async () => {
     const [spammedRoom, freshRoom] = await shardRooms(2, 17);
     const spammed = await fixture(2, spammedRoom), fresh = await fixture(2, freshRoom), spammedGame = await spammed.addGame();
     expect(await reserveGroupGameMissedDay(fresh.roomId, [await fresh.addGame()], now)).toBe(1);
-    const backlog = await cancellations(spammedGame, 180);
-    await drainGameChatLifecycle({ now });
-    expect(await db.hostedLinqDelivery.findMany({ where: { id: { in: backlog.map(row => row.id) }, attemptedAt: now }, select: { id: true } })).toEqual([{ id: backlog[0]!.id }]);
-    expect((await receipt(gameGroupMissedDayEventId(fresh.roomId, date))).status).toBe("generation_queued");
-    expect(await db.hostedMailboxItem.count({ where: { userId: fresh.roomId } })).toBe(1);
+    // What repeated propose-and-cancel builds: one distinct receipt per cancellation, all older than the other room's.
+    const prefix = `cancelled_${randomUUID()}_`;
+    await db.$executeRaw`INSERT INTO hosted_linq_delivery (id, source, source_ref, template, status, target_kind, attempted_at, updated_at)
+      SELECT ${prefix} || n, 'game_lifecycle', ${spammedGame} || ':proposal' || n, 'game_change_cancelled', 'awaiting_generation', 'thread',
+        TIMESTAMP '1970-01-01' + n * INTERVAL '1 millisecond', CURRENT_TIMESTAMP FROM generate_series(1, 100121) AS n`;
+    try {
+      await drainGameChatLifecycle({ now });
+      expect(await db.hostedLinqDelivery.findMany({ where: { id: { startsWith: prefix }, attemptedAt: now }, select: { id: true } })).toEqual([{ id: `${prefix}1` }]);
+      expect((await receipt(gameGroupMissedDayEventId(fresh.roomId, date))).status).toBe("generation_queued");
+      expect(await db.hostedMailboxItem.count({ where: { userId: fresh.roomId } })).toBe(1);
+    } finally { await db.hostedLinqDelivery.deleteMany({ where: { id: { startsWith: prefix } } }); }
   });
 
   it("keeps the batch full behind one busy chat", async () => {

@@ -80,8 +80,8 @@ describe("durable game chat lifecycle", () => {
   it("filters supported templates and picks one receipt per chat before the limit", async () => {
     await drainGameChatLifecycle({ now });
     const [sql, ...values] = m.lock.mock.calls[0] as [string[], ...unknown[]];
-    expect(sql.join("?")).toMatch(/source_ref IS NOT NULL[\s\S]*DISTINCT ON \(chat\)[\s\S]*ORDER BY attempted_at, id LIMIT \?$/u);
-    expect(values).toEqual([expect.arrayContaining(["game_started", "game_group_missed", "game_challenge"]), now, now, 100_000, 10]);
+    expect(sql.join("?")).toMatch(/DISTINCT ON \(chat\)[\s\S]*source_ref IS NOT NULL[\s\S]*ORDER BY attempted_at, id LIMIT \?$/u);
+    expect(values).toEqual([expect.arrayContaining(["game_started", "game_group_missed", "game_challenge"]), now, now, 10]);
   });
 
   it.each(["awaiting_generation", "generation_queued"])("queues or recovers one bound Prove it notice: %s", async status => {

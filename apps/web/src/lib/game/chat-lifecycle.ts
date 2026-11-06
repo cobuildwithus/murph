@@ -40,10 +40,12 @@ import { readGameRematchDeliveryRevision } from "./chat-delivery-authority";
 const LIFECYCLE_BATCH = 10;
 const LIFECYCLE_WORKERS = 4;
 const LIFECYCLE_CLAIM_BUDGET_MS = 90_000;
-/** Matches the route's maxDuration, so a lease cannot lapse while the invocation that claimed it is alive. */
+/**
+ * Covers a claim from when it really started until its first status transition, and matches the route's maxDuration.
+ * Publication replaces it with a 60s recovery timer and provider acceptance clears it, so another drain can overlap after
+ * that; the mailbox item and frozen provider identity contain any repeat work.
+ */
 const LIFECYCLE_LEASE_MS = 180_000;
-/** The most due rows one pass dedupes by chat: more than two months of a single chat's turns. */
-const LIFECYCLE_SCAN_ROWS = 100_000;
 const LIFECYCLE_FROZEN_BATCH = 1;
 
 /**
@@ -130,21 +132,19 @@ function logLifecycleItemFailure(template: string | null, error: unknown): void 
  * each chat, then the limit, so a chat with a long backlog takes one slot and hides no other chat. Its own queue still
  * moves one receipt a pass. `payloadOwnerMemberId` is unset on most receipts until they publish, so the chat comes from the
  * game binding, or the room in a group check-in's reference. Receipts with no known chat are NULL here and collapse into
- * one shared slot. The scan reads every due row through the status index; there is no provider or crypto work in it.
+ * one shared slot. The query reads every due row, so its cost grows with the backlog, with no provider or crypto work in
+ * it. Only the outer limit may cut rows: a limit before the dedupe would let one chat's backlog hide every other chat.
  */
-async function readOldestReceiptPerChat(prisma: PrismaClient, now: Date): Promise<(GameChatIntent & { attemptedAt: Date })[]> {
+export async function readOldestReceiptPerChat(prisma: PrismaClient, now: Date): Promise<(GameChatIntent & { attemptedAt: Date })[]> {
   const oldest = await prisma.$queryRaw<Array<{ id: string }>>`
-    WITH due AS (
-      SELECT id, attempted_at, template, source_ref FROM hosted_linq_delivery
-      WHERE source = 'game_lifecycle' AND template = ANY(${LIFECYCLE_TEMPLATES}::text[]) AND source_ref IS NOT NULL
-        AND ((status = 'awaiting_generation' AND (retry_after_at IS NULL OR retry_after_at <= ${now}::timestamp))
-          OR (status = 'generation_queued' AND retry_after_at <= ${now}::timestamp))
-      ORDER BY attempted_at, id LIMIT ${LIFECYCLE_SCAN_ROWS}
-    ), oldest AS (
+    WITH oldest AS (
       SELECT DISTINCT ON (chat) id, attempted_at FROM (
         SELECT due.id, due.attempted_at,
           CASE WHEN due.template = 'game_group_missed' THEN split_part(due.source_ref, ':', 1) ELSE game.chat_container_member_id END AS chat
-        FROM due LEFT JOIN game ON game.id = split_part(due.source_ref, ':', 1)
+        FROM hosted_linq_delivery due LEFT JOIN game ON game.id = split_part(due.source_ref, ':', 1)
+        WHERE due.source = 'game_lifecycle' AND due.template = ANY(${LIFECYCLE_TEMPLATES}::text[]) AND due.source_ref IS NOT NULL
+          AND ((due.status = 'awaiting_generation' AND (due.retry_after_at IS NULL OR due.retry_after_at <= ${now}::timestamp))
+            OR (due.status = 'generation_queued' AND due.retry_after_at <= ${now}::timestamp))
       ) resolved ORDER BY chat, attempted_at, id
     )
     SELECT id FROM oldest ORDER BY attempted_at, id LIMIT ${LIFECYCLE_BATCH}`;
