@@ -21,9 +21,9 @@ informal name alone is not: require matching saved ingredients and portion
 evidence or ask instead of copying nutrition.
 
 For imported device stubs, load `automatic-meal-capture` and inspect the photo.
-Delete confirmed non-food, unconsumed-food, or pending repeat stubs without
-member-written notes under that skill's rule, confirm absence, then refresh
-same-date totals. Write no note or `remove-photo` for a deleted stub. Preserve member-written notes;
+Delete confirmed non-food or unconsumed-food stubs and resolve pending repeats
+without member-written notes under that skill's rules, confirm absence, then
+refresh same-date totals. Write no note or `remove-photo` for a deleted stub. Preserve member-written notes;
 unclear food stays on the estimation or clarification path.
 
 Use only the canonical meal surface for this recovery: `vault-cli meal list
