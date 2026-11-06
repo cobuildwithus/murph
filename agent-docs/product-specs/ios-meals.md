@@ -143,9 +143,10 @@ metadata-only privacy tombstones preserve append-only history references.
 Account deletion uses the existing encrypted-object cleanup for both copies.
 
 Murph removes a meal the same way, through `deleteMealRecord`, when inspection
-shows an automatically captured photo is not food the member ate and the meal has
-no member-written note. A meal can therefore leave the list without a member
-action, normally after the 9pm closeout. Notes already saved on older non-food
+shows an automatically captured photo is not food the member ate, or, while it
+is still pending review, repeats a meal already saved, and the meal has no
+member-written note. A meal can therefore leave the list without a member action, normally after the 9pm
+closeout. Notes already saved on older non-food
 meals stay until the member removes them.
 
 Hide the meal optimistically after acceptance. Until a new projection is saved,

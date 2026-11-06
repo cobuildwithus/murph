@@ -5,6 +5,7 @@ import path from 'node:path'
 import { Cli } from 'incur'
 import { test } from 'vitest'
 import {
+  addMeal,
   initializeVault,
   listInboxDocumentDefaultPromotionCorrelations,
 } from '@murphai/core'
@@ -621,6 +622,43 @@ test('meal edit rejects a non-IANA timezone in the final repair envelope', async
     assert.equal(result.envelope.error.fieldErrors?.[0]?.path, 'timeZone')
   }
   assert.doesNotMatch(JSON.stringify(result.envelope), /Private\/TimezoneSentinel/u)
+})
+
+test('meal edit leaves source to the host and keeps the capture reviewable', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'murph-capture-edit-'))
+
+  try {
+    const vaultRoot = path.join(root, 'vault')
+    const photoPath = path.join(root, 'capture.jpg')
+    await initializeVault({ vaultRoot })
+    await writeFile(photoPath, 'synthetic image bytes')
+    const { mealId } = await addMeal({
+      vaultRoot,
+      photoPath,
+      source: 'device',
+      occurredAt: '2030-01-15T23:05:51.000Z',
+      externalRef: { system: 'meal-photo-capture', resourceType: 'photo', resourceId: 'synthetic-capture' },
+    })
+    const cli = createDocumentMealSchemaCli()
+    const run = (args: string[]) => runInProcessJsonCli<{
+      entity: { data: { attachments: Array<{ role: string }>; externalRef: { system: string }; source: string } }
+    }>(cli, ['meal', ...args, '--vault', vaultRoot])
+
+    for (const flag of [['--source', 'device'], ['--clear-source']]) {
+      const rejected = await run(['edit', mealId, '--note', 'Rejected edit', ...flag])
+      assert.equal(rejected.exitCode, 1)
+      assert.equal(rejected.envelope.ok, false)
+    }
+
+    const edited = requireData((await run(['edit', mealId, '--note', 'Visible grain bowl'])).envelope).entity.data
+    assert.equal(edited.source, 'manual')
+    assert.equal(edited.externalRef.system, 'meal-photo-capture')
+
+    const reviewed = requireData((await run(['remove-photo', mealId])).envelope).entity.data
+    assert.deepEqual(reviewed.attachments.map(attachment => attachment.role), ['reviewed_photo'])
+  } finally {
+    await rm(root, { force: true, recursive: true })
+  }
 })
 
 test('meal import-json help documents the structured payload path and override rule', async () => {

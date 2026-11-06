@@ -238,6 +238,19 @@ it("recovers legacy exact automatic upload links in list and detail, then rechec
   expect((await GET(request())).status).toBe(401);
 });
 
+it("recovers an edited capture's upload link from its capture reference", async () => {
+  const captureId = "c".repeat(64);
+  const entities = [{ family: "event", kind: "meal", attributes: {
+    mealId: meal.id, source: "manual",
+    externalRef: { system: "meal-photo-capture", resourceType: "photo", resourceId: captureId },
+  } }];
+  mocks.decode.mockImplementation(async () => ({ client: { replica: {
+    generation: 17, generatedAt: savedAt, meals: structuredClone(projection), entities,
+  } } }));
+  mocks.uploadLinks.mockResolvedValue([{ captureId }]);
+  expect((await (await GET(request())).json()).days[0].meals[0].uploadId).toBe(captureId);
+});
+
 it("recovers a real legacy import from the frozen production core client without changing its snapshot", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "synthetic-meals-frozen-"));
   try {

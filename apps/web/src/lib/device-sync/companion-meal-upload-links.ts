@@ -15,8 +15,8 @@ export async function recoverCompanionMealUploadIds(input: {
   const candidates = new Map<string, string>();
   for (const entity of input.entities) {
     if (entity.family !== "event" || entity.kind !== "meal") continue;
-    const { mealId, source, externalRef } = entity.attributes;
-    if (source !== "device" || typeof mealId !== "string" || !meals.has(mealId)) continue;
+    const { mealId, externalRef } = entity.attributes;
+    if (typeof mealId !== "string" || !meals.has(mealId)) continue;
     if (!externalRef || typeof externalRef !== "object" || Array.isArray(externalRef)) continue;
     const ref = externalRef as Record<string, unknown>;
     if (ref.system === "meal-photo-capture" && ref.resourceType === "photo"

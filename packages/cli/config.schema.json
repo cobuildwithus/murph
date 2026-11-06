@@ -3276,16 +3276,6 @@
                           "type": "string",
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
-                        "source": {
-                          "description": "Replace the event source (`manual`, `import`, `device`, or `derived`).",
-                          "type": "string",
-                          "enum": [
-                            "manual",
-                            "import",
-                            "device",
-                            "derived"
-                          ]
-                        },
                         "tag": {
                           "description": "Replace saved tags. Repeat --tag for multiple values.",
                           "type": "array",
@@ -3309,10 +3299,6 @@
                         },
                         "clearDayKey": {
                           "description": "Clear the saved day key.",
-                          "type": "boolean"
-                        },
-                        "clearSource": {
-                          "description": "Clear the saved source.",
                           "type": "boolean"
                         },
                         "clearTags": {
@@ -4560,16 +4546,6 @@
                           "type": "string",
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
-                        "source": {
-                          "description": "Replace the event source (`manual`, `import`, `device`, or `derived`).",
-                          "type": "string",
-                          "enum": [
-                            "manual",
-                            "import",
-                            "device",
-                            "derived"
-                          ]
-                        },
                         "tag": {
                           "description": "Replace saved tags. Repeat --tag for multiple values.",
                           "type": "array",
@@ -4593,10 +4569,6 @@
                         },
                         "clearDayKey": {
                           "description": "Clear the saved day key.",
-                          "type": "boolean"
-                        },
-                        "clearSource": {
-                          "description": "Clear the saved source.",
                           "type": "boolean"
                         },
                         "clearTags": {
@@ -5942,16 +5914,6 @@
                           "type": "string",
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
-                        "source": {
-                          "description": "Replace the event source (`manual`, `import`, `device`, or `derived`).",
-                          "type": "string",
-                          "enum": [
-                            "manual",
-                            "import",
-                            "device",
-                            "derived"
-                          ]
-                        },
                         "tag": {
                           "description": "Replace saved tags. Repeat --tag for multiple values.",
                           "type": "array",
@@ -5975,10 +5937,6 @@
                         },
                         "clearDayKey": {
                           "description": "Clear the saved day key.",
-                          "type": "boolean"
-                        },
-                        "clearSource": {
-                          "description": "Clear the saved source.",
                           "type": "boolean"
                         },
                         "clearTags": {
@@ -6812,16 +6770,6 @@
                           "type": "string",
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
-                        "source": {
-                          "description": "Replace the event source (`manual`, `import`, `device`, or `derived`).",
-                          "type": "string",
-                          "enum": [
-                            "manual",
-                            "import",
-                            "device",
-                            "derived"
-                          ]
-                        },
                         "tag": {
                           "description": "Replace saved tags. Repeat --tag for multiple values.",
                           "type": "array",
@@ -6845,10 +6793,6 @@
                         },
                         "clearDayKey": {
                           "description": "Clear the saved day key.",
-                          "type": "boolean"
-                        },
-                        "clearSource": {
-                          "description": "Clear the saved source.",
                           "type": "boolean"
                         },
                         "clearTags": {
@@ -8576,16 +8520,6 @@
                           "type": "string",
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
-                        "source": {
-                          "description": "Replace the event source (`manual`, `import`, `device`, or `derived`).",
-                          "type": "string",
-                          "enum": [
-                            "manual",
-                            "import",
-                            "device",
-                            "derived"
-                          ]
-                        },
                         "tag": {
                           "description": "Replace saved tags. Repeat --tag for multiple values.",
                           "type": "array",
@@ -8609,10 +8543,6 @@
                         },
                         "clearDayKey": {
                           "description": "Clear the saved day key.",
-                          "type": "boolean"
-                        },
-                        "clearSource": {
-                          "description": "Clear the saved source.",
                           "type": "boolean"
                         },
                         "clearTags": {

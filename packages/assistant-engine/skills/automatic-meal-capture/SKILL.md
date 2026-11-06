@@ -157,9 +157,10 @@ When enriching a captured meal:
 1. List recent meals and find photo-backed device meals with missing nutrition.
 2. Before editing, compare nearby canonical meals for a likely manual,
    conversation, provider, or second-photo record of the same eating occasion.
-   Do not enrich both, sum both, delete, or merge silently; identify the
-   probable duplicate and ask only when resolving it materially affects
-   tracking.
+   Count each occasion once. When inspection shows a capture repeats a meal
+   already saved, apply the deletion rule below and leave that meal unchanged.
+   When you cannot tell, do not enrich both or sum both; ask only when resolving
+   it materially affects tracking.
 3. Show each candidate and inspect its actual photo attachment. Do not infer
    foods from the fact that the on-device classifier accepted it.
 4. Resolve exact visible package or menu labels with the food-journal label
@@ -172,16 +173,17 @@ When enriching a captured meal:
    `--nutrition-source database` for matched database facts, and
    `--nutrition-source estimated` only for visual ingredient or portion
    estimates. For mixed evidence, describe both and set confidence from the
-   weakest material assumption. Preserve the meal's occurred-at time and
-   source. For a device meal, include `--source device` in that same edit.
+   weakest material assumption. Preserve the meal's occurred-at time. An edit
+   makes the meal member-owned, so `source` reads `manual` afterward; its
+   `externalRef` still identifies the capture.
    `--with-daily-totals` belongs to add/import, not edit; after editing, read
    the meal back. Read daily totals only when the existing presentation and
    numeric-suitability rules authorize them. Keep the photo until saved
    structure has been read back.
 6. If the edit fails or the read-back does not prove the intended structure,
    run one fresh bounded meal list for the capture date, re-identify the exact
-   photo-backed device meal from its returned id, source, occurred-at time, and
-   attachment, inspect it, and retry `meal edit` once with corrected arguments.
+   photo-backed capture from its returned id, occurred-at time, and attachment,
+   inspect it, and retry `meal edit` once with corrected arguments.
    Never switch to `meal add`, guess a nearby record, or retry past that one
    correction. If the retry or its read-back fails, keep the photo and report or
    fail the unresolved work instead of claiming enrichment.
@@ -198,8 +200,9 @@ empty, save a concise `--note` describing only the visible meal or food form and
 material uncertainty; never replace a member-written note. Add `--ingredient`
 values only for identities the photo supports. An imported photo stub is not
 evidence of consumption. After actually inspecting an imported device stub,
-if it shows a non-food image or food/drink the member did not consume and has
-no member-written note, run `vault-cli meal delete <meal-id>` and confirm it is
+if it shows a non-food image, food/drink the member did not consume, or, while
+its attachment role is still `photo`, a meal already saved, and has no
+member-written note, run `vault-cli meal delete <meal-id>` and confirm it is
 absent with a fresh bounded `meal list` for its capture date. Write no note and
 run no `remove-photo` for that meal. This applies to interactive enrichment and
 scheduled closeout. Never delete from classifier acceptance, a guess, or
@@ -212,11 +215,11 @@ one narrow identity or portion question only when actual attachment inspection
 leaves identity or amount too indeterminate for any meaningful bounded estimate
 and the answer would materially help.
 
-A recent device meal remains unresolved after its attachment becomes a privacy
+A recent captured meal remains unresolved after its attachment becomes a privacy
 tombstone when its saved identity, amount or ingredients, and nutrition cannot
 support the member's current request. When the member answers a capture question
 or asks for totals or a card that meal blocks, match the existing meal from the
-current conversation, device source, capture date, and capture time with bounded
+current conversation, `externalRef`, capture date, and capture time with bounded
 `meal list` and `meal show` reads; never add a replacement or restore the photo.
 Apply the estimation-eligibility rule above before recovery. When estimation is
 skipped, do not ask for identity or amount merely to enable nutrition estimates.
@@ -258,8 +261,8 @@ On a scheduled run:
    same-occurrence retry evidence, use only the already-saved structured fields
    and uncertainty. Enrich the existing meal when supported, apply the bounded
    re-identification and single-retry rule above after a failed edit, and read
-   the result back. Apply the inspected non-food/unconsumed-stub deletion rule
-   above before the food observation fallback. A confirmed deletion completes
+   the result back. Apply the inspected-stub deletion rule above before the food
+   observation fallback. A confirmed deletion completes
    that stub's work. On retry, refresh the queue and skip meals already absent;
    never recreate or delete them again. For food without supported nutrition,
    save and read back the observation fallback above.
@@ -411,9 +414,9 @@ scheduled-question exception; its answer uses the existing-meal recovery above.
 - **Low light, mixed plates, packaging, or food-like objects:** classification
   and portion estimates can be wrong. Use the actual photo and retain
   uncertainty.
-- **Several photos of one meal:** they can become separate meal records. Do not
-  silently sum, delete, or merge them; identify the likely duplicate and ask
-  only if it would materially change tracking.
+- **Several photos of one meal:** they can become separate meal records. Count
+  the meal once under the inspected-stub deletion rule; when you cannot tell,
+  ask only if it would materially change tracking.
 - **App says Sent but the assistant did not mention it:** automatic background
   imports may stay quiet. A manual Send to Murph submission requests estimation;
   query meals by captured time and complete the existing meal or clarify missing
