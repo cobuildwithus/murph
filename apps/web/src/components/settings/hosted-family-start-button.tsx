@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   requestHostedOnboardingJson,
@@ -31,8 +31,10 @@ interface HostedFamilyCheckoutConfirmation {
 
 export function HostedFamilyStartButton(props: {
   block?: boolean;
+  className?: string;
   familyInviteReturnPath?: string | null;
   label: string;
+  onSubmittingChange?: (submitting: boolean) => void;
   ownershipConfirmation?: boolean;
   returnDirectlyToInvite?: boolean;
   resolveCheckoutForInvite?: boolean;
@@ -45,6 +47,10 @@ export function HostedFamilyStartButton(props: {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const { onSubmittingChange } = props;
+  useEffect(() => {
+    onSubmittingChange?.(isSubmitting);
+  }, [isSubmitting, onSubmittingChange]);
   const confirmation: HostedFamilyCheckoutConfirmation | null =
     props.trialConversionConfirmation ?? (
       props.ownershipConfirmation
@@ -142,7 +148,7 @@ export function HostedFamilyStartButton(props: {
           void startCheckout();
         }}
         disabled={isSubmitting}
-        className={props.block ? "w-full" : undefined}
+        className={cn(props.block && "w-full", props.className)}
       >
         {isSubmitting ? "Opening Stripe..." : props.label}
       </Button>

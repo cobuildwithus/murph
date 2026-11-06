@@ -8,6 +8,9 @@ import { cn } from "@/src/lib/utils";
 const LINK_PAGE_PILL_CLASS =
   "flex h-14 w-full items-center justify-center gap-2 rounded-full bg-[#FFFCF6] text-[17px] font-semibold text-[#2D3436] transition-[opacity,scale] duration-150 hover:opacity-90 active:scale-[0.98] motion-reduce:transition-none";
 
+const LINK_PAGE_LINK_CLASS =
+  "h-11 rounded-lg px-3 text-[15px] font-semibold text-[#FFFCF6] underline-offset-4 hover:underline";
+
 function LinkPageSurface({ children }: { children: ReactNode }) {
   return (
     <div
@@ -116,10 +119,7 @@ function LinkPageLink({
 }: ComponentProps<typeof Button>) {
   return (
     <Button
-      className={cn(
-        "h-11 rounded-lg px-3 text-[15px] font-semibold text-[#FFFCF6] underline-offset-4 hover:underline",
-        className,
-      )}
+      className={cn(LINK_PAGE_LINK_CLASS, className)}
       size="unstyled"
       type="button"
       variant="unstyled"
@@ -199,6 +199,7 @@ function LinkPageError({ children }: { children: ReactNode }) {
 }
 
 export {
+  LINK_PAGE_LINK_CLASS,
   LINK_PAGE_NIGHT_TOKENS,
   LINK_PAGE_PILL_CLASS,
   LinkPageError,

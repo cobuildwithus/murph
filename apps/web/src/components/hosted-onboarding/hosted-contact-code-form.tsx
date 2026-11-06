@@ -116,7 +116,7 @@ export function HostedContactCodeForm({
       <div className="space-y-3">
         <Label htmlFor={inputId}>Your email</Label>
         <Input id={inputId} type="email" inputMode="email" autoFocus={autoFocus} autoComplete="off" autoCapitalize="none" spellCheck={false}
-          data-bwignore="true" placeholder="you@example.com" inputSize="xl" className="w-full border-stone-200 bg-white"
+          data-bwignore="true" placeholder="you@example.com" inputSize="xl" className="w-full"
           maxLength={320} required value={draft} disabled={pending !== null} onChange={(event) => setDraft(event.target.value)} />
       </div>
       <Button type="submit" size="xl" className="w-full" disabled={pending !== null} aria-busy={pending !== null}>
