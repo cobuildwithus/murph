@@ -45,7 +45,7 @@ import {
   sendClaimedHostedAiUsageLimitNoticeToTelegramThread,
 } from "../hosted-execution/usage-limit-notice";
 import { projectHostedAiUsageLimitNoticeForDelivery } from "../hosted-execution/usage-limit-notice-message";
-import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
+import { hostedRuntimeMemberEligibleWhere, readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
   readHostedWorkspace,
   type HostedWorkspaceRecord,
@@ -100,18 +100,8 @@ export async function readHostedRuntimeReconciliationFacts(
   const projectedWorkspace = projectHostedRuntimeReconciliationWorkspace(workspace);
 
   if (!hasActiveAccess) {
-    const facts = buildHostedRuntimeBlockedFacts({
-      mailboxLag: [],
-      reason: "user_not_active",
-      retryAt: projectedWorkspace
-        ? readHostedRuntimeFutureTimestamp(projectedWorkspace.inboxMediaRetentionWakeAt, now)
-        : null,
-      workspace: projectedWorkspace
-        ? {
-            ...projectedWorkspace,
-            systemMailboxFrontier: null,
-          }
-        : null,
+    const facts = await buildHostedRuntimeInactiveFacts({
+      now, prisma, userId: input.userId, workspace: projectedWorkspace,
     });
     emitHostedRuntimeReconciliationFacts({
       now,
@@ -130,12 +120,7 @@ export async function readHostedRuntimeReconciliationFacts(
   });
   reportStage?.("canonical_projection");
   if (healthDataConsentState === "revoked") {
-    const facts = buildHostedRuntimeBlockedFacts({
-      mailboxLag: [],
-      reason: "health_data_consent_withdrawn",
-      retryAt: null,
-      workspace: projectedWorkspace,
-    });
+    const facts = buildHostedRuntimeConsentWithdrawnFacts(projectedWorkspace);
     emitHostedRuntimeReconciliationFacts({
       now,
       facts,
@@ -216,13 +201,22 @@ export async function readHostedRuntimeReconciliationFacts(
     });
 
     if (gate.status === "health_data_consent_withdrawn") {
+      reportStage?.("canonical_consent");
+      // A thread container inherits its owner's denial here, but claim still
+      // admits its retention and model-free work. Only its own withdrawal quiesces.
+      const withdrawn = await readHostedHealthDataConsentState({
+        memberId: input.userId,
+        prisma,
+      }) === "revoked";
       reportStage?.("canonical_projection");
-      const facts = buildHostedRuntimeBlockedFacts({
-        mailboxLag,
-        reason: "health_data_consent_withdrawn",
-        retryAt: null,
-        workspace: workspaceWithSystemMailboxFrontier,
-      });
+      const facts = withdrawn
+        ? buildHostedRuntimeConsentWithdrawnFacts(projectedWorkspace)
+        : buildHostedRuntimeBlockedFacts({
+            mailboxLag,
+            reason: "health_data_consent_withdrawn",
+            retryAt: null,
+            workspace: workspaceWithSystemMailboxFrontier,
+          });
       emitHostedRuntimeReconciliationFacts({
         now,
         facts,
@@ -312,6 +306,52 @@ export async function readHostedRuntimeReconciliationFacts(
     usageGateStatus: "not_required",
   });
   return facts;
+}
+
+async function buildHostedRuntimeInactiveFacts(input: {
+  now: Date;
+  prisma: PrismaClient;
+  userId: string;
+  workspace: HostedRuntimeReconciliationFactsWorkspace | null;
+}): Promise<HostedRuntimeReconciliationFacts> {
+  const { now, prisma, workspace } = input;
+  const retentionEligible = workspace?.inboxMediaRetentionWakeAt != null
+    && await prisma.hostedMember.findUnique({
+      select: { id: true },
+      where: { id: input.userId, AND: [hostedRuntimeMemberEligibleWhere()] },
+    });
+  const retentionWakeAt = retentionEligible ? workspace.inboxMediaRetentionWakeAt : null;
+  return buildHostedRuntimeBlockedFacts({
+    mailboxLag: [],
+    reason: "user_not_active",
+    retryAt: readHostedRuntimeFutureTimestamp(retentionWakeAt, now),
+    workspace: workspace ? {
+      ...workspace,
+      systemMailboxFrontier: null,
+      inboxMediaRetentionWakeAt: retentionWakeAt,
+    } : null,
+  });
+}
+
+function buildHostedRuntimeConsentWithdrawnFacts(
+  workspace: HostedRuntimeReconciliationFactsWorkspace | null,
+): HostedRuntimeReconciliationFacts {
+  return buildHostedRuntimeBlockedFacts({
+    mailboxLag: [],
+    reason: "health_data_consent_withdrawn",
+    retryAt: null,
+    workspace: workspace ? {
+      ...workspace,
+      systemMailboxFrontier: null,
+      inboxMediaRetentionWakeAt: null,
+      nextWakeAt: null,
+      nextWakeReason: null,
+      ...(workspace.systemMailboxProgressGeneration === undefined ? {} : {
+        nextDefaultProcessingWakeAt: null,
+        nextDefaultProcessingWakeReason: null,
+      }),
+    } : null,
+  });
 }
 
 function buildHostedRuntimeBlockedFacts(input: {

@@ -13,6 +13,7 @@ import {
 } from "../hosted-groups/thread-container-participant-access";
 import {
   HOSTED_HEALTH_DATA_CONSENT_SCOPE,
+  hostedHealthDataConsentNotRevokedWhere,
   resolveHostedHealthDataConsentState,
 } from "../legal/consent";
 import { getPrisma } from "../prisma";
@@ -313,6 +314,24 @@ async function readGameChatAccessIds(input: {
   prisma: Pick<Prisma.TransactionClient, "$queryRaw">;
 }): Promise<Set<string>> {
   return new Set((await readGameChatFundingRooms({ ...input, now: input.now ?? new Date() })).keys());
+}
+
+/** Claim's floor for every runtime mode; normal processing also needs active access, retention does not. */
+export function hostedRuntimeMemberEligibleWhere(): Prisma.HostedMemberWhereInput {
+  return { suspendedAt: null, AND: [hostedHealthDataConsentNotRevokedWhere()] };
+}
+
+/** The same floor for raw selections, against a table aliased "member". */
+export function hostedRuntimeMemberEligibleSql(): Prisma.Sql {
+  return Prisma.sql`
+    "member"."suspended_at" IS NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM "hosted_consent_grant" AS "consent"
+      WHERE "consent"."member_id" = "member"."id"
+        AND "consent"."scope" = ${HOSTED_HEALTH_DATA_CONSENT_SCOPE}
+        AND "consent"."status" = 'revoked'
+    )
+  `;
 }
 
 /**

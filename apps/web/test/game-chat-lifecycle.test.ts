@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const m = vi.hoisted(() => ({
+  consumed: vi.fn(),
   groupAuthority: vi.fn(), lock: vi.fn(), wake: vi.fn(), challengeCase: vi.fn(), challengeInstructions: vi.fn(), currentChange: vi.fn(),
   event: vi.fn(), receipts: vi.fn(), frozen: vi.fn(), recover: vi.fn(), receiptUpdate: vi.fn(), game: vi.fn(), current: vi.fn(), bind: vi.fn(),
   state: vi.fn(), rematchNotice: vi.fn(), identity: vi.fn(), discover: vi.fn(), exact: vi.fn(), bootstrap: vi.fn(), proposal: vi.fn(),
@@ -20,7 +21,7 @@ vi.mock("../src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: m.p
 vi.mock("../src/lib/hosted-onboarding/hosted-member-identity-store", () => ({ readHostedMemberIdentity: m.identity }));
 vi.mock("../src/lib/hosted-onboarding/linq-observability-identifiers", () => ({ createHostedLinqDeliveryIdempotencyLookupKey: (key: string) => `hash:${key}` }));
 vi.mock("../src/lib/hosted-onboarding/linq-delivery-store", () => ({ buildHostedLinqDeliveryId: (key: string) => key }));
-vi.mock("../src/lib/hosted-mailbox/store", () => ({ appendPreparedHostedMailboxEnvelopeTx: m.append, prepareHostedMailboxEnvelopeAppend: m.prepare, readHostedMailboxItemByDedupeKey: m.mailbox, readHostedMailboxWakeByDedupeKey: m.wake }));
+vi.mock("../src/lib/hosted-mailbox/store", () => ({ isHostedMailboxItemConsumed: m.consumed, appendPreparedHostedMailboxEnvelopeTx: m.append, prepareHostedMailboxEnvelopeAppend: m.prepare, readHostedMailboxItemByDedupeKey: m.mailbox, readHostedMailboxWakeByDedupeKey: m.wake }));
 vi.mock("../src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: m.signal }));
 vi.mock("../src/lib/hosted-routing/assistant-notification-destination", () => ({
   resolveHostedAssistantNotificationDestination: m.destination,
@@ -60,6 +61,7 @@ describe("durable game chat lifecycle", () => {
   });
   beforeEach(() => {
     vi.resetAllMocks();
+    m.consumed.mockResolvedValue(false);
     m.lock.mockResolvedValue([]);
     m.reserveMissed.mockResolvedValue(0);
     m.event.mockResolvedValue({ gameId: "game", type: "change_cancelled", payload: { proposalId: "proposal" } });
@@ -401,7 +403,8 @@ describe("durable game chat lifecycle", () => {
   });
   it("hands consumed work to runtime retry ownership without rewriting provider status", async () => {
     m.receipts.mockResolvedValue([{ ...receipt, status: "generation_queued" }]);
-    m.mailbox.mockResolvedValue({ id: "queued", consumedAt: now });
+    m.mailbox.mockResolvedValue({ id: "queued", consumedAt: null });
+    m.consumed.mockResolvedValue(true);
     await drainGameChatLifecycle({ now });
     expect(m.receiptUpdate).toHaveBeenLastCalledWith({ where: { id: "receipt", status: "generation_queued" }, data: { retryAfterAt: null } });
     expect(m.signal).not.toHaveBeenCalled(); expect(m.prepare).not.toHaveBeenCalled();

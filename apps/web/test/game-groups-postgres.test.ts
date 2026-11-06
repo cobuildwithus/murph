@@ -44,7 +44,7 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({ requireHostedRuntime
 vi.mock("@/src/lib/hosted-routing/thread-route-store", async importOriginal => ({ ...await importOriginal<object>(), assertHostedThreadRouteEgressAuthority: async () => {} }));
 vi.mock("@/src/lib/hosted-groups/group-message-sender", () => ({ resolveHostedGroupMessageSenderMemberId: async () => chatProof.sender }));
 vi.mock("@/src/lib/hosted-mailbox/store", async importOriginal => ({ ...await importOriginal<object>(), readHostedMailboxConversationWakeByAssistantInputId: async () => chatProof.wake,
-  prepareHostedMailboxEnvelopeAppend: lifecycleProof.prepare, appendPreparedHostedMailboxEnvelopeTx: lifecycleProof.append, readHostedMailboxItemByDedupeKey: lifecycleProof.mailbox,
+  isHostedMailboxItemConsumed: async () => false, prepareHostedMailboxEnvelopeAppend: lifecycleProof.prepare, appendPreparedHostedMailboxEnvelopeTx: lifecycleProof.append, readHostedMailboxItemByDedupeKey: lifecycleProof.mailbox,
 }));
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: lifecycleProof.signal }));
 vi.mock("@/src/lib/hosted-onboarding/linq-line-store", async importOriginal => ({

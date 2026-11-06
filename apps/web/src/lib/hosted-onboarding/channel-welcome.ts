@@ -71,7 +71,7 @@ export async function ensureHostedMemberChannelWelcome(input: {
     try {
       await signalHostedMailboxAppendRuntime({ expectedUserId: input.memberId, mailboxItemId, prisma: input.prisma });
     } catch {
-      // The durable mailbox sweep recovers failed runtime signals.
+      // The handoff sweep retries failed signals for welcomes from the last 24 hours.
     }
   }
 }

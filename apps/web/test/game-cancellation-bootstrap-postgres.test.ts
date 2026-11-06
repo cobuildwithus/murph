@@ -4,6 +4,7 @@ import type { HostedExecutionAssistantNotificationRequestedWake } from "@murphai
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getPrisma } from "@/src/lib/prisma";
 import { readGameChatFundingRooms } from "@/src/lib/game/chat-access";
+import { advanceHostedMailboxConsumedSeqByLane } from "@/src/lib/hosted-mailbox/store";
 import { prepareGameChatBootstrap } from "@/src/lib/game/chat-bootstrap";
 import { deliverGameChangeProposal } from "@/src/lib/game/chat-delivery";
 import { markGameChatGenerationQueuedTx, reserveGameChatLifecycleTx, reserveGameChatProposalTx } from "@/src/lib/game/chat-lifecycle-receipt";
@@ -60,6 +61,7 @@ async function fixture() {
   await markGameChatGenerationQueuedTx(cancellation, db, room);
   await db.hostedMailboxItem.create({ data: { id: randomUUID(), userId: room, lane: "system", laneSeq: 1n,
     kind: "assistant.notification.requested", dedupeKey: cancellation, occurredAt: now, payloadSchema: "synthetic" } });
+  await db.hostedMailboxLaneCounter.create({ data: { userId: room, lane: "system", nextSeq: 2n } });
   return { db, first, room, gameId, now, cancellation };
 }
 
@@ -78,6 +80,17 @@ describe.skipIf(!enabled)("cancellation bootstrap ordering PostgreSQL", () => {
     await db.hostedLinqDelivery.updateMany({ where: { sourceRef: { startsWith: `${gameId}:` } }, data: { template: "unrelated" } });
     expect(await readGameChatFundingRooms({ memberIds: [room], now, prisma: db })).toEqual(new Map());
   });
+  it("allows another bootstrap after the system floor covers the old cancellation", async () => {
+    const { db, first, room, gameId, now } = await fixture();
+    const proposalId = randomUUID(), eventId = `game-change:${gameId}:${proposalId}`;
+    await db.game.update({ where: { id: gameId }, data: { pendingChange: { v: 1, id: proposalId, proposedByMemberId: first,
+      expectedTermsVersion: 1, change: { kind: "edit", lengthDays: 10 }, effectiveFromDay: 0, startsOn: null, origin: "app", deliveryStatus: "pending" } } });
+    await reserveGameChatProposalTx({ gameId, proposalId, now, tx: db });
+    await expect(prepareGameChatBootstrap(gameId, eventId, "Ask about the replacement.")).resolves.toBeNull();
+    await advanceHostedMailboxConsumedSeqByLane({ userId: room, prisma: db, lanes: [{ lane: "system", consumedSeq: "1" }] });
+    expect(await db.hostedMailboxItem.findFirst({ where: { userId: room } })).toMatchObject({ consumedAt: null });
+    await expect(prepareGameChatBootstrap(gameId, eventId, "Ask about the replacement.")).resolves.toBe(room);
+  });
   it("holds the replacement until cancellation attaches the room, then publishes it once on the ordinary route", async () => {
     const { db, first, room, gameId, now, cancellation } = await fixture();
     const proposalId = randomUUID(), eventId = `game-change:${gameId}:${proposalId}`;
@@ -90,7 +103,8 @@ describe.skipIf(!enabled)("cancellation bootstrap ordering PostgreSQL", () => {
     expect(await db.hostedLinqDelivery.findFirst({ where: { sourceRef: gameId, status: "awaiting_generation" } })).not.toBeNull();
     // Provider acceptance/attachment is separately covered by the bootstrap suite.
     await db.hostedThreadRoute.create({ data: { channel: "linq", containerMemberId: room, threadLookupKey: room, threadIdentityLookupKey: room } });
-    await db.hostedMailboxItem.updateMany({ where: { userId: room, dedupeKey: cancellation }, data: { consumedAt: now } });
+    // System checkpoints advance the floor; they never stamp consumedAt.
+    await advanceHostedMailboxConsumedSeqByLane({ userId: room, prisma: db, lanes: [{ lane: "system", consumedSeq: "1" }] });
     await expect(deliverGameChangeProposal(gameId, proposalId)).resolves.toBe(true);
     await expect(deliverGameChangeProposal(gameId, proposalId)).resolves.toBe(true);
     expect(m.published).toHaveLength(1);
