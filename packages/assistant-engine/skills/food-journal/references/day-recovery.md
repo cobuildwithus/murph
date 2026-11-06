@@ -20,6 +20,12 @@ meal is equivalent to a specific prior meal is usable evidence. A similar
 informal name alone is not: require matching saved ingredients and portion
 evidence or ask instead of copying nutrition.
 
+For imported device stubs, load `automatic-meal-capture` and inspect the photo.
+Delete confirmed non-food or unconsumed-food stubs without member-written notes
+under that skill's rule, confirm absence, then refresh same-date totals. Write
+no note or `remove-photo` for a deleted stub. Preserve member-written notes;
+unclear food stays on the estimation or clarification path.
+
 Use only the canonical meal surface for this recovery: `vault-cli meal list
 --from <date> --to <date> --limit 200 --format json`, `vault-cli meal show
 <meal-id> --format json`, and `vault-cli meal edit <meal-id>` with the typed

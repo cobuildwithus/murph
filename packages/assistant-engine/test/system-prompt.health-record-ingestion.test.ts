@@ -8,6 +8,7 @@ import {
   resolveAssistantSkillsRoot,
 } from '../src/assistant-skill-assets.js'
 import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
+import { MURPH_ATTACH_RESPONSE_CARD_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.js'
 import { MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION } from '../src/assistant/managed-automations.js'
 
 function buildPrompt(): string {
@@ -39,12 +40,23 @@ describe('assistant system prompt health record ingestion invariant', () => {
     expect(automatic).toMatch(/An imported photo stub is not\s+evidence of consumption/u)
     expect(automatic).not.toContain('record only that the retained image was')
     const closeout = automatic.replace(/\s+/gu, ' ')
-    expect(closeout).toContain('record only the supported non-food or non-consumption fact')
-    expect(closeout).toContain('without a dish name, ingredients, or nutrition')
-    expect(closeout).toContain('it never authorizes adding a meal')
-    expect(closeout).toContain('Read the factual observation back, then follow the existing photo cleanup below')
-    expect(closeout).toContain('exclude identified non-food or unconsumed-food records from presentation and questions')
-    expect(closeout).toContain('Any command failure fails the run')
+    expect(closeout).toContain('run `vault-cli meal delete <meal-id>` and confirm it is absent with a fresh bounded `meal list`')
+    expect(closeout).toContain('Write no note and run no `remove-photo` for that meal')
+    expect(closeout).toContain('This applies to interactive enrichment and scheduled closeout')
+    expect(closeout).toContain('Never delete a stub with a member-written note')
+    expect(closeout).toContain('Never delete from classifier acceptance, a guess, or difficulty estimating food')
+    expect(closeout).toContain('unclear images follow the food workflow above')
+    expect(closeout).toContain('On retry, refresh the queue and skip meals already absent')
+    expect(closeout).toContain('For surviving meals only')
+    expect(closeout).toContain('from closeout text, questions, and cards')
+    expect(closeout).toContain('Any command failure, including a failed delete, fails the run')
+    const recovery = await readFile(path.join(resolveAssistantSkillsRoot(), 'food-journal', 'references', 'day-recovery.md'), 'utf8')
+    for (const guidance of [normalizedFood, recovery.replace(/\s+/gu, ' ')]) {
+      expect(guidance).toMatch(/(?:delete|deletion).*?(?:member-written notes)|member-written notes.*?(?:delete|deletion)/iu)
+    }
+    for (const guidance of [automatic, food, recovery, prompt, MURPH_ATTACH_RESPONSE_CARD_TOOL.description]) {
+      expect(guidance.replace(/\s+/gu, ' ')).not.toMatch(/record only the supported non-food|Read the factual observation back|neither saved nutrition nor that observation/u)
+    }
     const managed = MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions
     expect(managed).toContain('A review-completion failure or any selected pending photo attachment remaining fails the run')
     expect(closeout).not.toContain('defer')
