@@ -1869,3 +1869,7 @@ The current model and compatibility contract remain in `../ARCHITECTURE.md`.
 Retired feature residue cleanup is tracked in [the removal record](exec-plans/completed/2026-11-05-remove-age-remnants.md).
 
 Changelog deletion evidence is owned by `../apps/web/changelog/README.md`; [verification record](exec-plans/completed/2026-11-05-changelog-deleted-entry-proof.md).
+
+Canonical publication uncertainty and operational receipt replay proof are tracked in
+[`canonical evidence preservation`](exec-plans/completed/2026-11-06-preserve-canonical-evidence.md).
+The durable contract remains in `references/hosted-runtime-protocol.md`.

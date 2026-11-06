@@ -73,6 +73,7 @@ type HostedLocalAssistantProviderFunctionCallResponse = {
   };
 
 type HostedLocalAssistantProviderCustomToolCallResponse = {
+  beforeResponse?: () => Promise<void> | void;
   customToolCall: {
     input: string;
     name: string;
@@ -161,8 +162,10 @@ export function buildAssistantProviderShellCommandCall(
 export function buildAssistantProviderMurphToolCall(
   tool: string,
   toolArguments: Record<string, unknown>,
+  beforeResponse?: () => Promise<void> | void,
 ): HostedLocalAssistantProviderScriptedResponse {
   return {
+    ...(beforeResponse ? { beforeResponse } : {}),
     customToolCall: {
       input: buildAssistantProviderMurphCodeModeInput(tool, toolArguments),
       name: "exec",
@@ -408,6 +411,7 @@ export interface HostedLocalAssistantProviderStubRequest {
   queuedResponseCount?: number;
   requestKind?: "turn" | "prewarm" | "compaction" | "memory" | "unknown";
   responseStatus?: number | null;
+  responseToolCallId?: string;
   url: string;
 }
 
@@ -707,11 +711,12 @@ async function prepareAssistantProviderScriptedResponse(
   scriptedResponse: HostedLocalAssistantProviderScriptedResponsePayload,
   requestContext: HostedLocalAssistantProviderRequestContext,
 ): Promise<string | HostedLocalAssistantProviderToolCallResponse> {
-  if (typeof scriptedResponse === "object" && "functionCall" in scriptedResponse) {
+  if (typeof scriptedResponse === "object"
+    && ("functionCall" in scriptedResponse || "customToolCall" in scriptedResponse)) {
     await scriptedResponse.beforeResponse?.();
     return scriptedResponse;
   }
-  if (typeof scriptedResponse === "string" || "customToolCall" in scriptedResponse) {
+  if (typeof scriptedResponse === "string") {
     return scriptedResponse;
   }
   if ("deriveResponse" in scriptedResponse) {
@@ -1133,6 +1138,7 @@ export async function startAssistantProviderStubServer(input: {
           responseId,
           toolCall: preparedScriptedResponse,
         });
+        requestRecord.responseToolCallId = String(toolCallItem.call_id);
         const usage = buildAssistantProviderStubUsage({
           body,
           responseText: JSON.stringify(toolCallItem),
