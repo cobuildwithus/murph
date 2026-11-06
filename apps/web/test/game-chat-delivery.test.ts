@@ -158,6 +158,24 @@ describe("game proposal chat delivery", () => {
     await deliverGameChangeProposal("game", "proposal");
     expect(m.enqueue).not.toHaveBeenCalled(); expect(m.wake).toHaveBeenCalledWith({ expectedUserId: "room", mailboxItemId: "existing" });
   });
+  it("does not append a legacy JSON sent proposal while its mailbox item is retained", async () => {
+    m.game.mockResolvedValue({ ...game("room"), pendingChange: { v: 1, ...proposal, deliveryStatus: "sent" } });
+    m.mailbox.mockResolvedValue({ id: "existing", consumedAt: new Date() }); m.consumed.mockResolvedValue(true);
+    await expect(deliverGameChangeProposal("game", "proposal")).resolves.toBe(true);
+    expect(m.mailbox).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ dedupeKey: "game-change:game:proposal", userId: "room" }));
+    expect(m.enqueue).not.toHaveBeenCalled(); expect(m.wake).not.toHaveBeenCalled();
+    expect(m.create).not.toHaveBeenCalled(); expect(m.claim).not.toHaveBeenCalled();
+  });
+  it("appends one wake for a legacy JSON sent proposal after mailbox removal without dispatching to the provider", async () => {
+    m.game.mockResolvedValue({ ...game("room"), pendingChange: { v: 1, ...proposal, deliveryStatus: "sent" } });
+    await expect(deliverGameChangeProposal("game", "proposal")).resolves.toBe(true);
+    expect(m.enqueue).toHaveBeenCalledOnce();
+    expect(m.wake).toHaveBeenCalledExactlyOnceWith({ expectedUserId: "room", mailboxItemId: "notify" });
+    expect(m.prepareMailbox.mock.calls[0]![0].envelope.notification).toMatchObject({
+      deliveryIdempotencyKey: "game-change:game:proposal", deliveryDispatchMode: "queue-only",
+    });
+    expect(m.create).not.toHaveBeenCalled(); expect(m.claim).not.toHaveBeenCalled();
+  });
   it("requires a fresh exact roster before runtime game tools read shared terms", async () => {
     m.game.mockResolvedValue(game("room"));
     await requireExactGameChat("room");

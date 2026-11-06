@@ -168,20 +168,21 @@ describe("generated game chat bootstrap", () => {
     expect(m.create).toHaveBeenCalledExactlyOnceWith({ from: "+15555550100", to: phones, message: "You are both in for daily reading. Want reminders for the first few days?", idempotencyKey: eventId });
     expect(m.attachRoute).toHaveBeenCalledWith(expect.objectContaining({ gameId, prepared: { containerMemberId: "room" } }));
   });
-  it("marks an accepted proposal sent without rewriting its sealed terms envelope", async () => {
+  it("attaches an accepted proposal route without writing JSON or changing its sealed envelope", async () => {
     await call("send", "Original generated proposal");
     const proposalEventId = `game-change:${gameId}:proposal_sample`;
     const sealed = { v: 2, id: "proposal_sample", deliveryStatus: "queued", termsWordsEncrypted: "sealed-sentinel" };
     m.frozen = { ...m.frozen, eventId: proposalEventId };
     m.game.mockResolvedValue({ ...game(), pendingChange: sealed });
     m.wake.mockResolvedValue({ kind: "assistant.notification.requested", notification: { gameChatBootstrap: { gameId, eventId: proposalEventId }, route: { delivery: { kind: "bootstrap", target: "room" } } } });
-    m.updateGame.mockClear();
+    const before = structuredClone(sealed);
+    m.updateGame.mockClear(); m.attachRoute.mockClear(); m.saveReceipt.mockClear();
     await expect(handleGameChatBootstrapControl({ memberId: "room", runtimeIdentity: null, request: { action: "game_chat_bootstrap", gameId, eventId: proposalEventId, operation: "recover" } })).resolves.toMatchObject({ result: { status: "sent" } });
-    const [parts, ...values] = m.writeMetadata.mock.calls[0]!;
-    expect(parts.join("?")).toContain(`jsonb_set(pending_change, '{deliveryStatus}', '"sent"'::jsonb)`);
-    expect(values).toEqual([gameId, "room", "proposal_sample"]);
+    expect(m.attachRoute).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ gameId, prepared: { containerMemberId: "room" } }));
+    expect(m.saveReceipt).toHaveBeenCalledExactlyOnceWith({ where: { id: "delivery" }, data: { bootstrapRouteAttachedAt: expect.any(Date), retryAfterAt: null } });
+    expect(m.writeMetadata).not.toHaveBeenCalled();
     expect(m.updateGame).not.toHaveBeenCalled();
-    expect(sealed.termsWordsEncrypted).toBe("sealed-sentinel"); expect(sealed.v).toBe(2);
+    expect(sealed).toEqual(before);
   });
   it.each(["accept", "cancel", "expire"])("reconciles a frozen talk with proposal policy after %s", async (transition) => {
     const talkId = `game-talk:${gameId}:proposal_talk`;

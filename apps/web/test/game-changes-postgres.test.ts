@@ -2,6 +2,7 @@ import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
+import { claimHostedLinqDeliveryProviderDispatchTx, markHostedLinqDeliveryAcceptedTx } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import { toPrismaJsonObject } from "@/src/lib/device-sync/prisma-store/prisma-json";
 import { getPrisma } from "@/src/lib/prisma";
 import { readGame, readGameChatState, runGameCommand } from "@/src/lib/game/service";
@@ -312,6 +313,35 @@ describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL",
     // Runtime group sends carry no provider receipt; acceptance is the final status.
     await db.hostedLinqDelivery.update({where:{idempotencyKey:createHostedLinqDeliveryIdempotencyLookupKey(`game-change:${gameId}:${proposalId}`)!},data:{status:"sent_no_receipt_expected"}});
     for (const viewer of [a,b]) expect((await readGame(gameId,viewer))?.pendingChange).toMatchObject({id:proposalId,deliveryStatus:"sent",deliveryRetryable:true});
+  });
+  it("reads queued JSON with an accepted bootstrap receipt as sent and retryable, then reserves one app cancellation notice", async () => {
+    const { a,b,gameId } = await setup(); const proposalId = randomUUID(); const db = getPrisma();
+    expect(await run(a, { type: "proposeChange", gameId, proposalId, expectedTermsVersion: 1, change: { kind: "edit", lengthDays: 21 } })).toMatchObject({ ok: true });
+    expect(await db.$executeRaw`UPDATE game SET pending_change = jsonb_set(pending_change, '{deliveryStatus}', '"queued"'::jsonb) WHERE id = ${gameId}`).toBe(1);
+    const idempotencyKey = `game-change:${gameId}:${proposalId}`;
+    expect(await db.$transaction(prisma => markHostedLinqDeliveryAcceptedTx({ prisma, idempotencyKey }))).toMatchObject({ deliveryStatus: "accepted" });
+    for (const viewer of [a,b]) expect((await readGame(gameId, viewer))?.pendingChange)
+      .toMatchObject({ id: proposalId, deliveryStatus: "sent", deliveryRetryable: true });
+    expect((await db.game.findUniqueOrThrow({ where: { id: gameId } })).pendingChange).toMatchObject({ id: proposalId, deliveryStatus: "queued" });
+    expect(await run(a, { type: "respondChange", gameId, proposalId, decision: "cancel" })).toMatchObject({ ok: true });
+    expect((await db.game.findUniqueOrThrow({ where: { id: gameId } })).pendingChange).toBeNull();
+    expect(await db.hostedLinqDelivery.count({ where: { template: "game_change_cancelled", sourceRef: `${gameId}:${proposalId}` } })).toBe(1);
+  });
+  it("refuses a new provider dispatch for an accepted game-change receipt without changing it", async () => {
+    const { a,gameId } = await setup(); const proposalId = randomUUID(); const db = getPrisma();
+    expect(await run(a, { type: "proposeChange", gameId, proposalId, expectedTermsVersion: 1, change: { kind: "edit", lengthDays: 21 } })).toMatchObject({ ok: true });
+    const idempotencyKey = `game-change:${gameId}:${proposalId}`;
+    const dispatch = { idempotencyKey, source: "game_lifecycle", sourceRef: gameId,
+      template: "game_proposal", targetKind: "thread", status: "provider_dispatch_started" as const };
+    expect(await db.$transaction(prisma => claimHostedLinqDeliveryProviderDispatchTx({ prisma, ...dispatch }))).toMatchObject({ claimed: true });
+    expect(await db.$transaction(prisma => markHostedLinqDeliveryAcceptedTx({ prisma, idempotencyKey }))).toMatchObject({ deliveryStatus: "accepted" });
+    const where = { idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(idempotencyKey)! };
+    const accepted = await db.hostedLinqDelivery.findUniqueOrThrow({ where });
+    expect(accepted).toMatchObject({ status: "accepted", acceptedAt: expect.any(Date) });
+    expect(await db.$transaction(prisma => claimHostedLinqDeliveryProviderDispatchTx({ prisma, ...dispatch })))
+      .toEqual({ claimed: false, id: accepted.id });
+    expect(await db.hostedLinqDelivery.findUniqueOrThrow({ where })).toEqual(accepted);
+    expect(await db.hostedLinqDelivery.count({ where })).toBe(1);
   });
   it("announces an approval refusal once: Murph's reply in the bound chat, else a notice", async () => {
     const today = gameLocalDate(new Date(), "America/New_York");
