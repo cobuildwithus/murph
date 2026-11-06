@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, describe, test, vi } from "vitest";
 import { initializeVault } from "@murphai/core";
@@ -26,7 +27,7 @@ import { createEmptyHostedMailboxImportState } from "../src/hosted-runtime/mailb
 import { readHostedPendingAssistantInputIds } from "../src/hosted-runtime/pending-input-index.ts";
 import { selectHostedAssistantInputIds } from "../src/hosted-runtime/turn-input.ts";
 
-// Only external parser selection and a transient runtime-read fault are synthetic.
+// Only parser selection and faults around real SQLite operations are synthetic.
 // Normalization, raw capture writes, SQLite claims, parser preparation/publication,
 // assistant evidence, pending index, grouping, and the mailbox loop are real.
 const probes = vi.hoisted(() => ({
@@ -34,6 +35,11 @@ const probes = vi.hoisted(() => ({
   activePreparations: 0,
   closeActiveCounts: [] as number[],
   failNextFailureRead: false,
+  loseNextClaim: false,
+  failCompletions: 0,
+  failFinalizations: 0,
+  failNextRecoveryReset: false,
+  claimSnapshots: [] as Array<Array<{ state: string; attempts: number }>>,
 }));
 vi.mock("@murphai/parsers", async (importOriginal) => ({
   ...await importOriginal<typeof import("@murphai/parsers")>(),
@@ -46,6 +52,40 @@ vi.mock("@murphai/inboxd/runtime", async (importOriginal) => {
     async openInboxRuntime(input: Parameters<typeof actual.openInboxRuntime>[0]) {
       const runtime = await actual.openInboxRuntime(input);
       const list = runtime.listAttachmentParseJobs;
+      const claim = runtime.claimNextAttachmentParseJob;
+      runtime.claimNextAttachmentParseJob = (filters) => {
+        probes.claimSnapshots.push(list({ limit: 200 }).map(({ state, attempts }) => ({ state, attempts })));
+        const job = claim(filters);
+        if (job && probes.loseNextClaim) {
+          probes.loseNextClaim = false;
+          throw new Error("Synthetic owner loss after SQLite claim commit.");
+        }
+        return job;
+      };
+      const complete = runtime.completeAttachmentParseJob;
+      runtime.completeAttachmentParseJob = (attempt) => {
+        if (probes.failCompletions > 0) {
+          probes.failCompletions -= 1;
+          throw new Error("Synthetic completion unavailable.");
+        }
+        return complete(attempt);
+      };
+      const fail = runtime.failAttachmentParseJob;
+      runtime.failAttachmentParseJob = (attempt) => {
+        if (probes.failFinalizations > 0) {
+          probes.failFinalizations -= 1;
+          throw new Error("Synthetic failure finalization unavailable.");
+        }
+        return fail(attempt);
+      };
+      const requeue = runtime.requeueAttachmentParseJobs;
+      runtime.requeueAttachmentParseJobs = (filters) => {
+        if (probes.failNextRecoveryReset) {
+          probes.failNextRecoveryReset = false;
+          throw new Error("Synthetic recovery reset unavailable.");
+        }
+        return requeue(filters);
+      };
       runtime.listAttachmentParseJobs = (filters) => {
         if (probes.failNextFailureRead && filters?.state === "failed") {
           probes.failNextFailureRead = false;
@@ -69,11 +109,130 @@ afterEach(async () => {
   vi.restoreAllMocks();
   probes.configure.mockReset();
   probes.failNextFailureRead = false;
+  probes.loseNextClaim = false;
+  probes.failCompletions = 0;
+  probes.failFinalizations = 0;
+  probes.failNextRecoveryReset = false;
+  probes.claimSnapshots.length = 0;
   probes.closeActiveCounts.length = 0;
   assert.equal(probes.activePreparations, 0);
 });
 
 describe.sequential("hosted consecutive audio preparation", () => {
+  test.each([1, 3])("recovers an ownerless claim from retained SQLite with %i ordered inputs", async (count) => {
+    const fixture = await createFixture(count);
+    fixture.releaseAll();
+    probes.loseNextClaim = true;
+    const blocked = await fixture.run();
+    assert.equal(blocked.state.watermarks.conversation, "0");
+    assert.equal(blocked.blocked[0]?.reasonCode, "conversation-import.parser-retry");
+    assert.deepEqual(await fixture.pending(), []);
+    const [stranded] = await fixture.jobs();
+    assert.ok(stranded);
+    assert.equal(stranded.state, "running");
+    assert.equal(stranded.attempts, 1);
+    assert.deepEqual(fixture.calls, []);
+    const recovered = await fixture.run(); // Reopens the same file, without rebuilding.
+    assert.equal(recovered.state.watermarks.conversation, String(count));
+    assert.deepEqual(recovered.blocked, []);
+    assert.equal((await fixture.jobs()).find((job) => job.jobId === stranded.jobId)?.attempts, 2);
+    assert.ok((await fixture.jobs()).every((job) => job.state === "succeeded"));
+    assert.deepEqual([...fixture.calls].sort(), Array.from({ length: count }, (_, index) => index + 1));
+    await fixture.assertEvidenceOrder(recovered.assistantInputIds ?? []);
+    assert.deepEqual(await fixture.pending(), recovered.assistantInputIds);
+  });
+
+  test.each([1, 3])("recovers completion and failure-finalization outages with %i ordered inputs", async (count) => {
+    const fixture = await createFixture(count);
+    fixture.releaseAll();
+    const strandedCount = Math.min(count, 2);
+    probes.failCompletions = strandedCount;
+    probes.failFinalizations = strandedCount;
+    const blocked = await fixture.run();
+    assert.equal(blocked.state.watermarks.conversation, "0");
+    assert.equal(blocked.blocked[0]?.reasonCode, "conversation-import.parser-retry");
+    assert.deepEqual(await fixture.pending(), []);
+    const stranded = await fixture.jobs();
+    assert.equal(stranded.length, strandedCount);
+    assert.ok(stranded.every((job) => job.state === "running" && job.attempts === 1));
+    assert.equal(fixture.calls.length, strandedCount);
+    probes.claimSnapshots.length = 0;
+    const recovered = await fixture.run();
+    // Both pair rows must be reset before the first new claim, not per capture.
+    assert.deepEqual(probes.claimSnapshots[0], Array.from({ length: strandedCount }, () => ({ state: "pending", attempts: 1 })));
+    assert.equal(recovered.state.watermarks.conversation, String(count));
+    assert.deepEqual(recovered.blocked, []);
+    const jobs = await fixture.jobs();
+    assert.ok(jobs.every((job) => job.state === "succeeded"));
+    for (const job of stranded) assert.equal(jobs.find((candidate) => candidate.jobId === job.jobId)?.attempts, 2);
+    assert.equal(fixture.calls.length, strandedCount + count);
+    await fixture.assertEvidenceOrder(recovered.assistantInputIds ?? []);
+    assert.deepEqual(await fixture.pending(), recovered.assistantInputIds);
+  });
+
+  test.each([1, 2])("never reclaims a live sibling preparation with %i inputs", async (count) => {
+    const fixture = await createFixture(count);
+    const first = fixture.run();
+    await observeBarrier(Promise.all(fixture.started.map((gate) => gate.promise)));
+    // Release any wrongly started replacement so a missing exclusivity guard fails
+    // on real attempt state rather than hanging behind the provider barrier.
+    fixture.releaseRepeatedCalls();
+    const second = await fixture.run();
+    assert.equal(second.state.watermarks.conversation, "0");
+    const jobs = await fixture.jobs();
+    assert.equal(jobs.length, count);
+    assert.ok(jobs.every((job) => job.state === "running" && job.attempts === 1));
+    assert.equal(fixture.calls.length, count);
+    fixture.releaseAll();
+    const completed = await first;
+    assert.ok((await fixture.jobs()).every((job) => job.state === "succeeded" && job.attempts === 1));
+    await fixture.assertEvidenceOrder(completed.assistantInputIds ?? []);
+  });
+
+  test("recovery failure remains retryable and balances preparation ownership", async () => {
+    const fixture = await createFixture(1);
+    fixture.releaseAll();
+    probes.loseNextClaim = true;
+    await fixture.run();
+    probes.failNextRecoveryReset = true;
+    const blocked = await fixture.run();
+    assert.equal(blocked.state.watermarks.conversation, "0");
+    assert.equal(blocked.blocked.length, 1);
+    assert.equal(blocked.blocked[0]?.retryable, true);
+    assert.deepEqual(await fixture.pending(), []);
+    const staged = await listAssistantInputEvents({ vault: fixture.vaultRoot });
+    assert.ok(staged.events.every((event) => event.projection.status !== "failed"));
+    const recovered = await fixture.run();
+    assert.equal(recovered.state.watermarks.conversation, "1");
+    await fixture.assertEvidenceOrder(recovered.assistantInputIds ?? []);
+  });
+
+  test.each([1, 2])("keeps succeeded evidence across replay and real rebuild with %i inputs", async (count) => {
+    const fixture = await createFixture(count);
+    fixture.releaseAll();
+    await fixture.run();
+    const replay = await fixture.run();
+    await fixture.assertEvidenceOrder(replay.assistantInputIds ?? []);
+    await fixture.rebuild();
+    const rebuilt = await fixture.run();
+    assert.equal(rebuilt.state.watermarks.conversation, String(count));
+    assert.equal(fixture.calls.length, count);
+    await fixture.assertEvidenceOrder(rebuilt.assistantInputIds ?? []);
+  });
+
+  test.each([1, 2])("restores published but unfinalized transcripts without parsing again with %i inputs", async (count) => {
+    const fixture = await createFixture(count);
+    fixture.releaseAll();
+    await fixture.run();
+    await fixture.strandPublishedResults();
+    const recovered = await fixture.run();
+    assert.equal(recovered.state.watermarks.conversation, String(count));
+    assert.equal(fixture.calls.length, count);
+    assert.ok((await fixture.jobs()).every((job) => job.state === "pending" && job.attempts === 1));
+    await fixture.assertEvidenceOrder(recovered.assistantInputIds ?? []);
+    assert.deepEqual(await fixture.pending(), recovered.assistantInputIds);
+  });
+
   test.each(["success", "retry", "abort"] as const)(
     "preserves attachment typing during parallel preparation and cleans up on %s",
     async (scenario) => {
@@ -344,6 +503,7 @@ async function createFixture(count: number, options: { typing?: boolean } = {}) 
   let maximumActive = 0;
   let disallowSecond = false;
   let throwSecondDecode = false;
+  let releaseRepeatedCalls = false;
   const wakes: HostedExecutionConversationMessageWake[] = Array.from({ length: count }, (_, index) => ({
     kind: "conversation.message", eventId: `event_audio_fixture_${index + 1}`,
     occurredAt, userId: "member_audio_fixture",
@@ -381,7 +541,9 @@ async function createFixture(count: number, options: { typing?: boolean } = {}) 
       maximumActive = Math.max(maximumActive, probes.activePreparations);
       started[ordinal - 1]!.resolve();
       try {
-        await releases[ordinal - 1]!.promise;
+        if (!releaseRepeatedCalls || calls.filter((call) => call === ordinal).length === 1) {
+          await releases[ordinal - 1]!.promise;
+        }
         return { text: `Synthetic transcript ${ordinal}.` };
       } finally {
         probes.activePreparations -= 1;
@@ -440,6 +602,7 @@ async function createFixture(count: number, options: { typing?: boolean } = {}) 
     vaultRoot, items, wakes, started, finished, calls, downloads, releaseAll,
     disallowSecond() { disallowSecond = true; },
     throwSecondDecode() { throwSecondDecode = true; },
+    releaseRepeatedCalls() { releaseRepeatedCalls = true; },
     release(ordinal: number) { releases[ordinal - 1]!.resolve(); },
     maximumActive: () => maximumActive,
     pending: () => readHostedPendingAssistantInputIds({ vaultRoot }),
@@ -447,6 +610,24 @@ async function createFixture(count: number, options: { typing?: boolean } = {}) 
       const actual = await vi.importActual<typeof import("@murphai/inboxd/runtime")>("@murphai/inboxd/runtime");
       const runtime = await actual.openInboxRuntime({ vaultRoot });
       try { return runtime.listAttachmentParseJobs({}); } finally { runtime.close(); }
+    },
+    async rebuild() {
+      const actual = await vi.importActual<typeof import("@murphai/inboxd/runtime")>("@murphai/inboxd/runtime");
+      const runtime = await actual.openInboxRuntime({ vaultRoot });
+      try {
+        await actual.rebuildRuntimeFromVault({ enqueueParserJobs: true, vaultRoot, runtime });
+      } finally { runtime.close(); }
+    },
+    async strandPublishedResults() {
+      const actual = await vi.importActual<typeof import("@murphai/inboxd/runtime")>("@murphai/inboxd/runtime");
+      const runtime = await actual.openInboxRuntime({ vaultRoot });
+      const databasePath = runtime.databasePath;
+      runtime.close();
+      const database = new DatabaseSync(databasePath);
+      try {
+        database.exec(`update attachment_parse_job set state = 'running';
+          update capture_attachment set parser_state = 'running', transcript_text = null, derived_path = null;`);
+      } finally { database.close(); }
     },
     async assertEvidenceOrder(inputIds: readonly string[]) {
       assert.equal(inputIds.length, count);

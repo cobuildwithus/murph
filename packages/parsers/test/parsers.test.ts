@@ -2793,6 +2793,7 @@ test("attachment parse worker requeues its claimed job when provider parsing abo
     {
       attachmentId,
       captureId: capture.captureId,
+      exactAttempt: { attempt: 1, jobId: runtime.listAttachmentParseJobs({ captureId: capture.captureId })[0]!.jobId },
       state: "running",
     },
   ]);
@@ -2807,7 +2808,7 @@ test("attachment parse worker requeues its claimed job when provider parsing abo
   pipeline.close();
 });
 
-test("stale running parser attempts do not overwrite a requeued rerun", async () => {
+test.each(["completion", "abort"] as const)("stale running parser %s does not overwrite a requeued rerun", async (lateAction) => {
   const vaultRoot = await makeTempDirectory("murph-parser-worker-race-vault");
   const sourceRoot = await makeTempDirectory("murph-parser-worker-race-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
@@ -2848,6 +2849,18 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
   const firstRunRelease = new Promise<void>((resolve) => {
     releaseFirstRun = resolve;
   });
+  let signalSecondRunStarted: (() => void) | undefined;
+  const secondRunStarted = new Promise<void>((resolve) => { signalSecondRunStarted = resolve; });
+  let releaseSecondRun: (() => void) | undefined;
+  const secondRunRelease = new Promise<void>((resolve) => { releaseSecondRun = resolve; });
+  const controller = new AbortController();
+  const finalizations: Array<{ attempt: number; applied: boolean }> = [];
+  const complete = runtime.completeAttachmentParseJob;
+  runtime.completeAttachmentParseJob = (input) => {
+    const result = complete(input);
+    finalizations.push({ attempt: input.attempt, applied: result.applied });
+    return result;
+  };
 
   const registry = createParserRegistry([
     {
@@ -2875,6 +2888,8 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
           };
         }
 
+        signalSecondRunStarted?.();
+        await secondRunRelease;
         return {
           text: "fresh rerun text",
         };
@@ -2887,28 +2902,44 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
     runtime,
     registry,
     ffmpeg: disableFfmpegLookup(),
+    signal: controller.signal,
   });
 
   await firstRunStarted;
+  const firstJob = runtime.listAttachmentParseJobs({ captureId: capture.captureId })[0]!;
   assert.equal(
     runtime.requeueAttachmentParseJobs({
       captureId: capture.captureId,
+      exactAttempt: { jobId: firstJob.jobId, attempt: firstJob.attempts },
       state: "running",
     }),
     1,
   );
 
-  const rerun = await runAttachmentParseJobOnce({
+  const secondAttempt = runAttachmentParseJobOnce({
     vaultRoot,
     runtime,
     registry,
     ffmpeg: disableFfmpegLookup(),
   });
+  try {
+    await secondRunStarted;
+    if (lateAction === "abort") controller.abort();
+    releaseFirstRun?.();
+    assert.equal(await firstAttempt, null);
+    assert.equal(runtime.listAttachmentParseJobs({ captureId: capture.captureId })[0]?.state, "running");
+    assert.equal(runtime.listAttachmentParseJobs({ captureId: capture.captureId })[0]?.attempts, 2);
+    assert.equal(runtime.getCapture(capture.captureId)?.attachments[0]?.parseState, "running");
+    if (lateAction === "completion") assert.deepEqual(finalizations, [{ attempt: 1, applied: false }]);
+  } finally {
+    releaseFirstRun?.();
+    releaseSecondRun?.();
+    await Promise.allSettled([firstAttempt, secondAttempt]);
+  }
+  const rerun = await secondAttempt;
   assert.equal(rerun?.status, "succeeded");
+  assert.equal(rerun?.job.attempts, 2);
   assert.match(rerun?.resultPath ?? "", /attempts\/0002\/result\.json$/u);
-
-  releaseFirstRun?.();
-  assert.equal(await firstAttempt, null);
 
   const refreshed = runtime.getCapture(capture.captureId);
   assert.ok(refreshed);
