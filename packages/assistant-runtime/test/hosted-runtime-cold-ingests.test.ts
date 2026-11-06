@@ -5,6 +5,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { brotliCompressSync } from "node:zlib";
+import { materializeVaultMedia } from "@murphai/assistant-engine/assistant-codex";
+import { restoreHostedBundleRoots, snapshotHostedBundleRoots } from "@murphai/runtime-state/node";
 import { expect, test, vi } from "vitest";
 import { archiveClosedIntegrationIngestShards, buildIntegrationEvidencePart, buildIntegrationIngestRecord, importDeviceBatch, initializeVault, readIntegrationIngestEntries, listIntegrationIngestsForEvent, withIntegrationIngestMaterializer } from "@murphai/core";
 import type { HostedRuntimeMediaStore } from "../src/hosted-runtime/platform.ts";
@@ -20,6 +22,66 @@ import { collectHostedWorkspaceSnapshotArchivePlan, HOSTED_MEDIA_REFS_SCHEMA, HO
 import { createHostedArtifactMaterializer } from "../src/hosted-runtime/artifacts.ts";
 
 const closedPath = "ledger/integration-ingests/2020/2020-01.jsonl.br";
+
+test.each([false, true])("bulk restoration preserves a committed later-month backfill and checkpoint, replaced=%s", async republish => {
+  const root = await mkdtemp(path.join(tmpdir(), "cold-ingest-bulk-race-"));
+  const vaultRoot = path.join(root, "live"), restoredRoot = path.join(root, "restored");
+  const objects = new Map<string, Uint8Array>();
+  let release: (() => void) | undefined;
+  let started: (() => void) | undefined;
+  const paused = new Promise<void>(resolve => { started = resolve; });
+  const resumed = new Promise<void>(resolve => { release = resolve; });
+  let holdFirst = true;
+  const mediaStore: HostedRuntimeMediaStore = {
+    put: async entry => { objects.set(entry.mediaId, entry.bytes); },
+    get: async entry => {
+      if (holdFirst) { holdFirst = false; started!(); await resumed; }
+      return objects.get(entry.mediaId) ?? null;
+    },
+  };
+  const batch = { vaultRoot, provider: "synthetic", events: [], samples: [],
+    evidenceParts: [{ role: "payload", fileName: "payload.json", content: { value: 1 } }] };
+  try {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const first = await importDeviceBatch({ ...batch, importedAt: "2020-01-15T00:00:00.000Z" });
+    const second = await importDeviceBatch({ ...batch, importedAt: "2020-02-15T00:00:00.000Z" });
+    expect((await archiveClosedIntegrationIngestShards({ vaultRoot })).archivedShardCount).toBe(2);
+    await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore });
+    const catalogue = await readHostedMediaReferenceCatalogue({ vaultRoot });
+    expect(catalogue.entries).toHaveLength(2);
+    for (const entry of catalogue.entries) await rm(path.join(vaultRoot, entry.relativePath));
+    const materialize = createHostedArtifactMaterializer({ vaultRoot, operatorHomeRoot: vaultRoot, mediaStore });
+    const bulk = materializeVaultMedia({ args: { all: true }, vaultRoot, materialize });
+    try {
+      await paused;
+      const backfill = await withIntegrationIngestMaterializer(vaultRoot, materialize, () => importDeviceBatch({
+        ...batch, importedAt: "2020-02-16T00:00:00.000Z",
+        evidenceParts: [{ role: "payload", fileName: "payload.json", content: { value: 2 } }],
+      }));
+      expect(backfill.applied).toBe(true);
+      const laterPath = catalogue.entries[1]!.relativePath;
+      const committed = await readFile(path.join(vaultRoot, laterPath));
+      expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries.some(entry => entry.relativePath === laterPath)).toBe(false);
+      if (republish) await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore });
+      release!();
+      expect(await bulk).toEqual({ requested: 2, available: 2, removed: 0, unavailable: [] });
+      expect(await readFile(path.join(vaultRoot, laterPath))).toEqual(committed);
+      const ids = [first.ingestId, second.ingestId, backfill.ingestId];
+      expect((await readIntegrationIngestEntries(vaultRoot)).map(entry => entry.record.id)).toEqual(ids);
+      // The normal checkpoint externalizes the winning shard. A cold restore
+      // and materialization must recover the backfill as well as the old rows.
+      const publication = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore });
+      const snapshot = await snapshotHostedBundleRoots({ kind: "vault", roots: [{ root: vaultRoot, rootKey: "vault", shouldIncludeRelativePath: relativePath => !publication.excludedVaultPaths.includes(relativePath) }] });
+      expect(snapshot).toBeTruthy();
+      await restoreHostedBundleRoots({ bytes: snapshot!, expectedKind: "vault", roots: { vault: restoredRoot } });
+      const restoredMaterialize = createHostedArtifactMaterializer({ vaultRoot: restoredRoot, operatorHomeRoot: restoredRoot, mediaStore });
+      await withIntegrationIngestMaterializer(restoredRoot, restoredMaterialize, async () => {
+        expect((await readIntegrationIngestEntries(restoredRoot)).map(entry => entry.record.id)).toEqual(ids);
+      });
+      expect(await readFile(path.join(restoredRoot, laterPath))).toEqual(committed);
+    } finally { release!(); await bulk; }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 test("failed media pruning retains newly uploaded cold history and the cleanup pointer", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "cold-ingests-prune-retry-"));

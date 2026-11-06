@@ -171,13 +171,12 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       if (input.signal?.aborted) {
         throw input.signal.reason ?? error;
       }
-      if (
-        (error instanceof HostedRuntimeArtifactReadError && error.retryable)
-        || error instanceof HostedColdHistoryUnavailableError
-      ) {
+      if (isOperationalHostedReceiptReplayFailure(error)) {
         await clearHostedWorkspaceRuntimeLocalRoots(restored);
         await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
-        throw error instanceof HostedColdHistoryUnavailableError ? error : error.cause ?? error;
+        throw error instanceof HostedRuntimeArtifactReadError && error.retryable
+          ? error.cause ?? error
+          : error;
       }
       return {
         count: 0,
@@ -272,6 +271,35 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     restoreWasCold: true,
     restoreTiming: null,
   };
+}
+
+// System errors that describe the receipt's target tree, so replay can never succeed.
+const HOSTED_RECEIPT_REPLAY_TREE_SHAPE_ERROR_CODES = new Set([
+  "EEXIST", "EINVAL", "EISDIR", "ELOOP", "ENAMETOOLONG", "ENOENT", "ENOTDIR", "ENOTEMPTY",
+]);
+
+// Only invalid history may retire Web's acknowledged log. The nearest explicit
+// retry disposition wins, so a terminal artifact read stays terminal.
+function isOperationalHostedReceiptReplayFailure(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current = error;
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof HostedColdHistoryUnavailableError) {
+      return true;
+    }
+    if ("retryable" in current && typeof current.retryable === "boolean") {
+      return current.retryable;
+    }
+    // Only OS calls carry `syscall`; zlib decode errors have `errno` but prove bad data.
+    if ("code" in current && typeof current.code === "string"
+      && "syscall" in current && typeof current.syscall === "string"
+      && !HOSTED_RECEIPT_REPLAY_TREE_SHAPE_ERROR_CODES.has(current.code)) {
+      return true;
+    }
+    current = "cause" in current ? current.cause : null;
+  }
+  return false;
 }
 
 interface HostedWorkspaceCleanCheckpointMarker {

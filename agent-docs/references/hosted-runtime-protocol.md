@@ -3949,13 +3949,13 @@ Receipt replay is fail-stop for each restore attempt. The encrypted R2 reader
 owns artifact failure disposition: transport, object-read, key-resolution
 request, and service failures remain retryable, while a persisted object with
 a malformed envelope, unavailable key ID, or deterministic decryption failure
-is terminal. If a retryable read
-failure reaches receipt recovery, the runtime discards that local tree and
-fails the invocation without changing the durable receipt fingerprint; a later
-invocation retries the same input. If the artifact failure is terminal, or if
-referenced content is missing, malformed, conflicting, or fails application,
-the runtime instead reloads the authoritative snapshot before admitting
-foreground work.
+is terminal. If a retryable read failure or an operational local failure
+reaches receipt recovery, including through a materializer cause, the runtime
+discards that local tree and fails the invocation without changing the durable
+receipt fingerprint; a later invocation retries the same input. If the artifact
+failure is terminal, or if referenced content is missing, malformed, conflicting,
+or deterministically fails integrity or tree-shape validation, the runtime
+instead reloads the authoritative snapshot before admitting foreground work.
 That failed receipt batch is rejected as unauthorized recovery input and its
 active fingerprint is removed; the runtime reports the degraded recovery but
 does not create a repair owner or claim the rejected batch remains repairable.
@@ -4083,6 +4083,12 @@ Cloudflare workspace port retries the identical expected-version CAS once. It
 accepts a version-conflict response only when the active invocation fence still
 matches and the returned workspace is the exact requested successor, including
 the receipt fingerprint, snapshot ref, wake fields, and retention wake.
+If the retry cannot prove success, the port reports an unknown canonical write
+outcome with the first failure as its cause. The runtime immediately aborts the
+invocation and clears its clean checkpoint marker; core preserves applied files,
+receipts, and the committed operation record. Queued tools and tool results stop
+at that fence. A later invocation cold-restores the snapshot and receipts Web
+actually accepted.
 Cloudflare forwarding maps an unreadable successful checkpoint response to a
 server error so this bounded ambiguity path remains reachable; verified
 authority and fence rejections remain deterministic `401` failures. Cold

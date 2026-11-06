@@ -593,6 +593,8 @@ export interface AssistantWorkspaceArtifactMaterializationResult {
 export interface AssistantWorkspaceArtifactMaterializationOptions {
   signal?: AbortSignal | null
   maxFileBytes?: number
+  /** Bounds remote reads only. Retired, expired and locally cached files cost nothing. */
+  maxTotalDownloadBytes?: number
 }
 
 export type AssistantWorkspaceArtifactMaterializer = (

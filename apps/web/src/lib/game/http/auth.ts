@@ -1,3 +1,5 @@
+import type { Prisma } from "@prisma/client";
+import { assertHostedNativeMemberAuthCurrentTx, type HostedNativeMemberAuth } from "../../better-auth/native-auth";
 import { isHostedOnboardingError } from "../../hosted-onboarding/errors";
 import { requireHostedMemberAuthFromBearerToken } from "../../hosted-onboarding/request-auth";
 import { hasHostedConsentAtPublishedVersions, readHostedConsentStatus } from "../../legal/consent";
@@ -25,13 +27,25 @@ export async function requireGameMemberAuth(request: Request, inviteToken?: stri
   try {
     auth = await requireHostedMemberAuthFromBearerToken(request, getPrisma());
   } catch (error) {
-    if (isHostedOnboardingError(error) && error.httpStatus === 401) {
-      throw gameHttpError("UNAUTHENTICATED", 401, "Sign in to continue.");
-    }
-    throw error;
+    throwGameAuthError(error);
   }
   if (!(await canEnterGame(auth.member.id, inviteToken || request.headers.get(GAME_INVITE_HEADER) || null))) throw gameDisabled();
   return auth;
+}
+
+export async function assertGameMemberAuthCurrentTx(auth: HostedNativeMemberAuth, tx: Prisma.TransactionClient): Promise<void> {
+  try {
+    await assertHostedNativeMemberAuthCurrentTx(auth, tx);
+  } catch (error) {
+    throwGameAuthError(error);
+  }
+}
+
+function throwGameAuthError(error: unknown): never {
+  if (isHostedOnboardingError(error) && error.httpStatus === 401) {
+    throw gameHttpError("UNAUTHENTICATED", 401, "Sign in to continue.");
+  }
+  throw error;
 }
 
 /**

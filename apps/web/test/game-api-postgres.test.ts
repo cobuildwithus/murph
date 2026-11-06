@@ -28,6 +28,7 @@ import { POST as agree } from "../app/api/device-sync/companion/legal-consent/ro
 import { hostedAuthAdapter } from "../src/lib/better-auth/adapter";
 import { serializeHostedNativeSessionToken } from "../src/lib/better-auth/transport";
 import type { GameHomeView, GameView } from "../src/lib/game/contract";
+import { assertGameMemberAuthCurrentTx, requireGameMemberAuth } from "../src/lib/game/http/auth";
 import { getPrisma } from "../src/lib/prisma";
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -120,6 +121,152 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: memberIds } } });
     await rm(mediaDir, { recursive: true, force: true });
     vi.unstubAllEnvs();
+  });
+
+  async function livePair() {
+    const actor = await member("Player"), peer = await member("Partner"), id = randomUUID();
+    const context = { params: Promise.resolve({ id }) };
+    const created = await game(create(request(actor, { gameId: id, inviteeFirstName: "Partner", terms: {
+      startsOn: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10),
+      tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Read" }],
+      schedule: { count: 3 }, stakes: [{ kind: "prize", item: "Lunch" }],
+    } })));
+    await game(accept(request(peer, { termsVersion: 1, timeZone: "UTC" }), { params: Promise.resolve({ token: created.inviteToken! }) }));
+    await game(start(request(actor), context));
+    return { actor, peer, id, context };
+  }
+
+  async function revoke(token: string) {
+    await hostedAuthAdapter(getPrisma())({}).delete({ model: "session", where: [{ field: "id", value: `session-${tokenMember.get(token)!}` }] });
+  }
+
+  function revokeOnBodyRead(token: string, body: unknown, method = "POST") {
+    const init: RequestInit & { duplex: "half" } = {
+      method, duplex: "half", headers: request(token).headers,
+      body: new ReadableStream({ async pull(controller) {
+        await revoke(token);
+        controller.enqueue(new TextEncoder().encode(JSON.stringify(body)));
+        controller.close();
+      } }, { highWaterMark: 0 }),
+    };
+    return new Request("http://localhost/api/game/v1", init);
+  }
+
+  it("lets foreign-key checks pass the native session recheck while excluding member updates", async () => {
+    const { id, token } = await account();
+    const db = getPrisma();
+    const auth = await requireGameMemberAuth(request(token));
+    let markHeld!: () => void, release!: () => void;
+    const held = new Promise<void>(resolve => { markHeld = resolve; });
+    const released = new Promise<void>(resolve => { release = resolve; });
+    const holding = db.$transaction(async tx => {
+      await assertGameMemberAuthCurrentTx(auth, tx);
+      markHeld();
+      await released;
+    });
+    try {
+      await Promise.race([held, holding]);
+      // The held transaction pins one connection; each probe uses another.
+      await expect(db.$transaction(async tx => {
+        await tx.$queryRaw`SELECT set_config('lock_timeout', '250ms', true)`;
+        return tx.$queryRaw`SELECT 1 AS locked FROM hosted_member WHERE id = ${id} FOR KEY SHARE`;
+      })).resolves.toEqual([{ locked: 1 }]);
+      await expect(db.$transaction(async tx => {
+        await tx.$queryRaw`SELECT set_config('lock_timeout', '250ms', true)`;
+        await tx.$executeRaw`UPDATE hosted_member SET suspended_at = now() WHERE id = ${id}`;
+      })).rejects.toThrow(/lock timeout/u);
+      await expect(db.$transaction(async tx => {
+        await tx.$queryRaw`SELECT set_config('lock_timeout', '250ms', true)`;
+        await tx.$queryRaw`SELECT 1 FROM hosted_member WHERE id = ${id} FOR UPDATE`;
+      })).rejects.toThrow(/lock timeout/u);
+    } finally {
+      release();
+      await holding;
+    }
+  });
+
+  it("serializes opposite native rematch requests through the create route over three rounds", async () => {
+    const { actor, peer, id } = await livePair();
+    let previousGameId: string = id;
+    const terms = {
+      tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Read" }],
+      schedule: { count: 3 }, stakes: [{ kind: "prize", item: "Lunch" }],
+    };
+    for (let round = 0; round < 3; round += 1) {
+      await game(settle(request(actor), { params: Promise.resolve({ id: previousGameId }) }));
+      const gameIds = [randomUUID(), randomUUID()];
+      const responses = await Promise.all([actor, peer].map((token, index) => create(request(token, {
+        gameId: gameIds[index], previousGameId, inviteeFirstName: "Friend", terms,
+      }))));
+      const rematches = await Promise.all(responses.map(response => game(Promise.resolve(response))));
+      expect(rematches[0].id).toBe(rematches[1].id);
+      expect(gameIds).toContain(rematches[0].id);
+      expect(await getPrisma().game.findMany({ where: { previousGameId }, select: { id: true, status: true } }))
+        .toEqual([{ id: rematches[0].id, status: "live" }]);
+      previousGameId = rematches[0].id;
+    }
+  });
+
+  it.each(["post", "setProfile", "watchRecap", "block", "unblock"] as const)("rejects %s revoked after admission without writing", async action => {
+    const { actor, peer, id, context } = await livePair();
+    const memberId = tokenMember.get(actor)!;
+    const blockedMemberId = tokenMember.get(peer)!;
+    const blockContext = { params: Promise.resolve({ memberId: blockedMemberId }) };
+    if (action === "watchRecap") await game(settle(request(actor), context));
+    if (action === "unblock") await blockRoute(request(actor, undefined, "PUT"), blockContext);
+    const snapshot = async () => ({
+      profile: await getPrisma().gameProfile.findUnique({ where: { memberId } }),
+      game: await getPrisma().game.findUnique({ where: { id } }),
+      entries: await getPrisma().gameEntry.findMany({ where: { gameId: id } }),
+      events: await getPrisma().gameEvent.findMany({ where: { gameId: id }, orderBy: { id: "asc" } }),
+      blocks: await getPrisma().gameBlock.findMany({ where: { blockerMemberId: memberId } }),
+    });
+    const before = await snapshot();
+    const transaction = getPrisma().$transaction.bind(getPrisma());
+    const spy = action === "post" || action === "setProfile" ? null
+      : vi.spyOn(getPrisma(), "$transaction").mockImplementationOnce(async (run, options) => {
+        await revoke(actor);
+        return transaction(run, options);
+      });
+    try {
+      const response = action === "post" ? await post(revokeOnBodyRead(actor, { entryId: randomUUID(), kind: "words", text: "Pending post" }), context)
+        : action === "setProfile" ? await profile(revokeOnBodyRead(actor, { firstName: "Changed", timeZone: "UTC" }, "PUT"))
+        : action === "watchRecap" ? await recapWatched(request(actor), context)
+        : action === "block" ? await blockRoute(request(actor, undefined, "PUT"), blockContext)
+        : await unblockRoute(request(actor, undefined, "DELETE"), blockContext);
+      expect(response.status).toBe(401);
+      expect(await response.json()).toMatchObject({ error: { code: "UNAUTHENTICATED" } });
+      expect(await snapshot()).toEqual(before);
+    } finally { spy?.mockRestore(); }
+  });
+
+  it("returns a committed post even when its session is revoked immediately after commit", async () => {
+    const { actor, id, context } = await livePair();
+    const transaction = getPrisma().$transaction.bind(getPrisma());
+    const spy = vi.spyOn(getPrisma(), "$transaction").mockImplementationOnce(async (run, options) => {
+      const result = await transaction(run, options);
+      await revoke(actor);
+      return result;
+    });
+    const entryId = randomUUID();
+    try {
+      expect((await post(request(actor, { entryId, kind: "words", text: "Committed post" }), context)).status).toBe(200);
+      expect(await getPrisma().gameEntry.count({ where: { id: entryId, gameId: id } })).toBe(1);
+    } finally { spy.mockRestore(); }
+  });
+
+  it("retries unavailable storage but finally refuses a foreign media key", async () => {
+    const { actor, peer, id, context } = await livePair();
+    const owned = await imageKey(actor, 81), foreign = await imageKey(peer, 82);
+    vi.stubEnv("VERCEL_ENV", "production");
+    try {
+      for (const [key, status, code, retryable] of [[owned, 503, "GAME_MEDIA_UNAVAILABLE", true], [foreign, 422, "MEDIA_MISSING", false]] as const) {
+        const response = await post(request(actor, { entryId: randomUUID(), kind: "photo", mediaKeys: [key] }), context);
+        expect(response.status).toBe(status);
+        expect(await response.json()).toMatchObject({ error: { code, retryable } });
+      }
+      expect(await getPrisma().gameEntry.count({ where: { gameId: id } })).toBe(0);
+    } finally { vi.stubEnv("VERCEL_ENV", ""); }
   });
 
   it("accepts a talk note through the authenticated invite route and preserves route-owned identity", async () => {

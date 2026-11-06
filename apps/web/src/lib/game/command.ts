@@ -174,6 +174,10 @@ function post(input: Record<string, unknown>): GameCommand {
     ...(data ? { data } : {}),
     ...optional(input.blurHash, (value) => ({ blurHash: string(value, "blurHash", 64) })),
     ...optional(input.captureAgeMs, (value) => ({ captureAgeMs: integer(value, "captureAgeMs", 0, CAPTURE_AGE_MAX_MS) })),
+    ...optional(input.expectEmptySlot, value => {
+      if (value !== true) reject("INVALID_REQUEST", "expectEmptySlot must be true.");
+      return { expectEmptySlot: true as const };
+    }),
   };
 }
 

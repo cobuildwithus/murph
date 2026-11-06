@@ -1,3 +1,4 @@
+import { HostedCanonicalWriteOutcomeUnknownError } from '@murphai/core'
 import { AssistantWorkspaceArtifactMaterializationError } from '../assistant/execution-context.js'
 import { types } from 'node:util'
 import {
@@ -512,8 +513,15 @@ export function createDynamicToolRuntimeIssueInput(input: {
   )
 }
 
+// The publication owner fences through the turn's abort signal, so this one check
+// outranks every generic tool catch: no queued tool runs and no result is reported.
+export function assertCanonicalWriteOutcomeKnown(signal: AbortSignal | undefined): void {
+  if (signal?.reason instanceof HostedCanonicalWriteOutcomeUnknownError) throw signal.reason
+}
+
 // Interruption and owner loss must unwind the turn. Reporting them to the model
 // as an ordinary tool failure would let a stale invocation keep working.
 export function dynamicToolFailureEndsTurn(requestSettled: boolean, error: unknown): boolean {
   return requestSettled || error instanceof AssistantWorkspaceArtifactMaterializationError
+    || error instanceof HostedCanonicalWriteOutcomeUnknownError
 }

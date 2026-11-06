@@ -5,6 +5,7 @@ vi.mock("../src/lib/prisma", () => ({ getPrisma: () => ({ ...tx, $transaction: (
 vi.mock("../src/lib/game/service", () => ({ readGamePhotoPostingStateTx: m.posting, runGameCommand: m.run }));
 vi.mock("../src/lib/game/media", async (original) => ({ ...await original<typeof import("../src/lib/game/media")>(), putGameMedia: m.put }));
 vi.mock("../src/lib/game/chat-photo-media", async (original) => ({ ...await original<typeof import("../src/lib/game/chat-photo-media")>(), downloadGameChatPhoto: m.download }));
+import { gameMediaUnavailable } from "../src/lib/game/http/errors";
 import { handleGameChatPhoto } from "../src/lib/game/chat-photo";
 import { GameChatPhotoImportError } from "../src/lib/game/chat-photo-media";
 import type { HostedExecutionConversationMessageWake } from "@murphai/hosted-execution/contracts";
@@ -110,9 +111,12 @@ describe("game photo accepted-source bridge", () => {
     m.download.mockRejectedValueOnce(new GameChatPhotoImportError("too_large")).mockRejectedValueOnce(new Error("https://cdn.example.test/secret"));
     expect(await handleGameChatPhoto(input("save"))).toMatchObject({ error: "photo_unavailable_resend_or_use_app" });
     expect(await handleGameChatPhoto(input("save"))).toMatchObject({ error: "photo_unavailable_resend_or_use_app" });
+    m.put.mockRejectedValueOnce(gameMediaUnavailable(new TypeError("fetch failed")));
+    expect(await handleGameChatPhoto(input("save"))).toMatchObject({ error: "photo_unavailable_resend_or_use_app" });
     expect(m.run).not.toHaveBeenCalled();
     expect(warn.mock.calls.map(([, details]) => details)).toEqual([
       expect.objectContaining({ warning: "game.chat.photo-import", reason: "too_large" }),
+      expect.objectContaining({ warning: "game.chat.photo-import", reason: "store" }),
       expect.objectContaining({ warning: "game.chat.photo-import", reason: "store" }),
     ]);
     expect(JSON.stringify(warn.mock.calls)).not.toContain("secret");

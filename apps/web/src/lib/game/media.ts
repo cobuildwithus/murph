@@ -5,10 +5,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import type { CloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
+import { readCloudflareHostedControlHttpError, type CloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
 
 import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
 import { mediaKeyOwner } from "./access";
+import { gameMediaUnavailable, invalidGameRequest } from "./http/errors";
 import { openGameMedia } from "./crypto";
 import { readRawBodyBuffer } from "../http";
 
@@ -93,7 +94,14 @@ export async function putGameMedia(input: {
   const store = requireStore();
   if (store.kind === "hosted") {
     const { mediaId, owner } = hostedName(key);
-    await store.control.putGameImage({ bytes: input.bytes, contentType: input.contentType, mediaId, userId: owner });
+    try {
+      await store.control.putGameImage({ bytes: input.bytes, contentType: input.contentType, mediaId, userId: owner });
+    } catch (error) {
+      const refusal = readCloudflareHostedControlHttpError(error);
+      if (refusal?.status === 400) throw invalidGameRequest("The upload isn't a valid image.");
+      if (refusal?.status === 413) throw invalidGameRequest("The image is too large.");
+      throw gameMediaUnavailable(error);
+    }
     return key;
   }
   if (await statGameMedia(key)) return key;
@@ -111,9 +119,13 @@ export async function statGameMedia(key: string): Promise<{ byteLength: number; 
   const contentType = contentTypeOf(key);
   if (store.kind === "hosted") {
     const { mediaId, owner } = hostedName(key);
-    const stored = await store.control.statGameImage({ mediaId, userId: owner })
-      ?? await recoverLegacyGameMedia(store.control, key);
-    return stored ? { byteLength: stored.byteLength, contentType } : null;
+    try {
+      const stored = await store.control.statGameImage({ mediaId, userId: owner })
+        ?? await recoverLegacyGameMedia(store.control, key);
+      return stored ? { byteLength: stored.byteLength, contentType } : null;
+    } catch (error) {
+      throw gameMediaUnavailable(error);
+    }
   }
   try {
     return { byteLength: (await stat(requireFile(store.root, key))).size, contentType };
@@ -198,7 +210,7 @@ function assertImageDeliveryURL(value: string): void {
 
 function requireStore(): Store {
   const store = readStore();
-  if (!store) throw new Error("Game media storage is not configured.");
+  if (!store) throw gameMediaUnavailable();
   return store;
 }
 

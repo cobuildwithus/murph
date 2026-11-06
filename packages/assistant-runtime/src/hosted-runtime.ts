@@ -32,6 +32,7 @@ import {
   VAULT_LAYOUT,
 } from "@murphai/contracts";
 import {
+  HostedCanonicalWriteOutcomeUnknownError,
   CURRENT_VAULT_FORMAT_VERSION,
   runIntegrationIngestMigration,
   withIntegrationIngestMaterializer,
@@ -191,6 +192,7 @@ import {
   type HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
 } from "./hosted-runtime/workspace-runner.ts";
 import {
+  clearHostedWorkspaceCleanCheckpointMarkerBestEffort,
   writeHostedWorkspaceCleanCheckpointMarkerBestEffort,
 } from "./hosted-runtime/workspace-restore.ts";
 import {
@@ -2230,7 +2232,17 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           systemMailboxProgressGeneration,
         });
         const checkpoint = canonicalRuntimeCommit
-          ? await checkpointOperation
+          ? await checkpointOperation.catch(async (error: unknown) => {
+              if (error instanceof HostedCanonicalWriteOutcomeUnknownError) {
+                // The host abort path also owns uncertain canonical publication.
+                hostAbortReason = error;
+                hostAbortObserved = true;
+                hostAbortDuringCanonicalWritePersistence = true;
+                runtimeAbortController.abort(error);
+                await clearHostedWorkspaceCleanCheckpointMarkerBestEffort(restored.vaultRoot);
+              }
+              throw error;
+            })
           : await raceHostedRuntimeCancellation(
               checkpointOperation,
               runtimeAbortController.signal,

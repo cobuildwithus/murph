@@ -261,20 +261,6 @@ export class HostedRuntimeMediaWriteError extends Error {
   }
 }
 
-export class HostedRuntimeCanonicalCheckpointError extends Error {
-  readonly retryable = true;
-
-  constructor(input: { cause: unknown }) {
-    super(
-      input.cause instanceof Error
-        ? input.cause.message
-        : "Hosted runtime canonical checkpoint failed.",
-      { cause: input.cause },
-    );
-    this.name = "HostedRuntimeCanonicalCheckpointError";
-  }
-}
-
 export interface HostedRuntimeAssistantConfigurationToolPort {
   request(
     request: HostedRuntimeAssistantConfigurationControlRequest,

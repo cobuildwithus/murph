@@ -1,3 +1,4 @@
+import { readMaterializeVaultMediaToolRequest, materializeVaultMedia } from './dynamic-tools/materialize-vault-media.js'
 import { sleepSummaryCardRequestSchema } from '@murphai/contracts'
 import { resolveTrustedSleepSummaryCard } from './dynamic-tools/sleep-summary-card.js'
 import { readGameDynamicToolRequest, executeGameTool, type GameDynamicRequest } from './dynamic-tools/games.js'
@@ -1524,6 +1525,7 @@ export type MurphDynamicToolRequest =
   | PhoneCallDynamicToolRequest
   | PhysicalNoteDynamicToolRequest
   | ClinicalRecordsConnectLinkDynamicToolRequest
+  | NonNullable<ReturnType<typeof readMaterializeVaultMediaToolRequest>>
   | {
       kind: 'send-vault-file'
       ref: string
@@ -1801,6 +1803,7 @@ export function readMurphDynamicToolRequest(
   }
 
   for (const readRequest of [
+    readMaterializeVaultMediaToolRequest,
     readConversationPollDynamicToolRequest,
     readGameDynamicToolRequest,
     readDeviceDynamicToolRequest,
@@ -2378,6 +2381,20 @@ function executeInvalidAutomationArgumentsDynamicTool(
         request.validationDigest,
       )
   }
+}
+
+async function executeMaterializeVaultMediaDynamicTool(
+  input: ExecuteMurphDynamicToolRequestInput,
+  request: Extract<MurphDynamicToolRequest, { kind: 'materialize-vault-media' }>,
+): Promise<MurphDynamicToolExecutionResult> {
+  const context = input.hostedToolContext
+  if (!context?.vaultFileSendAvailable || context.currentConversationScope?.() !== 'direct'
+    || !input.vaultRoot || !input.materializeWorkspaceArtifacts) {
+    return toolTextResult(false, 'vault media restoration is unavailable for this conversation', 'unavailable')
+  }
+  const result = await materializeVaultMedia({ args: request.args, vaultRoot: input.vaultRoot,
+    materialize: input.materializeWorkspaceArtifacts, signal: input.abortSignal })
+  return toolTextResult(true, JSON.stringify(result))
 }
 
 async function executeSendVaultFileDynamicTool(
@@ -3704,6 +3721,13 @@ function isUnavailableComputerTool(request: MurphDynamicToolRequest, context: As
   return isExecutableComputerDynamicToolRequest(request) && !canExecuteComputerDynamicTools(context)
 }
 
+function isInvalidOrdinaryToolRequest(request: MurphDynamicToolRequest): request is Exclude<
+  Extract<MurphDynamicToolRequest, { validationDigest: SafeToolCallValidationDigest }>,
+  { kind: 'invalid-automation-arguments' }
+> {
+  return 'validationDigest' in request && request.kind !== 'invalid-automation-arguments'
+}
+
 async function dispatchMurphDynamicToolRequest(
   input: ExecuteMurphDynamicToolRequestInput,
 ): Promise<MurphDynamicToolExecutionResult> {
@@ -3730,10 +3754,7 @@ async function dispatchMurphDynamicToolRequest(
       'unavailable',
     )
   }
-  if (
-    'validationDigest' in input.request
-    && input.request.kind !== 'invalid-automation-arguments'
-  ) {
+  if (isInvalidOrdinaryToolRequest(input.request)) {
     return invalidDynamicToolArgumentsResult(
       input.request.kind === 'invalid-progress-arguments'
         ? 'invalid_progress_update_arguments'
@@ -3844,6 +3865,8 @@ async function dispatchMurphDynamicToolRequest(
         vaultRoot: input.vaultRoot ?? null,
       })
     }
+    case 'materialize-vault-media':
+      return await executeMaterializeVaultMediaDynamicTool(input, input.request)
     case 'send-vault-file':
       return await executeSendVaultFileDynamicTool(input, input.request)
     case 'resolve-physical-note':
