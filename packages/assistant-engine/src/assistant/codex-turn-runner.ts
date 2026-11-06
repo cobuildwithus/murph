@@ -518,6 +518,7 @@ function emitCodexPlanTraceEvent(input: {
         routePlanningUnaccountedElapsedMs:
           input.routePlanningDiagnostics.routePlanningUnaccountedElapsedMs,
         resumeCodexThreadIdPresent: input.resumeCodexThreadIdPresent,
+        threadRotationReason: input.routePlanningDiagnostics.threadRotationReason,
         workingDirectoryKind:
           input.workingDirectory === HOSTED_STABLE_PROVIDER_WORKING_DIRECTORY
             ? 'hosted-stable-proc-cwd'

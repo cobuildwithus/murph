@@ -1863,6 +1863,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
               limitPerLane: input.input.limitPerLane,
               requestId: `${requestId}:system`,
               signal: importCancellation.signal,
+              mailboxFetchSignal: importCancellation.signal,
               checkpointCanonicalMailboxImportProgress:
                 input.checkpointCanonicalMailboxImportProgress,
             });

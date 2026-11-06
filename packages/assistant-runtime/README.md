@@ -4,6 +4,17 @@ Workspace-private headless hosted/runtime surface for Murph assistant execution.
 
 This package exists so hosted runtimes such as `apps/cloudflare` do not need to import their execution seams directly from the public `@murphai/murph` CLI package.
 
+Stopping the active mailbox watcher cancels its system HTTP fetch, preserving
+the system watermark for retry. Conversation imports keep their completion
+boundary, and stop still joins in-flight canonical persistence or rollback.
+
+The existing provider-start callback emits
+`Hosted assistant provider-start critical path timing.` with finite nonnegative
+`automationGroupAndOperationScopeMs`, `automationTerminalEvidenceMs`,
+`automationSessionPreflightMs`, `automationCrossSessionContextMs`, and
+`automationPromptPreparationMs` when available. These describe preparation
+before reply-started, add no awaits, and also remain in the latency trace.
+
 Current responsibilities:
 
 - skip retired member ChatGPT-linking mailbox work before payload loading and

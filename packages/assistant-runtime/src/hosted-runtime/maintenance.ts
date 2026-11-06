@@ -554,6 +554,21 @@ export async function runHostedAssistantAutomation(
       },
       onProviderRequestStarted: (event) => {
         options?.onProviderRequestStarted?.();
+        if (event.providerStartCriticalPath) {
+          const details: Record<string, number> = {};
+          for (const key of [
+            "automationGroupAndOperationScopeMs", "automationTerminalEvidenceMs",
+            "automationSessionPreflightMs", "automationCrossSessionContextMs",
+            "automationPromptPreparationMs",
+          ] as const) {
+            const value = event.providerStartCriticalPath[key];
+            if (typeof value === "number" && Number.isFinite(value) && value >= 0) details[key] = value;
+          }
+          if (Object.keys(details).length > 0) redactedLogEntries.push(emitHostedRuntimeRedactedLog({
+            component: "runtime", details, wake, phase: "wake.running",
+            message: "Hosted assistant provider-start critical path timing.",
+          }));
+        }
         const source = readHostedIngressLatencySource(event.source);
         const runtimeAttemptId = options?.runtimeAttemptId?.trim() ?? "";
         activeProviderMilestoneTraceContext = source && runtimeAttemptId
