@@ -14,12 +14,18 @@ export async function lockHostedMemberRow(
   memberId: string,
   options: {
     timeoutMs?: number;
+    // Let foreign-key checks pass while excluding member updates and deletion.
+    noKeyUpdate?: boolean;
   } = {},
 ): Promise<void> {
   if (options.timeoutMs !== undefined) {
     await tx.$queryRaw`select set_config('lock_timeout', ${`${options.timeoutMs}ms`}, true)`;
   }
-  await tx.$queryRaw`select 1 from "hosted_member" where "id" = ${memberId} for update`;
+  if (options.noKeyUpdate) {
+    await tx.$queryRaw`select 1 from "hosted_member" where "id" = ${memberId} for no key update`;
+  } else {
+    await tx.$queryRaw`select 1 from "hosted_member" where "id" = ${memberId} for update`;
+  }
 }
 
 export async function readHostedMemberSuspensionAfterLockTx(

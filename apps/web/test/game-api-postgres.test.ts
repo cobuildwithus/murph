@@ -28,6 +28,7 @@ import { POST as agree } from "../app/api/device-sync/companion/legal-consent/ro
 import { hostedAuthAdapter } from "../src/lib/better-auth/adapter";
 import { serializeHostedNativeSessionToken } from "../src/lib/better-auth/transport";
 import type { GameHomeView, GameView } from "../src/lib/game/contract";
+import { assertGameMemberAuthCurrentTx, requireGameMemberAuth } from "../src/lib/game/http/auth";
 import { getPrisma } from "../src/lib/prisma";
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -150,6 +151,61 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
     };
     return new Request("http://localhost/api/game/v1", init);
   }
+
+  it("lets foreign-key checks pass the native session recheck while excluding member updates", async () => {
+    const { id, token } = await account();
+    const db = getPrisma();
+    const auth = await requireGameMemberAuth(request(token));
+    let markHeld!: () => void, release!: () => void;
+    const held = new Promise<void>(resolve => { markHeld = resolve; });
+    const released = new Promise<void>(resolve => { release = resolve; });
+    const holding = db.$transaction(async tx => {
+      await assertGameMemberAuthCurrentTx(auth, tx);
+      markHeld();
+      await released;
+    });
+    try {
+      await Promise.race([held, holding]);
+      // The held transaction pins one connection; each probe uses another.
+      await expect(db.$transaction(async tx => {
+        await tx.$queryRaw`SELECT set_config('lock_timeout', '250ms', true)`;
+        return tx.$queryRaw`SELECT 1 AS locked FROM hosted_member WHERE id = ${id} FOR KEY SHARE`;
+      })).resolves.toEqual([{ locked: 1 }]);
+      await expect(db.$transaction(async tx => {
+        await tx.$queryRaw`SELECT set_config('lock_timeout', '250ms', true)`;
+        await tx.$executeRaw`UPDATE hosted_member SET suspended_at = now() WHERE id = ${id}`;
+      })).rejects.toThrow(/lock timeout/u);
+      await expect(db.$transaction(async tx => {
+        await tx.$queryRaw`SELECT set_config('lock_timeout', '250ms', true)`;
+        await tx.$queryRaw`SELECT 1 FROM hosted_member WHERE id = ${id} FOR UPDATE`;
+      })).rejects.toThrow(/lock timeout/u);
+    } finally {
+      release();
+      await holding;
+    }
+  });
+
+  it("serializes opposite native rematch requests through the create route over three rounds", async () => {
+    const { actor, peer, id } = await livePair();
+    let previousGameId: string = id;
+    const terms = {
+      tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Read" }],
+      schedule: { count: 3 }, stakes: [{ kind: "prize", item: "Lunch" }],
+    };
+    for (let round = 0; round < 3; round += 1) {
+      await game(settle(request(actor), { params: Promise.resolve({ id: previousGameId }) }));
+      const gameIds = [randomUUID(), randomUUID()];
+      const responses = await Promise.all([actor, peer].map((token, index) => create(request(token, {
+        gameId: gameIds[index], previousGameId, inviteeFirstName: "Friend", terms,
+      }))));
+      const rematches = await Promise.all(responses.map(response => game(Promise.resolve(response))));
+      expect(rematches[0].id).toBe(rematches[1].id);
+      expect(gameIds).toContain(rematches[0].id);
+      expect(await getPrisma().game.findMany({ where: { previousGameId }, select: { id: true, status: true } }))
+        .toEqual([{ id: rematches[0].id, status: "live" }]);
+      previousGameId = rematches[0].id;
+    }
+  });
 
   it.each(["post", "setProfile", "watchRecap", "block", "unblock"] as const)("rejects %s revoked after admission without writing", async action => {
     const { actor, peer, id, context } = await livePair();
