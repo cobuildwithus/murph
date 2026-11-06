@@ -1,6 +1,6 @@
 # One owner per meal capture fact
 
-Status: active
+Status: completed
 Created: 2026-11-05
 Updated: 2026-11-05
 
@@ -65,3 +65,6 @@ Updated: 2026-11-05
 - Commands to run: focused CLI, engine and Web tests, `pnpm complexity:diff`,
   `pnpm docs:drift`, and `pnpm test:assistant:live -- --test "counts a repeated capture once"`.
 - Expected outcomes: all pass, and the printed replies meet the reply bar.
+- Result: all passed on `gpt-6.1-sol` with local subscription auth, reply review Ready. The existing non-food and edit-recovery journeys also passed.
+- A Codex deep review found one contradiction, a troubleshooting bullet that still forbade deleting repeats. It was fixed, a prompt test now rejects that guidance, and the journey passed again on the final text.
+Completed: 2026-11-05
