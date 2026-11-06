@@ -14018,6 +14018,75 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
+  it("keeps a never-activated incomplete member with a subscription out of the billing notice", async () => {
+    const fixture = await buildPausedHostedMemberHomeRouteFixture({
+      billingStatus: HostedBillingStatus.incomplete,
+    });
+    const prisma = asPrismaTransactionClient({
+      $transaction: vi.fn(
+        async (run: (tx: unknown) => unknown) => run(prisma),
+      ) as never,
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue({
+          expiresAt: new Date("2026-07-24T12:00:00.000Z"),
+          id: "hin_first_contact",
+          inviteCode: "first_contact_invite_code",
+        }),
+        findFirst: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValue({ inviteCode: "first_contact_invite_code" }),
+        update: vi.fn(),
+      },
+      hostedLinqProviderEvent: {
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+      hostedMember: {
+        // The activation evidence query carries an OR; this member has none.
+        findUnique: vi.fn(async ({ where }: { where: { OR?: unknown } }) => where.OR ? null : fixture.member),
+      },
+      hostedMemberRouting: createSingleHostedMemberRoutingMock(fixture.routing),
+    });
+
+    const scheduledTasks: Array<() => Promise<void> | void> = [];
+    const outcome = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        createdAt: "2026-07-23T12:00:00.000Z",
+        data: {
+          chat: {
+            id: "chat_other_first_contact",
+            owner_handle: {
+              handle: "+15550100002",
+              id: "handle_owner_other_first_contact",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+          sent_at: "2026-07-23T12:00:00.000Z",
+        },
+        eventId: "evt_incomplete_new_chat",
+        service: "iMessage",
+      }),
+      scheduleAfterResponse: (task) => {
+        scheduledTasks.push(task);
+      },
+      signature: null,
+      timestamp: null,
+    }).catch((error: unknown) => ({ ok: false, reason: String(error) }));
+    for (const task of scheduledTasks) {
+      await task();
+    }
+
+    expect(outcome).not.toMatchObject({ reason: "sent-billing-inactive-notice" });
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining("settings#subscription"),
+      }),
+    );
+  });
+
   it("does not hold product-member conversation input when the AI denial has no notice", async () => {
     // Returning incomplete with activation evidence but no provider subscription:
     // the real product predicate admits it and the real strict decision has no notice.

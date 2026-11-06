@@ -433,6 +433,13 @@ export async function readGameChatAllowanceBeneficiary(input: {
   return (await readGameChatFundingRooms({ memberIds: [input.memberId], now, prisma: input.prisma })).get(input.memberId) ?? null;
 }
 
+/** Sponsored members already have access, so this read stays off the mailbox fetch path. */
+function needsHostedActivationProof(member: HostedMemberAccessState): boolean {
+  return !member.threadContainer
+    && member.billingStatus === HostedBillingStatus.incomplete
+    && !hasStrictHostedPersonAccess(member);
+}
+
 async function hasHostedMemberActivationProof(input: {
   memberId: string;
   prisma: HostedOnboardingReadClient;
@@ -461,7 +468,7 @@ export async function readActiveHostedMemberAccessState(input: {
     return null;
   }
 
-  if (!member.threadContainer && member.billingStatus === HostedBillingStatus.incomplete) {
+  if (needsHostedActivationProof(member)) {
     member.activationProof = await hasHostedMemberActivationProof({ memberId: input.memberId, prisma });
   }
   const active = member.threadContainer
@@ -942,7 +949,7 @@ export async function assertActiveHostedMemberAccessAllowed(input: {
 
   if (member) {
     assertHostedMemberNotSuspended(member);
-    const activationProof = !member.threadContainer && member.billingStatus === HostedBillingStatus.incomplete
+    const activationProof = needsHostedActivationProof(member)
       ? await hasHostedMemberActivationProof({ memberId: input.memberId, prisma })
       : false;
     if (hasActiveHostedMemberAccess({ ...member, activationProof })) {

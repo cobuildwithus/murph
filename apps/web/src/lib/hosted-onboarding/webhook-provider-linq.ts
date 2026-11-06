@@ -1789,7 +1789,12 @@ async function planHostedLinqInactiveMemberConversation(admission: {
     return { allowed: false, plan: null };
   }
   const homeRoutePresent = admission.homeRouteMemberId === existingMember.id;
-  if (!homeRoutePresent && !isHostedLinqDirectChatAttested(messageEvent)) {
+  // Off the home chat, only established product members get a billing answer.
+  // Anyone else, including an unfinished signup, stays on the signup flow.
+  if (
+    !homeRoutePresent
+    && (!admission.existingMemberEffectiveActive || !isHostedLinqDirectChatAttested(messageEvent))
+  ) {
     return { allowed: false, plan: null };
   }
   const accessDecision = await readHostedRuntimeAiAccessDecision({

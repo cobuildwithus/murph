@@ -484,3 +484,8 @@ Both isolated databases are dropped and the baseline checkout is retired.
 The original dirty worktree, parent edits and pre-existing cache are preserved.
 No commit, push, PR or deployment was made.
 
+## Parent review and deep review outcomes
+
+- Parent review removed activation proof from assistant settings and group email, because those relation reads ran on every settings read for a brief state. A returning `incomplete` member being refused there matches prior behavior and is accepted. Reintroducing each trap fails real PostgreSQL tests: funding lapsed rooms fails 2, widening referral fails 1, and leaving the worker off fails 13.
+- The full Web suite found an import regression hidden by the first selection of tests. The pure projections moved to a Prisma-only module so warm control and lazy SDK paths stay lean.
+- Deep review round 1 found silent holds on new Linq chats and on email, and a Telegram welcome reachable by lapsed members. All three fixed. Round 2 found a billing notice reachable by a first-time `incomplete` member on a new chat, and an extra query for Family-sponsored `incomplete` members on mailbox fetch. Both fixed test-first.
