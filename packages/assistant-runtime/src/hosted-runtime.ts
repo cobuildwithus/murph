@@ -114,7 +114,7 @@ import {
   createHostedAssistantChannelTypingDependencies,
 } from "./hosted-runtime/channel-activity.ts";
 import {
-  resolveHostedCurrentInputIdForAcceptedInputs,
+  readHostedAcceptedInputContext,
 } from "./hosted-runtime/turn-input.ts";
 import {
   recordHostedAssistantMilestonesBestEffort,
@@ -4478,7 +4478,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         status: "start",
       });
       try {
-        let currentAssistantInputId: string | null = null;
         let acceptedForegroundPriorityInputNeedsOpaqueQuietWindow = false;
         const initialMailboxAssistantInputIds =
           passInput.initialMailboxImport?.importResult.assistantInputIds ?? [];
@@ -4522,7 +4521,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             recordForegroundConversationInputsFromImport(
               phaseInput.initialMailboxImport,
             );
-            currentAssistantInputId = null;
             const acceptedAssistantInputIds = new Set<string>();
             const releaseAcceptedImageGenerationInputs = async (
               inputIds: readonly string[],
@@ -4570,7 +4568,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                     }
                   : {}),
                 foregroundCausalOnly: passInput.foregroundCausalOnly === true,
-                currentAssistantInputId: () => currentAssistantInputId,
                 imageGenerationLauncher:
                   imageGenerationController?.launcher ?? null,
                 deviceSyncMessagingReturnTarget,
@@ -4591,9 +4588,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                       "Runtime ownership changed; retrying the turn in a fresh invocation.",
                     );
                   }
-                  const acceptedInputsOnlyAssistant = acceptedInputs.every(
-                    (acceptedInput) => acceptedInput.source === "assistant-input",
-                  );
                   const assistantInputIds = acceptedInputs
                     .filter((acceptedInput) => acceptedInput.source === "assistant-input")
                     .map((acceptedInput) => acceptedInput.id);
@@ -4602,7 +4596,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                     acceptedAssistantInputIds.add(assistantInputId);
                   }
                   const acceptedInputContext =
-                    await resolveHostedCurrentInputIdForAcceptedInputs({
+                    await readHostedAcceptedInputContext({
                       assistantInputIds,
                       vaultRoot: restored.vaultRoot,
                     });
@@ -4622,9 +4616,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                       }],
                     });
                   }
-                  currentAssistantInputId = acceptedInputsOnlyAssistant
-                    ? acceptedInputContext.currentInputId
-                    : null;
                   if (acceptedInputContext.conversationActivityReceivedAtEpochMs !== null) {
                     notifyHostedConversationActivityObservedBestEffort(
                       options.onConversationActivityObserved,
@@ -4662,14 +4653,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                     if (acceptedInputContext.foregroundPriorityInputAccepted) {
                       deviceImportAdmissionOpenedAt = Date.now();
                     }
-                    currentAssistantInputId = null;
                   };
                 },
                 signal: passSignal,
               });
             } finally {
               closeDeviceImportAdmission();
-              currentAssistantInputId = null;
               // A reply can acquire terminal evidence before a later phase error.
               // Release invocation-local image status from that durable truth in
               // both success and failure paths; evidence read errors retain it.

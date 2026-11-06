@@ -798,7 +798,6 @@ describeRealCodex('real Codex reaction on an already-tapped message', () => {
         env: config.env,
         hostedToolContext: {
           computerToolsAvailable: false, vaultFileSendAvailable: false,
-          currentAssistantInputId: () => messageRef,
           currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
           sendVaultFile: async () => ({ filename: 'unused', status: 'denied' as const }),
         } satisfies AssistantHostedToolContext,
@@ -3847,7 +3846,7 @@ describeRealCodex('real Codex GPT-6 configuration e2e', () => {
             },
           },
           computerToolsAvailable: false,
-          currentAssistantInputId: () => 'ain_00000000000000000000000000000061',
+          currentUserActionScope: () => createRealCodexDirectUserActionScope('ain_00000000000000000000000000000061'),
           currentAssistantTarget: () => ({ model: 'gpt-6-sol', reasoningEffort: 'low' }),
           currentHostedDeliveryContext: () => null,
           currentHostedMailboxItemIds: () => [],
@@ -3914,7 +3913,7 @@ describeRealCodex('real Codex GPT-6 configuration e2e', () => {
             },
           },
           computerToolsAvailable: false,
-          currentAssistantInputId: () => 'ain_00000000000000000000000000000061',
+          currentUserActionScope: () => createRealCodexDirectUserActionScope('ain_00000000000000000000000000000061'),
           currentAssistantTarget: () => ({ model: 'gpt-6-sol', reasoningEffort: 'low' }),
           currentHostedDeliveryContext: () => null,
           currentHostedMailboxItemIds: () => [],
@@ -3976,7 +3975,7 @@ describeRealCodex('real Codex GPT-6 configuration e2e', () => {
             },
           },
           computerToolsAvailable: false,
-          currentAssistantInputId: () => 'ain_00000000000000000000000000000061',
+          currentUserActionScope: () => createRealCodexDirectUserActionScope('ain_00000000000000000000000000000061'),
           currentAssistantTarget: () => ({ model: 'gpt-6-sol', reasoningEffort: 'low' }),
           currentHostedDeliveryContext: () => null,
           currentHostedMailboxItemIds: () => [],
@@ -4039,7 +4038,7 @@ describeRealCodex('real Codex default model restore e2e', () => {
             },
           },
           computerToolsAvailable: false,
-          currentAssistantInputId: () => 'ain_00000000000000000000000000000062',
+          currentUserActionScope: () => createRealCodexDirectUserActionScope('ain_00000000000000000000000000000062'),
           currentAssistantTarget: () => ({ model: 'gpt-6-luna', reasoningEffort: 'low' }),
           currentHostedDeliveryContext: () => null,
           currentHostedMailboxItemIds: () => [],
@@ -9503,7 +9502,7 @@ describeRealCodex('real Codex preference source e2e', () => {
         prompt: prompt.prompt, reasoningEffort: 'low', sandbox: 'workspace-write',
         vaultRoot: workingDirectory, workingDirectory,
         hostedToolContext: {
-          computerToolsAvailable: false, currentAssistantInputId: () => later,
+          computerToolsAvailable: false,
           currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
           currentUserActionScope: () => ({
             acceptedInputIds: [first, later], conversationId: 'conversation_style',
@@ -10515,7 +10514,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           },
           hostedToolContext: {
             computerToolsAvailable: false,
-            currentAssistantInputId: () => `ain_${'7'.repeat(32)}`,
+            currentUserActionScope: () => createRealCodexDirectUserActionScope(`ain_${'7'.repeat(32)}`),
             currentHostedDeliveryContext: () => null,
             currentHostedMailboxItemIds: () => [],
             imageGenerationLauncher: {
@@ -10602,7 +10601,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         await mkdir(path.dirname(path.join(workingDirectory, media.ref)), { recursive: true })
         await writeFile(path.join(workingDirectory, media.ref), imageBytes)
         const completionInputId = `ain_${'8'.repeat(32)}`
-        const originInputId = commonInput.hostedToolContext.currentAssistantInputId()
+        const originInputId = `ain_${'7'.repeat(32)}`
         const identity = `image-completion:${'9'.repeat(64)}`
         const trustedHostedImageCompletion = readTrustedHostedImageCompletion({
           sourceRef: {
@@ -10628,7 +10627,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           ...commonInput,
           hostedToolContext: {
             ...commonInput.hostedToolContext,
-            currentAssistantInputId: () => completionInputId,
+            currentUserActionScope: () => null,
             currentHostedImageCompletionEffectScope: () => ({
               authorizedOriginAssistantInputId: originInputId,
               completionAssistantInputId: completionInputId,
@@ -11938,7 +11937,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           ].join('\n\n'),
           hostedToolContext: {
             computerToolsAvailable: false,
-            currentAssistantInputId: () => `ain_${'9'.repeat(32)}`,
+            currentUserActionScope: () => createRealCodexDirectUserActionScope(`ain_${'9'.repeat(32)}`),
             currentHostedDeliveryContext: () => null,
             currentHostedMailboxItemIds: () => [],
             imageGenerationLauncher: {
@@ -12787,8 +12786,8 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           scenario.expectedPersonalizationVoice
             ? {
                 ...createRealCodexSupportHostedToolContext('direct'),
-                currentAssistantInputId: () =>
-                  'ain_11111111111111111111111111111111',
+                currentUserActionScope: () =>
+                  createRealCodexDirectUserActionScope('ain_11111111111111111111111111111111'),
                 personalizationTool: {
                   async request(request) {
                     personalizationRequests.push(request)
@@ -13384,7 +13383,6 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             }),
           hostedToolContext: {
             computerToolsAvailable: false,
-            currentAssistantInputId: () => originInputId,
             currentHostedDeliveryContext: () => null,
             currentHostedMailboxItemIds: () => [],
             currentUserActionScope: () => ({
@@ -26815,7 +26813,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         path.join(tmpdir(), scenario.workingDirectoryPrefix),
       )
       const confirmationInputId = `ain_${'c'.repeat(32)}`
-      let currentAssistantInputId = `ain_${'b'.repeat(32)}`
+      let subscriptionInputId = `ain_${'b'.repeat(32)}`
       let subscriptionActionClaimed = false
       const planUsageRequests: Array<Record<string, unknown>> = []
       const subscriptionRequests: Array<Record<string, unknown>> = []
@@ -26847,10 +26845,9 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                 return null
               }
               subscriptionActionClaimed = true
-              return currentAssistantInputId
+              return subscriptionInputId
             },
             computerToolsAvailable: false,
-            currentAssistantInputId: () => currentAssistantInputId,
             currentHostedDeliveryContext: () => null,
             currentHostedMailboxItemIds: () => [],
             planUsageTool: {
@@ -26956,7 +26953,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           )
         }
 
-        currentAssistantInputId = confirmationInputId
+        subscriptionInputId = confirmationInputId
         const confirmed = await executeRealCodexAppServerTurn({
           ...commonInput,
           prompt: scenario.confirmationPrompt,
@@ -27758,7 +27755,6 @@ describeRealCodex('real Codex proactive physical-note address e2e', () => {
           const launchedOperationIds: string[] = []
           const hostedToolContext = {
             computerToolsAvailable: false,
-            currentAssistantInputId: () => latestMessageRef,
             currentHostedDeliveryContext: () => null,
             currentHostedMailboxItemIds: () => [],
             currentUserActionScope: () => ({
@@ -27953,7 +27949,6 @@ describeRealCodex('real Codex physical-note image continuation e2e', () => {
           ...commonInput,
           hostedToolContext: {
             computerToolsAvailable: false,
-            currentAssistantInputId: () => originInputId,
             currentHostedDeliveryContext: () => null,
             currentHostedMailboxItemIds: () => [],
             currentUserActionScope: () => ({
@@ -28089,7 +28084,6 @@ describeRealCodex('real Codex physical-note image continuation e2e', () => {
               : null,
           hostedToolContext: {
             computerToolsAvailable: false,
-            currentAssistantInputId: () => approvalInputId,
             currentHostedDeliveryContext: () => null,
             currentHostedMailboxItemIds: () => [],
             currentUserActionScope: () => ({
@@ -30202,7 +30196,6 @@ describeRealCodex('real Codex personalization schema e2e', () => {
         env: { ...config.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
         hostedToolContext: {
           ...createRealCodexSupportHostedToolContext('direct'),
-          currentAssistantInputId: () => 'ain_11111111111111111111111111111111',
           currentUserActionScope: () => ({
             acceptedInputIds: ['ain_11111111111111111111111111111111'],
             conversationId: 'conversation-personalization', conversationScope: 'direct',
@@ -40580,6 +40573,17 @@ function buildRealCodexShellEnvironmentConfigOverrides(
       includedKeys.map((key) => tomlString(key)).join(',')
     }]`,
   ]
+}
+
+function createRealCodexDirectUserActionScope(assistantInputId: string) {
+  return {
+    acceptedInputIds: [assistantInputId],
+    conversationId: 'conversation-real-codex',
+    conversationScope: 'direct' as const,
+    inboundMailboxItemIds: [],
+    originSessionId: 'session-real-codex',
+    recipientKey: null,
+  }
 }
 
 function createRealCodexSupportHostedToolContext(

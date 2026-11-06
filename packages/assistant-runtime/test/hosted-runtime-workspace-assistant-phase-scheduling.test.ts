@@ -566,22 +566,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
-  it("exposes current-input authority with hosted personalization", async () => {
+  it("exposes hosted personalization", async () => {
     const assistantPersonalizationToolPort = {
       request: vi.fn(),
     };
-    const currentAssistantInputId = () =>
-      "ain_33333333333333333333333333333333";
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      currentAssistantInputId,
       runtimeAssistantPersonalizationToolPort: assistantPersonalizationToolPort,
     }));
 
     expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
       {
         hosted: expect.objectContaining({
-          currentAssistantInputId,
           personalizationTool: assistantPersonalizationToolPort,
         }),
       },
@@ -591,7 +587,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect.objectContaining({
         executionContext: expect.objectContaining({
           hosted: expect.objectContaining({
-            currentAssistantInputId,
             personalizationTool: assistantPersonalizationToolPort,
           }),
         }),

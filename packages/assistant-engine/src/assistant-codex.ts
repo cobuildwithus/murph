@@ -4863,6 +4863,7 @@ async function runCodexAppServerTurnOnProcess(
               )
             ),
           deliveryContextOrdinal: dynamicToolRequestDeliveryContextOrdinal,
+          providerTurnSteered: currentDeliveryContextOrdinal() > 0,
           nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
           onboardingFirstReadCompletionTransitionAvailable:
             input.onboardingFirstReadCompletionTransitionAvailable ?? false,

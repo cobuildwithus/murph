@@ -615,7 +615,6 @@ export interface AssistantHostedExecutionContext {
   }): Promise<void>
   automationTool?: AssistantHostedAutomationTool | null
   createAutomationTool?(route: AssistantCurrentDeliveryRoute): AssistantHostedAutomationTool | null
-  currentAssistantInputId?: () => string | null
   createScheduledGroupTools?(input: {
     channel: string
     target: string
@@ -783,7 +782,6 @@ export function normalizeAssistantExecutionContext(
   const groupPermissionOfferTool = normalizeAssistantGroupPermissionOfferTool(
     hosted.groupPermissionOfferTool,
   )
-  const groupTool = normalizeAssistantGroupTool(hosted.groupTool)
   const groupSharedReader = normalizeAssistantGroupSharedReader(
     hosted.groupSharedReader,
   )
@@ -822,11 +820,6 @@ export function normalizeAssistantExecutionContext(
         : {}),
       ...optionalHostedField('automationTool', automationTool),
       ...optionalHostedField('createAutomationTool', hosted.createAutomationTool),
-      ...(typeof hosted.currentAssistantInputId === 'function'
-        ? {
-            currentAssistantInputId: hosted.currentAssistantInputId,
-          }
-        : {}),
       ...(typeof hosted.createScheduledGroupTools === 'function'
         ? { createScheduledGroupTools: hosted.createScheduledGroupTools }
         : {}),
@@ -843,7 +836,7 @@ export function normalizeAssistantExecutionContext(
       ...optionalHostedField('groupParticipantDisplayNameReader', groupParticipantDisplayNameReader),
       ...optionalHostedField('groupPermissionOfferTool', groupPermissionOfferTool),
       ...optionalHostedField('groupSharedReader', groupSharedReader),
-      ...optionalHostedField('groupTool', groupTool),
+      ...optionalHostedField('groupTool', hosted.groupTool),
       ...optionalHostedField('gameRecapScope', gameRecapScope),
       ...optionalHostedField('gameMissedCheckInScope', gameMissedCheckInScope),
       ...optionalHostedField('labsTool', labsTool),
@@ -1129,25 +1122,6 @@ function normalizeAssistantConfigurationTool(
 
   return {
     request: input.request.bind(input),
-  }
-}
-
-function normalizeAssistantGroupTool(
-  input: AssistantHostedExecutionContext['groupTool'] | undefined,
-): AssistantHostedGroupTool | undefined {
-  if (!input || typeof input.request !== 'function') {
-    return undefined
-  }
-
-  // Keep the optional route probe bound alongside `request`. Dropping it here
-  // silently downgrades a pre-generation refusal into a post-generation one,
-  // because callers treat an absent probe as admission.
-  const directAttachmentRouteStatus = input.directAttachmentRouteStatus
-  return {
-    request: input.request.bind(input),
-    ...(typeof directAttachmentRouteStatus === 'function'
-      ? { directAttachmentRouteStatus: directAttachmentRouteStatus.bind(input) }
-      : {}),
   }
 }
 
