@@ -1,4 +1,6 @@
-import { appendFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { HOSTED_MEDIA_REFS_SCHEMA, resolveHostedMediaReferenceCataloguePath } from "@murphai/runtime-state/node";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import sharp from "sharp";
@@ -19,6 +21,46 @@ async function fixture() {
 }
 const capturedAt = "2026-07-01T12:00:00.000Z";
 const due = new Date(Date.parse(capturedAt) + INBOX_IMAGE_RETENTION_WINDOW_MS);
+
+it.each(["settled", "legacy", "hash", "size", "kind", "owner", "pending", "expired", "malformed", "changed-local", "stale-cleanup"])(
+  "closeout and vault validation verify retained descriptor integrity: %s", async scenario => {
+    const input = await fixture();
+    const meal = await addMeal({ ...input, photoCapturedAt: capturedAt, occurredAt: capturedAt, source: "device",
+      externalRef: { system: "meal-photo-capture", resourceType: "photo", resourceId: "a".repeat(64) } });
+    const relativePath = meal.photo!.relativePath;
+    const localPath = path.join(input.vaultRoot, relativePath);
+    const bytes = await readFile(localPath);
+    const entry = { relativePath, mediaKind: scenario === "kind" ? "video" : "image", mediaId: "a".repeat(64),
+      sha256: scenario === "hash" ? "b".repeat(64) : createHash("sha256").update(bytes).digest("hex"),
+      byteSize: bytes.length + (scenario === "size" ? 1 : 0), expiresAt: scenario === "expired" ? capturedAt : null,
+      mimeType: "image/jpeg", recordedAt: capturedAt,
+      ...(scenario === "legacy" ? {} : { pendingUpload: scenario === "pending" }) };
+    if (scenario === "malformed") entry.relativePath = "raw/meals/../outside.jpg";
+    const cataloguePath = resolveHostedMediaReferenceCataloguePath(input.vaultRoot);
+    await mkdir(path.dirname(cataloguePath), { recursive: true });
+    await writeFile(cataloguePath, JSON.stringify({ schema: HOSTED_MEDIA_REFS_SCHEMA, entries: [entry] }));
+    if (scenario === "stale-cleanup") {
+      await runMealPhotoMaintenance({ vaultRoot: input.vaultRoot, now: due });
+    }
+    if (scenario === "owner") {
+      const manifest = JSON.parse(await readFile(path.join(input.vaultRoot, meal.manifestPath!), "utf8"));
+      manifest.owner.id = "other-owner";
+      await writeFile(path.join(input.vaultRoot, meal.manifestPath!), JSON.stringify(manifest));
+    }
+    await rm(localPath);
+    if (scenario === "changed-local") await writeFile(localPath, Buffer.alloc(bytes.length, 1));
+    if (scenario === "settled" || scenario === "legacy") {
+      expect(await removeAutomaticMealPhoto({ vaultRoot: input.vaultRoot, eventId: meal.event.id })).toMatchObject({ removedPhotoCount: 1 });
+      expect(await validateVault({ vaultRoot: input.vaultRoot })).toMatchObject({ valid: true, issues: [] });
+      await expect(readFile(localPath)).rejects.toMatchObject({ code: "ENOENT" });
+    } else {
+      // Retirement has already removed review work; validation must still reject
+      // the stale descriptor in place of its now-missing canonical tombstone.
+      if (scenario !== "stale-cleanup") await expect(removeAutomaticMealPhoto({ vaultRoot: input.vaultRoot, eventId: meal.event.id })).rejects.toThrow();
+      expect((await validateVault({ vaultRoot: input.vaultRoot })).valid).toBe(false);
+    }
+  },
+);
 
 it("backfills an oriented metadata-free JPEG, preserves it at day 90, and deletes meal media", async () => {
   const input = await fixture();

@@ -1405,10 +1405,13 @@ test("canonical reads, maintenance and reconciliation agree on shard tie-breaks 
     await uploadCommittedHostedMealMediaReferences({ vaultRoot, mediaStore: store.mediaStore });
     const thumbnail = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]!;
     // Same revision and timestamps, later shard: canonical deletion wins.
-    await appendJsonlRecord({ vaultRoot, relativePath: "ledger/events/2030/2030-02.jsonl", record: { ...current, lifecycle: { ...current.lifecycle, state: "deleted" }, attachments: [], rawRefs: [], photoThumbnail: undefined } });
+    await appendJsonlRecord({ vaultRoot, relativePath: "ledger/events/2030/2030-02.jsonl", record: { ...current, lifecycle: { ...current.lifecycle, state: "deleted" } } });
     await expect(readEvent({ vaultRoot, eventId: meal.event.id })).rejects.toMatchObject({ code: "EVENT_MISSING" });
     const materializeCandidatePaths = vi.fn();
-    expect(await runMealPhotoMaintenance({ vaultRoot, now: new Date("2030-04-02T00:00:00Z"), materializeCandidatePaths })).toMatchObject({ thumbnailCount: 0, retiredPhotoCount: 0 });
+    // Retained descriptors must survive until the canonical privacy operation.
+    expect((await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore: store.mediaStore })).prunedMediaCount).toBe(0);
+    expect(store.deleteCalls).not.toContain(thumbnail.mediaId);
+    expect(await runMealPhotoMaintenance({ vaultRoot, now: new Date("2030-04-02T00:00:00Z"), materializeCandidatePaths })).toMatchObject({ thumbnailCount: 0, retiredPhotoCount: 2 });
     expect(materializeCandidatePaths).not.toHaveBeenCalled();
     expect((await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore: store.mediaStore })).prunedMediaCount).toBe(1);
     expect(store.deleteCalls).toContain(thumbnail.mediaId);
