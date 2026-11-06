@@ -829,7 +829,8 @@ export async function recordHostedLinqRuntimeProviderDispatchFenceTx(input: {
 export type HostedLinqInstantFirstTurnRuntimeEgressDisposition =
   | "already_answered"
   | "available"
-  | "defer";
+  | "defer"
+  | "held";
 
 /**
  * The legal states of one first-turn row. Empty means all three payload fields
@@ -844,11 +845,13 @@ export type HostedLinqInstantFirstTurnRuntimeEgressDisposition =
  * | attempted + empty                     | reserved    | exact claim seals or skips; stale reclaim | defer            |
  * | attempted, started or failed + sealed | sealed      | exact claim dispatches or fails; a failed | defer            |
  * | (except rejected retries)             |             | or stale row reclaims                     |                  |
- * | anything else                         | held        | positive evidence only                    | defer            |
+ * | anything else                         | held        | positive evidence only                    | held             |
  *
  * Held covers rejected retries, legacy skipped + sealed and uncertified failed +
- * empty rows. They never resume because a later reply could follow an ordinary
- * answer to the same input.
+ * empty rows. Web never resumes them; runtime sends for the exact input stay
+ * vetoed. With a later member message, a turn-commit probe may pass; an exact
+ * reply with no delivery purpose ends as superseded, without retry or recovery.
+ * Reaction/progress purposes and lone held inputs retain the retryable veto.
  */
 function resolveHostedLinqInstantFirstTurnDeliveryDisposition(input: {
   acceptedAt: Date | null;
@@ -918,12 +921,13 @@ export async function resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionT
     ? "already_answered"
     : disposition === "fallback"
       ? "available"
-      : "defer";
+      : disposition === "held" ? "held" : "defer";
 }
 
-// Rejected retries and legacy held rows hold only their exact input. Nothing can
-// resolve them here, and blocking the chat before mailbox append would lose later
-// inbound messages. Callers exclude skipped rows themselves.
+// This chat-wide filter excludes rejected retries and failed empty rows; callers
+// exclude skipped rows. A later member message lets a held turn-commit probe pass;
+// exact held-input replies without a delivery purpose then end as superseded.
+// Lone held inputs and reaction/progress purposes keep the retryable veto.
 const hostedLinqInstantFirstTurnUnresolvedWhere = {
   template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
   OR: [
