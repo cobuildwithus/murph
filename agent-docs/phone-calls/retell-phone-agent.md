@@ -1,6 +1,9 @@
 # Retell phone agent prompt
 
-Use one published Retell LLM agent version tagged `prod`. The call behavior should be driven by
+Use one Retell LLM agent. Calls resolve `RETELL_AGENT_VERSION`, which defaults to
+`latest_published`, so publishing a new agent version in the Retell dashboard is all a prompt
+change needs. Do not pin a number or the `prod` tag; a stale pin silently keeps old versions
+live (the `prod` tag pointed at v0 until 2026-11-01). The call behavior should be driven by
 the `call_brief` and server-owned `call_audience` dynamic variables, not by separate
 appointment/reservation/order agents.
 
@@ -12,7 +15,7 @@ After the callee replies, continue from that reply without greeting them again.
 
 The live prompt is managed in the Retell dashboard; editing this document does not update it.
 Rollout order: deploy the code that sends `call_audience` first, then replace the dashboard
-prompt with the full text below and publish that agent version tagged `prod`.
+prompt with the full text below and publish the agent version.
 
 Web sets `call_audience` to `member` only for a direct, non-thread-container call whose
 callee matches the requesting member's verified phone number after E.164 normalization.
