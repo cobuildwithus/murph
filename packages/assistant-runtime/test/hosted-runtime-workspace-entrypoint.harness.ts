@@ -191,6 +191,7 @@ type HostedWorkspaceEntrypointMockName =
   | "createHostedWorkspaceSnapshotCheckpointRequestBuilder"
   | "drainHostedPreparedAssistantDeliveries"
   | "enqueueHostedPendingAssistantInputId"
+  | "inspectHostedPendingAssistantInputWakeCandidate"
   | "executeConsentedReadOnlyAssistantAsk"
   | "executeOperatorDiagnostic"
   | "executeReadOnlyAssistantAsk"
@@ -249,6 +250,7 @@ const mocks: HostedWorkspaceEntrypointMocks = vi.hoisted(() => ({
   drainHostedPreparedAssistantDeliveries:
     vi.fn<DrainHostedPreparedAssistantDeliveries>(),
   enqueueHostedPendingAssistantInputId: vi.fn(),
+  inspectHostedPendingAssistantInputWakeCandidate: vi.fn(),
   executeConsentedReadOnlyAssistantAsk: vi.fn(),
   executeOperatorDiagnostic: vi.fn(),
   executeReadOnlyAssistantAsk: vi.fn(),
@@ -314,6 +316,10 @@ vi.mock("../src/hosted-runtime/pending-input-index.ts", async (importOriginal) =
     enqueueHostedPendingAssistantInputId:
       mocks.enqueueHostedPendingAssistantInputId.mockImplementation(
         actual.enqueueHostedPendingAssistantInputId,
+      ),
+    inspectHostedPendingAssistantInputWakeCandidate:
+      mocks.inspectHostedPendingAssistantInputWakeCandidate.mockImplementation(
+        actual.inspectHostedPendingAssistantInputWakeCandidate,
       ),
   };
 });
@@ -2625,7 +2631,18 @@ async function runHostedWorkspaceRuntimeJobInProcess(
   }
 }
 
+/** Forces the pending-message answer for one test; call the result to restore it. */
+function mockHostedPendingRetryCandidate(hasCandidate: boolean): () => void {
+  const mock = mocks.inspectHostedPendingAssistantInputWakeCandidate;
+  const actual = mock.getMockImplementation();
+  mock.mockImplementation(async () => ({ hasCandidate, indexComplete: true }));
+  return () => {
+    if (actual) mock.mockImplementation(actual);
+  };
+}
+
 export {
+  mockHostedPendingRetryCandidate,
   buildJunctionSleepFixtureResponse,
   HOSTED_CONTAINER_CA_ENV_KEYS,
   HOSTED_UNSTABLE_PROCESS_ENV_KEYS,

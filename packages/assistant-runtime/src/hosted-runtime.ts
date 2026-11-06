@@ -2936,6 +2936,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       idleCheckpointStartByMs = checkpointStartByMs;
       publishCheckpointPublicationExpectation(checkpointStartByMs);
     };
+    const capIdleCheckpointStartBy = (checkpointStartByMs: number) => {
+      if (checkpointStartByMs < (idleCheckpointStartByMs ?? Infinity)) {
+        setIdleCheckpointStartBy(checkpointStartByMs);
+      }
+    };
     const ensureIdleCheckpointStartBy = (checkpointStartByMs: number) => {
       if (idleCheckpointStartByMs === null) {
         setIdleCheckpointStartBy(checkpointStartByMs);
@@ -6977,7 +6982,18 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         if (runtimeOwnerHandoffRequested) {
           setIdleCheckpointStartBy(Date.now());
         }
+        // Pending input must not sit behind the conversation quiet window.
+        // Without any, assistant wakes keep it, so routine work never ends a
+        // warm conversation early.
+        const retryCheckpointDeadline = await readHostedPendingRetryCheckpointDeadline({
+          attemptedWakeKey: hotProjectedWakeAttemptedKey,
+          invocationLocalWakeKey: invocationLocalProjectedAssistantWakeKey,
+          pendingWake,
+          vaultRoot: restored.vaultRoot,
+        });
+        capIdleCheckpointStartBy(retryCheckpointDeadline);
         // Projected wakes share the full wait deadline, including retained work.
+        // Background work keeps its hold: a checkpoint return would abort it.
         const backgroundWorkDeadline = readBackgroundCheckpointWaitDeadline();
         const waitDeadlineMs = Math.max(idleCheckpointStartByMs, backgroundWorkDeadline ?? 0);
         const hotProjectedWake = resolveHotProjectedWake(waitDeadlineMs);
@@ -8487,6 +8503,32 @@ function buildHostedRuntimeWakeKey(input: {
 
 function normalizeHostedRuntimeWakeReason(nextWakeReason: string | null): string {
   return nextWakeReason ?? HOSTED_ASSISTANT_WAKE_REASON;
+}
+
+async function readHostedPendingRetryCheckpointDeadline(input: {
+  attemptedWakeKey: string | null;
+  invocationLocalWakeKey: string | null;
+  pendingWake: { nextWakeAt?: string | null; nextWakeReason?: string | null };
+  vaultRoot: string;
+}): Promise<number> {
+  const wakeKey = buildHostedRuntimeWakeKey({
+    nextWakeAt: input.pendingWake.nextWakeAt ?? null,
+    nextWakeReason: input.pendingWake.nextWakeReason ?? null,
+  });
+  const wakeAtMs = Date.parse(input.pendingWake.nextWakeAt ?? "");
+  if (
+    !hostedRuntimeWakeReasonIsAssistant(input.pendingWake.nextWakeReason ?? null)
+    || wakeKey === input.invocationLocalWakeKey
+    || wakeKey === input.attemptedWakeKey
+    || !Number.isFinite(wakeAtMs)
+  ) {
+    return Infinity;
+  }
+  // Unknown pending state keeps the ordinary quiet window.
+  const pendingInput = await inspectHostedPendingAssistantInputWakeCandidate({
+    vaultRoot: input.vaultRoot,
+  }).catch(() => null);
+  return pendingInput?.hasCandidate ? wakeAtMs : Infinity;
 }
 
 function hostedRuntimeWakeReasonIsAssistant(nextWakeReason: string | null): boolean {

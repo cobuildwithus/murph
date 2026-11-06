@@ -240,19 +240,24 @@ its due key without repeating local service; a successful attempt can clear it
 or project a distinct successor. Otherwise the invocation
 remains dirty until the runtime-owned idle-floor—or last-chance shutdown—
 `idle_shutdown` checkpoint succeeds; inherited or committed assistant wakes and
-durability barriers remain checkpoint-first. Successful assistant writes to the
+durability barriers remain checkpoint-first. When replyable input is pending, an
+unserviced carried assistant wake caps the quiet window at its exact deadline,
+including after later foreground admissions. Existing pause and quiesce policy
+runs before publication; the due wake then passes to the ordinary successor.
+Voice checkpoints in place and may service it once clean, preserving its exact
+identity and the attempted-key guard. Successful assistant writes to the
 canonical event ledger request Browser Vault publication after the reply finishes.
 They use the same idle checkpoint and foreground-preemptible replica publisher,
 but skip the conversation quiet window so confirmed journal changes appear
-promptly. Active background work retains its existing wait and successor owners.
+promptly. Active background work retains its existing pause and successor owners.
 The canonical checkpoint still precedes projection publication. Only newly admitted foreground
 priority work restarts the quiet window. Empty probes and generic maintenance
 do not restart it; cleanup that dirties state after a checkpoint uses the spent
 window and proceeds directly to its required follow-up checkpoint. Provider
 cleanup still runs only after its saved intent, and required post-checkpoint
 effects are not removed or collapsed into an unsafe single snapshot. Active
-background-work waits use their existing work deadlines and remain wakeable,
-without moving the conversation or checkpoint clocks. Once a checkpoint pauses
+background-work waits use their existing work deadlines and remain wakeable
+without extending conversation warmth. Once a checkpoint pauses
 background reads, they stay paused through checkpoint retries, effect drain and
 return. Foreground work still proceeds; unfinished asks and clinical extraction
 retain their durable successors instead of repeatedly reclaiming canceled work.
@@ -408,11 +413,11 @@ Device import yield reasons and receipt-capacity slicing are specified in
 
 ### Background stale retry discovery
 
-Background input selection reuses its content-retention event snapshot for stale
-retry discovery. Retention still owns the full-store scan; retry discovery does
-not perform a second scan. It groups recent pending member messages by exact
-source/account/thread, considers only later member inputs in those chats, and
-stops at the newest replied or committed-reply evidence per chat. System inputs
-and image completions cannot supersede member messages. The caller's abort
-signal reaches history listing, retention, compaction and retry evidence checks.
-No prompt, reply policy, persisted index, or foreground provider input changes.
+Background input selection keeps the full event read for content retention.
+Stale retry discovery considers only pending member messages and suppresses them
+when their receipt age exceeds 15 minutes (falling back to occurrence time).
+The exact boundary remains eligible. Later replies, including committed reply
+intents and replies to another group actor, do not complete earlier inputs.
+System inputs and image completions keep their own recovery. The caller's abort
+signal reaches history listing, retention, compaction and stale retry cleanup.
+The existing terminal-evidence owner and pending batch boundaries remain intact.

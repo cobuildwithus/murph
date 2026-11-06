@@ -1201,8 +1201,7 @@ function readHostedStaleRetryDropLogDetails(
     return {};
   }
   return {
-    staleRetryDroppedNewerAnsweredCount: dropped.filter((entry) => entry.reason === "newer_message_answered").length,
-    staleRetryDroppedTooOldCount: dropped.filter((entry) => entry.reason === "too_old").length,
+    staleRetryDroppedTooOldCount: dropped.length,
   };
 }
 

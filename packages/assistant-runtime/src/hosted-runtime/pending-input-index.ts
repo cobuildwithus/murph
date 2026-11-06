@@ -1553,47 +1553,30 @@ export const HOSTED_STALE_RETRY_MAX_AGE_MS = 15 * 60 * 1000;
 export const HOSTED_STALE_RETRY_SUPPRESSION_REASON =
   "stale retry dropped before a late reply";
 
-export type HostedStaleRetryDropReason = "too_old" | "newer_message_answered";
-
 /**
  * A pending member message reaching the background pass is a retry of a turn
- * that did not finish. Drop it without replying once its message is too old,
- * or once a newer member message in the same chat was answered, so a late
- * reply never lands out of order.
+ * that did not finish. Drop it without replying once its message is too old.
  */
 export async function dropHostedStalePendingAssistantInputRetries(input: {
   events: readonly AssistantInputEventRecord[];
-  /** The cursor-ordered snapshot already read by this pass's content retention. */
-  storedEvents: readonly AssistantInputEventRecord[];
   now?: Date;
   signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<{
-  dropped: Array<{ inputId: string; reason: HostedStaleRetryDropReason }>;
+  dropped: Array<{ inputId: string; reason: "too_old" }>;
   kept: AssistantInputEventRecord[];
 }> {
   input.signal?.throwIfAborted();
   const nowMs = (input.now ?? new Date()).getTime();
-  const reasons = new Map<string, HostedStaleRetryDropReason>();
-  const recentByChat = new Map<string, AssistantInputEventRecord[]>();
+  const expiredInputIds = new Set<string>();
   for (const event of input.events) {
     if (!isHostedMemberConversationInput(event)) continue;
     const receivedAtMs = resolveHostedPendingInputReceivedAtMs(event);
     if (!Number.isFinite(receivedAtMs) || nowMs - receivedAtMs > HOSTED_STALE_RETRY_MAX_AGE_MS) {
-      reasons.set(event.inputId, "too_old");
-    } else {
-      const chat = hostedPendingInputChatKey(event);
-      if (chat) {
-        const recent = recentByChat.get(chat) ?? [];
-        recent.push(event);
-        recentByChat.set(chat, recent);
-      }
+      expiredInputIds.add(event.inputId);
     }
   }
-  for (const inputId of await findSupersededHostedPendingInputs({ ...input, recentByChat })) {
-    reasons.set(inputId, "newer_message_answered");
-  }
-  const dropped = input.events.filter((event) => reasons.has(event.inputId));
+  const dropped = input.events.filter((event) => expiredInputIds.has(event.inputId));
   input.signal?.throwIfAborted();
   if (dropped.length > 0) {
     await writeAssistantAutoReplySuppressionEvidence({
@@ -1604,74 +1587,17 @@ export async function dropHostedStalePendingAssistantInputRetries(input: {
     });
   }
   return {
-    dropped: dropped.map((event) => ({ inputId: event.inputId, reason: reasons.get(event.inputId)! })),
-    kept: input.events.filter((event) => !reasons.has(event.inputId)),
+    dropped: dropped.map((event) => ({ inputId: event.inputId, reason: "too_old" })),
+    kept: input.events.filter((event) => !expiredInputIds.has(event.inputId)),
   };
 }
 
-/** Reuse retention's snapshot; read terminal evidence only for relevant later messages. */
-async function findSupersededHostedPendingInputs(input: {
-  events: readonly AssistantInputEventRecord[];
-  storedEvents: readonly AssistantInputEventRecord[];
-  recentByChat: Map<string, AssistantInputEventRecord[]>;
-  signal?: AbortSignal | null;
-  vaultRoot: string;
-}): Promise<string[]> {
-  const { recentByChat } = input;
-  if (recentByChat.size === 0) return [];
-  const superseded: string[] = [];
-  const pendingInputIds = new Set(input.events.map((event) => event.inputId));
-  const oldestByChat = new Map([...recentByChat].map(([chat, events]) => [
-    chat, events.reduce((first, event) =>
-      compareAssistantInputCursors(event.cursor, first.cursor) < 0 ? event : first).cursor,
-  ]));
-  // Sort only relevant member inputs: cross-lane cursor ordering is not a
-  // total order. Within this one lane, newest-first lets us stop per chat.
-  const later = input.storedEvents.filter((event) => {
-    if (pendingInputIds.has(event.inputId) || !isHostedMemberConversationInput(event)) return false;
-    const chat = hostedPendingInputChatKey(event);
-    const oldest = chat ? oldestByChat.get(chat) : undefined;
-    return oldest !== undefined && compareAssistantInputCursors(event.cursor, oldest) > 0;
-  }).sort((left, right) => compareAssistantInputCursors(right.cursor, left.cursor));
-  for (const newer of later) {
-    input.signal?.throwIfAborted();
-    if (recentByChat.size === 0) break;
-    const chat = hostedPendingInputChatKey(newer);
-    const recent = chat ? recentByChat.get(chat) : undefined;
-    if (!chat || !recent) continue;
-    const evidence = await readAssistantAutoReplyTerminalEvidenceByEvidenceId(input.vaultRoot, newer.inputId)
-      ?? (newer.projection.captureId
-        ? await readAssistantAutoReplyTerminalEvidenceByEvidenceId(input.vaultRoot, newer.projection.captureId)
-        : null);
-    input.signal?.throwIfAborted();
-    if (evidence?.terminal.kind !== "replied" && evidence?.terminal.kind !== "reply_intent_committed") continue;
-    for (const event of recent) {
-      if (compareAssistantInputCursors(newer.cursor, event.cursor) > 0) {
-        superseded.push(event.inputId);
-      }
-    }
-    recentByChat.delete(chat);
-  }
-  return superseded;
-}
-
-/**
- * Only a member's own chat message is a retry that can go stale or be
- * superseded. System inputs (delivery failures, image completions) keep their
- * own recovery and never count as a newer answered message.
- */
+/** System inputs and image completions keep their own recovery. */
 function isHostedMemberConversationInput(event: AssistantInputEventRecord): boolean {
   return event.sourceRef.kind === "hosted-mailbox"
     && event.sourceRef.lane === "conversation"
     && event.conversation?.actorIsSelf !== true
     && !isAssistantHostedImageCompletionEvent(event);
-}
-
-function hostedPendingInputChatKey(event: AssistantInputEventRecord): string | null {
-  const chat = event.conversation;
-  return chat?.source && chat.threadId
-    ? JSON.stringify([chat.source, chat.accountId, chat.threadId])
-    : null;
 }
 
 export function isHostedPendingAssistantInputStillReplyable(input: {

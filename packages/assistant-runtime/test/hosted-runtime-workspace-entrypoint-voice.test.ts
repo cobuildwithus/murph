@@ -1,11 +1,15 @@
 import {
+  mockHostedPendingRetryCandidate,
   TEST_NOW, createDeferred, withRealTimeout, waitForFakeTimerScheduled, TEST_USER_ID, createMailboxItem, createSnapshotFixtureRef, createMailboxPort, createPlatform, createWorkspacePort,
   createWorkspaceRuntimeJobInput, createWorkspaceState, createResolvedRuntimeControlSystemMailboxItem, createVaultSnapshotBundle, removeTempRoot,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 import { mkdtemp } from "node:fs/promises";
+import { setTimeout as sleepRealTime } from "node:timers/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, it, vi } from "vitest";
+import * as clinicalEnrichment from "../src/hosted-runtime/clinical-enrichment.ts";
+import type { HostedWorkspaceCheckpointRequest } from "@murphai/hosted-execution/runtime-control";
 import { initializeVault } from "@murphai/core";
 import { buildHostedExecutionRuntimeControlWake } from "@murphai/hosted-execution";
 import type { CodexRealtimeClosure } from "@murphai/assistant-engine/assistant-runtime";
@@ -306,3 +310,161 @@ it("stops repeated no-progress service of a due mailbox item while voice retains
     await removeTempRoot(vaultRoot);
   }
 });
+
+
+it.each(["no-progress", "backoff", "held-background", "budget", "shutdown"] as const)(
+  "checkpoints an inherited retry in place before voice service (%s)", async (outcome) => {
+    const restorePendingRetry = mockHostedPendingRetryCandidate(true);
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-voice-inherited-retry-"));
+    const events: string[] = [];
+    const checkpoints: HostedWorkspaceCheckpointRequest[] = [];
+    const wake = createCoalescingRuntimeWakeSignal();
+    const abort = new AbortController();
+    const shutdown = new AbortController();
+    const foreground = createDeferred<void>();
+    const published = createDeferred<void>();
+    const serviced = createDeferred<void>();
+    const extractionStarted = createDeferred<void>();
+    const retryAt = new Date(Date.parse(TEST_NOW) + 1_000).toISOString();
+    const backoffAt = new Date(Date.parse(TEST_NOW) + 60_000).toISOString();
+    let phases = 0;
+    const clinical = outcome === "held-background"
+      ? vi.spyOn(clinicalEnrichment, "runOneHostedClinicalEnrichment").mockImplementation(async (input) => {
+          input.onExtractionStarted?.();
+          extractionStarted.resolve();
+          await new Promise<void>((resolve) => {
+            if (input.abortSignal.aborted) resolve();
+            else input.abortSignal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          events.push("background:joined");
+          return "idle";
+        })
+      : null;
+    const voice = createHostedRuntimeVoice({
+      notifyRuntime: () => wake.notify(),
+      createCall: (callId) => createHostedRuntimeVoiceCall({
+        callId, memberId: TEST_USER_ID, signal: abort.signal,
+        notifyRuntime: () => wake.notify(), onError: vi.fn(),
+        admitInput: async () => { throw new Error("No speech was sent."); },
+        usagePort: { recordUsage: async () => { throw new Error("No provider was started."); } },
+      }),
+    });
+    voice.reserve("call_synthetic_retry");
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    vi.setSystemTime(new Date(TEST_NOW));
+    const invocation = runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({ request: {
+      runnerIdleTtlMs: 600_000,
+      ...(outcome === "budget" ? { budget: { maxMailboxItems: 1 } } : {}),
+    } }), {
+      voice, runtimeWakeSignal: wake, signal: abort.signal, shutdownSignal: shutdown.signal, vaultRoot,
+      async createCheckpointSnapshot() {
+        expect(Date.now()).toBe(Date.parse(retryAt));
+        expect(voice.isHoldingRuntime()).toBe(true);
+        if (clinical) expect(events).toContain("background:joined");
+        events.push("snapshot");
+        return { snapshotRef: createSnapshotFixtureRef({ hash: "d".repeat(64), size: 640 }) };
+      },
+      importItem: async () => ({ status: "imported" }),
+      platform: createPlatform({
+        mailboxPort: createMailboxPort({ events, items: [createMailboxItem(), ...(outcome === "budget" ? [createMailboxItem({ id: "mailbox_item_budget_second", laneSeq: "2", createdAt: "9999-01-01T00:00:00.000Z" })] : [])] }),
+        workspacePort: createWorkspacePort({ events, checkpointRequests: checkpoints,
+          workspace: createWorkspaceState({ nextWakeAt: retryAt, nextWakeReason: "assistant" }),
+          checkpointWorkspace(request) {
+            events.push("published");
+            if (outcome === "shutdown") shutdown.abort();
+            published.resolve();
+            return createWorkspaceState({
+              version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+              snapshotRef: request.snapshotRef,
+              nextWakeAt: request.nextWakeAt ?? null, nextWakeReason: request.nextWakeReason ?? null,
+            });
+          },
+        }),
+      }),
+      async runAssistantPhase(input) {
+        phases += 1;
+        if (phases === 1) {
+          if (clinical) await extractionStarted.promise;
+          foreground.resolve();
+          return {
+            progressed: true, checkpointReason: "assistant_runtime_commit",
+            nextWakeAt: retryAt, nextWakeReason: "assistant",
+            ...(clinical ? {} : { afterCheckpoint: async () => ({
+              checkpointReason: "assistant_runtime_commit" as const,
+              afterDurableCheckpoint: async () => { events.push("effect"); },
+            }) }),
+          };
+        }
+        if (phases > 2) {
+          // Closing voice can probe again; the future retry must stay unserviced.
+          expect(outcome).toBe("backoff");
+          expect(voice.isHoldingRuntime()).toBe(false);
+          expect(input.workspace?.nextWakeAt).toBe(backoffAt);
+          expect(Date.now()).toBeLessThan(Date.parse(backoffAt));
+          return { progressed: false };
+        }
+        expect(events).toContain("published");
+        if (!clinical) expect(events).toContain("effect");
+        expect(voice.isHoldingRuntime()).toBe(true);
+        expect(input.workspace?.nextWakeAt).toBe(retryAt);
+        events.push("retry");
+        serviced.resolve();
+        return outcome === "backoff"
+          ? { progressed: true, checkpointReason: "assistant_runtime_commit", nextWakeAt: backoffAt, nextWakeReason: "assistant" }
+          : { progressed: false };
+      },
+    });
+    void invocation.catch(() => {});
+    try {
+      await withRealTimeout(foreground.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(999);
+      expect(checkpoints).toHaveLength(0);
+      expect(phases).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      if (outcome === "held-background") {
+        // A checkpoint return would abort detached work, so a due retry waits.
+        // Publication does real I/O, so give it real time to prove it stays held.
+        await vi.advanceTimersByTimeAsync(60_000);
+        const publishedWhileHeld = await Promise.race([
+          published.promise.then(() => true),
+          sleepRealTime(1_500).then(() => false),
+        ]);
+        expect(publishedWhileHeld).toBe(false);
+        expect(events).not.toContain("background:joined");
+        return;
+      }
+      await withRealTimeout(published.promise, 5_000, () => events.join(","));
+      if (outcome === "budget" || outcome === "shutdown") {
+        const result = await withRealTimeout(invocation, 5_000, () => events.join(","));
+        expect(phases).toBe(1);
+        expect(result.nextWakeAt).toBe(retryAt);
+        if (outcome === "budget") expect(result.status).toBe("budget_exhausted");
+      } else {
+        await withRealTimeout(serviced.promise, 5_000, () => events.join(","));
+        // Let publication and the clean voice wait settle before moving time.
+        await withRealTimeout((async () => {
+          while (outcome === "backoff" && checkpoints.length < 2) {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+          }
+        })(), 5_000, () => events.join(","));
+        await vi.advanceTimersByTimeAsync(2_000);
+        expect(phases).toBe(2);
+        expect(voice.isHoldingRuntime()).toBe(true);
+        await voice.closeCall("call_synthetic_retry");
+        const result = await withRealTimeout(invocation, 5_000, () => events.join(","));
+        expect(result.nextWakeAt).toBe(outcome === "backoff" ? backoffAt : retryAt);
+        expect(checkpoints.at(-1)?.nextWakeAt).toBe(outcome === "backoff" ? backoffAt : retryAt);
+        if (!clinical) expect(events.indexOf("published")).toBeLessThan(events.indexOf("effect"));
+      }
+    } finally {
+      restorePendingRetry();
+      abort.abort();
+      await voice.close();
+      await invocation.catch(() => {});
+      clinical?.mockRestore();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  },
+);

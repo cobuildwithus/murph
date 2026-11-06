@@ -10,6 +10,7 @@ import {
   createWorkspaceRuntimeJobInput,
   createWorkspaceState,
   mocks,
+  mockHostedPendingRetryCandidate,
   removeTempRoot,
   requireEventIndex,
   stageAssistantInputEventForMailboxItem,
@@ -60,7 +61,7 @@ import {
   type HostedWorkspaceInvocationRequest,
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   createCoalescingRuntimeWakeSignal,
   HostedRuntimeCheckpointInterruptedByWakeError,
@@ -74,6 +75,13 @@ import {
 } from "../src/hosted-runtime.ts";
 
 describe("hosted workspace runtime entrypoint", () => {
+  // Real pending-state I/O races these fake-timer tests. None has a message waiting.
+  let restoreNoPendingRetry = () => {};
+  beforeEach(() => {
+    restoreNoPendingRetry = mockHostedPendingRetryCandidate(false);
+  });
+  afterEach(() => restoreNoPendingRetry());
+
   test.each([
     { followupMinute: 4, timing: { runnerIdleTtlMs: 600_000 }, worker: "current" },
     { followupMinute: 9, timing: { idleCheckpointDelayMs: 180_000 }, worker: "legacy" },
@@ -1607,6 +1615,183 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeAt, TEST_NOW);
     } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test.each([
+    [10, true],
+    [20, true],
+    [10, false],
+  ])("inherited wake due at %s ms with a waiting message=%s", async (retryDelayMs, messageWaiting) => {
+    const restorePendingRetry = mockHostedPendingRetryCandidate(messageWaiting);
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-round4-hidden-wake-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxItems: HostedMailboxItem[] = [createMailboxItem({ id: "mailbox_item_initial_conversation" })];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const runnerIdleTtlMs = 600_000;
+    const retryWakeAt = new Date(Date.parse(TEST_NOW) + retryDelayMs).toISOString();
+    let checkpointStartedAtMs: number | null = null;
+    const abort = new AbortController();
+    let invocation: Promise<unknown> | undefined;
+    const assistantOneObserved = createDeferred<void>();
+    const assistantTwoObserved = createDeferred<void>();
+    const assistantThreeObserved = createDeferred<void>();
+    let assistantPhaseCalls = 0;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const resultPromise = withRealTimeout(invocation =
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_round4_committed_due_assistant_hidden_then_serviced",
+              runnerIdleTtlMs,
+              leaseGeneration: "9",
+              userId: TEST_USER_ID,
+              workspaceVersion: "4",
+            },
+          }),
+          {
+            signal: abort.signal,
+            async createCheckpointSnapshot(snapshotInput) {
+              checkpointStartedAtMs = Date.now();
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createSnapshotFixtureRef({
+                  hash: `${checkpointRequests.length + 1}`.repeat(64).slice(0, 64),
+                  size: 640,
+                }),
+              };
+            },
+            async importItem(item) {
+              events.push(`mailbox.importItem:${item.item.id}`);
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: mailboxItems,
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({
+                  nextWakeAt: retryWakeAt,
+                  nextWakeReason: "assistant",
+                  version: "4",
+                }),
+              }),
+            }),
+            runtimeWakeSignal,
+            async runAssistantPhase(input) {
+              assistantPhaseCalls += 1;
+              events.push(
+                `assistant.phase:${assistantPhaseCalls}:`
+                  + `${input.workspace?.nextWakeAt ?? "none"}:`
+                  + `${input.workspace?.nextWakeReason ?? "none"}`,
+              );
+              if (assistantPhaseCalls === 1) {
+                assistantOneObserved.resolve();
+                setTimeout(() => {
+                  mailboxItems.push(createMailboxItem({
+                    id: "mailbox_item_round4_hidden_wake_conversation",
+                    laneSeq: "2",
+                    occurredAt: "2026-04-27T00:00:01.000Z",
+                  }));
+                  runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
+                }, 0);
+                return {
+                  checkpointReason: "canonical_runtime_commit" as const,
+                  nextWakeAt: retryWakeAt,
+                  nextWakeReason: "assistant",
+                  progressed: true,
+                  redactedStatus: {
+                    hostedAssistantProgressed: true,
+                  },
+                };
+              }
+
+              if (assistantPhaseCalls === 2) {
+                vi.setSystemTime(new Date(Date.parse(TEST_NOW) + 15));
+                assistantTwoObserved.resolve();
+                return {
+                  progressed: false,
+                  redactedStatus: {
+                    hostedAssistantProgressed: false,
+                  },
+                };
+              }
+
+              if (assistantPhaseCalls === 3) {
+                assert.equal(input.workspace?.nextWakeAt, retryWakeAt);
+                assistantThreeObserved.resolve();
+                return {
+                  checkpointReason: "assistant_runtime_commit" as const,
+                  nextWakeAt: retryWakeAt,
+                  nextWakeReason: "assistant",
+                  progressed: true,
+                  redactedStatus: {
+                    hostedAssistantProgressed: true,
+                  },
+                };
+              }
+
+              throw new Error("Committed due assistant wake should be serviced exactly once after checkpoint.");
+            },
+            vaultRoot,
+          },
+        ),
+        15_000,
+        () => events.join(","),
+      );
+
+      void resultPromise.catch(() => undefined);
+      await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(0);
+      await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
+      assert.equal(checkpointRequests.length, 0);
+      assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:")), [
+        `assistant.phase:1:${retryWakeAt}:assistant`,
+        `assistant.phase:2:${retryWakeAt}:assistant`,
+      ]);
+
+      if (!messageWaiting) {
+        // Routine assistant work must not end a warm conversation early.
+        await waitForFakeTimerScheduled(() => events.join(","));
+        await vi.advanceTimersByTimeAsync(60_000);
+        assert.equal(checkpointStartedAtMs, null);
+        await vi.advanceTimersByTimeAsync(runnerIdleTtlMs);
+        await resultPromise;
+        assert.equal(checkpointRequests.length, 1);
+        return;
+      }
+      if (retryDelayMs === 20) {
+        await waitForFakeTimerScheduled(() => events.join(","));
+        await vi.advanceTimersByTimeAsync(3);
+        mailboxItems.push(createMailboxItem({ id: "mailbox_item_later_fresh", laneSeq: "3" }));
+        runtimeWakeSignal.notify();
+        await withRealTimeout(assistantThreeObserved.promise, 15_000, () => events.join(","));
+        await waitForFakeTimerScheduled(() => events.join(","));
+        await vi.advanceTimersByTimeAsync(2);
+      }
+      const result = await resultPromise;
+      assert.equal(checkpointStartedAtMs, Date.parse(TEST_NOW) + Math.max(15, retryDelayMs));
+      assert.equal(assistantPhaseCalls, retryDelayMs === 20 ? 3 : 2);
+      assert.deepEqual(checkpointRequests.map((request) => [request.reason, request.nextWakeAt, request.nextWakeReason]), [
+        ["idle_shutdown", retryWakeAt, "assistant"],
+      ]);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, retryWakeAt);
+    } finally {
+      abort.abort();
+      await invocation?.catch(() => undefined);
+      restorePendingRetry();
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }
