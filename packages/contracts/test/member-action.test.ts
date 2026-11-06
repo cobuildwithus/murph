@@ -743,3 +743,15 @@ describe("member action contract", () => {
     }).success).toBe(false);
   });
 });
+
+
+it("validates display-name actions with the memory name contract", () => {
+  const request = (displayName: unknown) => ({ ...validRequest(), action: { kind: "display-name.set", version: 1, displayName } });
+  expect(parseMemberActionRequestV1(request("Avery")).action).toEqual({ kind: "display-name.set", version: 1, displayName: "Avery" });
+  for (const name of ["", " ", "A".repeat(121), "A\nB", null]) {
+    expect(memberActionRequestV1Schema.safeParse(request(name)).success).toBe(false);
+  }
+  expect(memberActionRequestV1Schema.safeParse({ ...request("Avery"), action: {
+    kind: "display-name.set", version: 1, displayName: "Avery", extra: true,
+  } }).success).toBe(false);
+});

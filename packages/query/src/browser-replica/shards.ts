@@ -36,6 +36,7 @@ export interface BrowserVaultReplicaShardIdentity {
 export interface BrowserVaultCoreShard extends Pick<
   BrowserVaultReplica,
   | "demographics"
+  | "displayName"
   | "assistantSummary"
   | "entities"
   | "journal"
@@ -170,6 +171,7 @@ export async function splitBrowserVaultReplica(
       identity,
       ...(replica.journal === undefined ? {} : { journal: replica.journal }),
       ...(replica.demographics === undefined ? {} : { demographics: replica.demographics }),
+      ...(replica.displayName === undefined ? {} : { displayName: replica.displayName }),
       ...(replica.meals === undefined ? {} : { meals: replica.meals }),
       policy: replica.policy,
       schema: BROWSER_VAULT_CORE_SHARD_SCHEMA,
@@ -212,6 +214,7 @@ export function assembleBrowserVaultCoreReplica(core: BrowserVaultCoreShard): Br
     hasLabBiomarkers: core.hasLabBiomarkers,
     ...(core.journal === undefined ? {} : { journal: core.journal }),
     ...(core.demographics === undefined ? {} : { demographics: core.demographics }),
+    ...(core.displayName === undefined ? {} : { displayName: core.displayName }),
     ...(core.meals === undefined ? {} : { meals: core.meals }),
     policy: core.policy,
     schema: BROWSER_VAULT_REPLICA_SCHEMA,

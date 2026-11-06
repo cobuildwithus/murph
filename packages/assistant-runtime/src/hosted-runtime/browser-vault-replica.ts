@@ -10,6 +10,7 @@ import {
 import path from "node:path";
 
 import {
+  memoryDisplayNameSchema,
   experimentFrontmatterSchema,
   experimentOutcomeSchema,
   VAULT_LAYOUT,
@@ -19,6 +20,17 @@ import {
 } from "@murphai/contracts";
 
 import { readMemoryDemographics } from "@murphai/core";
+import { readProjectableProfileName } from "./vault-share-projection.ts";
+
+async function readReplicaDisplayName(vaultRoot: string): Promise<string | undefined> {
+  try {
+    const records = await readProjectableProfileName(vaultRoot);
+    const data = records[0]?.data;
+    return data && "displayName" in data ? memoryDisplayNameSchema.safeParse(data.displayName).data : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Memory that can't be read projects as unknown (no field), so one bad memory
@@ -215,6 +227,7 @@ export async function createHostedBrowserVaultReplicaForSourceState(input: {
   input.onRefreshStep?.("replica_construction_projection");
   return await createBrowserVaultReplica({
     demographics: (await readReplicaDemographics(input.vaultRoot)) ?? undefined,
+    displayName: await readReplicaDisplayName(input.vaultRoot),
     experimentOutcomes: outcomeProjection.outcomes,
     generatedAt: input.generatedAt,
     metricPoints,
@@ -593,6 +606,8 @@ export async function hashHostedBrowserVaultReplicaSources(
   const digest = createHash("sha256");
   digest.update("murph.hosted-browser-vault-source.v1\0");
   digest.update(canonicalSourceResult.value.hash);
+  digest.update("\0displayName\0");
+  digest.update(JSON.stringify(await readReplicaDisplayName(vaultRoot) ?? null));
   digest.update("\0demographics\0");
   digest.update(JSON.stringify(await readReplicaDemographics(vaultRoot)));
   digest.update("\0");

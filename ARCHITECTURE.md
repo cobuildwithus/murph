@@ -5616,6 +5616,23 @@ read these observations to help explain sync status; contact never proves Health
 permissions, successful ingestion, or continuous app execution.
 See [companion presence](agent-docs/references/companion-presence.md).
 
+## Vault display-name projection and actions
+
+Browser Vault replicas and their core shard carry optional `displayName` beside
+`demographics`. The hosted runtime uses `readProjectableProfileName`, including
+canonical memory and its narrow legacy `bank/profile.md` fallback. A missing or
+failed name read omits the field without failing the replica. The resolved name
+participates in every hosted source digest check. Adding its digest segment
+invalidates older source hashes on the next refresh before the skip decision;
+projection generation remains 18. Older parsers copy known fields and ignore it.
+
+`display-name.set` V1 carries `displayName` validated by
+`memoryDisplayNameSchema`. The existing encrypted member-action mailbox calls
+core `setMemoryDisplayName`; its locked `changed` result selects `applied` or
+`unchanged`. It uses the same silent no-op mailbox effect as demographics,
+without a model turn or a new dispatch event. Deploy this consumer before the
+Web producer; keep it while accepted actions can remain queued or restored.
+
 ## Weekly Game
 
 Operator recap regeneration reuses the lifecycle receipt, minute sweep, hosted

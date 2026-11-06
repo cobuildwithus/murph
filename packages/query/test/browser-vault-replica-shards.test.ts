@@ -556,3 +556,19 @@ test("demographics survives split, parse and assemble without collapsing legacy 
     assert.deepEqual(parseBrowserVaultReplica(current).demographics, current.demographics);
   }
 });
+
+
+test("displayName survives the core and monolith parsers while legacy absence stays absent", async () => {
+  const legacy = createReplica();
+  assert.equal("displayName" in parseBrowserVaultReplica(legacy), false);
+  const old = assembleBrowserVaultCoreReplica(parseBrowserVaultCoreShard((await splitBrowserVaultReplica(legacy)).core));
+  assert.equal("displayName" in old, false);
+  const current = { ...legacy, displayName: "Avery" };
+  const shards = await splitBrowserVaultReplica(current);
+  const parsed = await parseBrowserVaultReplicaShards(JSON.parse(JSON.stringify(shards)));
+  assert.equal(assembleBrowserVaultReplicaShards(parsed).displayName, "Avery");
+  assert.equal(assembleBrowserVaultCoreReplica(parsed.core).displayName, "Avery");
+  assert.equal(parseBrowserVaultReplica(current).displayName, "Avery");
+  assert.equal("displayName" in parsed.labs, false);
+  assert.equal("displayName" in parsed.metrics, false);
+});

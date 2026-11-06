@@ -1,5 +1,5 @@
 import type { CanonicalEntity } from "../canonical-entities.ts";
-import { memoryDemographicsSchema, experimentOutcomeSchema } from "@murphai/contracts";
+import { memoryDisplayNameSchema, memoryDemographicsSchema, experimentOutcomeSchema } from "@murphai/contracts";
 import { metricPointRecordIds } from "../metrics/index.ts";
 import { buildJournalView } from "../journal-view.ts";
 import { buildCompanionMealsProjection } from "./meals.ts";
@@ -119,6 +119,7 @@ export async function createBrowserVaultReplica(
     generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
     // Absent means unknown (unreadable memory, or a builder without memory).
     ...(input.demographics ? { demographics: memoryDemographicsSchema.parse(input.demographics) } : {}),
+    ...(input.displayName === undefined ? {} : { displayName: memoryDisplayNameSchema.parse(input.displayName) }),
     meals: buildCompanionMealsProjection(input.vault),
     hasLabBiomarkers: metricRows.some((row) =>
       row.sourceKind === "test-result" &&

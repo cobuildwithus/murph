@@ -450,3 +450,29 @@ it("applies demographics through canonical memory and replays after a later corr
     expect((await executeHostedMemberActionWake({ vaultRoot: root, wake: conflict })).postCheckpointRecord).toMatchObject({ outcome: { status: "rejected", reason: "demographics_unresolved" } });
   } finally { await rm(root, { force: true, recursive: true }); }
 });
+
+
+it("applies a display name through core, stays silent, and reports changed versus unchanged", async () => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { readMemoryDocument } = await import("@murphai/core");
+  const { resolveMemoryDisplayName } = await import("@murphai/contracts");
+  const root = await mkdtemp(join(tmpdir(), "display-name-action-"));
+  const wake = {
+    eventId: "member.action.requested:d8653d1f-fb8d-400b-8efe-d3fbdc9f9830",
+    kind: "member.action.requested" as const, userId: "member_synthetic", occurredAt: "2026-01-01T01:00:00Z",
+    request: { actionId: "d8653d1f-fb8d-400b-8efe-d3fbdc9f9830", requestedAt: "2026-01-01T01:00:00Z", schemaVersion: 1 as const,
+      action: { kind: "display-name.set" as const, version: 1 as const, displayName: "Avery" },
+    },
+  };
+  try {
+    for (const [displayName, status] of [["Avery", "applied"], ["Avery", "unchanged"], ["Robin", "applied"], ["Avery", "applied"]] as const) {
+      wake.request.action.displayName = displayName;
+      const result = await executeHostedMemberActionWake({ vaultRoot: root, wake });
+      expect(result).toMatchObject({ conversationMetrics: null, mailboxLane: "member-action", nextWakeAt: null, redactedLogEntries: [],
+        postCheckpointRecord: { kind: "member-action.outcome-recorded", outcome: { status, reason: null } } });
+      expect(resolveMemoryDisplayName(await readMemoryDocument(root))?.displayName).toBe(displayName);
+    }
+  } finally { await rm(root, { force: true, recursive: true }); }
+});
