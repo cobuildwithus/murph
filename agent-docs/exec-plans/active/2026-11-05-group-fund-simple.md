@@ -135,6 +135,10 @@ A migration under `apps/web/prisma/contract-migrations` drops
 `hosted_group_sponsorship_moment`, which also deletes the stored personalization.
 The drop sets a hard rollback floor at PR 2, so it stays separate.
 
+The owner approved the drop on 2026-11-05, knowing it deletes stored aliases and
+requests for good. It ships as `20261106050000_drop_group_sponsorship_moment`, merged
+after the runner carrying PR 2 was live.
+
 The parser's tolerance for the `sponsorship` key is a separate window: dropping
 the table says nothing about old tabs. Remove it once PR 1 has been live for
 seven days.

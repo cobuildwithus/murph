@@ -9,7 +9,24 @@ const migrationSql = readFileSync(
   "utf8",
 );
 
+const dropSql = readFileSync(
+  new URL(
+    "../prisma/contract-migrations/20261106050000_drop_group_sponsorship_moment/migration.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
+
 describe("hosted group sponsorship migration", () => {
+  it("drops the moment table and nothing else once its readers are gone", () => {
+    const statements = dropSql
+      .split("\n")
+      .filter((line) => line.trim() !== "" && !line.startsWith("--"));
+    expect(statements).toEqual([
+      'DROP TABLE IF EXISTS "hosted_group_sponsorship_moment";',
+    ]);
+  });
+
   it("adds one purchase-linked content record without a second financial state", () => {
     expect(migrationSql).toContain(
       'CREATE TABLE "hosted_group_sponsorship_moment"',

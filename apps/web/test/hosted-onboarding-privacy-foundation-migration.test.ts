@@ -99,7 +99,6 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'groupJournalCaptureConsentRequestedAt DateTime? @map("group_journal_capture_consent_requested_at")',
     'groupJournalCaptureEnabled Boolean? @map("group_journal_capture_enabled")',
     'groupPrivateConversionTrackedAt DateTime? @map("group_private_conversion_tracked_at")',
-    'groupSponsorshipMomentsCreated HostedGroupSponsorshipMoment[] @relation("HostedGroupSponsorshipMomentCreator")',
     'groupSponsorshipsPaid HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationPayer")',
     'groupSponsorshipsReceived HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationBeneficiary")',
     'initialOnboardingCompletedAt DateTime? @default(now()) @map("initial_onboarding_completed_at")',

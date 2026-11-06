@@ -657,7 +657,6 @@ model HostedMember {
   usageCreditPurchasesReceived   HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchaseBeneficiary")
   groupSponsorshipsPaid          HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationPayer")
   groupSponsorshipsReceived      HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationBeneficiary")
-  groupSponsorshipMomentsCreated HostedGroupSponsorshipMoment[]  @relation("HostedGroupSponsorshipMomentCreator")
   usageCreditEntries             HostedUsageCreditEntry[]
   usageReferralsAsReferrer       HostedUsageReferral[]            @relation("HostedUsageReferralReferrer")
   usageReferralsAsBeneficiary    HostedUsageReferral[]            @relation("HostedUsageReferralBeneficiary")
@@ -1812,7 +1811,6 @@ model HostedUsageCreditPurchase {
   groupSponsorshipPeriodStartedAt  DateTime?                            @map("group_sponsorship_period_started_at")
   groupSponsorshipChargeOrdinal    Int?                                 @map("group_sponsorship_charge_ordinal")
   groupSponsorshipAuthorization    HostedGroupSponsorshipAuthorization? @relation(fields: [groupSponsorshipAuthorizationId], references: [id], onDelete: Restrict)
-  groupSponsorshipMoment            HostedGroupSponsorshipMoment?
 
   @@unique([payerMemberId, clientRequestKey], map: "hosted_usage_credit_purchase_payer_request_key")
   @@unique([groupSponsorshipAuthorizationId, groupSponsorshipPeriodStartedAt, groupSponsorshipChargeOrdinal], map: "hosted_usage_credit_purchase_sponsorship_period_ordinal_key")
@@ -1846,29 +1844,6 @@ model HostedGroupSponsorshipAuthorization {
   @@index([payerMemberId, status, updatedAt], map: "hosted_group_sponsorship_authorization_payer_status_idx")
   @@index([beneficiaryMemberId, status, updatedAt], map: "hosted_group_sponsorship_authorization_beneficiary_status_idx")
   @@map("hosted_group_sponsorship_authorization")
-}
-
-model HostedGroupSponsorshipMoment {
-  purchaseId                 String   @id @map("purchase_id")
-  beneficiaryMemberId        String   @map("beneficiary_member_id")
-  creatorMemberId            String   @map("creator_member_id")
-  configurationDigest        String   @map("configuration_digest")
-  creativeRequestEncrypted   String?  @map("creative_request_encrypted")
-  publicAliasEncrypted       String?  @map("public_alias_encrypted")
-  fundingPageAliasConsent    String?  @map("funding_page_alias_consent")
-  sponsorMessageEncrypted    String?  @map("sponsor_message_encrypted")
-  runningBitRequestEncrypted String?  @map("running_bit_request_encrypted")
-  activatedAt                DateTime? @map("activated_at")
-  fundingPageAliasPublishedAt DateTime? @map("funding_page_alias_published_at")
-  expiresAt                  DateTime? @map("expires_at")
-  createdAt                  DateTime  @default(now()) @map("created_at")
-  updatedAt                  DateTime  @updatedAt @map("updated_at")
-  purchase                   HostedUsageCreditPurchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
-  creator                    HostedMember @relation("HostedGroupSponsorshipMomentCreator", fields: [creatorMemberId], references: [id], onDelete: Cascade)
-
-  @@index([beneficiaryMemberId, expiresAt], map: "hosted_group_sponsorship_moment_active_idx")
-  @@index([creatorMemberId, createdAt], map: "hosted_group_sponsorship_moment_creator_idx")
-  @@map("hosted_group_sponsorship_moment")
 }
 
 model HostedUsageCreditEntry {

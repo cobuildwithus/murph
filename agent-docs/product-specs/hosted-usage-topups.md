@@ -238,13 +238,13 @@ sponsor and the single-sponsor billing invariant.
 
 Sponsorship personalization is retired. Funding collects no creative request,
 temporary running bit, public alias, or supporters-list consent. Checkout,
-recovery, Stripe reconciliation, and mailbox fetch neither read nor write
-`HostedGroupSponsorshipMoment`. The model and migrations remain until a separate
-contract migration drops the table and its stored personalization.
+recovery, Stripe reconciliation, and mailbox fetch keep no sponsorship content.
+The `20261106050000_drop_group_sponsorship_moment` contract migration dropped the
+table and its stored personalization.
 
 Growth reporting classifies group purchases from the beneficiary's thread
-container and the existing monthly authorization, independent of moment rows
-or payer retention. Historical one-time group contributions remain group revenue.
+container and the existing monthly authorization, independent of payer
+retention. Historical one-time group contributions remain group revenue.
 Private payment-recovery notices and all billing authorization checks remain.
 
 The runtime accepts the historical `creative-response` and
@@ -1340,14 +1340,14 @@ Web cannot activate or safely manage it. Recover from that point with a forward
 fix on the compatible schema, Web, and runtime rather than restoring the older
 producer.
 
-Personalization removal has the UI-and-recovery revision as its Web rollback
-floor: it tolerates an old tab's `sponsorship` key and recovers purchases without
-reading a moment row or comparing a draft digest. Billing selection, the
-`sponsorship` conflict value, caps, exact $5 activation and refills remain live.
-Keep old-tab key tolerance until that revision has been live for seven days.
+Personalization removal tolerates an old tab's `sponsorship` key and recovers
+purchases without reading a moment row or comparing a draft digest. Billing
+selection, the `sponsorship` conflict value, caps, exact $5 activation and refills
+remain live. Keep old-tab key tolerance until that revision has been live for seven
+days.
 
-Drop the moment table only in a later contract-migration release after this
-removal is live. That drop sets the rollback floor at the removal revision.
+The moment table drop sets the Web rollback floor at the removal revision, because
+older Web writes that table.
 Retired notification profiles must remain readable while retained mailbox rows
 or restored runtime snapshots can still contain them; the 14-day mailbox
 retention alone does not prove all snapshots have drained.
