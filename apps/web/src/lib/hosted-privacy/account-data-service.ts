@@ -51,10 +51,9 @@ import {
 import {
   cancelHostedGroupSponsorshipsForPayerAccountDeletionTx,
 } from "../hosted-groups/group-sponsorship-authorization";
+import { releaseHostedLinqSignupSuppressionAfterDeletionTx } from "../hosted-onboarding/linq-delivery-store";
 import {
-  buildHostedLinqInviteSignupEffectId,
   buildHostedLinqInviteSignupEffectIdMemberPrefix,
-  parseHostedLinqInviteSignupEffectId,
 } from "../hosted-onboarding/linq-invite-signup-effect-id";
 import {
   getHostedOnboardingStripe,
@@ -2124,10 +2123,6 @@ type HostedGroupJoinOutreachDeletionSnapshot = {
   outreachIds: string[];
 };
 
-type HostedLinqSignupProjectionIdentity = {
-  dayUtc: string;
-  memberId: string;
-};
 
 async function readHostedGroupJoinOutreachDeletionSnapshot(input: {
   memberIdFilter: string | { in: string[] };
@@ -2189,24 +2184,6 @@ async function readHostedGroupJoinOutreachDeletionSnapshot(input: {
   return { deliveries, deliveryWhere, outreachIds };
 }
 
-function readHostedLinqSignupProjectionIdentities(
-  deliveries: readonly { sourceRef: string | null }[],
-): HostedLinqSignupProjectionIdentity[] {
-  const identities = new Map<string, HostedLinqSignupProjectionIdentity>();
-  for (const delivery of deliveries) {
-    const attempt = parseHostedLinqInviteSignupEffectId(delivery.sourceRef);
-    if (!attempt) {
-      continue;
-    }
-    const identity = {
-      dayUtc: attempt.dayUtc,
-      memberId: attempt.memberId,
-    };
-    identities.set(`${identity.memberId}\0${identity.dayUtc}`, identity);
-  }
-  return [...identities.values()];
-}
-
 async function deleteHostedGroupJoinOutreachRowsForMembers(
   prisma: Prisma.TransactionClient,
   memberIdFilter: string | { in: string[] },
@@ -2224,10 +2201,6 @@ async function deleteHostedGroupJoinOutreachRowsForMembers(
   if (!snapshot.deliveryWhere) {
     return { deliveryCount: 0, outreachCount: 0 };
   }
-  const projectionIdentities = readHostedLinqSignupProjectionIdentities(
-    snapshot.deliveries,
-  );
-
   // The earlier suspension transaction crossed this same drain before commit.
   // A provider effect admitted first therefore committed its correlation and
   // projection before suspension, while every later preparation observes the
@@ -2236,49 +2209,7 @@ async function deleteHostedGroupJoinOutreachRowsForMembers(
   const deliveries = await prisma.hostedLinqDelivery.deleteMany({
     where: snapshot.deliveryWhere,
   });
-  if (projectionIdentities.length > 0) {
-    const liveDeliveries = await prisma.hostedLinqDelivery.findMany({
-      select: { sourceRef: true },
-      where: {
-        OR: projectionIdentities.map((identity) => ({
-          sourceRef: {
-            startsWith: buildHostedLinqInviteSignupEffectId({
-              memberId: identity.memberId,
-              occurredAt: identity.dayUtc,
-            }),
-          },
-        })),
-        status: {
-          in: ["attempted", "provider_dispatch_started", "accepted", "delivered"],
-        },
-        template: {
-          in: ["invite_signup", "invite_signup_fallback"],
-        },
-      },
-    });
-    const liveIdentityKeys = new Set(
-      readHostedLinqSignupProjectionIdentities(liveDeliveries).map(
-        (identity) => `${identity.memberId}\0${identity.dayUtc}`,
-      ),
-    );
-    const releasedIdentities = projectionIdentities.filter(
-      (identity) => !liveIdentityKeys.has(`${identity.memberId}\0${identity.dayUtc}`),
-    );
-    if (releasedIdentities.length > 0) {
-      const identityWhere = releasedIdentities.map((identity) => ({
-        dayUtc: new Date(identity.dayUtc),
-        memberId: identity.memberId,
-      }));
-      await prisma.hostedLinqDailyState.updateMany({
-        // Preserve the independent daily reminder allowance when reopening signup.
-        data: { onboardingLinkSentAt: null },
-        where: {
-          ...(identityWhere.length === 1 ? identityWhere[0] : { OR: identityWhere }),
-          onboardingLinkSentAt: { not: null },
-        },
-      });
-    }
-  }
+  await releaseHostedLinqSignupSuppressionAfterDeletionTx({ deliveries: snapshot.deliveries, prisma });
   const removed = await prisma.hostedGroupJoinOutreach.deleteMany({
     where: { id: { in: snapshot.outreachIds } },
   });

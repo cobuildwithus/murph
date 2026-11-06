@@ -9,6 +9,9 @@ import {
   createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
+  claimHostedLinqDeliveryProviderDispatchTx,
+  markHostedLinqDeliveryAcceptedTx,
+  releaseHostedLinqSignupSuppressionAfterDeletionTx,
   hasHostedLinqInviteSignupLiveDeliveryTx,
   readHostedLinqInviteSignupLiveAttemptsTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
@@ -732,4 +735,91 @@ function isClearlyLocalPostgresUrl(value: string): boolean {
   const effectiveHost = (hostOverrides[0] || parsed.hostname).toLowerCase();
   return ["127.0.0.1", "::1", "[::1]", "localhost"].includes(effectiveHost)
     || effectiveHost.startsWith("/");
+}
+
+
+describe.skipIf(!runPostgresProof)("signup suppression owner", () => {
+  it.each([false, true])("failure releases only without another live identity (B live: %s)", async (bLive) => withSuppressionFixture(async (f) => {
+    await f.claim("a");
+    await f.accept("a");
+    if (bLive) await f.claim("b");
+    await f.receipt("a", "failed");
+    const afterFailure = await f.read();
+    expect(afterFailure.onboardingLinkSentAt !== null).toBe(bLive);
+    if (!bLive) {
+      await f.claim("b");
+      expect((await f.read()).onboardingLinkSentAt).toBeNull();
+    }
+    expect((await f.read()).signupLinkReminderSentAt).toEqual(f.reminderAt);
+  }));
+
+  it("catches up delivered-before-accepted and accepted no-op through the owner", async () => withSuppressionFixture(async (f) => {
+    await f.claim("a");
+    await f.receipt("a", "delivered");
+    expect((await f.read()).onboardingLinkSentAt).toBeNull();
+    const accepted = await f.accept("a");
+    expect(accepted).toMatchObject({ deliveryStatus: "delivered", restoreOnboardingLink: { memberId: f.memberId } });
+    expect((await f.read()).onboardingLinkSentAt).not.toBeNull();
+    await f.prisma.hostedLinqDailyState.update({ where: f.dailyWhere, data: { onboardingLinkSentAt: null } });
+    expect(await f.accept("a")).toMatchObject({ deliveryStatus: "delivered", restoreOnboardingLink: null });
+    const marker = await f.read();
+    expect(marker.onboardingLinkSentAt).not.toBeNull();
+    expect(marker.signupLinkReminderSentAt).toEqual(f.reminderAt);
+  }));
+
+  it("privacy deletion preserves suppression until all identities are gone and keeps reminders", async () => withSuppressionFixture(async (f) => {
+    await f.claim("a"); await f.accept("a");
+    await f.claim("b"); await f.accept("b");
+    const before = await f.read();
+    const remove = (key: "a" | "b") => f.prisma.$transaction(async prisma => {
+      const deliveries = await prisma.hostedLinqDelivery.findMany({ where: { sourceRef: f.effect(key) }, select: { sourceRef: true } });
+      await prisma.hostedLinqDelivery.deleteMany({ where: { sourceRef: f.effect(key) } });
+      await releaseHostedLinqSignupSuppressionAfterDeletionTx({ deliveries, prisma });
+    });
+    await remove("a");
+    expect(await f.read()).toEqual(before);
+    await remove("b");
+    expect(await f.read()).toMatchObject({ onboardingLinkSentAt: null, signupLinkReminderSentAt: f.reminderAt });
+  }));
+});
+
+async function withSuppressionFixture(run: (f: Awaited<ReturnType<typeof seedSuppressionFixture>>) => Promise<void>) {
+  const f = await seedSuppressionFixture();
+  try { await run(f); } finally {
+    await f.prisma.hostedLinqAlert.deleteMany({ where: { eventId: { in: f.eventKeys } } });
+    await f.prisma.hostedLinqProviderEvent.deleteMany({ where: { eventId: { in: f.eventKeys } } });
+    await f.prisma.hostedLinqDelivery.deleteMany({ where: { source: f.source } });
+    await f.prisma.hostedLinqLine.deleteMany({ where: { phoneNumberLookupKey: createHostedPhoneLookupKey(f.phone)! } });
+    await f.prisma.hostedMember.delete({ where: { id: f.memberId } });
+    await f.prisma.$disconnect();
+  }
+}
+async function seedSuppressionFixture() {
+  const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+  const nonce = randomUUID();
+  const source = `suppression-proof-${nonce}`;
+  const memberId = `suppression-member-${nonce}`;
+  const phone = buildTestPhoneNumber(nonce, 0n);
+  const dayUtc = new Date("2026-08-01T00:00:00Z");
+  const reminderAt = new Date("2026-08-01T10:00:00Z");
+  const eventKeys: string[] = [];
+  await prisma.hostedMember.create({ data: { id: memberId } });
+  await prisma.hostedLinqDailyState.create({ data: { dayUtc, memberId, firstSeenAt: dayUtc, lastSeenAt: dayUtc, signupLinkReminderSentAt: reminderAt } });
+  const dailyWhere = { memberId_dayUtc: { dayUtc, memberId } };
+  const read = () => prisma.hostedLinqDailyState.findUniqueOrThrow({ where: dailyWhere,
+    select: { onboardingLinkSentAt: true, signupLinkReminderSentAt: true } });
+  const effect = (key: "a" | "b") => buildHostedLinqInviteSignupEffectId({ memberId, occurredAt: dayUtc, sourceEventDigest: key.repeat(32) });
+  const message = (key: "a" | "b") => `${source}-message-${key}`;
+  const claim = (key: "a" | "b") => prisma.$transaction(prisma => claimHostedLinqDeliveryProviderDispatchTx({
+    idempotencyKey: effect(key), sourceRef: effect(key), source, template: "invite_signup", status: "provider_dispatch_started", prisma,
+  }));
+  const accept = (key: "a" | "b") => markHostedLinqDeliveryAcceptedTx({ idempotencyKey: effect(key), messageId: message(key), prisma });
+  const receipt = (key: "a" | "b", status: "failed" | "delivered") => {
+    const eventId = `${source}-event-${key}-${status}`;
+    eventKeys.push(createHostedLinqProviderEventLookupKey(eventId)!);
+    return prisma.$transaction(prisma => ingestHostedLinqProviderEventTx({ prisma, event: buildReceipt({
+      eventId, messageId: message(key), occurredAt: new Date("2026-08-01T12:10:00Z"), phoneNumber: phone, status,
+    }) }));
+  };
+  return { prisma, source, memberId, phone, eventKeys, dailyWhere, reminderAt, read, effect, claim, accept, receipt };
 }

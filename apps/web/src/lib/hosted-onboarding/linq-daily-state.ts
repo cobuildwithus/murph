@@ -125,15 +125,6 @@ export async function hasHostedLinqInboundWithinDays(input: {
   return row !== null;
 }
 
-export async function claimHostedLinqOnboardingLinkNotice(input: {
-  memberId: string;
-  occurredAt: Date | string;
-  prisma: HostedLinqDailyStateClient;
-  sentAt?: Date;
-}): Promise<boolean> {
-  return markHostedLinqOnboardingLinkNoticeSent(input);
-}
-
 export async function markHostedLinqOnboardingLinkNoticeSent(input: {
   memberId: string;
   occurredAt: Date | string;

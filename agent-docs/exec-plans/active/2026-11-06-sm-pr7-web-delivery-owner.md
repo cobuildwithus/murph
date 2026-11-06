@@ -65,3 +65,15 @@ Updated: 2026-11-06
   (313 tests, exit 0).
 - Typecheck is reserved for the end of all three parts, per task constraints.
 - The plan remains active. No push, CI or remote review is part of this local task.
+
+- Signup suppression now commits within the delivery owner. Transport retains
+  its existing fallback and sent conditions; receipts return only contact-card
+  context. Privacy deletion calls the extracted batched projection maintenance
+  immediately after deleting delivery rows. Reminder allowance is unchanged.
+- Both signup templates construct IDs through the same signup effect builder;
+  acceptance can therefore derive member/day from the ID, including no-op replay.
+- Focused signup, transport, planner, privacy and outreach units: 656 passed.
+- New signup owner PostgreSQL cases and unchanged concurrent last-live proof:
+  5 passed. The unrelated 20,000-row index fixture was excluded by name.
+- The raw privacy unit command initially lacked the generated changelog module;
+  the existing `pnpm --dir apps/web changelog:generate` completed with exit 0.

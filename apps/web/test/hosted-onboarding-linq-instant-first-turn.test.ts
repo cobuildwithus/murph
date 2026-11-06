@@ -334,7 +334,6 @@ describe("hosted Linq instant first turn", () => {
     });
     mocks.markHostedLinqDeliveryAcceptedTx.mockResolvedValue({
       deliveryStatus: "accepted",
-      reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     });
     mocks.markHostedLinqDeliverySendFailedTx.mockResolvedValue(null);
@@ -1161,7 +1160,6 @@ describe("hosted Linq instant first turn", () => {
   it("keeps accepted Web ownership when a buffered provider failure is replayed", async () => {
     mocks.markHostedLinqDeliveryAcceptedTx.mockResolvedValueOnce({
       deliveryStatus: "failed",
-      reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     });
 

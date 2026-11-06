@@ -9,7 +9,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   acquireHostedMemberHomeLinqRouteLockTx: vi.fn(),
   buildHostedLinqAffirmativeReactionMessageEvent: vi.fn(),
-  claimHostedLinqOnboardingLinkNotice: vi.fn(),
   claimHostedLinqQuotaReplyNotice: vi.fn(),
   markHostedLinqOnboardingLinkNoticeSent: vi.fn(),
   releaseHostedLinqOnboardingLinkNoticeClaim: vi.fn(),
@@ -222,7 +221,6 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
 
   return {
     ...actual,
-    claimHostedLinqOnboardingLinkNotice: mocks.claimHostedLinqOnboardingLinkNotice,
     claimHostedLinqQuotaReplyNotice: mocks.claimHostedLinqQuotaReplyNotice,
     markHostedLinqOnboardingLinkNoticeSent: mocks.markHostedLinqOnboardingLinkNoticeSent,
     incrementHostedLinqInboundDailyState: mocks.incrementHostedLinqInboundDailyState,
@@ -311,7 +309,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     );
     mocks.acquireHostedMemberHomeLinqRouteLockTx.mockResolvedValue(undefined);
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
-    mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
     mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
       claimed: true,
@@ -470,7 +467,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     );
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
   });
 
   it("records message.sent without treating it as delivery or inbound work", async () => {
@@ -509,7 +505,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
   });
 
   it("coalesces routed participant additions without scheduling, sending, or waking", async () => {
@@ -1783,7 +1778,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     });
     expect(response).not.toHaveProperty("wakeUserId");
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberSnapshot).not.toHaveBeenCalled();
   });
 

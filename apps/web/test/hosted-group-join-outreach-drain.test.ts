@@ -143,7 +143,6 @@ describe("hosted group join outreach drain", () => {
     mocks.listHealthyLines.mockResolvedValue([LINE]);
     mocks.lookupMember.mockResolvedValue(null);
     mocks.markDeliveryAccepted.mockResolvedValue({
-      reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     });
     mocks.markDeliveryFailed.mockResolvedValue(undefined);

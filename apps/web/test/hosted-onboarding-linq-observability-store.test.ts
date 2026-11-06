@@ -4778,7 +4778,6 @@ describe("hosted Linq observability stores", () => {
       advanced: true,
       deliveryId: "hld_skipped_retry",
       phoneNumberLookupKey: null,
-      reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     });
 
@@ -5466,17 +5465,11 @@ describe("hosted Linq signup-link delivery attempts", () => {
       prisma: fixture.prisma as never,
     })).resolves.toEqual({
       deliveryStatus: "failed",
-      reopenOnboardingLink: {
-        groupJoinReplyContext: {
-          outreachId: "hgrpjoa_buffered",
-          repliedAt: "2026-03-26T12:01:00.000Z",
-        },
-        memberId: "member_123",
-        occurredAt: "2026-03-26T00:00:00.000Z",
-        releaseDailySuppression: true,
-      },
       restoreOnboardingLink: null,
     });
+    expect(fixture.hostedLinqDailyStateUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: { onboardingLinkSentAt: null }, where: expect.objectContaining({ memberId: "member_123" }),
+    }));
   });
 
   it("does not reopen the daily marker when a buffered generic failure replays after a distinct group success", async () => {
@@ -5505,9 +5498,9 @@ describe("hosted Linq signup-link delivery attempts", () => {
       prisma: fixture.prisma as never,
     })).resolves.toEqual({
       deliveryStatus: "failed",
-      reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     });
+    expect(fixture.hostedLinqDailyStateUpdateMany).not.toHaveBeenCalled();
   });
 
   it("restores group signup state when the accepted milestone replays a buffered delivery receipt", async () => {
@@ -5535,12 +5528,7 @@ describe("hosted Linq signup-link delivery attempts", () => {
       prisma: fixture.prisma as never,
     })).resolves.toEqual({
       deliveryStatus: "delivered",
-      reopenOnboardingLink: null,
       restoreOnboardingLink: {
-        groupJoinReplyContext: {
-          outreachId: "hgrpjoa_buffered",
-          repliedAt: "2026-03-26T12:01:00.000Z",
-        },
         linqChatId: "chat_123",
         memberId: "member_123",
         occurredAt: "2026-03-26T00:00:00.000Z",
@@ -5741,7 +5729,6 @@ describe("hosted Linq signup-link delivery attempts", () => {
         prisma: fixture.prisma as never,
       })).resolves.toEqual({
         deliveryStatus: "delivered",
-        reopenOnboardingLink: null,
         restoreOnboardingLink: {
           linqChatId: "chat_123",
           memberId: "member_123",
@@ -5778,7 +5765,6 @@ describe("hosted Linq signup-link delivery attempts", () => {
       advanced: true,
       deliveryId: "hld_delivered_signup",
       phoneNumberLookupKey: null,
-      reopenOnboardingLink: null,
       restoreOnboardingLink: {
         linqChatId: "chat_123",
         memberId: "member_123",
@@ -6047,7 +6033,6 @@ describe("owned multi-part Linq delivery receipts", () => {
         advanced: false,
         deliveryId: "hld_parent_only_partial",
         phoneNumberLookupKey: null,
-        reopenOnboardingLink: null,
         restoreOnboardingLink: null,
       });
 
