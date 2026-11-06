@@ -1,3 +1,4 @@
+import { GAME_RECAP_GENERATION_RETIRED } from "../src/runtime-control.ts";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { writeFile, rm } from "node:fs/promises";
@@ -313,4 +314,10 @@ it.skipIf(process.env.MURPH_VERIFY_GAME_SKEW !== "1")("keeps group Prove it corr
       expect(reader.hostedGameToolResponseSchema.safeParse(response({ ...game, maxPlayers: 10, talkNote: "private" })).success).toBe(false);
     }
   } finally { await rm(target, { force: true }); }
+});
+
+it("accepts durable recap retirement in the existing error field", () => {
+  const response = { action: "read_game", result: { status: "unavailable", error: GAME_RECAP_GENERATION_RETIRED } };
+  expect(GAME_RECAP_GENERATION_RETIRED).toBe("recap_generation_retired");
+  expect(hostedGameToolResponseSchema.parse(response)).toEqual(response);
 });

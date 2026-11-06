@@ -95,10 +95,6 @@ export {
   parseHostedAssistantWorkspaceRuntimeJobRequest,
 } from "./hosted-runtime/parsers.ts";
 export {
-  RUNTIME_LIVENESS_TOUCH_TIMEOUT_MAX_MS,
-  type RuntimeLivenessPort,
-} from "./hosted-runtime/liveness.ts";
-export {
   parseHostedRuntimeAssistantResponseMedia,
   parseHostedRuntimeIssueRecordResponse,
   parseHostedRuntimeLatencyTraceResponse,

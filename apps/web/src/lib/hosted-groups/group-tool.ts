@@ -435,7 +435,7 @@ async function recordHostedRuntimeGroupJournalFact(
       await input.scheduleMailboxWake?.(admission.mailboxWake);
     } catch (error) {
       (input.logger ?? console).warn(
-        "Hosted group Journal handoff failed; the mailbox recovery sweep will retry it.",
+        "Hosted group Journal handoff failed; the handoff sweep retries facts from the last 24 hours.",
         sanitizeHostedOnboardingStructuredLogDetails({
           errorName: deriveHostedOnboardingTimingErrorName(error),
           outcome: "post_commit_handoff_failed",

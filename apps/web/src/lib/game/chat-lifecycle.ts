@@ -1,4 +1,5 @@
 import "server-only";
+import { recordGameRecapWitnessTx } from "./recap-witness";
 import { groupGameRecapPlayers } from "./recap-cohort";
 
 import { isPairRoster, isGameMemberSet } from "./roster";
@@ -11,7 +12,7 @@ import { readCurrentGameTalk, readGameTalkReceiptIdentity, prepareGameTalkAudien
 import { assertGameProposalDeliveryCurrentTx } from "./chat-delivery-authority";
 import { isRecord } from "../primitives";
 import { getPrisma } from "../prisma";
-import { appendPreparedHostedMailboxEnvelopeTx, prepareHostedMailboxEnvelopeAppend, readHostedMailboxItemByDedupeKey } from "../hosted-mailbox/store";
+import { isHostedMailboxItemConsumed, appendPreparedHostedMailboxEnvelopeTx, prepareHostedMailboxEnvelopeAppend, readHostedMailboxItemByDedupeKey } from "../hosted-mailbox/store";
 import { assertHostedAssistantNotificationRouteAuthority, bindHostedAssistantNotificationDestination, resolveHostedAssistantNotificationDestination } from "../hosted-routing/assistant-notification-destination";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
@@ -302,7 +303,7 @@ async function recoverGameNotificationPointer(receiptId: string, roomId: string,
   const prisma = getPrisma();
   const mailbox = await readHostedMailboxItemByDedupeKey({ dedupeKey: eventId, userId: roomId, prisma });
   if (!mailbox) return false;
-  if (mailbox.consumedAt !== null) {
+  if (await isHostedMailboxItemConsumed({ item: mailbox, prisma })) {
     // Consumption hands retry ownership to the existing runtime/outbox. Keep
     // provider truth intact and stop this pre-generation wake sweep.
     await prisma.hostedLinqDelivery.updateMany({ where: { id: receiptId, status: "generation_queued" }, data: { retryAfterAt: null } });
@@ -479,7 +480,7 @@ async function deliverGroupMissedDayLifecycle(roomId: string, firstMissedDate: s
   // Publication may have committed before its signal failed. Never replace frozen evidence.
   const existing = await readHostedMailboxItemByDedupeKey({ userId: roomId, dedupeKey: eventId });
   if (existing) {
-    if (existing.consumedAt === null && await readGroupMissedDayDeliveryAuthority(eventId, roomId)) {
+    if (!await isHostedMailboxItemConsumed({ item: existing }) && await readGroupMissedDayDeliveryAuthority(eventId, roomId)) {
       await signalHostedMailboxAppendRuntime({ expectedUserId: roomId, mailboxItemId: existing.id });
     }
     return true;
@@ -563,6 +564,7 @@ async function lifecycleInstructions(game: Pick<Game, "id" | "chatContainerMembe
     if (!game.chatContainerMemberId) return null;
     const { readGameRecapMaterial } = await import("./service");
     const { readGameRecapChatMessages } = await import("./chat-tool");
+    // Instructions carry no entries; publication fixes the witness.
     const material = await readGameRecapMaterial(game.id, game.chatContainerMemberId, players);
     return material
       ? buildGameRecapInstructions(await readGameRecapChatMessages({ containerMemberId: game.chatContainerMemberId, material }), await noticeRoom(), game.maxPlayers === 10)
@@ -629,7 +631,7 @@ async function enqueueGameLifecycle(input: {
       if (!current || revision !== currentTerms(parseStoredTerms(current.terms)).n) return false;
     }
     await markGameChatGenerationQueuedTx(input.eventId, prisma, input.containerMemberId);
-    if (existing.consumedAt === null) await signalHostedMailboxAppendRuntime({ expectedUserId: input.containerMemberId, mailboxItemId: existing.id });
+    if (!await isHostedMailboxItemConsumed({ item: existing, prisma })) await signalHostedMailboxAppendRuntime({ expectedUserId: input.containerMemberId, mailboxItemId: existing.id });
     return true;
   }
   const bound = bindHostedAssistantNotificationDestination({ destination: input.destination, memberId: input.containerMemberId });
@@ -654,7 +656,7 @@ async function enqueueGameLifecycle(input: {
   let appended;
   try {
     appended = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      if (input.kind === "rematch" && input.game.maxPlayers === 10) await tx.$queryRaw`SELECT id FROM game WHERE id = ${input.gameId} FOR UPDATE`;
+      if (input.kind === "recap" || input.kind === "rematch" && input.game.maxPlayers === 10) await tx.$queryRaw`SELECT id FROM game WHERE id = ${input.gameId} FOR UPDATE`;
       if (bound.externalThreadRouteAuthority) await assertHostedAssistantNotificationRouteAuthority({ authority: bound.externalThreadRouteAuthority, prisma: tx });
       if (input.kind === "talk" || input.kind === "challenge") {
         await assertGameProposalDeliveryCurrentTx({ tx, deliveryIdempotencyKey: input.eventId,
@@ -664,6 +666,7 @@ async function enqueueGameLifecycle(input: {
         return result;
       }
       if (!await isGameLifecycleAppendCurrentTx(input, tx)) return null;
+      if (input.kind === "recap" && !await recordGameRecapWitnessTx(tx, input.gameId, input.eventId)) return null;
       const result = await appendPreparedHostedMailboxEnvelopeTx({ prepared, tx });
       await markGameChatGenerationQueuedTx(input.eventId, tx, input.containerMemberId);
       return result;
@@ -673,7 +676,7 @@ async function enqueueGameLifecycle(input: {
     return skipGameNotice(createHostedLinqDeliveryIdempotencyLookupKey(input.eventId)!, prisma, new Date());
   }
   if (!appended) return false;
-  if (existing?.consumedAt != null) return true;
+  if (existing && await isHostedMailboxItemConsumed({ item: existing, prisma })) return true;
   await signalHostedMailboxAppendRuntime({ expectedUserId: input.containerMemberId, mailboxItemId: appended.mailboxItemId });
   return true;
 }

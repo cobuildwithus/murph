@@ -648,10 +648,13 @@ Current product admission, delivery and native runtime safety rules remain.
   the same Web transaction. An append failure therefore rolls back the grant
   instead of admitting unrecoverable work. After commit, Web signals that exact
   mailbox pointer in parallel with bounded join-confirmation recovery, and the
-  scheduled mailbox-handoff sweep includes an unconsumed row when the immediate
+  scheduled mailbox-handoff sweep includes an unimported row when the immediate
   signal fails or the process stops. Either best-effort signal can stall without
   starving the other. The durable null snapshot remains an explicit `pending`
-  shared-read state until the member runtime materializes it.
+  shared-read state until the member runtime materializes it. The shared handoff
+  sweep also recovers group Journal facts, channel updates, destination-specific
+  welcomes, group-join confirmations and group-sharing confirmations from the
+  last 24 hours. It excludes explicit health-data withdrawal before its limit.
 - Direct hosted Codex process projection includes the selected core provider
   and that provider's SDK credential placeholder. Changing providers
   therefore changes the warm-process launch identity; the replacement process

@@ -533,24 +533,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     mocks.emitHostedExecutionStructuredLog.mockReset();
   });
 
-  it("does not attach stale runtime liveness controls to the Cloudflare platform", () => {
-    const platform = buildTestHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      workspaceCheckpointBridge: {
-        readCurrentLease: () => ({
-          attemptId: "attempt_1",
-          leaseGeneration: "9",
-          userId: "member_123",
-          workspaceVersion: "5",
-        }),
-      },
-    });
-
-    expect(platform.runtimeLivenessIntervalMs).toBeUndefined();
-    expect(platform.runtimeLivenessPort).toBeUndefined();
-    expect(platform.runtimeLivenessRequired).toBeUndefined();
-  });
-
   it("attaches the hosted assistant configuration port to the Cloudflare platform", () => {
     const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",

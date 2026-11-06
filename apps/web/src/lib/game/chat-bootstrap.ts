@@ -11,7 +11,7 @@ import type { HostedGameChatBootstrapRequest, HostedGameChatBootstrapResponse } 
 import { runWithHostedDomainRootProviderCallsDisabled, runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import { openHostedUserSecureBoxString, sealHostedUserSecureBoxString } from "../hosted-crypto/secure-box";
 import { requireHostedRuntimeCallbackTx, type HostedRuntimeIdentity } from "../hosted-execution/runtime-owner";
-import { appendHostedMailboxEnvelopeTx, appendPreparedHostedMailboxEnvelopeTx, prepareHostedMailboxEnvelopeAppend, readHostedMailboxItemByDedupeKey, readHostedMailboxWakeByDedupeKey } from "../hosted-mailbox/store";
+import { isHostedMailboxItemConsumed, readHostedMailboxConsumedSeqByLane, appendHostedMailboxEnvelopeTx, appendPreparedHostedMailboxEnvelopeTx, prepareHostedMailboxEnvelopeAppend, readHostedMailboxItemByDedupeKey, readHostedMailboxWakeByDedupeKey } from "../hosted-mailbox/store";
 import { requireHostedRuntimeActiveAccessForUpdateTx } from "../hosted-mailbox/runtime-access";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
@@ -106,7 +106,8 @@ async function readOtherPendingBootstrap(memberId: string, eventId: string, pris
     const talk = currentGameTalkRequest(game, new Date());
     return [...(talk ? [`game-talk:${game.id}:${talk.proposalId}`] : []), ...(game.status === "live" ? [`game-started:${game.id}`] : []), ...(proposal ? [`game-change:${game.id}:${proposal.id}`] : [])];
   });
-  return prisma.hostedMailboxItem.findFirst({ where: { userId: memberId, kind: "assistant.notification.requested", consumedAt: null,
+  const [system] = await readHostedMailboxConsumedSeqByLane({ userId: memberId, lanes: ["system"], prisma });
+  return prisma.hostedMailboxItem.findFirst({ where: { userId: memberId, kind: "assistant.notification.requested", laneSeq: { gt: BigInt(system.consumedSeq) },
     dedupeKey: { not: eventId }, OR: [{ dedupeKey: { in: keys } }, ...games.map((game) => ({ dedupeKey: { startsWith: `game-change-cancelled:${game.id}:` } }))],
   }, select: { id: true } });
 }
@@ -116,7 +117,7 @@ async function queueExistingBootstrap(gameId: string, eventId: string, instructi
   if (await readOtherFrozenBootstrap(containerMemberId, eventId)) return null;
   const existing = await readHostedMailboxItemByDedupeKey({ dedupeKey: eventId, userId: containerMemberId, prisma });
   if (existing) {
-    if (existing.consumedAt === null) await signalHostedMailboxAppendRuntime({ expectedUserId: containerMemberId, mailboxItemId: existing.id });
+    if (!await isHostedMailboxItemConsumed({ item: existing, prisma })) await signalHostedMailboxAppendRuntime({ expectedUserId: containerMemberId, mailboxItemId: existing.id });
     return containerMemberId;
   }
   const prepared = await prepareHostedMailboxEnvelopeAppend({ prisma, envelope: buildBootstrapWake(gameId, eventId, instructions, containerMemberId, new Date()) });

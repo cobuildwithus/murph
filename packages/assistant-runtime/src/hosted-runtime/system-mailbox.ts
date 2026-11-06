@@ -1572,6 +1572,7 @@ async function executePendingHostedSystemMailboxItem(input: {
             .assertExternalThreadRouteAuthority,
         executionContext,
         mailboxDedupeKey: input.pendingItem.mailboxDedupeKey,
+        groupToolPort: input.runtime.platform.groupToolPort,
         signal: input.signal,
         wake,
       });

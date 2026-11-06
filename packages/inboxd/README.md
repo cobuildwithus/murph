@@ -54,6 +54,7 @@ The inbox runtime exposes attachment-job primitives that stay safely outside can
 - `requeueAttachmentParseJobs(...)`
 
 These methods mutate only inbox-local projection state such as `.runtime/projections/inboxd.sqlite` and attachment parse metadata. They do not write canonical health records directly.
+`requeueAttachmentParseJobs({ exactAttempt: { jobId, attempt } })` resets only that running job attempt while its attachment is also running, preserving newer attempts and published transcripts.
 
 When combined with `@murphai/parsers`, runtime consumers can drain those queues without mixing parser state into canonical health records.
 

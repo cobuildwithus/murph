@@ -1,4 +1,5 @@
 Game report recovery from the stored receipt and its frozen alert inputs are owned by [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md).
+Recap moderation witnesses, transactional takedown clearing and read-time hiding of affected stored stories are owned by [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md#weekly-game). Existing ciphertext cleanup is held for a separate approved PR. Local verification is recorded in [the recap moderation execution plan](exec-plans/completed/2026-11-06-recap-moderation-witness.md).
 
 Delivery publication fences and reply deadlines are owned by [the invariants](../docs/contracts/00-invariants.md) and [Reliability](RELIABILITY.md); [the implementation result](exec-plans/completed/2026-11-06-delivery-publication.md) records local restore and timing proof.
 
@@ -1890,4 +1891,8 @@ accounting deadline proofs are recorded in the [delivery settlement execution re
 
 Single-checkpoint receipt recovery and the accepted workspace owner are tracked in
 [`single checkpoint receipt recovery`](exec-plans/completed/2026-11-06-single-checkpoint-receipt-recovery.md).
+The durable contract remains in `references/hosted-runtime-protocol.md`.
+
+Hosted parser attempt recovery decisions are tracked in
+[`parser attempts`](exec-plans/completed/2026-11-06-sm-pr17-parser-attempts.md).
 The durable contract remains in `references/hosted-runtime-protocol.md`.

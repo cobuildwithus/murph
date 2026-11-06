@@ -577,9 +577,8 @@ async function signalHostedGroupOfferReactionBestEffort(input: {
       }),
     });
   } catch (error) {
-    // The reaction row committed atomically with the offer decision. A later
-    // mailbox-wide wake imports it; do not turn an already-applied join,
-    // disclosure grant, or outreach decision into a provider-visible failure.
+    // The handoff sweep retries sharing confirmations from the last 24 hours.
+    // Other reaction evidence waits for the next ordinary mailbox wake.
     logHostedOnboardingDiagnostic(
       "hosted-onboarding.group-offer-reaction-signal-failed",
       {

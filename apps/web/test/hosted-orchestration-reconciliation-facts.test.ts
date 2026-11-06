@@ -511,6 +511,10 @@ describe("hosted orchestration reconciliation facts", () => {
       status: "revoked",
     });
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      inboxMediaRetentionWakeAt: FIXED_NOW,
+      nextDefaultProcessingWakeAt: FIXED_NOW,
+      nextDefaultProcessingWakeReason: "assistant",
+      systemMailboxProgressGeneration: "2",
       nextWakeAt: FIXED_NOW,
       nextWakeReason: "device-sync.reconcile",
     }));
@@ -524,6 +528,14 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(facts.blocked).toEqual({
       reason: "health_data_consent_withdrawn",
       retryAt: null,
+    });
+    expect(facts.mailboxLag).toEqual([]);
+    expect(Object.hasOwn(facts.workspace!, "systemMailboxFrontier")).toBe(true);
+    expect(facts.workspace).toMatchObject({
+      systemMailboxFrontier: null, inboxMediaRetentionWakeAt: null,
+      nextWakeAt: null, nextWakeReason: null,
+      nextDefaultProcessingWakeAt: null, nextDefaultProcessingWakeReason: null,
+      systemMailboxProgressGeneration: "2",
     });
     expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
