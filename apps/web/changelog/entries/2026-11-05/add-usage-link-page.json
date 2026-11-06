@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-05",
+  "order": 60,
+  "item": {
+    "id": "add-usage-link-page",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "A clearer page when Murph sends you to add usage",
+    "summary": "The link now opens straight to adding usage, and if you're signed out, the page says why you're there and lets you sign in right on it.",
+    "details": "You always pick the amount yourself. Nothing is preselected.",
+    "relevanceTags": ["billing"],
+    "sourcePullRequests": [4632]
+  }
+}
