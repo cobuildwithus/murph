@@ -313,16 +313,12 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     : undefined;
   if (
     preparedDirectAuthority
-    && (
-      preparedDirectAuthority.telegramUserId !== summary.senderTelegramUserId
-      || preparedDirectAuthority.telegramThreadId !== telegramMessage.threadId
-      || preparedDirectAuthority.senderResolution !== existingMemberLookup.status
-      || preparedDirectAuthority.memberId !== (
-        existingMemberLookup.status === "found"
-          ? existingMemberLookup.core.id
-          : null
-      )
-    )
+    && isHostedDirectTelegramPreparationStale({
+      lookup: existingMemberLookup,
+      preparation: preparedDirectAuthority,
+      telegramThreadId: telegramMessage.threadId,
+      telegramUserId: summary.senderTelegramUserId,
+    })
   ) {
     throw hostedDirectTelegramPreparationRequired("sender_route");
   }
@@ -734,6 +730,20 @@ async function readHostedDirectTelegramAdmissionTx(input: {
     && input.preparedRouting?.kind !== "family"
     ? "replay"
     : "fenced";
+}
+
+function isHostedDirectTelegramPreparationStale(input: {
+  lookup: Awaited<ReturnType<typeof resolveHostedMemberCoreByTelegramUserId>>;
+  preparation: HostedDirectTelegramMemberRoutingPreparation;
+  telegramThreadId: string;
+  telegramUserId: string;
+}): boolean {
+  return input.preparation.telegramUserId !== input.telegramUserId
+    || input.preparation.telegramThreadId !== input.telegramThreadId
+    || input.preparation.senderResolution !== input.lookup.status
+    || input.preparation.memberId !== (
+      input.lookup.status === "found" ? input.lookup.core.id : null
+    );
 }
 
 async function revalidatePreparedDirectTelegramRouteTx(input: {
