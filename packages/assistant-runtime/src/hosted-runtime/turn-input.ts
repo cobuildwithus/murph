@@ -601,12 +601,15 @@ async function recoverHostedUnansweredInputPredecessors(input: {
       )
     );
     if (predecessors.length === 0) return input.freshEvents;
-    const unanswered: AssistantInputEventRecord[] = [];
-    for (const event of predecessors) {
-      // Complete evidence means handled, and the engine defers a whole group for
-      // partial evidence, so any evidence keeps an input out of a fresh turn.
-      if (!await hasHostedAssistantInputTerminalEvidence(event, input.vaultRoot)) unanswered.push(event);
-    }
+    // Evidence files are written independently, so one file can prove a whole
+    // group was handled. Read every older input, in or out of the retry window,
+    // and honour the group it names: replaying a covered input can repeat effects.
+    const handledIds = new Set((await Promise.all(
+      pending.filter((event) => compareAssistantInputCursors(event.cursor, first.cursor) < 0)
+        .map((event) => readHostedAssistantInputCoveredIds(event, input.vaultRoot)),
+    )).flat());
+    const unanswered = predecessors.filter((event) => !handledIds.has(event.inputId)
+      && !(event.projection.captureId && handledIds.has(event.projection.captureId)));
     if (unanswered.length === 0) return input.freshEvents;
     // Grouping keeps predecessors on the fresh channel. Reading automation state
     // here could write or quarantine it on the foreground path.
@@ -626,13 +629,14 @@ async function recoverHostedUnansweredInputPredecessors(input: {
   }
 }
 
-async function hasHostedAssistantInputTerminalEvidence(
+async function readHostedAssistantInputCoveredIds(
   event: AssistantInputEventRecord,
   vaultRoot: string,
-): Promise<boolean> {
+): Promise<string[]> {
   const captureId = event.projection.captureId;
-  return await readAssistantAutoReplyTerminalEvidenceByEvidenceId(vaultRoot, event.inputId) !== null
-    || (captureId ? await readAssistantAutoReplyTerminalEvidenceByEvidenceId(vaultRoot, captureId) !== null : false);
+  const evidence = await readAssistantAutoReplyTerminalEvidenceByEvidenceId(vaultRoot, event.inputId)
+    ?? (captureId ? await readAssistantAutoReplyTerminalEvidenceByEvidenceId(vaultRoot, captureId) : null);
+  return evidence ? [event.inputId, ...evidence.groupInputIds, ...evidence.groupCaptureIds] : [];
 }
 
 async function selectHostedAssistantInputEventBatchWithImageCompletion(input: {

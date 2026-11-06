@@ -60,6 +60,7 @@ Updated: 2026-11-06
   - Fresh input was displaced at the 50-input cap: an over-cap cohort now stays fresh-only. This replaces the review's oldest-first service, because fresh input is never delayed.
   - Partial terminal evidence could defer the whole group at `reply.ts`, blocking fresh input: any terminal evidence now excludes an input.
   - The replyability filter read automation state, which can write or quarantine it: foreground recovery now checks replyability against the fresh input's channel.
+- ReviewGPT PR round 1, 2026-11-06, one High finding, accepted: evidence on one member of a compound group proved the whole group handled, but recovery read each input alone, so a sibling whose file was lost to an interrupted write looked unanswered and could be replayed, including a second paid phone call. Recovery now reads evidence on every older pending input and excludes every input its group names, including a sibling past the retry window.
 
 ## Verification
 

@@ -1093,6 +1093,23 @@ describe("selectHostedAssistantInputIds", () => {
       await compactHostedPendingAssistantInputIds({ vaultRoot });
       return vaultRoot;
     }
+    // Evidence files are written independently, so an interrupted write leaves the
+    // whole group named on one member while another member has no file at all.
+    async function writeInterruptedGroupEvidence(
+      vaultRoot: string,
+      kind: "replied" | "suppressed" | "reply_intent_committed",
+      keptInputId: string,
+      lostInputId: string,
+    ) {
+      const inputIds = [keptInputId, lostInputId];
+      if (kind === "suppressed") {
+        await writeAssistantAutoReplySuppressionEvidence({ vault: vaultRoot, inputIds, captureIds: [], reason: "synthetic terminal" });
+      } else {
+        await writeAssistantAutoReplyReplyTerminalEvidence({ vault: vaultRoot, inputIds, captureIds: [],
+          deliveryIntentId: "synthetic-intent", outcome: "result", recordedAt: "2026-11-06T12:01:00Z", sessionId: "synthetic-session", terminalKind: kind });
+      }
+      await rm(path.join(resolveAssistantStatePaths(vaultRoot).assistantStateRoot, "auto-reply", "evidence", `${encodeURIComponent(lostInputId)}.json`));
+    }
     const select = (vaultRoot: string, inputId: string) => selectHostedAssistantInputIds({
       vaultRoot, mode: "foreground", freshAssistantInputIds: [inputId, inputId],
     });
@@ -1276,6 +1293,27 @@ describe("selectHostedAssistantInputIds", () => {
       await rm(path.join(resolveAssistantStatePaths(vaultRoot).assistantStateRoot, "auto-reply", "evidence", "expired_group_member.json"), { force: false });
       expect((await select(vaultRoot, fresh.inputId)).inputIds).toEqual([fresh.inputId]);
       expect(await readHostedPendingAssistantInputIds({ vaultRoot })).toEqual([older.inputId]);
+    });
+
+    it.each(["replied", "suppressed", "reply_intent_committed"] as const)("keeps an input out when a sibling's %s evidence covers it", async (kind) => {
+      const vaultRoot = await setup();
+      const covering = await stage(vaultRoot, 10);
+      const covered = await stage(vaultRoot, 11);
+      const fresh = await stage(vaultRoot, 12);
+      for (const event of [covering, covered]) await enqueueHostedPendingAssistantInputId({ vaultRoot, inputId: event.inputId });
+      await writeInterruptedGroupEvidence(vaultRoot, kind, covering.inputId, covered.inputId);
+      expect((await select(vaultRoot, fresh.inputId)).inputIds).toEqual([fresh.inputId]);
+      expect(await readHostedPendingAssistantInputIds({ vaultRoot })).toEqual([covering.inputId, covered.inputId]);
+    });
+
+    it("honours group evidence held by a sibling past the retry window", async () => {
+      const vaultRoot = await setup();
+      const covering = await stage(vaultRoot, 10, { receivedAt: "2026-11-06T11:46:59Z" });
+      const covered = await stage(vaultRoot, 11);
+      const fresh = await stage(vaultRoot, 12);
+      for (const event of [covering, covered]) await enqueueHostedPendingAssistantInputId({ vaultRoot, inputId: event.inputId });
+      await writeInterruptedGroupEvidence(vaultRoot, "replied", covering.inputId, covered.inputId);
+      expect((await select(vaultRoot, fresh.inputId)).inputIds).toEqual([fresh.inputId]);
     });
 
     it("recovers without reading automation state on the foreground path", async () => {

@@ -3494,8 +3494,10 @@ Current product admission, delivery and native runtime safety rules remain.
   grouping authority, consecutive conversation lane sequences and increasing
   causal sequences. Original `receivedAt` (or legacy `occurredAt`) must remain
   valid and within the same 15-minute retry window. Any terminal evidence, complete
-  or partial, excludes an input, because the engine defers a whole group for
-  partial evidence; repair stays with the background owner. Pending projection or
+  or partial, excludes an input and every input its group names, including an
+  older sibling past the window, because evidence files are written independently
+  and replaying a covered input can repeat effects. Repair stays with the
+  background owner. Pending projection or
   attachment evidence cannot be skipped.
   Recovery reads at most 4 KiB plus one overflow byte of the current pending
   index and inspects at most 100 unique IDs in waves of eight. Missing, legacy,
