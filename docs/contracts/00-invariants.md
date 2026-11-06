@@ -330,6 +330,9 @@ it has been explicitly elevated to a cross-cutting invariant.
   not release the claim or permit blind resend without provider idempotency or
   proof that the effect did not begin. Acknowledge, clean up, or advance
   progress only after terminal or durable pending evidence.
+  A retry under a provider idempotency key sends the bytes accepted for that
+  key, so freeze those inputs on the accepted receipt and never rebuild them
+  from current source state.
 - Failure to observe an outcome does not prove rejection. Once a native game
   write has read its request, a server failure is reported as retryable, never
   as a final refusal of that request.

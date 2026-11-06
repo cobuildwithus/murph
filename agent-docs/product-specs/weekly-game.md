@@ -680,7 +680,8 @@ resulting avatar. No private photo is shared with the subject or other players.
   post (or player's photo) is hidden from the reporter at once; it still
   counts. The reported player is never told. A person reviews every report
   within 24 hours and can take the post down, end the games, or suspend the
-  account. The reporter can block in the same step.
+  account. The reporter can block in the same step. For every report kind, a
+  retry recovers the stored report and its alert repeats what was accepted.
 - **Block.** Blocking someone ends every open or live game with them (no
   winner, nothing owed), stops Murph texting their shared chat about the game,
   and refuses invites and rematches between them either way. Each sees the
@@ -745,8 +746,7 @@ App routes:
 - `GET /api/game/v1/games/:id/replies/:replyId/audio`: object-authorized game
   bearer access, `audio/mp4`, private/no-store, nosniff; no signed URL.
 - `POST /api/game/v1/games/:id/reports`: `about: "reply"` and `replyId` with
-  the existing report fields. Stored report identity is recovered before
-  requiring live content, so alert retries work after hiding or deletion.
+  the existing report fields.
 - `GET /api/ops/game-reports/:reportId/audio`: Ops-authenticated evidence.
 
 Deploy the additive migration, then the complete Web backend, then the native
