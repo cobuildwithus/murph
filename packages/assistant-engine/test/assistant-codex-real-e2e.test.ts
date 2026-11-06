@@ -26786,6 +26786,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
       ].join(' '),
       quoteTimingPattern: /now|immediate/iu,
       recurringAmountUsdCents: 5_000,
+      steeredFollowUp: 'Yes, go ahead with that.',
       subscriptionResponse: {
         action: 'change_plan',
         paymentUrl: 'https://billing.stripe.test/max-confirmation',
@@ -26953,11 +26954,31 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           )
         }
 
+        let confirmationSessionId = quote.sessionId
+        const { steeredFollowUp } = scenario
+        if (steeredFollowUp) {
+          let steered: Promise<void> | null = null
+          const refused = await executeRealCodexAppServerTurn({
+            ...commonInput,
+            onLiveTurn: (turn) => {
+              steered = turn.steer({ prompt: steeredFollowUp })
+            },
+            prompt: scenario.confirmationPrompt,
+            resumeSessionId: quote.sessionId,
+          })
+          await steered
+          process.stdout.write(`[steered-plan-change] ${JSON.stringify({ reply: refused.finalMessage })}\n`)
+          expect(subscriptionRequests).toHaveLength(0)
+          expect(refused.finalMessage).toMatch(/new message|again|confirm/iu)
+          expect(refused.finalMessage).not.toMatch(/stripe|payment link|you(?:'|’)re (?:now )?on max/iu)
+          confirmationSessionId = refused.sessionId
+        }
+
         subscriptionInputId = confirmationInputId
         const confirmed = await executeRealCodexAppServerTurn({
           ...commonInput,
           prompt: scenario.confirmationPrompt,
-          resumeSessionId: quote.sessionId,
+          resumeSessionId: confirmationSessionId,
         })
         const confirmedActions = readCapabilityRoutingActions(
           confirmed.jsonEvents,

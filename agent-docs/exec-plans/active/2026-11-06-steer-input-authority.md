@@ -235,3 +235,7 @@ expiry, turn commit). Do not merge the two context objects wholesale.
   error `assistant configuration updates require user-sourced input`, and passes
   after the change. Both steered-subscription sequences pass with the rule and fail
   without it, and each reaches the call rather than ending the turn first.
+- Live model: `pnpm test:assistant:live -- --test "explicit Max upgrade"` passed.
+  A confirmation with a mid-turn follow-up made no subscription request, and the
+  reply said nothing was applied and asked for one more confirmation. Confirming
+  in a new message then succeeded. UX verdict: Ready.
