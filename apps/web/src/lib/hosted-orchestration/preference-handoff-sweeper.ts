@@ -8,6 +8,7 @@ import {
 import {
   hostedThreadContainerParticipantAccessCutoff,
 } from "../hosted-groups/thread-container-participant-access";
+import { hostedRuntimeMemberEligibleSql } from "../hosted-onboarding/member-access";
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
   createHostedPostCommitDeadline,
@@ -24,6 +25,8 @@ const MAX_HANDOFF_LIMIT = 250;
 // Producers own the first signal. Recovery waits for import independently of
 // the Schedule cadence, using only the existing durable mailbox timestamp.
 const HANDOFF_RECOVERY_MIN_AGE_MS = 60_000;
+// Bounds the families below that repair a recent failed signal, not history.
+const HANDOFF_RECOVERY_RECENT_FAMILY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 export interface HostedPreferenceHandoffSweepResult {
   candidateUsers: number;
@@ -81,9 +84,10 @@ export async function runHostedPreferenceHandoffSweeper(input: {
   let handoffSkippedInactive = 0;
   const activeUserIds = new Set<string>();
 
-  // The production query selects active members before LIMIT. Recheck through
-  // the canonical async gate to fail closed if access changes after selection;
-  // those races do not consume the handoff-attempt budget.
+  // The query excludes suspension and explicit withdrawal and selects active
+  // access before LIMIT. Recheck through the canonical async gate to fail closed
+  // if access changes after selection; those races do not consume the
+  // handoff-attempt budget.
   await runHostedRecoveryBatch(
     uniqueCandidates,
     async (candidate) => {
@@ -181,9 +185,43 @@ function createHostedPreferenceHandoffCandidateStore(
       const recoveryAgeEligibility = Prisma.sql`
         "item"."created_at" <= ${new Date(input.now.getTime() - HANDOFF_RECOVERY_MIN_AGE_MS)}
       `;
+      // The only system rows this sweep recovers: a producer may promise recovery
+      // only for a family listed here. Welcomes and confirmations are real member
+      // messages, and one wake imports everything pending for that user, so the
+      // recent families never wake a member for an old row. Older rows stay stored
+      // and import on the next ordinary wake.
+      const recoverableSystemItem = Prisma.sql`
+        (
+          "item"."kind" IN (
+            'member.preferences.updated',
+            'member.action.requested',
+            'device-sync.wake',
+            'health.daily-metric.reported',
+            'runtime.browser-vault-refresh-requested',
+            'runtime.maintenance-requested'
+          )
+          OR (
+            "item"."created_at" >= ${new Date(input.now.getTime() - HANDOFF_RECOVERY_RECENT_FAMILY_MAX_AGE_MS)}
+            AND (
+              "item"."kind" IN ('journal.group-fact.recorded', 'member.channels.updated')
+              OR (
+                "item"."kind" = 'assistant.notification.requested'
+                AND (
+                  "item"."dedupe_key" ~ '^assistant[.]notification[.]requested:group-join:[^:]+$'
+                  OR "item"."dedupe_key" ~ '^assistant[.]notification[.]requested:group-sharing-confirmed:[0-9a-f]{64}$'
+                  OR (
+                    "item"."dedupe_key" ~ '^assistant[.]notification[.]requested:signup-welcome:[^:]+:(email|linq):[0-9a-f]{64}$'
+                    AND split_part("item"."dedupe_key", ':', 3) = "item"."user_id"
+                  )
+                )
+              )
+            )
+          )
+        )
+      `;
       const participantAccessCutoff =
         hostedThreadContainerParticipantAccessCutoff(input.now);
-      // Preference writes can target a person member or a synthetic thread
+      // Recoverable system rows can target a person or a synthetic thread
       // container, while Clinical Records wakes only target person members.
       // One exact mailbox signal wakes the runtime to reconcile all durable
       // mailbox lag, so choose at most one pending item per user before LIMIT.
@@ -191,7 +229,7 @@ function createHostedPreferenceHandoffCandidateStore(
       // inherit active owner or current-participant access. The async access
       // gate above remains the canonical race check.
       return await prisma.$queryRaw<Array<HostedPreferenceHandoffCandidate>>(Prisma.sql`
-        WITH "pending_preference_users" AS (
+        WITH "pending_system_users" AS (
           SELECT DISTINCT ON ("item"."user_id")
             "item"."id" AS "mailboxItemId",
             "item"."user_id" AS "userId",
@@ -200,32 +238,10 @@ function createHostedPreferenceHandoffCandidateStore(
           FROM "hosted_mailbox_item" AS "item"
           LEFT JOIN "hosted_workspace" AS "workspace"
             ON "workspace"."user_id" = "item"."user_id"
-          WHERE "item"."kind" = 'member.preferences.updated'
+          WHERE ${recoverableSystemItem}
             -- Import transfers retry ownership from this handoff sweep to the
             -- runtime. Handled-through can remain behind while runtime-owned
             -- work waits for its persisted retry timestamp.
-            AND ${recoveryAgeEligibility}
-            AND "item"."lane_seq" > ${systemMailboxImportedSeq}
-            AND ("item"."expires_at" IS NULL OR "item"."expires_at" > ${input.now})
-            AND "item"."created_at" >= ${retainedAt}
-          ORDER BY "item"."user_id", "item"."lane_seq" ASC
-        ),
-        "pending_runtime_control_users" AS (
-          SELECT DISTINCT ON ("item"."user_id")
-            "item"."id" AS "mailboxItemId",
-            "item"."user_id" AS "userId",
-            "item"."created_at" AS "createdAt",
-            "item"."lane_seq" AS "laneSeq"
-          FROM "hosted_mailbox_item" AS "item"
-          LEFT JOIN "hosted_workspace" AS "workspace"
-            ON "workspace"."user_id" = "item"."user_id"
-          WHERE "item"."kind" IN (
-              'member.action.requested',
-              'device-sync.wake',
-              'health.daily-metric.reported',
-              'runtime.browser-vault-refresh-requested',
-              'runtime.maintenance-requested'
-            )
             AND ${recoveryAgeEligibility}
             AND "item"."lane_seq" > ${systemMailboxImportedSeq}
             AND ("item"."expires_at" IS NULL OR "item"."expires_at" > ${input.now})
@@ -261,10 +277,7 @@ function createHostedPreferenceHandoffCandidateStore(
         ),
         "pending_handoff_candidates" AS (
           SELECT "mailboxItemId", "userId", "createdAt", "laneSeq"
-          FROM "pending_preference_users"
-          UNION ALL
-          SELECT "mailboxItemId", "userId", "createdAt", "laneSeq"
-          FROM "pending_runtime_control_users"
+          FROM "pending_system_users"
           UNION ALL
           SELECT "mailboxItemId", "userId", "createdAt", "laneSeq"
           FROM "pending_clinical_record_users"
@@ -308,7 +321,7 @@ function createHostedPreferenceHandoffCandidateStore(
           ON "active_member"."id" = "member"."id"
         LEFT JOIN "active_person_members" AS "active_owner"
           ON "active_owner"."id" = "thread_container"."owner_member_id"
-        WHERE "member"."suspended_at" IS NULL
+        WHERE ${hostedRuntimeMemberEligibleSql()}
           AND (
             (
               "thread_container"."member_id" IS NULL

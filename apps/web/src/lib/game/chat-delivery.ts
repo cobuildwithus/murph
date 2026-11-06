@@ -5,7 +5,7 @@ import { isPairRoster, hasGameIdentity, gameMemberIds } from "./roster";
 
 import type { Game, GamePlayer } from "@prisma/client";
 import { buildHostedExecutionAssistantNotificationRequestedWake } from "@murphai/hosted-execution";
-import { appendPreparedHostedMailboxEnvelopeTx, prepareHostedMailboxEnvelopeAppend, readHostedMailboxItemByDedupeKey } from "../hosted-mailbox/store";
+import { isHostedMailboxItemConsumed, appendPreparedHostedMailboxEnvelopeTx, prepareHostedMailboxEnvelopeAppend, readHostedMailboxItemByDedupeKey } from "../hosted-mailbox/store";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { assertHostedAssistantNotificationRouteAuthority, bindHostedAssistantNotificationDestination, resolveHostedAssistantNotificationDestination } from "../hosted-routing/assistant-notification-destination";
@@ -119,7 +119,7 @@ async function enqueueProposal(gameId: string, proposal: GamePendingChange, cont
   const existing = await readHostedMailboxItemByDedupeKey({ dedupeKey: key, userId: containerMemberId, prisma });
   if (existing) {
     await markGameChatGenerationQueuedTx(key, prisma);
-    if (existing.consumedAt === null) await signalHostedMailboxAppendRuntime({ expectedUserId: containerMemberId, mailboxItemId: existing.id });
+    if (!await isHostedMailboxItemConsumed({ item: existing, prisma })) await signalHostedMailboxAppendRuntime({ expectedUserId: containerMemberId, mailboxItemId: existing.id });
     return true;
   }
   const destination = await resolveHostedAssistantNotificationDestination({ memberId: containerMemberId, prisma });

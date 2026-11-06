@@ -1,3 +1,4 @@
+import { linqRoster } from "./support/linq-roster";
 import { HostedBillingStatus } from "@prisma/client";
 import {
   HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
@@ -297,10 +298,10 @@ import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/w
 describe("hosted onboarding Linq webhook hard-cut flows", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
-    mocks.getHostedLinqChatSummary.mockResolvedValue({
+    mocks.getHostedLinqChatSummary.mockResolvedValue(linqRoster({
       handles: [],
       isGroup: false,
-    });
+    }));
     const linq = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/linq")>(
       "@/src/lib/hosted-onboarding/linq",
     );

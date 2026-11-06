@@ -1,3 +1,4 @@
+import { linqRoster } from "./support/linq-roster";
 import { HostedBillingStatus, Prisma } from "@prisma/client";
 import {
   buildHostedExecutionLinqConversationMessageWake,
@@ -329,7 +330,6 @@ vi.mock("../src/lib/hosted-onboarding/linq-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/lib/hosted-onboarding/linq-client")>();
   return {
     ...actual,
-    getHostedLinqChatHandles: vi.fn(),
     getHostedLinqChatSummary: vi.fn(),
     sendHostedLinqChatMessage: vi.fn(),
   };
@@ -402,8 +402,6 @@ beforeEach(() => {
     .mockResolvedValue(null);
   vi.mocked(prismaModule.getPrisma).mockReset();
   vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest).mockReset();
-  vi.mocked(linqClient.getHostedLinqChatHandles).mockReset();
-  vi.mocked(linqClient.getHostedLinqChatHandles).mockResolvedValue([]);
   vi.mocked(linqClient.getHostedLinqChatSummary).mockReset();
   vi.mocked(linqClient.sendHostedLinqChatMessage).mockReset();
   vi.mocked(linqClient.sendHostedLinqChatMessage).mockResolvedValue({
@@ -426,10 +424,10 @@ beforeEach(() => {
     .mockReset();
   vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
     .mockResolvedValue(null);
-  vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
+  vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue(linqRoster({
     handles: [],
     isGroup: null,
-  });
+  }));
   vi.mocked(mailboxStore.readHostedMailboxItemByDedupeKey).mockReset();
   vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockReset();
   vi.mocked(mailboxStore.appendHostedMailboxEnvelopeWithSourceMessageTx).mockReset();
@@ -924,6 +922,7 @@ function createPrisma(input: {
     }),
   };
   const hostedThreadContainer = {
+    update: vi.fn().mockResolvedValue({}),
     findUnique: vi.fn().mockResolvedValue(null),
   };
   const hostedMemberRouting = {
@@ -1067,11 +1066,11 @@ function createPrisma(input: {
         : [];
     }),
     updateMany: vi.fn().mockImplementation(async ({ where }: {
-      where: { participantMemberId?: string };
+      where: { participantMemberId?: string; removedAt?: unknown };
     }) => {
       if (
         routeParticipantHasProjection
-        && !routeParticipantRemoved
+        && (!routeParticipantRemoved || typeof where.removedAt === "object" && where.removedAt !== null)
         && where.participantMemberId === "member_active_participant_123"
       ) {
         routeParticipantLeaseRefreshed = true;
@@ -1143,7 +1142,7 @@ function createPrisma(input: {
   });
   const prisma = {
     $executeRaw: vi.fn().mockResolvedValue(0),
-    $queryRaw: vi.fn().mockResolvedValue([]),
+    $queryRaw: vi.fn().mockImplementation(async (query: Prisma.Sql | TemplateStringsArray) => ("sql" in query ? query.sql : query.join("")).includes("complete_roster_observed_at") ? [{ completeRosterObservedAt: null }] : []),
     $transaction: transaction,
     hostedLinqLine,
     hostedMailboxItem,
@@ -1224,6 +1223,7 @@ function createStatefulThreadRoutePrisma() {
     ownerMemberId: string;
   }>();
   const hostedThreadContainer = {
+    update: vi.fn().mockResolvedValue({}),
     create: vi.fn().mockImplementation(async ({ data }: {
       data: {
         memberId: string;
@@ -1614,7 +1614,7 @@ function createStatefulThreadRoutePrisma() {
   };
   const prisma = {
     $executeRaw: executeRaw,
-    $queryRaw: vi.fn().mockResolvedValue([]),
+    $queryRaw: vi.fn().mockImplementation(async (query: Prisma.Sql | TemplateStringsArray) => ("sql" in query ? query.sql : query.join("")).includes("complete_roster_observed_at") ? [{ completeRosterObservedAt: null }] : []),
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
     game: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) },
     hostedLinqLine,
@@ -5134,7 +5134,7 @@ describe("Linq explicit external-thread routing", () => {
         routeParticipantActive: true,
         routeParticipantHandleLookupKey: previousLookupKey,
       });
-      vi.mocked(linqClient.getHostedLinqChatHandles).mockResolvedValue([
+      vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue(linqRoster({ handles: [
         { handle: "+15550000000", isMe: true, status: "active" },
         { handle: "+15551112222", isMe: false, status: "active" },
         ...Array.from({ length: 40 }, (_, index) => ({
@@ -5143,7 +5143,7 @@ describe("Linq explicit external-thread routing", () => {
           status: "active",
         })),
         { handle: "+15552223333", isMe: false, status: "active" },
-      ]);
+      ] }));
       vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
         .mockImplementation(async ({ phoneNumber }) =>
           phoneNumber === "+15552223333"
@@ -5173,7 +5173,7 @@ describe("Linq explicit external-thread routing", () => {
         ok: true,
         reason: "thread-container-inactive",
       });
-      expect(linqClient.getHostedLinqChatHandles).not.toHaveBeenCalled();
+      expect(linqClient.getHostedLinqChatSummary).not.toHaveBeenCalled();
       expect(prisma.hostedThreadContainerParticipant.findMany).toHaveBeenCalledWith({
         select: {
           participant: {
@@ -5214,7 +5214,7 @@ describe("Linq explicit external-thread routing", () => {
       routeParticipantHasProjection,
       routeParticipantRemoved,
     });
-    vi.mocked(linqClient.getHostedLinqChatHandles).mockResolvedValue([
+    vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue(linqRoster({ handles: [
       { handle: "+15550000000", isMe: true, status: "active" },
       ...Array.from({ length: 40 }, (_, index) => ({
         handle: `+15553${index.toString().padStart(6, "0")}`,
@@ -5222,7 +5222,7 @@ describe("Linq explicit external-thread routing", () => {
         status: "active",
       })),
       { handle: "+15552223333", isMe: false, status: "active" },
-    ]);
+    ] }));
     vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
       .mockImplementation(async ({ phoneNumber }) =>
         phoneNumber === "+15552223333"
@@ -5262,8 +5262,6 @@ describe("Linq explicit external-thread routing", () => {
       },
       update: {
         handleLookupKey: createHostedPhoneLookupKey("+15552223333"),
-        lastSeenAt: expect.any(Date),
-        removedAt: null,
       },
       where: {
         containerMemberId_participantMemberId: {
@@ -5283,7 +5281,7 @@ describe("Linq explicit external-thread routing", () => {
     });
     vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
       .mockResolvedValue(null);
-    vi.mocked(linqClient.getHostedLinqChatHandles)
+    vi.mocked(linqClient.getHostedLinqChatSummary)
       .mockRejectedValue(new Error("provider unavailable"));
 
     const plan = await planHostedOnboardingLinqWebhook({
@@ -5307,10 +5305,10 @@ describe("Linq explicit external-thread routing", () => {
       routeParticipantAccessRequiresRosterRefresh: true,
       routeParticipantActive: true,
     });
-    vi.mocked(linqClient.getHostedLinqChatHandles).mockResolvedValue([
+    vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue(linqRoster({ handles: [
       { handle: "+15550000000", isMe: true, status: "active" },
       { handle: "+15552223333", isMe: false, status: "active" },
-    ]);
+    ] }));
     vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
       .mockImplementation(async ({ phoneNumber }) =>
         phoneNumber === "+15552223333"
@@ -5699,7 +5697,7 @@ describe("Linq group chat auto-provision", () => {
     vi.mocked(linqClient.getHostedLinqChatSummary).mockImplementation(async ({ timeoutMs }) => {
       if (scenario === "timeout" && timeoutMs === 3_000) throw new Error("Linq timeout with private provider context");
       const roster = scenario === "mismatch" ? [...handles, "extra@example.test"] : handles;
-      return { isGroup: true, handlesComplete: true, handles: [{ handle: "+15550000000", isMe: true, status: "active" }, ...roster.map(handle => ({ handle, isMe: false, status: "active" }))] };
+      return linqRoster({ isGroup: true, handlesComplete: true, handles: [{ handle: "+15550000000", isMe: true, status: "active" }, ...roster.map(handle => ({ handle, isMe: false, status: "active" }))] });
     });
     vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://www.example.test");
     const link = `https://${scenario === "apex" ? "" : "www."}example.test/g/${token}`;
@@ -6689,7 +6687,6 @@ describe("Linq group chat auto-provision", () => {
         .mockReturnValue(buildLinqMessageReceivedEvent({ isGroup: webhookIsGroup }) as never);
       vi.mocked(linqClient.getHostedLinqChatSummary)
         .mockRejectedValue(new Error("Linq chat read unavailable"));
-      vi.mocked(linqClient.getHostedLinqChatHandles).mockResolvedValue([]);
 
       try {
         const response = await handleHostedOnboardingLinqWebhook({
@@ -6755,7 +6752,6 @@ describe("Linq group chat auto-provision", () => {
         isGroup: true,
       }) as never,
     );
-    vi.mocked(linqClient.getHostedLinqChatHandles).mockResolvedValue([]);
 
     await expect(handleHostedOnboardingLinqWebhook({
       rawBody: "{}",
@@ -6849,7 +6845,6 @@ describe("Linq group chat auto-provision", () => {
       .mockReturnValue(buildLinqMessageReceivedEvent({ isGroup: false }) as never);
     vi.mocked(linqClient.getHostedLinqChatSummary)
       .mockRejectedValue(new Error("Chat HTTP is not ownership authority"));
-    vi.mocked(linqClient.getHostedLinqChatHandles).mockResolvedValue([]);
 
     const response = await handleHostedOnboardingLinqWebhook({
       rawBody: "{}",
@@ -6915,14 +6910,13 @@ describe("Linq group chat auto-provision", () => {
       { member: senderCore, memberId: senderCore.id },
     ]);
     mockSuccessfulGroupProvision({ prisma, senderCore });
-    vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
+    vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue(linqRoster({
       displayName: "Weekend Warriors",
-      handleCount: 0,
-      handles: [],
+      handleCount: 1,
+      handles: [{ handle: "+15550000000", isMe: true, status: "active" }],
       handlesComplete: true,
       isGroup: true,
-    });
-    vi.mocked(linqClient.getHostedLinqChatHandles).mockResolvedValue([]);
+    }));
 
     try {
       const response = await handleHostedOnboardingLinqWebhook({
@@ -7981,7 +7975,7 @@ describe("Linq group chat auto-provision", () => {
     mockSuccessfulGroupProvision({ prisma, senderCore });
     vi.mocked(linqClient.getHostedLinqChatSummary).mockImplementation(async () => {
       expect(transactionOpen).toBe(false);
-      return {
+      return linqRoster({
         handles: [
           { handle: "+15550000000", isMe: true, status: "active" },
           {
@@ -7991,7 +7985,7 @@ describe("Linq group chat auto-provision", () => {
           },
         ],
         isGroup: true,
-      };
+      });
     });
 
     const response = await handleHostedOnboardingLinqWebhook({
@@ -8082,7 +8076,7 @@ describe("Linq group chat auto-provision", () => {
     }));
     vi.mocked(linqClient.getHostedLinqChatSummary).mockImplementation(async () => {
       expect(transactionOpen).toBe(false);
-      return {
+      return linqRoster({
         handles: [
           { handle: "+15550000000", isMe: true, status: "active" },
           { handle: "+15551112222", isMe: false, status: "active" },
@@ -8094,7 +8088,7 @@ describe("Linq group chat auto-provision", () => {
           })),
         ],
         isGroup: true,
-      };
+      });
     });
 
     const setupId = "hpgs_recovery_pin";
@@ -8250,14 +8244,14 @@ describe("Linq group chat auto-provision", () => {
       }
       return [];
     }));
-    vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
+    vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue(linqRoster({
       handles: [
         { handle: "+15550000000", isMe: true, status: "active" },
         { handle: "+15551112222", isMe: false, status: "active" },
         { handle: recoveredOwnerPhone, isMe: false, status: "active" },
       ],
       isGroup: true,
-    });
+    }));
 
     const setupId = "hpgs_container_failure_pin";
     const setupLineLookupKey = requireTestPhoneLookupKey("+15553334444");
@@ -8396,14 +8390,14 @@ describe("Linq group chat auto-provision", () => {
           phoneLookupKey: recoveredOwnerPhoneLookupKey,
         }]
       : []);
-    vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
+    vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue(linqRoster({
       handles: [
         { handle: "+15550000000", isMe: true, status: "active" },
         { handle: "+15551112222", isMe: false, status: "active" },
         { handle: recoveredOwnerPhone, isMe: false, status: "active" },
       ],
       isGroup: true,
-    });
+    }));
 
     Object.assign(prisma, {
       hostedLinqFirstContactAdmissionBudget: {
@@ -8555,13 +8549,13 @@ describe("Linq group chat auto-provision", () => {
       suspendedAt: null,
       threadContainer: null,
     });
-    vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
+    vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue(linqRoster({
       handles: [
         { handle: "+15550000000", isMe: true, status: "active" },
         { handle: "+15551112222", isMe: false, status: "active" },
       ],
       isGroup: true,
-    });
+    }));
 
     const response = await handleHostedOnboardingLinqWebhook({
       rawBody: "{}",
@@ -8598,13 +8592,13 @@ describe("Linq group chat auto-provision", () => {
         phoneLookupKey: createHostedPhoneLookupKey("+15551112222"),
       },
     ]);
-    vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
+    vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue(linqRoster({
       handles: [
         { handle: "+15550000000", isMe: true, status: "active" },
         { handle: "+15551112222", isMe: false, status: "active" },
       ],
       isGroup: true,
-    });
+    }));
 
     const response = await handleHostedOnboardingLinqWebhook({
       rawBody: "{}",
@@ -8648,7 +8642,7 @@ describe("Linq group chat auto-provision", () => {
       if (sql.includes(
         "input_participant(participant_member_id, handle_lookup_key)",
       )) {
-        expect(transactionOpen).toBe(false);
+        expect(transactionOpen).toBe(true);
       }
       return 0;
     });
@@ -8720,24 +8714,16 @@ describe("Linq group chat auto-provision", () => {
         "usage_referral_2",
       ],
     });
-    vi.mocked(linqClient.getHostedLinqChatHandles).mockImplementation(async () => {
-      expect(transactionOpen).toBe(false);
-      return [
-        { handle: "+15550000000", isMe: true, status: "active" },
-        { handle: "+15551112222", isMe: false, status: "active" },
-        { handle: "participant@example.com", isMe: false, status: "active" },
-      ];
-    });
     vi.mocked(linqClient.getHostedLinqChatSummary).mockImplementation(async () => {
       expect(transactionOpen).toBe(false);
-      return {
+      return linqRoster({
         handles: [
           { handle: "+15550000000", isMe: true, status: "active" },
           { handle: "+15551112222", isMe: false, status: "active" },
           { handle: "participant@example.com", isMe: false, status: "active" },
         ],
         isGroup: true,
-      };
+      });
     });
 
     const response = await handleHostedOnboardingLinqWebhook({
@@ -8758,7 +8744,7 @@ describe("Linq group chat auto-provision", () => {
       reason: "wake-appended-thread-route",
     });
     expect(prismaModule.getPrisma).toHaveBeenCalledTimes(1);
-    expect(linqClient.getHostedLinqChatHandles).not.toHaveBeenCalled();
+    expect(linqClient.getHostedLinqChatSummary).toHaveBeenCalledTimes(1);
     expect(linqClient.getHostedLinqChatSummary).toHaveBeenCalledWith({
       chatId: "chat_group_123",
       timeoutMs: 1_500,
@@ -8821,23 +8807,19 @@ describe("Linq group chat auto-provision", () => {
     expect(participantReconciles[0]?.sql).toContain(
       "ON CONFLICT (container_member_id, participant_member_id)",
     );
-    expect(participantReconciles[0]?.sql).toContain(
-      "UPDATE hosted_thread_container_participant AS participant",
-    );
     expect(participantReconciles[0]?.values).toEqual(expect.arrayContaining([
       containerCreate.data.memberId,
       "member_owner_123",
       boundaryParticipantMemberId,
-      true,
     ]));
     expect(participantReconciles[0]?.values).not.toContain(
       planningParticipantMemberId,
     );
     expect(prisma.hostedThreadContainerParticipant.upsert).not.toHaveBeenCalled();
-    const legacyRosterRemovalWrites =
+    const rosterRemovalWrites =
       prisma.hostedThreadContainerParticipant.updateMany.mock.calls
         .filter(([query]) => query.data?.removedAt instanceof Date);
-    expect(legacyRosterRemovalWrites).toHaveLength(0);
+    expect(rosterRemovalWrites).toHaveLength(1);
     expect(signalRuntime.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
       expectedUserId: containerCreate.data.memberId,
@@ -8887,7 +8869,7 @@ describe("Linq group chat auto-provision", () => {
     mockSuccessfulGroupProvision({ prisma, senderCore });
     vi.mocked(linqClient.getHostedLinqChatSummary).mockImplementation(async () => {
       expect(transactionOpen).toBe(false);
-      return {
+      return linqRoster({
         handles: [
           { handle: "+15550000000", isMe: true, status: "active" },
           ...Array.from({ length: 33 }, (_, index) => ({
@@ -8897,13 +8879,8 @@ describe("Linq group chat auto-provision", () => {
           })),
         ],
         isGroup: true,
-      };
+      });
     });
-    vi.mocked(linqClient.getHostedLinqChatHandles).mockResolvedValue([
-      { handle: "+15550000000", isMe: true, status: "active" },
-      { handle: "+15551112222", isMe: false, status: "active" },
-    ]);
-
     const response = await handleHostedOnboardingLinqWebhook({
       rawBody: "{}",
       signature: null,
@@ -8941,7 +8918,7 @@ describe("Linq group chat auto-provision", () => {
         "input_participant(participant_member_id, handle_lookup_key)",
       ));
     expect(participantReconciles).toHaveLength(1);
-    expect(participantReconciles[0]?.values).toContain(false);
+    expect(prisma.hostedThreadContainerParticipant.updateMany.mock.calls.filter(([query]) => query.data?.removedAt instanceof Date)).toHaveLength(0);
   });
 
   it("retries the first group message when roster authority is unavailable", async () => {
@@ -8962,7 +8939,7 @@ describe("Linq group chat auto-provision", () => {
     mockSuccessfulGroupProvision({ prisma, senderCore });
     vi.mocked(linqClient.getHostedLinqChatSummary)
       .mockRejectedValue(new Error("linq unavailable"));
-    vi.mocked(linqClient.getHostedLinqChatHandles).mockImplementation(async () => {
+    vi.mocked(linqClient.getHostedLinqChatSummary).mockImplementation(async () => {
       expect(transactionOpen).toBe(false);
       throw new Error("linq unavailable");
     });
@@ -8972,7 +8949,7 @@ describe("Linq group chat auto-provision", () => {
       signature: null,
       timestamp: null,
     })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_PENDING_GROUP_ROSTER_UNAVAILABLE",
+      code: "HOSTED_LINQ_GROUP_ROSTER_UNAVAILABLE",
       httpStatus: 502,
       retryable: true,
     });
@@ -9019,14 +8996,14 @@ describe("Linq group chat auto-provision", () => {
     ]);
     vi.mocked(linqClient.getHostedLinqChatSummary)
       .mockRejectedValueOnce(new Error("linq roster unavailable"))
-      .mockResolvedValueOnce({
+      .mockResolvedValueOnce(linqRoster({
         handles: [
           { handle: "+15550000000", isMe: true, status: "active" },
           { handle: "+15551112222", isMe: false, status: "active" },
           { handle: "+15552223333", isMe: false, status: "active" },
         ],
         isGroup: true,
-      });
+      }));
     preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx
       .mockImplementationOnce(async (input) => {
         const threadLookupKey = createHostedExternalThreadLookupKey({
@@ -9071,7 +9048,7 @@ describe("Linq group chat auto-provision", () => {
     } as const;
 
     await expect(handleHostedOnboardingLinqWebhook(request)).rejects.toMatchObject({
-      code: "HOSTED_LINQ_PENDING_GROUP_ROSTER_UNAVAILABLE",
+      code: "HOSTED_LINQ_GROUP_ROSTER_UNAVAILABLE",
       httpStatus: 502,
       retryable: true,
     });

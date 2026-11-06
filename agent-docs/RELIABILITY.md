@@ -447,10 +447,13 @@ Current product admission, delivery and native runtime safety rules remain.
   existing per-user Cloudflare execution owner to serialize with earlier
   ensures, re-read the Web-owned grant, clear the write fence, and stop the
   runner before acknowledging success. Later ensures re-read consent under the
-  same lock. Renewal waits behind the earlier stop, commits its new grant, then
-  signals the existing Temporal workflow. Best-effort provider cleanup failures
-  are secret-safe, do not roll back the grant, and may be retried idempotently
-  by repeating withdrawal.
+  same lock. The existing external retention tick redrives an interrupted stop
+  through the same reconciliation for explicitly revoked members with a non-idle
+  owner or retained target, without normal processing eligibility. Every member
+  renewal surface waits behind the earlier stop before committing its new grant;
+  hosted Web renewal then signals the existing Temporal workflow. Best-effort
+  provider cleanup failures are secret-safe, do not roll back the grant, and may
+  be retried idempotently by repeating withdrawal.
   Webhooks finalize an already-claimed trace without appending dirty work;
   scheduled selection and wake admission both exclude explicit revocation; and
   queued model work rechecks authority before usage is consumed. Renewal is a
@@ -645,10 +648,13 @@ Current product admission, delivery and native runtime safety rules remain.
   the same Web transaction. An append failure therefore rolls back the grant
   instead of admitting unrecoverable work. After commit, Web signals that exact
   mailbox pointer in parallel with bounded join-confirmation recovery, and the
-  scheduled mailbox-handoff sweep includes an unconsumed row when the immediate
+  scheduled mailbox-handoff sweep includes an unimported row when the immediate
   signal fails or the process stops. Either best-effort signal can stall without
   starving the other. The durable null snapshot remains an explicit `pending`
-  shared-read state until the member runtime materializes it.
+  shared-read state until the member runtime materializes it. The shared handoff
+  sweep also recovers group Journal facts, channel updates, destination-specific
+  welcomes, group-join confirmations and group-sharing confirmations from the
+  last 24 hours. It excludes explicit health-data withdrawal before its limit.
 - Direct hosted Codex process projection includes the selected core provider
   and that provider's SDK credential placeholder. Changing providers
   therefore changes the warm-process launch identity; the replacement process
@@ -804,7 +810,9 @@ Current product admission, delivery and native runtime safety rules remain.
   cold. DO reactivation preserves the SDK task, while process replacement does
   not inherit a completed process's watermark.
   Activity expiry rearms and yields to an active invocation before acquiring the
-  lifecycle lock, which the invocation retains until its response settles.
+  lifecycle lock, which the invocation retains until its response settles. An
+  exact completed receipt instead starts abort-and-stop recovery for a retained
+  transport-uncertain invocation whose response was lost.
   Maintenance must not hold the SDK alarm open behind that long-running work.
   Destructive cleanup remains locked and rechecks interaction ownership after
   external reads; scheduling a future check grants no new conversation warmth.
@@ -1399,12 +1407,16 @@ Current product admission, delivery and native runtime safety rules remain.
   leave a participant authoritative forever: stale relationships age out.
   Authenticated Linq inbound can renew only an existing non-removed relationship
   for the currently resolved identity, and future provider timestamps are
-  clamped to server time. Before denying a quiet route, Web makes one bounded
-  provider read and scans the full returned roster. It may create or reinstate
-  exactly the authenticated current sender after the roster handle re-resolves
-  to the same active hosted identity; otherwise it may renew only an existing
-  active participant whose current identity still matches the stored
-  relationship. Provider order and the assistant participant projection cap do
+  clamped to server time. Before denying a quiet route for an eligible verified
+  sender, Web makes one bounded provider read and scans the full returned roster.
+  Missing required roster proof is retryable; a partial roster establishes only
+  presence. Complete verified game-room reads renew the same participant leases.
+  Pre-read observation times and the complete-roster watermark prevent stale
+  evidence from restoring removed access; removal wins equal-time conflicts.
+  Web may create or reinstate exactly the authenticated current sender after
+  the roster handle re-resolves to the same active hosted identity; otherwise it
+  may renew only an existing active participant whose current identity still
+  matches the stored relationship. Provider order and the assistant participant projection cap do
   not decide access.
 - Linq participant add/remove context is a bounded optional sidecar on the
   existing routed group, not another work owner. Provider-event deduplication
@@ -3685,24 +3697,33 @@ Current product admission, delivery and native runtime safety rules remain.
   only from the lock statement to the fresh update statement; it must not
   escape that callback or appear in logs. The writer must not lock an unbounded
   collection or open one transaction per trace.
-- Chat-affirmation group joins (Linq reaction, Telegram inline button) are
-  at-least-once, not exactly-once. The provider-event ledger records that an
-  event was *received*, not that it was *applied*, so a redelivered event
-  re-runs acceptance. Membership creation is the only non-idempotent step: the
-  disclosure path derives its grant id from the affirmation event, but
-  `leaveHostedGroupMemberTx` deletes the membership row, so a redelivery that
-  lands after a departure can silently rejoin that member. Gating acceptance on
-  the ledger's duplicate flag is not the fix: it would drop legitimate joins
-  whenever a first attempt failed after the ledger write. Closing this needs a
-  consumed-event record written in the same transaction as acceptance; it is
-  deliberately deferred until a real occurrence or a broader offer-state change
-  justifies the table.
+- Chat-affirmation group grants (Linq reaction, Telegram inline button) spend
+  their provider gesture once. `hosted_group_offer_gesture_receipt` holds an
+  opaque digest of the gesture id, written in the same transaction as the
+  acceptance decision and after the group lock, including accepted no-ops. It
+  is keyed to the group, not the membership, so it survives leave, revocation,
+  relink, and deletion of the tapper's account, and it dies with the group.
+  A redelivery that loses the spend mutates nothing. A rollback removes the
+  receipt, so a failed tap stays unseen and can be retried. A genuinely new tap
+  has a new provider id and is a new decision. The Linq provider-event marker
+  remains the fast duplicate exit; the receipt is what closes two deliveries
+  that both pass it. Taps accepted before receipts existed cannot be
+  reconstructed, and Telegram supplies no tap time, so a first delivery that
+  arrives after a later revocation is still applied.
+- A direct Telegram update keeps the owner its first admission recorded. The
+  planner serializes on the update id and reads retained mailbox owners by
+  metadata across members before any fresh effect. A replay reuses its pointer
+  only for that same owner. A different or conflicting owner acknowledges with
+  no append, wake, or pointer. An erased row, or a first delivery after a relink,
+  has no earlier owner to find.
 
 ## Scheduled tool parity and replay
 
 Optional private follow-ups register under required outbox terminal confirmation.
 A failed canonical write retries confirmation without repeating the source send;
-source-key lookup under the registry lock prevents duplicate or resurrected work.
+the hosted drain selects and wakes that confirmation retry, including after the
+channel is later disabled. Source-key lookup under the registry lock prevents
+duplicate or resurrected work.
 Live finite children protect source dispatch evidence from terminal retention.
 Before the first transport attempt, a changed accepted-input cursor fails the
 unsent child intent and leaves its occurrence retryable. Existing failed-intent

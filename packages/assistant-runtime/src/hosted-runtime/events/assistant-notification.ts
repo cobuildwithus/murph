@@ -1,5 +1,5 @@
 import { isHostedRetiredAssistantNotificationProfile } from "@murphai/hosted-execution/contracts";
-import { gameGroupMissedCheckInPolicySchema, parseGameRecapEventId } from "@murphai/hosted-execution/runtime-control";
+import { GAME_RECAP_GENERATION_RETIRED, gameGroupMissedCheckInPolicySchema, parseGameRecapEventId } from "@murphai/hosted-execution/runtime-control";
 import { buildHostedGameChatBootstrapPolicy, isHostedGameBootstrapUnavailable } from "./game-chat-bootstrap.ts";
 import type { HostedRuntimeGroupToolPort } from "../platform.ts";
 import { resolveHostedOperatorModelProvider } from "../codex-runtime-env.ts";
@@ -81,7 +81,7 @@ type HostedAssistantNotificationSystemMailboxPreparation =
   | {
       kind: "terminal_no_send";
       outcome: HostedMailboxOutcome;
-      reason: "external_route_authority_stale";
+      reason: "external_route_authority_stale" | "game_recap_generation_retired";
     };
 
 export type HostedLegacyUsageReferralAuthorityClassification =
@@ -93,7 +93,8 @@ export type HostedLegacyUsageReferralAuthorityClassification =
   | "route_mismatch";
 
 /**
- * Recovers only the one authority-less usage-referral notification shape that
+ * Handles host-owned terminal notification outcomes and recovers the
+ * authority-less usage-referral notification shape that
  * shipped before direct Linq route proof was carried into the mailbox wake.
  * The local system mailbox already owns the imported payload, so recovery must
  * happen here rather than by mutating the Web row behind its import watermark.
@@ -104,6 +105,7 @@ export async function prepareHostedAssistantNotificationSystemMailboxWake(
       HostedRuntimeEffectsPort["assertExternalThreadRouteAuthority"];
     executionContext: AssistantExecutionContext;
     mailboxDedupeKey: string;
+    groupToolPort?: HostedRuntimeGroupToolPort | null;
     signal: AbortSignal | null;
     wake: HostedExecutionAssistantNotificationRequestedWake;
   },
@@ -119,6 +121,28 @@ export async function prepareHostedAssistantNotificationSystemMailboxWake(
       throw new TypeError(
         "Hosted group context handoff mailbox identity is invalid.",
       );
+    }
+  }
+
+  const policy = input.wake.notification.responsePolicy;
+  if (policy?.kind === "require_game_recap" && policy.eventId === input.wake.eventId && input.groupToolPort) {
+    // A tool result only reaches the model, so the host asks before any model work.
+    // recap_authority_unavailable stays uncertain: roster, access or storage may recover.
+    const response = await input.groupToolPort.request({ action: "read_game",
+      origin: { kind: "game_recap", gameId: policy.gameId, eventId: policy.eventId } }, { signal: input.signal });
+    if (response.action === "read_game" && response.result.status === "unavailable" && response.result.error === GAME_RECAP_GENERATION_RETIRED) {
+      return {
+        kind: "terminal_no_send",
+        outcome: createNoopMailboxEffect({
+          conversationMetrics: null, deliveryIntentIds: [], mailboxLane: "assistant-notification",
+          redactedLogEntries: [emitHostedAssistantNotificationLifecycleLog({
+            extraDetails: { eventCode: "assistant.notification.game_recap_generation_retired", terminalDisposition: "game_recap_generation_retired" },
+            level: "info", message: "Hosted recap generation ended without delivery because it is durably retired.",
+            phase: "wake.running", wake: input.wake,
+          })],
+        }),
+        reason: "game_recap_generation_retired",
+      };
     }
   }
 

@@ -47,6 +47,7 @@ import {
   ASSISTANT_PROGRESS_UPDATE_ACKNOWLEDGED_CODE,
   AssistantWorkspaceArtifactMaterializationError,
   applyAssistantVaultFileSendApprovalResult,
+  assistantOutboxAcceptedDeliveryRequiresConfirmation,
   beginAssistantOutboxIntentMirrorPreparedDispatch,
   buildAssistantVaultFileSendApprovalRequest,
   compareAssistantOutboxDeliverySequenceOrder,
@@ -56,6 +57,7 @@ import {
   findAssistantAutoReplyDeliveryIntentIds,
   hasAssistantAutoReplyChannel,
   hasPendingAssistantOutboxMessageVolumeReceipt,
+  isAssistantOutboxRetryableError,
   isAssistantOutboxReplyBubbleSuccessor,
   listAssistantCronPendingDeliveryIntentIds,
   listAssistantOutboxIntents,
@@ -1421,6 +1423,13 @@ function buildPreferredHostedAssistantDeliveryBoundaryOrder(input: {
   return order;
 }
 
+// Accepted delivery already reached the provider. Its remaining clock settles
+// local work, so it cannot be an outbound predecessor on this boundary.
+function hostedAssistantIntentAwaitsOnlySettlement(intent: AssistantOutboxIntent): boolean {
+  return intent.status === "sent"
+    || assistantOutboxAcceptedDeliveryRequiresConfirmation(intent);
+}
+
 function buildSelectableHostedAssistantDeliveryCandidateIds(input: {
   candidateIntentIds: ReadonlySet<string>;
   intents: readonly AssistantOutboxIntent[];
@@ -1441,9 +1450,8 @@ function buildSelectableHostedAssistantDeliveryCandidateIds(input: {
         // hide a ready approval-link reply queued later on the same boundary.
         continue;
       }
-      if (intent.status === "sent") {
-        // Receipt recovery shares the wake clock but is not an outbound
-        // delivery predecessor on this conversation boundary.
+      if (hostedAssistantIntentAwaitsOnlySettlement(intent)) {
+        // Receipt recovery and accepted confirmation do not block later sends.
         continue;
       }
       if (resolveHostedAssistantOutboxIntentWakeAt(intent, input.now)) {
@@ -1839,7 +1847,7 @@ function resolveHostedAssistantDeliveryBoundaryWakeAt(
   now: Date,
 ): string | null {
   let approvalFallbackWakeAt: string | null = null;
-  let receiptFallbackWakeAt: string | null = null;
+  let settlementFallbackWakeAt: string | null = null;
   for (const intent of intents) {
     const wakeAt = resolveHostedAssistantOutboxIntentWakeAt(intent, now);
     if (!wakeAt) {
@@ -1851,17 +1859,17 @@ function resolveHostedAssistantDeliveryBoundaryWakeAt(
       }
       continue;
     }
-    if (intent.status === "sent") {
-      if (!receiptFallbackWakeAt || wakeAt < receiptFallbackWakeAt) {
-        receiptFallbackWakeAt = wakeAt;
+    if (hostedAssistantIntentAwaitsOnlySettlement(intent)) {
+      if (!settlementFallbackWakeAt || wakeAt < settlementFallbackWakeAt) {
+        settlementFallbackWakeAt = wakeAt;
       }
       continue;
     }
-    return [approvalFallbackWakeAt, receiptFallbackWakeAt, wakeAt]
+    return [approvalFallbackWakeAt, settlementFallbackWakeAt, wakeAt]
       .filter((candidate): candidate is string => candidate !== null)
       .sort()[0] ?? null;
   }
-  return [approvalFallbackWakeAt, receiptFallbackWakeAt]
+  return [approvalFallbackWakeAt, settlementFallbackWakeAt]
     .filter((candidate): candidate is string => candidate !== null)
     .sort()[0] ?? null;
 }
@@ -1925,11 +1933,10 @@ function hasHostedAssistantOutboxConfirmationRetryPath(
   if (readHostedAcceptedLinqReactionDeliveryAwaitingConsume(intent)) {
     return true;
   }
-  return intent.deliveryConfirmationPending === true
-    && intent.delivery !== null
-    && parseHostedPhoneCallResultDeliveryKey(
-      intent.deliveryIdempotencyKey,
-    ) !== null;
+  return assistantOutboxAcceptedDeliveryRequiresConfirmation(
+    intent,
+    parseHostedPhoneCallResultDeliveryKey(intent.deliveryIdempotencyKey) !== null,
+  );
 }
 
 export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
@@ -2701,13 +2708,13 @@ function markHostedPhoneCallResultRouteRevocationRetryable(input: {
   return markHostedDeliveryPreProviderRetryable(input.error);
 }
 
-function createHostedEmailGroupRecipientAmbiguityError(): VaultCliError & {
+function createHostedEmailRecipientAmbiguityError(): VaultCliError & {
   deliveryMayHaveSucceeded: true;
   retryable: false;
 } {
   const error = new VaultCliError(
-    "ASSISTANT_EMAIL_GROUP_FANOUT_INCOMPLETE",
-    "Group email recipient delivery may have started; automatic retry is disabled to avoid duplicate email.",
+    "ASSISTANT_DELIVERY_AMBIGUOUS",
+    "Email delivery may have started; automatic retry is disabled to avoid duplicate email.",
   );
 
   return Object.assign(error, {
@@ -3591,7 +3598,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             );
           }
 
-          await assertHostedDeliveryCanEnterProvider(input);
           const providerTarget =
             await resolveHostedDirectEmailRecipientAtProviderEntry({
               assistantDeliveryEffect: input.assistantDeliveryEffect,
@@ -3600,16 +3606,13 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               target: request.target,
               targetKind: request.targetKind,
             });
+          await assertHostedDeliveryCanEnterProvider(input);
           const hostedEmailThreadTarget = request.targetKind === "thread"
             ? parseHostedEmailThreadTarget(request.target)
             : null;
           const plansGroupFanout = Boolean(
             hostedEmailThreadTarget?.targetKind === "group"
             && !hostedEmailThreadTarget.recipientMemberId,
-          );
-          const sendsGroupRecipient = Boolean(
-            hostedEmailThreadTarget?.targetKind === "group"
-            && hostedEmailThreadTarget.recipientMemberId,
           );
           providerDispatchEntered = !plansGroupFanout;
           // The binding identityId is a privacy-blinded conversation identifier,
@@ -3637,13 +3640,13 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               }
             } else if (hostedDeliveryErrorProvesProviderWasSkipped(error)) {
               providerDispatchEntered = false;
-            } else if (sendsGroupRecipient) {
-              throw createHostedEmailGroupRecipientAmbiguityError();
+            } else {
+              throw createHostedEmailRecipientAmbiguityError();
             }
             throw error;
           }
           const providerWasSkipped =
-            sendsGroupRecipient && hostedEmailResultProvesProviderWasSkipped(result);
+            !plansGroupFanout && hostedEmailResultProvesProviderWasSkipped(result);
           if (providerWasSkipped) {
             providerDispatchEntered = false;
           }
@@ -3658,8 +3661,8 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           try {
             await assertHostedDeliveryLiveNow(input);
           } catch (error) {
-            if (sendsGroupRecipient && !providerWasSkipped) {
-              throw createHostedEmailGroupRecipientAmbiguityError();
+            if (!plansGroupFanout && !providerWasSkipped) {
+              throw createHostedEmailRecipientAmbiguityError();
             }
             throw error;
           }
@@ -3783,7 +3786,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           if (!privateCompletion && !trackedPhoneCallResult) {
             providerDispatchEntered = true;
           }
-          const result = await sendTelegramMessage(request, {
+          return sendTelegramMessage(request, {
             ...dependencies,
             onTextSendAccepted: (acceptance) => {
               if (!input.platform?.logPort) return;
@@ -3801,13 +3804,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               });
             },
           });
-          if (trackedPhoneCallResult) {
-            // Telegram has accepted the non-idempotent result; preserve the
-            // receipt through the existing outbox confirmation path.
-            return result;
-          }
-          await assertHostedDeliveryLiveNow(input);
-          return result;
         },
         sendTelegramRich: async (request) => {
           await assertHostedDeliveryCanEnterProvider(input);
@@ -5558,6 +5554,9 @@ async function preloadApprovedHostedAssistantVaultFiles(input: {
       request: buildAssistantVaultFileSendApprovalRequest(intent),
     });
   } catch (error) {
+    if (isAssistantOutboxRetryableError(error)) {
+      throw markHostedDeliveryPreProviderRetryable(error);
+    }
     throw createAssistantDeliveryTerminalError(
       "ASSISTANT_VAULT_FILE_APPROVAL_INVARIANT_FAILED",
       "Secure vault-file approval could not be consumed at provider dispatch.",
@@ -6819,7 +6818,7 @@ async function maybeFailHostedDisabledAutoReplyDelivery(input: {
   if (!intent) {
     return null;
   }
-  if (readHostedAcceptedLinqReactionDeliveryAwaitingConsume(intent)) {
+  if (hasHostedAssistantOutboxConfirmationRetryPath(intent)) {
     return null;
   }
   if (!await hostedAssistantDeliveryIntentIsAutoReply({

@@ -10,8 +10,11 @@ const providerMocks = vi.hoisted(() => ({
   createHostedLinqChat: vi.fn(),
   ensureHostedMemberStripeCustomer: vi.fn(),
   getHostedLinqChatSummary: vi.fn().mockResolvedValue({
+    handleCount: 0,
     handles: [],
+    handlesComplete: true,
     isGroup: false,
+    observedAt: new Date(),
   }),
   sendHostedLinqChatMessage: vi.fn(),
 }));

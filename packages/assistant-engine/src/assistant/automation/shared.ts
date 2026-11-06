@@ -1,6 +1,3 @@
-import type {
-  AssistantAutomationState,
-} from '@murphai/operator-config/assistant-cli-contracts'
 import { compareAssistantTimestampsAscending } from '../shared.js'
 
 
@@ -87,10 +84,6 @@ export interface AssistantAutoReplyScanResult {
   replied: number
   skipped: number
   terminalLinqCleanup?: string[]
-}
-
-export interface AssistantAutomationScanStateProgress {
-  autoReply: AssistantAutomationState['autoReply']
 }
 
 export interface AssistantAutomationScanResult {

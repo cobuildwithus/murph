@@ -22,6 +22,8 @@ function setup() {
     findFirst.mockResolvedValue(game); findMany.mockResolvedValue(game ? [game] : []); unique.mockResolvedValue(game);
   };
   vi.spyOn(prisma.gameEntry, "findMany").mockResolvedValue([]);
+  vi.spyOn(prisma.gameEntry, "findFirst").mockResolvedValue(null);
+  vi.spyOn(prisma.gameReport, "findMany").mockResolvedValue([]);
   const receipt = vi.spyOn(prisma.hostedLinqDelivery, "findUnique").mockResolvedValue(null);
   vi.spyOn(prisma, "$queryRaw").mockResolvedValue([{ id: "game" }]);
   const event = vi.spyOn(prisma.gameEvent, "findUnique").mockResolvedValue({ id: 1n, gameId: "game", actor: "person-a", createdAt: now,
@@ -98,7 +100,8 @@ describe("game proposal provider dispatch authority", () => {
     await expect(assertGameProposalDeliveryCurrentTx(kickoff)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
   it("authorizes an older settled recap for its bound pair without consulting the newest game", async () => {
-    const { input, findFirst, setGame } = setup();
+    const { input, event, findFirst, setGame } = setup();
+    event.mockResolvedValue(null);
     findFirst.mockResolvedValueOnce({ ...row(), status: "settled" }).mockResolvedValue({ ...row(), id: "newer" });
     await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "game-recap:game" })).resolves.toBe(true);
     expect(findFirst).toHaveBeenCalledTimes(1);

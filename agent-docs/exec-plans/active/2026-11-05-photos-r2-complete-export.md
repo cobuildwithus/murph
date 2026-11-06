@@ -395,3 +395,149 @@ exited 1 because its generated CLI contract was absent; the documented generator
 exited 0 and the parity rerun passed. Frog's existing prepared-runtime/CLI-contract
 entry already describes that setup requirement; no new workaround or entry was
 needed. There are no unresolved local verification failures.
+
+
+## PR 3 local preserver implementation — 2026-11-06
+
+Scope: findings 2 and 3, and only the reader/pending interpretation from finding 6.
+One scoped local commit, no push, PR or deployment. The plan stays active for PR 4.
+
+Outcome: a preserver runner carries future sole-copy meal and measurement photos
+through rewrites, checkpoint restore and receipt recovery without new uploads.
+Reaches: retained measurement evidence, meal review closeout, explicit meal photo
+retirement and vault validation. No prompt or tool surface changes.
+Proof: synthetic future-writer catalogue fixtures, legacy/current measurement
+lifecycle and byte-for-byte export, composed meal closeout/delete/retention and
+receipt replay, actual CLI commands, and the invalid-descriptor integrity matrix.
+
+### Partial-attempt review and corrections
+
+Kept the shared runtime-state parser, canonical retained-owner preservation,
+measurement receipt references and the narrow core retained-artifact resolver.
+The partial attempt's measurement exclusion expectation widened what leaves the
+archive. Corrected it so the existing exclusion families stay unchanged; local
+meal and measurement bytes also remain in receipt payloads. Added proof that
+pending, settled and legacy descriptors cannot change that boundary.
+
+Generalized replay completion recognizes both explicit settlement and legacy
+settlement without a marker; replaying older pending intent cannot regress either.
+Separated descriptor identity validation from legacy metadata normalization and
+retained-photo collection from upload candidates to keep complexity bounded.
+
+Full-suite review also corrected two older composed assertions: the exporter now
+reports policy-removed media separately, and a shard-ordering fixture must retain
+canonical attachments until explicit photo retirement. The latter now proves
+zero pruning before retirement, the deleted shard wins maintenance, and pruning
+occurs after canonical tombstones. Measurement proof compares retained paths
+with inline deletion as well as checking restored export bytes.
+
+The engine's three catalogue-only unit fixtures now provide complete typed
+descriptors, so the stricter shared reader is exercised rather than bypassed.
+One existing case-sensitive export-copy assertion was corrected to match the
+already-shipped text. Cloudflare's tool-advertisement fixture now includes the
+existing materializer in the enabled file-send scenario, excludes it in the
+disabled scenario, and models its deferred code-mode advertisement. No production
+prompt, tool definition or guidance changed.
+
+### Per-outcome proof
+
+1. Runtime-state owns the typed descriptor reader, including measurement paths;
+   assistant-runtime delegates to it. Malformed paths, hashes, sizes, expiry,
+   kinds and pending markers fail explicitly. Checkpoint rejection leaves the
+   original malformed sole-copy catalogue unchanged and performs no PUT or delete.
+   Legacy marker absence remains settled, except for deployed thumbnail-v2 paths.
+2. The collector preserves canonical meal/measurement artifacts independently of
+   upload candidates. Both legacy body measurements and current measurements are
+   externalized by fixture, restored without local bytes, deleted, checkpointed,
+   restored again and materialized/exported byte-for-byte. Meal deletion and
+   expiry instead write canonical privacy tombstones and retire settled objects.
+3. Canonical event reference extraction covers measurements. Deletion receipts
+   carry their descriptors, including recovery into a snapshot without a catalogue.
+4. Closeout and validation use the same retained-artifact resolver. Tests accept
+   matching settled/legacy descriptors, reject wrong hash, size, kind and owner,
+   pending/expired descriptors, malformed paths, stale cleanup pointers, and
+   changed local bytes despite an old matching descriptor. The local-only
+   `statAndHashVaultFile` contract is unchanged.
+5. Explicit pending state survives parsing, rewriting and receipt recovery outside
+   thumbnail-v2; exact settled evidence survives replay of old pending intent.
+   Pending absent bytes never count as restored or trigger a GET. New pending
+   photo production and uploader expansion remain PR 4 work.
+6. Absent-byte meal closeout, `meal remove-photo`, meal deletion and retention
+   through `stageMealPhotoRetirement` succeed. Receipt-only recovery reproduces
+   the same tombstones, validates the restored vault and prunes only retired media.
+
+The cold-preserver round-trip now carries both full-meal and measurement
+references alongside cold ingests through future-writer fixture, preserver
+restore, canonical merge, checkpoint and another restore. It proves no unintended
+PUT, GET or deletion, and no new archive exclusions. Local-byte fixtures separately
+prove no receipt payload omission.
+
+Product walkthrough: **Ready** for this local prerequisite. No member-facing
+release note is published for an unpublished compatibility floor; the later
+producer release owns the changed storage behavior. No ReviewGPT or CI is claimed:
+a pushed PR head is explicitly outside this task. Parent review covers the full
+candidate, ownership, privacy, failure handling and the no-producer boundary.
+
+### Verification
+
+Full suites cover all touched packages and their workspace consumers. Every lane
+captures the actual exit status; failed attempts remain recorded below. Final
+workspace typecheck, complexity and diff/privacy checks are recorded on completion.
+
+
+Final full-suite results (local, synthetic; optional/platform/live skips are shown
+explicitly). The command for each package/app is `pnpm --dir <path> test`.
+The final engine run uses `MURPH_VITEST_MAX_WORKERS=2`; the additional Workers lane
+uses `pnpm --dir apps/cloudflare test:workers`. The Cloudflare Node row sums its
+workspace and containers-helper summaries.
+
+| Full suite | Passed | Skipped | Exit |
+| --- | ---: | ---: | ---: |
+| `packages/runtime-state` | 290 | 19 | 0 |
+| `packages/core` | 1,089 | 1 | 0 |
+| `packages/assistant-runtime` | 4,118 | 7 | 0 |
+| `packages/assistant-engine` | 6,072 | 782 | 0 |
+| `packages/cloudflare-hosted-control` | 91 | 0 | 0 |
+| `packages/device-syncd` | 1,458 | 0 | 0 |
+| `packages/hosted-execution` | 924 | 8 | 0 |
+| `packages/hosted-local-harness` | 512 | 1 | 0 |
+| `packages/importers` | 753 | 0 | 0 |
+| `packages/inbox-services` | 29 | 0 | 0 |
+| `packages/inboxd` | 194 | 3 | 0 |
+| `packages/operator-config` | 466 | 0 | 0 |
+| `packages/parsers` | 94 | 0 | 0 |
+| `packages/query` | 841 | 1 | 0 |
+| `packages/vault-usecases` | 537 | 0 | 0 |
+| `packages/cli` | 1,264 | 29 | 0 |
+| `apps/web` | 14,103 | 1,797 | 0 |
+| `apps/cloudflare (Node and containers helper)` | 4,654 | 5 | 0 |
+| `apps/cloudflare (Workers)` | 19 | 0 | 0 |
+
+Final `pnpm typecheck`, `pnpm complexity:diff`, workspace incremental build,
+`pnpm docs:drift`, `git diff --check`, and authored-content privacy scan: **exit 0**.
+Every shell verification lane captures `EXIT=$?` and returns it; no `PIPESTATUS`
+or piped-command inference is used.
+
+Focused final proof: photo-preserver plus cold-ingest tests **19 passed, exit 0**;
+retained-integrity core matrix **15 passed, exit 0**; engine descriptor/export
+fixtures **69 passed, exit 0**; Cloudflare advertisement fixture **40 passed,
+exit 0**. The actual CLI absent-byte case also passes in its full suite.
+
+Earlier failures are not passing evidence: initial complexity exited 1 before
+simplification; two focused CLI attempts exited 1 for the test-helper success
+exit convention and the root `validate` command path; the initial runtime full
+suite exited 1 with two obsolete assertions; the initial engine full suite
+exited 1 with three incomplete catalogue fixtures and one case-sensitive copy
+assertion; the initial Cloudflare full suite and three diagnostic/correction
+attempts exited 1 while correcting its disabled, enabled and deferred tool
+fixtures. Focused runtime and engine diagnosis also exited 1 before correction.
+The final full reruns above include every correction and pass.
+
+Frog: recorded `20261106023859-web-full-suite` for the Web suite's untracked SWC
+plugin cache, then removed only the session-generated cache. Its public-safe
+entry is included in the scoped commit. No source behavior workaround was needed.
+
+Final review: shared parsing, canonical ownership, pending recovery, local-byte
+integrity, explicit retirement, receipt payload retention and unchanged archive
+exclusion policy all have composed proof. No new photo upload admission, prompt,
+tool, push, PR, deployment or production access. The plan remains **active**.

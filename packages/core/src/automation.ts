@@ -150,8 +150,6 @@ export function resolveAutomationUpsertSlug(input: {
 export type AutomationScaffoldPayload = ContractAutomationScaffoldPayload;
 
 export interface UpsertAutomationInput extends AutomationScaffoldPayload {
-  /** Scheduler-only consumption; explicit edits always retire attached children. */
-  completedOccurrence?: true;
   allowSlugRename?: boolean;
   automationId?: string;
   createOnly?: boolean;
@@ -162,6 +160,10 @@ export interface UpsertAutomationInput extends AutomationScaffoldPayload {
   now?: Date;
   vaultRoot: string;
 }
+
+type UpsertAutomationWithLatestRegistryInput = UpsertAutomationInput & {
+  completedOccurrence?: true;
+};
 
 export interface UpsertAutomationResult {
   auditPath: string;
@@ -228,6 +230,14 @@ export interface ListAutomationInput {
 export interface ListAutomationResult {
   items: AutomationRecord[];
   count: number;
+}
+
+export interface ArchiveAutomationIfOccurrenceCurrentInput {
+  expectedUpdatedAt: string;
+  lookup: string;
+  now?: Date;
+  occurrenceAt: string;
+  vaultRoot: string;
 }
 
 export interface ArchiveAutomationIfActiveUntilElapsedInput {
@@ -1222,6 +1232,35 @@ export async function patchAutomation(
   });
 }
 
+export async function archiveAutomationIfOccurrenceCurrent(
+  input: ArchiveAutomationIfOccurrenceCurrentInput,
+): Promise<boolean> {
+  return withAutomationRegistryLock(input.vaultRoot, async () => {
+    const records = await loadAutomationRecords(input.vaultRoot);
+    const existingRecord = selectAutomationRecord(records, {
+      automationId: input.lookup,
+      slug: input.lookup,
+    });
+    if (
+      !existingRecord ||
+      existingRecord.status !== "active" ||
+      existingRecord.updatedAt !== input.expectedUpdatedAt ||
+      existingRecord.schedule.kind !== "at" ||
+      Date.parse(existingRecord.schedule.at) !== Date.parse(input.occurrenceAt)
+    ) {
+      return false;
+    }
+    await upsertAutomationWithLatestRegistry({
+      ...existingRecord,
+      completedOccurrence: true,
+      now: input.now,
+      status: "archived",
+      vaultRoot: input.vaultRoot,
+    }, records);
+    return true;
+  });
+}
+
 export async function archiveAutomationIfActiveUntilElapsed(
   input: ArchiveAutomationIfActiveUntilElapsedInput,
 ): Promise<ArchiveAutomationIfActiveUntilElapsedResult> {
@@ -1714,7 +1753,7 @@ function resolveAutomationScheduleAnchorAt(input: {
 }
 
 async function upsertAutomationWithLatestRegistry(
-  input: UpsertAutomationInput,
+  input: UpsertAutomationWithLatestRegistryInput,
   records?: AutomationRecord[],
 ): Promise<UpsertAutomationResult> {
   const normalizedId = normalizeId(input.automationId, "automationId", "automation");
@@ -1837,7 +1876,7 @@ async function upsertAutomationWithLatestRegistry(
     markdown: "",
   };
 
-  await retireAutomationFollowUpsBeforeParentWrite({ input, existingRecord, currentRecords, status });
+  await retireAutomationFollowUpsBeforeParentWrite({ input, existingRecord, currentRecords });
 
   const { auditPath, record: writtenRecord } = await writeMarkdownRegistryRecord({
     vaultRoot: input.vaultRoot,
@@ -1885,15 +1924,11 @@ function resolveAutomationFollowUpFields({ input, existingRecord, schedule, acti
   };
 }
 
-async function retireAutomationFollowUpsBeforeParentWrite({ input, existingRecord, currentRecords, status }: {
-  input: UpsertAutomationInput;
+async function retireAutomationFollowUpsBeforeParentWrite({ input, existingRecord, currentRecords }: {
+  input: UpsertAutomationWithLatestRegistryInput;
   existingRecord: AutomationRecord | null;
   currentRecords: AutomationRecord[];
-  status: AutomationRecord["status"];
 }): Promise<void> {
-  if (input.completedOccurrence && (existingRecord?.schedule.kind !== "at" || status !== "archived")) {
-    throw new VaultError("VAULT_INVALID_INPUT", "Only a consumed one-shot can preserve attached follow-ups.");
-  }
   // Retire children first: a crash must not leave an edited parent authorizing
   // obsolete optional work. Ordinary one-shot consumption keeps its child.
   if (existingRecord && !input.completedOccurrence) {

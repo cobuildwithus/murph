@@ -9072,7 +9072,7 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
-    expect(assertLiveness).toHaveBeenCalledTimes(2);
+    expect(assertLiveness).toHaveBeenCalledTimes(1);
     expect(assertExternalThreadRouteAuthority).not.toHaveBeenCalled();
     expect(mocks.sendTelegramMessage).toHaveBeenCalledWith({
       idempotencyKey: "assistant-outbox:intent_123",
@@ -19923,7 +19923,7 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
     })).rejects.toMatchObject({
-      code: "ASSISTANT_EMAIL_GROUP_FANOUT_INCOMPLETE",
+      code: "ASSISTANT_DELIVERY_AMBIGUOUS",
       deliveryMayHaveSucceeded: true,
       retryable: false,
     });
@@ -20068,7 +20068,7 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
     })).rejects.toMatchObject({
-      code: "ASSISTANT_EMAIL_GROUP_FANOUT_INCOMPLETE",
+      code: "ASSISTANT_DELIVERY_AMBIGUOUS",
       deliveryMayHaveSucceeded: true,
       retryable: false,
     });

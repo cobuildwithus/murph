@@ -8,7 +8,7 @@ import { brotliCompressSync } from "node:zlib";
 import { materializeVaultMedia } from "@murphai/assistant-engine/assistant-codex";
 import { restoreHostedBundleRoots, snapshotHostedBundleRoots } from "@murphai/runtime-state/node";
 import { expect, test, vi } from "vitest";
-import { archiveClosedIntegrationIngestShards, buildIntegrationEvidencePart, buildIntegrationIngestRecord, importDeviceBatch, initializeVault, readIntegrationIngestEntries, listIntegrationIngestsForEvent, withIntegrationIngestMaterializer } from "@murphai/core";
+import { addMeal, addMeasurement, archiveClosedIntegrationIngestShards, buildIntegrationEvidencePart, buildIntegrationIngestRecord, deleteEvent, importDeviceBatch, initializeVault, readIntegrationIngestEntries, listIntegrationIngestsForEvent, withIntegrationIngestMaterializer } from "@murphai/core";
 import type { HostedRuntimeMediaStore } from "../src/hosted-runtime/platform.ts";
 import {
   type HostedMediaReferenceCatalogue,
@@ -97,10 +97,16 @@ test("failed media pruning retains newly uploaded cold history and the cleanup p
   };
   try {
     await initializeVault({ vaultRoot, timezone: "UTC" });
-    const stale = { byteSize: 3, expiresAt: null, mediaId: "a".repeat(64), mediaKind: "image" as const,
+    const photoPath = path.join(vaultRoot, "fixture.jpg");
+    const bytes = Buffer.from("synthetic retired photo");
+    await writeFile(photoPath, bytes);
+    const meal = await addMeal({ vaultRoot, photoPath, occurredAt: "2020-01-01T00:00:00.000Z" });
+    const stale = { byteSize: bytes.length, expiresAt: null, mediaId: "a".repeat(64), mediaKind: "image" as const,
       mimeType: "image/jpeg", recordedAt: "2020-01-01T00:00:00.000Z",
-      relativePath: "raw/meals/synthetic/thumbnail-stale.jpg", sha256: "b".repeat(64) };
-    objects.set(stale.mediaId, new Uint8Array([1, 2, 3]));
+      relativePath: meal.photo!.relativePath, sha256: createHash("sha256").update(bytes).digest("hex") };
+    objects.set(stale.mediaId, bytes);
+    // Pruning requires the canonical retirement evidence written by meal deletion.
+    await deleteEvent({ vaultRoot, eventId: meal.event.id });
     await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue: { schema: HOSTED_MEDIA_REFS_SCHEMA, entries: [stale] } });
     await mkdir(path.dirname(path.join(vaultRoot, closedPath)), { recursive: true });
     await writeFile(path.join(vaultRoot, closedPath), brotliCompressSync(Buffer.from('{"synthetic":true}\n')));
@@ -306,12 +312,31 @@ test("cold catalogue survives restore, media merge, checkpoint and another resto
   };
   try {
     await initializeVault({ vaultRoot: source });
+    const photoPath = path.join(root, "fixture.jpg");
+    await writeFile(photoPath, "synthetic retained photo");
+    const meal = await addMeal({ vaultRoot: source, photoPath, occurredAt: "2020-01-01T00:00:00.000Z" });
+    const measurement = await addMeasurement({ vaultRoot: source,
+      draft: { title: "Synthetic measurement", occurredAt: "2020-01-01T00:00:00.000Z", measurements: [{ metric: "weight", value: 70, unit: "kg" }] },
+      attachments: [{ role: "media_1", sourcePath: photoPath }] });
+    for (const attachment of [meal.photo!, measurement.event.attachments![0]!]) {
+      const bytes = await readFile(path.join(source, attachment.relativePath));
+      catalogue.entries.push({ relativePath: attachment.relativePath, mediaKind: "image",
+        mediaId: createHash("sha256").update(attachment.relativePath).digest("hex"),
+        sha256: createHash("sha256").update(bytes).digest("hex"), byteSize: bytes.length,
+        mimeType: "image/jpeg", recordedAt: entry.recordedAt, expiresAt: null });
+      await rm(path.join(source, attachment.relativePath));
+    }
+    // A newer producer fixture writes sole-copy references; the preserver must
+    // carry them through canonical merge and its next sparse checkpoint.
     await writeHostedMediaReferenceCatalogue({ vaultRoot: source, catalogue });
     await mkdir(restored); await mkdir(restoredAgain);
     const firstArchive = path.join(root, "first.tar");
     await tar("tar", ["-cf", firstArchive, "-C", source, "."]);
     await tar("tar", ["-xf", firstArchive, "-C", restored]);
     expect(await readHostedMediaReferenceCatalogue({ vaultRoot: restored })).toEqual(catalogue);
+    for (const photo of [meal.photo!, measurement.event.attachments![0]!]) {
+      await expect(readFile(path.join(restored, photo.relativePath))).rejects.toMatchObject({ code: "ENOENT" });
+    }
     // Receipt/media reconciliation must preserve the same entry too.
     await publishHostedWorkspaceMediaReferences({ vaultRoot: restored, mediaStore });
     const publication = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot: restored, mediaStore });
@@ -326,6 +351,9 @@ test("cold catalogue survives restore, media merge, checkpoint and another resto
     await tar("tar", ["-cf", checkpoint, "-C", restored, "."]);
     await tar("tar", ["-xf", checkpoint, "-C", restoredAgain]);
     expect(await readHostedMediaReferenceCatalogue({ vaultRoot: restoredAgain })).toEqual(catalogue);
+    for (const photo of [meal.photo!, measurement.event.attachments![0]!]) {
+      await expect(readFile(path.join(restoredAgain, photo.relativePath))).rejects.toMatchObject({ code: "ENOENT" });
+    }
     expect(JSON.parse(await readFile(path.join(restoredAgain, HOSTED_MEDIA_REFS_RELATIVE_PATH), "utf8"))).toEqual(catalogue);
     expect(mediaStore.put).not.toHaveBeenCalled();
     expect(mediaStore.get).not.toHaveBeenCalled();

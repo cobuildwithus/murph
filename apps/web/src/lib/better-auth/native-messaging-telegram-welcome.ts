@@ -51,7 +51,7 @@ export async function welcomeNativeMessagingTelegram(input: { memberId: string; 
     return enqueueHostedMemberChannelsUpdatedForActiveMemberTx({ memberId: input.memberId, occurredAt: new Date().toISOString(), prisma: tx, sourceType: "settings.telegram.welcome" });
   }), { maxWait: 5_000, timeout: 10_000 });
   if (dispatch) await signalHostedMailboxAppendRuntime({ expectedUserId: input.memberId, mailboxItemId: dispatch.mailboxItemId }).catch(() => {
-    // The committed mailbox owns wake recovery.
+    // The handoff sweep retries channel updates from the last 24 hours.
   });
   return result(false);
 }

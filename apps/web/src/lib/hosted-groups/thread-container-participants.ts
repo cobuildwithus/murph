@@ -1,9 +1,10 @@
 import "server-only";
 import { HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX } from "@murphai/hosted-execution/runtime-control";
-import { Prisma } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
-  getHostedLinqChatHandles,
+  getHostedLinqChatSummary,
+  type HostedLinqChatRosterObservation,
   type HostedLinqChatHandleSummary,
 } from "../hosted-onboarding/linq-client";
 import { createHostedLinqParticipantContactLookupKey } from "../hosted-onboarding/linq-participant-contact";
@@ -16,6 +17,7 @@ import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import type { HostedOnboardingReadClient } from "../hosted-onboarding/shared";
 import { HOSTED_GROWTH_GROUP_PRIVATE_ATTRIBUTION_LOOKBACK_MS } from "./group-private-attribution-policy";
 import { lookupHostedGroupParticipantMemberIdsByHandles } from "./participant-member";
+import { lockHostedThreadContainerParticipantObservationTx } from "./thread-container-participant-access";
 
 export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX;
@@ -28,12 +30,13 @@ export type HostedThreadContainerResolvedParticipant = {
 export async function reconcileHostedThreadContainerParticipants(input: {
   chatId: string;
   containerMemberId: string;
-  handles?: readonly HostedLinqChatHandleSummary[];
-  prisma: HostedOnboardingReadClient;
+  observation?: HostedLinqChatRosterObservation;
+  prisma: PrismaClient;
   resolvedParticipants?: readonly HostedThreadContainerResolvedParticipant[];
 }): Promise<void> {
   try {
-    const handles = input.handles ?? await getHostedLinqChatHandles({ chatId: input.chatId });
+    const observation = input.observation ?? await getHostedLinqChatSummary({ chatId: input.chatId });
+    const { handles, observedAt } = observation;
     if (handles.length === 0) {
       logHostedThreadContainerParticipantReconcileSkipped({
         chatId: input.chatId,
@@ -44,7 +47,8 @@ export async function reconcileHostedThreadContainerParticipants(input: {
     }
 
     const hasCompleteRoster =
-      handles.length <= HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX;
+      observation.handlesComplete === true
+      && observation.handleCount <= HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX;
     const participantHandles = selectHostedThreadContainerParticipantHandles({
       chatId: input.chatId,
       containerMemberId: input.containerMemberId,
@@ -56,9 +60,8 @@ export async function reconcileHostedThreadContainerParticipants(input: {
         handles: participantHandles,
         prisma: input.prisma,
       })).filter((participant) => boundedHandleValues.has(participant.handle));
-    const now = new Date();
     const observationExpiresAt = new Date(
-      now.getTime() + HOSTED_GROWTH_GROUP_PRIVATE_ATTRIBUTION_LOOKBACK_MS,
+      observedAt.getTime() + HOSTED_GROWTH_GROUP_PRIVATE_ATTRIBUTION_LOOKBACK_MS,
     );
     const observationLookupKeys = [...new Set(participantHandles.flatMap((handle) => {
       const lookupKey = createHostedThreadContainerParticipantHandleLookupKey(
@@ -106,21 +109,18 @@ export async function reconcileHostedThreadContainerParticipants(input: {
           `))}
         `;
 
-    await input.prisma.$executeRaw(Prisma.sql`
-      WITH input_observation(contact_lookup_key) AS (
-        ${inputObservationRows}
-      ),
-      upserted_observation AS (
+    await input.prisma.$transaction(async (tx) => {
+      const acceptsPositive = await lockHostedThreadContainerParticipantObservationTx({
+        containerMemberId: input.containerMemberId,
+        observedAt,
+        prisma: tx,
+      });
+      await tx.$executeRaw(Prisma.sql`
         INSERT INTO hosted_group_participant_observation (
-          contact_lookup_key,
-          first_observed_at,
-          expires_at
+          contact_lookup_key, first_observed_at, expires_at
         )
-        SELECT
-          input_observation.contact_lookup_key,
-          ${now},
-          ${observationExpiresAt}
-        FROM input_observation
+        SELECT input_observation.contact_lookup_key, ${observedAt}, ${observationExpiresAt}
+        FROM (${inputObservationRows}) AS input_observation(contact_lookup_key)
         ORDER BY input_observation.contact_lookup_key
         ON CONFLICT (contact_lookup_key)
         DO UPDATE SET
@@ -136,61 +136,53 @@ export async function reconcileHostedThreadContainerParticipants(input: {
             hosted_group_participant_observation.expires_at,
             EXCLUDED.expires_at
           )
-        RETURNING contact_lookup_key
-      ),
-      input_participant(participant_member_id, handle_lookup_key) AS (
-        ${inputParticipantRows}
-      ),
-      upserted AS (
-        INSERT INTO hosted_thread_container_participant (
-          container_member_id,
-          participant_member_id,
-          handle_lookup_key,
-          first_seen_at,
-          last_seen_at,
-          removed_at,
-          created_at,
-          updated_at
-        )
-        SELECT
-          ${input.containerMemberId},
-          input_participant.participant_member_id,
-          input_participant.handle_lookup_key,
-          ${now},
-          ${now},
-          NULL,
-          ${now},
-          ${now}
-        FROM input_participant
-        CROSS JOIN (SELECT COUNT(*) FROM upserted_observation) AS observation_barrier
-        ON CONFLICT (container_member_id, participant_member_id)
-        DO UPDATE SET
-          handle_lookup_key = EXCLUDED.handle_lookup_key,
-          last_seen_at = EXCLUDED.last_seen_at,
-          removed_at = NULL,
-          updated_at = EXCLUDED.updated_at
-        RETURNING participant_member_id
-      )
-      UPDATE hosted_thread_container_participant AS participant
-      SET
-        removed_at = ${now},
-        updated_at = ${now}
-      FROM (SELECT COUNT(*) FROM upserted) AS upsert_barrier
-      WHERE ${hasCompleteRoster}
-        AND participant.container_member_id = ${input.containerMemberId}
-        AND participant.removed_at IS NULL
-        AND NOT EXISTS (
-          SELECT 1
-          FROM input_participant
-          WHERE input_participant.participant_member_id = participant.participant_member_id
-        )
-    `);
+      `);
+      if (acceptsPositive) {
+        await tx.$executeRaw(Prisma.sql`
+          INSERT INTO hosted_thread_container_participant (
+            container_member_id, participant_member_id, handle_lookup_key,
+            first_seen_at, last_seen_at, removed_at, created_at, updated_at
+          )
+          SELECT ${input.containerMemberId}, input_participant.participant_member_id,
+            input_participant.handle_lookup_key, ${observedAt}, ${observedAt}, NULL,
+            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+          FROM (${inputParticipantRows}) AS input_participant(participant_member_id, handle_lookup_key)
+          ON CONFLICT (container_member_id, participant_member_id)
+          DO UPDATE SET
+            handle_lookup_key = EXCLUDED.handle_lookup_key,
+            last_seen_at = EXCLUDED.last_seen_at,
+            removed_at = NULL,
+            updated_at = EXCLUDED.updated_at
+          WHERE hosted_thread_container_participant.last_seen_at < EXCLUDED.last_seen_at
+            AND (hosted_thread_container_participant.removed_at IS NULL
+              OR hosted_thread_container_participant.removed_at < EXCLUDED.last_seen_at)
+        `);
+      }
+      if (hasCompleteRoster) {
+        await tx.hostedThreadContainerParticipant.updateMany({
+          where: {
+            containerMemberId: input.containerMemberId,
+            removedAt: null,
+            lastSeenAt: { lte: observedAt },
+            participantMemberId: { notIn: seenParticipants.map(participant => participant.participantMemberId) },
+          },
+          data: { removedAt: observedAt },
+        });
+        if (acceptsPositive) {
+          await tx.hostedThreadContainer.update({
+            where: { memberId: input.containerMemberId },
+            data: { completeRosterObservedAt: observedAt },
+          });
+        }
+      }
+    });
 
     if (!hasCompleteRoster) {
       logHostedThreadContainerParticipantReconcileSkipped({
         chatId: input.chatId,
         containerMemberId: input.containerMemberId,
-        reason: "roster_exceeds_cap",
+        reason: observation.handleCount > HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX
+          ? "roster_exceeds_cap" : "roster_incomplete",
       });
     }
   } catch (error) {

@@ -1,4 +1,5 @@
 import "server-only";
+import { reconcileHostedThreadContainerParticipants } from "../hosted-groups/thread-container-participants";
 import type { Prisma } from "@prisma/client";
 import { assertHostedThreadRouteEgressAuthority, readHostedThreadRouteByThreadIdentity } from "../hosted-routing/thread-route-store";
 import { readHostedPublicOrigin } from "../hosted-web/public-url";
@@ -146,6 +147,7 @@ export async function exactChat(containerMemberId: string, phones: readonly stri
   const self = chat.handles.find((handle) => handle.isMe && (handle.status === null || handle.status.toLowerCase() === "active"));
   const line = await readHostedLinqIncomingLineState({ phoneNumberLookupKeys: createHostedPhoneLookupKeyReadCandidates(self?.handle), prisma });
   if (line.kind !== "assignable" && line.kind !== "at_risk") throw new Error("Game chat sending line is unavailable.");
+  await reconcileHostedThreadContainerParticipants({ chatId: route.threadId, containerMemberId, observation: chat, prisma });
   return { chat, route };
 }
 
@@ -204,10 +206,10 @@ export async function readGameChatAudience(containerMemberId: string) {
   // "Unavailable" includes a failed open (database or KMS), which proves nothing about the room.
   if (!route) throw routes.unavailableContainerMemberIds.has(containerMemberId)
     ? new Error("Game chat route is unavailable.") : new GameChatAudienceError("route_unavailable", "Game chat route is unavailable.");
-  return { ...await readGameChatHandleAudience(route.threadId), route };
+  return { ...await readGameChatHandleAudience(route.threadId, containerMemberId), route };
 }
 
-async function readGameChatHandleAudience(threadId: string) {
+async function readGameChatHandleAudience(threadId: string, containerMemberId?: string) {
   const prisma = getPrisma();
   const chat = await getHostedLinqChatSummary({ chatId: threadId, timeoutMs: 3_000 });
   const active = chat.handles.filter(handle => handle.status === null || handle.status.toLowerCase() === "active");
@@ -229,6 +231,7 @@ async function readGameChatHandleAudience(threadId: string) {
   const memberIds = resolvedContacts.flatMap(({ memberId }) => memberId ? [memberId] : []);
   // Two handles resolving to one person are ambiguous audience evidence.
   if (new Set(memberIds).size !== memberIds.length) throw new GameChatAudienceError("identity_ambiguous", "Game chat identity is ambiguous.");
+  if (containerMemberId) await reconcileHostedThreadContainerParticipants({ chatId: threadId, containerMemberId, observation: chat, prisma });
   return { memberIds, contacts, resolvedContacts, keys: gameAudienceKeys(contacts), threadId };
 }
 

@@ -679,6 +679,7 @@ describe("hosted retention cleanup", () => {
     const queryRaw = vi.fn(async (
       sql: TemplateStringsArray,
       dueAt: Date,
+      _eligibleMember: unknown,
       limit: number,
       attemptedAt: Date,
     ) => {

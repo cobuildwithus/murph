@@ -77,6 +77,8 @@ type MockAutomationRecord = {
 
 const cronMocks = vi.hoisted(() => ({
   archiveAutomationIfActiveUntilElapsed: vi.fn(),
+  archiveAutomationIfOccurrenceCurrent: vi.fn(),
+  archiveScheduledLogIfOccurrenceCurrent: vi.fn(),
   canSkipManagedAutomaticMealCloseout: vi.fn(),
   applyAssistantSelfDeliveryTargetDefaults: vi.fn(),
   automationsByVault: new Map<string, MockAutomationRecord[]>(),
@@ -111,6 +113,8 @@ vi.mock('@murphai/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@murphai/core')>()),
   archiveAutomationIfActiveUntilElapsed:
     cronMocks.archiveAutomationIfActiveUntilElapsed,
+  archiveAutomationIfOccurrenceCurrent: cronMocks.archiveAutomationIfOccurrenceCurrent,
+  archiveScheduledLogIfOccurrenceCurrent: cronMocks.archiveScheduledLogIfOccurrenceCurrent,
   executeScheduledLogOccurrence: cronMocks.executeScheduledLogOccurrence,
   isVaultError: (error: unknown) => Boolean(
     error &&
@@ -432,6 +436,26 @@ beforeEach(() => {
   cronMocks.executeScheduledLogOccurrence.mockReset().mockResolvedValue({
     message: 'Auto-logged scheduled log "Morning measurement" as event evt_1.',
   })
+  cronMocks.archiveAutomationIfOccurrenceCurrent.mockReset().mockImplementation(
+    async (input: import('@murphai/core').ArchiveAutomationIfOccurrenceCurrentInput) => {
+      const record = findCanonicalAutomation(input.vaultRoot, input.lookup)
+      if (!record || record.status !== 'active' || record.updatedAt !== input.expectedUpdatedAt ||
+        record.schedule.kind !== 'at' || Date.parse(record.schedule.at) !== Date.parse(input.occurrenceAt)) return false
+      record.status = 'archived'
+      record.updatedAt = (input.now ?? new Date()).toISOString()
+      return true
+    },
+  )
+  cronMocks.archiveScheduledLogIfOccurrenceCurrent.mockReset().mockImplementation(
+    async (input: Parameters<typeof import('@murphai/core').archiveScheduledLogIfOccurrenceCurrent>[0]) => {
+      const record = getVaultScheduledLogStore(input.vaultRoot).find((record) => record.scheduledLogId === input.scheduledLogId)
+      if (!record || record.status !== 'active' || record.updatedAt !== input.expectedUpdatedAt ||
+        record.schedule.kind !== 'at' || Date.parse(record.schedule.at) !== Date.parse(input.occurrenceAt)) return false
+      record.status = 'archived'
+      record.updatedAt = (input.now ?? new Date()).toISOString()
+      return true
+    },
+  )
   cronMocks.setScheduledLogStatus.mockReset().mockImplementation(
     async (input: {
       activeUntil?: string | null
@@ -616,6 +640,7 @@ describe('assistant cron runtime orchestration', () => {
       const core = await vi.importActual<typeof import('@murphai/core')>('@murphai/core')
       const query = await vi.importActual<typeof import('@murphai/query')>('@murphai/query')
       cronMocks.upsertAutomation.mockImplementation(core.upsertAutomation)
+      cronMocks.archiveAutomationIfOccurrenceCurrent.mockImplementation(core.archiveAutomationIfOccurrenceCurrent)
       cronMocks.archiveAutomationIfActiveUntilElapsed.mockImplementation(core.archiveAutomationIfActiveUntilElapsed)
       cronMocks.listCanonicalAutomations.mockImplementation(query.listAutomations)
       cronMocks.showCanonicalAutomation.mockImplementation(query.showAutomation)
@@ -3967,6 +3992,7 @@ describe('assistant cron runtime orchestration', () => {
       }),
     )
     expect(cronMocks.upsertAutomation).not.toHaveBeenCalled()
+    expect(cronMocks.archiveAutomationIfOccurrenceCurrent).not.toHaveBeenCalled()
   })
 
   it('blocks enable toggles while a canonical delivery confirmation is pending', async () => {
@@ -7982,10 +8008,11 @@ describe('assistant cron runtime orchestration', () => {
       succeeded: 0,
     })
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
-    expect(cronMocks.upsertAutomation).toHaveBeenLastCalledWith(
+    expect(cronMocks.archiveAutomationIfOccurrenceCurrent).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        automationId: canonicalJob.jobId,
-        status: 'archived',
+        lookup: canonicalJob.jobId,
+        expectedUpdatedAt: canonicalJob.updatedAt,
+        occurrenceAt: canonicalJob.schedule.kind === 'at' ? canonicalJob.schedule.at : null,
       }),
     )
     await expect(listAssistantCronJobs(vaultRoot)).resolves.toEqual([])
@@ -9863,9 +9890,10 @@ describe('assistant cron runtime orchestration', () => {
       scheduledLogId: 'slog_01JX8VCQY2M5ZBV64ZP4N1DRBC',
       vaultRoot,
     }))
-    expect(cronMocks.setScheduledLogStatus).toHaveBeenCalledWith({
+    expect(cronMocks.archiveScheduledLogIfOccurrenceCurrent).toHaveBeenCalledWith({
       scheduledLogId: 'slog_01JX8VCQY2M5ZBV64ZP4N1DRBC',
-      status: 'archived',
+      expectedUpdatedAt: expect.any(String),
+      occurrenceAt: '2026-04-08T09:00:00.000Z',
       vaultRoot,
     })
     await expect(
@@ -10118,6 +10146,7 @@ describe('assistant cron runtime orchestration', () => {
       }))
       expect(scheduledEventWriteAttempted).toBe(false)
       expect(cronMocks.setScheduledLogStatus).not.toHaveBeenCalled()
+      expect(cronMocks.archiveScheduledLogIfOccurrenceCurrent).not.toHaveBeenCalled()
       await expect(
         listAssistantCronRuns({
           job: scheduledLogId,
@@ -10590,6 +10619,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(deliveryAttempted).toBe(false)
     expect(findCanonicalAutomation(vaultRoot, claimed.job.jobId)?.status).toBe('paused')
     expect(cronMocks.upsertAutomation).not.toHaveBeenCalled()
+    expect(cronMocks.archiveAutomationIfOccurrenceCurrent).not.toHaveBeenCalled()
   })
 
   it('does not deliver or overwrite an automation edited after its occurrence was claimed', async () => {
@@ -10654,6 +10684,7 @@ describe('assistant cron runtime orchestration', () => {
       updatedAt: '2026-04-08T10:20:01.000Z',
     })
     expect(cronMocks.upsertAutomation).not.toHaveBeenCalled()
+    expect(cronMocks.archiveAutomationIfOccurrenceCurrent).not.toHaveBeenCalled()
   })
 
   it('does not deliver and clears runtime state when an automation is removed after claim', async () => {
@@ -10714,6 +10745,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(deliveryAttempted).toBe(false)
     expect(findCanonicalAutomation(vaultRoot, claimed.job.jobId)).toBeUndefined()
     expect(cronMocks.upsertAutomation).not.toHaveBeenCalled()
+    expect(cronMocks.archiveAutomationIfOccurrenceCurrent).not.toHaveBeenCalled()
     const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
     expect(runtimeStore.jobs.some((record) => record.jobId === claimed.job.jobId))
       .toBe(false)
@@ -14876,7 +14908,7 @@ describe('cron delivery reconciliation telemetry', () => {
             ? vi.spyOn(assistantCronRuntimeState, 'writeAssistantCronCanonicalRuntimeStore')
             : null
       if (spy) spy.mockRejectedValueOnce(failure)
-      else cronMocks.upsertAutomation.mockRejectedValueOnce(failure)
+      else cronMocks.archiveAutomationIfOccurrenceCurrent.mockRejectedValueOnce(failure)
       try {
         await expect(reconcileAssistantCronDeliveryIntent({ intent: terminal, onEvent, vault: vaultRoot }))
           .rejects.toThrow(failure)

@@ -142,17 +142,19 @@ async function completeAttachmentParseJobAttempt(
 ): Promise<RunAttachmentParseJobResult | typeof STALE_PARSE_ATTEMPT | null> {
   let publishedAttemptDirectoryPath: string | null = null;
   let keepPublishedAttempt = false;
+  const requeueAttempt = () => input.runtime.requeueAttachmentParseJobs({
+    attachmentId: job.attachmentId,
+    captureId: job.captureId,
+    exactAttempt: { attempt: job.attempts, jobId: job.jobId },
+    state: "running",
+  });
 
   try {
     const prepared = await preparation;
     if (prepared.status === "failed") throw prepared.error;
     const { parsed, transcriptOnly } = prepared;
     if (input.signal?.aborted) {
-      input.runtime.requeueAttachmentParseJobs({
-        attachmentId: job.attachmentId,
-        captureId: job.captureId,
-        state: "running",
-      });
+      requeueAttempt();
       return null;
     }
     const published = await writeParserResult({
@@ -162,11 +164,7 @@ async function completeAttachmentParseJobAttempt(
     });
     publishedAttemptDirectoryPath = published.attemptDirectoryPath;
     if (input.signal?.aborted) {
-      input.runtime.requeueAttachmentParseJobs({
-        attachmentId: job.attachmentId,
-        captureId: job.captureId,
-        state: "running",
-      });
+      requeueAttempt();
       return null;
     }
     const completedJob = input.runtime.completeAttachmentParseJob({
@@ -190,11 +188,7 @@ async function completeAttachmentParseJobAttempt(
     };
   } catch (error) {
     if (input.signal?.aborted) {
-      input.runtime.requeueAttachmentParseJobs({
-        attachmentId: job.attachmentId,
-        captureId: job.captureId,
-        state: "running",
-      });
+      requeueAttempt();
       return null;
     }
 

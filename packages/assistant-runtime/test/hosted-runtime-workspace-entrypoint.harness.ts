@@ -496,7 +496,6 @@ import {
 } from "../src/hosted-runtime/checkpoint-bridge.ts";
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
-  hostedCanonicalWriteReceiptRecoveryStatusFields,
   readHostedCanonicalWriteReceiptRecoveryWake,
 } from "../src/hosted-runtime/canonical-write-receipt-log.ts";
 import type {
@@ -560,7 +559,6 @@ import {
   type HostedRuntimeDeviceSyncPort,
   type HostedRuntimeMailboxPort,
   type HostedRuntimePlatform,
-  type RuntimeLivenessPort,
   type HostedRuntimeWorkspacePort,
   type HostedRuntimeWorkspaceSnapshotPort,
 } from "../src/hosted-runtime-contracts.ts";
@@ -593,13 +591,6 @@ const HOSTED_UNSTABLE_PROCESS_ENV_KEYS = [
 const execFileAsync = promisify(execFile);
 
 process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS ??= "0";
-
-function continueRuntimeLiveness(): Awaited<ReturnType<RuntimeLivenessPort["touch"]>> {
-  return {
-    instruction: { kind: "continue" },
-    ok: true,
-  };
-}
 
 async function readCheckpointConversationWatermark(
   input: HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
@@ -950,9 +941,6 @@ function createPlatform(input: {
   issueExportPort?: HostedRuntimePlatform["issueExportPort"] | null;
   mailboxPort: HostedRuntimeMailboxPort | null;
   phoneCalls?: HostedRuntimePlatform["phoneCalls"] | null;
-  runtimeLivenessIntervalMs?: number | null;
-  runtimeLivenessPort?: RuntimeLivenessPort | null;
-  runtimeLivenessRequired?: boolean | null;
   snapshotFixtureVaultRelativePath?: "vault";
   stageSamples?: StageTimingSample[];
   vaultSharePort?: HostedRuntimePlatform["vaultSharePort"] | null;
@@ -1072,13 +1060,6 @@ function createPlatform(input: {
     ...(input.issueExportPort ? { issueExportPort: input.issueExportPort } : {}),
     ...(input.mailboxPort ? { mailboxPort: input.mailboxPort } : {}),
     ...(input.phoneCalls ? { phoneCalls: input.phoneCalls } : {}),
-    ...(input.runtimeLivenessIntervalMs
-      ? { runtimeLivenessIntervalMs: input.runtimeLivenessIntervalMs }
-      : {}),
-    ...(input.runtimeLivenessPort ? { runtimeLivenessPort: input.runtimeLivenessPort } : {}),
-    ...(input.runtimeLivenessRequired !== undefined
-      ? { runtimeLivenessRequired: input.runtimeLivenessRequired }
-      : {}),
     ...(input.vaultSharePort ? { vaultSharePort: input.vaultSharePort } : {}),
     ...(input.workspacePort ? { workspacePort: input.workspacePort } : {}),
     workspaceSnapshotPort: input.workspaceSnapshotPort === null ? null : input.workspaceSnapshotPort ?? {
@@ -1407,6 +1388,7 @@ function createCanonicalReceiptLogArtifacts(
   entryCount: number,
   options: {
     activeEntryCount?: number;
+    payload?: { bytes: Buffer; targetRelativePath: string };
   } = {},
 ): {
   artifactBytesByHash: Map<string, Uint8Array>;
@@ -1414,8 +1396,18 @@ function createCanonicalReceiptLogArtifacts(
   receiptLogBytes: Buffer;
   receiptLogHash: string;
 } {
+  const payloadHash = options.payload ? sha256Hex(options.payload.bytes) : null;
   const receiptBytes = Buffer.from(`${JSON.stringify({
-    actions: [],
+    actions: options.payload && payloadHash
+      ? [{
+          byteLength: options.payload.bytes.byteLength,
+          contentRef: { byteSize: options.payload.bytes.byteLength, sha256: payloadHash },
+          effect: "create",
+          kind: "text_upsert",
+          sha256: payloadHash,
+          targetRelativePath: options.payload.targetRelativePath,
+        }]
+      : [],
     committedAt: TEST_NOW,
     createdAt: TEST_NOW,
     occurredAt: TEST_NOW,
@@ -1450,6 +1442,9 @@ function createCanonicalReceiptLogArtifacts(
     artifactBytesByHash: new Map<string, Uint8Array>([
       [receiptHash, receiptBytes],
       [receiptLogHash, receiptLogBytes],
+      ...(options.payload && payloadHash
+        ? [[payloadHash, options.payload.bytes] as const]
+        : []),
     ]),
     receiptHash,
     receiptLogBytes,
@@ -1457,11 +1452,12 @@ function createCanonicalReceiptLogArtifacts(
   };
 }
 
-function createSaturatedCanonicalReceiptLogArtifacts(): ReturnType<
-  typeof createCanonicalReceiptLogArtifacts
-> {
+function createSaturatedCanonicalReceiptLogArtifacts(
+  payload?: { bytes: Buffer; targetRelativePath: string },
+): ReturnType<typeof createCanonicalReceiptLogArtifacts> {
   return createCanonicalReceiptLogArtifacts(
     HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
+    payload ? { payload } : {},
   );
 }
 
@@ -2640,7 +2636,6 @@ export {
   TEST_NOW,
   TEST_USER_ID,
   assertPrivateDirectoryMode,
-  continueRuntimeLiveness,
   createAssistantAskRequestedWake,
   createAssistantProviderUsageDraft,
   createAssistantUsageRecord,

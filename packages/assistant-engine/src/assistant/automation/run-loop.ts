@@ -23,10 +23,8 @@ import type { AssistantTurnEnvironment } from '../service-contracts.js'
 import { buildAssistantOutboxSummary } from '../outbox/summary.js'
 import { maybeRunAssistantRuntimeMaintenance } from '../runtime-budgets.js'
 
-import {
-  readAssistantAutomationState,
-  saveAssistantAutomationState,
-} from '../store.js'
+import { readAssistantAutomationState } from '../store.js'
+import { advanceAssistantAutoReplyCursorLocal } from '../auto-reply-channels.js'
 import { sameAssistantAutoReplyState } from '../automation-state.js'
 import {
   createStoreBackedAssistantInputSource,
@@ -188,12 +186,8 @@ export async function runAssistantAutomationPass(
     inputSource,
     vault: input.vault,
     vaultServices,
-    async onStateProgress(next) {
-      state = await saveAssistantAutomationState(input.vault, {
-        ...state,
-        autoReply: [...next.autoReply],
-        updatedAt: new Date().toISOString(),
-      })
+    async onCursorProgress(proposal) {
+      state = await advanceAssistantAutoReplyCursorLocal({ proposal, vault: input.vault })
     },
   })
   passTiming.scanElapsedMs = Date.now() - scanStartedAt

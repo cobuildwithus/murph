@@ -215,7 +215,7 @@ export async function signalHostedGroupJoinConfirmationRuntimeBestEffort(input: 
       signal: input.signal,
     });
   } catch {
-    // The encrypted mailbox item is durable; a later runtime wake imports it.
+    // The handoff sweep retries join confirmations from the last 24 hours.
   }
 }
 

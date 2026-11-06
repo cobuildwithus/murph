@@ -115,10 +115,16 @@ export class RunnerInvocationReceiptStore {
   }
 
   finishUsageSettlement(identity: RunnerInvocationIdentity, reportId: string, allowed: boolean): void {
-    // Only an explicit successful allowance response removes this request's
-    // negative latch. Lost responses/eviction leave durable pending evidence.
+    // Success clears only pending evidence; denial survives success replays.
+    // Lost responses/eviction leave durable pending evidence.
     if (allowed) this.sql.exec("DELETE FROM runner_usage_settlement WHERE report_id = ? AND attempt_id = ? AND generation = ? AND state = 'pending'", reportId, identity.attemptId, identity.generation);
-    else this.sql.exec("UPDATE runner_usage_settlement SET state = 'denied' WHERE report_id = ? AND attempt_id = ? AND generation = ?", reportId, identity.attemptId, identity.generation);
+    else {
+      // register clears all rows on identity change, so conflicts belong to this receipt.
+      this.sql.exec(`INSERT INTO runner_usage_settlement (report_id, attempt_id, generation, state)
+        SELECT ?, attempt_id, generation, 'denied' FROM runner_invocation_receipt
+        WHERE singleton = 1 AND attempt_id = ? AND generation = ?
+        ON CONFLICT(report_id) DO UPDATE SET state = 'denied'`, reportId, identity.attemptId, identity.generation);
+    }
   }
 
   usageSettlementAllowsProviders(identity: RunnerInvocationIdentity): boolean {

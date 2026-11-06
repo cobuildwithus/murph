@@ -2,6 +2,7 @@ import { mkdir, rm, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { AssistantAutoReplyCursorProposal } from '../src/assistant/auto-reply-channels.ts'
 import type {
   AssistantInputCursor,
   AssistantAutomationState,
@@ -85,7 +86,7 @@ const runLoopMocks = vi.hoisted(() => ({
   redactAssistantDisplayPath: vi.fn(),
 
   resolveAssistantStatePaths: vi.fn(),
-  saveAssistantAutomationState: vi.fn(),
+  advanceAssistantAutoReplyCursorLocal: vi.fn(),
   scanAssistantAutomationOnce: vi.fn(),
   warnAssistantBestEffortFailure: vi.fn(),
 }))
@@ -232,13 +233,16 @@ vi.mock('../src/assistant/shared.ts', async () => {
   }
 })
 
+vi.mock('../src/assistant/auto-reply-channels.ts', () => ({
+  advanceAssistantAutoReplyCursorLocal: runLoopMocks.advanceAssistantAutoReplyCursorLocal,
+}))
+
 vi.mock('../src/assistant/store.ts', () => ({
   listAssistantTranscriptEntries: replyMocks.listAssistantTranscriptEntries,
   readAssistantAutomationState: runLoopMocks.readAssistantAutomationState,
   redactAssistantDisplayPath: runLoopMocks.redactAssistantDisplayPath,
   lookupAssistantSession: replyMocks.lookupAssistantSession,
   resolveAssistantStatePaths: runLoopMocks.resolveAssistantStatePaths,
-  saveAssistantAutomationState: runLoopMocks.saveAssistantAutomationState,
 }))
 
 vi.mock('../src/assistant/channel-adapters.ts', () => ({
@@ -1126,9 +1130,12 @@ beforeEach(() => {
   runLoopMocks.resolveAssistantStatePaths.mockReset().mockReturnValue({
     lockPath: '/tmp/assistant.lock',
   })
-  runLoopMocks.saveAssistantAutomationState
+  runLoopMocks.advanceAssistantAutoReplyCursorLocal
     .mockReset()
-    .mockImplementation(async (_vault: string, next: AssistantAutomationState) => next)
+    .mockImplementation(async ({ proposal }: { proposal: AssistantAutoReplyCursorProposal }) => ({
+      ...createAutomationState(),
+      autoReply: [{ channel: proposal.channel, ...proposal.observed, eligibleAfter: proposal.cursor }],
+    }))
   runLoopMocks.scanAssistantAutomationOnce.mockReset().mockResolvedValue({
     currentTurnDeliveryIntentIds: [],
     routing: {
@@ -1500,7 +1507,7 @@ describe('assistant automation scanner', () => {
       '../src/assistant/automation/scanner.ts',
     )
 
-    const stateUpdates: AssistantAutomationState[] = []
+    const stateUpdates: AssistantAutoReplyCursorProposal[] = []
     const events: Array<Record<string, unknown>> = []
     const result = await scanner.scanAssistantAutomationOnce({
       inboxServices,
@@ -1508,11 +1515,8 @@ describe('assistant automation scanner', () => {
       onEvent: (event) => {
         events.push(toSnapshotRecord(event))
       },
-      onStateProgress: async (next) => {
-        stateUpdates.push({
-          ...createAutomationState(),
-          autoReply: [...next.autoReply],
-        })
+      onCursorProgress: async (proposal) => {
+        stateUpdates.push(proposal)
       },
       state: createAutomationState({
         autoReplyChannels: ['telegram'],
@@ -1527,10 +1531,7 @@ describe('assistant automation scanner', () => {
       replied: 0,
       skipped: 1,
     })
-    expect(readAutoReplyCursor(
-      stateUpdates[0] ?? createAutomationState(),
-      'telegram',
-    )).toEqual(assistantInputCandidateFromInboxCapture(latest).event.cursor)
+    expect(stateUpdates[0]?.cursor).toEqual(assistantInputCandidateFromInboxCapture(latest).event.cursor)
     expect(events).not.toContainEqual(
       expect.objectContaining({
         type: 'reply.scan.primed',
@@ -1785,7 +1786,7 @@ describe('assistant automation scanner', () => {
       skipped: 0,
       stopScanning: false,
     })
-    const stateUpdates: AssistantAutomationState[] = []
+    const stateUpdates: AssistantAutoReplyCursorProposal[] = []
     const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
       '../src/assistant/automation/scanner.ts',
     )
@@ -1795,11 +1796,8 @@ describe('assistant automation scanner', () => {
       inboxServices: createInboxServices(),
       inputSource: createAssistantInputSourceForCaptures([first, second]),
       onProviderEvent,
-      onStateProgress: async (next) => {
-        stateUpdates.push({
-          ...createAutomationState(),
-          autoReply: [...next.autoReply],
-        })
+      onCursorProgress: async (proposal) => {
+        stateUpdates.push(proposal)
       },
       state: createAutomationState({
         autoReplyChannels: ['telegram'],
@@ -1807,10 +1805,7 @@ describe('assistant automation scanner', () => {
       vault: '/tmp/assistant-automation-vault',
     })
 
-    const cursor = readAutoReplyCursor(
-      stateUpdates[stateUpdates.length - 1] ?? createAutomationState(),
-      'telegram',
-    )
+    const cursor = stateUpdates.at(-1)?.cursor
     expect(cursor).toEqual(createReplyGroupItem(second).inputCandidate.event.cursor)
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
       expect.objectContaining({ beforeProviderAcceptedInputs, onProviderEvent }),
@@ -1823,15 +1818,12 @@ describe('assistant automation scanner', () => {
       '../src/assistant/automation/scanner.ts',
     )
 
-    const stateUpdates: AssistantAutomationState[] = []
+    const stateUpdates: AssistantAutoReplyCursorProposal[] = []
     await scanner.scanAssistantAutomationOnce({
       inboxServices,
       inputSource: createAssistantInputSourceForCaptures([]),
-      onStateProgress: async (next) => {
-        stateUpdates.push({
-          ...createAutomationState(),
-          autoReply: [...next.autoReply],
-        })
+      onCursorProgress: async (proposal) => {
+        stateUpdates.push(proposal)
       },
       state: createAutomationState({
         autoReplyChannels: ['telegram'],
@@ -2479,7 +2471,7 @@ describe('assistant automation scanner', () => {
     const scanner = await vi.importActual<typeof import('../src/assistant/automation/scanner.ts')>(
       '../src/assistant/automation/scanner.ts',
     )
-    const stateUpdates: AssistantAutomationState[] = []
+    const stateUpdates: AssistantAutoReplyCursorProposal[] = []
 
     const result = await scanner.scanAssistantAutomationOnce({
       applyCanonicalWrites: false,
@@ -2488,11 +2480,8 @@ describe('assistant automation scanner', () => {
       state: createAutomationState({
         autoReplyChannels: ['telegram'],
       }),
-      onStateProgress: async (next) => {
-        stateUpdates.push({
-          ...createAutomationState(),
-          autoReply: [...next.autoReply],
-        })
+      onCursorProgress: async (proposal) => {
+        stateUpdates.push(proposal)
       },
       vault: '/tmp/assistant-automation-vault',
     })
@@ -2522,15 +2511,12 @@ describe('assistant automation scanner', () => {
       '../src/assistant/automation/scanner.ts',
     )
 
-    const stateUpdates: AssistantAutomationState[] = []
+    const stateUpdates: AssistantAutoReplyCursorProposal[] = []
     const result = await scanner.scanAssistantAutomationOnce({
       inboxServices,
       inputSource: createAssistantInputSourceForCaptures([first, second]),
-      onStateProgress: async (next) => {
-        stateUpdates.push({
-          ...createAutomationState(),
-          autoReply: [...next.autoReply],
-        })
+      onCursorProgress: async (proposal) => {
+        stateUpdates.push(proposal)
       },
       state: createAutomationState(),
       vault: '/tmp/assistant-automation-vault',
@@ -3390,10 +3376,12 @@ describe('assistant auto-reply runtime', () => {
       inboxServices: createInboxServices(),
       inputSource,
       maxPerScan,
-      onStateProgress(next) {
+      onCursorProgress(proposal) {
         state = {
           ...state,
-          autoReply: next.autoReply,
+          autoReply: state.autoReply.map((entry) => entry.channel === proposal.channel
+            ? { ...entry, eligibleAfter: proposal.cursor }
+            : entry),
         }
       },
       state,

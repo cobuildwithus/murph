@@ -24,7 +24,7 @@ import {
   readHostedLinqExplicitGroupDisplayName,
   startHostedLinqChatTypingIndicator,
   stopHostedLinqChatTypingIndicator,
-  type HostedLinqChatHandleSummary,
+  type HostedLinqChatRosterObservation,
   type HostedLinqChatSummary,
 } from "./linq-client";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
@@ -585,7 +585,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 pendingGroupParticipantMemberIds:
                   planningResolution.pendingGroupParticipantMemberIds ?? null,
                 pendingGroupRosterUnavailable:
-                  planningResolution.pendingGroupRosterUnavailable ?? false,
+                  (planningResolution.pendingGroupRosterUnavailable ?? false)
+                  || (planningResolution.requestLocalGroupRoster?.observation.handlesComplete === false
+                    && !preparation.preparedPendingGroupSetup?.selected),
                 ...("directMailboxPreparationFailure" in preparation
                   ? {
                       directMailboxPreparationFailure:
@@ -1445,7 +1447,7 @@ interface HostedLinqPlanningEventResolution {
   pendingGroupRosterUnavailable?: boolean;
   requestLocalGroupRoster?: {
     chatId: string;
-    handles: readonly HostedLinqChatHandleSummary[];
+    observation: HostedLinqChatRosterObservation;
   };
   /** The route the resolver already read, reused so warming costs no query. */
   threadRoute: HostedThreadRouteSnapshot | null;
@@ -1564,12 +1566,12 @@ async function resolveHostedLinqPlanningEvent(input: {
     ...(pendingGroupRoster?.unavailable === true
       ? { pendingGroupRosterUnavailable: true }
       : {}),
-    ...(pendingGroupRoster?.handles == null
+    ...(pendingGroupRoster?.observation == null
       ? {}
       : {
           requestLocalGroupRoster: {
             chatId: messageEvent.data.chat_id,
-            handles: pendingGroupRoster.handles,
+            observation: pendingGroupRoster.observation,
           },
         }),
     threadRoute,
@@ -1582,7 +1584,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
   prisma: PrismaClient;
   signal?: AbortSignal;
 }): Promise<{
-  handles: readonly HostedLinqChatHandleSummary[] | null;
+  observation: HostedLinqChatRosterObservation | null;
   initialGroupDisplayName: string | null;
   participantMemberIds: string[] | null;
   unavailable: boolean;
@@ -1597,7 +1599,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
     if (summary.isGroup === false) {
       logHostedLinqPendingGroupRoster("provider_not_group");
       return {
-        handles: null,
+        observation: null,
         initialGroupDisplayName: null,
         participantMemberIds: null,
         unavailable: false,
@@ -1609,10 +1611,10 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
     if (handles.length === 0) {
       logHostedLinqPendingGroupRoster("empty_roster");
       return {
-        handles,
+        observation: summary,
         initialGroupDisplayName,
         participantMemberIds: null,
-        unavailable: false,
+        unavailable: true,
       };
     }
     const participantHandles = [...new Set(handles.flatMap((handle) => {
@@ -1630,7 +1632,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
     ) {
       logHostedLinqPendingGroupRoster("oversized_roster");
       return {
-        handles,
+        observation: summary,
         initialGroupDisplayName,
         participantMemberIds: null,
         unavailable: false,
@@ -1646,7 +1648,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
     }))];
     logHostedLinqPendingGroupRoster("resolved");
     return {
-      handles,
+      observation: summary,
       initialGroupDisplayName,
       participantMemberIds: memberIds,
       unavailable: false,
@@ -1657,7 +1659,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
     }
     logHostedLinqPendingGroupRoster("unavailable");
     return {
-      handles: null,
+      observation: null,
       initialGroupDisplayName: null,
       participantMemberIds: null,
       unavailable: true,
@@ -1898,7 +1900,7 @@ async function reconcileHostedLinqGroupRostersAfterCommitBestEffort(input: {
   reconciles: readonly HostedOnboardingLinqGroupRosterReconcile[];
   requestLocalRoster?: {
     chatId: string;
-    handles: readonly HostedLinqChatHandleSummary[];
+    observation: HostedLinqChatRosterObservation;
   };
   scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
 }): Promise<void> {
@@ -1913,7 +1915,7 @@ async function reconcileHostedLinqGroupRostersAfterCommitBestEffort(input: {
           chatId: reconcile.chatId,
           containerMemberId: reconcile.containerMemberId,
           ...(input.requestLocalRoster?.chatId === reconcile.chatId
-            ? { handles: input.requestLocalRoster.handles }
+            ? { observation: input.requestLocalRoster.observation }
             : {}),
           prisma: getPrisma(),
         });

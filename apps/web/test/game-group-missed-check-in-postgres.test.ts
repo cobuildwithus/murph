@@ -1,3 +1,4 @@
+import { linqRoster } from "./support/linq-roster";
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { Prisma } from "@prisma/client";
@@ -13,7 +14,7 @@ import { GameChatAudienceError } from "@/src/lib/game/chat-membership";
 import { readGroupMissedDayDeliveryAuthority, prepareGroupMissedDay, reserveGroupGameMissedDay, isGroupMissedDayBatchCurrentTx } from "@/src/lib/game/group-missed-day";
 import { assertGameProposalDeliveryCurrentTx } from "@/src/lib/game/chat-delivery-authority";
 import { readGameProposalDeliveryPlayers } from "@/src/lib/game/chat-delivery";
-import { acquireHostedMailboxCausalAppendLockTx, readHostedMailboxWakeByDedupeKey } from "@/src/lib/hosted-mailbox/store";
+import { advanceHostedMailboxConsumedSeqByLane, acquireHostedMailboxCausalAppendLockTx, readHostedMailboxWakeByDedupeKey } from "@/src/lib/hosted-mailbox/store";
 import { recordHostedLinqRuntimeProviderDispatchFenceTx } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import { createHostedEmailLookupKey, createHostedExternalThreadIdentityLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
@@ -30,8 +31,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", async original => {
     proof.audienceReads.push(`chat:${input.chatId}`);
     if (proof.chatFailures.has(input.chatId)) throw proof.chatFailures.get(input.chatId);
     if (proof.parsedChats.has(input.chatId)) return actual.getHostedLinqChatSummary(input);
-    return { isGroup: true, handlesComplete: true,
-      handles: [{ handle: "+15555550100", isMe: true, status: "active" }, ...(proof.rooms.get(input.chatId) ?? []).map(handle => ({ handle, isMe: false, status: "active" }))] };
+    return linqRoster({ isGroup: true, handlesComplete: true,
+      handles: [{ handle: "+15555550100", isMe: true, status: "active" }, ...(proof.rooms.get(input.chatId) ?? []).map(handle => ({ handle, isMe: false, status: "active" }))] });
   } };
 });
 vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", async original => { const actual = await original<typeof import("@/src/lib/hosted-routing/assistant-notification-destination")>(); return { ...actual,
@@ -490,19 +491,24 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect((await receipt(eventId)).status).toBe(status);
   });
 
-  it("does not drop an unpublished-status receipt whose mailbox item exists", async () => {
+  it.each([false, true])("keeps an existing pointer and checks authority before signalling; audience changed=%s", async changed => {
     const f = await fixture(), authority = await publish(f.roomId, [await f.addGame()]), eventId = authority.policy.eventId;
     await db.hostedLinqDelivery.update({ where: { id: (await receipt(eventId)).id }, data: { status: "awaiting_generation", retryAfterAt: justLate } });
     proof.audienceReads.length = 0; proof.signal.mockClear();
+    if (changed) proof.rooms.set(f.roomId, f.people.slice(0, 2).map(person => person.email));
     expect(await turn(eventId, justLate)).toMatchObject({ attempted: 1, queued: 1 });
     expect(await receipt(eventId)).toMatchObject({ status: "awaiting_generation", skippedAt: null });
     expect(await db.hostedMailboxItem.count({ where: { userId: f.roomId } })).toBe(1);
-    expect(proof.audienceReads).toEqual([]);
+    expect(proof.audienceReads).toEqual([`route:${f.roomId}`, `chat:${f.roomId}`]);
+    expect(proof.signal).toHaveBeenCalledTimes(changed ? 0 : 1);
   });
 
   it.each([["unconsumed", null], ["consumed", now]] as const)("takes a published %s check-in out of the sweep past its deadline without dropping it", async (_state, consumedAt) => {
     const f = await fixture(), authority = await publish(f.roomId, [await f.addGame()]), eventId = authority.policy.eventId;
-    await db.hostedMailboxItem.updateMany({ where: { userId: f.roomId }, data: { consumedAt } });
+    if (consumedAt) {
+      const item = await db.hostedMailboxItem.findFirstOrThrow({ where: { userId: f.roomId, lane: "system" } });
+      await advanceHostedMailboxConsumedSeqByLane({ userId: f.roomId, prisma: db, lanes: [{ lane: "system", consumedSeq: item.laneSeq }] });
+    }
     proof.rooms.set(f.roomId, [f.people[0]!.email]); proof.audienceReads.length = 0; proof.signal.mockClear();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(await turn(eventId, justLate)).toMatchObject({ attempted: 1, queued: 0 });

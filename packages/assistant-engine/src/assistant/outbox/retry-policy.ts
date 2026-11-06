@@ -47,6 +47,19 @@ const FRESH_INTENT_RETRY_FORBIDDEN_ERROR_CODES = new Set([
   'ASSISTANT_DELIVERY_RETRY_EXHAUSTED',
 ])
 
+export function errorImpliesAssistantDeliveryMayHaveSucceeded(error: unknown): boolean {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'deliveryMayHaveSucceeded' in error &&
+    typeof (error as { deliveryMayHaveSucceeded?: unknown }).deliveryMayHaveSucceeded === 'boolean'
+  ) {
+    return (error as { deliveryMayHaveSucceeded: boolean }).deliveryMayHaveSucceeded
+  }
+
+  return normalizeAssistantDeliveryError(error).code === 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING'
+}
+
 export function shouldDispatchAssistantOutboxIntent(
   intent: AssistantOutboxIntent,
   now: Date,

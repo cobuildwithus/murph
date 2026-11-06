@@ -10,22 +10,9 @@ import type {
   FailAttachmentParseJobInput,
   RequeueAttachmentParseJobsInput,
 } from "../../contracts/derived.ts";
-import type { StoredAttachment } from "../../contracts/capture.ts";
-import { generatePrefixedId } from "../../shared.ts";
 import { decodeAttachmentParseJobRow, decodeAttachmentParseJobRows } from "./rows.ts";
 
-const ATTACHMENT_PARSE_PIPELINE = "attachment_text" as const;
-const PARSEABLE_ATTACHMENT_KINDS = new Set<StoredAttachment["kind"]>([
-  "audio",
-  "video",
-]);
-
 export interface AttachmentParseJobStore {
-  enqueueAttachmentParseJobs(input: {
-    captureId: string;
-    attachments: StoredAttachment[];
-    createdAt: string;
-  }): void;
   listAttachmentParseJobs(filters?: AttachmentParseJobFilters): AttachmentParseJobRecord[];
   claimNextAttachmentParseJob(filters?: AttachmentParseJobClaimFilters): AttachmentParseJobRecord | null;
   requeueAttachmentParseJobs(filters?: RequeueAttachmentParseJobsInput): number;
@@ -38,58 +25,8 @@ export function createAttachmentParseJobStore(input: {
   refreshCaptureSearchIndex(captureId: string): void;
 }): AttachmentParseJobStore {
   const { database, refreshCaptureSearchIndex } = input;
-  const insertAttachmentParseJobStatement = database.prepare(
-    `
-      insert into attachment_parse_job (
-        job_id,
-        capture_id,
-        attachment_id,
-        pipeline,
-        state,
-        attempts,
-        created_at
-      ) values (?, ?, ?, ?, ?, ?, ?)
-      on conflict (attachment_id, pipeline) do nothing
-    `,
-  );
 
   return {
-    enqueueAttachmentParseJobs({ captureId, attachments, createdAt }) {
-      if (attachments.length === 0) {
-        return;
-      }
-
-      withTransaction(database, () => {
-        for (const attachment of attachments) {
-          if (!shouldEnqueueParseJob(attachment)) {
-            continue;
-          }
-
-          const insertResult = insertAttachmentParseJobStatement.run(
-            generatePrefixedId("job"),
-            captureId,
-            attachment.attachmentId,
-            ATTACHMENT_PARSE_PIPELINE,
-            "pending",
-            0,
-            createdAt,
-          );
-
-          if (insertResult.changes > 0) {
-            database
-              .prepare(
-                `
-                  update capture_attachment
-                  set parser_state = 'pending',
-                      parse_updated_at = ?
-                  where attachment_id = ?
-                `,
-              )
-              .run(createdAt, attachment.attachmentId);
-          }
-        }
-      });
-    },
     listAttachmentParseJobs(filters = {}) {
       const normalizedCaptureId = normalizeNullable(filters.captureId);
       const normalizedAttachmentId = normalizeNullable(filters.attachmentId);
@@ -134,6 +71,7 @@ export function createAttachmentParseJobStore(input: {
                   select attachment_id
                   from capture_attachment
                   where kind in ('audio', 'video')
+                    and coalesce(parser_state, '') <> 'succeeded'
                 )
                 and (? is null or capture_id = ?)
                 and (? is null or attachment_id = ?)
@@ -203,6 +141,17 @@ export function createAttachmentParseJobStore(input: {
                 and (? is null or attachment_id = ?)
                 and (? is null or state = ?)
                 and state in ('failed', 'running', 'succeeded')
+                and (
+                  ? is null
+                  or (
+                    job_id = ?
+                    and attempts = ?
+                    and state = 'running'
+                    and attachment_id in (
+                      select attachment_id from capture_attachment where parser_state = 'running'
+                    )
+                  )
+                )
                 and attachment_id in (
                   select attachment_id
                   from capture_attachment
@@ -217,6 +166,9 @@ export function createAttachmentParseJobStore(input: {
             normalizedAttachmentId,
             normalizedState,
             normalizedState,
+            filters.exactAttempt?.jobId ?? null,
+            filters.exactAttempt?.jobId ?? null,
+            filters.exactAttempt?.attempt ?? null,
           ) as Array<{ attachment_id?: string; capture_id?: string }>;
 
         const attachmentIds = rows
@@ -387,14 +339,6 @@ export function createAttachmentParseJobStore(input: {
       });
     },
   };
-}
-
-function shouldEnqueueParseJob(attachment: StoredAttachment): boolean {
-  return (
-    PARSEABLE_ATTACHMENT_KINDS.has(attachment.kind) &&
-    typeof attachment.storedPath === "string" &&
-    attachment.storedPath.length > 0
-  );
 }
 
 function readAttachmentParseJob(database: DatabaseSync, jobId: string): AttachmentParseJobRecord {

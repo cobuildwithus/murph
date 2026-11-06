@@ -12,7 +12,7 @@ vi.mock("../src/lib/hosted-crypto/domain-root-unwrap-cache", () => ({ runWithHos
 vi.mock("../src/lib/hosted-crypto/secure-box", () => ({ sealHostedUserSecureBoxString: async ({ value }: { value: string }) => value, openHostedUserSecureBoxString: async ({ value }: { value: string }) => value }));
 vi.mock("../src/lib/hosted-execution/runtime-owner", () => ({ requireHostedRuntimeCallbackTx: m.runtime }));
 vi.mock("../src/lib/hosted-mailbox/runtime-access", () => ({ requireHostedRuntimeActiveAccessForUpdateTx: m.access }));
-vi.mock("../src/lib/hosted-mailbox/store", () => ({ readHostedMailboxWakeByDedupeKey: m.wake, appendHostedMailboxEnvelopeTx: m.append, readHostedMailboxItemByDedupeKey: m.mailbox, prepareHostedMailboxEnvelopeAppend: m.prepareMailbox, appendPreparedHostedMailboxEnvelopeTx: m.enqueue }));
+vi.mock("../src/lib/hosted-mailbox/store", () => ({ isHostedMailboxItemConsumed: async () => false, readHostedMailboxConsumedSeqByLane: async () => [{ lane: "system", consumedSeq: "0" }], readHostedMailboxWakeByDedupeKey: m.wake, appendHostedMailboxEnvelopeTx: m.append, readHostedMailboxItemByDedupeKey: m.mailbox, prepareHostedMailboxEnvelopeAppend: m.prepareMailbox, appendPreparedHostedMailboxEnvelopeTx: m.enqueue }));
 vi.mock("../src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: m.signal }));
 vi.mock("../src/lib/hosted-onboarding/hosted-member-identity-store", () => ({ readHostedMemberIdentity: m.identities }));
 vi.mock("../src/lib/hosted-onboarding/linq-client", async (importOriginal) => ({

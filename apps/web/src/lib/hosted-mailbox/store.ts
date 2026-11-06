@@ -1592,6 +1592,19 @@ export async function readHostedMailboxConsumedSeqByLane(input: {
   return result;
 }
 
+/** System checkpoints advance the lane floor without stamping the item. */
+export async function isHostedMailboxItemConsumed(input: {
+  item: Pick<HostedMailboxItemRecord, "lane" | "laneSeq" | "userId">;
+  prisma?: HostedMailboxStoreClient;
+}): Promise<boolean> {
+  const [progress] = await readHostedMailboxConsumedSeqByLane({
+    lanes: [input.item.lane],
+    prisma: input.prisma,
+    userId: input.item.userId,
+  });
+  return BigInt(input.item.laneSeq) <= BigInt(progress.consumedSeq);
+}
+
 export async function advanceHostedMailboxConsumedSeqByLane(input: {
   lanes: readonly { consumedSeq: bigint | number | string; lane: HostedMailboxLane | string }[];
   prisma?: HostedMailboxStoreClient;
@@ -2650,6 +2663,30 @@ async function acquireHostedMailboxDedupeAppendLockTx(input: {
   await input.tx.$executeRaw`
     SELECT pg_advisory_xact_lock(hashtext(${input.userId}), hashtext(${input.dedupeKey}))
   `;
+}
+
+/**
+ * Serializes direct Telegram admission across mutable member bindings, then
+ * reads retained owners by metadata only. `(user_id, dedupe_key)` is unique, so
+ * two rows prove two owners. The literal LIKE selects the partial index.
+ */
+export async function lockAndReadHostedTelegramUpdateOwnerIdsTx(input: {
+  eventId: string;
+  tx: HostedMailboxMutationTx;
+}): Promise<string[]> {
+  await input.tx.$executeRaw`
+    SELECT pg_advisory_xact_lock(
+      hashtext('mailbox-telegram-update'),
+      hashtext(${input.eventId})
+    )
+  `;
+  const rows = await input.tx.$queryRaw<Array<{ user_id: string }>>`
+    SELECT "user_id" FROM "hosted_mailbox_item"
+    WHERE "dedupe_key" = ${input.eventId}
+      AND "dedupe_key" LIKE 'telegram:update:%'
+    LIMIT 2
+  `;
+  return rows.map((row) => row.user_id);
 }
 
 export async function acquireHostedMailboxSourceMessageLocksTx(input: {

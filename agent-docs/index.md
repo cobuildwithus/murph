@@ -1,4 +1,5 @@
 Game report recovery from the stored receipt and its frozen alert inputs are owned by [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md).
+Recap moderation witnesses, transactional takedown clearing and read-time hiding of affected stored stories are owned by [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md#weekly-game). Existing ciphertext cleanup is held for a separate approved PR. Local verification is recorded in [the recap moderation execution plan](exec-plans/completed/2026-11-06-recap-moderation-witness.md).
 
 Native game write outcomes, the empty-slot post guard and the Messages member-action session recheck are owned by [Weekly Game](product-specs/weekly-game.md) and [Security](SECURITY.md).
 
@@ -8,6 +9,9 @@ Shared demographic memory, generation-18 projection and native action contracts 
 The [backend execution record](exec-plans/completed/2026-11-04-vault-demographics-backend.md) contains local verification evidence for the parent-owned integration.
 
 Automatic removal and merging of inspected meal stubs is owned by [the iOS Meals contract](product-specs/ios-meals.md#removal) and the `automatic-meal-capture` skill.
+
+Redelivery identity for direct Telegram messages and group offer gestures is owned by [the invariants](../docs/contracts/00-invariants.md) and [Reliability](RELIABILITY.md).
+The [execution record](exec-plans/completed/2026-11-06-ingress-identity-replay.md) holds the design decisions.
 
 Pair health board API and scoped sharing are owned by [the iOS game contract](product-specs/ios-game.md#pair-health-board), [game rules](product-specs/weekly-game.md#pair-board-current-run), and [group sharing](product-specs/hosted-group-join-confirmation.md#app-board-sharing).
 Reported VO2 persistence, the additive no-readings reason and local verification
@@ -1872,6 +1876,21 @@ Retired feature residue cleanup is tracked in [the removal record](exec-plans/co
 
 Changelog deletion evidence is owned by `../apps/web/changelog/README.md`; [verification record](exec-plans/completed/2026-11-05-changelog-deleted-entry-proof.md).
 
+Scheduling writer ownership proof is tracked in
+[`scheduling writers`](exec-plans/completed/2026-11-06-sm-pr14-scheduling-writers.md).
+The durable rule remains in `docs/contracts/00-invariants.md`.
+
 Canonical publication uncertainty and operational receipt replay proof are tracked in
 [`canonical evidence preservation`](exec-plans/completed/2026-11-06-preserve-canonical-evidence.md).
+The durable contract remains in `references/hosted-runtime-protocol.md`.
+
+Hosted delivery uncertainty, accepted confirmation, approval consume retries, and
+accounting deadline proofs are recorded in the [delivery settlement execution record](exec-plans/completed/2026-11-06-delivery-settlement.md).
+
+Single-checkpoint receipt recovery and the accepted workspace owner are tracked in
+[`single checkpoint receipt recovery`](exec-plans/completed/2026-11-06-single-checkpoint-receipt-recovery.md).
+The durable contract remains in `references/hosted-runtime-protocol.md`.
+
+Hosted parser attempt recovery decisions are tracked in
+[`parser attempts`](exec-plans/completed/2026-11-06-sm-pr17-parser-attempts.md).
 The durable contract remains in `references/hosted-runtime-protocol.md`.

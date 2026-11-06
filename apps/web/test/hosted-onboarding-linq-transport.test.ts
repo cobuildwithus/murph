@@ -47,7 +47,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
     chatId: "chat-created",
     messageId: "provider-message-created",
   }),
-  getHostedLinqChatHandles: vi.fn(),
+  getHostedLinqChatSummary: vi.fn(),
   isHostedLinqAttachmentSendPrepareFailure: vi.fn(() => false),
   sendHostedLinqAttachmentMessage: vi.fn(),
 }));
