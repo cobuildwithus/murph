@@ -1874,6 +1874,7 @@ describe("hosted device-sync wakes", () => {
         "user-123",
         "dsc_123",
         expect.any(Function),
+        undefined,
       );
       expect(warn).toHaveBeenCalledWith(
         "Hosted device-sync wake Temporal signal failed after mailbox append.",

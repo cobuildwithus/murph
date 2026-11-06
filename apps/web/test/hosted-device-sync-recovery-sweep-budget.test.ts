@@ -74,13 +74,13 @@ async function fixture({ wakeMs = 10, handoffMs = 10 } = {}) {
   }));
   const clinical = [{ id: "clinical-slow", memberId: "clinical-member-slow" }, { id: "clinical-next", memberId: "clinical-member-next" }];
   const writes = vi.fn(async (input) => { events.push({ kind: "write", id: input.where.id, at: elapsed() }); return { count: 1 }; });
-  let envelope: HostedDomainRootKeyEnvelopeV1 | undefined;
+  const root: { envelope?: HostedDomainRootKeyEnvelopeV1 } = {};
   const tx = {
     $queryRaw: vi.fn(async (query: TemplateStringsArray | { strings: readonly string[] }) => {
       const sql = ("strings" in query ? query.strings : query).join(" ");
-      if (sql.includes("hosted_user_crypto_envelope")) return envelope ? [{
+      if (sql.includes("hosted_user_crypto_envelope")) return root.envelope ? [{
         id: "synthetic-root-row", domain: "ingress", userId: "synthetic-deferred", status: "active",
-        rootKeyId: envelope.rootKeyId, signedEnvelopeJson: envelope, updatedAt: now,
+        rootKeyId: root.envelope.rootKeyId, signedEnvelopeJson: root.envelope, updatedAt: now,
       }] : [];
       if (sql.includes("INSERT INTO hosted_mailbox_lane_counter")) return [{ seq: 1n }];
       if (sql.includes("INSERT INTO hosted_mailbox_item")) {
@@ -155,7 +155,7 @@ async function fixture({ wakeMs = 10, handoffMs = 10 } = {}) {
     return { signalAccepted: true, workflowId: "synthetic" };
   });
   const candidates = await prepareHostedCryptoDomainRootCandidates({ domains: ["ingress"], prisma: getPrisma(), userId: "synthetic-deferred" });
-  envelope = candidates.get("ingress")!;
+  root.envelope = candidates.get("ingress")!;
   const config = cryptoEnv.getHostedWebCryptoConfig();
   vi.spyOn(cryptoEnv, "getHostedWebCryptoConfig").mockReturnValue(config);
   const decrypt = config.gcpKms.decrypt.bind(config.gcpKms);
