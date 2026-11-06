@@ -4,9 +4,11 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronRightIcon } from "lucide-react";
 
 import {
+  LINK_PAGE_FORM_CLASS,
   LINK_PAGE_NIGHT_TOKENS,
   LinkPageLink,
 } from "@/src/components/link-page/link-page-shell";
+import { cn } from "@/src/lib/utils";
 
 type HostedContactChannel = "phone" | "telegram";
 
@@ -38,7 +40,7 @@ export function HostedContactChannelChoice({
 
   return (
     <div
-      className="flex w-full flex-col items-center gap-1 outline-none"
+      className={cn("flex w-full flex-col items-center gap-1 outline-none", LINK_PAGE_FORM_CLASS)}
       ref={regionRef}
       style={LINK_PAGE_NIGHT_TOKENS}
       tabIndex={-1}

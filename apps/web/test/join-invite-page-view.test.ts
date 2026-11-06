@@ -659,7 +659,7 @@ test("JoinInvitePageView shows a dead invite like every other dead link", () => 
   assert.match(expired, /This link expired\./);
   for (const markup of [invalid, expired]) {
     assert.match(markup, /Ask Murph for a new one\./);
-    assert.match(markup, /href="sms:"/);
+    assert.equal(markup.includes("Open Messages"), false);
     assert.doesNotMatch(markup, /Link no longer works/);
     assert.doesNotMatch(markup, /data-sign-out/);
   }

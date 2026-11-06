@@ -124,17 +124,9 @@ function JoinInviteDeadLinkScreen({
 
   return (
     <LinkPageScreen
-      actions={
-        <>
-          <a className={LINK_PAGE_PILL_CLASS} href="sms:">
-            <MessageCircleIcon aria-hidden="true" className="size-5" />
-            Open Messages
-          </a>
-          {signedInElsewhere ? (
-            <JoinInviteSignOutButtonIsland appearance="link" idleLabel="Sign out" />
-          ) : null}
-        </>
-      }
+      actions={signedInElsewhere ? (
+        <JoinInviteSignOutButtonIsland appearance="link" idleLabel="Sign out" />
+      ) : undefined}
       announceDetail={false}
       detail={resolveJoinInviteSubtitle(status)}
       title={resolveJoinInviteTitle(status)}

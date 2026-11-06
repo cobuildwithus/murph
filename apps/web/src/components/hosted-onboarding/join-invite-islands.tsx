@@ -2,10 +2,12 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { cn } from "@/src/lib/utils";
 import { HostedLoginMethodEditor } from "../settings/hosted-login-method-dialog";
 import { HostedContactChannelChoice } from "./hosted-contact-channel-choice";
 
 import {
+  LINK_PAGE_FORM_CLASS,
   LINK_PAGE_NIGHT_TOKENS,
   LinkPageError,
   LinkPageLink,
@@ -128,7 +130,7 @@ export function JoinInvitePhoneVerificationIsland({
   const [view, setView] = useState<HostedFirstPartyAuthPanelView>("auth");
   const savedPhoneHint = phoneAuthTarget?.kind === "saved" ? phoneAuthTarget.phoneHint : phoneHint;
   return <LinkPageScreen
-    actions={<div className="flex w-full flex-col gap-4" style={LINK_PAGE_NIGHT_TOKENS}>
+    actions={<div className={cn("flex w-full flex-col gap-4", LINK_PAGE_FORM_CLASS)} style={LINK_PAGE_NIGHT_TOKENS}>
       {verificationMode === "invite_phone" && savedPhoneHint && view === "auth" ? <p className="text-sm text-muted-foreground">
         Use the number ending in {savedPhoneHint.replace(/\D/gu, "").slice(-4)}.
       </p> : null}

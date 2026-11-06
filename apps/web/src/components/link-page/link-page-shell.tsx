@@ -190,6 +190,10 @@ const LINK_PAGE_NIGHT_TOKENS = {
   "--secondary-hover": "#34302B",
 } as CSSProperties;
 
+/** Shared forms keep some light-theme styling of their own. This turns that night too. */
+const LINK_PAGE_FORM_CLASS =
+  "[&_button[data-slot=button]]:rounded-full [&_input]:border-[#FFFCF6]/15 [&_input]:bg-[#2A2622] [&_input]:text-[#FFFCF6]";
+
 function LinkPageError({ children }: { children: ReactNode }) {
   return (
     <p className="pb-2 text-center text-[15px] leading-5 text-[#E27B6E]" role="alert">
@@ -199,6 +203,7 @@ function LinkPageError({ children }: { children: ReactNode }) {
 }
 
 export {
+  LINK_PAGE_FORM_CLASS,
   LINK_PAGE_LINK_CLASS,
   LINK_PAGE_NIGHT_TOKENS,
   LINK_PAGE_PILL_CLASS,
