@@ -259,7 +259,7 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
         await lockClient?.query("ROLLBACK");
         expect(uncaught).toEqual([]);
 
-        expect(getHostedRuntimeLogPool()).toBe(runtimePool);
+        expect(runtimePool.totalCount).toBe(0);
         await expect(record({ entries: [runtimeEntry()], isUserActive: async () => true, userId }))
           .resolves.toBe(1);
         await expect(postgres.query(
