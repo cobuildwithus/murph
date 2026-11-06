@@ -1,3 +1,5 @@
+Game report recovery from the stored receipt and its frozen alert inputs are owned by [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md).
+
 Native game write outcomes, the empty-slot post guard and the Messages member-action session recheck are owned by [Weekly Game](product-specs/weekly-game.md) and [Security](SECURITY.md).
 
 The two-lane production Web admission, the Cloudflare predeploy gates, and the private nightly proof that owns reminder, foreground, and Codex cache-prefix journeys are owned by [Hosted Temporal orchestration](references/hosted-temporal-orchestration.md) and `../apps/cloudflare/DEPLOY.md`.

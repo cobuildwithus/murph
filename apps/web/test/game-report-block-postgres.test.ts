@@ -511,6 +511,10 @@ describe.skipIf(!runPostgresProof)("weekly game report and block", () => {
 
     expect(await ok(reporter, command)).toBeNull();
     expect(mocks.sendEmail.mock.calls.map(call => call[0])).toEqual([email, email]);
+    // The cleared foreign key can't let a different invite take this report id.
+    const other = await invite(await member("Jo"));
+    expect(await run(reporter, { ...command, token: other.token }))
+      .toMatchObject({ ok: false, error: { code: "INVALID_REQUEST", message: "That report id is taken." } });
   });
 
   it.each(["actor", "about", "entry", "game", "player", "reply as post"] as const)(
