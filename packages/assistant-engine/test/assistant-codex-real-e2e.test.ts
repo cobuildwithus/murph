@@ -35246,6 +35246,83 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
     }
   })
 
+  it('counts a repeated capture once and keeps a different plate at meal closeout', { timeout: 1_200_000 }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-repeated-capture-e2e-'))
+    const vaultRoot = path.join(root, 'vault')
+    const binDirectory = path.join(root, 'bin')
+    const skillsRoot = path.join(root, 'skills')
+    const commandLog = path.join(root, 'commands.log')
+    const photoPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../apps/web/public/meal-snap-2.jpg')
+    try {
+      await initializeVault({ vaultRoot, timezone: 'America/New_York' })
+      await Promise.all((['automatic-meal-capture', 'food-journal'] as const).map(slug =>
+        materializeAssistantSkill({ skillsRoot, slug })))
+      await materializeAutomaticMealClarificationVaultCli({ binDirectory, commandLog, vaultRoot })
+      for (const repeated of [true, false]) {
+        const currentLocalDate = repeated ? '2026-08-24' : '2026-08-25'
+        const scheduledOccurrenceAt = repeated ? '2026-08-25T01:00:00.000Z' : '2026-08-26T01:00:00.000Z'
+        const savedNote = repeated
+          ? 'Grain bowl with sweet potato, avocado, arugula and chickpeas.'
+          : 'Vanilla protein shake after the gym.'
+        const saved = await addMeal({ vaultRoot, occurredAt: `${currentLocalDate}T16:00:15.000Z`,
+          name: repeated ? 'Grain bowl' : 'Protein shake', note: savedNote,
+          nutrition: { totals: { calories: 520 }, provenance: { source: 'estimated', confidence: 'low' } },
+          ...(repeated ? { photoPath } : {}) })
+        const capture = await addMeal({ vaultRoot, source: 'device', occurredAt: `${currentLocalDate}T16:00:00.000Z`,
+          photoPath, externalRef: { system: 'meal-photo-capture', resourceType: 'photo', resourceId: `capture-${currentLocalDate}` } })
+        await writeFile(commandLog, '', 'utf8')
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildAutomaticMealCloseoutDeveloperInstructions({ currentLocalDate, scheduledOccurrenceAt }),
+          env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot },
+          fixtureBinDirectory: binDirectory, groupConversation: false,
+          model: config.model, modelProvider: config.modelProvider,
+          reasoningEffort: 'low', sandbox: 'workspace-write', vaultRoot, workingDirectory: vaultRoot,
+          prompt: [MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions,
+            `Scheduled occurrence context: Occurrence local date: ${currentLocalDate}. Occurrence instant: ${scheduledOccurrenceAt}.`,
+            'The member prefers nonnumeric tracking.',
+          ].join('\n\n'),
+        })
+        const commands = (await readFile(commandLog, 'utf8')).trim().split('\n')
+        const edited = (mealId: string) => commands.findIndex(command => isMealEditMutationCommand(command) && command.includes(mealId))
+        const deletes = (mealId: string) => commands.filter(command => isMealDeleteCommand(command, mealId)).length
+        expect(commands.some(command => /meal (?:add|import-json)\b|\s--source\b/u.test(command))).toBe(false)
+        expect(deletes(saved.mealId)).toBe(0)
+        expect(edited(saved.mealId)).toBe(-1)
+        const savedState = await readAutomaticMealClarificationState({ vaultRoot, mealId: saved.mealId })
+        expect(savedState.savedNote).toBe(savedNote)
+        expect(savedState.savedCalories).toBe(520)
+        const decision = parseAssistantNotificationDecision(result.finalMessage)
+        if (repeated) {
+          expect(deletes(capture.mealId)).toBe(1)
+          await expect(showMealRecord(vaultRoot, capture.mealId)).rejects.toMatchObject({ code: 'not_found' })
+          expect(edited(capture.mealId)).toBe(-1)
+          expect(commands.some(command => isMealRemovePhotoCommand(command, capture.mealId))).toBe(false)
+          expect(decision.kind).toBe('skip')
+        } else {
+          expect(deletes(capture.mealId)).toBe(0)
+          const readback = commands.findIndex((command, index) => index > edited(capture.mealId) && command.startsWith(`meal show ${capture.mealId}`))
+          const remove = commands.findIndex(command => isMealRemovePhotoCommand(command, capture.mealId))
+          expect(edited(capture.mealId)).toBeGreaterThanOrEqual(0)
+          expect(readback).toBeGreaterThan(edited(capture.mealId))
+          expect(remove).toBeGreaterThan(readback)
+          const state = await readAutomaticMealClarificationState({ vaultRoot, mealId: capture.mealId })
+          expect(state.savedNote).toBeTruthy()
+          expect(state.savedAttachmentCount).toBe(0)
+          expect(decision.kind).toBe('send_message')
+          if (decision.kind === 'send_message') expect(decision.text).not.toMatch(/\bsource\b|pending|could not|couldn['’]t|unable/iu)
+        }
+        expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+        process.stdout.write(`[repeated-capture-closeout-proof] ${JSON.stringify({ repeated, reply: result.finalMessage })}\n`)
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths])
+    }
+  })
+
   it('recovers one automatic meal edit and retains unresolved photos', {
     timeout: 900_000,
   }, async () => {

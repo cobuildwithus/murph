@@ -1,7 +1,7 @@
 Shared demographic memory, generation-18 projection and native action contracts are owned by [Architecture](../ARCHITECTURE.md#canonical-memory-demographics) and [private numbers](product-specs/ios-meals.md#shared-demographics).
 The [backend execution record](exec-plans/completed/2026-11-04-vault-demographics-backend.md) contains local verification evidence for the parent-owned integration.
 
-Automatic removal of inspected non-food meal stubs is owned by [the iOS Meals contract](product-specs/ios-meals.md#removal) and the `automatic-meal-capture` skill.
+Automatic removal of inspected non-food or already-saved meal stubs is owned by [the iOS Meals contract](product-specs/ios-meals.md#removal) and the `automatic-meal-capture` skill.
 
 Pair health board API and scoped sharing are owned by [the iOS game contract](product-specs/ios-game.md#pair-health-board), [game rules](product-specs/weekly-game.md#pair-board-current-run), and [group sharing](product-specs/hosted-group-join-confirmation.md#app-board-sharing).
 Reported VO2 persistence, the additive no-readings reason and local verification

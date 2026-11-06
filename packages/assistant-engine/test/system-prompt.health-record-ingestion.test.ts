@@ -40,6 +40,8 @@ describe('assistant system prompt health record ingestion invariant', () => {
     expect(automatic).toMatch(/An imported photo stub is not\s+evidence of consumption/u)
     expect(automatic).not.toContain('record only that the retained image was')
     const closeout = automatic.replace(/\s+/gu, ' ')
+    expect(closeout).toContain('When inspection shows a capture repeats a meal already saved, apply the deletion rule below and leave that meal unchanged')
+    expect(closeout).toContain('or a meal already saved, and has no member-written note')
     expect(closeout).toContain('run `vault-cli meal delete <meal-id>` and confirm it is absent with a fresh bounded `meal list`')
     expect(closeout).toContain('Write no note and run no `remove-photo` for that meal')
     expect(closeout).toContain('This applies to interactive enrichment and scheduled closeout')
