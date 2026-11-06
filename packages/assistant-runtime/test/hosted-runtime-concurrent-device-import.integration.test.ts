@@ -41,22 +41,16 @@ import * as maintenanceCancellation from "../src/hosted-runtime/background-maint
 import { HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS } from "../src/hosted-runtime/device-sync-maintenance-limits.ts";
 import { readHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
 
-async function withTestSignal<T>(step: Promise<T>, signal: AbortSignal, events: string[]): Promise<T> {
-  let onAbort: () => void;
-  const aborted = new Promise<never>((_, reject) => {
-    onAbort = () => {
-      // Vitest reports its own timeout error, so preserve the event order here.
-      process.stderr.write(`${JSON.stringify(events)}\n`);
+// These steps do real CPU work, so how long one takes says more about the host than the
+// product. The test timeout is their only deadline; racing it still unwinds `finally`.
+function untilTestTimeout<T>(step: Promise<T>, signal: AbortSignal, events: string[]): Promise<T> {
+  return Promise.race([step, new Promise<never>((_resolve, reject) => {
+    signal.addEventListener("abort", () => {
+      // Vitest reports its own timeout error, so keep the event order here.
+      process.stderr.write(`${events.join(",")}\n`);
       reject(signal.reason);
-    };
-    if (signal.aborted) onAbort();
-    else signal.addEventListener("abort", onAbort, { once: true });
-  });
-  try {
-    return await Promise.race([step, aborted]);
-  } finally {
-    signal.removeEventListener("abort", onAbort!);
-  }
+    }, { once: true });
+  })]);
 }
 
 test.for(["completed", "stalled", "absent", "persistent", "cold", "reminder", "acknowledgment", "empty-wake", "finalization", "long-finalization"] as const)("preserves foreground delivery with a %s concurrent device import", async (scenario, { signal, task }) => {
@@ -199,7 +193,7 @@ test.for(["completed", "stalled", "absent", "persistent", "cold", "reminder", "a
       if (scenario !== "absent" && !cold && handledInputIds.size === 1) {
         items.push(deviceItem);
         runtimeWakeSignal.notify();
-        await withTestSignal(
+        await untilTestTimeout(
           finalization ? indexing.promise : completesBeforeReply ? imported.promise : providerStarted.promise,
           signal, events,
         );
@@ -427,7 +421,7 @@ test.for(["completed", "stalled", "absent", "persistent", "cold", "reminder", "a
       },
     );
     if (cold) {
-      await withTestSignal(providerStarted.promise, signal, events);
+      await untilTestTimeout(providerStarted.promise, signal, events);
       if (scenario === "reminder") {
         // No conversation or external wake announces this local deadline.
         vi.setSystemTime(new Date(reminderAt));
@@ -437,7 +431,7 @@ test.for(["completed", "stalled", "absent", "persistent", "cold", "reminder", "a
       }
     }
     if (completesBeforeReply || persistent) {
-      await withTestSignal(Promise.race([
+      await untilTestTimeout(Promise.race([
         secondReply.promise,
         runtimeCompletion.then(() => assert.fail("Runtime exited before the second reply.")),
       ]), signal, events);
@@ -447,7 +441,7 @@ test.for(["completed", "stalled", "absent", "persistent", "cold", "reminder", "a
         assert.equal(events.filter((event) => event.includes("/summary/sleep/")).length, 1);
         assert.equal(events.includes("device.receipt.uploaded"), false, events.join(","));
         releaseDownload.resolve();
-        await withTestSignal(imported.promise, signal, events);
+        await untilTestTimeout(imported.promise, signal, events);
       }
       assert.equal(events.filter((event) => event === "device.receipt.uploaded").length, 1);
       releaseSnapshot.resolve();
@@ -455,11 +449,10 @@ test.for(["completed", "stalled", "absent", "persistent", "cold", "reminder", "a
     if (finalization) {
       // Keep this invocation alive through the retry. A 1-ms idle fixture can
       // legitimately shut down between dispatch and resumed preparation.
-      await withTestSignal(replyDispatched.promise, signal, events);
+      await untilTestTimeout(replyDispatched.promise, signal, events);
       assert.equal(preparationAborts, 1);
       assert.ok(events.includes("foreground.lock.acquired"));
-      await withTestSignal(vi.waitFor(async () => {
-        if (signal.aborted) return;
+      await untilTestTimeout(vi.waitFor(async () => {
         const item = (await readHostedSystemMailboxState(vaultRoot)).pending.find(item => item.itemId === deviceItem.id);
         assert.equal(item?.status, "recording");
       }, { timeout: task.timeout, interval: 25 }), signal, events);
@@ -469,7 +462,7 @@ test.for(["completed", "stalled", "absent", "persistent", "cold", "reminder", "a
         runtimeWakeSignal.notify();
       }, 10);
     }
-    await withTestSignal(runtimeCompletion, signal, events);
+    await untilTestTimeout(runtimeCompletion, signal, events);
     assert.ok(replySent, JSON.stringify({ events, intents: await listAssistantOutboxIntents(vaultRoot) }));
     if (completesBeforeReply || persistent) {
       assert.equal(handledInputIds.size, scenario === "acknowledgment" ? 3 : 2);
@@ -693,7 +686,7 @@ test.for(["workspace boundary", "pass timeout"] as const)("retains unstarted dev
       }),
     });
     runtimeCompletion = run();
-    await withTestSignal(runtimeCompletion, signal, events);
+    await untilTestTimeout(runtimeCompletion, signal, events);
     assert.equal(controller.signal.aborted, false);
     assert.ok(preloadAbortReason instanceof Error);
     assert.equal(preloadAbortReason.message, scenario === "workspace boundary"
@@ -722,7 +715,7 @@ test.for(["workspace boundary", "pass timeout"] as const)("retains unstarted dev
     checkpointRequests.length = 0;
     vi.setSystemTime(new Date(retryAt));
     runtimeCompletion = run();
-    await withTestSignal(runtimeCompletion, signal, events);
+    await untilTestTimeout(runtimeCompletion, signal, events);
     assert.equal(acknowledgments, 1, JSON.stringify({ events, pending: (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => ({ status: item.status, error: item.lastErrorCode })) }));
     assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
     assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "1");

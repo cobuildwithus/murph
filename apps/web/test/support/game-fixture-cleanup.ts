@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 
+/** `source_ref` names a game without a foreign key, so deleting a game alone orphans its receipts. */
 export async function cleanupGameFixtures(prisma: PrismaClient, ownerMemberIds: string[]): Promise<void> {
   const games = await prisma.game.findMany({
     where: { wordsOwnerMemberId: { in: ownerMemberIds } },
