@@ -4,6 +4,17 @@ Workspace-private headless hosted/runtime surface for Murph assistant execution.
 
 This package exists so hosted runtimes such as `apps/cloudflare` do not need to import their execution seams directly from the public `@murphai/murph` CLI package.
 
+Stopping the active mailbox watcher cancels its system HTTP fetch, preserving
+the system watermark for retry. Conversation imports keep their completion
+boundary, and stop still joins in-flight canonical persistence or rollback.
+
+The existing provider-start callback emits
+`Hosted assistant provider-start critical path timing.` with finite nonnegative
+`automationGroupAndOperationScopeMs`, `automationTerminalEvidenceMs`,
+`automationSessionPreflightMs`, `automationCrossSessionContextMs`, and
+`automationPromptPreparationMs` when available. These describe preparation
+before reply-started, add no awaits, and also remain in the latency trace.
+
 Current responsibilities:
 
 - skip retired member ChatGPT-linking mailbox work before payload loading and
@@ -321,12 +332,9 @@ or retention schedule, committed it, and did not service it. The runtime tracks
 only invocation-local exact wake keys: presenting a wake removes its key, while
 a same-key continuation adds it again. Inherited or attempted no-progress wakes
 do not emit the edge on the ordinary runtime result path, and known future
-mailbox retry continuations stay deferred until their retry time. If the
-Cloudflare caller loses that result after explicit inactive-container proof, it
-may conservatively reconstruct the edge for a recovered due committed wake
-because invocation-local provenance is no longer available. The edge is never
-checkpointed; Temporal re-reads the durable workspace and mailbox facts before
-acting.
+mailbox retry continuations stay deferred until their retry time. The Worker no
+longer forwards the edge to Web. Final release wakes Temporal, which re-reads
+durable workspace and mailbox facts before acting. The edge is never checkpointed.
 
 Current non-goals:
 

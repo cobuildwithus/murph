@@ -984,6 +984,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260905120000_hosted_operator_task_result_retention_index",
       "20261019120000_final_reply_delivery_alert_retention",
       "20261106120000_hosted_mailbox_telegram_update_lookup",
+      "20261106190000_game_event_actor_type_index",
     ]);
     expect(
       migrationEntries.filter((entry) => !queryShapeMigrationEntries.has(entry)),

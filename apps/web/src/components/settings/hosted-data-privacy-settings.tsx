@@ -30,7 +30,6 @@ import {
   publishBrowserVaultSessionInvalidation,
 } from "@/src/lib/browser-vault/session-invalidation";
 import { reloadCurrentHostedAuthDocument } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
-import { HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE } from "@/src/lib/hosted-onboarding/errors";
 import {
   HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
   type HostedAccountExitReasonCode,
@@ -42,15 +41,6 @@ import {
 } from "./account-deletion-farewell";
 import { AccountExitReasonStep } from "./account-exit-reason-step";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
-
-// A suspended account cannot reload this page, so these retries stay in the dialog.
-const HOSTED_ACCOUNT_DELETION_DIALOG_RETRY_CODES: ReadonlySet<string | null> = new Set([
-  HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE,
-  "ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG",
-  "ACCOUNT_DELETION_CONNECTED_APP_SETUP_IN_PROGRESS",
-  "ACCOUNT_DELETION_GAME_HISTORY_PENDING",
-  "ACCOUNT_DELETION_GAME_STATE_CHANGED",
-]);
 
 interface HostedAccountVendorDeletionSummary {
   errorCode: string | null;
@@ -220,9 +210,10 @@ function HostedDataPrivacySettingsContent(props: {
         requestError instanceof HostedOnboardingApiError
         && requestError.code
           === "ACCOUNT_DELETION_DEVICE_TOKEN_REFRESH_RECOVERY_REQUIRED";
+      // A suspended account cannot reload this page, so these retries stay in the dialog.
       const dialogRetry =
         requestError instanceof HostedOnboardingApiError
-        && HOSTED_ACCOUNT_DELETION_DIALOG_RETRY_CODES.has(requestError.code);
+        && requestError.retryable;
       if (sessionEndingDispatched && !receivedReplacementHeaders) {
         publishBrowserVaultSessionInvalidation();
         if (

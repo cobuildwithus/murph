@@ -341,16 +341,21 @@ it has been explicitly elevated to a cross-cutting invariant.
   proof that the effect did not begin. A definite provider rejection proves
   only the attempt that received it: only the winning first dispatch may
   release an obligation, atomically and naming its exact attempt. A rejected
-  retry keeps earlier ambiguity. Acknowledge, clean up, or advance progress
+  retry keeps earlier ambiguity. It holds back only its exact send; a later
+  member message still commits, and a reply aimed at it still goes out.
+  Acknowledge, clean up, or advance progress
   only after terminal or durable pending evidence. Accepted delivery
   needing confirmation settles through its existing delivery retry deadline;
   optional accounting may update its own marker but never moves that deadline.
+  A hosted Telegram send checks liveness before provider entry. Once a sender
+  returns an accepted response, losing liveness cannot discard it: the outbox
+  persists the receipt before any post-dispatch liveness check.
   A retry under a provider idempotency key sends the bytes accepted for that
   key, so freeze those inputs on the accepted receipt and never rebuild them
   from current source state.
 - Failure to observe an outcome does not prove rejection. Once a native game
-  write has read its request, a server failure is reported as retryable, never
-  as a final refusal of that request.
+  write or an account deletion has read its request, a server failure is
+  reported as retryable, never as a final refusal of that request.
 - Any path that suppresses or defers a user-visible effect records a typed
   durable outcome. A persisted pending effect names its current validity
   predicate and is durably superseded instead of delivered when that predicate
@@ -377,9 +382,9 @@ it has been explicitly elevated to a cross-cutting invariant.
   irreversible-effect boundary. Carry narrow typed proof within that bounded
   operation instead of making sibling layers rediscover it. Model-supplied
   targets are requests, never authority.
-- A native game command or Messages member action admitted before request
-  reading or preparation rechecks its exact session inside the transaction that
-  commits its effect. A failed recheck writes nothing.
+- A native game command, board sharing save or Messages member action admitted
+  before request reading or preparation rechecks its exact session inside the
+  transaction that commits its effect. A failed recheck writes nothing.
 - Participant-target phone egress is denied unless its exact send kind has a
   narrow durable authority binding the idempotency key, participant identity,
   and source line. Adding one allowed first-contact kind must not widen another
@@ -557,9 +562,9 @@ it has been explicitly elevated to a cross-cutting invariant.
   Never open one transaction per collection item concurrently; batch the items
   into one transaction or process them sequentially, and count concurrent
   transactions against the request's concurrency bound.
-- The hosted Web Prisma pool returns a connection for reuse only when PostgreSQL
-  reports it outside a transaction. Any other release closes the connection, so
-  a later write can never join an unfinished transaction.
+- The hosted Web Prisma and runtime log pools reuse a connection only after
+  PostgreSQL confirms it is outside a transaction. Any other release closes the
+  connection, so a later write cannot join an unfinished transaction.
 - The fanout bound composes across the whole request, render, or job: parallel
   helpers that each fan out internally multiply, so evaluate peak concurrent
   datastore work for the composed path and keep one request's peak well below

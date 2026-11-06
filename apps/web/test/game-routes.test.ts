@@ -9,9 +9,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import type { GameHistoryView, GameView } from "../src/lib/game/contract";
 import { decidePost, GameRuleError, type RuleEntry, type RuleState } from "../src/lib/game/rules";
 import { buildGameView } from "../src/lib/game/views";
-import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
+import { hostedOnboardingError, withRetryableServerFailures } from "../src/lib/hosted-onboarding/errors";
 import { isRecord } from "../src/lib/primitives";
-import { withGameServiceFailures } from "../src/lib/game/http/errors";
 import { buildCurrentHostedConsentDocumentVersions } from "../src/lib/legal/consent";
 
 vi.mock("server-only", () => ({}));
@@ -255,7 +254,7 @@ describe("weekly game routes", () => {
     it("preserves known errors and their details while marking server failures retryable with their cause", async () => {
       for (const [httpStatus, retryable] of [[403, false], [503, true], [503, false]] as const) {
         const cause = hostedOnboardingError({ code: "SYNTHETIC", message: "Synthetic failure.", httpStatus, retryable, details: { stage: "write" } });
-        const result = withGameServiceFailures(async () => { throw cause; });
+        const result = withRetryableServerFailures(async () => { throw cause; });
         if (httpStatus < 500 || retryable) await expect(result).rejects.toBe(cause);
         else await expect(result).rejects.toMatchObject({ code: cause.code, message: cause.message, httpStatus, details: cause.details, retryable: true, cause });
       }

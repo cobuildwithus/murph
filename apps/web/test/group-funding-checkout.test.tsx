@@ -422,6 +422,46 @@ test("resumes or cancels an open checkout", async () => {
   }
 });
 
+test.each([
+  { expectedPath: "/groups/fund/group_join_code_1234", keep: false },
+  {
+    expectedPath:
+      "/groups/fund/group_join_code_1234?usageCheckout=success&usagePurchase=hucp_group_pending",
+    keep: true,
+  },
+])("leaves a return in the address only when the next page needs it ($keep)", async ({
+  expectedPath,
+  keep,
+}) => {
+  mocks.requestHostedOnboardingJson.mockResolvedValue({
+    purchaseId: "hucp_group_pending",
+    status: "payment_pending",
+  });
+  const rendered = await renderCheckout({
+    activePurchase: {
+      offerCode: "usage_5_usd",
+      purchaseId: "hucp_group_pending",
+      retryAllowed: false,
+      status: "payment_pending",
+    },
+    initialMode: "monthly",
+    keepPurchaseReturnQuery: keep,
+    purchaseReturn: { kind: "success", purchaseId: "hucp_group_pending" },
+  }, {
+    location: {
+      href: `https://example.test${
+        "/groups/fund/group_join_code_1234?usageCheckout=success&usagePurchase=hucp_group_pending"
+      }`,
+    },
+  });
+
+  try {
+    expect(rendered.replaceState).toHaveBeenLastCalledWith({}, "", expectedPath);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("retries a pending activation with its original cap", async () => {
   vi.useFakeTimers();
   mocks.requestHostedOnboardingJson.mockImplementation(
@@ -785,7 +825,7 @@ async function checkoutElement(overrides: Partial<CheckoutProps> = {}) {
 
 async function renderCheckout(
   overrides: Partial<CheckoutProps> = {},
-  options: { sessionStorage?: Storage } = {},
+  options: { location?: { href: string }; sessionStorage?: Storage } = {},
 ) {
   const rendered = await renderClientComponent(await checkoutElement(overrides), {
     location: { href: "https://example.test/groups/fund/group_join_code_1234" },

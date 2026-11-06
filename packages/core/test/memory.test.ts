@@ -188,6 +188,7 @@ describe("core memory package wrapper", () => {
       now: createdAt,
     });
     expect(first.created).toBe(true);
+    expect(first.changed).toBe(true);
     expect(first.record).toMatchObject({
       section: "Identity",
       text: "Preferred display name: Theo",
@@ -199,6 +200,8 @@ describe("core memory package wrapper", () => {
       now: updatedAt,
     });
     expect(second.created).toBe(false);
+    expect(second.changed).toBe(true);
+    expect((await setMemoryDisplayName(vaultRoot, { displayName: "Ari" })).changed).toBe(false);
     expect(second.record.id).toBe(first.record.id);
     expect(second.record).toMatchObject({
       text: "Preferred display name: Ari",

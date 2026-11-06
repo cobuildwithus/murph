@@ -236,6 +236,42 @@ afterEach(() => {
 })
 
 describe('assistant Codex turn planning', () => {
+  it('attributes each thread rotation without changing provider declarations', async () => {
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportsNativeResume: true })
+    const planInput: Parameters<typeof resolveAssistantRouteTurnPlan>[0] = {
+      executionContext: null, input: createMessageInput(),
+      profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
+      promptTimeContext: { currentLocalDate: '2026-11-05', currentTimeZone: 'UTC' },
+      route: createRoute(), session: createSession(), sharedPlan: createSharedPlan(),
+    }
+    const baseline = await resolveAssistantRouteTurnPlan(planInput)
+    expect(baseline.planningDiagnostics.threadRotationReason).toBe('binding_absent')
+    const binding = {
+      assistantContractFingerprint: baseline.assistantContractFingerprint,
+      routeFingerprint: planInput.route.routeFingerprint ?? planInput.route.routeId,
+      threadId: 'synthetic-resume-thread',
+    }
+    for (const reason of [null, 'route_mismatch', 'contract_mismatch', 'profile_isolated', 'native_resume_disabled'] as const) {
+      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportsNativeResume: reason !== 'native_resume_disabled' })
+      const plan = await resolveAssistantRouteTurnPlan({
+        ...planInput,
+        profile: { ...planInput.profile, threadScope: reason === 'profile_isolated' ? 'isolated-thread' : 'session-thread' },
+        session: createSession({ resumeState: {
+          ...binding,
+          ...(reason === 'route_mismatch' ? { routeFingerprint: 'synthetic-other-route' } : {}),
+          ...(reason === 'contract_mismatch' ? { assistantContractFingerprint: 'f'.repeat(64) } : {}),
+        } }),
+      })
+      expect(plan.planningDiagnostics.threadRotationReason).toBe(reason)
+      expect(plan.resume?.codexThreadId ?? null).toBe(reason === null ? binding.threadId : null)
+      expect(plan.dynamicTools).toEqual(baseline.dynamicTools)
+      expect(plan.assistantContractFingerprint).toEqual(baseline.assistantContractFingerprint)
+      for (const key of ['systemPrompt', 'developerInstructions', 'turnContextPrompt'] as const) {
+        expect(Buffer.from(plan[key] ?? '')).toEqual(Buffer.from(baseline[key] ?? ''))
+      }
+    }
+  })
+
   it.each([0, 20, 200])('attributes the serial route-planning tail with %i automations without changing prompt bytes', async (count) => {
     const vault = await mkdtemp(path.join(os.tmpdir(), 'murph-tail-planning-'))
     let clock = Date.parse('2026-11-05T12:00:00.000Z')

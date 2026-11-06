@@ -23,6 +23,7 @@ import {
   readReturnKey,
   shouldPollPurchaseStatus,
   type HostedUsageTopUpDialogProps,
+  type HostedUsageTopUpReturn,
 } from "./hosted-usage-top-up-contract";
 import {
   createHostedUsageTopUpState,
@@ -62,6 +63,7 @@ function useHostedUsageTopUpDialog({
   initialCheckoutErrorCode,
   initialOpen = false,
   inert = false,
+  keepPurchaseReturnQuery,
   offers,
   payerMemberId,
   purchaseReturn = null,
@@ -174,19 +176,18 @@ function useHostedUsageTopUpDialog({
   }
 
   useEffect(() => {
-    const queryKeys = [
-      ...(initialOpen ? ["addUsage"] : []),
-      ...(purchaseReturn
-        ? ["usagePurchase", "usageCheckout", "usageFamily", "usageMember"]
-        : []),
-    ];
+    const queryKeys = readHandledQueryKeys({
+      initialOpen,
+      keepPurchaseReturnQuery,
+      purchaseReturn,
+    });
     const cleanupKey = `${queryKeys.join(":")}:${returnKey ?? ""}`;
     if (queryKeys.length === 0 || cleanedQueryKeyRef.current === cleanupKey) {
       return;
     }
     cleanedQueryKeyRef.current = cleanupKey;
     stripSettingsQueryParams(queryKeys);
-  }, [initialOpen, purchaseReturn, returnKey]);
+  }, [initialOpen, keepPurchaseReturnQuery, purchaseReturn, returnKey]);
 
   useEffect(() => {
     let canceled = false;
@@ -750,6 +751,17 @@ function readCancelPurchaseResponse(value: unknown) {
   } catch {
     throw new Error("Could not cancel this checkout right now. Try again.");
   }
+}
+
+function readHandledQueryKeys(input: {
+  initialOpen: boolean;
+  keepPurchaseReturnQuery?: boolean;
+  purchaseReturn: HostedUsageTopUpReturn | null;
+}): string[] {
+  const returnKeys = input.purchaseReturn && !input.keepPurchaseReturnQuery
+    ? ["usagePurchase", "usageCheckout", "usageFamily", "usageMember"]
+    : [];
+  return input.initialOpen ? ["addUsage", ...returnKeys] : returnKeys;
 }
 
 function purchaseStatusUrl(purchaseId: string): string {

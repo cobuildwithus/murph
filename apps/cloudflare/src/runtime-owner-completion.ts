@@ -1,5 +1,4 @@
 import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
-import type { HostedWorkspaceInvocationResult } from "@murphai/hosted-execution/runtime-control";
 import { commandHostedRuntimeOwner } from "./runtime-owner-client.ts";
 
 export async function recordHostedRuntimeOwnerCompletion(input: {
@@ -7,7 +6,6 @@ export async function recordHostedRuntimeOwnerCompletion(input: {
   userId: string;
   attemptId: string;
   generation: string;
-  result: Pick<HostedWorkspaceInvocationResult, "immediateRecheckRequested">;
   /** Set only after the native invocation operation itself has settled. A
    * runtime callback alone does not prove that the outer operation is gone. */
   settledRunnerContainerName?: string;
@@ -18,7 +16,8 @@ export async function recordHostedRuntimeOwnerCompletion(input: {
       source: input.source, userId: input.userId,
       command: { operation: "complete", attemptId: input.attemptId, generation: input.generation,
         settledRunnerContainerName: input.settledRunnerContainerName ?? null,
-        immediateRecheckRequested: input.result.immediateRecheckRequested === true },
+        // Web ignores it, but its parser and live protocol admission still require the boolean.
+        immediateRecheckRequested: false },
     });
     const updated = completed.status === "updated";
     // Canonical acknowledgment only, not proof of downstream delivery.

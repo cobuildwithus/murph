@@ -24,7 +24,6 @@ export interface RunnerProviderAuthority extends RunnerInvocationIdentity, Runne
 
 export interface RunnerInvocationReceipt extends RunnerInvocationIdentity {
   state: "registered" | "completed";
-  immediateRecheckRequested: boolean;
 }
 
 /** Native execution evidence, never member admission authority. One retained
@@ -33,6 +32,7 @@ export interface RunnerInvocationReceipt extends RunnerInvocationIdentity {
  */
 export class RunnerInvocationReceiptStore {
   constructor(private readonly sql: InvocationSqlStorage) {
+    // Older controllers still select immediate_recheck; this code neither reads nor writes it.
     sql.exec(`CREATE TABLE IF NOT EXISTS runner_invocation_receipt (
       singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
       attempt_id TEXT NOT NULL,
@@ -53,11 +53,11 @@ export class RunnerInvocationReceiptStore {
 
   read(): RunnerInvocationReceipt | null {
     const [row] = this.sql.exec<{
-      attempt_id: string; generation: string; state: string; immediate_recheck: number;
-    }>("SELECT attempt_id, generation, state, immediate_recheck FROM runner_invocation_receipt WHERE singleton = 1").toArray();
+      attempt_id: string; generation: string; state: string;
+    }>("SELECT attempt_id, generation, state FROM runner_invocation_receipt WHERE singleton = 1").toArray();
     if (!row) return null;
     if (row.state !== "registered" && row.state !== "completed") throw new Error("Invalid native invocation receipt.");
-    return { attemptId: row.attempt_id, generation: row.generation, state: row.state, immediateRecheckRequested: row.immediate_recheck === 1 };
+    return { attemptId: row.attempt_id, generation: row.generation, state: row.state };
   }
 
   register(identity: RunnerInvocationIdentity, context?: RunnerProviderContext): "new" | "existing" {
@@ -73,9 +73,9 @@ export class RunnerInvocationReceiptStore {
       if (current.state !== "completed") throw new Error("Native invocation outcome is unresolved.");
     }
     this.sql.exec(`INSERT INTO runner_invocation_receipt
-      (singleton, attempt_id, generation, state, immediate_recheck, provider_context) VALUES (1, ?, ?, 'registered', 0, ?)
+      (singleton, attempt_id, generation, state, provider_context) VALUES (1, ?, ?, 'registered', ?)
       ON CONFLICT(singleton) DO UPDATE SET attempt_id = excluded.attempt_id,
-        generation = excluded.generation, state = 'registered', immediate_recheck = 0,
+        generation = excluded.generation, state = 'registered',
         provider_context = excluded.provider_context`,
     identity.attemptId, identity.generation, context ? JSON.stringify(context) : null);
     this.sql.exec("DELETE FROM runner_usage_settlement");
@@ -134,12 +134,12 @@ export class RunnerInvocationReceiptStore {
     return row?.count === 0;
   }
 
-  complete(identity: RunnerInvocationIdentity, immediateRecheckRequested: boolean): boolean {
+  complete(identity: RunnerInvocationIdentity): boolean {
     const current = this.read();
     if (!current || !matches(current, identity)) return false;
-    this.sql.exec(`UPDATE runner_invocation_receipt SET state = 'completed', immediate_recheck = MAX(immediate_recheck, ?)
+    this.sql.exec(`UPDATE runner_invocation_receipt SET state = 'completed'
       WHERE singleton = 1 AND attempt_id = ? AND generation = ?`,
-    immediateRecheckRequested ? 1 : 0, identity.attemptId, identity.generation);
+    identity.attemptId, identity.generation);
     return true;
   }
 }

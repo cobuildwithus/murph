@@ -191,7 +191,7 @@ async function reconcileExistingRuntime(ctx: ProcessingContext, owner: HostedRun
   const receipt = container?.readSupervisedInvocation
     ? await ctx.step("read_invocation", () => container.readSupervisedInvocation!({ userId: ctx.input.userId })).catch(() => null) : null;
   if (receipt?.state === "completed" && receipt.attemptId === identity.attemptId && receipt.generation === identity.generation && owner.runnerContainerName) {
-    return reconcileCompletedRuntime(ctx, owner, owner.runnerContainerName, receipt.immediateRecheckRequested);
+    return reconcileCompletedRuntime(ctx, owner, owner.runnerContainerName);
   }
   if (owner.phase === "retiring" || (owner.processingMode === "inbox_media_retention" && ctx.mode !== "inbox_media_retention")) {
     return retireRuntime(ctx, owner);
@@ -210,7 +210,7 @@ function retirementAttemptAtEpochMs(since: string | null): number {
   return since ? Date.parse(since) + 30_000 : 0;
 }
 
-async function reconcileCompletedRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot, runnerContainerName: string, immediateRecheckRequested: boolean): Promise<HostedRuntimeEnsureProcessingResponse | null> {
+async function reconcileCompletedRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot, runnerContainerName: string): Promise<HostedRuntimeEnsureProcessingResponse | null> {
   const identity = requireIdentity(owner);
   const live = await readRuntimeFenceLivenessBestEffort({ commandBudget: ctx.budget,
     identity: { ...identity, leaseGeneration: identity.generation, userId: ctx.input.userId },
@@ -224,7 +224,6 @@ async function reconcileCompletedRuntime(ctx: ProcessingContext, owner: HostedRu
   await ctx.step("complete_invocation", () => recordHostedRuntimeOwnerCompletion({
     source: ctx.source, userId: ctx.input.userId, ...identity,
     settledRunnerContainerName: runnerContainerName,
-    result: immediateRecheckRequested ? { immediateRecheckRequested: true } : {},
   }), ctx.env.webControlTimeoutMs);
   // A stale result can mean a concurrent caller already released this owner.
   // Re-admit from Postgres; neither the old snapshot nor the receipt grants launch.

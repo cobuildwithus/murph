@@ -91,7 +91,7 @@ const mocks = vi.hoisted(() => {
     claimHostedLinqInstantFirstTurn: vi.fn(),
     completeHostedLinqInstantFirstTurn: vi.fn(),
     abandonHostedLinqInstantFirstTurn: vi.fn(),
-    hasConflictingHostedLinqInstantFirstTurnForChatTx: vi.fn(),
+    releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx: vi.fn(),
     ensureHostedLinqInstantStartStarterUsageEnrollment: vi.fn(),
     runHostedLinqInstantStartDeferredActivationWakeBestEffort: vi.fn(),
     releaseHostedLinqOnboardingLinkNoticeClaim: vi.fn(),
@@ -367,8 +367,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
   return {
     ...actual,
     claimHostedLinqDeliveryProviderDispatchTx: mocks.claimHostedLinqDeliveryProviderDispatchTx,
-    hasConflictingHostedLinqInstantFirstTurnForChatTx:
-      mocks.hasConflictingHostedLinqInstantFirstTurnForChatTx,
+    releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx:
+      mocks.releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx,
     readHostedLinqDeliveryProviderDispatchIntentTx:
       mocks.readHostedLinqDeliveryProviderDispatchIntentTx,
   };
@@ -1184,7 +1184,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       kind: "unavailable",
     });
     mocks.abandonHostedLinqInstantFirstTurn.mockResolvedValue(undefined);
-    mocks.hasConflictingHostedLinqInstantFirstTurnForChatTx.mockResolvedValue(
+    mocks.releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx.mockResolvedValue(
       false,
     );
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValue({

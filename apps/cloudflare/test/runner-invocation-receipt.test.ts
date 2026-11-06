@@ -19,16 +19,44 @@ describe("native invocation receipts", () => {
     const first = { attemptId: "attempt-1", generation: "9007199254740993" };
     const second = { attemptId: "attempt-2", generation: "9007199254740994" };
     receipt.register(first);
-    expect(receipt.complete(first, true)).toBe(true);
+    expect(receipt.complete(first)).toBe(true);
     const recovered = new RunnerInvocationReceiptStore(sql);
-    expect(recovered.read()).toEqual({ ...first, state: "completed", immediateRecheckRequested: true });
+    expect(recovered.read()).toEqual({ ...first, state: "completed" });
     expect(recovered.register(first)).toBe("existing");
     expect(recovered.register(second)).toBe("new");
     expect(() => recovered.register(first)).toThrow("Stale");
     expect(() => recovered.register({ ...second, attemptId: "wrong-attempt" })).toThrow("Stale");
-    expect(recovered.complete(first, true)).toBe(false);
-    expect(recovered.read()).toEqual({ ...second, state: "registered", immediateRecheckRequested: false });
+    expect(recovered.complete(first)).toBe(false);
+    expect(recovered.read()).toEqual({ ...second, state: "registered" });
   });
+  it.each(["legacy", "fresh"] as const)("preserves the rollback column through completion and reuse on a %s table", origin => {
+    const sql = createTestSqlStorage();
+    const first = { attemptId: "attempt-1", generation: "1" };
+    if (origin === "legacy") {
+      sql.exec(`CREATE TABLE runner_invocation_receipt (singleton INTEGER PRIMARY KEY, attempt_id TEXT,
+        generation TEXT, state TEXT, immediate_recheck INTEGER NOT NULL DEFAULT 0)`);
+      sql.exec("INSERT INTO runner_invocation_receipt VALUES (1, 'attempt-1', '1', 'registered', 1)");
+    }
+    const store = () => new RunnerInvocationReceiptStore(sql);
+    const rollbackValue = origin === "legacy" ? 1 : 0;
+    const expectRollbackValue = () => expect(sql.exec("SELECT immediate_recheck FROM runner_invocation_receipt").toArray())
+      .toEqual([{ immediate_recheck: rollbackValue }]);
+    expect(store().register(first)).toBe(origin === "legacy" ? "existing" : "new");
+    expect(store().read()).toEqual({ ...first, state: "registered" });
+    expectRollbackValue();
+    expect(store().complete(first)).toBe(true);
+    expect(store().read()).toEqual({ ...first, state: "completed" });
+    expectRollbackValue();
+    expect(store().register(first)).toBe("existing");
+    expectRollbackValue();
+    const next = { attemptId: "attempt-2", generation: "2" };
+    expect(store().register(next)).toBe("new");
+    expect(store().read()).toEqual({ ...next, state: "registered" });
+    expectRollbackValue();
+    expect(store().complete(next)).toBe(true);
+    expectRollbackValue();
+  });
+
   it("keeps uncertain usage settlement closed across eviction and clears only its exact receipt", () => {
     const sql = createTestSqlStorage();
     const runtime = { attemptId: "usage-attempt", generation: "1" };
@@ -48,7 +76,7 @@ describe("native invocation receipts", () => {
     recovered.finishUsageSettlement(runtime, "usage-denied", false);
     recovered.finishUsageSettlement(runtime, "usage-denied", true);
     expect(recovered.usageSettlementAllowsProviders(runtime)).toBe(false);
-    recovered.complete(runtime, false);
+    recovered.complete(runtime);
     const next = { attemptId: "next-usage-attempt", generation: "2" };
     recovered.register(next);
     expect(recovered.beginUsageSettlement(runtime, "stale-report")).toBe(false);
@@ -94,7 +122,7 @@ describe("native invocation receipts", () => {
     const next = { attemptId: "next-usage-attempt", generation: "2" };
     const receipt = () => new RunnerInvocationReceiptStore(sql);
     receipt().register(identity);
-    expect(receipt().complete(identity, false)).toBe(true);
+    expect(receipt().complete(identity)).toBe(true);
     if (registered) receipt().register(next);
     receipt().finishUsageSettlement(identity, "usage-report", false);
     expect(sql.exec("SELECT state FROM runner_usage_settlement").toArray()).toEqual(registered ? [] : [{ state: "denied" }]);
@@ -131,7 +159,7 @@ describe("native invocation receipts", () => {
     expect(recovered.readProviderInvocation()).toEqual({ ...first, context, settlementPending: false });
     recovered.register(first, { ...context, platformAiUsageAllowed: true });
     expect(recovered.readProviderInvocation()?.context?.platformAiUsageAllowed).toBe(false);
-    recovered.complete(first, false);
+    recovered.complete(first);
     expect(recovered.readProviderInvocation()).toBeNull();
     recovered.register({ attemptId: "provider-2", generation: "2" }, { ...context, workspaceVersion: "4", platformAiUsageAllowed: true });
     expect(recovered.readProviderInvocation()?.context?.workspaceVersion).toBe("4");

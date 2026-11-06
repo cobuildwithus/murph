@@ -13,6 +13,7 @@ const CAPTURED_STATES = [
   "payment-confirming",
   "fulfilled-receipt",
   "capacity-conflict",
+  "monthly-finished",
   "monthly-active",
   "monthly-raising",
   "monthly-paused",

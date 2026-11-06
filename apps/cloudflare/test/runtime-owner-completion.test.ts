@@ -10,7 +10,7 @@ vi.mock("@murphai/hosted-execution", async () => ({
   ...await vi.importActual<typeof import("@murphai/hosted-execution")>("@murphai/hosted-execution"),
   emitHostedExecutionStructuredLog: vi.fn(),
 }));
-const input = { source: createHostedExecutionTestEnv(), userId: "synthetic-member", attemptId: "attempt-a", generation: "1", result: {} };
+const input = { source: createHostedExecutionTestEnv(), userId: "synthetic-member", attemptId: "attempt-a", generation: "1" };
 const nonUpdatedStatuses = ["claimed", "existing", "blocked", "stale", "observed", "authorized"] as const satisfies readonly Exclude<HostedRuntimeOwnerResponse["status"], "updated">[];
 
 describe("native completion publication", () => {
@@ -20,8 +20,8 @@ describe("native completion publication", () => {
     vi.mocked(emitHostedExecutionStructuredLog).mockImplementation(buildHostedExecutionStructuredLogRecord);
   });
 
-  it("publishes settled completion and its scheduling hint in one request", async () => {
-    const call = { ...input, settledRunnerContainerName: "synthetic-target", result: { immediateRecheckRequested: true as const } };
+  it("publishes settled completion with the compatibility boolean", async () => {
+    const call = { ...input, settledRunnerContainerName: "synthetic-target" };
     expect(await recordHostedRuntimeOwnerCompletion(call)).toBe(true);
     expectOriginalCommand(call);
     expectObservation("native_invocation", "updated");
@@ -120,10 +120,9 @@ describe("native completion publication", () => {
     expect(exactOuterAcknowledgments).toHaveLength(attemptId === input.attemptId ? 1 : 0);
   });
 
-  it.each(["updated", "stale"] as const)("omits private source, result, owner, target and generation fields for %s", async (status) => {
+  it.each(["updated", "stale"] as const)("omits private source, owner, target and generation fields for %s", async (status) => {
     const call = { ...input, generation: "482761", settledRunnerContainerName: "synthetic-private-target",
-      source: { ...input.source, PRIVATE_SYNTHETIC_VALUE: "synthetic-private-source" },
-      result: { immediateRecheckRequested: true as const, privateResult: "synthetic-private-result" } };
+      source: { ...input.source, PRIVATE_SYNTHETIC_VALUE: "synthetic-private-source" } };
     const response: HostedRuntimeOwnerResponse & { privateResult: string } = {
       cutover: "postgres", status, privateResult: "synthetic-private-response",
       owner: {
@@ -151,7 +150,7 @@ function expectOriginalCommand(call: Parameters<typeof recordHostedRuntimeOwnerC
   expect(commandHostedRuntimeOwner).toHaveBeenCalledExactlyOnceWith({ source: call.source, userId: call.userId,
     command: { operation: "complete", attemptId: call.attemptId, generation: call.generation,
       settledRunnerContainerName: call.settledRunnerContainerName ?? null,
-      immediateRecheckRequested: call.result.immediateRecheckRequested === true } });
+      immediateRecheckRequested: false } });
   expect(vi.mocked(commandHostedRuntimeOwner).mock.calls[0]![0].source).toBe(call.source);
 }
 

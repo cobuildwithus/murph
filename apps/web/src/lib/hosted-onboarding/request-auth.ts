@@ -4,6 +4,8 @@ import type { PrismaClient } from "@prisma/client";
 import { getPrisma } from "../prisma";
 import { assertActiveHostedMemberAccessAllowed } from "./member-access";
 
+// The historical "Active" wrapper checks product admission, including lapsed
+// humans. It grants neither AI capacity nor runtime execution authority.
 export async function requireActiveHostedMemberAuthFromBearerToken(
   request: Request,
   prisma: PrismaClient = getPrisma(),
@@ -13,8 +15,9 @@ export async function requireActiveHostedMemberAuthFromBearerToken(
   return context;
 }
 
-// Legal, account and authority-reducing operations remain available without an
-// entitlement check. Product reads and new authority use the active wrapper.
+// Legal, account and authority-reducing operations remain available without a
+// product-admission check. Product reads and new authority use the wrapper above;
+// spending and runtime work retain their separate AI usage checks.
 export async function requireHostedMemberAuthFromBearerToken(
   request: Request,
   prisma: PrismaClient = getPrisma(),

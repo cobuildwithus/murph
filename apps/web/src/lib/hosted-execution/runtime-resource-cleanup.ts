@@ -148,7 +148,11 @@ export async function claimHostedRuntimeResourceCleanup(input: { prisma: PrismaC
 
 export async function acknowledgeHostedRuntimeOrphanPurge(input: { prisma: PrismaClient; orphan: HostedRuntimeOrphan; now: Date }): Promise<boolean> {
   const { userId, kind, resourceId, revision } = input.orphan;
-  const result = await input.prisma.hostedRuntimeOrphan.updateMany({ where: { userId, kind, resourceId, revision, retiredAt: { not: null }, purgedAt: null }, data: { purgedAt: input.now } });
+  // The row stays as the publication fence, which reads only retiredAt. A wrapped
+  // key is useless once its object is gone. Legacy rows keep their ref: the table
+  // requires it and a repeat purge parses it.
+  const result = await input.prisma.hostedRuntimeOrphan.updateMany({ where: { userId, kind, resourceId, revision, retiredAt: { not: null }, purgedAt: null },
+    data: { purgedAt: input.now, ...(kind === "snapshot" ? { snapshotRef: Prisma.DbNull } : {}) } });
   return result.count === 1;
 }
 

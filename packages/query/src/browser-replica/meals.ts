@@ -35,6 +35,7 @@ export function buildCompanionMealsProjection(vault: VaultReadModel): CompanionM
       proteinGrams: numberOrNull(totals?.proteinGrams),
       carbsGrams: numberOrNull(totals?.carbsGrams),
       fatGrams: numberOrNull(totals?.fatGrams),
+      fiberGrams: numberOrNull(totals?.fiberGrams),
       uploadId: companionMealUploadIdSchema.safeParse(attributes.uploadId).data ?? null,
     };
     const date = toLocalDayKey(eatenAt, timeZone);

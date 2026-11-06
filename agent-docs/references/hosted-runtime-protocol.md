@@ -185,12 +185,12 @@ reconciliation facts are idle. Blocked facts discard the wake; accepted
 processing clears it only when no newer wake arrived during that call. A warm
 invocation compares its invocation provider with the Web-owned provider fact
 returned by its existing mailbox fetch, including empty and usage-denied fetches.
-A mismatch stops that invocation from servicing further wakes, makes its dirty
-workspace checkpoint, and returns the existing `immediateRecheckRequested` edge
-so Cloudflare releases the provider-specific invocation and starts a fresh one.
+A mismatch stops further wakes, checkpoints the dirty workspace and ends the
+invocation. Its ending drives Cloudflare release; final release wakes Temporal
+to admit a fresh invocation.
 When the package invocation settles, Cloudflare closes runtime-wake admission
 and drains the coalesced signal in the same synchronous turn. An already
-accepted wake becomes that same positive immediate-recheck edge; a later wake
+accepted wake becomes a positive immediate-recheck edge; a later wake
 is rejected for the existing outer reconciliation owner.
 A failed best-effort signal
 leaves the durable preference intact; the next invocation or mailbox fetch
@@ -2590,37 +2590,18 @@ workspace snapshots.
 Repeated dirty hints while the same connection is already dirty do not append or signal
 another device-sync wake; dirty coalescing remains the work-queue invariant,
 and any stronger signal-delivery repair must be mailbox-wide. Redacted runtime logs
-remain diagnostic evidence only; they must not be merged into checkpointed
-import status for workflow completion or status projection. The narrow liveness
-exception is the exact `runner.accepted_attempt_failed` event: when web receives
-that metadata-only row, it may send a cooldown-throttled, payload-free
-`runtime_recheck_requested` Temporal signal. That row carries the
-fence `attemptId`/`leaseGeneration` plus metadata-only error diagnostics and,
-in `redactedJson`, the `attemptLivenessProbeOutcome` enum
-(`active`/`inactive`/`mismatch`/`unsupported`/`error`/`timeout`) alongside the derived
-`attemptStillActive`/`fenceCleared` flags. The probe outcome is the primary
-diagnostic for distinguishing transport-only failures against a still-live
-invocation (`active`) from real invocation deaths, and for watching the
-documented RunnerContainer DO-restart residual (`inactive` despite a live
-container suggests the in-memory active-op record was lost to a DO restart).
-`unsupported` means the liveness probe could not run through the expected
-RunnerContainer method; it is not proof that the child stopped. That signal only
-interrupts the workflow's current wait so Temporal re-reads web-owned
-reconciliation facts; it sets no mailbox, manual, browser-vault, lag, or
-device-sync work flag.
-The cooldown is a per-member claim on `HostedWorkspace`
-(`acceptedAttemptFailureRecheckClaimedAt`), taken with one conditional update, so
-concurrent first-failure callbacks produce at most one immediate recheck and
-cannot all suppress each other. Recovery therefore does not depend on the
-diagnostic row having been written or read back: runtime logs stay purely
-diagnostic and remain subject to ordinary retention. The callback reports the
-number of rows actually persisted. If account deletion removes or suspends the
-member before a draining runtime's diagnostic batch arrives, the dedicated
-writer returns a successful zero-row diagnostic result after rechecking primary
-member authority under the subject lock; database failures remain visible.
-Cloudflare only reports the accepted-attempt failure through the existing
-signed runtime-log callback; it does not schedule retries or become a recovery
-orchestrator.
+are diagnostic evidence only: they neither signal recovery nor contribute to
+checkpointed import status, workflow completion, or status projection. They
+remain subject to ordinary retention.
+Historical `runner.accepted_attempt_failed` rows remain parseable. Their
+`attemptLivenessProbeOutcome` recorded a liveness probe result
+(`active`/`inactive`/`mismatch`/`unsupported`/`error`/`timeout`); `unsupported`
+meant the expected probe method was unavailable, not that the child stopped.
+The callback reports the number of rows actually persisted. If account deletion
+removes or suspends the member before a draining runtime's diagnostic batch
+arrives, the dedicated writer returns a successful zero-row diagnostic result
+after rechecking primary member authority under the subject lock; database
+failures remain visible.
 
 Scheduled-job completion diagnostics expose `retryScheduled` after the cron
 owner finalizes durable runtime state. Web prefixes that field as

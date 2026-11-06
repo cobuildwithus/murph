@@ -1,3 +1,8 @@
+const usageGate = vi.hoisted(() => vi.fn(async () => ({ allowed: true })));
+vi.mock("@/src/lib/hosted-execution/usage-allowance", async original => ({
+  ...await original<typeof import("@/src/lib/hosted-execution/usage-allowance")>(), readHostedAiUsageGate: usageGate,
+}));
+
 import { describe, expect, it, vi } from "vitest";
 import { runInNewContext } from "node:vm";
 import { Prisma } from "@prisma/client";

@@ -154,10 +154,11 @@ before status, token exchange, or any health setup:
    alternate-sign-in recovery. On typed `HOSTED_CONSENT_REQUIRED`, use the
    existing bearer-only legal-consent `GET` and `POST` boundary to render and
    record the required launch grants, then retry admission. On typed
-   `HOSTED_ACCESS_REQUIRED`—including a member whose prior billing history
-   makes automatic starter enrollment unsafe—enter the existing
-   billing/activation access recovery instead of falling through to health
-   setup. Typed
+   `HOSTED_ACCESS_REQUIRED`, keep unfinished signup on the existing activation
+   recovery path. Signed-up human members with `canceled`, `paused`, `unpaid`,
+   or `past_due` billing pass product admission with exactly `{ "ok": true }`;
+   admission does not re-enroll them, grant Starter usage, send a welcome, or
+   change billing. AI access and usage remain independently gated. Typed
    `HOSTED_MEMBER_SUSPENDED` enters suspended-account support recovery.
    `COMPANION_ADMISSION_RETRYABLE` keeps the account gate visible with an
    explicit retry, while `COMPANION_ADMISSION_SUPPORT_REQUIRED` enters support
@@ -167,6 +168,10 @@ before status, token exchange, or any health setup:
    and failed recovery remain on the account gate.
 4. After successful admission, read source-scoped status as sync truth and show
    health setup. Status is not account admission and must never replace step 1.
+
+Heartbeat and push-route registration use the same product authority under
+member and sponsorship locks, preserving private-member and consent checks.
+Runtime presence reads retain their independent runtime callback fence.
 
 Admission grants no Junction or device authority. A newly authenticated signup
 must not request a sign-in token, sign in to the Junction SDK, or create or

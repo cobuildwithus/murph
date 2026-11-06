@@ -81,6 +81,23 @@ function request(optIn = true) {
   });
 }
 describe("Worker mailbox fetch/decode composition", () => {
+  it.each([
+    ["", "initial"],
+    [":runtime-wake:12:conversation", "runtime-wake-conversation"],
+    [":runtime-wake:13:system", "runtime-wake-system"],
+    [":pre-assistant-system:1", "pre-assistant-system"],
+  ])("attributes fetch suffix %s without logging its request identity", async (suffix, kind) => {
+    const requestId = `private-attempt-member-value${suffix}`;
+    const port = createHostedWebMailboxPort({
+      boundUserId: wake.userId, timeoutMs: 1000, transport: { mode: "proxy" },
+      fetchImpl: async () => new Response(JSON.stringify({ ...(await mailboxFixture()), items: [] })),
+    });
+    await port.fetch({ ...requestBody, requestId, lanes: [{ lane: kind.endsWith("system") ? "system" : "conversation", importedSeq: "0" }] });
+    const log = mocks.log.mock.calls.find(([entry]) => entry.message === "Hosted runtime mailbox fetch finished.")?.[0];
+    expect(log?.details).toMatchObject({ mailboxFetchKind: kind, mailboxFetchLanes: [kind.endsWith("system") ? "system" : "conversation"] });
+    expect(JSON.stringify(log)).not.toContain("private-attempt-member-value");
+  });
+
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.crypto.mockResolvedValue({ resolveKeyById: async (id: string) => id === rootKeyId ? rootKey : null });

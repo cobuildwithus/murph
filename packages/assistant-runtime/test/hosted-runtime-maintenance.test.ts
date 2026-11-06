@@ -5751,6 +5751,14 @@ describe("runHostedAssistantAutomationLane", () => {
       source: "linq",
       startedAt: "2026-04-08T00:00:01.000Z",
     });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(expect.objectContaining({
+      message: "Hosted assistant provider-start critical path timing.",
+      details: expect.objectContaining({
+        automationGroupAndOperationScopeMs: 1, automationTerminalEvidenceMs: 1,
+        automationSessionPreflightMs: 1, automationCrossSessionContextMs: 0,
+        automationPromptPreparationMs: 0,
+      }),
+    }));
     await Promise.resolve();
     expect(latencyTraceRecord).toHaveBeenCalledWith({
       event: {

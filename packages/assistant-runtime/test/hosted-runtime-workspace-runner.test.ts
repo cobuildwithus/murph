@@ -1476,6 +1476,124 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test.each(["fetch", "persist", "rollback"] as const)("system watcher stop joins %s and preserves retryable progress", async (held) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-system-stop-"));
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const entered = createDeferred<void>();
+    const release = createDeferred<void>();
+    const cancelled = createDeferred<void>();
+    const items: HostedMailboxItem[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const imported: string[] = [];
+    const baseMailbox = createMailboxPort({ items }).mailboxPort;
+    let runner: Promise<unknown> | undefined;
+    let heldOnce = false;
+    let writeSettled = false;
+    let stopSettled = false;
+    const relativePath = "bank/system-stop.md";
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const run = (firstPass: boolean) => runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_system_stop", expectedWorkspaceVersion: "0",
+          leaseGeneration: "1", snapshotRef: null,
+        }),
+        checkpointRuntimeRedactedStatus: createRuntimeRedactedStatusCheckpoint({
+          attemptId: "attempt_synthetic_system_stop", checkpointRequests, leaseGeneration: "1",
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          if (held !== "fetch" && firstPass) {
+            try {
+              await applyCanonicalWriteBatch({
+                audit: { action: "experiment_update", commandName: "test.systemStop", summary: "Synthetic held system write." },
+                operationType: "system_stop_test", summary: "Synthetic held system write",
+                textWrites: [{ content: "persisted\n", overwrite: true, relativePath }], vaultRoot,
+              });
+            } finally {
+              writeSettled = true;
+            }
+          }
+          imported.push(item.item.laneSeq);
+          return { status: "imported" };
+        },
+        kickSystemWork() {},
+        limitPerLane: 10,
+        platform: createPlatform({
+          async artifactPut() {
+            if (!firstPass || heldOnce) return;
+            heldOnce = true;
+            entered.resolve();
+            await release.promise;
+            if (held === "rollback") throw new Error("Synthetic upload failure.");
+          },
+          mailboxPort: {
+            ...baseMailbox,
+            async fetch(request, context) {
+              if (firstPass && held === "fetch" && /:runtime-wake:\d+:system$/u.test(request.requestId)) {
+                entered.resolve();
+                await new Promise<void>((resolve, reject) => {
+                  release.promise.then(resolve);
+                  const abort = () => { cancelled.resolve(); reject(context?.signal?.reason); };
+                  if (context?.signal?.aborted) abort();
+                  else context?.signal?.addEventListener("abort", abort, { once: true });
+                });
+              }
+              return baseMailbox.fetch(request, context);
+            },
+          },
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_system_stop", runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          if (!firstPass) return { progressed: false };
+          items.push(createMailboxItem({ id: "mailbox_system_stop", kind: "member.activated", lane: "system", laneSeq: "1" }));
+          runtimeWakeSignal.notify();
+          await entered.promise;
+          const stop = input.prepareAutoReplyDelivery!().then(() => { stopSettled = true; });
+          if (held === "fetch") {
+            // A missing fetch signal fails promptly, without a hung test or leaked work.
+            await Promise.race([cancelled.promise, new Promise<void>((_, reject) => {
+              const timer = setTimeout(() => {
+                release.resolve();
+                reject(new Error("System fetch was not cancelled by stop."));
+              }, 300);
+              cancelled.promise.then(() => clearTimeout(timer));
+            })]);
+            await stop;
+            assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.system, "0");
+            assert.deepEqual(imported, []);
+          } else {
+            await new Promise((resolve) => setTimeout(resolve, 30));
+            assert.equal(stopSettled, false);
+            assert.equal(writeSettled, false);
+            release.resolve();
+            await stop;
+            assert.equal(writeSettled, true);
+            assert.equal(existsSync(path.join(vaultRoot, relativePath)), held === "persist");
+          }
+          return { progressed: false };
+        },
+        vaultRoot, workspace: createWorkspaceState({ version: "0" }), now: () => TEST_NOW,
+      });
+      runner = run(true);
+      await runner;
+      if (held !== "persist") {
+        assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.system, "0");
+        await run(false);
+      } else {
+        assert.equal(await readFile(path.join(vaultRoot, relativePath), "utf8"), "persisted\n");
+        assert.ok(checkpointRequests.some((request) => request.reason === "canonical_runtime_commit"));
+      }
+      assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.system, "1");
+      assert.deepEqual(imported, ["1"]);
+    } finally {
+      release.resolve();
+      await runner?.catch(() => undefined);
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   test("delivery barrier still yields background maintenance after fresh conversation import", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-coalesced-runtime-wake-"));

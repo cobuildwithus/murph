@@ -2,6 +2,7 @@ import { isHostedMemberSignupWelcomeDeliveryIdentity } from "@murphai/hosted-exe
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import type {
+  HostedExecutionConversationMessageWake,
   HostedExecutionExternalThreadRouteAuthority,
   HostedExecutionLinqExternalThreadRouteAuthority,
   HostedExecutionResolvedLinqDeliveryRoute,
@@ -384,6 +385,86 @@ async function readMatchingPersistedHostedLinqInboundMailboxItem(input: {
   target: string;
   threadIsDirect: boolean;
 }): Promise<MatchingPersistedHostedLinqDirectInbound | null> {
+  const wake = await readPersistedHostedLinqInboundMailboxItem(input);
+  if (
+    !wake
+    || wake.message.channel !== "linq"
+    || wake.message.linqMessage.isFromMe !== false
+    || wake.message.linqMessage.threadIsDirect !== input.threadIsDirect
+    || wake.message.linqMessage.chatId !== input.target
+    || wake.message.linqMessage.messageId !== input.replyToMessageId
+  ) {
+    return null;
+  }
+
+  return {
+    accountLookupKey: normalizeNullable(wake.message.accountLookupKey),
+    directRecipient: wake.message.linqMessage.from,
+    sourceEventId: input.item.dedupeKey,
+    target: wake.message.linqMessage.chatId,
+  };
+}
+
+export async function hasLaterHostedLinqMemberMessage(input: {
+  memberId: string;
+  prisma: HostedLinqEngagementClient;
+  replyToMessageId: string | null;
+  sourceEventId: string;
+  target: string;
+}): Promise<boolean> {
+  const target = normalizeNullable(input.target);
+  const replyToMessageId = normalizeNullable(input.replyToMessageId);
+  if (!target || !replyToMessageId) {
+    return false;
+  }
+
+  return runWithHostedDomainRootUnwrapCache(async () => {
+    const availableAt = new Date();
+    const candidates = await readHostedLinqDirectInboundCandidates({
+      answeredMailboxItemIds: [],
+      availableAt,
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
+    const payloadsByMailboxItemId = await readHostedLinqDirectInboundPayloads({
+      availableAt,
+      candidates,
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
+
+    let laterMemberMessage = false;
+    for (const item of candidates) {
+      if (item.dedupeKey === input.sourceEventId) {
+        return laterMemberMessage;
+      }
+      const wake = await readPersistedHostedLinqInboundMailboxItem({
+        item,
+        memberId: input.memberId,
+        payloadCiphertext:
+          payloadsByMailboxItemId.get(item.id)?.payloadCiphertext ?? null,
+        prisma: input.prisma,
+      });
+      if (
+        wake?.message.channel === "linq"
+        && wake.message.linqMessage.isFromMe === false
+        && wake.message.linqMessage.threadIsDirect === true
+        && wake.message.linqMessage.chatId === target
+        && wake.message.linqMessage.messageId !== replyToMessageId
+      ) {
+        laterMemberMessage = true;
+      }
+    }
+    return false;
+  });
+}
+
+async function readPersistedHostedLinqInboundMailboxItem(input: {
+  item: HostedLinqDirectInboundMailboxItem;
+  memberId: string;
+  payloadCiphertext: string | null;
+  prisma: HostedLinqEngagementClient;
+}): Promise<HostedExecutionConversationMessageWake | null> {
   const item = input.item;
   if (
     item.userId !== input.memberId
@@ -416,21 +497,11 @@ async function readMatchingPersistedHostedLinqInboundMailboxItem(input: {
     || wake.userId !== input.memberId
     || wake.eventId !== item.dedupeKey
     || wake.occurredAt !== item.occurredAt.toISOString()
-    || wake.message.channel !== "linq"
-    || wake.message.linqMessage.isFromMe !== false
-    || wake.message.linqMessage.threadIsDirect !== input.threadIsDirect
-    || wake.message.linqMessage.chatId !== input.target
-    || wake.message.linqMessage.messageId !== input.replyToMessageId
   ) {
     return null;
   }
 
-  return {
-    accountLookupKey: normalizeNullable(wake.message.accountLookupKey),
-    directRecipient: wake.message.linqMessage.from,
-    sourceEventId: item.dedupeKey,
-    target: wake.message.linqMessage.chatId,
-  };
+  return wake;
 }
 
 async function readHostedLinqDirectInboundCandidates(input: {

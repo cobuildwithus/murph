@@ -49,6 +49,8 @@ interface HostedUsageTopUpDialogProps {
   deferTerminalRefreshUntilClose?: boolean;
   initialCheckoutErrorCode?: HostedUsageCreditCapacityConflictCode;
   initialOpen?: boolean;
+  /** The next refresh needs the return, so the page that follows owns removing it. */
+  keepPurchaseReturnQuery?: boolean;
   /** A link from Murph opened this, so it fills the screen as a night page. */
   linkPage?: boolean;
   inert?: boolean;

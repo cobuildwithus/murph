@@ -325,6 +325,7 @@ export interface HostedExecutionContainerStubLike extends Partial<HostedRunnerSl
   ensureProcessing?(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
   startSupervisedInvocation?(input: HostedExecutionContainerInvokeRequest): Promise<{ accepted: true }>;
+  // Keep result: older controllers read input.result, and the outbound route still validates it.
   recordSupervisedRuntimeCompletion?(input: { userId: string; attemptId: string; generation: string; result: HostedWorkspaceInvocationResult }): Promise<HostedRuntimeCompletionReceipt>;
   readSupervisedInvocation?(input: { userId: string }): Promise<RunnerInvocationReceipt | null>;
   beginRuntimeUsageSettlement?(input: { userId: string; attemptId: string; generation: string; reportId: string }): Promise<boolean>;
@@ -1042,14 +1043,13 @@ export class RunnerContainer extends Container {
     if (receipts.register(identity, { workspaceVersion: request.workspaceVersion,
       platformAiUsageAllowed: authority.owner.platformAiUsageAllowed }) === "existing") return { accepted: true };
     const result = this.invoke(payload);
-    this.ctx.waitUntil(result.then(async (completed) => {
-      if (!receipts.complete(identity, completed.immediateRecheckRequested === true)) return;
+    this.ctx.waitUntil(result.then(async () => {
+      if (!receipts.complete(identity)) return;
       const recorded = await recordHostedRuntimeOwnerCompletion({
         source: this.environment,
         userId: payload.userId,
         attemptId: payload.job.request.attemptId,
         generation: payload.job.request.leaseGeneration,
-        result: completed,
         settledRunnerContainerName: target.slotName,
       });
       if (recorded) await this.onRuntimeCompletionRecorded({
@@ -1072,8 +1072,10 @@ export class RunnerContainer extends Container {
 
   async recordSupervisedRuntimeCompletion(input: { userId: string; attemptId: string; generation: string; result: HostedWorkspaceInvocationResult }): Promise<HostedRuntimeCompletionReceipt> {
     this.authorizeBoundUser(input.userId);
-    if (!this.requireInvocationReceiptStore().complete(input, input.result.immediateRecheckRequested === true)) return { completed: false, reason: "native_receipt_mismatch" };
-    const completed = await recordHostedRuntimeOwnerCompletion({ ...input, source: this.environment });
+    if (!this.requireInvocationReceiptStore().complete(input)) return { completed: false, reason: "native_receipt_mismatch" };
+    const completed = await recordHostedRuntimeOwnerCompletion({
+      source: this.environment, userId: input.userId, attemptId: input.attemptId, generation: input.generation,
+    });
     if (completed) await this.onRuntimeCompletionRecorded({ userId: input.userId, attemptId: input.attemptId, leaseGeneration: input.generation });
     return completed ? { completed: true } : { completed: false, reason: "canonical_completion_rejected" };
   }
@@ -2462,7 +2464,6 @@ export class RunnerContainer extends Container {
         await recordHostedRuntimeOwnerCompletion({
           source: this.environment, userId: binding.userId,
           attemptId: receipt.attemptId, generation: receipt.generation,
-          result: receipt.immediateRecheckRequested ? { immediateRecheckRequested: true } : {},
           settledRunnerContainerName: binding.slotName,
         });
       }

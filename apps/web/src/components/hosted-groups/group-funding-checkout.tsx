@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState, type ReactNode, type Ref } from "react";
 import { useRouter } from "next/navigation";
-import { MessageCircle } from "lucide-react";
 
 import {
   type HostedUsageTopUpActivePurchase,
@@ -26,8 +25,8 @@ import {
   GroupFundingDial,
   type GroupFundingDialOption,
 } from "./group-funding-dial";
+import { GroupFundingOpenMessages } from "./group-funding-open-messages";
 import {
-  LINK_PAGE_PILL_CLASS,
   LinkPageError,
   LinkPageLink,
   LinkPagePill,
@@ -80,6 +79,7 @@ function GroupFundingCheckout({
   initialMode,
   initialMonthlyCapMinor,
   inert = false,
+  keepPurchaseReturnQuery,
   monthly = null,
   oneTimeOffers,
   payerMemberId,
@@ -93,6 +93,8 @@ function GroupFundingCheckout({
   initialMode?: GroupFundingMode;
   initialMonthlyCapMinor?: HostedGroupSponsorshipMonthlyCapMinor;
   inert?: boolean;
+  /** A confirmed activation refreshes into the sponsor card, which ends the return. */
+  keepPurchaseReturnQuery?: boolean;
   monthly?: GroupFundingMonthlyPlan | null;
   oneTimeOffers: readonly HostedUsageTopUpOffer[];
   payerMemberId: string;
@@ -122,6 +124,7 @@ function GroupFundingCheckout({
     checkoutUrl,
     inert,
     initialOpen: true,
+    keepPurchaseReturnQuery,
     offers: monthly && mode === "monthly" ? [monthly.offer] : oneTimeOffers,
     payerMemberId,
     purchaseReturn,
@@ -719,14 +722,7 @@ function GroupFundingPurchaseStatus({
           {checkoutError ? (
             <LinkPageError>{checkoutError}</LinkPageError>
           ) : null}
-          {status.next === "messages" ? (
-            // Messages has no deep link into an existing group thread, so the
-            // group follow-up can only open the app itself.
-            <a className={LINK_PAGE_PILL_CLASS} href="sms:">
-              <MessageCircle aria-hidden="true" className="size-5" />
-              Open Messages
-            </a>
-          ) : null}
+          {status.next === "messages" ? <GroupFundingOpenMessages /> : null}
           {status.next === "start_over" ? (
             <LinkPagePill onClick={onStartOver}>Start over</LinkPagePill>
           ) : null}

@@ -1167,9 +1167,16 @@ Existing product admission, delivery and runtime safety rules still apply.
   other successfully planned outcome settles only an untouched empty reservation
   before signup or alternate-route egress. A caught planning failure abandons
   only this request's winning generation reservation. Settlement names its exact
-  attemptedAt version under the chat lock; an exact replay without that version
-  can settle only a stale empty reservation. Sealed or held obligations remain
-  unresolved, and an absent row stays absent. The
+  attemptedAt version under the chat lock. First-turn claims become stale after
+  five minutes: one bounded provider POST does not need the fifteen-minute
+  usage-notice interval. Exact replay may reclaim with the same provider key;
+  abandonment without the owning version, a later event, or runtime egress may
+  skip only a stale empty reservation by row id and exact attemptedAt. A missed skip stays blocked, and
+  a failed enclosing plan rolls the skip back. The old owner's dispatch cannot
+  seal or send after a skip; exact replay takes the ordinary path. The chat check
+  uses one ledger read and at most one set-based write, matching each stale row's
+  exact attempt; a clean chat performs no write. Later-event and egress checks
+  never close sealed or held obligations, and an absent row stays absent. The
   request retains every source part type in order, so
   multiple text parts remain multipart even when their bounded classifier text
   is joined. The classifier keeps its 2,000-character bound, but instant reply
@@ -1189,8 +1196,15 @@ Existing product admission, delivery and runtime safety rules still apply.
   cannot reopen an untouched empty skip or a certified first-dispatch rejection.
   Only the winning first dispatch can atomically certify rejection and clear its
   payload with its exact attemptedAt version. Rejected retries retain the sealed
-  body, but Web does not resend them; they hold only their exact input without
-  blocking later messages in the chat.
+  body, but Web does not resend them. A held row keeps vetoing every real send
+  for its exact input and any turn with no later member message. When a later
+  member message exists, a turn-commit probe may pass even if that message does
+  not join the held input's turn. A real send still aimed at the held input ends
+  as superseded, with no retry, failure-recovery input or recovery wake. Intent
+  or idempotency check-only requests use the same terminal contract; reaction
+  and progress purposes retain the retryable veto. A reply to the later message
+  can repeat part of an earlier reply that landed, but never sends again for
+  the held input.
   Legacy skipped payloads, uncertified empty
   failures, and incomplete tuples hold only their exact input. This template-specific
   rule does not change signup or notice retries.

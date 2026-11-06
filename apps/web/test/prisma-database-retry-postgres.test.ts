@@ -109,7 +109,8 @@ describe.skipIf(!runPostgresRetryProof)(
         }
 
         // Prisma has given up, but the discarded start is still first in the
-        // pool queue. It takes the connection and runs BEGIN before this write.
+        // pool queue. It takes the connection, runs BEGIN, then rolls itself
+        // back before this write, so the release guard has nothing to close.
         const rowId = randomUUID();
         await expect(prisma.$executeRawUnsafe(
           `insert into "${table}" (id) values ($1)`,
@@ -119,7 +120,7 @@ describe.skipIf(!runPostgresRetryProof)(
         await expect(reader.$queryRawUnsafe(`select id from "${table}"`))
           .resolves.toEqual([{ id: rowId }]);
         expect(callbackRuns).toBe(0);
-        expect(loggedCategories(warn)).toEqual(["transaction_start_timeout", "transaction_left_open"]);
+        expect(loggedCategories(warn)).toEqual(["transaction_start_timeout"]);
       } finally {
         await prisma.$disconnect();
         await reader.$executeRawUnsafe(`drop table if exists "${table}"`);

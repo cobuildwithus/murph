@@ -110,3 +110,18 @@ export function isHostedStripeEffectPendingError(
   return isHostedOnboardingError(error)
     && error.code === HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE;
 }
+
+/** Server failures after input parsing must leave the request retryable. */
+export async function withRetryableServerFailures<T>(run: () => Promise<T>, unexpectedMessage = "Internal error."): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (isHostedOnboardingError(error)) {
+      if (error.httpStatus < 500 || error.retryable) throw error;
+      throw hostedOnboardingError({ code: error.code, httpStatus: error.httpStatus,
+        message: error.message, details: error.details, retryable: true, cause: error });
+    }
+    throw hostedOnboardingError({ code: "INTERNAL_ERROR", httpStatus: 500,
+      message: unexpectedMessage, retryable: true, cause: error });
+  }
+}

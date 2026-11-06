@@ -36,7 +36,6 @@ const mocks = vi.hoisted(() => ({
   isHostedRuntimeLogDatabaseConfigured: vi.fn(),
   listHostedRuntimeLogs: vi.fn(),
   publishLatestBrowserVaultReplicaRef: vi.fn(),
-  claimHostedAcceptedAttemptFailureRecheck: vi.fn(),
   readHostedMailboxConsumedSeqByLane: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
@@ -118,8 +117,6 @@ vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", async (importOr
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
   checkpointHostedWorkspace: mocks.checkpointHostedWorkspace,
   publishLatestBrowserVaultReplicaRef: mocks.publishLatestBrowserVaultReplicaRef,
-  claimHostedAcceptedAttemptFailureRecheck:
-    mocks.claimHostedAcceptedAttemptFailureRecheck,
   readHostedWorkspace: mocks.readHostedWorkspace,
 }));
 
@@ -364,7 +361,6 @@ describe("hosted runtime internal web routes", () => {
       solAvailable: false,
     });
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveHostedMemberRecord());
-    mocks.claimHostedAcceptedAttemptFailureRecheck.mockResolvedValue(false);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
       status: "allowed",
     });
@@ -2968,7 +2964,7 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
-  it("acknowledges stale runtime telemetry without persistence or recovery", async () => {
+  it("acknowledges stale runtime telemetry without persistence or a runtime signal", async () => {
     mocks.requireHostedCloudflareCallbackRequest.mockRejectedValueOnce(hostedOnboardingError({
       code: "HOSTED_RUNTIME_OWNER_STALE",
       httpStatus: 409,
@@ -2983,7 +2979,6 @@ describe("hosted runtime internal web routes", () => {
       expect(response.status).toBe(200);
       expect(parseHostedRuntimeLogResponse(await response.json())).toEqual({ loggedCount: 0 });
       expect(mocks.recordHostedRuntimeLogs).not.toHaveBeenCalled();
-      expect(mocks.claimHostedAcceptedAttemptFailureRecheck).not.toHaveBeenCalled();
       expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
       expect(mocks.after).not.toHaveBeenCalled();
       expect(warn).not.toHaveBeenCalled();
@@ -3008,7 +3003,7 @@ describe("hosted runtime internal web routes", () => {
       expect(response.status).toBe(httpStatus);
       expect(await response.json()).toMatchObject({ error: { code } });
       expect(mocks.recordHostedRuntimeLogs).not.toHaveBeenCalled();
-      expect(mocks.claimHostedAcceptedAttemptFailureRecheck).not.toHaveBeenCalled();
+      expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
       expect(mocks.after).not.toHaveBeenCalled();
     } finally {
       warn.mockRestore();
@@ -3126,7 +3121,6 @@ describe("hosted runtime internal web routes", () => {
       })],
       userId: "member_routes_1",
     }));
-    expect(mocks.claimHostedAcceptedAttemptFailureRecheck).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
 
     const rejectedResponse = await runtimeLogRoute.POST(jsonRequest(
@@ -3749,9 +3743,8 @@ describe("hosted runtime internal web routes", () => {
     },
   );
 
-  it("persists a failed processing summary without triggering accepted-attempt recovery", async () => {
+  it("persists a failed processing summary without a runtime signal", async () => {
     mocks.recordHostedRuntimeLogs.mockResolvedValue(1);
-    mocks.claimHostedAcceptedAttemptFailureRecheck.mockResolvedValue(true);
     const entry = {
       at: FIXED_NOW,
       component: "runner",
@@ -3772,154 +3765,37 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(200);
     expect(parseHostedRuntimeLogResponse(await response.json())).toEqual({ loggedCount: 1 });
     expect(mocks.recordHostedRuntimeLogs).toHaveBeenCalledWith(expect.objectContaining({ entries: [entry] }));
-    expect(mocks.claimHostedAcceptedAttemptFailureRecheck).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
   });
 
-  it("signals a stateless runtime recheck after an accepted runtime attempt failure log", async () => {
-    mocks.recordHostedRuntimeLogs.mockResolvedValue(1);
-    mocks.claimHostedAcceptedAttemptFailureRecheck.mockResolvedValue(true);
+  it("persists duplicate historical accepted-attempt failure logs without a runtime signal", async () => {
+    mocks.recordHostedRuntimeLogs.mockResolvedValue(2);
+    const entry = {
+      at: FIXED_NOW,
+      component: "runner",
+      errorCode: "runner_child_failed",
+      eventCode: "runner.accepted_attempt_failed",
+      level: "warn",
+      phase: "error",
+      redactedJson: {
+        safeErrorMessage: "Runner child process failed.",
+      },
+      workspaceVersion: "5",
+    };
 
     const response = await runtimeLogRoute.POST(jsonRequest(
       "/api/internal/hosted-runtime/log",
-      {
-        entries: [
-          {
-            at: FIXED_NOW,
-            component: "runner",
-            errorCode: "runner_child_failed",
-            eventCode: "runner.accepted_attempt_failed",
-            level: "warn",
-            phase: "error",
-            redactedJson: {
-              safeErrorMessage: "Runner child process failed.",
-            },
-            workspaceVersion: "5",
-          },
-        ],
-      },
+      { entries: [entry, entry] },
     ));
 
     expect(response.status).toBe(200);
-    expect(parseHostedRuntimeLogResponse(await response.json())).toEqual({
-      loggedCount: 1,
-    });
-    // Recovery ownership is a workspace claim, not an election among the log
-    // rows this request happened to insert.
-    expect(mocks.claimHostedAcceptedAttemptFailureRecheck).toHaveBeenCalledWith({
-      cooldownMs: 30_000,
+    expect(parseHostedRuntimeLogResponse(await response.json())).toEqual({ loggedCount: 2 });
+    expect(mocks.recordHostedRuntimeLogs).toHaveBeenCalledOnce();
+    expect(mocks.recordHostedRuntimeLogs).toHaveBeenCalledWith(expect.objectContaining({
+      entries: [entry, entry],
       userId: "member_routes_1",
-    });
-    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
-      userId: "member_routes_1",
-    });
-  });
-
-  it("still claims and signals when the diagnostic batch write fails", async () => {
-    // Recovery must not be gated on the diagnostic insert: the runner's log
-    // writer is best effort and never retries a failed callback.
-    mocks.recordHostedRuntimeLogs.mockRejectedValue(
-      new Error("Synthetic runtime log insert failure."),
-    );
-    mocks.claimHostedAcceptedAttemptFailureRecheck.mockResolvedValue(true);
-
-    await expect(runtimeLogRoute.POST(jsonRequest(
-      "/api/internal/hosted-runtime/log",
-      {
-        entries: [
-          {
-            at: FIXED_NOW,
-            component: "runner",
-            errorCode: "runner_child_failed",
-            eventCode: "runner.accepted_attempt_failed",
-            level: "warn",
-            phase: "error",
-            redactedJson: {
-              safeErrorMessage: "Runner child process failed.",
-            },
-            workspaceVersion: "5",
-          },
-        ],
-      },
-    ))).resolves.toBeDefined();
-
-    expect(mocks.claimHostedAcceptedAttemptFailureRecheck).toHaveBeenCalledTimes(1);
-    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(1);
-    expect(
-      mocks.signalHostedRuntimeRecheckRuntime.mock.invocationCallOrder[0]!,
-    ).toBeLessThan(mocks.recordHostedRuntimeLogs.mock.invocationCallOrder[0]!);
-  });
-
-  it("cooldowns accepted runtime attempt failure recheck signals behind the workspace claim", async () => {
-    mocks.recordHostedRuntimeLogs.mockResolvedValue(1);
-    mocks.claimHostedAcceptedAttemptFailureRecheck.mockResolvedValue(false);
-
-    const response = await runtimeLogRoute.POST(jsonRequest(
-      "/api/internal/hosted-runtime/log",
-      {
-        entries: [
-          {
-            at: FIXED_NOW,
-            component: "runner",
-            errorCode: "runner_child_failed",
-            eventCode: "runner.accepted_attempt_failed",
-            level: "warn",
-            phase: "error",
-            redactedJson: {
-              safeErrorMessage: "Runner child process failed.",
-            },
-            workspaceVersion: "5",
-          },
-        ],
-      },
-    ));
-
-    expect(response.status).toBe(200);
+    }));
     expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
-    // The diagnostics still persist; only the recovery signal is suppressed.
-    expect(mocks.recordHostedRuntimeLogs).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not fail runtime log writes when the recheck signal is unavailable", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    mocks.recordHostedRuntimeLogs.mockResolvedValue(1);
-    mocks.claimHostedAcceptedAttemptFailureRecheck.mockResolvedValue(true);
-    mocks.signalHostedRuntimeRecheckRuntime.mockRejectedValueOnce(
-      new Error("Temporal unavailable"),
-    );
-
-    try {
-      const response = await runtimeLogRoute.POST(jsonRequest(
-        "/api/internal/hosted-runtime/log",
-        {
-          entries: [
-            {
-              at: FIXED_NOW,
-              component: "runner",
-              errorCode: "runner_child_failed",
-              eventCode: "runner.accepted_attempt_failed",
-              level: "warn",
-              phase: "error",
-              redactedJson: {
-                safeErrorMessage: "Runner child process failed.",
-              },
-              workspaceVersion: "5",
-            },
-          ],
-        },
-      ));
-
-      expect(response.status).toBe(200);
-      expect(warnSpy).toHaveBeenCalledWith(
-        "Hosted runtime recheck signal failed after accepted-attempt failure log.",
-        expect.objectContaining({
-          errorCode: "HOSTED_RUNTIME_RECHECK_SIGNAL_FAILED",
-          errorMessage: "Temporal unavailable",
-        }),
-      );
-    } finally {
-      warnSpy.mockRestore();
-    }
   });
 
   it("returns redacted status from workspace state, mailbox high-water, and structured logs", async () => {

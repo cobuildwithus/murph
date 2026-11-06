@@ -170,6 +170,28 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it("keeps activation available when billing lapses", async () => {
+      const fixture = await createFixture();
+
+      try {
+        await fixture.observer.hostedAccountGroup.update({
+          data: { billingStatus: HostedBillingStatus.canceled },
+          where: { id: fixture.groupId },
+        });
+        await fixture.observer.hostedMember.update({
+          data: { billingStatus: HostedBillingStatus.canceled },
+          where: { id: fixture.beneficiaryMemberId },
+        });
+
+        await expect(activateMealPhotoCaptureEnrollmentForScopedToken({
+          prisma: fixture.activation,
+          token: fixture.token,
+        })).resolves.toEqual({ activated: true });
+      } finally {
+        await cleanupFixture(fixture);
+      }
+    });
+
     it.each([
       "consent_withdrawal",
       "direct_access",
@@ -512,7 +534,7 @@ async function applyMemberLoss(input: {
   }
   if (input.memberLoss === "direct_access") {
     await input.tx.hostedMember.update({
-      data: { billingStatus: HostedBillingStatus.canceled },
+      data: { billingStatus: HostedBillingStatus.incomplete },
       where: { id: input.fixture.beneficiaryMemberId },
     });
     return;
@@ -568,7 +590,7 @@ async function expectMemberLossPersisted(input: {
     await expect(input.fixture.observer.hostedMember.findUniqueOrThrow({
       select: { billingStatus: true },
       where: { id: input.fixture.beneficiaryMemberId },
-    })).resolves.toEqual({ billingStatus: HostedBillingStatus.canceled });
+    })).resolves.toEqual({ billingStatus: HostedBillingStatus.incomplete });
     return;
   }
   await expect(input.fixture.observer.hostedMealPhotoCaptureEnrollment.findUniqueOrThrow({

@@ -108,6 +108,10 @@ export function createHostedWebMailboxPort(input: {
         emitHostedExecutionStructuredLog({
           component: "mailbox",
           details: {
+            mailboxFetchKind: /:runtime-wake:\d+:(conversation|system)$/u.test(request.requestId)
+              ? `runtime-wake-${request.requestId.endsWith(":conversation") ? "conversation" : "system"}`
+              : /:pre-assistant-system:\d+$/u.test(request.requestId) ? "pre-assistant-system" : "initial",
+            mailboxFetchLanes: request.lanes.map(({ lane }) => lane),
             mailboxFetchCorrelationId: correlationId,
             mailboxRuntimeFetchStartedAtEpochMs: startedAtEpochMs,
             mailboxRuntimeResponseDecodedAtEpochMs: decodedAtEpochMs,

@@ -28,6 +28,12 @@ selection (`follow_up_context`, `assistant_context_snapshot_refresh`, and
 validation preserve the numeric fields and stage values. Skipped refreshes remain
 `null`; timing does not change follow-up expiry, authority, or resume decisions.
 
+Provider plans also carry `threadRotationReason`: `profile_isolated`,
+`native_resume_disabled`, `binding_absent`, `route_mismatch`, or
+`contract_mismatch` (in that decision order). A resumed plan has no rotation
+reason. This metadata follows the existing trace callback to hosted logging;
+the shared engine never writes structured logs to stdout.
+
 ## Codex failure telemetry
 
 Auto-reply failure context retains `codexErrorInfoPresent` only as a boolean,

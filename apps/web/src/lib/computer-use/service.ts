@@ -9,6 +9,7 @@ import {
 } from "@murphai/hosted-execution/computer-use";
 
 import { isHostedOnboardingError } from "../hosted-onboarding/errors";
+import { readHostedAiUsageGate } from "../hosted-execution/usage-allowance";
 import { readHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { computerUseConflictError, computerUseError, computerUseNotFoundError } from "./errors";
 import {
@@ -1007,6 +1008,9 @@ export class ComputerUseService {
       return { kind: "expired" };
     }
 
+    // This browser-authenticated continuation can launch a new Kernel login
+    // or task browser without returning through runtime admission.
+    await assertComputerSignInUsageAllowed(input.memberId);
     let claimed: ComputerHandoffRecord | null = null;
     let staleClaimUpdatedAt: Date | null = null;
     if (handoff.status === "checkpointing") {
@@ -4359,6 +4363,17 @@ function shouldDeleteDeterministicBrowserName(
     return false;
   }
   return run.expiresAt.getTime() >= now.getTime() - COMPUTER_DETERMINISTIC_BROWSER_ACCOUNT_DELETE_GRACE_MS;
+}
+
+async function assertComputerSignInUsageAllowed(memberId: string): Promise<void> {
+  const usage = await readHostedAiUsageGate({ memberId });
+  if (!usage.allowed) {
+    throw computerUseError({
+      code: "HOSTED_COMPUTER_USAGE_REQUIRED",
+      httpStatus: 403,
+      message: "AI usage is unavailable for computer sign-in.",
+    });
+  }
 }
 
 function normalizeKernelNameSegment(value: string): string {

@@ -556,6 +556,14 @@ describe("prisma module", () => {
     },
     {
       code: "08P01",
+      expectedCategory: "connection_limit",
+      knownRequestError: true,
+      message: PGBOUNCER_MAX_CLIENT_CONN_MESSAGE,
+      nested: false,
+      scenario: "P2039 known request error with a driver adapter cause",
+    },
+    {
+      code: "08P01",
       expectedCategory: null,
       message: "invalid frontend message type; private-password",
       nested: false,
@@ -578,6 +586,7 @@ describe("prisma module", () => {
   ])("handles the PgBouncer max-client classifier for $scenario", async ({
     code,
     expectedCategory,
+    knownRequestError,
     message,
     nested,
   }) => {
@@ -603,9 +612,15 @@ describe("prisma module", () => {
       },
       name: "DriverAdapterError",
     });
-    const operationFailure = nested
-      ? Object.assign(new Error("adapter failure"), { cause: driverFailure })
-      : driverFailure;
+    const operationFailure = knownRequestError
+      ? Object.assign(new Error("adapter failure"), {
+        name: "PrismaClientKnownRequestError",
+        code: "P2039",
+        meta: { driverAdapterError: { cause: driverFailure.cause } },
+      })
+      : nested
+        ? Object.assign(new Error("adapter failure"), { cause: driverFailure })
+        : driverFailure;
 
     await expect(extension.query.$allOperations({
       args: {},

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { companionPresence, companionHeartbeatSchema } from "@murphai/hosted-execution/companion-presence";
 const m = vi.hoisted(() => ({ prisma: vi.fn(), access: vi.fn(), consent: vi.fn(), runtime: vi.fn() }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: m.prisma }));
-vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({ requireHostedRuntimeActiveAccessForUpdateTx: m.access }));
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({ assertActiveHostedMemberAccessAllowed: m.access }));
 vi.mock("@/src/lib/legal/consent", () => ({ assertHostedHistoricalLaunchConsentGranted: m.consent }));
 vi.mock("@/src/lib/hosted-execution/runtime-owner", () => ({ requireHostedRuntimeCallbackTx: m.runtime }));
 import { recordCompanionHeartbeat, readRuntimeCompanionPresence } from "@/src/lib/companion/presence";
@@ -19,7 +19,7 @@ describe("companion contact evidence", () => {
     expect(companionHeartbeatSchema.safeParse({ state: "foreground", observedAt: now.toISOString() }).success).toBe(false);
   });
   it("uses server receipt time under member authority and preserves foreground evidence on background contact", async () => {
-    const tx = { hostedThreadContainer: { findUnique: vi.fn().mockResolvedValue(null) },
+    const tx = { $queryRaw: vi.fn().mockResolvedValue([]), hostedThreadContainer: { findUnique: vi.fn().mockResolvedValue(null) },
       hostedMember: { update: vi.fn(), findUniqueOrThrow: vi.fn().mockResolvedValue({ companionLastContactAt: null, companionLastForegroundAt: null }) } };
     m.prisma.mockReturnValue({ $transaction: async (run: (tx: unknown) => Promise<unknown>) => run(tx) });
     await recordCompanionHeartbeat("synthetic", "foreground");

@@ -1,3 +1,4 @@
+import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 import { randomUUID } from "node:crypto";
 import sharp from "sharp";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -34,11 +35,11 @@ describe.skipIf(!enabled)("shared game progress canonical PostgreSQL proof", () 
   beforeEach(() => { vi.stubEnv("VERCEL_ENV", "preview"); imageControl.putGameImage.mockClear(); });
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
   afterAll(async () => {
-    await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: members } } });
+    await cleanupGameFixtures(getPrisma(), members);
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: members } } }); });
   it("projects five extended legacy games without truncating their per-miss tickets", async () => {
-    const { a, b, room, gameId: initialId, db } = await fixture();
-    await db.game.delete({ where: { id: initialId } });
+    const { a, b, room, db } = await fixture();
+    await cleanupGameFixtures(db, [a]);
     const dayOne = new Date(`${addDays(gameLocalDate(new Date(), "UTC"), -366)}T00:00:00Z`);
     const stakes = [0, 1, 2].map((index) => ({ key: `legacy-${index}`, kind: "per_miss" }));
     for (let round = 0; round < 5; round += 1) {

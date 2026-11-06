@@ -2352,6 +2352,16 @@ test.each([
     suspendedAt: null,
   },
   {
+    billingStatus: HostedBillingStatus.paused,
+    label: "paused",
+    suspendedAt: null,
+  },
+  {
+    billingStatus: HostedBillingStatus.unpaid,
+    label: "unpaid",
+    suspendedAt: null,
+  },
+  {
     billingStatus: HostedBillingStatus.past_due,
     label: "inactive",
     suspendedAt: null,
@@ -2361,7 +2371,7 @@ test.each([
     label: "suspended",
     suspendedAt: new Date("2026-07-10T12:00:00.000Z"),
   },
-])("SettingsPage hides Edge upgrade actions for an $label paid Pulse member", async ({
+])("SettingsPage preserves billing recovery but hides Edge upgrades for a $label paid Pulse member", async ({
   billingStatus,
   suspendedAt,
 }) => {
@@ -2401,6 +2411,7 @@ test.each([
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
     expect.objectContaining({
+      canManageBilling: suspendedAt === null,
       canUpgradeToEdge: false,
       usageTopUpOffers: [],
       usageTopUpPurchaseReturn: {
