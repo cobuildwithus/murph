@@ -4,7 +4,7 @@ import {
   FamilyInviteScreen,
   type FamilyInviteView,
 } from "@/src/components/family/family-invite-screen";
-import { JoinInviteCenteredShell } from "@/src/components/hosted-onboarding/join-invite-shell";
+import { LinkPageFrame } from "@/src/components/link-page/link-page-shell";
 import { readConfiguredMurphPhoneNumbers } from "@/src/lib/device-sync/messaging-return-destination";
 import {
   buildHostedFamilyInviteMessagesHref,
@@ -50,13 +50,13 @@ export default async function FamilyAcceptPage({
   ]);
 
   return (
-    <JoinInviteCenteredShell>
+    <LinkPageFrame>
       <FamilyInviteScreen
         authenticated={auth.authenticated}
         messagesAcceptHref={resolveMessagesAcceptHref(view)}
         view={view}
       />
-    </JoinInviteCenteredShell>
+    </LinkPageFrame>
   );
 }
 

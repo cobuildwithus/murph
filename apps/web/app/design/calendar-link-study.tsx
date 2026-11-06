@@ -17,12 +17,12 @@ export function CalendarLinkStudy() {
   const payload = buildCalendarEventUrl(EVENT).split("/").at(-1) ?? "";
 
   return (
-    <div className="grid gap-8" data-design-section="calendar-link" id="calendar-link">
+    <div className="grid gap-8 lg:grid-cols-2" data-design-section="calendar-link" id="calendar-link">
       <div>
         <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          Valid invite · phone and desktop
+          The invite · a page off the calendar
         </p>
-        <div className="overflow-hidden border border-border">
+        <div className="flex min-h-[46rem] max-w-[402px] flex-col overflow-hidden rounded-[2rem] bg-[#1C1915]">
           <CalendarEventPage
             autoOpen={false}
             downloadHref="#calendar-link"
@@ -34,9 +34,9 @@ export function CalendarLinkStudy() {
       </div>
       <div>
         <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          Invalid link recovery
+          Broken link
         </p>
-        <div className="overflow-hidden border border-border">
+        <div className="flex min-h-[46rem] max-w-[402px] flex-col overflow-hidden rounded-[2rem] bg-[#1C1915]">
           <CalendarLinkUnavailable embedded />
         </div>
       </div>

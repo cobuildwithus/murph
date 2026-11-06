@@ -487,17 +487,25 @@ navigation or as a substitute for ordinary buttons.
 
 The group join consent checkpoint may request the complete selectable sharing
 catalog. Keep every requested choice selected for a new invitee until they
-explicitly uncheck it, state the selected count when the catalog is long, and
-place the checklist in one bounded, keyboard-scrollable region so the primary
-join action remains visible. Beside a long-catalog count, include one quiet
-button that clears all optional sharing so joining without health or email
-sharing is a single action; members can then re-enable exact choices below.
-Each row stays a full-width checkbox card with its
-plain-language scope description; do not compress a consequential permission
-into a dense table, hide choices behind categories, or imply that the defaults
-have already been granted. Existing members reopen the same surface with only
-their currently active shares selected, and the list includes both the current
-group request and every older share that member can still revoke.
+explicitly uncheck it, state the selected count, and place the checklist in one
+bounded, keyboard-scrollable region so the primary join action remains visible.
+Beside the count, include one quiet `Clear all` button so joining without health
+or email sharing is a single action; members can then re-enable exact choices
+below. An existing member's short list leaves it out, because they stop sharing
+one row at a time.
+
+Each row stays a full-width checkbox card that shows the choice's name. The exact
+plain-language scope description is one tap away: `Details` opens a drawer that
+lists every choice with its description word for word. Do not compress a
+consequential permission into a dense table, hide choices behind categories, or
+imply that the defaults have already been granted. Existing members reopen the
+same surface with only their currently active shares selected, and the list
+includes both the current group request and every older share that member can
+still revoke.
+
+Joining always shares the member's name, so the visible sentence says so in every
+state, including an invite with no optional choices. Do not rely on Details for
+it, because Details only appears when there are choices.
 
 ### Link Pages
 
@@ -511,9 +519,10 @@ show the cream page beneath. Render `LinkPageFrame` at page level; the catalog
 uses `LinkPageSurface`, because the frame repaints the whole document.
 
 Give a page one object where the funding dial sits, when it has something real
-to show: `LinkPageSheet` for a file or a record, a ticket for an invite, and
-`LinkPageDots`, the logo's dot grid, while the page is working on something. Do
-not add one to a page with nothing to act on, such as a dead link.
+to show: `LinkPageSheet` for a file or a record, a ticket for an invite, a
+calendar page for a date, and `LinkPageDots`, the logo's dot grid, while the page
+is working on something. Do not add one to a page with nothing to act on, such as
+a dead link.
 
 A choice between plans is one row per plan and one pill that names the selected
 plan. The rows lock while that plan's checkout runs, so the plan that opens is
@@ -521,12 +530,14 @@ always the one on the pill, and coming back from checkout restores them.
 
 A private link keeps its reason for being opened: `LinkPageSignIn` puts the
 sign-in form on the page under a headline that names the task, and finishes the
-way the sign-in dialog does. Never show the private subject of a link, such as
-a file name, before sign-in.
+way the sign-in dialog does unless the page owns its own finish, as group join
+and group start do. Never show the private subject of a link, such as a file
+name, before sign-in.
 
 Consent wording, sharing descriptions, and privacy promises keep their exact
-words on these pages. An approval keeps the server's sentence word for word,
-because it is what the member is authorizing.
+words on these pages. A group's sharing descriptions keep them in the Details
+drawer. An approval keeps the server's sentence word for word, because it is
+what the member is authorizing.
 
 ### Group Usage Funding
 

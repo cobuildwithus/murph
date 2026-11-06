@@ -9,10 +9,10 @@ import {
 export interface CalendarEventPresentation {
   dateLabel: string;
   day: string;
-  endsLabel: string;
   month: string;
-  startsLabel: string;
+  timeLabel: string;
   timeZoneLabel: string;
+  weekday: string;
 }
 
 export function buildICalendar(
@@ -64,15 +64,19 @@ export function presentCalendarEvent(
     && startsAt.month === endsAt.month
     && startsAt.day === endsAt.day;
 
+  const startsLabel = formatWallTime(startsAt);
+  const endsLabel = formatWallTime(endsAt);
+  const oneMeridiem = sameDay && (startsAt.hour < 12) === (endsAt.hour < 12);
+
   return {
     dateLabel: formatWallDate(startsAt, "long"),
     day: String(startsAt.day),
-    endsLabel: sameDay
-      ? formatWallTime(endsAt)
-      : `${formatWallDate(endsAt, "short")}, ${formatWallTime(endsAt)}`,
     month: formatWallDate(startsAt, "month").toUpperCase(),
-    startsLabel: formatWallTime(startsAt),
+    timeLabel: sameDay
+      ? `${oneMeridiem ? startsLabel.replace(/\s[AP]M$/u, "") : startsLabel}–${endsLabel}`
+      : `${startsLabel}–${formatWallDate(endsAt, "short")}, ${endsLabel}`,
     timeZoneLabel: formatOffset(startsAt.offset),
+    weekday: formatWallDate(startsAt, "weekday"),
   };
 }
 
@@ -86,9 +90,15 @@ function requireCalendarDateTime(value: string) {
 
 function formatWallDate(
   value: ReturnType<typeof requireCalendarDateTime>,
-  style: "long" | "month" | "short",
+  style: "long" | "month" | "short" | "weekday",
 ): string {
   const date = new Date(Date.UTC(value.year, value.month - 1, value.day));
+  if (style === "weekday") {
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone: "UTC",
+      weekday: "long",
+    }).format(date);
+  }
   return new Intl.DateTimeFormat("en-US", {
     day: style === "month" ? undefined : "numeric",
     month: style === "long" ? "long" : "short",
