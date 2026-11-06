@@ -5,6 +5,7 @@ import { EmailIcon } from "@/src/components/homepage/email-icon";
 import { TelegramIcon } from "@/src/components/homepage/telegram-icon";
 import { HostedAuthEntryLayout } from "@/src/components/hosted-onboarding/hosted-auth-entry-layout";
 import { HostedContactChannelChoice } from "@/src/components/hosted-onboarding/hosted-contact-channel-choice";
+import { LinkPageScreen, LinkPageSurface } from "@/src/components/link-page/link-page-shell";
 import { HostedContactCodeForm } from "@/src/components/hosted-onboarding/hosted-contact-code-form";
 import { HostedInlineAuthButton } from "@/src/components/hosted-onboarding/hosted-inline-auth-button";
 import { HostedAuthCompletionStatus } from "@/src/components/hosted-onboarding/hosted-first-party-auth-panel";
@@ -78,12 +79,18 @@ export function BetterAuthAdoptionStudy() {
       <h3 className="mb-4 font-serif text-xl">Security</h3>
       <InitialPasskeySetupView enrollmentEnabled pending={false} registered={false} error={null} onEnroll={() => undefined} />
     </div>
-    <div className="rounded-2xl border border-border bg-background p-5" data-auth-study="messaging">
-      <h3 className="mb-4 font-serif text-xl">How should Murph reach you?</h3>
-      <HostedContactChannelChoice
-        phone={<HostedContactCodeForm method="phone" onSend={ignoreProof} onVerify={ignoreProof} />}
-        telegram={<HostedInlineAuthButton onClick={ignoreAction} icon={<TelegramIcon className="h-5 w-5" />}>Connect Telegram</HostedInlineAuthButton>}
-      />
+    <div className="flex min-h-[46rem] flex-col overflow-hidden rounded-[2rem] bg-[#1C1915]" data-auth-study="messaging">
+      <LinkPageSurface>
+        <LinkPageScreen
+          actions={<HostedContactChannelChoice
+            phone={<HostedContactCodeForm method="phone" onSend={ignoreProof} onVerify={ignoreProof} />}
+            telegram={<HostedInlineAuthButton onClick={ignoreAction} icon={<TelegramIcon className="h-5 w-5" />}>Connect Telegram</HostedInlineAuthButton>}
+          />}
+          announceDetail={false}
+          detail="Add your phone or Telegram so Murph can message you."
+          title="How should Murph reach you?"
+        />
+      </LinkPageSurface>
     </div>
     <div className="overflow-hidden rounded-2xl border border-border" data-auth-study="code-email">
       <iframe title="Sign-in code email" srcDoc={emailPreview} sandbox="" className="h-[650px] w-full border-0" />

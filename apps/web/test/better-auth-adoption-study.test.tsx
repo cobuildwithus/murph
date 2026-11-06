@@ -1,11 +1,15 @@
-import { act } from "react";
+import { act, createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { expect, test, vi } from "vitest";
 import { renderClientComponent } from "./render-client-component";
 
-// Only the Next router is supplied by the test. No study, auth, credential,
+// Only the Next router and image are supplied by the test. No study, auth, credential,
 // Telegram, settings, code-form or input component is replaced.
 const router = vi.hoisted(() => ({ refresh: vi.fn(), useRouter: vi.fn() }));
+vi.mock("next/image", () => ({
+  default: ({ alt, src }: { alt?: string; src: string }) => createElement("img", { alt: alt ?? "", src }),
+}));
+
 vi.mock("next/navigation", async (importOriginal) => ({
   ...await importOriginal<typeof import("next/navigation")>(),
   useRouter: router.useRouter.mockImplementation(() => ({ refresh: router.refresh })),

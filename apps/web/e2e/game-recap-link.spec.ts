@@ -23,8 +23,9 @@ test("public recap handoff and design proof", async ({ page }) => {
     await page.setViewportSize({ width, height });
     const response = await page.goto(`/recap/${gameId}`);
     expect(response?.status()).toBe(200);
-    await expect(page.getByRole("heading", { name: apple ? "Your recap is in Murph." : "Your week, in pictures." })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Your week, in pictures." })).toBeVisible();
     if (apple) {
+      await expect(page.getByText("Your recap is in Murph.", { exact: true })).toBeVisible();
       await expect(page.getByRole("link", { name: "Open in Murph", exact: true })).toHaveAttribute("href", `ai.withmurph.app://recap/${gameId}`);
     } else {
       await expect(page.getByText("Scan the ticket with your iPhone camera to watch it in Murph.", { exact: true })).toBeVisible();

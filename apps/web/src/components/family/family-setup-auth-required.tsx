@@ -1,26 +1,20 @@
 "use client";
 
-import { UsersRound } from "lucide-react";
 import { useCallback, useState } from "react";
 
 import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
-import { HostedAuthRequiredScreenView } from "@/src/components/hosted-onboarding/hosted-auth-required-screen";
 import {
   navigateHostedAuthRedirect,
   reloadCurrentHostedAuthDocument,
 } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
+import {
+  LinkPageFrame,
+  LinkPagePill,
+  LinkPageScreen,
+  LinkPageSurface,
+} from "@/src/components/link-page/link-page-shell";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedAuthenticationCompletionPayload } from "@/src/lib/hosted-onboarding/types";
-
-const FAMILY_SETUP_AUTH_COPY = {
-  description:
-    "Sign in or create your Murph account to open your private Family settings.",
-  eyebrow: "Murph Family",
-  eyebrowIcon: UsersRound,
-  footer:
-    "Family billing, membership, and invitations stay private to your account.",
-  title: "Set up Family",
-} as const;
 
 export function FamilySetupAuthRequired() {
   const [open, setOpen] = useState(true);
@@ -37,11 +31,8 @@ export function FamilySetupAuthRequired() {
   );
 
   return (
-    <>
-      <HostedAuthRequiredScreenView
-        {...FAMILY_SETUP_AUTH_COPY}
-        onLogin={() => setOpen(true)}
-      />
+    <LinkPageFrame>
+      <FamilySetupAuthRequiredScreen onLogin={() => setOpen(true)} />
       <AuthDialog
         description="Sign in to continue to your private Family settings."
         onCompleted={handleAuthCompleted}
@@ -50,10 +41,25 @@ export function FamilySetupAuthRequired() {
         requireLaunchConsentOnCompletion
         title="Set up Murph Family"
       />
-    </>
+    </LinkPageFrame>
   );
 }
 
 export function FamilySetupAuthRequiredView() {
-  return <HostedAuthRequiredScreenView {...FAMILY_SETUP_AUTH_COPY} />;
+  return (
+    <LinkPageSurface>
+      <FamilySetupAuthRequiredScreen />
+    </LinkPageSurface>
+  );
+}
+
+function FamilySetupAuthRequiredScreen({ onLogin }: { onLogin?: () => void }) {
+  return (
+    <LinkPageScreen
+      actions={<LinkPagePill onClick={onLogin}>Log in or sign up</LinkPagePill>}
+      announceDetail={false}
+      detail="Family billing, membership, and invitations stay private to your account."
+      title="Set up Family."
+    />
+  );
 }

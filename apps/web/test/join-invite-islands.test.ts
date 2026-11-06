@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => ({
   requestHostedBillingCheckout: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
   loginMethodProps: null as Record<string, unknown> | null,
+  phoneEditorProps: null as Record<string, unknown> | null,
   hostedAuthProps: null as Record<string, unknown> | null,
   useHostedInviteStatusRefresh: vi.fn(),
 }));
@@ -42,6 +43,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/src/components/settings/hosted-login-method-dialog", () => ({
   HostedLoginMethodEditor: function HostedLoginMethodEditor(props: Record<string, unknown>) {
     mocks.loginMethodProps = props;
+    if (props.method === "phone") mocks.phoneEditorProps = props;
     return createElement("div", { "data-login-method-editor": props.method, "data-presentation": props.presentation }, "Connect account");
   },
 }));
@@ -108,6 +110,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.hostedAuthProps = null;
   mocks.loginMethodProps = null;
+  mocks.phoneEditorProps = null;
 });
 
 test("JoinInviteSignOutButtonIsland preserves the invite URL while switching accounts", async () => {
@@ -439,7 +442,7 @@ test("JoinInviteStarterUsageIsland shows support for non-checkout account errors
   });
 
   expect(container.textContent).toContain("Murph setup needs support");
-  expect(container.textContent).toContain("Email support");
+  expect(container.textContent).toContain("Contact support");
   expect(container.textContent).not.toContain("Try again");
   expect(container.textContent).not.toContain("Continue with Pulse");
   expect(container.querySelector("a[href^='mailto:']")).toBeTruthy();
@@ -608,10 +611,64 @@ test("messaging setup mounts both editors inline without an extra dialog or Sett
   await cleanup();
 });
 
+test("messaging setup opens on a choice, then shows only the chosen editor", async () => {
+  const { cleanup, container } = await renderClientComponent(createElement(JoinInviteMessagingSetupIsland), { requireButton: false });
+  const editorIsHidden = (method: string) => container
+    .querySelector(`[data-login-method-editor="${method}"]`)
+    ?.parentElement?.hasAttribute("hidden");
+  expect(editorIsHidden("phone")).toBe(true);
+  expect(editorIsHidden("telegram")).toBe(true);
+
+  await act(async () => {
+    findButtonByText(container, /^Text message$/).dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  expect(editorIsHidden("phone")).toBe(false);
+  expect(editorIsHidden("telegram")).toBe(true);
+  expect(container.textContent).not.toContain("Text message");
+
+  await act(async () => {
+    findButtonByText(container, /^Use Telegram instead$/).dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  expect(editorIsHidden("phone")).toBe(true);
+  expect(editorIsHidden("telegram")).toBe(false);
+
+  await act(async () => {
+    findButtonByText(container, /^Use a phone number instead$/).dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  expect(editorIsHidden("phone")).toBe(false);
+  await cleanup();
+});
+
+test("messaging setup holds the phone step until it ends", async () => {
+  const { cleanup, container } = await renderClientComponent(createElement(JoinInviteMessagingSetupIsland), { requireButton: false });
+  await act(async () => {
+    findButtonByText(container, /^Text message$/).dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  const setActive = mocks.phoneEditorProps?.onActiveChange;
+  if (typeof setActive !== "function") {
+    throw new Error("Expected the phone editor to report its active step.");
+  }
+
+  await act(async () => {
+    setActive(true);
+  });
+  expect(container.querySelector('[data-login-method-editor="telegram"]')).toBeNull();
+  expect(container.textContent).not.toContain("Use Telegram instead");
+
+  await act(async () => {
+    setActive(false);
+  });
+  expect(container.querySelector('[data-login-method-editor="telegram"]')).not.toBeNull();
+  expect(container.textContent).toContain("Use Telegram instead");
+  await cleanup();
+});
+
 test("email invites use first-party verification with their saved target and invite binding", async () => {
   const { cleanup } = await renderClientComponent(createElement(JoinInvitePhoneVerificationIsland, {
+    detail: "Use the iMessage email address that received this join link.",
     emailAuthTarget: { emailAddress: "synthetic@example.com", kind: "saved" },
-    inviteCode: "invite-code", verificationMode: "invite_email",
+    inviteCode: "invite-code", title: "Verify your email.", verificationMode: "invite_email",
   }), { requireButton: false });
   expect(mocks.hostedAuthProps).toMatchObject({
     initialEmailAddress: "synthetic@example.com", methods: ["email"], inviteCode: "invite-code",

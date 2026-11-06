@@ -52,7 +52,7 @@ import { GrowthScorecardStudy } from "./growth-scorecard-study";
 import { HealthDataConsentWithdrawalFlowStudy } from "./health-data-consent-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
 import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
-import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-study";
+import { JoinInviteStudy } from "./join-invite-study";
 import { OpsUsageStudy } from "./ops-usage-study";
 import { OpsGameReportsStudy } from "./ops-game-reports-study";
 import { OpsOperatorTaskStudy } from "./ops-operator-task-study";
@@ -219,7 +219,7 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Stateless calendar link">
+          <StudySection title="Calendar invite link: a page off the calendar, and a broken link">
             <CalendarLinkStudy />
           </StudySection>
 
@@ -548,14 +548,14 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Family plan invite acceptance">
+          <StudySection title="Family invite link: the ticket, three promises, and every way to accept">
             <FamilyInviteJoinStudy />
           </StudySection>
 
           <Separator />
 
-          <StudySection title="Family billing recovery and management on Join">
-            <JoinFamilyBillingRecoveryStudy />
+          <StudySection title="Sign up on Join: every stage, Family billing recovery, and the checkout return">
+            <JoinInviteStudy />
           </StudySection>
         </>
       ) : null}
@@ -656,7 +656,7 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Group join invites, source-aware sharing, and setup recovery">
+          <StudySection title="Group join link: names first, exact wording in Details, Leave group drawer">
             <GroupJoinStudy
               comprehensivePermissions={projectHostedVaultShareProjectionDisplays(
                 resolveHostedGroupAccessOfferProjectionScopes(undefined),
@@ -666,7 +666,7 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Unknown iMessage group setup and recovery">
+          <StudySection title="Group start link: setup, recovery, and back to the group">
             <GroupStartStudy />
           </StudySection>
 
@@ -689,7 +689,7 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Reusable signup referral link, shared authentication, recipient claim, and signed-in recovery states">
+          <StudySection title="Friend’s invite link: the ticket, shared authentication, recipient claim, and signed-in recovery states">
             <SignupReferralFlowStudy />
           </StudySection>
 
