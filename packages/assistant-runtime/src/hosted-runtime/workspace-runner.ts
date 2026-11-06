@@ -114,6 +114,7 @@ import {
 } from "./current-delivery-route.ts";
 import {
   selectHostedAssistantInputIds,
+  type HostedAssistantInputSelection,
 } from "./turn-input.ts";
 import {
   appendHostedCanonicalWriteReceiptToArtifactLog,
@@ -298,6 +299,7 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   assistantAutomationScheduleChanged?: (() => boolean) | null;
   backgroundMaintenanceSignal?: AbortSignal | null;
   clearAssistantAutomationScheduleChanged?: (() => void) | null;
+  inputSelection?: HostedAssistantInputSelection | null;
   initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
   initialMailboxImport: HostedMailboxImportCheckpointResult;
   latestAssistantInputBatch?: (() => HostedWorkspaceRunnerAssistantInputBatch | null) | null;
@@ -997,13 +999,16 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       current: null,
       result: initialMailboxImport,
     });
-  const selectedInitialAssistantInputIds = acceptedInitialAssistantInputBatch
-      ? (await selectHostedAssistantInputIds({
-          freshAssistantInputIds: acceptedInitialAssistantInputBatch.assistantInputIds,
-          mode: "foreground",
-          vaultRoot: input.vaultRoot,
-        })).inputIds
-    : [];
+  let inputSelection: HostedAssistantInputSelection | null = null;
+  let selectedInitialAssistantInputIds: string[] = [];
+  if (acceptedInitialAssistantInputBatch) {
+    inputSelection = await selectHostedAssistantInputIds({
+      freshAssistantInputIds: acceptedInitialAssistantInputBatch.assistantInputIds,
+      mode: "foreground",
+      vaultRoot: input.vaultRoot,
+    });
+    selectedInitialAssistantInputIds = inputSelection.inputIds;
+  }
   const selectedInitialAssistantInputBatch = acceptedInitialAssistantInputBatch
     ? includeHostedWorkspaceRunnerAssistantInputBatch(
         acceptedInitialAssistantInputBatch,
@@ -1245,6 +1250,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     clearAssistantAutomationScheduleChanged: () => {
       assistantAutomationScheduleChanged = false;
     },
+    inputSelection,
     initialAssistantInputBatch: selectedInitialAssistantInputBatch,
     initialMailboxImport,
     latestAssistantInputBatch: () =>

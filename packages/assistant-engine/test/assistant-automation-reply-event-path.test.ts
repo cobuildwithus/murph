@@ -156,6 +156,43 @@ afterEach(async () => {
 })
 
 describe('assistant auto-reply event-first path', () => {
+  it('covers every recovered hosted input in one reply and terminal evidence', async () => {
+    const vault = await createTempVault()
+    const candidates = [10, 11].map((seq) => createLinqGroupCandidate({
+      inputId: `ain_${String(seq).repeat(16)}`,
+      messageId: `synthetic-recovery-${seq}`,
+      occurredAt: `2026-11-06T12:00:${seq}.000Z`,
+      text: `Synthetic request ${seq}`,
+      threadIsDirect: true,
+      sourceRef: {
+        causalSeq: String(seq), laneSeq: String(seq), lane: 'conversation',
+        dedupeKey: `recovery-${seq}`, eventId: `recovery-${seq}`, itemId: `recovery-${seq}`,
+        kind: 'hosted-mailbox', payloadSchema: 'murph.hosted-mailbox-payload.v1',
+        payloadSource: 'inline', source: 'hosted-mailbox', wakeSchema: 'murph.hosted-execution-wake.v1',
+      },
+    }))
+    for (const candidate of candidates) {
+      if (candidate.event.sourceRef.kind === 'hosted-mailbox') candidate.event.hostedMailboxItemId = candidate.event.sourceRef.itemId
+    }
+    const context = createReplyContextFromCandidates(candidates)
+    const run = () => processAssistantAutoReplyGroup({
+      allowSelfAuthored: false, context, enabledChannels: ['linq'],
+      executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [] } },
+      inboxServices: createInboxServices(), requestId: null, sessionMaxAgeMs: null, vault,
+    })
+    expect(await run()).toMatchObject({ failed: 0, replied: 1 })
+    const sent = readSentInput()
+    expect(sent.acceptedTurnInput.initialInputs.map((item: { id: string }) => item.id))
+      .toEqual(candidates.map((candidate) => candidate.event.inputId))
+    expect(sent.answeredMailboxItemIds).toEqual(['recovery-10', 'recovery-11'])
+    for (const candidate of candidates) {
+      expect(await readAssistantAutoReplyTerminalEvidenceByEvidenceId(vault, candidate.event.inputId))
+        .toMatchObject({ groupInputIds: candidates.map((item) => item.event.inputId), terminal: { kind: 'replied' } })
+    }
+    await run()
+    expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
+  })
+
   it('buffers outcome persistence timing without turning a trace failure into a delivery failure', async () => {
     const vault = await createTempVault()
     const onTraceEvent = vi.fn(() => { throw new Error('synthetic trace failure') })

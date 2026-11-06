@@ -135,12 +135,14 @@ import {
   recordHostedProviderCleanupBeforeCommit,
 } from "../src/hosted-runtime/provider-cleanup.ts";
 import {
+  compactHostedPendingAssistantInputIds,
   enqueueHostedPendingAssistantInputId,
   ensureHostedPendingAssistantInputIndex,
   readExistingHostedPendingAssistantInputIds,
   readHostedPendingAssistantInputIds,
   resolveHostedPendingAssistantInputStatePath,
 } from "../src/hosted-runtime/pending-input-index.ts";
+import * as pendingInputIndex from "../src/hosted-runtime/pending-input-index.ts";
 import {
   selectHostedAssistantInputIds,
 } from "../src/hosted-runtime/turn-input.ts";
@@ -496,6 +498,59 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     await publication;
     assert.equal(builder.latestWorkspace()?.version, "2");
     assert.equal(builder.readRedactedStatus()?.hostedCanonicalWriteReceiptLogSha256, stagedStatus.hostedCanonicalWriteReceiptLogSha256);
+  });
+
+  test("carries recovered inputs outside the fresh import batch without inspecting twice", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-recovery-"));
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(TEST_NOW));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    try {
+      await saveAssistantAutomationState(vaultRoot, {
+        version: 1, updatedAt: TEST_NOW,
+        autoReply: [{ channel: "linq", eligibleAfter: null, enabledAt: TEST_NOW }],
+      });
+      await compactHostedPendingAssistantInputIds({ vaultRoot });
+      const olderItem = createMailboxItem({ id: "synthetic-recovery-10", laneSeq: "10", causalSeq: "10" });
+      const freshItem = createMailboxItem({ id: "synthetic-recovery-11", laneSeq: "11", causalSeq: "11" });
+      const stage = async (item: HostedMailboxItem) => {
+        const event = createStoredAssistantInputEventForMailboxItem(item, "Synthetic recovery request");
+        const stored = await upsertAssistantInputEvent({ vault: vaultRoot, event: {
+          ...event, sourceRef: { ...event.sourceRef, causalSeq: item.causalSeq },
+        } });
+        await enqueueHostedPendingAssistantInputId({ vaultRoot, inputId: stored.inputId });
+        return stored.inputId;
+      };
+      const olderId = await stage(olderItem);
+      const state = createEmptyHostedMailboxImportState();
+      state.watermarks.conversation = "10";
+      await writeHostedMailboxImportState({ vaultRoot, state });
+      const inspection = vi.spyOn(pendingInputIndex, "inspectHostedPendingAssistantInputRecoveryEvents");
+      let freshId: string | null = null;
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "synthetic-recovery", expectedWorkspaceVersion: "0", leaseGeneration: "1", snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) { freshId = await stage(item.item); return { assistantInputId: freshId, status: "imported" }; },
+        limitPerLane: 50,
+        platform: createPlatform({ mailboxPort: createMailboxPort({ items: [freshItem] }).mailboxPort, workspacePort: createWorkspacePort({ checkpointRequests }) }),
+        requestId: "synthetic-recovery",
+        async runAssistantPhase(phase) {
+          expect(phase.inputSelection?.inputIds).toEqual([olderId, freshId]);
+          expect(phase.initialAssistantInputBatch?.assistantInputIds).toEqual([freshId]);
+          expect(inspection).toHaveBeenCalledTimes(1);
+          return { progressed: false };
+        },
+        vaultRoot, workspace: createWorkspaceState({ version: "0" }), now: () => TEST_NOW,
+      });
+      expect(result.latestAssistantInputBatch).toBeNull();
+      expect(await readHostedPendingAssistantInputIds({ vaultRoot })).toEqual([olderId, freshId]);
+      inspection.mockRestore();
+    } finally {
+      vi.useRealTimers();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
   });
 
   test("carries two initial conversation inputs through singleton foreground reruns before checkpointing", async () => {

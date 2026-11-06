@@ -52,6 +52,7 @@ import type {
 import {
   createHostedAssistantInputSource,
   selectHostedAssistantInputIds,
+  type HostedAssistantInputSelection,
 } from "./turn-input.ts";
 import {
   createHostedAssistantTurnEnvironment,
@@ -155,6 +156,7 @@ export async function runHostedAssistantAutomationLane(input: {
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig"
   >;
+  inputSelection?: HostedAssistantInputSelection | null;
   freshAssistantInputIds?: readonly string[] | null;
   readForegroundInputIds?: (() => readonly string[]) | null;
   runnerIdleTtlMs?: number | null;
@@ -223,6 +225,7 @@ export async function runHostedAssistantAutomationLane(input: {
           vaultRoot: input.vaultRoot,
         }),
         {
+          inputSelection: input.inputSelection,
           ...(input.operationScope ? { operationScope: input.operationScope } : {}),
           buildBackgroundDynamicContextPrompt:
             input.buildBackgroundDynamicContextPrompt,
@@ -317,6 +320,18 @@ function readProviderStartCriticalPathTiming(
   return Object.keys(details).length > 0 ? details : null;
 }
 
+async function resolveHostedAutomationInputSelection(input: {
+  freshAssistantInputIds: readonly string[];
+  selection?: HostedAssistantInputSelection | null;
+  signal?: AbortSignal;
+  vaultRoot: string;
+}): Promise<HostedAssistantInputSelection> {
+  if (input.selection) return input.selection;
+  return selectHostedAssistantInputIds(input.freshAssistantInputIds.length > 0
+    ? { freshAssistantInputIds: input.freshAssistantInputIds, mode: "foreground", vaultRoot: input.vaultRoot }
+    : { limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT, mode: "background", signal: input.signal, vaultRoot: input.vaultRoot });
+}
+
 export async function runHostedAssistantAutomation(
   vaultRoot: string,
   requestId: string,
@@ -326,6 +341,7 @@ export async function runHostedAssistantAutomation(
   signal?: AbortSignal,
   turnEnvironment?: AssistantTurnEnvironment | null,
   options?: {
+    inputSelection?: HostedAssistantInputSelection | null;
     operationScope?: AssistantAutomationOperationScope | null;
     buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
     commitTimeoutMs?: number | null;
@@ -379,20 +395,12 @@ export async function runHostedAssistantAutomation(
   const automationOptions = options ?? {};
   let providerStartCriticalPath =
     automationOptions.providerStartCriticalPath ?? null;
-  const selectedInputIds = await selectHostedAssistantInputIds(
-    freshAssistantInputIdCount > 0
-        ? {
-            freshAssistantInputIds,
-            mode: "foreground",
-          vaultRoot,
-        }
-      : {
-          limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
-          mode: "background",
-          signal,
-          vaultRoot,
-        },
-  );
+  const selectedInputIds = await resolveHostedAutomationInputSelection({
+    freshAssistantInputIds,
+    selection: automationOptions.inputSelection,
+    signal,
+    vaultRoot,
+  });
   providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
     providerStartCriticalPath,
     "automationInputSelectionDoneAtMonotonicMs",

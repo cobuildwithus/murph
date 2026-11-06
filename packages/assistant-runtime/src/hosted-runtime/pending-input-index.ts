@@ -1,4 +1,5 @@
 import path from "node:path";
+import { open } from "node:fs/promises";
 
 import {
   hasCompleteAssistantAutoReplyTerminalEvidence,
@@ -500,6 +501,53 @@ export async function hasHostedPendingAssistantInputWakeCandidate(input: {
   return (await compactHostedPendingAssistantInputIds({
     vaultRoot: input.vaultRoot,
   })).length > 0;
+}
+
+// Foreground inspection must not hydrate an unbounded index or repair it. A
+// complete small snapshot is required because raw ID order is not chronological.
+export async function inspectHostedPendingAssistantInputRecoveryEvents(input: {
+  knownEvents: readonly AssistantInputEventRecord[];
+  vaultRoot: string;
+}): Promise<AssistantInputEventRecord[] | null> {
+  const handle = await open(resolveHostedPendingAssistantInputStatePath(input.vaultRoot), "r");
+  let text: string;
+  try {
+    const buffer = Buffer.alloc(4097);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    if (bytesRead === buffer.length) return null;
+    text = buffer.subarray(0, bytesRead).toString("utf8");
+  } finally {
+    await handle.close();
+  }
+  const state = parseVersionedJsonStateEnvelope(JSON.parse(text), {
+    label: HOSTED_PENDING_ASSISTANT_INPUT_STATE_LABEL,
+    parseValue: parseHostedPendingAssistantInputState,
+    schema: HOSTED_PENDING_ASSISTANT_INPUT_STATE_SCHEMA,
+    schemaVersion: HOSTED_PENDING_ASSISTANT_INPUT_STATE_SCHEMA_VERSION,
+  });
+  if (!state.backfilled || state.inputIds.length > 2 * DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT) return null;
+  const known = new Map(input.knownEvents.map((event) => [event.inputId, event]));
+  const events: AssistantInputEventRecord[] = [];
+  for (let start = 0; start < state.inputIds.length; start += HOSTED_PENDING_ASSISTANT_INPUT_INSPECTION_WAVE_SIZE) {
+    const wave = await Promise.all(state.inputIds.slice(start, start + HOSTED_PENDING_ASSISTANT_INPUT_INSPECTION_WAVE_SIZE).map(
+      (inputId) => known.get(inputId) ?? readAssistantInputEvent({ inputId, vault: input.vaultRoot }),
+    ));
+    for (const event of wave) {
+      if (!event) return null;
+      events.push(event);
+    }
+  }
+  return events;
+}
+
+export function isHostedPendingMemberInputWithinRetryWindow(
+  event: AssistantInputEventRecord,
+  nowMs: number,
+): boolean {
+  const receivedAtMs = resolveHostedPendingInputReceivedAtMs(event);
+  return isHostedMemberConversationInput(event)
+    && Number.isFinite(receivedAtMs)
+    && nowMs - receivedAtMs <= HOSTED_STALE_RETRY_MAX_AGE_MS;
 }
 
 export async function inspectHostedPendingAssistantInputWakeCandidate(input: {

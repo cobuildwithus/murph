@@ -1136,6 +1136,17 @@ describe("runHostedAssistantAutomation", () => {
     expect(mocks.initInboxRuntime).not.toHaveBeenCalled();
   });
 
+  it("reuses the runner foreground recovery selection without a second inspection", async () => {
+    const selection = { freshInputIds: ["fresh"], inputIds: ["recovered", "fresh"], mode: "foreground" as const, pendingInputIds: [] };
+    await runHostedAssistantAutomation(
+      "/tmp/vault-root", "synthetic-recovery", { hosted: { memberId: "synthetic-member", userEnvKeys: [] } },
+      { eventId: "synthetic-recovery", kind: "runtime.timer", occurredAt: "2026-11-06T12:02:00Z", triggerKind: "runtime_timer", userId: "synthetic-member" },
+      ["fresh"], undefined, undefined, { inputSelection: selection },
+    );
+    expect(mocks.selectHostedAssistantInputIds).not.toHaveBeenCalled();
+    expect(mocks.createHostedAssistantInputSource).toHaveBeenCalledWith(expect.objectContaining({ selectedInputIds: ["recovered", "fresh"] }));
+  });
+
   it("binds input acquired after background selection at the provider boundary", async () => {
     const callOrder: string[] = [];
     const beforeProviderAcceptedInputs = vi.fn(async ({ acceptedInputs }) => {

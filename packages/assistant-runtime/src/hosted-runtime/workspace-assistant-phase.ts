@@ -486,7 +486,8 @@ function resolveHostedCurrentLinqDeliveryContexts(
 function readHostedInitialAssistantInputIds(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): readonly string[] {
-  return input.initialAssistantInputBatch?.assistantInputIds
+  return input.inputSelection?.inputIds
+    ?? input.initialAssistantInputBatch?.assistantInputIds
     ?? input.initialMailboxImport.importResult.assistantInputIds
     ?? [];
 }
@@ -2161,6 +2162,7 @@ export async function runHostedWorkspaceAssistantPhase(
               : {}),
             executionContext,
             freshAssistantInputIds,
+            inputSelection: input.inputSelection,
             runnerIdleTtlMs: input.request.runnerIdleTtlMs,
             now: new Date(resolveHostedAssistantPhaseNowMs(input)),
             operationScope: automationOperationScope,

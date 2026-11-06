@@ -1,8 +1,24 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const automationStateReads = vi.hoisted(() => vi.fn());
+
+vi.mock("@murphai/assistant-engine/assistant-state", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@murphai/assistant-engine/assistant-state")>();
+  return {
+    ...actual,
+    readAssistantAutomationState: (...args: Parameters<typeof actual.readAssistantAutomationState>) => {
+      automationStateReads();
+      return actual.readAssistantAutomationState(...args);
+    },
+  };
+});
+
+import { restoreHostedExecutionContext, snapshotHostedExecutionContext } from "@murphai/runtime-state/node";
+
+import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 import * as assistantEngine from "@murphai/assistant-engine";
 import {
   hasPendingAssistantAutoReplyInput,
@@ -16,9 +32,12 @@ import {
 import {
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   writeAssistantAutoReplyReplyTerminalEvidence,
+  writeAssistantAutoReplySuppressionEvidence,
 } from "@murphai/assistant-engine/assistant-automation";
 
 import {
+  compactHostedPendingAssistantInputIds,
+  compactHostedConversationMailboxHandledItemIds,
   enqueueHostedPendingAssistantInputId,
   ensureHostedPendingAssistantInputIndex,
   readHostedPendingAssistantInputIds,
@@ -1054,6 +1073,220 @@ describe("selectHostedAssistantInputIds", () => {
     expect(readInputSpy.mock.calls.map((call) => call[0].inputId)).toEqual([
       fresh.inputId,
     ]);
+  });
+
+  describe("unanswered foreground recovery", () => {
+    async function stage(vaultRoot: string, seq: number, overrides: Parameters<typeof createAssistantInputEvent>[0] = {}) {
+      return upsertAssistantInputEvent({ vault: vaultRoot, event: createAssistantInputEvent({
+        causalSeq: String(seq + 100), laneSeq: String(seq),
+        dedupeKey: `recovery_${seq}`, eventId: `recovery_${seq}`, itemId: `recovery_${seq}`,
+        occurredAt: new Date(Date.parse("2026-11-06T12:00:00Z") + seq * 1000).toISOString(),
+        receivedAt: new Date(Date.parse("2026-11-06T12:00:00Z") + seq * 1000).toISOString(),
+        ...overrides,
+      }) });
+    }
+    async function setup() {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-11-06T12:02:00Z"));
+      const vaultRoot = await createTempVault();
+      await enableLinqAutoReply(vaultRoot);
+      await compactHostedPendingAssistantInputIds({ vaultRoot });
+      return vaultRoot;
+    }
+    const select = (vaultRoot: string, inputId: string) => selectHostedAssistantInputIds({
+      vaultRoot, mode: "foreground", freshAssistantInputIds: [inputId, inputId],
+    });
+
+    it.each([false, true])("admits adjacent unanswered input after restore=%s without a failure receipt", async (restore) => {
+      let vaultRoot = await setup();
+      const older = await stage(vaultRoot, 10);
+      await enqueueHostedPendingAssistantInputId({ vaultRoot, inputId: older.inputId });
+      if (restore) {
+        const operatorHomeRoot = path.join(path.dirname(vaultRoot), "operator");
+        await mkdir(operatorHomeRoot, { recursive: true });
+        const snapshot = await snapshotHostedExecutionContext({ vaultRoot, operatorHomeRoot });
+        const restored = await restoreHostedExecutionContext({ bundle: snapshot.bundle, workspaceRoot: path.dirname(await createTempVault()) });
+        vaultRoot = restored.vaultRoot;
+      }
+      const fresh = await stage(vaultRoot, 11);
+      await enqueueHostedPendingAssistantInputId({ vaultRoot, inputId: fresh.inputId });
+      for (const [event, mailboxItemId] of [[older, "recovery_10"], [fresh, "recovery_11"]] as const) {
+        await recordHostedMailboxAssistantInputItem({ vault: vaultRoot, inputId: event.inputId, mailboxItemId });
+      }
+      const pendingBefore = await readFile(resolveHostedPendingAssistantInputStatePath(vaultRoot), "utf8");
+      const readSpy = vi.spyOn(assistantEngine, "readAssistantInputEvent");
+      const selection = await select(vaultRoot, fresh.inputId);
+      expect(selection.inputIds).toEqual([older.inputId, fresh.inputId]);
+      expect(await readFile(resolveHostedPendingAssistantInputStatePath(vaultRoot), "utf8")).toBe(pendingBefore);
+      expect(readSpy.mock.calls.map(([input]) => input.inputId)).toEqual([fresh.inputId, older.inputId]);
+      const source = createHostedAssistantInputSource({ selectedInputIds: selection.inputIds, vaultRoot, pendingInputRefreshMode: "none" });
+      const candidates = await source.listInputCandidates({ limit: 50 });
+      expect(candidates.inputs.map((candidate) => candidate.acceptedInput.id)).toEqual(selection.inputIds);
+      expect(candidates.inputs.map((candidate) => candidate.event.hostedMailboxItemId)).toEqual(["recovery_10", "recovery_11"]);
+      // Selection does not terminalize or acknowledge either input.
+      expect(await readAssistantAutoReplyTerminalEvidenceByEvidenceId(vaultRoot, older.inputId)).toBeNull();
+      expect(await readHostedPendingAssistantInputIds({ vaultRoot })).toEqual([older.inputId, fresh.inputId]);
+      expect(await compactHostedConversationMailboxHandledItemIds({ vaultRoot, consumedThroughSeq: "9" })).toEqual([]);
+      await writeAssistantAutoReplyReplyTerminalEvidence({ vault: vaultRoot, inputIds: selection.inputIds, captureIds: [],
+        deliveryIntentId: null, outcome: "result", recordedAt: "2026-11-06T12:02:00Z", sessionId: "synthetic-session" });
+      expect(await compactHostedConversationMailboxHandledItemIds({ vaultRoot, consumedThroughSeq: "9" })).toEqual(["recovery_10", "recovery_11"]);
+      expect(await readHostedPendingAssistantInputIds({ vaultRoot })).toEqual([older.inputId, fresh.inputId]);
+      await compactHostedConversationMailboxHandledItemIds({ vaultRoot, consumedThroughSeq: "11" });
+      expect(await readHostedPendingAssistantInputIds({ vaultRoot })).toEqual([]);
+    });
+
+    it.each(["replied", "suppressed", "reply_intent_committed"] as const)("excludes complete %s evidence still indexed", async (kind) => {
+      const vaultRoot = await setup();
+      const older = await stage(vaultRoot, 10);
+      const fresh = await stage(vaultRoot, 11);
+      await enqueueHostedPendingAssistantInputId({ vaultRoot, inputId: older.inputId });
+      if (kind === "suppressed") {
+        await writeAssistantAutoReplySuppressionEvidence({ vault: vaultRoot, inputIds: [older.inputId], captureIds: [], reason: "synthetic terminal" });
+      } else {
+        await writeAssistantAutoReplyReplyTerminalEvidence({ vault: vaultRoot, inputIds: [older.inputId], captureIds: [],
+          deliveryIntentId: "synthetic-intent", outcome: "result", recordedAt: "2026-11-06T12:01:00Z", sessionId: "synthetic-session", terminalKind: kind });
+      }
+      expect((await select(vaultRoot, fresh.inputId)).inputIds).toEqual([fresh.inputId]);
+      expect(await readHostedPendingAssistantInputIds({ vaultRoot })).toEqual([older.inputId]);
+    });
+
+    it.each(["2026-11-06T11:46:59Z", "invalid"])("excludes old or invalid receivedAt %s", async (receivedAt) => {
+      const vaultRoot = await setup();
+      const older = await stage(vaultRoot, 10);
+      const fresh = await stage(vaultRoot, 11);
+      await enqueueHostedPendingAssistantInputId({ vaultRoot, inputId: older.inputId });
+      const read = assistantEngine.readAssistantInputEvent;
+      vi.spyOn(assistantEngine, "readAssistantInputEvent").mockImplementation(async (input) => {
+        const event = await read(input);
+        return event?.inputId === older.inputId ? { ...event, receivedAt } : event;
+      });
+      expect((await select(vaultRoot, fresh.inputId)).inputIds).toEqual([fresh.inputId]);
+    });
+
+    it.each(["lane gap", "route", "anchor", "reaction", "pending media", "projection", "self", "system", "causal"])("keeps older %s pending and answers fresh alone", async (boundary) => {
+      const vaultRoot = await setup();
+      const older = await stage(vaultRoot, 10, {
+        ...(boundary === "route" ? { threadId: "other-thread" } : {}),
+        ...(boundary === "anchor" ? { replyToMessageId: "other-anchor" } : {}),
+        ...(boundary === "self" ? { actorIsSelf: true } : {}),
+        ...(boundary === "system" ? { lane: "system" } : {}),
+        ...(boundary === "causal" ? { causalSeq: "999" } : {}),
+      });
+      const fresh = await stage(vaultRoot, boundary === "lane gap" ? 20 : 11);
+      await enqueueHostedPendingAssistantInputId({ vaultRoot, inputId: older.inputId });
+      const read = assistantEngine.readAssistantInputEvent;
+      vi.spyOn(assistantEngine, "readAssistantInputEvent").mockImplementation(async (input) => {
+        const event = await read(input);
+        if (!event || event.inputId !== older.inputId) return event;
+        if (boundary === "reaction" && event.sourceMetadata?.kind === "linq") return { ...event, sourceMetadata: { ...event.sourceMetadata, affirmativeReaction: true } };
+        if (boundary === "projection") return { ...event, projection: { ...event.projection, status: "pending" } };
+        if (boundary === "pending media") return { ...event,
+          projection: { ...event.projection, status: "succeeded" },
+          content: { ...event.content, attachmentDescriptors: [{ attachmentId: "synthetic-media", contentType: "image/png", fileName: "synthetic.png", kind: "image", sizeBytes: null }] },
+        };
+        return event;
+      });
+      expect((await select(vaultRoot, fresh.inputId)).inputIds).toEqual([fresh.inputId]);
+      expect(await readHostedPendingAssistantInputIds({ vaultRoot })).toEqual([older.inputId]);
+    });
+
+    it("falls back without throwing on unreadable, incomplete or exhausted pending state", async () => {
+      const vaultRoot = await setup();
+      const older = await stage(vaultRoot, 10);
+      const fresh = await stage(vaultRoot, 11);
+      await enqueueHostedPendingAssistantInputId({ vaultRoot, inputId: older.inputId });
+      const file = resolveHostedPendingAssistantInputStatePath(vaultRoot);
+      const original = JSON.parse(await readFile(file, "utf8"));
+      for (const state of ["{invalid", JSON.stringify({ ...original, value: { ...original.value, backfilled: false } }), " ".repeat(20000)]) {
+        await writeFile(file, state);
+        expect((await select(vaultRoot, fresh.inputId)).inputIds).toEqual([fresh.inputId]);
+      }
+    });
+
+    it.each([true, false])("does not recover a ready suffix across an unavailable predecessor (direct=%s)", async (threadIsDirect) => {
+      const vaultRoot = await setup();
+      const route = { threadIsDirect, routeAuthority: true };
+      const blocked = await stage(vaultRoot, 9, route);
+      const older = await stage(vaultRoot, 10, route);
+      const fresh = await stage(vaultRoot, 11, route);
+      for (const event of [older, blocked]) await enqueueHostedPendingAssistantInputId({ vaultRoot, inputId: event.inputId });
+      await updateAssistantInputProjection({ vault: vaultRoot, inputId: blocked.inputId, projection: { status: "pending", captureId: null } });
+      expect((await select(vaultRoot, fresh.inputId)).inputIds).toEqual([fresh.inputId]);
+    });
+
+    it("uses occurredAt only when receivedAt is absent and includes the exact age boundary", async () => {
+      const vaultRoot = await setup();
+      const older = await stage(vaultRoot, 10);
+      const fresh = await stage(vaultRoot, 11);
+      await enqueueHostedPendingAssistantInputId({ vaultRoot, inputId: older.inputId });
+      const read = assistantEngine.readAssistantInputEvent;
+      vi.spyOn(assistantEngine, "readAssistantInputEvent").mockImplementation(async (input) => {
+        const event = await read(input);
+        return event?.inputId === older.inputId ? { ...event, receivedAt: null, occurredAt: "2026-11-06T11:47:00Z" } : event;
+      });
+      expect((await select(vaultRoot, fresh.inputId)).inputIds).toEqual([older.inputId, fresh.inputId]);
+    });
+
+    it.each([0, 10, 1000])("bounds event reads with %s unrelated indexed inputs", async (count) => {
+      const vaultRoot = await setup();
+      const events = [];
+      // Only opaque pending IDs are needed to prove exhaustion avoids event I/O.
+      const file = resolveHostedPendingAssistantInputStatePath(vaultRoot);
+      const envelope = JSON.parse(await readFile(file, "utf8"));
+      for (let seq = 1; seq <= Math.min(count, 10); seq++) events.push(await stage(vaultRoot, seq, { threadId: `unrelated-${seq}` }));
+      envelope.value.inputIds = count === 1000
+        ? Array.from({ length: count }, (_, index) => `ain_${String(index).padStart(32, "0")}`)
+        : events.map((event) => event.inputId);
+      await writeFile(file, JSON.stringify(envelope));
+      const fresh = await stage(vaultRoot, 1001);
+      const reads = vi.spyOn(assistantEngine, "readAssistantInputEvent");
+      expect((await select(vaultRoot, fresh.inputId)).inputIds).toEqual([fresh.inputId]);
+      expect(reads).toHaveBeenCalledTimes(count === 10 ? 11 : 1);
+    });
+
+    it("keeps fresh input first when the owed cohort would exceed the input limit", async () => {
+      const vaultRoot = await setup();
+      const older = [];
+      for (let seq = 1; seq <= 50; seq++) older.push(await stage(vaultRoot, seq));
+      for (const event of [...older].reverse()) await enqueueHostedPendingAssistantInputId({ vaultRoot, inputId: event.inputId });
+      const fresh = await stage(vaultRoot, 51);
+      const before = await readHostedPendingAssistantInputIds({ vaultRoot });
+      expect((await select(vaultRoot, fresh.inputId)).inputIds).toEqual([fresh.inputId]);
+      expect(await readHostedPendingAssistantInputIds({ vaultRoot })).toEqual(before);
+    });
+
+    it("recovers a full cohort in cursor order despite reversed index order", async () => {
+      const vaultRoot = await setup();
+      const older = [];
+      for (let seq = 1; seq <= 49; seq++) older.push(await stage(vaultRoot, seq));
+      for (const event of [...older].reverse()) await enqueueHostedPendingAssistantInputId({ vaultRoot, inputId: event.inputId });
+      const fresh = await stage(vaultRoot, 50);
+      expect((await select(vaultRoot, fresh.inputId)).inputIds).toEqual([...older, fresh].map((event) => event.inputId));
+    });
+
+    it("keeps fresh input alone when a predecessor has partial terminal evidence", async () => {
+      const vaultRoot = await setup();
+      const older = await stage(vaultRoot, 10);
+      const fresh = await stage(vaultRoot, 11);
+      await enqueueHostedPendingAssistantInputId({ vaultRoot, inputId: older.inputId });
+      await writeAssistantAutoReplySuppressionEvidence({
+        vault: vaultRoot, inputIds: [older.inputId, "expired_group_member"], captureIds: [], reason: "synthetic partial group",
+      });
+      // A crash mid-write leaves one member's evidence, which is what makes it partial.
+      await rm(path.join(resolveAssistantStatePaths(vaultRoot).assistantStateRoot, "auto-reply", "evidence", "expired_group_member.json"), { force: false });
+      expect((await select(vaultRoot, fresh.inputId)).inputIds).toEqual([fresh.inputId]);
+      expect(await readHostedPendingAssistantInputIds({ vaultRoot })).toEqual([older.inputId]);
+    });
+
+    it("recovers without reading automation state on the foreground path", async () => {
+      const vaultRoot = await setup();
+      const older = await stage(vaultRoot, 10);
+      const fresh = await stage(vaultRoot, 11);
+      await enqueueHostedPendingAssistantInputId({ vaultRoot, inputId: older.inputId });
+      automationStateReads.mockClear();
+      expect((await select(vaultRoot, fresh.inputId)).inputIds).toEqual([older.inputId, fresh.inputId]);
+      expect(automationStateReads).not.toHaveBeenCalled();
+    });
   });
 
   it("batches rapid same-wake messages in cursor order", async () => {

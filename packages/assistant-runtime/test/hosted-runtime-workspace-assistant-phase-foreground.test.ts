@@ -109,6 +109,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("passes the recovered selection through the phase even when fresh import records are empty", async () => {
+    const inputSelection = {
+      freshInputIds: ["fresh-overflow"], inputIds: ["recovered"],
+      mode: "foreground" as const, pendingInputIds: [],
+    };
+    await runHostedWorkspaceAssistantPhase({
+      ...createPhaseInput({ assistantInputIds: ["fresh-overflow"], importedCount: 1 }),
+      inputSelection,
+      initialAssistantInputBatch: null,
+    });
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledWith(expect.objectContaining({
+      freshAssistantInputIds: ["recovered"], inputSelection,
+    }));
+  });
+
   it("passes foreground Linq delivery context into hosted progress dependencies", async () => {
     const linqDeliveryContext = {
       directRecipientPhoneNumber: "+15550000001",

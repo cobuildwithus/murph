@@ -24,6 +24,7 @@ import {
 } from "@murphai/assistant-engine/assistant-state";
 import {
   isSameAuthenticatedAssistantGroupRoute,
+  readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   shouldGroupAdjacentAssistantInputCandidates,
 } from "@murphai/assistant-engine/assistant-automation";
 import {
@@ -35,6 +36,8 @@ import {
   compactHostedPendingAssistantInputIds,
   dropHostedStalePendingAssistantInputRetries,
   isHostedPendingAssistantInputStillReplyable,
+  inspectHostedPendingAssistantInputRecoveryEvents,
+  isHostedPendingMemberInputWithinRetryWindow,
   readHostedPendingAssistantImageCompletionRecoveryInputIds,
   runHostedPendingAssistantInputContentRetention,
   type HostedStaleRetryDropReason,
@@ -44,7 +47,7 @@ const DEFAULT_HOSTED_ASSISTANT_INPUT_QUERY_LIMIT = 100;
 
 type HostedPendingInputRefreshMode = "compact" | "none";
 
-type HostedAssistantInputSelection =
+export type HostedAssistantInputSelection =
   | {
       freshInputIds: string[];
       inputIds: string[];
@@ -553,6 +556,13 @@ export async function selectHostedAssistantInputIds(
     };
   }
 
+  if (!hasFreshImageCompletion && selectionEvents === freshEvents && !selected.preserveInputOrder) {
+    selected.events = await recoverHostedUnansweredInputPredecessors({
+      freshEvents: selected.events,
+      vaultRoot: input.vaultRoot,
+    });
+  }
+
   return {
     freshInputIds,
     inputIds: selected.events.map((event) => event.inputId),
@@ -562,6 +572,67 @@ export async function selectHostedAssistantInputIds(
       ? { preserveInputOrder: true as const }
       : {}),
   };
+}
+
+async function recoverHostedUnansweredInputPredecessors(input: {
+  freshEvents: AssistantInputEventRecord[];
+  vaultRoot: string;
+}): Promise<AssistantInputEventRecord[]> {
+  const first = input.freshEvents[0];
+  if (!first || readPositiveHostedConversationInputSequence(first, "laneSeq") === null
+    || readPositiveHostedConversationInputSequence(first, "causalSeq") === null
+    || first.conversation?.actorIsSelf === true) return input.freshEvents;
+  try {
+    const pending = await inspectHostedPendingAssistantInputRecoveryEvents({
+      knownEvents: input.freshEvents, vaultRoot: input.vaultRoot,
+    });
+    if (!pending) return input.freshEvents;
+    const nowMs = Date.now();
+    const anchor = assistantInputCandidateFromStoredEvent(first);
+    const predecessors = pending.filter((event) =>
+      compareAssistantInputCursors(event.cursor, first.cursor) < 0
+      && isHostedPendingMemberInputWithinRetryWindow(event, nowMs)
+      && (
+        shouldGroupAdjacentAssistantInputCandidates(assistantInputCandidateFromStoredEvent(event), anchor)
+        // Group batching itself excludes pending projections. Keep those as
+        // blockers so a ready suffix cannot jump over the unavailable input.
+        || (event.projection.status === "pending"
+          && isSameAuthenticatedAssistantGroupRoute(assistantInputCandidateFromStoredEvent(event), anchor))
+      )
+    );
+    if (predecessors.length === 0) return input.freshEvents;
+    const unanswered: AssistantInputEventRecord[] = [];
+    for (const event of predecessors) {
+      // Complete evidence means handled, and the engine defers a whole group for
+      // partial evidence, so any evidence keeps an input out of a fresh turn.
+      if (!await hasHostedAssistantInputTerminalEvidence(event, input.vaultRoot)) unanswered.push(event);
+    }
+    if (unanswered.length === 0) return input.freshEvents;
+    // Grouping keeps predecessors on the fresh channel. Reading automation state
+    // here could write or quarantine it on the foreground path.
+    const enabledAutoReplyChannels = new Set([first.replyTarget?.channel ?? ""]);
+    if (unanswered.some((event) => event.projection.status === "pending"
+      || !isHostedPendingAssistantInputStillReplyable({ enabledAutoReplyChannels, event }))) return input.freshEvents;
+    const ordered = [...new Map([...unanswered, ...input.freshEvents].map((event) => [event.inputId, event])).values()]
+      .sort((left, right) => compareAssistantInputCursors(left.cursor, right.cursor));
+    // Recovery never displaces fresh input: an over-cap or broken bridge stays
+    // fresh-only, and the background owner keeps the older inputs.
+    if (ordered.length > DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT) return input.freshEvents;
+    const contiguous = selectHostedAssistantInputEventBatch({ events: ordered, limit: ordered.length });
+    return contiguous.length === ordered.length ? contiguous : input.freshEvents;
+  } catch {
+    // Unknown coverage cannot grant recovery authority or block fresh input.
+    return input.freshEvents;
+  }
+}
+
+async function hasHostedAssistantInputTerminalEvidence(
+  event: AssistantInputEventRecord,
+  vaultRoot: string,
+): Promise<boolean> {
+  const captureId = event.projection.captureId;
+  return await readAssistantAutoReplyTerminalEvidenceByEvidenceId(vaultRoot, event.inputId) !== null
+    || (captureId ? await readAssistantAutoReplyTerminalEvidenceByEvidenceId(vaultRoot, captureId) !== null : false);
 }
 
 async function selectHostedAssistantInputEventBatchWithImageCompletion(input: {
