@@ -2266,11 +2266,28 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it.each(["canceled", "paused", "unpaid", "past_due"] as const)("skips acquisition outreach for a %s existing person", async billingStatus => {
+      const fixture = await createOpenerRaceFixture();
+      try {
+        const memberId = await fixture.contenderPrisma.$transaction(tx => createPhoneBoundMemberIdentityTx({
+          phoneNumber: fixture.participantPhone, phoneNumberVerifiedAt: fixture.now, tx,
+        }));
+        await fixture.contenderPrisma.hostedMember.update({ where: { id: memberId }, data: { billingStatus } });
+        providerMocks.createHostedLinqChat.mockClear();
+        expect(await drainOneHostedGroupJoinOutreach({ now: fixture.now, prisma: fixture.drainPrisma }))
+          .toMatchObject({ kind: "skipped", outreachId: fixture.outreachId, reason: "recipient_now_active" });
+        expect(providerMocks.createHostedLinqChat).not.toHaveBeenCalled();
+        expect(await fixture.contenderPrisma.hostedInvite.count({ where: { memberId } })).toBe(0);
+      } finally {
+        await cleanupOpenerRaceFixture(fixture);
+      }
+    });
+
     it.each([
       ["same", true],
       ["different", false],
     ])(
-      "honors an accepted opener reply in the %s chat without replacing a lapsed member's home route",
+      "honors an accepted opener reply in the %s chat without replacing a signup-only member's home route",
       async (_chatRelationship, openerUsesHomeChat) => {
         vi.stubEnv(
           "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
@@ -2298,7 +2315,7 @@ describe.skipIf(!runPostgresProof)(
           throw new Error("Expected a phone participant contact.");
         }
         await fixture.contenderPrisma.hostedMember.update({
-          data: { billingStatus: HostedBillingStatus.paused },
+          data: { billingStatus: HostedBillingStatus.not_started },
           where: { id: participantMemberId },
         });
         await fixture.contenderPrisma.$transaction((tx) =>
@@ -2426,7 +2443,7 @@ describe.skipIf(!runPostgresProof)(
           throw new Error("Expected a phone participant contact.");
         }
         await fixture.contenderPrisma.hostedMember.update({
-          data: { billingStatus: HostedBillingStatus.paused },
+          data: { billingStatus: HostedBillingStatus.not_started },
           where: { id: participantMemberId },
         });
         await fixture.contenderPrisma.$transaction((tx) =>
@@ -2469,6 +2486,11 @@ describe.skipIf(!runPostgresProof)(
           })).resolves.toEqual({
             kind: "sent",
             outreachId: fixture.outreachId,
+          });
+
+          // The opener was accepted before the account became a returning lapsed member.
+          await fixture.contenderPrisma.hostedMember.update({
+            where: { id: participantMemberId }, data: { billingStatus: HostedBillingStatus.paused },
           });
 
           for (const messageText of [

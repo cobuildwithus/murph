@@ -3478,14 +3478,39 @@ latest available retained vault replica without waking the paused runtime.
 Renewal reuses the existing consent documents and grant owner; disconnected
 providers require their ordinary explicit reconnect flow.
 
-The historically named `assertActiveHostedMemberAccessAllowed` is product
-admission: signed-up human members with canceled, paused, unpaid or past-due
-billing can use native and Web product surfaces without billing writes or new
-Starter grants. Suspension, unfinished signup and synthetic-container behavior
-remain unchanged. Strict active-access readers, runtime ownership and AI usage
-checks remain independent and unchanged. Companion heartbeat and push-route
+The historically named `ActiveHostedMemberAccess` helpers own product and worker
+admission. Real people retain access with canceled, paused, unpaid or past-due
+billing. An incomplete account retains access only with existing activation proof
+(a member-activated mailbox item or all four active crypto-domain roots), or valid
+Family sponsorship. Never-activated signup and suspension remain excluded.
+The pure projection leaf imports only Prisma; store-backed activation readers
+remain with activation. Product state reads query proof only for incomplete
+accounts. Settings snapshots retain their existing incomplete refusal without
+additional relation reads. Prisma, batch and SQL projections agree; device selection,
+handoff recovery and home-line occupancy apply eligibility before page limits.
+Synthetic containers retain strict own-active/Family owner or leased-participant
+sponsorship and exact-pair game access. Duplicate game rooms retain their frozen
+primary allowance beneficiary. Product access never supplies AI allowance,
+welcomes, referral qualification, or complimentary physical-note funding.
+Linq chooses the existing billing notice from its separate strict AI decision
+for home and new direct chats, without binding or queueing denied input. A
+notice-free denial discards established-member input; product members cannot
+fall into first-contact or instant-start onboarding. Email conversation routing
+remains strict at both entrypoints. Native Telegram welcomes check strict person
+eligibility before sending.
+Clinical transport uses product access with its existing consent and suspension
+floor, including locked egress checks; daily admission additionally requires
+launch consent. Clinical enrichment remains AI-gated. No billing writes or new
+Starter grants accompany these reads. Companion heartbeat and push-route
 registration apply product authority under member and sponsorship locks; runtime
 presence still requires its callback fence.
+
+This Web-only rule changes no wire fields or runner behavior. Existing runners
+can process device imports while AI is denied; deterministic member actions and
+preferences still follow their separately deployed execution classification.
+Inactive AI allowance can request a 15-minute reconciliation retry, which is not
+runner admission. Canonical workspace retention and checkpoint recovery remain
+independent of billing lapse, with consent, suspension and fencing preserved.
 
 Native companion account admission is a bearer-authenticated member lifecycle
 boundary, not a device-sync lifecycle boundary. `POST

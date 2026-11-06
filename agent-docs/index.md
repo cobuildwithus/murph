@@ -357,6 +357,11 @@ Deterministic edits and clinical acquisition with AI denied are owned by
 [Architecture · Hosted Clinical Records](../ARCHITECTURE.md#hosted-clinical-records).
 Implementation and replay proof: [model-free actions](exec-plans/completed/2026-11-06-lapsed-actions.md).
 
+Product and worker access after billing lapse, strict room funding and lifecycle
+eligibility, and returning-member activation proof are owned by
+[Architecture](../ARCHITECTURE.md); local evidence and the caller audit are in
+[the worker access plan](exec-plans/completed/2026-11-06-lapsed-worker.md).
+
 # Murph Agent Docs Index
 
 The weekly game's flag-gated Terms check on app writes

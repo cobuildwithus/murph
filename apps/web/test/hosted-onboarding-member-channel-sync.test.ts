@@ -217,7 +217,7 @@ describe("hosted onboarding member channel sync", () => {
   it("skips active channel dispatch when the current locked member is not active", async () => {
     const tx = {
       hostedMember: {
-        findUnique: vi.fn(async () => ({
+        findUnique: vi.fn(async ({ where }: { where: { OR?: unknown } }) => where.OR ? null : ({
           accountGroupMemberships: [],
           billingStatus: "incomplete",
           suspendedAt: null,

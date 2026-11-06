@@ -1543,6 +1543,7 @@ export async function planHostedOnboardingLinqWebhook(
     ? isHostedMemberSuspended(existingMember.suspendedAt)
     : false;
   let existingMemberEffectiveActive = false;
+  let existingMemberAiAllowed = false;
   let instantStartOwner: HostedLinqInstantStartOwner | null = null;
 
   if (summary.isFromMe) {
@@ -1590,6 +1591,7 @@ export async function planHostedOnboardingLinqWebhook(
       return admission;
     }
     existingMemberEffectiveActive = admission.existingMemberActive;
+    existingMemberAiAllowed = admission.aiAccessAllowed;
     preparedDirectRoutingAuthority = admission.preparedRoutingAuthority;
   }
 
@@ -1729,54 +1731,19 @@ export async function planHostedOnboardingLinqWebhook(
     );
   }
 
-  // A member who already owns billing can never be onboarded as a first contact
-  // on their own bound home chat: the pending-bind write would hit the home-route
-  // race guard and 503 on every retry, forever. Answer from their access decision
-  // and stop here instead. The decision carries a notice only for a member with
-  // billing to recover, so a genuine first-time subscriber falls through to the
-  // signup-link and fallback-retry paths below rather than being answered here.
-  if (
-    existingMember
-    && !existingMemberEffectiveActive
-    && incomingHomeLinqChatOwnerLookup?.memberId === existingMember.id
-  ) {
-    const accessDecision = await readHostedRuntimeAiAccessDecision({
-      memberId: existingMember.id,
-      noticeSeed: input.event.event_id,
-      now: new Date(occurredAt),
-      prisma: input.prisma,
-    });
-    if (accessDecision.allowed) {
-      // The two access reads disagreed. Trust the runtime decision and let the
-      // normal active-member path own this inbound: falling through to the
-      // first-contact tail would attempt the pending bind and 503 forever.
-      existingMemberEffectiveActive = true;
-    } else {
-      const userNotice = accessDecision.userNotice;
-      if (userNotice) {
-        return logHostedLinqWebhookPlannerDecisionAndReturn(
-          buildInactiveMemberAccessNoticeResponse({
-            chatId: summary.chatId,
-            memberId: existingMember.id,
-            message: userNotice.message,
-            messageId: summary.messageId,
-            noticeCode: userNotice.code,
-            occurredAt,
-            sourceEventId: input.event.event_id,
-          }),
-          buildHostedLinqWebhookPlannerDetails(input.event, context, {
-            accessReason: accessDecision.reason,
-            existingMemberActive: false,
-            existingMemberMatch,
-            homeRoutePresent: true,
-            noticeCode: userNotice.code,
-            reason: HOSTED_LINQ_INACTIVE_MEMBER_NOTICE_REASON[userNotice.code],
-            routeStage: "inactive-member-home-access-notice",
-          }),
-        );
-      }
-    }
+  const inactiveMemberAdmission = await planHostedLinqInactiveMemberConversation({
+    context,
+    existingMember,
+    existingMemberAiAllowed,
+    existingMemberEffectiveActive: Boolean(existingMemberEffectiveActive),
+    existingMemberMatch,
+    homeRouteMemberId: incomingHomeLinqChatOwnerLookup?.memberId,
+    input,
+  });
+  if (inactiveMemberAdmission.plan) {
+    return inactiveMemberAdmission.plan;
   }
+  existingMemberEffectiveActive ||= inactiveMemberAdmission.allowed;
 
   if (existingMember && existingMemberEffectiveActive) {
     return planHostedLinqActiveMemberDirectWebhook({
@@ -1806,6 +1773,76 @@ export async function planHostedOnboardingLinqWebhook(
   });
 }
 
+/** Resolve unfunded direct conversations before binding or queueing them. */
+async function planHostedLinqInactiveMemberConversation(admission: {
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  existingMember: HostedMemberCoreState | null;
+  existingMemberAiAllowed: boolean;
+  existingMemberEffectiveActive: boolean;
+  existingMemberMatch: HostedLinqExistingMemberMatch;
+  homeRouteMemberId: string | undefined;
+  input: HostedOnboardingLinqWebhookPlannerInput;
+}): Promise<{ allowed: boolean; plan: HostedOnboardingLinqDirectPlan | null }> {
+  const { context, existingMember, existingMemberMatch, input } = admission;
+  const { messageEvent, occurredAt, summary } = context;
+  if (!existingMember || admission.existingMemberAiAllowed) {
+    return { allowed: false, plan: null };
+  }
+  const homeRoutePresent = admission.homeRouteMemberId === existingMember.id;
+  if (!homeRoutePresent && !isHostedLinqDirectChatAttested(messageEvent)) {
+    return { allowed: false, plan: null };
+  }
+  const accessDecision = await readHostedRuntimeAiAccessDecision({
+    memberId: existingMember.id,
+    noticeSeed: input.event.event_id,
+    now: new Date(occurredAt),
+    prisma: input.prisma,
+  });
+  if (accessDecision.allowed) {
+    // Funding recovered under the route lock; use the active-member path.
+    return { allowed: true, plan: null };
+  }
+  const userNotice = accessDecision.userNotice;
+  if (userNotice) {
+    return {
+      allowed: false,
+      plan: logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildInactiveMemberAccessNoticeResponse({
+          chatId: summary.chatId,
+          memberId: existingMember.id,
+          message: userNotice.message,
+          messageId: summary.messageId,
+          noticeCode: userNotice.code,
+          occurredAt,
+          sourceEventId: input.event.event_id,
+        }),
+        buildHostedLinqWebhookPlannerDetails(input.event, context, {
+          accessReason: accessDecision.reason,
+          existingMemberActive: false,
+          existingMemberMatch,
+          homeRoutePresent,
+          noticeCode: userNotice.code,
+          reason: HOSTED_LINQ_INACTIVE_MEMBER_NOTICE_REASON[userNotice.code],
+          routeStage: "inactive-member-direct-access-notice",
+        }),
+      ),
+    };
+  }
+  // Established product access must not turn an unfunded conversation into
+  // signup or hold its input for a later billing recovery. First-time members
+  // without product access retain the existing signup flow.
+  return {
+    allowed: false,
+    plan: admission.existingMemberEffectiveActive
+      ? buildHostedLinqIgnoredPlan(input.event, context, {
+        existingMemberMatch,
+        reason: accessDecision.reason,
+        routeStage: "inactive-member-direct-discarded",
+      })
+      : null,
+  };
+}
+
 async function admitHostedLinqExistingDirectMemberTx(admission: {
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   directMailboxPreparationFailureProvided: boolean;
@@ -1817,6 +1854,7 @@ async function admitHostedLinqExistingDirectMemberTx(admission: {
 }): Promise<
   | HostedOnboardingLinqDirectPlan
   | {
+      aiAccessAllowed: boolean;
       existingMemberActive: boolean;
       preparedRoutingAuthority: PreparedHostedLinqDirectMailboxPayloadRoot | null;
     }
@@ -1841,7 +1879,10 @@ async function admitHostedLinqExistingDirectMemberTx(admission: {
     now: new Date(occurredAt),
     prisma: input.prisma,
   });
-  const existingMemberEffectiveActive = exactMemberAccess.allowed;
+  const existingMemberEffectiveActive = exactMemberAccess.allowed || await readActiveHostedMemberAccess({
+    memberId: existingMember.id,
+    prisma: input.prisma,
+  });
   // The committed mailbox row is the canonical classification for this exact
   // member/event pair. Repair its wake before mutable Family, group, quota, or
   // routing state can reinterpret a provider redelivery.
@@ -1952,12 +1993,10 @@ async function admitHostedLinqExistingDirectMemberTx(admission: {
     if (!preparedDirectMailboxControlAuthority) {
       throw hostedLinqDirectMailboxPreparationRequired("member");
     }
-    if (!exactMemberAccess.allowed) {
+    if (!existingMemberEffectiveActive) {
       requireHostedLinqPreparedControlRoot(preparedDirectMailboxControlAuthority);
-    }
-    if (
-      exactMemberAccess.allowed
-      && !preparedDirectMailboxControlAuthority.preparedIngressRoot
+    } else if (
+      !preparedDirectMailboxControlAuthority.preparedIngressRoot
       && preparedDirectMailboxControlAuthority.preparedFamilyInvite?.kind
         !== "accepted_replay"
     ) {
@@ -1972,6 +2011,7 @@ async function admitHostedLinqExistingDirectMemberTx(admission: {
   }
 
   return {
+    aiAccessAllowed: exactMemberAccess.allowed,
     existingMemberActive: existingMemberEffectiveActive,
     preparedRoutingAuthority: preparedDirectRoutingAuthority,
   };

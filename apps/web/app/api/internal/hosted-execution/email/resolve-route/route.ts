@@ -13,7 +13,7 @@ import {
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { jsonOk, readOptionalJsonObject } from "@/src/lib/http";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { readActiveHostedMemberAccess } from "@/src/lib/hosted-onboarding/member-access";
+import { readStrictHostedMemberAccess } from "@/src/lib/hosted-onboarding/member-access";
 import { withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
   lookupHostedMemberByVerifiedEmailAddress,
@@ -112,7 +112,7 @@ export const POST = withJsonError(async (request: Request) => {
     if (!grant) {
       return jsonOk({ userId: null });
     }
-    if (!await readActiveHostedMemberAccess({
+    if (!await readStrictHostedMemberAccess({
       memberId: senderMemberId,
       prisma,
     })) {
@@ -163,7 +163,7 @@ async function resolveHostedEmailRouteMemberUserId(input: {
     return null;
   }
 
-  return await readActiveHostedMemberAccess({
+  return await readStrictHostedMemberAccess({
     memberId: input.memberId,
     prisma: input.prisma,
   })

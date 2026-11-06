@@ -13,8 +13,8 @@ import {
 
 import {
   provisionHostedCryptoDomainRootsForUserTx,
-  provisionPreparedHostedCryptoDomainRootsTx,
   readUserIdsWithActiveHostedCryptoDomainRootsTx,
+  provisionPreparedHostedCryptoDomainRootsTx,
   type PreparedHostedCryptoDomainRootCandidates,
   unwrapHostedDomainRootForWeb,
 } from "../hosted-crypto/domain-root-store";
@@ -32,7 +32,7 @@ import {
 import {
   appendHostedAccessRestorationRuntimeHandoffTx,
 } from "./member-access-runtime-handoff";
-import { readActiveHostedMemberAccess } from "./member-access";
+import { readActiveHostedFamilySponsorship } from "./member-access";
 import {
   clearHostedMemberPendingActivationTimeZone,
   composeHostedMemberSnapshot,
@@ -59,8 +59,8 @@ import {
   startHostedOnboardingTiming,
 } from "./logging";
 import {
-  type HostedOnboardingReadClient,
   lockHostedMemberRow,
+  type HostedOnboardingReadClient,
 } from "./shared";
 
 export type HostedMemberActivationResult = {
@@ -516,7 +516,7 @@ async function readActivationReadyHostedMemberTx(input: {
   // member with a stale own status is still activation-ready.
   if (
     isHostedAccessBlockedBillingStatus(currentMember.core.billingStatus)
-    && !(await readActiveHostedMemberAccess({
+    && !(await readActiveHostedFamilySponsorship({
       memberId: input.memberId,
       prisma: input.prisma,
     }))

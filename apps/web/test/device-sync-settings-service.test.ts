@@ -167,7 +167,7 @@ function createAccessPrisma(member: {
 }) {
   return {
     hostedMember: {
-      findUnique: vi.fn(async () => ({
+      findUnique: vi.fn(async ({ where }: { where: { OR?: unknown } }) => where.OR ? null : ({
         ...member,
         threadContainer: null,
       })),

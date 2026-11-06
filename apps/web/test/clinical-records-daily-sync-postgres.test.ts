@@ -36,7 +36,7 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
     const memberId = `clinical-budget-${randomUUID()}`;
     const connectionId = `crc-${randomUUID()}`;
     members.push(memberId);
-    await client.hostedMember.create({ data: { id: memberId, billingStatus: access ? "active" : "canceled" } });
+    await client.hostedMember.create({ data: { id: memberId, billingStatus: access ? "active" : "not_started" } });
     if (consent) for (const scope of ["launch.legal", "launch.health-data"] as const) {
       await recordHostedLaunchRequiredConsent({ memberId, scope, prisma: client, now });
     }
@@ -61,6 +61,16 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
     const mailbox = () => client.hostedMailboxItem.count({ where: { userId: memberId } });
     return { memberId, connectionId, decrypt, originalDecrypt, signal, row, runs, mailbox };
   }
+
+  it.each(["canceled", "paused", "unpaid", "past_due"] as const)("admits %s clinical acquisition with consent", async (billingStatus) => {
+    const f = await fixture();
+    await client.hostedMember.update({ where: { id: f.memberId }, data: { billingStatus } });
+    expect(await runClinicalDailySyncSweep({ now })).toEqual({ checked: 1, queued: 1, failed: 0 });
+    expect(await f.runs()).toHaveLength(1);
+    expect(await f.mailbox()).toBe(1);
+    expect(f.signal).toHaveBeenCalledTimes(1);
+    expect(await client.hostedAiUsage.count({ where: { memberId: f.memberId } })).toBe(0);
+  });
 
   it("short-retries a precommit unwrap failure without durable admission", async () => {
     const f = await fixture();
