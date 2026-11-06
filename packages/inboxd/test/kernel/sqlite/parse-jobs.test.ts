@@ -5,6 +5,36 @@ import { describe, expect, it } from "vitest";
 import { createAttachmentParseJobStore } from "../../../src/kernel/sqlite/parse-jobs.ts";
 
 describe("createAttachmentParseJobStore", () => {
+  it("skips succeeded attachments, claims null parser state, and permits a deliberate rerun", () => {
+    const database = createParseJobTestDatabase();
+    try {
+      database.exec(`
+        insert into capture_attachment (attachment_id, kind, parser_state)
+        values ('attachment-a', 'audio', 'succeeded'), ('attachment-b', 'audio', null);
+        insert into attachment_parse_job
+          (job_id, capture_id, attachment_id, pipeline, state, attempts, created_at)
+        values
+          ('job-a', 'capture-1', 'attachment-a', 'attachment_text', 'pending', 1, '2026-04-15'),
+          ('job-b', 'capture-1', 'attachment-b', 'attachment_text', 'pending', 0, '2026-04-15');
+      `);
+      const store = createAttachmentParseJobStore({ database, refreshCaptureSearchIndex() {} });
+      expect(store.claimNextAttachmentParseJob({ attachmentId: "attachment-a" })).toBeNull();
+      expect(readParseJobState(database, "job-a")).toBe("pending");
+      expect(store.claimNextAttachmentParseJob({ captureId: "capture-1" })?.attachmentId)
+        .toBe("attachment-b");
+
+      // Broad requeues deliberately rerun terminal jobs, including published successes.
+      database.exec("update attachment_parse_job set state = 'succeeded' where job_id = 'job-a'");
+      expect(store.requeueAttachmentParseJobs({ attachmentId: "attachment-a" })).toBe(1);
+      expect(database.prepare("select parser_state from capture_attachment where attachment_id = 'attachment-a'")
+        .get()).toEqual({ parser_state: "pending" });
+      expect(store.claimNextAttachmentParseJob({ attachmentId: "attachment-a" }))
+        .toMatchObject({ attachmentId: "attachment-a", state: "running", attempts: 2 });
+    } finally {
+      database.close();
+    }
+  });
+
   it.each([
     ["matching", "job-a", 2, "running", "audio", "running", 1],
     ["wrong job", "job-other", 2, "running", "audio", "running", 0],

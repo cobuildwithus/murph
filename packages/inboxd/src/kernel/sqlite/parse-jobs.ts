@@ -71,6 +71,7 @@ export function createAttachmentParseJobStore(input: {
                   select attachment_id
                   from capture_attachment
                   where kind in ('audio', 'video')
+                    and coalesce(parser_state, '') <> 'succeeded'
                 )
                 and (? is null or capture_id = ?)
                 and (? is null or attachment_id = ?)
