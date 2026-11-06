@@ -46206,7 +46206,7 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
       expect(reply).toMatch(/day 2|day two/iu)
       expect(reply).toMatch(/chapter/iu)
       expect(reply).toMatch(/7(?::00)?\s*a\.?m/iu)
-      expect(reply).toMatch(/7(?::00)?\s*p\.?m/iu)
+      expect(reply).not.toMatch(/7(?::00)?\s*p\.?m|\bdue\b|deadline|time limit|within|hours?|by (?:tonight|tomorrow|midnight)/iu)
       expect(reply).toMatch(/not count|not counting|incomplete|doesn.t count|does not count/iu)
       expect(reply.match(/\?/gu)).toHaveLength(1)
       expect(reply).not.toMatch(/\b(?:you|your|he|she|his|her|they|their|lol|fake|fraud|guilty|cheat)\b|saw the photo|looks like|https?:|\u2014|[😂🤣]/iu)

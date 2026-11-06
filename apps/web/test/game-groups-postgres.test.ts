@@ -2351,7 +2351,8 @@ describe.skipIf(!enabled)("group Prove it and Talk", () => {
     expect(await run(winner.actor, winner.command, caseNow)).toMatchObject({ ok: true });
     expect((await readGame(f.group.id, winner.actor, true))?.canChallenge).toBe(false);
     const accused = await readGame(f.group.id, f.people[1].id, true);
-    expect(accused?.days[0].mine?.challenge).toMatchObject({ status: "open", byYou: false });
+    expect(accused?.days[0].mine?.entryId).toBe(photos[1].id);
+    expect(accused?.days[0].mine).not.toHaveProperty("challenge");
     expect(await run(f.people[1].id, { type: "challenge", gameId: f.group.id, entryId: photos[0].id }, caseNow)).toMatchObject({ ok: true });
     await ok(f.people[1].id, { type: "leave", gameId: f.group.id }, caseNow);
     expect((await readGame(f.group.id, winner.actor, true))?.canChallenge).toBe(true);

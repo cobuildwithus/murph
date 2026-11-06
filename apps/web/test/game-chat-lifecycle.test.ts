@@ -90,7 +90,7 @@ describe("durable game chat lifecycle", () => {
     m.challengeCase.mockResolvedValue({ row: game, state: { players: players.map(memberId => ({ memberId })), entries: [{ id: "entry", memberId: players[1] }] },
       challenge: { actor: players[0] }, status: "open" });
     const instructions = buildGameChallengeInstructions({ challengerName: "Maya", accusedName: "Sam", dayNumber: 1, task: "Read a chapter",
-      postedAt: now, deadlineAt: new Date(now.getTime() + 12 * 3_600_000), timeZone: "UTC" });
+      postedAt: now, timeZone: "UTC" });
     m.challengeInstructions.mockResolvedValue(instructions);
     if (status === "generation_queued") m.mailbox.mockResolvedValue({ id: "mailbox", consumedAt: null });
     await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });

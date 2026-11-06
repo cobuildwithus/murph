@@ -1374,7 +1374,7 @@ async function challenge(context: CommandContext, command: Extract<GameCommand, 
     ]);
     const hidden = new Set(reports.flatMap(report => report.entryId ? [report.entryId] : []));
     const draft = { type: "challenged" as const, createdAt: now, ...decideChallenge(loaded.state, history.get(command.gameId) ?? [], {
-      memberId: context.actor, entryId: command.entryId, now, createdAt: now, visibleEntryIds: visibleEntryIds(loaded.state, context.actor, hidden),
+      memberId: context.actor, entryId: command.entryId, now, visibleEntryIds: visibleEntryIds(loaded.state, context.actor, hidden),
     }) };
     await reserveGameChallengeTx({ gameId: command.gameId, entryId: draft.payload.entryId,
       containerMemberId: loaded.row.chatContainerMemberId!, now, tx });
@@ -2604,12 +2604,12 @@ async function readGameChallenges(db: Db, gameIds: readonly string[]): Promise<M
   `);
   for (const row of rows) {
     const payload = row.payload;
-    if (!isRecord(payload) || payload.v !== 1 || typeof payload.entryId !== "string" || typeof payload.deadlineAt !== "string"
-      || row.commandKey !== gameChallengeKey(row.gameId, payload.entryId) || !Number.isFinite(Date.parse(payload.deadlineAt))) {
+    if (!isRecord(payload) || payload.v !== 1 || typeof payload.entryId !== "string"
+      || row.commandKey !== gameChallengeKey(row.gameId, payload.entryId)) {
       throw new Error("Stored game challenge is malformed.");
     }
     const challenges = result.get(row.gameId) ?? [];
-    challenges.push({ id: row.id, actor: row.actor, entryId: payload.entryId, deadlineAt: new Date(payload.deadlineAt), concessionEventId: row.concessionEventId });
+    challenges.push({ id: row.id, actor: row.actor, entryId: payload.entryId, concessionEventId: row.concessionEventId });
     result.set(row.gameId, challenges);
   }
   return result;
@@ -2660,7 +2660,7 @@ export async function readGameChallengeInstructions(current: NonNullable<Awaited
   const task = current.row.maxPlayers === 10 ? words?.defaultTask : words?.tasks.find(task => task.seat === accused.seat)?.text;
   if (!task) return null;
   return buildGameChallengeInstructions({ group: current.row.maxPlayers === 10, challengerName, accusedName, task, dayNumber: entry.dayIndex + 1,
-    postedAt: entry.receivedAt, deadlineAt: current.challenge.deadlineAt, timeZone: accused.timeZone });
+    postedAt: entry.receivedAt, timeZone: accused.timeZone });
 }
 
 async function loadGames(db: Db, gameIds: readonly string[], multiplayer = true): Promise<LoadedGame[]> {
