@@ -168,7 +168,8 @@ function readStatusPresentation(input: {
   const closeOwnedFulfilledConfirmation =
     fulfilledConfirmation && props.deferTerminalRefreshUntilClose === true;
   const statusContent = chatHandoff
-    ? { message: "Murph can keep going.", title: "Usage added." }
+    // An old return URL can reopen this, so it only says what stays true.
+    ? { message: "Go back to your chat.", title: "Usage added." }
     : closeOwnedFulfilledConfirmation
     ? {
         message:
@@ -986,6 +987,13 @@ function HostedUsageTopUpDialog(dialogProps: HostedUsageTopUpDialogProps) {
     statusPresentation.chatHandoff,
     statusPresentation.fulfilledConfirmation,
   ]);
+
+  // A saved card finishes in place, so nothing else announces the result.
+  useEffect(() => {
+    if (statusPresentation.chatHandoff) {
+      titleRef.current?.focus({ preventScroll: true });
+    }
+  }, [statusPresentation.chatHandoff]);
 
   const selectionPresentation = readSelectionPresentation(selection);
   const header = readDialogHeader({

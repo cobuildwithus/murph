@@ -3372,7 +3372,7 @@ test("ends a verified purchase on the chat page and refreshes only when it close
     assert.ok(dialog);
     assert.equal(dialog.classList.contains("h-dvh"), true);
     assert.equal(rendered.container.querySelector("h2")?.textContent, "Usage added.");
-    assert.match(rendered.container.textContent ?? "", /Murph can keep going\./);
+    assert.match(rendered.container.textContent ?? "", /Go back to your chat\./);
     assert.ok(rendered.container.querySelector('a[href="sms:+15550100001"]'));
     assert.match(rendered.container.textContent ?? "", /Open Messages/);
     // A refresh can unmount the dialog, so the page holds it until it closes.
@@ -3403,19 +3403,22 @@ test("offers recovery, never the chat page, when a payment failed", async () => 
 
   try {
     assert.doesNotMatch(rendered.container.textContent ?? "", /Usage added\./);
-    assert.doesNotMatch(rendered.container.textContent ?? "", /Murph can keep going/);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Go back to your chat/);
     assert.equal(rendered.container.querySelector('a[href="sms:+15550100001"]'), null);
   } finally {
     await rendered.cleanup();
   }
 });
 
-test("ends a saved-card purchase on the chat page without leaving Settings", async () => {
-  mocks.requestHostedOnboardingJson.mockImplementation(async (request: {
+test("ends a saved-card purchase on the chat page and moves focus to it", async () => {
+  let resolveStatus: (value: { purchaseId: string; status: string }) => void = () => {};
+  mocks.requestHostedOnboardingJson.mockImplementation((request: {
     method: string;
   }) => request.method === "POST"
-    ? { purchaseId: "hucp_saved_card_chat", status: "payment_pending" }
-    : { purchaseId: "hucp_saved_card_chat", status: "fulfilled" });
+    ? Promise.resolve({ purchaseId: "hucp_saved_card_chat", status: "payment_pending" })
+    : new Promise((resolve) => {
+        resolveStatus = resolve;
+      }));
   const { HostedUsageTopUpDialog } = await import(
     "@/src/components/settings/hosted-usage-top-up-dialog"
   );
@@ -3438,8 +3441,24 @@ test("ends a saved-card purchase on the chat page without leaving Settings", asy
       await Promise.resolve();
     });
 
+    // Still pending, so nothing claims success yet.
+    assert.notEqual(rendered.container.querySelector("h2")?.textContent, "Usage added.");
+    assert.equal(rendered.container.querySelector('a[href="sms:+15550100001"]'), null);
+
+    const title = rendered.container.querySelector("h2");
+    assert.ok(title);
+    const focus = vi.spyOn(title, "focus");
+
+    await act(async () => {
+      resolveStatus({ purchaseId: "hucp_saved_card_chat", status: "fulfilled" });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
     assert.equal(rendered.container.querySelector("h2")?.textContent, "Usage added.");
     assert.ok(rendered.container.querySelector('a[href="sms:+15550100001"]'));
+    // A result that finishes in place has nothing else to announce it.
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
     expect(mocks.routerRefresh).not.toHaveBeenCalled();
   } finally {
     await rendered.cleanup();

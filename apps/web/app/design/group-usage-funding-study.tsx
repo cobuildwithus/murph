@@ -657,7 +657,7 @@ function PersonalUsageCreditOwnerStudy() {
         inert
       >
         <LinkPageSurface>
-          <LinkPageScreen detail="Murph can keep going." title="Usage added.">
+          <LinkPageScreen detail="Go back to your chat." title="Usage added.">
             <HostedUsageAddedHandoff contactOption={DESIGN_USAGE_MISSION_CONTACT_OPTION} />
           </LinkPageScreen>
         </LinkPageSurface>

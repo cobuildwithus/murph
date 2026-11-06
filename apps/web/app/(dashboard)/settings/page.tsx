@@ -90,7 +90,10 @@ import {
   readHostedUsageCreditPurchaseTargetForPayer,
   type HostedUsageCreditPurchaseTargetProjection,
 } from "@/src/lib/hosted-onboarding/usage-credit-purchase-service";
-import { resolveMurphContactOptions } from "@/src/lib/murph-contact-routing";
+import {
+  resolveMurphContactOptions,
+  withMurphContactOptionBody,
+} from "@/src/lib/murph-contact-routing";
 
 export const metadata: Metadata = createMurphPageMetadata({
   title: "Settings — Murph",
@@ -520,18 +523,15 @@ function resolveSettingsAccountPresentation(input: {
   const { account, routing, usageActivity } = input;
   const murphPhoneNumber =
     routing?.linqRecipientPhone ?? routing?.pendingLinqRecipientPhone ?? null;
-  // The member sends this to Murph right after picking a voice, so the reply
-  // comes back as a voice memo in the new voice. Voice memos only deliver over
-  // text and Telegram, so an email-only member gets no redirect.
-  const resolvedVoiceTestOption = account
+  // One route to Murph. Each surface adds its own message. Voice memos and
+  // missions only work over text and Telegram, so an email-only member keeps the
+  // route but gets neither.
+  const chatContactOption = account
     ? resolveMurphContactOptions({
         contactChannels: {
           email: Boolean(account.email.murphEmailAddress),
           telegram: Boolean(account.telegram.telegramUserId),
           text: Boolean(account.phone.number),
-        },
-        message: {
-          body: "just picked a new voice for you! send me a voice memo so I can hear it",
         },
         murphEmailAddress: account.email.murphEmailAddress ?? null,
         murphPhoneNumber: routing?.linqRecipientPhone ?? null,
@@ -539,28 +539,21 @@ function resolveSettingsAccountPresentation(input: {
         userEmailAddress: account.email.address,
       })[0] ?? null
     : null;
-  const voiceTestContactOption =
-    resolvedVoiceTestOption && resolvedVoiceTestOption.kind !== "email"
-      ? resolvedVoiceTestOption
-      : null;
-  const usageAddedContactOption = readUsageAddedContactOption(account, routing);
-  const usageMissionContactOption =
-    usageActivity?.missionsEnabled === true && account
-      ? resolveMurphContactOptions({
-          contactChannels: {
-            email: false,
-            telegram: Boolean(account.telegram.telegramUserId),
-            text: Boolean(account.phone.number),
-          },
-          message: {
-            body: "Hey Murph, what referral options can I choose from?",
-          },
-          murphEmailAddress: account.email.murphEmailAddress ?? null,
-          murphPhoneNumber: routing?.linqRecipientPhone ?? null,
-          preferredKind: "text",
-          userEmailAddress: account.email.address,
-        })[0] ?? null
-      : null;
+  const messageContactOption = chatContactOption?.kind === "email" ? null : chatContactOption;
+  // The member sends this to Murph right after picking a voice, so the reply
+  // comes back as a voice memo in the new voice.
+  const voiceTestContactOption = messageContactOption
+    ? withMurphContactOptionBody(
+        messageContactOption,
+        "just picked a new voice for you! send me a voice memo so I can hear it",
+      )
+    : null;
+  const usageMissionContactOption = usageActivity?.missionsEnabled === true && messageContactOption
+    ? withMurphContactOptionBody(
+        messageContactOption,
+        "Hey Murph, what referral options can I choose from?",
+      )
+    : null;
   const canStartUsageMissions =
     usageActivity?.missionsEnabled === true
     && usageMissionContactOption !== null;
@@ -576,32 +569,11 @@ function resolveSettingsAccountPresentation(input: {
 
   return {
     murphPhoneNumber,
-    usageAddedContactOption,
+    usageAddedContactOption: chatContactOption,
     usageMissionContactOption,
     visibleUsageActivity,
     voiceTestContactOption,
   };
-}
-
-/** The way back to the chat once a usage purchase is verified. */
-function readUsageAddedContactOption(
-  account: Parameters<typeof resolveSettingsAccountPresentation>[0]["account"],
-  routing: Parameters<typeof resolveSettingsAccountPresentation>[0]["routing"],
-) {
-  if (!account) {
-    return null;
-  }
-  return resolveMurphContactOptions({
-    contactChannels: {
-      email: Boolean(account.email.murphEmailAddress),
-      telegram: Boolean(account.telegram.telegramUserId),
-      text: Boolean(account.phone.number),
-    },
-    murphEmailAddress: account.email.murphEmailAddress ?? null,
-    murphPhoneNumber: routing?.linqRecipientPhone ?? null,
-    preferredKind: "text",
-    userEmailAddress: account.email.address,
-  })[0] ?? null;
 }
 
 function resolveSettingsBillingPresentation(input: {
