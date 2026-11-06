@@ -931,8 +931,10 @@ The field is a closed validation-boundary vocabulary:
   decision schema.
 - `runtime_presentation_non_send_decision`: a runtime-owned presentation was
   paired with a decision other than `send_message`.
-- `creative_response_media_invalid`: creative-response media was not exactly
-  one generated voice memo.
+- `creative_response_media_invalid`: historical creative-response media failed
+  the former single-song requirement. Retained logs remain readable; current
+  runners skip these retired notifications before model work and never emit
+  this reason.
 
 Only those four literal values pass the existing assistant-notification
 structured-redaction allowlist. Provider output, response text, prompts,

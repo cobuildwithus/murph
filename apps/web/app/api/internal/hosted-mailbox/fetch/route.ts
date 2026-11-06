@@ -9,9 +9,6 @@ import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
-  readHostedActiveGroupRunningBit,
-} from "@/src/lib/hosted-groups/group-sponsorship-store";
-import {
   requireHostedRuntimeMailboxActiveAccess,
 } from "@/src/lib/hosted-mailbox/runtime-access";
 import {
@@ -51,7 +48,7 @@ export async function POST(request: Request): Promise<Response> {
     const body = parseHostedMailboxFetchRequest(rawBody);
     const authority = readHostedRuntimeCallbackAuthority(request);
     timing.start("transaction_acquire");
-    const { mailbox, includeGroupRunningBit } = await prisma.$transaction(async (tx) => {
+    const mailbox = await prisma.$transaction(async (tx) => {
       timing.start("authority");
       try {
         await requireHostedRuntimeCallbackTx(tx, userId, authority ? { ...authority, userId } : null);
@@ -62,7 +59,7 @@ export async function POST(request: Request): Promise<Response> {
           select: hostedRuntimeUsageMemberSelect,
         });
         timing.start("access");
-        const access = await requireHostedRuntimeMailboxActiveAccess(userId, {
+        await requireHostedRuntimeMailboxActiveAccess(userId, {
           prisma: tx,
           memberState,
         });
@@ -103,7 +100,7 @@ export async function POST(request: Request): Promise<Response> {
           : { allowed: true, runningLow: false };
         timing.start("projection");
         if (!usage.allowed) {
-          return { includeGroupRunningBit: false, mailbox: parseHostedMailboxFetchResponse({
+          return parseHostedMailboxFetchResponse({
             // Import progress is not durable acknowledgement, even when usage is denied.
             consumedSeqByLane: projection.consumedSeqByLane,
             fetchedAt: fetchedAt.toISOString(),
@@ -113,16 +110,16 @@ export async function POST(request: Request): Promise<Response> {
               maxSeq: importedSeq,
             })),
             userId,
-          }) };
+          });
         }
-        return { includeGroupRunningBit: conversationWorkPresent && access.isThreadContainer, mailbox: parseHostedMailboxFetchResponse({
+        return parseHostedMailboxFetchResponse({
           ...(usage.runningLow ? { conversationUsageStatus: "low" as const } : {}),
           consumedSeqByLane: projection.consumedSeqByLane,
           fetchedAt: fetchedAt.toISOString(),
           items: projection.items,
           maxSeqByLane: projection.maxSeqByLane,
           userId,
-        }) };
+        });
       } catch (error) {
         timing.failed();
         throw error;
@@ -130,11 +127,6 @@ export async function POST(request: Request): Promise<Response> {
         timing.start("transaction_finish");
       }
     });
-    timing.start("group_presentation");
-    // Decrypt optional presentation only after the database transaction ends.
-    const groupRunningBit = includeGroupRunningBit
-      ? await readHostedActiveGroupRunningBit({ now: new Date(mailbox.fetchedAt), prisma, runtimeMemberId: userId }).catch(() => null)
-      : null;
     timing.start("ingress_context");
     const consumed = mailbox.consumedSeqByLane?.find((cursor) => cursor.lane === "conversation");
     const inlineConversationPresent = mailbox.items.some((item) =>
@@ -147,7 +139,7 @@ export async function POST(request: Request): Promise<Response> {
       : null;
     timing.start("serialize");
     // This signed-envelope extension ends at the Worker; the canonical parser strips it.
-    return jsonOk({ ...mailbox, ...(groupRunningBit ? { groupRunningBit } : {}), ...(ingressCryptoContext ? { ingressCryptoContext } : {}) });
+    return jsonOk({ ...mailbox, ...(ingressCryptoContext ? { ingressCryptoContext } : {}) });
   }, (value) => { serverTiming = value; }));
   const response = await handle(request);
   response.headers.set("server-timing", serverTiming);

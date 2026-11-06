@@ -21444,6 +21444,56 @@ describeRealCodex('real Codex personal email audience e2e', () => {
   }, 360_000)
 })
 
+describeRealCodex('real Codex sponsorship retirement e2e', () => {
+  it('keeps private sponsorship recovery output-only after creative retirement', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-private-sponsorship-recovery-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    try {
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
+      const modelTarget = createAssistantModelTarget({
+        approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
+        codexHome: permissionHome.codexHome, model: config.model, modelProvider: config.modelProvider,
+        provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write',
+      })
+      if (!modelTarget) throw new Error('Expected real Codex target.')
+      const events: unknown[] = []
+      const result = await sendAssistantNotificationLocal({
+        actorId: null, bindingDeliveryTarget: 'sponsor@example.test', channel: 'email',
+        deliveryDispatchMode: 'queue-only', deliveryTarget: 'sponsor@example.test',
+        deliveryIdempotencyKey: 'synthetic-private-sponsorship-recovery',
+        executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'synthetic-sponsor', userEnvKeys: [] } },
+        identityId: 'synthetic-sponsor-identity',
+        instructions: [
+          'Send one concise private billing notice to the sponsor only.',
+          'Say that Murph could not complete the latest $5 group usage-credit refill and automatic charges are paused until they review payment.',
+          'Private recovery page: https://www.withmurph.ai/groups/fund/synthetic-recovery',
+          'Do not send this to the group, identify the sponsor there, or expose the monthly maximum.',
+        ].join('\n'),
+        responsePolicy: { kind: 'require_send' },
+        threadId: 'synthetic-private-recovery', threadIsDirect: true,
+        onTraceEvent: (event) => events.push(event.rawEvent),
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
+        turnTrigger: 'manual-deliver', vault: workingDirectory, workingDirectory,
+      })
+      expect(result.decision.kind).toBe('send_message')
+      expect(result.deliveryOutcome?.kind).toBe('queued')
+      expect(readCapabilityRoutingActions(events)).toEqual([])
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      expect(intents).toHaveLength(1)
+      expect(intents[0]).toMatchObject({ channel: 'email', threadIsDirect: true, explicitTarget: 'sponsor@example.test', status: 'pending', media: [] })
+      const reply = result.response ?? ''
+      process.stdout.write(`[real-codex private sponsorship recovery] ${JSON.stringify({ reply, intents: intents.length })}\n`)
+      expect(reply).toMatch(/\$5/u)
+      expect(reply).toMatch(/paus/iu)
+      expect(reply).toContain('https://www.withmurph.ai/groups/fund/synthetic-recovery')
+      expect(reply).not.toMatch(/song|poem|supporters|public alias|monthly maximum|monthly cap|notified the group|sent to the group/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
 describeRealCodex('real Codex direct email signup welcome e2e', () => {
   it.each([true, false])('queues one signup welcome on each channel regardless of delivery order: emailFirst=%s', async (emailFirst) => {
     const config = await resolveRealCodexE2eConfig()

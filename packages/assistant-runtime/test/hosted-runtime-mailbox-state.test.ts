@@ -1,3 +1,4 @@
+import { createAssistantOutboxIntent, listAssistantOutboxIntents } from "@murphai/assistant-engine/assistant-outbox";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -81,7 +82,51 @@ describe("retired system work in saved snapshots", () => {
     }
   });
 
-  it.each([null, { kind: "unknown.event" }, { kind: "runtime.browser-vault-refresh-requested" }])("still rejects malformed or unknown active wakes: %j", async (wake) => {
+  it.each([
+    ["creative-response", "pending"],
+    ["creative-response", "sending"],
+    ["creative-response", "recording"],
+    ["creative-response-text", "pending"],
+    ["creative-response-text", "sending"],
+    ["creative-response-text", "recording"],
+  ])("discards restored %s in %s before active-state parsing and advances past it", async (notificationPromptProfile, status) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-retired-notification-state-"));
+    try {
+      await createAssistantOutboxIntent({
+        channel: "telegram", identityId: "synthetic-group", message: "Previously committed synthetic response.",
+        deliveryIdempotencyKey: "synthetic-committed-creative", sessionId: "synthetic-session",
+        threadId: "synthetic-group", threadIsDirect: false, turnId: "synthetic-turn", vault: vaultRoot,
+      });
+      const committedOutbox = await listAssistantOutboxIntents(vaultRoot);
+      const active = buildPendingAssistantNotificationMailboxItem({ itemId: "private-recovery", mailboxLaneSeq: "2" });
+      await updateHostedSystemMailboxState(vaultRoot, () => ({ pending: [active] }));
+      const statePath = path.join(resolveAssistantStatePaths(vaultRoot).assistantStateRoot, "hosted-system-mailbox.json");
+      const envelope = JSON.parse(await readFile(statePath, "utf8"));
+      envelope.value.pending.unshift({
+        ...active,
+        itemId: "retired-creative",
+        mailboxLaneSeq: "1",
+        status,
+        // These removed fields must never enter strict active-state parsing.
+        routeAction: "retired-creative-action",
+        postCheckpointRecord: { kind: "retired-creative-record" },
+        wake: { ...active.wake, notification: { notificationPromptProfile } },
+      });
+      await writeFile(statePath, JSON.stringify(envelope));
+      const restored = await readHostedSystemMailboxState(vaultRoot);
+      expect(restored.pending).toEqual([active]);
+      expect(resolveHostedSystemMailboxHandledThroughSeq({ importedSeq: "2", state: restored })).toBe("1");
+      expect(findNextHostedSystemMailboxQueueItem({ allowedRouteActions: null, now: "2026-04-27T00:00:00.000Z", state: restored })?.itemId).toBe(active.itemId);
+      await removeHostedSystemMailboxPendingItemIfCurrent({ item: active, vaultRoot });
+      expect(resolveHostedSystemMailboxHandledThroughSeq({ importedSeq: "2", state: await readHostedSystemMailboxState(vaultRoot) })).toBe("2");
+      expect(await readFile(statePath, "utf8")).not.toContain("creative-response");
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual(committedOutbox);
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([null, { kind: "unknown.event" }, { kind: "runtime.browser-vault-refresh-requested" }, { kind: "assistant.notification.requested", notification: { notificationPromptProfile: "unknown-profile" } }])("still rejects malformed or unknown active wakes: %j", async (wake) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-invalid-system-state-"));
     try {
       await updateHostedSystemMailboxState(vaultRoot, () => ({ pending: [] }));

@@ -1,3 +1,4 @@
+import { isHostedRetiredAssistantNotificationProfile } from "@murphai/hosted-execution/contracts";
 import { gameGroupMissedCheckInPolicySchema, parseGameRecapEventId } from "@murphai/hosted-execution/runtime-control";
 import { buildHostedGameChatBootstrapPolicy, isHostedGameBootstrapUnavailable } from "./game-chat-bootstrap.ts";
 import type { HostedRuntimeGroupToolPort } from "../platform.ts";
@@ -563,12 +564,7 @@ function shouldSkipFailedHostedAssistantNotification(
   return (
     !isHostedSignupWelcomeNotification(wake)
     && (
-      (
-        wake.notification.notificationPromptProfile === "creative-response"
-        || wake.notification.notificationPromptProfile ===
-          "creative-response-text"
-      )
-      || wake.notification.firstContact != null
+      wake.notification.firstContact != null
       || wake.notification.responsePolicy?.kind === "allow_send_or_skip"
     )
   );
@@ -841,6 +837,10 @@ function buildAssistantNotificationInput(
   recordLogEntry: (entry: HostedExecutionRedactedLogEntry) => void,
   groupToolPort: HostedRuntimeGroupToolPort | null | undefined,
 ): AssistantNotificationInput {
+  const notificationPromptProfile = wake.notification.notificationPromptProfile;
+  if (isHostedRetiredAssistantNotificationProfile(notificationPromptProfile)) {
+    throw new TypeError("Retired notification profiles cannot enter active execution.");
+  }
   const privateAssistantAskCompletion =
     wake.notification.privateAssistantAskCompletion ?? null;
   if (privateAssistantAskCompletion) {
@@ -913,12 +913,7 @@ function buildAssistantNotificationInput(
       : null,
     instructions: wake.notification.instructions,
     logDetails: buildHostedAssistantNotificationLogDetails(wake),
-    ...(wake.notification.notificationPromptProfile
-      ? {
-          notificationPromptProfile:
-            wake.notification.notificationPromptProfile,
-        }
-      : {}),
+    ...(notificationPromptProfile ? { notificationPromptProfile } : {}),
     recordLogEntry,
     responsePolicy: wake.notification.responsePolicy ?? null,
     ...(privateAssistantAskCompletion

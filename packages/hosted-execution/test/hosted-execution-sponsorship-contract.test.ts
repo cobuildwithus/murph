@@ -21,7 +21,7 @@ const ROUTE = {
 };
 
 describe("hosted group sponsorship contracts", () => {
-  it("round-trips only the narrow creative notification prompt profile", () => {
+  it("keeps exactly the retired creative profiles readable and rejects unknown profiles", () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "assistant.notification.requested:group-sponsorship:test",
       memberId: "member-group-runtime",
@@ -60,33 +60,18 @@ describe("hosted group sponsorship contracts", () => {
     })).toThrow(/notificationPromptProfile/u);
   });
 
-  it("strictly parses the optional expiring group-bit sidecar", () => {
+  it.each([
+    null,
+    { schema: "murph.group-sponsorship-bit.v1", expiresAt: "2026-07-28T12:00:00.000Z", publicAlias: "Synthetic contributor", requestedBit: "Use a nautical greeting." },
+    { expiresAt: "invalid", permission: "admin" },
+    "obsolete payload",
+  ])("ignores a running bit from an older Web: %j", (groupRunningBit) => {
     const response = {
       fetchedAt: "2026-07-27T12:00:00.000Z",
-      groupRunningBit: {
-        expiresAt: "2026-07-28T12:00:00.000Z",
-        publicAlias: "Jake’s Lower Back",
-        requestedBit: "Treat me like the exhausted CFO.",
-        schema: "murph.group-sponsorship-bit.v1",
-      },
       items: [],
       maxSeqByLane: [],
       userId: "member-group-runtime",
     };
-    expect(parseHostedMailboxFetchResponse(response)).toEqual(response);
-    expect(() => parseHostedMailboxFetchResponse({
-      ...response,
-      groupRunningBit: {
-        ...response.groupRunningBit,
-        permission: "admin",
-      },
-    })).toThrow(/unknown fields/u);
-    expect(() => parseHostedMailboxFetchResponse({
-      ...response,
-      groupRunningBit: {
-        ...response.groupRunningBit,
-        expiresAt: "tomorrow",
-      },
-    })).toThrow(/canonical/u);
+    expect(parseHostedMailboxFetchResponse({ ...response, groupRunningBit })).toEqual(response);
   });
 });

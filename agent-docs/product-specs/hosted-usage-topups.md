@@ -236,142 +236,28 @@ sponsor and the single-sponsor billing invariant.
 
 ## Group Sponsorship Moment
 
-Every explicit one-time group contribution and monthly activation purchase has
-one purchase-linked sponsorship-moment row. Automatic $5 refills do not create
-another moment, creative response, group notice, or running bit. The moment is
-not a financial status or balance. It freezes an HMAC-bound request
-configuration and, only for a current owner or active participant, may encrypt
-an optional public alias, optional creative request, and temporary running-bit
-request using the hosted member secure-box owner. A new public alias is stored
-in the existing bounded encrypted plain-text shape so preceding Web can still
-recover and materialize the purchase. One separate nullable metadata field
-records the exact funding-page recognition consent; legacy rows carry no such
-consent.
+Sponsorship personalization is retired. Funding collects no creative request,
+temporary running bit, public alias, or supporters-list consent. Checkout,
+recovery, Stripe reconciliation, and mailbox fetch neither read nor write
+`HostedGroupSponsorshipMoment`. The model and migrations remain until a separate
+contract migration drops the table and its stored personalization.
 
-A creative request is absent by default, so funding alone is quiet in the room.
-The bounded formats are `message`, `poem`, and `song`. Every request may include
-an optional premise; a song may additionally include one genre or style
-reference. Named songs, shows, soundtracks, artists, and genres are interpreted
-only as broad traits such as mood, tempo, instrumentation, and structure. They
-never authorize copied melody, lyrics, catchphrases, vocal identity, or a
-signature arrangement. The encrypted creative envelope is versioned and exists
-only for an explicit request. A null creative-request column means quiet for
-both current and pre-feature rows. A pre-feature encrypted generic note is
-normalized only into a plain-message request; it can never be reinterpreted as
-song consent. Pre-feature rows without that note never produce a creative
-response.
+Growth reporting classifies group purchases from the beneficiary's thread
+container and the existing monthly authorization, independent of moment rows
+or payer retention. Historical one-time group contributions remain group revenue.
+Private payment-recovery notices and all billing authorization checks remain.
 
-A valid funding locator remains sufficient to contribute anonymously. It is
-not sufficient to publish content into the room. Web checks current
-participant authority when the purchase is created and again after verified
-payment. Losing that authority suppresses the new authored creative request
-without changing the grant and leaves the funding-page publication marker null.
-The alias field itself is optional recognition consent: the collection copy
-names signed-in group members as the audience and bounds visibility to an active
-monthly sponsorship or the 20 most recent contributions; blank means
-`Anonymous`. The server retains an alias-only draft only with that exact
-consent marker. Legacy aliases can still support their originally disclosed
-creative or running-bit use but never gain funding-page consent. No expired
-private copy is read or exposed.
-
-For a signed-in active group participant, the funding page may recognize the
-current live monthly sponsorship activation and at most the 20 most recent
-fulfilled one-time contribution moments. It displays only `Monthly sponsor` or
-`One-time contribution` with the moment's consented public alias only when the
-first verified-settlement transaction also marked it publishable after its
-creator-authority recheck, falling back to `Anonymous`; a later settlement
-replay cannot acquire publication authority. The alias is a
-presentation label, not authenticated payer identity. Pre-feature aliases,
-pending or incompletely materialized moments, and moments settled after the
-creator lost authority remain Anonymous. The projection never exposes payer records, contribution amounts,
-monthly maximums, charge timing, balances, automatic refills, or payment
-status. Signed-out visitors and non-participants receive no supporter
-projection. Alias decryption is best effort and degrades to `Anonymous` without
-blocking funding. The complete funding, management, cancellation, and recovery
-controls stream first; supporter recognition renders in a separate Suspense
-boundary with a null fallback. Its two-second abort signal is checked between
-the initial database stages and is forwarded to the secure-box batch; Prisma
-does not cancel an in-flight query, and a secure-box metadata lookup immediately
-after an overlapping moment read may begin before external crypto observes the
-abort. This is not a wall-clock database deadline. The primary funding and
-recovery controls never await this optional boundary.
-
-The funding-page read reuses the page's participant-authority result, then adds
-at most four set-based database calls: sponsorship authorization and 20-row
-one-time history in parallel, an optional activation purchase, and one moment
-batch for at most 21 purchase IDs. Peak added database concurrency is two. The
-secure-box owner opens alias ciphertexts in one batch and performs at most 21
-root unwraps with its existing concurrency cap of four; there are no per-row
-database reads, provider calls, or transactions. The optional read is outside
-the page's blocking data fanout. The shared signal bounds external secure-box
-work, but an already-started Prisma query and the immediate secure-box metadata
-lookup described above may still finish in the background without delaying the
-primary controls.
-
-Verified Stripe reconciliation remains the only activation authority. After a
-fulfilled group purchase, Web idempotently:
-
-1. activates a requested bit for 24 hours on a `$10` one-time contribution or
-   72 hours on a `$20` one-time contribution;
-2. stops without creating a public notification when no creative response was
-   explicitly requested;
-3. otherwise resolves the exact current non-direct group destination, with no
-   personal fallback; and
-4. appends one purchase-deduplicated creative notification to the existing
-   mailbox.
-
-Permanent schema validation failure in a decrypted optional creative envelope
-projects as no creative request at this notification boundary. Activation,
-including an otherwise valid running bit, commits and Stripe receipt completion
-continues. Creator recovery stays strict, and secure-box, decryption, database,
-and other operational failures continue to propagate for ordinary retry rather
-than being mislabeled as quiet content.
-
-A monthly activation is the actual `$5` purchase eligible for the optional
-social response. Its private monthly maximum never changes the public
-acknowledgment or creates a running bit.
-
-The creative turn is isolated and runs as a fresh ephemeral thread on the
-resident App Server. Message and poem formats use an output-only turn profile,
-so they have no tools rather than relying on prompt compliance alone. Song
-format projects only `generate_song`, which is used exactly once. A song is
-exactly 15 seconds with at most four short lyric lines. The requested format
-cannot be changed by participant-authored prompt text. The response transforms
-one vivid, recent, non-sensitive detail, exchange, or room dynamic from the
-current group conversation into a room-specific hook when one is available.
-The optional premise is the preferred creative seed when it blends naturally
-with the room.
-When neither source offers a safe, usable premise, the response becomes a
-gentle group celebration in the requested format without inventing personal
-facts or referring to sensitive history.
-
-Serious, urgent, medical, sensitive, or conflict-heavy recent context makes the
-response gentle and non-comedic. A creative provider failure terminally settles
-this optional notification instead of asking the model to try another song. A
-selected song without exactly one generated voice-memo attachment fails before
-receipt, transcript persistence, or delivery and is never replaced by a
-text-only response. Once a delivery intent commits, the ordinary outbox retains
-its retry and deduplication behavior. There is no reservation, attempt counter,
-post-hoc media-attempt accounting, or media-specific retry state. The reconciler
-wakes newly paid usage work before attempting this optional social effect, and
-notification failure never rolls back an already committed credit grant.
-
-The running bit remains a Web-owned expiring product fact, not durable group
-memory. Mailbox fetch projects only the newest active bit to fresh,
-route-authorized, non-direct Linq or Telegram conversation input. The running-bit
-reader decrypts only the alias and bit, so an unavailable or malformed creative
-envelope cannot suppress an otherwise valid active bit. The runtime rechecks
-expiry before prompt construction and quotes the alias and requested bit as
-untrusted participant-authored data. It is optional social color only:
-facts, health and safety guidance, privacy, permissions, routing, tools,
-challenge scoring, access, and response quality are unchanged. Failure to read
-the optional bit projects no bit and never blocks ordinary mailbox work.
+The runtime accepts the historical `creative-response` and
+`creative-response-text` profiles only to terminally skip them. Fresh mailbox
+imports skip after decoding; restored pending, sending, and recording work is
+removed before strict active-state parsing. Unknown profiles still fail closed.
+Undelivered creative work is abandoned. Already committed outbox delivery keeps
+its existing continuation and deduplication owner. The mailbox parser ignores
+`groupRunningBit` from an older Web, and restored input context never uses it.
 
 Private Murph may list a server-built sponsorship URL for each current group
 membership. The model cannot choose a monthly maximum, attach sponsor copy,
-change an authorization, or charge a card. Multiple simultaneous automatic
-sponsors, public spend rankings, exact-message accounting, and provider-level
-delivery deadlines remain out of scope.
+change an authorization, or charge a card.
 
 ## Individual MVP
 
@@ -1412,31 +1298,16 @@ and call the same idempotent reconciler by purchase ID.
    PaymentIntent, and Charge proof without requiring a Checkout Session, and
    its sibling check still clears every payer-encrypted Stripe value. Existing
    Web remains compatible because the new shape is a superset of its
-   Checkout-backed fulfilled rows. Apply
-   `20260727190000_hosted_group_sponsorship_moment` before enabling the
-   sponsorship producer; older Web does not read or write the additive table.
-3. Deploy the Cloudflare/runner bundle first. It parses the optional
-   low-capacity and group-running-bit mailbox fields, recognizes the isolated
-   `creative-response` and `creative-response-text` notification profiles, and
-   advertises `read_usage`. Verify the exact runner fingerprint converges before
-   Web can produce either new sponsorship contract. Existing Web sends neither
-   sponsorship field during this compatibility window.
-4. Apply the additive capped-sponsorship authorization migration and
-   `20260807210000_add_group_sponsorship_creative_request` after the tolerant
-   runtime reader is live. Confirm both migrations and compatible Web have
-   converged before enabling monthly authorization creation, automatic refill
-   admission, or optional creative-request creation.
-5. Deploy Web next. It contains the group sponsorship producer, target-aware
-   saved-card/Checkout flow, webhook-owned grant and moment materialization,
-   bounded automatic-refill sweep, private management and notices, optional
-   running-bit projection, and existing usage/exhaustion projections.
-   The new stable hosted developer guidance deliberately
-   changes the assistant contract fingerprint: every existing direct or group
-   session that would otherwise use native resume starts one new provider
-   thread on its first post-deploy conversation turn. That turn replays the
-   committed transcript fallback, bounded to 72 messages, 4,000 bytes per
-   message, and 12,000 bytes total; later turns resume the new thread. A rollback
-   rotates sessions that already adopted the new fingerprint once more.
+   Checkout-backed fulfilled rows.
+3. Keep the capped-sponsorship authorization schema and compatible runtime
+   readers deployed before enabling monthly authorization creation and refill.
+4. Web owns target-aware saved-card and Checkout payments, webhook-owned grants,
+   bounded automatic refills, private management and notices, and usage gates.
+5. Personalization removal deploys independently across Web and the manual
+   runner release. Old runners accept Web responses without a running bit; new
+   runners ignore an old Web's bit and terminally skip its creative wakes.
+   Undelivered creative work can still execute on a warm old runner until that
+   runner is replaced. Verify runner convergence to complete retirement.
 6. Do not run a second postdeploy constraint installer. The historical
    `20260720233000_hosted_group_usage_funding_invariants` contract migration is
    retained as immutable history but is superseded and omitted by the runner;
@@ -1469,33 +1340,17 @@ Web cannot activate or safely manage it. Recover from that point with a forward
 fix on the compatible schema, Web, and runtime rather than restoring the older
 producer.
 
-The optional-creative Web producer is also an old-Web rollback floor.
-Pre-feature Web does not understand the creative envelope and unconditionally
-materializes a song for every fulfilled group contribution, including a quiet
-one. Disable new sponsorship intake before rollback and keep the compatible Web
-reader and reconciler deployed. Rolling below that floor requires proof that no
-group contribution can still be materialized or retried; otherwise
-forward-fix.
+Personalization removal has the UI-and-recovery revision as its Web rollback
+floor: it tolerates an old tab's `sponsorship` key and recovers purchases without
+reading a moment row or comparing a draft digest. Billing selection, the
+`sponsorship` conflict value, caps, exact $5 activation and refills remain live.
+Keep old-tab key tolerance until that revision has been live for seven days.
 
-Funding-page recognition does not add another ciphertext-format rollback floor.
-Apply `20260811160000_add_group_sponsorship_funding_alias_publication` before
-promoting the recognition-aware Web artifact. The migration adds only nullable
-consent and publication metadata, and the encrypted alias remains the same
-bounded plain-text payload understood by preceding Web. Consent metadata is
-also excluded from the legacy configuration digest, so base recovery of a
-current-created consented row matches without changing its stored consent; a
-base-created row cannot gain consent on retry. A base client sent to current Web
-is accepted, but without the new consent field its alias remains Anonymous on
-the funding page. A surviving current client sent to base Web is rejected by
-the base strict request parser before Stripe; rollback must disable new
-sponsorship intake and force a page reload before routing sponsorship requests
-to base Web. Current-created pending moments remain recoverable and
-materializable by base Web. Base settlement cannot stamp the new publication
-metadata, so recognition remains Anonymous permanently even after a later
-compatible settlement replay. This deliberately prefers the narrower privacy
-fallback over retroactive publication. Purchased credit, creative
-materialization, notifications, and funding recovery do not depend on that
-optional publication marker.
+Drop the moment table only in a later contract-migration release after this
+removal is live. That drop sets the rollback floor at the removal revision.
+Retired notification profiles must remain readable while retained mailbox rows
+or restored runtime snapshots can still contain them; the 14-day mailbox
+retention alone does not prove all snapshots have drained.
 
 ## Verification
 

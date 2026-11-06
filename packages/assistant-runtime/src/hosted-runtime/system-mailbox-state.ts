@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 
 import {
+  isHostedRetiredAssistantNotificationProfile,
   type HostedExecutionSystemWake,
 } from "@murphai/hosted-execution/contracts";
 import {
@@ -1345,6 +1346,14 @@ function parseHostedSystemMailboxStateValue(value: unknown): HostedSystemMailbox
         ? value.wake : null;
       if (wake && typeof wake === "object" && "kind" in wake
         && typeof wake.kind === "string" && isHostedRetiredMailboxKind(wake.kind)) {
+        return [];
+      }
+      if (wake && typeof wake === "object" && "kind" in wake
+        && wake.kind === "assistant.notification.requested"
+        && "notification" in wake && wake.notification
+        && typeof wake.notification === "object"
+        && "notificationPromptProfile" in wake.notification
+        && isHostedRetiredAssistantNotificationProfile(wake.notification.notificationPromptProfile)) {
         return [];
       }
       return [parseHostedSystemMailboxPendingItem(value)];

@@ -4171,7 +4171,7 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(fake.purchases.size).toBe(1);
   });
 
-  it("recovers a purchase that still stores retired personalization", async () => {
+  it("recovers a group purchase without a sponsorship moment row", async () => {
     const fake = createFakePrisma();
     mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
       buildStripeSession(request)
@@ -4185,10 +4185,6 @@ describe("createHostedUsageCreditCheckout", () => {
       prisma: fake.prisma as never,
     });
     const purchase = onlyPurchase(fake.purchases);
-    Object.assign(fake.sponsorshipMoments.get(purchase.id as string) ?? {}, {
-      configurationDigest: "digest_of_a_retired_draft",
-      publicAliasEncrypted: "sealed:The Group Historian",
-    });
     clearStripeProviderMockHistory();
 
     await expect(createHostedGroupUsageCreditCheckout({
@@ -4370,7 +4366,7 @@ describe("createHostedUsageCreditCheckout", () => {
     });
   });
 
-  it("stores no personalization for a new group checkout", async () => {
+  it("creates a group checkout without a moment store", async () => {
     const fake = createFakePrisma();
     mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
       buildStripeSession(request)
@@ -4385,14 +4381,6 @@ describe("createHostedUsageCreditCheckout", () => {
       prisma: fake.prisma as never,
     })).resolves.toMatchObject({ status: "checkout_open" });
 
-    expect(fake.sponsorshipMoments.get(
-      onlyPurchase(fake.purchases).id as string,
-    )).toMatchObject({
-      creativeRequestEncrypted: null,
-      publicAliasEncrypted: null,
-      runningBitRequestEncrypted: null,
-      sponsorMessageEncrypted: null,
-    });
   });
 
   it("persists the purchase ambiguity fence before one-time Checkout creation", async () => {
@@ -7662,7 +7650,6 @@ function createFakePrisma(input: {
   }> = [];
   const purchases = new Map<string, Record<string, unknown>>();
   const sponsorshipAuthorizations = new Map<string, Record<string, unknown>>();
-  const sponsorshipMoments = new Map<string, Record<string, unknown>>();
   const hostedUsageCreditPurchase = {
     aggregate: vi.fn(async (query: PurchaseQuery) => ({
       _sum: {
@@ -7769,20 +7756,6 @@ function createFakePrisma(input: {
   const hostedMember = {
     findUnique: vi.fn(async () => member),
   };
-  const hostedGroupSponsorshipMoment = {
-    create: vi.fn(async (query: { data: Record<string, unknown> }) => {
-      sponsorshipMoments.set(String(query.data.purchaseId), query.data);
-      return query.data;
-    }),
-    findUnique: vi.fn(async (query: {
-      select?: Record<string, boolean>;
-      where: { purchaseId: string };
-    }) =>
-      projectFakeRecord(
-        sponsorshipMoments.get(query.where.purchaseId) ?? null,
-        query.select,
-      )),
-  };
   const prisma = {
     hostedGroupSponsorshipAuthorization: {
       create: vi.fn(async (query: { data: Record<string, unknown> }) => {
@@ -7823,7 +7796,6 @@ function createFakePrisma(input: {
         return { count };
       }),
     },
-    hostedGroupSponsorshipMoment,
     hostedMember,
     hostedGroup: {
       findUnique: vi.fn(async () => ({ runtimeMemberId: "member_group_runtime" })),
@@ -7896,7 +7868,6 @@ function createFakePrisma(input: {
     prisma,
     purchases,
     sponsorshipAuthorizations,
-    sponsorshipMoments,
     usageCreditBeneficiaryLockQueryCalls,
     usageCreditCapacityQueryCalls,
   };

@@ -96,7 +96,6 @@ export interface HostedMailboxResolvedImportItem {
   // lane consumed watermark: it must stay conversation context only, never a
   // fresh reply candidate.
   durablyConsumed?: boolean;
-  groupRunningBit?: HostedMailboxFetchResponse["groupRunningBit"];
   usageRunningLow?: true;
   item: HostedMailboxItem;
   payload: Extract<HostedMailboxPayloadResolutionResult, { status: "resolved" }>;
@@ -410,11 +409,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         && !itemIsDurablyConsumedReplay
         && fetched.conversationUsageStatus === "low"
         ? { usageRunningLow: true as const }
-        : {}),
-      ...(lane === "conversation"
-        && !itemIsDurablyConsumedReplay
-        && fetched.groupRunningBit
-        ? { groupRunningBit: fetched.groupRunningBit }
         : {}),
       item,
       payload,

@@ -176,22 +176,6 @@ const ASSISTANT_SYSTEM_NOTIFICATION_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'output-only-turn',
 }
-const ASSISTANT_CREATIVE_NOTIFICATION_TURN_PROFILE: Required<
-  AssistantCodexTurnThreadScopeProfile
-> = {
-  nativeResumePolicy: 'disabled',
-  promptProfile: 'creative-notification',
-  threadScope: 'isolated-thread',
-  toolProfile: 'provider-turn',
-}
-const ASSISTANT_CREATIVE_TEXT_NOTIFICATION_TURN_PROFILE: Required<
-  AssistantCodexTurnThreadScopeProfile
-> = {
-  nativeResumePolicy: 'disabled',
-  promptProfile: 'creative-notification',
-  threadScope: 'isolated-thread',
-  toolProfile: 'output-only-turn',
-}
 const ASSISTANT_INTERACTIVE_NOTIFICATION_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
 > = {
@@ -231,8 +215,6 @@ export type AssistantNotificationTurnPolicy =
 
 export type AssistantNotificationPromptProfile =
   | 'context-handoff'
-  | 'creative-response'
-  | 'creative-response-text'
   | 'operator-message'
 
 export type AssistantNotificationResponsePolicy =
@@ -762,18 +744,7 @@ export async function sendAssistantNotificationLocal(
           })
         }
 
-        let responseMedia: readonly AssistantResponseMedia[]
-        try {
-          responseMedia = resolveAssistantNotificationResponseMedia({
-            notificationPromptProfile: input.notificationPromptProfile ?? null,
-            responseMedia: providerResult.responseMedia,
-          })
-        } catch (error) {
-          throw annotateAssistantNotificationError(
-            error,
-            providerValidationErrorDetails,
-          )
-        }
+        const responseMedia = providerResult.responseMedia ?? []
         const generatedPresentation = resolveAssistantNotificationPresentation({
             decision,
             hasAppendOnlyRuntimePresentation,
@@ -2003,12 +1974,6 @@ function resolveAssistantNotificationTurnProfile(
   if (input.notificationPromptProfile === 'context-handoff') {
     return ASSISTANT_CONTEXT_HANDOFF_NOTIFICATION_TURN_PROFILE
   }
-  if (input.notificationPromptProfile === 'creative-response') {
-    return ASSISTANT_CREATIVE_NOTIFICATION_TURN_PROFILE
-  }
-  if (input.notificationPromptProfile === 'creative-response-text') {
-    return ASSISTANT_CREATIVE_TEXT_NOTIFICATION_TURN_PROFILE
-  }
   if (input.notificationPromptProfile === 'operator-message') {
     return ASSISTANT_OPERATOR_MESSAGE_NOTIFICATION_TURN_PROFILE
   }
@@ -2284,23 +2249,6 @@ function normalizeRequiredContextHandoffText(value: string): string {
     }
     throw error
   }
-}
-
-function resolveAssistantNotificationResponseMedia(input: {
-  notificationPromptProfile: AssistantNotificationPromptProfile | null
-  responseMedia: readonly AssistantResponseMedia[] | null | undefined
-}): readonly AssistantResponseMedia[] {
-  if (input.notificationPromptProfile !== 'creative-response') {
-    return input.responseMedia ?? []
-  }
-  const media = normalizeAssistantResponseMediaList(input.responseMedia)
-  if (media.length !== 1 || media[0]?.kind !== 'voice_memo') {
-    throw createAssistantNotificationInvalidResponseError(
-      'creative_response_media_invalid',
-      'A song notification requires exactly one generated song attachment.',
-    )
-  }
-  return media
 }
 
 function createAssistantNotificationInvalidResponseError(

@@ -118,9 +118,6 @@ import {
   type HostedGroupSponsorshipMonthlyCapMinor,
 } from "../hosted-groups/group-sponsorship-contract";
 import {
-  createHostedGroupSponsorshipMomentTx,
-} from "../hosted-groups/group-sponsorship-store";
-import {
   readHostedConfiguredGroupSponsorshipOfferCodes,
 } from "../hosted-groups/group-sponsorship-policy";
 import { hasHostedRuntimeActiveAccessForUpdateTx } from "../hosted-mailbox/runtime-access";
@@ -919,16 +916,6 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         updatedAt: now,
       },
     });
-    if (target.kind === "group") {
-      await createHostedGroupSponsorshipMomentTx({
-        authorizedDraft: null,
-        beneficiaryMemberId: target.beneficiaryMemberId,
-        creatorMemberId: target.payerMemberId,
-        offerCode: offer.code,
-        purchaseId,
-        tx,
-      });
-    }
     return {
       kind: "purchase" as const,
       purchase: created,

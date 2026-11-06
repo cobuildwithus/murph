@@ -239,6 +239,7 @@ export type HostedExecutionAssistantNotificationDeliveryDispatchMode =
 
 export const HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES = [
   "context-handoff",
+  // Reader compatibility for retained mailbox rows and restored snapshots.
   "creative-response",
   "creative-response-text",
   "operator-message",
@@ -246,6 +247,12 @@ export const HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES = [
 
 export type HostedExecutionAssistantNotificationPromptProfile =
   (typeof HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES)[number];
+
+export function isHostedRetiredAssistantNotificationProfile(
+  value: unknown,
+): value is "creative-response" | "creative-response-text" {
+  return value === "creative-response" || value === "creative-response-text";
+}
 
 export type HostedExecutionAssistantNotificationResponsePolicy =
   | HostedGameGroupMissedCheckInPolicy

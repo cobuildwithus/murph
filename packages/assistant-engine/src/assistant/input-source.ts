@@ -1,7 +1,4 @@
 import type { AssistantAcceptedTurnInputItemInput } from './active-turn-input-journal.js'
-import type {
-  HostedGroupRunningBitProjection,
-} from '@murphai/hosted-execution/runtime-control'
 import {
   readHostedMailboxAssistantInputItemDetails,
 } from './hosted-mailbox-input-items.js'
@@ -48,7 +45,6 @@ export interface AssistantInputEvent {
   cursor: AssistantInputCursor
   groupParticipantAdded?: true
   groupReactionContext?: string
-  groupRunningBit?: HostedGroupRunningBitProjection
   hostedMailboxItemId?: string | null
   inputId: string
   occurredAt: string
@@ -275,9 +271,6 @@ async function listStoredAssistantInputCandidates(input: {
         ...(hostedMailboxItem?.groupReactionContext
           ? { groupReactionContext: hostedMailboxItem.groupReactionContext }
           : {}),
-        ...(hostedMailboxItem?.groupRunningBit
-          ? { groupRunningBit: hostedMailboxItem.groupRunningBit }
-          : {}),
         hostedMailboxItemId: hostedMailboxItem?.mailboxItemId ?? null,
         ...(hostedMailboxItem?.usageRunningLow === true
           ? { usageRunningLow: true as const }
@@ -293,7 +286,6 @@ export function assistantInputCandidateFromStoredEvent(
   input?: {
     groupParticipantAdded?: true
     groupReactionContext?: string
-    groupRunningBit?: HostedGroupRunningBitProjection
     hostedMailboxItemId?: string | null
     usageRunningLow?: true
   },
@@ -306,9 +298,6 @@ export function assistantInputCandidateFromStoredEvent(
     ...(input?.groupReactionContext
       ? { groupReactionContext: input.groupReactionContext }
       : {}),
-    ...(input?.groupRunningBit
-      ? { groupRunningBit: input.groupRunningBit }
-      : {}),
     hostedMailboxItemId: input?.hostedMailboxItemId ?? null,
     ...(input?.usageRunningLow === true
       ? { usageRunningLow: true as const }
@@ -320,7 +309,6 @@ function assistantInputCandidateFromStoredEventWithHostedMailboxItem(input: {
   event: AssistantInputEventRecord
   groupParticipantAdded?: true
   groupReactionContext?: string
-  groupRunningBit?: HostedGroupRunningBitProjection
   hostedMailboxItemId: string | null
   usageRunningLow?: true
 }): AssistantInputCandidate {
@@ -336,16 +324,6 @@ function assistantInputCandidateFromStoredEventWithHostedMailboxItem(input: {
     event.sourceMetadata.externalThreadRouteAuthorityPresent === true &&
     event.conversation?.threadIsDirect === false
       ? input.groupReactionContext
-      : null
-  const groupRunningBit =
-    input.groupRunningBit &&
-    (
-      event.sourceMetadata?.kind === 'linq' ||
-      event.sourceMetadata?.kind === 'telegram'
-    ) &&
-    event.sourceMetadata.externalThreadRouteAuthorityPresent === true &&
-    event.conversation?.threadIsDirect === false
-      ? input.groupRunningBit
       : null
   return {
     acceptedInput: {
@@ -369,7 +347,6 @@ function assistantInputCandidateFromStoredEventWithHostedMailboxItem(input: {
         ? { groupParticipantAdded: true }
         : {}),
       ...(groupReactionContext ? { groupReactionContext } : {}),
-      ...(groupRunningBit ? { groupRunningBit } : {}),
       hostedMailboxItemId: input.hostedMailboxItemId,
       inputId: event.inputId,
       occurredAt: event.occurredAt,

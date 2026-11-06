@@ -520,26 +520,18 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
 })
 
 describe('murph.generate_song dynamic tool execution', () => {
-  it('forces the trusted turn duration before song generation', async () => {
+  it('preserves the requested duration for ordinary song generation', async () => {
     const generateAndUpload = vi.fn<
       LinqVoiceMemoRuntime['generateAndUpload']
     >(async () => ({
       attachmentId: 'attachment_song_policy',
-      filename: 'sponsor-song.mp3',
+      filename: 'synthetic-song.mp3',
       ok: true,
     }))
-    const generateSongTurnState = {
-      attemptCount: 0,
-      policy: {
-        maxAttempts: 1,
-        requiredDurationSeconds: 15,
-      },
-    }
 
     const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl: vi.fn<typeof fetch>(),
-      generateSongTurnState,
       nextUsageOrdinal: vi.fn(() => 99),
       progressDelivery: null,
       request: {
@@ -555,59 +547,11 @@ describe('murph.generate_song dynamic tool execution', () => {
 
     expect(generateAndUpload).toHaveBeenCalledTimes(1)
     expect(generateAndUpload.mock.calls[0]?.[0]?.generation).toMatchObject({
-      durationMs: 15_000,
+      durationMs: 30_000,
       kind: 'elevenlabs_music',
     })
-    expect(generateSongTurnState.attemptCount).toBe(1)
     expect(result.rpcResult.success).toBe(true)
   })
 
-  it('does not retry a failed creative song generation attempt', async () => {
-    const generateAndUpload = vi.fn<
-      LinqVoiceMemoRuntime['generateAndUpload']
-    >(async () => ({
-      failure: {
-        detail: 'ELEVENLABS_API_REQUEST_FAILED (http 503)',
-        kind: 'generation_failed',
-      },
-      ok: false,
-    }))
-    const generateSongTurnState = {
-      attemptCount: 0,
-      policy: {
-        maxAttempts: 1,
-        requiredDurationSeconds: 15,
-      },
-    }
-    const input = {
-      env: {},
-      fetchImpl: vi.fn<typeof fetch>(),
-      generateSongTurnState,
-      nextUsageOrdinal: vi.fn(() => 99),
-      progressDelivery: null,
-      request: {
-        args: {
-          durationSeconds: 15,
-          instrumental: false,
-          prompt: 'A bright, original group theme.',
-        },
-        kind: 'generate-song' as const,
-      },
-      voiceMemoRuntime: createLinqRuntime(generateAndUpload),
-    }
 
-    const first = await executeMurphDynamicToolRequest(input)
-    const second = await executeMurphDynamicToolRequest(input)
-
-    expect(first.rpcResult.success).toBe(false)
-    expect(second.rpcResult).toEqual({
-      success: false,
-      contentItems: [{
-        type: 'inputText',
-        text: 'song generation attempt limit reached for this turn; no song ran',
-      }],
-    })
-    expect(generateAndUpload).toHaveBeenCalledTimes(1)
-    expect(generateSongTurnState.attemptCount).toBe(1)
-  })
 })

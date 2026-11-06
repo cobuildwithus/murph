@@ -42,7 +42,6 @@ const mocks = vi.hoisted(() => ({
   readHostedMailboxMaxSeqByLane: vi.fn(),
   readHostedMemberAssistantModelPreference: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
-  readHostedActiveGroupRunningBit: vi.fn(),
   readHostedWorkspace: vi.fn(),
   recordHostedIngressAssistantInputStaged: vi.fn(),
   recordHostedIngressAssistantMilestone: vi.fn(),
@@ -105,10 +104,6 @@ vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", async (importO
   ...(await importOriginal<typeof import("@/src/lib/hosted-onboarding/assistant-model-preference")>()),
   readHostedMemberAssistantModelPreference:
     mocks.readHostedMemberAssistantModelPreference,
-}));
-
-vi.mock("@/src/lib/hosted-groups/group-sponsorship-store", () => ({
-  readHostedActiveGroupRunningBit: mocks.readHostedActiveGroupRunningBit,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", async (importOriginal) => ({
@@ -368,7 +363,6 @@ describe("hosted runtime internal web routes", () => {
       model: "gpt-6.1-sol",
       solAvailable: false,
     });
-    mocks.readHostedActiveGroupRunningBit.mockResolvedValue(null);
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveHostedMemberRecord());
     mocks.claimHostedAcceptedAttemptFailureRecheck.mockResolvedValue(false);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
@@ -729,7 +723,6 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(200);
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledTimes(1);
     expect(mocks.fetchHostedRuntimeMailboxProjection).toHaveBeenCalledTimes(1);
-    expect(mocks.readHostedActiveGroupRunningBit).not.toHaveBeenCalled();
     expect(mocks.hostedRuntimeMailboxMemberFindUnique).toHaveBeenCalledTimes(1);
     expect(mocks.readHostedMemberAssistantModelPreference).not.toHaveBeenCalled();
     expect(mocks.fetchHostedRuntimeMailboxProjection).toHaveBeenCalledWith({
@@ -779,18 +772,12 @@ describe("hosted runtime internal web routes", () => {
     { scenario: "consumed watermark replay", item: {}, consumedSeq: "1", eligible: false },
     { scenario: "missing payload", item: { payloadInlineCiphertext: null }, consumedSeq: "0", eligible: false },
     { scenario: "fresh conversation work", item: {}, consumedSeq: "0", eligible: true },
-  ])("only loads sponsorship for usable conversation input: $scenario", async ({ item, consumedSeq, eligible }) => {
+  ])("only checks usage for usable conversation input: $scenario", async ({ item, consumedSeq, eligible }) => {
     mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
       buildRuntimeMailboxAccessRecord({
         threadContainer: { owner: buildRuntimeMailboxAccessRecord() },
       }),
     );
-    const runningBit = {
-      expiresAt: "2026-04-27T00:00:00.000Z",
-      publicAlias: null,
-      requestedBit: "Use a nautical greeting.",
-      schema: "murph.group-sponsorship-bit.v1",
-    };
     const items = item === null ? [] : [{
       consumedAt: null,
       createdAt: FIXED_NOW,
@@ -814,7 +801,6 @@ describe("hosted runtime internal web routes", () => {
       items,
       maxSeqByLane: [{ lane: "conversation", maxSeq: "1" }],
     });
-    mocks.readHostedActiveGroupRunningBit.mockResolvedValue(runningBit);
 
     const response = await mailboxFetchRoute.POST(jsonRequest(
       "/api/internal/hosted-mailbox/fetch",
@@ -831,12 +817,11 @@ describe("hosted runtime internal web routes", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledTimes(eligible ? 1 : 0);
-    expect(mocks.readHostedActiveGroupRunningBit).toHaveBeenCalledTimes(eligible ? 1 : 0);
-    expect(payload.groupRunningBit ?? null).toEqual(eligible ? runningBit : null);
+    expect(payload).not.toHaveProperty("groupRunningBit");
     expect(payload.items).toHaveLength(items.length);
   });
 
-  it("returns ordinary mailbox work when the optional sponsorship bit is unavailable", async () => {
+  it("returns group mailbox work without a sponsorship moment store", async () => {
     mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
       buildRuntimeMailboxAccessRecord({
         threadContainer: { owner: buildRuntimeMailboxAccessRecord() },
@@ -874,9 +859,6 @@ describe("hosted runtime internal web routes", () => {
         maxSeq: "12",
       },
     ]);
-    mocks.readHostedActiveGroupRunningBit.mockRejectedValueOnce(
-      new Error("Optional sponsorship storage unavailable"),
-    );
 
     const response = await mailboxFetchRoute.POST(jsonRequest(
       "/api/internal/hosted-mailbox/fetch",
@@ -895,7 +877,7 @@ describe("hosted runtime internal web routes", () => {
     const payload = parseHostedMailboxFetchResponse(await response.json());
 
     expect(response.status).toBe(200);
-    expect(payload.groupRunningBit).toBeUndefined();
+    expect(payload).not.toHaveProperty("groupRunningBit");
     expect(payload.items).toHaveLength(1);
     expect(payload.items[0]).toMatchObject({
       id: "mailbox_item_1",
@@ -1596,7 +1578,6 @@ describe("hosted runtime internal web routes", () => {
       maxSeqByLane: [{ lane: "conversation", maxSeq: importedSeq }],
       userId: "member_routes_1",
     });
-    expect(mocks.readHostedActiveGroupRunningBit).not.toHaveBeenCalled();
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
       mode: "read_first",
       memberState: expect.objectContaining({ id: "member_routes_1" }),
@@ -1656,7 +1637,6 @@ describe("hosted runtime internal web routes", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
-    expect(mocks.readHostedActiveGroupRunningBit).not.toHaveBeenCalled();
   });
 
   it("does not AI-gate non-manual system mailbox consumption", async () => {
