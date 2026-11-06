@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-06",
+  "order": 100,
+  "item": {
+    "id": "usage-added-open-chat",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Back to your chat after adding usage",
+    "summary": "Once your payment is confirmed, you'll see that your usage was added, with one tap back to your chat with Murph.",
+    "details": "This only appears after the payment is confirmed, and you can stay in Settings instead.",
+    "relevanceTags": ["billing"],
+    "sourcePullRequests": [4663]
+  }
+}
