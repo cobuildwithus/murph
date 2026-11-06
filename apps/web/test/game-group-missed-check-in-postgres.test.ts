@@ -761,6 +761,17 @@ describe.skipIf(!enabled)("lifecycle batch", () => {
     return eventId;
   }
   const untouched = async (eventId: string, attemptedAt: Date) => expect(await receipt(eventId)).toMatchObject({ status: "awaiting_generation", attemptedAt });
+  /** The backlog repeated propose-and-cancel builds: one distinct receipt per cancellation, oldest first. */
+  async function cancellations(gameId: string, count: number) {
+    const rows = Array.from({ length: count }, (_, index) => {
+      const proposalId = randomUUID(), eventId = gameChatLifecycleEventId(gameId, "change_cancelled", proposalId);
+      events.push(eventId);
+      return { id: `cancelled_${randomUUID()}`, idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(eventId)!, source: "game_lifecycle",
+        sourceRef: `${gameId}:${proposalId}`, template: "game_change_cancelled", status: "awaiting_generation", targetKind: "thread", attemptedAt: new Date(index + 1) };
+    });
+    await db.hostedLinqDelivery.createMany({ data: rows });
+    return rows;
+  }
 
   it("publishes ten rooms in one pass and leaves the eleventh for the next", async () => {
     const rooms = await dueRooms(11);
@@ -804,6 +815,17 @@ describe.skipIf(!enabled)("lifecycle batch", () => {
     await drainGameChatLifecycle({ now });
     expect((await receipt(older)).attemptedAt).toEqual(now);
     await untouched(newer, new Date(2_000));
+  });
+
+  it("publishes another room's check-in behind 180 older cancellations in one chat", async () => {
+    const [spammedRoom, freshRoom] = await shardRooms(2, 17);
+    const spammed = await fixture(2, spammedRoom), fresh = await fixture(2, freshRoom), spammedGame = await spammed.addGame();
+    expect(await reserveGroupGameMissedDay(fresh.roomId, [await fresh.addGame()], now)).toBe(1);
+    const backlog = await cancellations(spammedGame, 180);
+    await drainGameChatLifecycle({ now });
+    expect(await db.hostedLinqDelivery.findMany({ where: { id: { in: backlog.map(row => row.id) }, attemptedAt: now }, select: { id: true } })).toEqual([{ id: backlog[0]!.id }]);
+    expect((await receipt(gameGroupMissedDayEventId(fresh.roomId, date))).status).toBe("generation_queued");
+    expect(await db.hostedMailboxItem.count({ where: { userId: fresh.roomId } })).toBe(1);
   });
 
   it("keeps the batch full behind one busy chat", async () => {
@@ -855,6 +877,60 @@ describe.skipIf(!enabled)("lifecycle batch", () => {
     controller.abort(); gate.release();
     expect(await draining).toMatchObject({ attempted: 4, queued: 4 });
     for (const [index, room] of rooms.slice(4).entries()) await untouched(room.eventId, new Date((index + 4) * 1_000));
+  });
+
+  it("keeps a late claim leased against a later overlapping drain", async () => {
+    const rooms = await dueRooms(5), late = rooms[4]!;
+    const firstFour = barrier(), released = barrier(), fifth = barrier(), finish = barrier(), prepared = vi.fn();
+    let clock = 1_000_000_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => clock);
+    proof.afterPrepare = async () => {
+      prepared();
+      const arrival = prepared.mock.calls.length;
+      if (arrival === 4) firstFour.release();
+      if (arrival <= 4) await released.promise;
+      if (arrival === 5) { fifth.release(); await finish.promise; }
+    };
+    const first = drainGameChatLifecycle({ now });
+    await firstFour.promise;
+    clock += 65_000; released.release();
+    await fifth.promise;
+    expect((await receipt(late.eventId)).retryAfterAt).toEqual(new Date(now.getTime() + 65_000 + 180_000));
+    await drainGameChatLifecycle({ now: new Date(now.getTime() + 66_000) });
+    finish.release();
+    await first;
+    expect(prepared).toHaveBeenCalledTimes(5);
+    expect(await db.hostedMailboxItem.count({ where: { userId: late.f.roomId } })).toBe(1);
+  });
+
+  it("retries a failing receipt when its lease ends, not sooner", async () => {
+    const [room] = await dueRooms(1);
+    proof.rooms.set(room!.f.roomId, [room!.f.people[0]!.email]);
+    let clock = now.getTime();
+    vi.spyOn(Date, "now").mockImplementation(() => clock);
+    await drainGameChatLifecycle({ now });
+    const nextTurn = async (seconds: number) => {
+      clock = now.getTime() + seconds * 1_000;
+      await drainGameChatLifecycle({ now: new Date(clock) });
+      return (await receipt(room!.eventId)).attemptedAt;
+    };
+    expect(await nextTurn(179)).toEqual(now);
+    expect(await nextTurn(180)).toEqual(new Date(now.getTime() + 180_000));
+  });
+
+  it.each([
+    ["an unexpected defect", "TypeError", (f: Fixture) => { proof.chatFailures.set(f.roomId, new TypeError(`Synthetic detail about ${f.roomId}.`)); }],
+    ["a provider failure", "LINQ_SEND_FAILED", (f: Fixture) => { proof.chatFailures.set(f.roomId, hostedOnboardingError({ code: "LINQ_SEND_FAILED", httpStatus: 502, message: `Synthetic detail about ${f.roomId}.`, retryable: true })); }],
+    ["an unsendable room", "participants_changed", (f: Fixture) => { proof.rooms.set(f.roomId, [f.people[0]!.email]); }],
+  ] as const)("logs one fixed-code diagnostic for %s and keeps its siblings going", async (_cause, reason, breakRoom) => {
+    const rooms = await dueRooms(3), failed = rooms[1]!;
+    breakRoom(failed.f);
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    expect(await drainGameChatLifecycle({ now })).toMatchObject({ attempted: 3, queued: 2, deferred: 1 });
+    expect(info.mock.calls.filter(call => (call[1] as { diagnostic?: string } | undefined)?.diagnostic === "game.chat-lifecycle-item"))
+      .toEqual([[expect.any(String), { diagnostic: "game.chat-lifecycle-item", kind: "item_failed", template: "game_group_missed", reason }]]);
+    const logged = JSON.stringify(info.mock.calls);
+    for (const value of [failed.f.roomId, failed.eventId, ...failed.f.people.flatMap(person => [person.id, person.email])]) expect(logged).not.toContain(value);
   });
 
   it("never lets overlapping drains publish one receipt twice", async () => {

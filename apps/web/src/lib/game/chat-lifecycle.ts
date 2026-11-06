@@ -15,7 +15,7 @@ import { appendPreparedHostedMailboxEnvelopeTx, prepareHostedMailboxEnvelopeAppe
 import { assertHostedAssistantNotificationRouteAuthority, bindHostedAssistantNotificationDestination, resolveHostedAssistantNotificationDestination } from "../hosted-routing/assistant-notification-destination";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
-import { readGroupGameChatAuthority, bindPairGameChat, findExistingGameChat, requireExactChat } from "./chat-membership";
+import { GameChatAudienceError, readGroupGameChatAuthority, bindPairGameChat, findExistingGameChat, requireExactChat } from "./chat-membership";
 import { prepareGameChatBootstrap, reconcileFrozenGameChatBootstrapReceipt } from "./chat-bootstrap";
 import { gameChatLifecycleEventId, gameMissedDayEventId, markGameChatGenerationQueuedTx, type GameChatLifecycleKind } from "./chat-lifecycle-receipt";
 import { isGameOn } from "./access";
@@ -26,7 +26,8 @@ import { currentTerms, parseStoredTerms, gameChallengeKey, isGameInviteExpired }
 import type { HostedGameGroupMissedCheckInPolicy } from "@murphai/hosted-execution/runtime-control";
 import { isGroupMissedDayBatchCurrentTx, prepareGroupMissedDay, readGroupMissedDayDeliveryAuthority } from "./group-missed-day";
 import { isMissedCheckInExpired } from "./missed-check-in";
-import { logHostedOnboardingWarning } from "../hosted-onboarding/logging";
+import { isHostedOnboardingError } from "../hosted-onboarding/errors";
+import { deriveHostedOnboardingTimingErrorName, logHostedOnboardingDiagnostic, logHostedOnboardingWarning } from "../hosted-onboarding/logging";
 import { gameGroupLoreFingerprint, gamePairLoreFingerprint } from "./audience";
 import { readGameRematchDeliveryRevision } from "./chat-delivery-authority";
 
@@ -39,8 +40,10 @@ import { readGameRematchDeliveryRevision } from "./chat-delivery-authority";
 const LIFECYCLE_BATCH = 10;
 const LIFECYCLE_WORKERS = 4;
 const LIFECYCLE_CLAIM_BUDGET_MS = 90_000;
-/** A busy chat takes one slot, so extra rows keep the rest of the batch full behind it. */
-const LIFECYCLE_CANDIDATES = LIFECYCLE_BATCH * 5;
+/** Matches the route's maxDuration, so a lease cannot lapse while the invocation that claimed it is alive. */
+const LIFECYCLE_LEASE_MS = 180_000;
+/** The most due rows one pass dedupes by chat: more than two months of a single chat's turns. */
+const LIFECYCLE_SCAN_ROWS = 100_000;
 const LIFECYCLE_FROZEN_BATCH = 1;
 
 /**
@@ -57,17 +60,11 @@ export async function drainGameChatLifecycle(input: { prisma?: PrismaClient; now
   // Real elapsed time, sweep included: `now` is the receipt clock and does not advance during a drain.
   const startedAtMs = Date.now();
   const stopClaiming = () => input.signal?.aborted || Date.now() - startedAtMs >= LIFECYCLE_CLAIM_BUDGET_MS;
+  // A claim can start well after `now`, so its lease runs from the claim, on the same clock as the due check.
+  const leaseUntil = () => new Date(now.getTime() + Date.now() - startedAtMs + LIFECYCLE_LEASE_MS);
   const { reserveDueGameMissedDayCheckIns } = await import("./service");
   await reserveDueGameMissedDayCheckIns(now);
-  const candidates = await prisma.hostedLinqDelivery.findMany({
-    where: { source: "game_lifecycle", template: { in: LIFECYCLE_TEMPLATES }, sourceRef: { not: null }, OR: [
-      { status: "awaiting_generation", OR: [{ retryAfterAt: null }, { retryAfterAt: { lte: now } }] },
-      { status: "generation_queued", retryAfterAt: { lte: now } },
-    ] },
-    orderBy: [{ attemptedAt: "asc" }, { id: "asc" }], take: LIFECYCLE_CANDIDATES,
-    select: { id: true, sourceRef: true, template: true, attemptedAt: true, idempotencyKey: true, status: true, createdAt: true, payloadOwnerMemberId: true },
-  });
-  const pending = await oneReceiptPerChat(candidates, prisma);
+  const pending = await readOldestReceiptPerChat(prisma, now);
   let queued = 0;
   let attempted = 0;
   let next = 0;
@@ -78,15 +75,16 @@ export async function drainGameChatLifecycle(input: { prisma?: PrismaClient; now
       const claimed = await prisma.hostedLinqDelivery.updateMany({
         where: { id: receipt.id, source: "game_lifecycle", status: receipt.status, attemptedAt: receipt.attemptedAt,
           OR: [{ retryAfterAt: null }, { retryAfterAt: { lte: now } }] },
-        data: { attemptedAt: now, retryAfterAt: new Date(now.getTime() + 60_000) },
+        data: { attemptedAt: now, retryAfterAt: leaseUntil() },
       });
       if (claimed.count !== 1) continue;
       attempted += 1;
       try {
         if (await processGameChatIntent(receipt, now, prisma)) queued += 1;
-      } catch {
+      } catch (error) {
         // The reserved receipt and retry time remain durable. Provider/model work
         // never rolls back the accepted challenge and never logs shared words.
+        logLifecycleItemFailure(receipt.template, error);
       }
     }
   };
@@ -105,14 +103,15 @@ export async function drainGameChatLifecycle(input: { prisma?: PrismaClient; now
       where: { id: receipt.id, source: "game_lifecycle", payloadSchema: "game_chat_bootstrap_v1",
         bootstrapRouteAttachedAt: null, skippedAt: null, attemptedAt: receipt.attemptedAt,
         OR: [{ retryAfterAt: null }, { retryAfterAt: { lte: now } }] },
-      data: { attemptedAt: now, retryAfterAt: new Date(now.getTime() + 60_000) },
+      data: { attemptedAt: now, retryAfterAt: leaseUntil() },
     });
     if (claimed.count !== 1) continue;
     attempted += 1;
     try {
       if (await reconcileFrozenGameChatBootstrapReceipt(receipt.id)) queued += 1;
-    } catch {
+    } catch (error) {
       // Frozen text and provider identity stay authoritative on the next sweep.
+      logLifecycleItemFailure("game_chat_bootstrap", error);
     }
   }
   return { attempted, queued, deferred: attempted - queued };
@@ -120,24 +119,37 @@ export async function drainGameChatLifecycle(input: { prisma?: PrismaClient; now
 
 type GameChatIntent = Pick<HostedLinqDelivery, "id" | "sourceRef" | "template" | "status" | "idempotencyKey" | "createdAt" | "payloadOwnerMemberId">;
 
+/** One line per failed item. The class or fixed code says what broke; messages can carry identifiers, so they stay out. */
+function logLifecycleItemFailure(template: string | null, error: unknown): void {
+  logHostedOnboardingDiagnostic("game.chat-lifecycle-item", { kind: "item_failed", template: template ?? "unknown",
+    reason: error instanceof GameChatAudienceError ? error.reason : isHostedOnboardingError(error) ? error.code : deriveHostedOnboardingTimingErrorName(error) });
+}
+
 /**
- * Workers run in parallel, so a later notice must not overtake an earlier one in the same chat: at most one receipt per
- * chat per pass, oldest first, and the rest wait for the next pass. `payloadOwnerMemberId` is unset on most receipts until
- * they publish, so the chat comes from the game binding, or the room in a group check-in's reference. Every receipt with
- * no known chat shares one slot, which keeps them at the old one-at-a-time rate.
+ * Workers run in parallel, so a later notice must not overtake an earlier one in the same chat: the oldest due receipt of
+ * each chat, then the limit, so a chat with a long backlog takes one slot and hides no other chat. Its own queue still
+ * moves one receipt a pass. `payloadOwnerMemberId` is unset on most receipts until they publish, so the chat comes from the
+ * game binding, or the room in a group check-in's reference. Receipts with no known chat are NULL here and collapse into
+ * one shared slot. The scan reads every due row through the status index; there is no provider or crypto work in it.
  */
-async function oneReceiptPerChat<T extends Pick<HostedLinqDelivery, "sourceRef" | "template">>(candidates: readonly T[], prisma: PrismaClient): Promise<T[]> {
-  const leadingId = (receipt: T) => (receipt.sourceRef ?? "").split(":")[0]!;
-  const gameIds = candidates.flatMap(receipt => receipt.template === "game_group_missed" ? [] : [leadingId(receipt)]);
-  const games = await prisma.game.findMany({ where: { id: { in: [...new Set(gameIds)] } }, select: { id: true, chatContainerMemberId: true } });
-  const chatByGame = new Map(games.map(game => [game.id, game.chatContainerMemberId]));
-  const taken = new Set<string | null>();
-  return candidates.filter(receipt => {
-    const chat = receipt.template === "game_group_missed" ? leadingId(receipt) : chatByGame.get(leadingId(receipt)) ?? null;
-    if (taken.has(chat)) return false;
-    taken.add(chat);
-    return true;
-  }).slice(0, LIFECYCLE_BATCH);
+async function readOldestReceiptPerChat(prisma: PrismaClient, now: Date): Promise<(GameChatIntent & { attemptedAt: Date })[]> {
+  const oldest = await prisma.$queryRaw<Array<{ id: string }>>`
+    WITH due AS (
+      SELECT id, attempted_at, template, source_ref FROM hosted_linq_delivery
+      WHERE source = 'game_lifecycle' AND template = ANY(${LIFECYCLE_TEMPLATES}::text[]) AND source_ref IS NOT NULL
+        AND ((status = 'awaiting_generation' AND (retry_after_at IS NULL OR retry_after_at <= ${now}::timestamp))
+          OR (status = 'generation_queued' AND retry_after_at <= ${now}::timestamp))
+      ORDER BY attempted_at, id LIMIT ${LIFECYCLE_SCAN_ROWS}
+    ), oldest AS (
+      SELECT DISTINCT ON (chat) id, attempted_at FROM (
+        SELECT due.id, due.attempted_at,
+          CASE WHEN due.template = 'game_group_missed' THEN split_part(due.source_ref, ':', 1) ELSE game.chat_container_member_id END AS chat
+        FROM due LEFT JOIN game ON game.id = split_part(due.source_ref, ':', 1)
+      ) resolved ORDER BY chat, attempted_at, id
+    )
+    SELECT id FROM oldest ORDER BY attempted_at, id LIMIT ${LIFECYCLE_BATCH}`;
+  return prisma.hostedLinqDelivery.findMany({ where: { id: { in: oldest.map(row => row.id) } }, orderBy: [{ attemptedAt: "asc" }, { id: "asc" }],
+    select: { id: true, sourceRef: true, template: true, attemptedAt: true, idempotencyKey: true, status: true, createdAt: true, payloadOwnerMemberId: true } });
 }
 
 async function processGameChatIntent(receipt: GameChatIntent, now: Date, prisma: PrismaClient): Promise<boolean> {
