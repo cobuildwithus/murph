@@ -2230,7 +2230,7 @@ describe("selectHostedAssistantInputIds", () => {
 
   it("drops a background retry of a message older than the stale window without replying", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-04-23T01:00:00.000Z"));
+    vi.setSystemTime(new Date("2026-04-23T00:15:03.000Z"));
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
     const failed = await upsertAssistantInputEvent({
@@ -2239,6 +2239,8 @@ describe("selectHostedAssistantInputIds", () => {
     });
     await enqueueHostedPendingAssistantInputId({ inputId: failed.inputId, vaultRoot });
 
+    expect((await selectHostedAssistantInputIds({ mode: "background", vaultRoot })).inputIds).toEqual([failed.inputId]);
+    vi.setSystemTime(new Date("2026-04-23T00:15:03.001Z"));
     const selection = await selectHostedAssistantInputIds({ mode: "background", vaultRoot });
 
     expect(selection.inputIds).toEqual([]);
@@ -2256,14 +2258,17 @@ describe("selectHostedAssistantInputIds", () => {
     expect((await selectHostedAssistantInputIds({ mode: "background", vaultRoot })).inputIds).toEqual([systemNote.inputId]);
   });
 
-  it("drops a background retry once a newer message in the same chat was answered", async () => {
+  it.each([
+    ["replied", false], ["reply_intent_committed", false],
+    ["replied", true], ["reply_intent_committed", true],
+  ] as const)("keeps a background retry after newer %s evidence (different group actor: %s)", async (terminalKind, group) => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-04-23T00:05:00.000Z"));
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
     const failed = await upsertAssistantInputEvent({
       vault: vaultRoot,
-      event: createAssistantInputEvent({ dedupeKey: "dedupe_failed", eventId: "evt_failed", itemId: "item_failed", laneSeq: "10", causalSeq: "10", messageId: "msg_failed",
+      event: createAssistantInputEvent({ dedupeKey: "dedupe_failed", eventId: "evt_failed", itemId: "item_failed", laneSeq: "10", causalSeq: "10", messageId: "msg_failed", threadIsDirect: !group,
         occurredAt: "2026-04-23T00:00:01.000Z", receivedAt: "2026-04-23T00:00:02.000Z" }),
     });
     const otherChat = await upsertAssistantInputEvent({
@@ -2286,10 +2291,10 @@ describe("selectHostedAssistantInputIds", () => {
 
     const newer = await upsertAssistantInputEvent({
       vault: vaultRoot,
-      event: createAssistantInputEvent({ dedupeKey: "dedupe_newer", eventId: "evt_newer", itemId: "item_newer", laneSeq: "12", causalSeq: "12", messageId: "msg_newer",
+      event: createAssistantInputEvent({ dedupeKey: "dedupe_newer", eventId: "evt_newer", itemId: "item_newer", laneSeq: "12", causalSeq: "12", messageId: "msg_newer", threadIsDirect: !group, actorId: group ? "actor_2" : "actor_1",
         occurredAt: "2026-04-23T00:01:01.000Z", receivedAt: "2026-04-23T00:01:02.000Z" }),
     });
-    await writeAssistantAutoReplyReplyTerminalEvidence({ captureIds: [], inputIds: [newer.inputId], deliveryIntentId: null, outcome: "result", recordedAt: "2026-04-23T00:02:00.000Z", sessionId: "session_newer", vault: vaultRoot });
+    await writeAssistantAutoReplyReplyTerminalEvidence({ captureIds: [], inputIds: [newer.inputId], terminalKind, deliveryIntentId: terminalKind === "reply_intent_committed" ? "intent_newer" : null, outcome: "result", recordedAt: "2026-04-23T00:02:00.000Z", sessionId: "session_newer", vault: vaultRoot });
 
     const unanswered = await upsertAssistantInputEvent({
       vault: vaultRoot,
@@ -2300,8 +2305,10 @@ describe("selectHostedAssistantInputIds", () => {
     await enqueueHostedPendingAssistantInputId({ inputId: unanswered.inputId, vaultRoot });
     const listSpy = vi.spyOn(assistantEngine, "listAssistantInputEvents");
     const selection = await selectHostedAssistantInputIds({ mode: "background", vaultRoot });
-    expect(selection.inputIds).toEqual([unanswered.inputId]);
-    expect(selection).toMatchObject({ staleRetryDropped: [{ inputId: failed.inputId, reason: "newer_message_answered" }] });
+    expect(selection.inputIds).toEqual([failed.inputId]);
+    expect(selection.pendingInputIds).toEqual([failed.inputId, unanswered.inputId]);
+    expect(await readAssistantAutoReplyTerminalEvidenceByEvidenceId(vaultRoot, failed.inputId)).toBeNull();
+    expect(selection).not.toHaveProperty("staleRetryDropped");
     expect(listSpy).toHaveBeenCalledTimes(1); // Reuse the required retention read.
   });
 

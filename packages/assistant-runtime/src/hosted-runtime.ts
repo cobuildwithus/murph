@@ -6928,6 +6928,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           ? null
           : Math.min(workDeadline, readHostedDurableEffectsCheckpointStartByMs(effects));
       };
+      const backgroundWorkHoldsCheckpoint = (retryCheckpointDeadline: number): boolean =>
+        Date.now() < retryCheckpointDeadline && readBackgroundCheckpointWaitDeadline() !== null;
       const prepareDirtyRuntimeCheckpointAttempt = async (
         initialCheckpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null,
       ): Promise<{
@@ -6971,9 +6973,21 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         if (runtimeOwnerHandoffRequested) {
           setIdleCheckpointStartBy(Date.now());
         }
-        // Projected wakes share the full wait deadline, including retained work.
+        // Pending input must not sit behind the conversation quiet window.
+        // Without any, assistant wakes keep it, so routine work never ends a
+        // warm conversation early.
+        const retryCheckpointDeadline = await readHostedPendingRetryCheckpointDeadline({
+          attemptedWakeKey: hotProjectedWakeAttemptedKey,
+          invocationLocalWakeKey: invocationLocalProjectedAssistantWakeKey,
+          pendingWake,
+          vaultRoot: restored.vaultRoot,
+        });
+        setIdleCheckpointStartBy(Math.min(idleCheckpointStartByMs, retryCheckpointDeadline));
         const backgroundWorkDeadline = readBackgroundCheckpointWaitDeadline();
-        const waitDeadlineMs = Math.max(idleCheckpointStartByMs, backgroundWorkDeadline ?? 0);
+        const waitDeadlineMs = Math.min(
+          Math.max(idleCheckpointStartByMs, backgroundWorkDeadline ?? 0),
+          retryCheckpointDeadline,
+        );
         const hotProjectedWake = resolveHotProjectedWake(waitDeadlineMs);
         if (
           hotProjectedWake !== null
@@ -6989,7 +7003,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           pendingCheckpointWakeLatencySeed ??= checkpointWakeLatencySeed;
           return null;
         }
-        // Share the existing wakeable wait without moving the batching window.
+        // Wait through the existing wakeable checkpoint boundary.
         const dirtyWaitResult = await waitForHostedRuntimeDirtyWindow({
           idleCheckpointStartByMs: waitDeadlineMs,
           projectedWakeAtMs: hotProjectedWake?.wakeAtMs ?? null,
@@ -7026,7 +7040,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           pendingCheckpointWakeLatencySeed ??= checkpointWakeLatencySeed;
           return null;
         }
-        if (readBackgroundCheckpointWaitDeadline() !== null) {
+        if (backgroundWorkHoldsCheckpoint(retryCheckpointDeadline)) {
           // Recheck work that arrived during the wait and drain staged results.
           return null;
         }
@@ -8480,6 +8494,32 @@ function buildHostedRuntimeWakeKey(input: {
 
 function normalizeHostedRuntimeWakeReason(nextWakeReason: string | null): string {
   return nextWakeReason ?? HOSTED_ASSISTANT_WAKE_REASON;
+}
+
+async function readHostedPendingRetryCheckpointDeadline(input: {
+  attemptedWakeKey: string | null;
+  invocationLocalWakeKey: string | null;
+  pendingWake: { nextWakeAt?: string | null; nextWakeReason?: string | null };
+  vaultRoot: string;
+}): Promise<number> {
+  const wakeKey = buildHostedRuntimeWakeKey({
+    nextWakeAt: input.pendingWake.nextWakeAt ?? null,
+    nextWakeReason: input.pendingWake.nextWakeReason ?? null,
+  });
+  const wakeAtMs = Date.parse(input.pendingWake.nextWakeAt ?? "");
+  if (
+    !hostedRuntimeWakeReasonIsAssistant(input.pendingWake.nextWakeReason ?? null)
+    || wakeKey === input.invocationLocalWakeKey
+    || wakeKey === input.attemptedWakeKey
+    || !Number.isFinite(wakeAtMs)
+  ) {
+    return Infinity;
+  }
+  // Unknown pending state keeps the ordinary quiet window.
+  const pendingInput = await inspectHostedPendingAssistantInputWakeCandidate({
+    vaultRoot: input.vaultRoot,
+  }).catch(() => null);
+  return pendingInput?.hasCandidate ? wakeAtMs : Infinity;
 }
 
 function hostedRuntimeWakeReasonIsAssistant(nextWakeReason: string | null): boolean {

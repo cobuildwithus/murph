@@ -4496,7 +4496,14 @@ no-progress hot attempt preserves its exact wake without replaying it again in
 the same invocation; a dirty progressed attempt restarts the full idle window.
 Mailbox budget exhaustion, pending durable checkpoint effects, staged durable
 follow-ups, and inherited, committed, or otherwise unproven wake keys remain
-checkpoint-first and do not shorten the routine floor. Shutdown does not use the
+checkpoint-first. When replyable input is pending, a carried, unserviced
+assistant wake caps the dirty checkpoint wait, including active background-work
+deadlines, at its exact wake time. With nothing pending, it keeps the quiet window. Later
+foreground admissions cannot postpone it with another quiet window. Existing
+pause and quiesce policy runs before publication, then the ordinary successor
+receives the still-due wake. Voice checkpoints in place without requesting an
+owner handoff and services the wake once clean. The exact wake and attempted-key
+guard survive publication; an already attempted obligation cannot spin. Shutdown does not use the
 hot-service exception; it may take the separate last-chance durability
 checkpoint. A restored or committed due wake may run ordinarily when the
 workspace is clean, but a dirty invocation checkpoints first. A durable

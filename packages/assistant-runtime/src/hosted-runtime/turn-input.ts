@@ -37,7 +37,6 @@ import {
   isHostedPendingAssistantInputStillReplyable,
   readHostedPendingAssistantImageCompletionRecoveryInputIds,
   runHostedPendingAssistantInputContentRetention,
-  type HostedStaleRetryDropReason,
 } from "./pending-input-index.ts";
 
 const DEFAULT_HOSTED_ASSISTANT_INPUT_QUERY_LIMIT = 100;
@@ -57,7 +56,7 @@ type HostedAssistantInputSelection =
       mode: "background";
       pendingInputIds: string[];
       preserveInputOrder?: true;
-      staleRetryDropped?: Array<{ inputId: string; reason: HostedStaleRetryDropReason }>;
+      staleRetryDropped?: Array<{ inputId: string; reason: "too_old" }>;
     };
 
 export interface HostedAssistantInputSource extends AssistantInputSource {
@@ -454,7 +453,7 @@ export async function selectHostedAssistantInputIds(
       signal: input.signal, vaultRoot: input.vaultRoot,
     });
     const stale = await dropHostedStalePendingAssistantInputRetries({
-      storedEvents, signal: input.signal,
+      signal: input.signal,
       events: await readHostedReplyablePendingAssistantInputEvents({
         inputIds: pendingInputIds,
         vaultRoot: input.vaultRoot,
