@@ -25,7 +25,7 @@ import {
 import { assertHostedGroupParticipantActionOriginHasOwnMurph } from "../hosted-groups/participant-action-authority";
 import {
   assertActiveHostedMemberAccessAllowed,
-  readActiveHostedMemberAccess,
+  readStrictHostedMemberAccess,
 } from "../hosted-onboarding/member-access";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -1161,7 +1161,7 @@ async function assertHostedPhysicalNoteMemberAccess(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<boolean> {
-  if (await readActiveHostedMemberAccess(input)) return true;
+  if (await readStrictHostedMemberAccess(input)) return true;
   await assertActiveHostedMemberAccessAllowed(input);
   return false;
 }

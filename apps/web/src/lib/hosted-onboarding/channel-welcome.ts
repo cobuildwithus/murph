@@ -13,7 +13,7 @@ import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import { readHostedMemberSnapshot, type HostedMemberSnapshot } from "./hosted-member-store";
 import { resolveHostedMemberActivationLinqRoute } from "./linq-home-routing";
-import { readActiveHostedMemberAccess } from "./member-access";
+import { readStrictHostedPersonAccess } from "./member-access";
 import { resolveHostedMemberAssistantNotificationRoute, resolveHostedMemberMessagingState } from "./messaging-state";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS, lockHostedMemberRow, type HostedOnboardingReadClient } from "./shared";
 
@@ -28,7 +28,7 @@ export async function ensureHostedMemberChannelWelcome(input: {
 }): Promise<void> {
   const mailboxItemId = await runWithHostedDomainRootUnwrapCache(async () => {
     const member = await readHostedMemberSnapshot(input);
-    if (!eligible(member, input.channel) || !await readActiveHostedMemberAccess(input)) return null;
+    if (!eligible(member, input.channel) || !await readStrictHostedPersonAccess(input)) return null;
     if (await alreadyQueued(member, input.channel, input.prisma)) return null;
 
     const writeDomains = input.channel === "linq"
@@ -44,7 +44,7 @@ export async function ensureHostedMemberChannelWelcome(input: {
       await lockHostedMemberRow(tx, input.memberId);
       const current = await readHostedMemberSnapshot({ memberId: input.memberId, prisma: tx });
       if (!eligible(current, input.channel)
-        || !await readActiveHostedMemberAccess({ memberId: input.memberId, prisma: tx })
+        || !await readStrictHostedPersonAccess({ memberId: input.memberId, prisma: tx })
         || await alreadyQueued(current, input.channel, tx)) return null;
 
       const route = input.channel === "linq"

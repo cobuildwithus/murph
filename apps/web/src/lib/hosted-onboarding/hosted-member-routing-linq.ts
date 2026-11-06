@@ -1,3 +1,4 @@
+import { activeHostedPersonAccessWhere } from "./member-access-projections";
 import {
   HostedBillingStatus,
   Prisma,
@@ -652,30 +653,7 @@ export async function countHostedMemberHomeLinqBindingsByRecipientPhone(input: {
           }
         : {}),
       OR: [
-        {
-          member: {
-            is: {
-              billingStatus: HostedBillingStatus.active,
-              suspendedAt: null,
-            },
-          },
-        },
-        {
-          member: {
-            is: {
-              accountGroupMemberships: {
-                some: {
-                  group: {
-                    billingStatus: HostedBillingStatus.active,
-                    suspendedAt: null,
-                  },
-                  status: "active",
-                },
-              },
-              suspendedAt: null,
-            },
-          },
-        },
+        { member: { is: activeHostedPersonAccessWhere() } },
         {
           linqHomeLineAssignedAt: {
             not: null,
