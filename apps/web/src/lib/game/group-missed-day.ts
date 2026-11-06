@@ -85,7 +85,7 @@ export async function reserveGroupGameMissedDay(roomId: string, gameIds: readonl
     if (!batch.some(game => game.misses.length)) continue;
     const policy = gameGroupMissedCheckInPolicySchema.parse({ kind: "game_group_missed_check_in", roomId, firstMissedDate,
       eventId: gameGroupMissedDayEventId(roomId, firstMissedDate), batch, pairFingerprint: room.pairFingerprint, conversationLaneSeq: "0" });
-    const added = await getPrisma().$transaction(tx => reserveGameMissedDayTx({ roomId, firstMissedDate, dueAt, tx,
+    const added = await getPrisma().$transaction(tx => reserveGameMissedDayTx({ roomId, firstMissedDate, dueAt, now, tx,
       pairMemberIds: room.audience.contacts.length === 2 ? room.audience.memberIds : [],
       beforeClaim: tx => isGroupMissedDayBatchCurrentTx(policy, room.audience, tx, now, false),
     }));

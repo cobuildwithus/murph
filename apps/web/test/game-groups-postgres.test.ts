@@ -130,6 +130,11 @@ async function erase(memberId: string) {
   await db.$transaction(tx => applyGameAccountDeletionTx({ memberIds: [memberId], prepared, tx, now: createdAt }));
   await db.hostedMember.delete({ where: { id: memberId } });
 }
+/** A pass takes ten receipts, so being oldest no longer isolates one from earlier tests' pending work in other chats. */
+async function parkOtherLifecycleReceipts(receiptId: string) {
+  await db.hostedLinqDelivery.updateMany({ where: { source: "game_lifecycle", id: { not: receiptId }, status: { in: ["awaiting_generation", "generation_queued"] } },
+    data: { retryAfterAt: new Date("9999-01-01T00:00:00Z") } });
+}
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 afterAll(async () => {
   if (!enabled) return;
@@ -2152,6 +2157,7 @@ describe.skipIf(!enabled)("group app change parity", () => {
     // Isolate this receipt from unrelated test games' pending work.
     const receipt = await db.hostedLinqDelivery.findFirstOrThrow({ where: { sourceRef: `${g.game.id}:${g.proposalId}`, template: `game_${kind}` } });
     await db.hostedLinqDelivery.update({ where: { id: receipt.id }, data: { attemptedAt: new Date(0), retryAfterAt: new Date(0) } });
+    await parkOtherLifecycleReceipts(receipt.id);
     const before = lifecycleProof.append.mock.calls.length;
     expect((await drainGameChatLifecycle()).queued).toBe(1);
     expect(lifecycleProof.append).toHaveBeenCalledTimes(before);
@@ -2401,6 +2407,7 @@ describe.skipIf(!enabled)("group exact notice ordering", () => {
     const { drainGameChatLifecycle } = await vi.importActual<typeof import("@/src/lib/game/chat-lifecycle")>("@/src/lib/game/chat-lifecycle");
     const recover = async () => {
       await db.hostedLinqDelivery.update({ where: { id: receipt.id }, data: { attemptedAt: new Date("1600-01-01"), retryAfterAt: new Date(0) } });
+      await parkOtherLifecycleReceipts(receipt.id);
       return drainGameChatLifecycle({ prisma: db, now: caseNow });
     };
     expect(await recover()).toMatchObject({ attempted: 1, queued: 1 });
@@ -2440,7 +2447,8 @@ describe.skipIf(!enabled)("group exact notice ordering", () => {
       });
     };
     lifecycleProof.prepare.mockImplementationOnce(async () => { await changeFirst(); return {}; });
-    await db.hostedLinqDelivery.update({ where: { idempotencyKey: key }, data: { attemptedAt: new Date("1800-01-01"), retryAfterAt: null } });
+    const { id: challengeReceipt } = await db.hostedLinqDelivery.update({ where: { idempotencyKey: key }, data: { attemptedAt: new Date("1800-01-01"), retryAfterAt: null } });
+    await parkOtherLifecycleReceipts(challengeReceipt);
     const { drainGameChatLifecycle } = await vi.importActual<typeof import("@/src/lib/game/chat-lifecycle")>("@/src/lib/game/chat-lifecycle");
     await drainGameChatLifecycle({ prisma: db, now: caseNow });
     expect(lifecycleProof.prepare).toHaveBeenCalledOnce();

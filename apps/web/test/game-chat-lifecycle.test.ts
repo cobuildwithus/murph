@@ -34,7 +34,7 @@ const now = new Date("2030-03-04T12:00:00Z");
 const players = ["person-a", "person-b"];
 const game = { id: "game", status: "live", chatContainerMemberId: "room", players: players.map((memberId) => ({ memberId })) };
 const pending = { v: 1, id: "proposal", proposedByMemberId: "person-a", expectedTermsVersion: 1, change: { kind: "edit", lengthDays: 10 }, effectiveFromDay: 1, startsOn: null, origin: "app", deliveryStatus: "pending" };
-const receipt = { id: "receipt", status: "awaiting_generation", sourceRef: "game", template: "game_started", attemptedAt: now, idempotencyKey: "hash:game-started:game" };
+const receipt = { id: "receipt", status: "awaiting_generation", sourceRef: "game", template: "game_started", attemptedAt: now, createdAt: now, payloadOwnerMemberId: "room", idempotencyKey: "hash:game-started:game" };
 
 describe("durable game chat lifecycle", () => {
   it.each([false, true])("publishes compact group facts only at the prepared revision; edited before append: %s", async edited => {
@@ -60,6 +60,7 @@ describe("durable game chat lifecycle", () => {
   });
   beforeEach(() => {
     vi.resetAllMocks();
+    m.lock.mockResolvedValue([]);
     m.reserveMissed.mockResolvedValue(0);
     m.event.mockResolvedValue({ gameId: "game", type: "change_cancelled", payload: { proposalId: "proposal" } });
     m.missedBatch.mockResolvedValue([{ gameId: "game", memberId: "person-a", missedDates: ["2030-03-03"] }, { gameId: "second-game", memberId: "person-b", missedDates: ["2030-03-03"] }]);
@@ -76,12 +77,11 @@ describe("durable game chat lifecycle", () => {
     m.destination.mockResolvedValue({ conversationShape: "thread-container", route: { channel: "linq" } });
     m.mailbox.mockResolvedValue(null); m.prepare.mockResolvedValue({}); m.append.mockResolvedValue({ mailboxItemId: "notice" });
   });
-  it("filters supported templates and non-null references before the bounded drain", async () => {
+  it("filters supported templates and picks one receipt per chat before the limit", async () => {
     await drainGameChatLifecycle({ now });
-    expect(m.receipts).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
-      template: { in: ["game_started", "game_rematch", "game_proposal", "game_talk", "game_change_cancelled", "game_change_expired", "game_change_resolved", "game_cancelled", "game_recap", "game_missed", "game_group_missed", "game_challenge"] },
-      sourceRef: { not: null },
-    }), take: 1 }));
+    const [sql, ...values] = m.lock.mock.calls[0] as [string[], ...unknown[]];
+    expect(sql.join("?")).toMatch(/DISTINCT ON \(chat\)[\s\S]*source_ref IS NOT NULL[\s\S]*ORDER BY attempted_at, id LIMIT \?$/u);
+    expect(values).toEqual([expect.arrayContaining(["game_started", "game_group_missed", "game_challenge"]), now, now, 10]);
   });
 
   it.each(["awaiting_generation", "generation_queued"])("queues or recovers one bound Prove it notice: %s", async status => {
@@ -302,12 +302,61 @@ describe("durable game chat lifecycle", () => {
     expect(instructions).not.toContain("Briefly offer reminders");
     expect(JSON.parse(instructions.split("\n").at(-1))).toEqual({ thisGameTasks: room.tasks, otherGames: room.otherGames });
   });
+  it("recovers one frozen bootstrap per pass, and none once the claim budget is spent", async () => {
+    m.receipts.mockResolvedValue([]);
+    m.frozen.mockResolvedValue([{ id: "frozen", attemptedAt: now }]);
+    m.recover.mockResolvedValue(true);
+    await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });
+    expect(m.frozen).toHaveBeenCalledWith(expect.objectContaining({ take: 1 }));
+    m.recover.mockClear();
+    const clock = vi.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValue(90_000);
+    await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 0, queued: 0, deferred: 0 });
+    expect(m.recover).not.toHaveBeenCalled();
+    clock.mockRestore();
+  });
+
+  it.each(["pending", "frozen"] as const)("leases a %s claim from the moment it was claimed, not from the start of the drain", async kind => {
+    m.receipts.mockResolvedValue(kind === "pending" ? [receipt] : []);
+    m.frozen.mockResolvedValue(kind === "frozen" ? [{ id: "frozen", attemptedAt: now }] : []);
+    const clock = vi.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValue(65_000);
+    await drainGameChatLifecycle({ now });
+    clock.mockRestore();
+    expect(m.receiptUpdate.mock.calls[0]![0].data).toEqual({ attemptedAt: now, retryAfterAt: new Date(now.getTime() + 65_000 + 180_000) });
+  });
+
+  it("logs a failed frozen recovery with its fixed code", async () => {
+    m.receipts.mockResolvedValue([]);
+    m.frozen.mockResolvedValue([{ id: "frozen", attemptedAt: now }]);
+    m.recover.mockRejectedValue(new TypeError("Synthetic detail about room-secret."));
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 0, deferred: 1 });
+    expect(info).toHaveBeenCalledWith(expect.any(String), { diagnostic: "game.chat-lifecycle-item", kind: "item_failed", template: "game_chat_bootstrap", reason: "TypeError" });
+    expect(JSON.stringify(info.mock.calls)).not.toContain("room-secret");
+    info.mockRestore();
+  });
+
+  it("surfaces a failed claim only after its sibling worker has finished", async () => {
+    let finishSibling = () => {};
+    const sibling = new Promise<null>(resolve => { finishSibling = () => resolve(null); });
+    m.receipts.mockResolvedValue([{ ...receipt, id: "first", sourceRef: "game-a" }, { ...receipt, id: "second", sourceRef: "game-b" }]);
+    m.receiptUpdate.mockReset();
+    m.receiptUpdate.mockRejectedValueOnce(new Error("Synthetic claim failure.")).mockResolvedValue({ count: 1 });
+    m.game.mockImplementationOnce(() => sibling);
+    let settled = false;
+    const draining = drainGameChatLifecycle({ now }).finally(() => { settled = true; });
+    draining.catch(() => {});
+    await vi.waitFor(() => expect(m.game).toHaveBeenCalled());
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(settled).toBe(false);
+    finishSibling();
+    await expect(draining).rejects.toThrow("Synthetic claim failure.");
+  });
+
   it("publishes one generated kickoff and advances the existing receipt atomically", async () => {
     await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });
-    expect(m.receipts).toHaveBeenCalledWith(expect.objectContaining({ take: 1, where: expect.objectContaining({ source: "game_lifecycle" }) }));
     expect(m.receiptUpdate).toHaveBeenNthCalledWith(1, {
       where: { id: "receipt", source: "game_lifecycle", status: "awaiting_generation", attemptedAt: now, OR: [{ retryAfterAt: null }, { retryAfterAt: { lte: now } }] },
-      data: { attemptedAt: now, retryAfterAt: new Date(now.getTime() + 60_000) },
+      data: { attemptedAt: now, retryAfterAt: expect.any(Date) },
     });
     expect(m.exact).toHaveBeenCalledExactlyOnceWith("room", ["+15555550101", "+15555550102"]);
     expect(m.append).toHaveBeenCalledOnce();

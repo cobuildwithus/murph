@@ -22,10 +22,11 @@ function setup() {
     findFirst.mockResolvedValue(game); findMany.mockResolvedValue(game ? [game] : []); unique.mockResolvedValue(game);
   };
   vi.spyOn(prisma.gameEntry, "findMany").mockResolvedValue([]);
+  const receipt = vi.spyOn(prisma.hostedLinqDelivery, "findUnique").mockResolvedValue(null);
   vi.spyOn(prisma, "$queryRaw").mockResolvedValue([{ id: "game" }]);
   const event = vi.spyOn(prisma.gameEvent, "findUnique").mockResolvedValue({ id: 1n, gameId: "game", actor: "person-a", createdAt: now,
     type: "change_expired", commandKey: "game-change-resolved:game:proposal", payload: { proposalId: "proposal", reason: "The start date locks once someone checks in." } });
-  return { findFirst, findMany, event, setGame, input: { tx: prisma, containerMemberId: "room", deliveryIdempotencyKey: "game-change:game:proposal", playerMemberIds: ["person-a", "person-b"], now } };
+  return { findFirst, findMany, event, receipt, setGame, input: { tx: prisma, containerMemberId: "room", deliveryIdempotencyKey: "game-change:game:proposal", playerMemberIds: ["person-a", "person-b"], now } };
 }
 describe("game proposal provider dispatch authority", () => {
   // Reads the base revision from git history; runs in the local MURPH_VERIFY_GAME_SKEW lane.
@@ -124,6 +125,16 @@ describe("game proposal provider dispatch authority", () => {
     setGame(row());
     await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "game-missed:game:outsider:2030-03-04" }))
       .rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+  });
+  it("refuses a pair check-in past its receipt's deadline and allows one exactly at it", async () => {
+    const { input, receipt, setGame } = setup();
+    setGame(row());
+    const delivery = { ...input, deliveryIdempotencyKey: "game-missed:game:person-a:2030-03-04", now };
+    const reservedAt = (msBeforeNow: number) => receipt.mockResolvedValue({ createdAt: new Date(now.getTime() - msBeforeNow) } as Awaited<ReturnType<typeof receipt>>);
+    reservedAt(2 * 3_600_000);
+    await expect(assertGameProposalDeliveryCurrentTx(delivery)).resolves.toBe(true);
+    reservedAt(2 * 3_600_000 + 1);
+    await expect(assertGameProposalDeliveryCurrentTx(delivery)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
   it("allows a rematch only while its addressed pair is still invited in the inherited room", async () => {
     const { input, findFirst, setGame } = setup();

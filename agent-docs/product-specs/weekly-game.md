@@ -484,7 +484,8 @@ resulting avatar. No private photo is shared with the subject or other players.
   player marked incomplete do not trigger it. Murph reads bounded current-room
   history and the exact pair's lore first and stays quiet when the player already
   explained the miss. This path requires the exact two-player roster, never
-  discovers or creates a chat, and permits a no-reply result.
+  discovers or creates a chat, and permits a no-reply result. A check-in that
+  cannot go out within two hours of its claim is dropped, never sent late.
 - **Group missed-day host check-ins.** A group game, including two-person
   turnout, uses one combined room message per first missed date. Murph names
   everyone still qualified and their missing tasks/date, warmly and with a light
@@ -505,7 +506,8 @@ resulting avatar. No private photo is shared with the subject or other players.
   an already-prepared message. Any conversation received since transcript capture
   also suppresses it, even unrelated chatter. Quiet and suppressed turns consume
   the daily claim; replay never creates a replacement message. Earlier historical
-  departures do not stop future eligible dates.
+  departures do not stop future eligible dates. A check-in that cannot go out
+  within two hours of its claim is dropped, never sent late.
 - **Hosted recap.** Settlement reserves one durable recap turn for the bound
   group. The turn reads the finished shared game, a bounded current-room
   transcript and the authorized game audience's lore, then calls `write_recap` with

@@ -6467,6 +6467,33 @@ The mailbox causal-append lock also protects a conversation watermark recheck:
 new conversation conservatively suppresses the notice, including unrelated
 chatter; notification-lane writes do not. The daily claim remains consumed.
 Recovery reuses the exact mailbox pointer and room batch, never an arbitrary game.
+A pair or group check-in retries while fresh. Two hours after its receipt was
+created it ends, whatever held it up and without a provider read: an unpublished
+receipt is skipped unless its mailbox item already exists, and a published one
+leaves the sweep without being skipped. Final egress refuses either past the same
+deadline, which also bounds outbox retries.
+
+The minute drain handles up to ten lifecycle receipts a pass, four at a time. It
+takes the oldest due receipt of each chat before applying that limit, so a chat
+with a long backlog takes one slot and hides no other chat. That query reads
+every due row, so its cost grows with the backlog. A receipt's chat comes from its
+game's binding, or the room in a group check-in's reference, because the room owner
+is unset on most receipts until they publish. Every receipt with no known chat
+shares one slot.
+Claims stop 90 seconds of real time after the drain starts, counting the
+missed-day sweep, so the drain ends inside the 180-second cron it shares with
+Stripe reconciliation. A claim leases its receipt for 180 seconds from the actual
+claim time, the cron's maximum, until its first status transition: publication
+replaces the lease with a 60-second recovery timer and provider acceptance clears
+it, after which the mailbox item and frozen provider identity contain any repeat
+work. A receipt that fails before then retries about every three minutes. Frozen
+recovery handles one receipt a pass under the same budget and lease. Each failed item logs one diagnostic with its template and a fixed
+code. Ten a pass is about 600 turns an hour. A burst publishes at that rate
+because older receipts go first, but each notice also costs a recovery turn, so
+sustained capacity is about 300 notices an hour. A check-in backlog that cannot
+publish within its two-hour deadline, about 1,200 receipts in a burst, expires
+rather than sends late. A single chat still moves one receipt a pass, so more
+than about 120 older receipts in one chat expire that chat's own check-in.
 
 The isolated runner exposes only lore and quiet tools and returns text or skip.
 It omits individually explained misses, stays quiet if all are explained, or

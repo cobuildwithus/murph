@@ -7,12 +7,14 @@ import { isPairRoster } from "./roster";
 import { parseGameRecapEventId } from "@murphai/hosted-execution/runtime-control";
 import { Prisma } from "@prisma/client";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 import { gameResolutionNoticeKind, parseGameResolutionNotice, readGameChangeResolution } from "./change-resolution";
 import { currentTerms, isGameInviteExpired, parseStoredTerms } from "./rules";
 import { readHostedMailboxWakeByDedupeKey } from "../hosted-mailbox/store";
 import { readGroupGameChatAuthority, sameGamePlayers } from "./chat-membership";
 import type { HostedGameGroupMissedCheckInPolicy } from "@murphai/hosted-execution/runtime-control";
 import { isGroupMissedDayBatchCurrentTx } from "./group-missed-day";
+import { isMissedCheckInExpired } from "./missed-check-in";
 
 /** Returns true only for the current proposal and proven audience; stale outbox work cannot announce a replaced edit. */
 export async function assertGameProposalDeliveryCurrentTx(input: {
@@ -46,6 +48,9 @@ export async function assertGameProposalDeliveryCurrentTx(input: {
 async function assertGameMissedEventDeliveryCurrentTx(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], key: string): Promise<true> {
   const missed = /^game-missed:([^:]+):([^:]+):(\d{4}-\d{2}-\d{2})$/u.exec(key);
   if (!missed) return stale();
+  // Every send passes here, and the outbox can retry for about a day after the sweep has let go.
+  const receipt = await input.tx.hostedLinqDelivery.findUnique({ where: { idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(key) ?? "" }, select: { createdAt: true } });
+  if (receipt && isMissedCheckInExpired({ reservedAt: receipt.createdAt, now: input.now ?? new Date() })) return stale();
   if (missed[2] !== "group") return assertGameMissedDeliveryCurrentTx(input, missed[1], missed[2]);
   const policy = input.groupMissedPolicy;
   if (!policy || policy.eventId !== key || policy.roomId !== input.containerMemberId || !input.audience

@@ -15,7 +15,7 @@ import { appendPreparedHostedMailboxEnvelopeTx, prepareHostedMailboxEnvelopeAppe
 import { assertHostedAssistantNotificationRouteAuthority, bindHostedAssistantNotificationDestination, resolveHostedAssistantNotificationDestination } from "../hosted-routing/assistant-notification-destination";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
-import { readGroupGameChatAuthority, bindPairGameChat, findExistingGameChat, requireExactChat } from "./chat-membership";
+import { GameChatAudienceError, readGroupGameChatAuthority, bindPairGameChat, findExistingGameChat, requireExactChat } from "./chat-membership";
 import { prepareGameChatBootstrap, reconcileFrozenGameChatBootstrapReceipt } from "./chat-bootstrap";
 import { gameChatLifecycleEventId, gameMissedDayEventId, markGameChatGenerationQueuedTx, type GameChatLifecycleKind } from "./chat-lifecycle-receipt";
 import { isGameOn } from "./access";
@@ -25,13 +25,28 @@ import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboardi
 import { currentTerms, parseStoredTerms, gameChallengeKey, isGameInviteExpired } from "./rules";
 import type { HostedGameGroupMissedCheckInPolicy } from "@murphai/hosted-execution/runtime-control";
 import { isGroupMissedDayBatchCurrentTx, prepareGroupMissedDay, readGroupMissedDayDeliveryAuthority } from "./group-missed-day";
+import { isMissedCheckInExpired } from "./missed-check-in";
+import { isHostedOnboardingError } from "../hosted-onboarding/errors";
+import { deriveHostedOnboardingTimingErrorName, logHostedOnboardingDiagnostic, logHostedOnboardingWarning } from "../hosted-onboarding/logging";
 import { gameGroupLoreFingerprint, gamePairLoreFingerprint } from "./audience";
 import { readGameRematchDeliveryRevision } from "./chat-delivery-authority";
 
-// One discovery (20 × 3s plus one 3s recheck) and one frozen recovery
-// (10s create + 3s roster check) cap provider wait at 76s per 180s cron.
-// Database/crypto work remains outside those provider calls and short locks.
-const LIFECYCLE_BATCH = 1;
+// This cron also runs Stripe reconciliation, so the drain must end inside its 180s.
+// One receipt can wait 63s on the provider (20 discovery reads × 3s plus a 3s recheck),
+// and frozen recovery 13s (10s create + 3s roster check). No claim starts 90s after the
+// drain starts, sweep included, and workers overlap, so the last one ends near 153s. That
+// leaves about 27s for database, crypto and the runtime signal, which has no deadline of
+// its own. Four workers hold at most four interactive transactions on the shared pool.
+const LIFECYCLE_BATCH = 10;
+const LIFECYCLE_WORKERS = 4;
+const LIFECYCLE_CLAIM_BUDGET_MS = 90_000;
+/**
+ * Covers a claim from when it really started until its first status transition, and matches the route's maxDuration.
+ * Publication replaces it with a 60s recovery timer and provider acceptance clears it, so another drain can overlap after
+ * that; the mailbox item and frozen provider identity contain any repeat work.
+ */
+const LIFECYCLE_LEASE_MS = 180_000;
+const LIFECYCLE_FROZEN_BATCH = 1;
 
 /**
  * Selected in the query, before the batch limit: a receipt this build cannot
@@ -44,61 +59,98 @@ const LIFECYCLE_TEMPLATES = ["game_started", "game_rematch", "game_proposal", "g
 export async function drainGameChatLifecycle(input: { prisma?: PrismaClient; now?: Date; signal?: AbortSignal } = {}): Promise<{ attempted: number; queued: number; deferred: number }> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
+  // Real elapsed time, sweep included: `now` is the receipt clock and does not advance during a drain.
+  const startedAtMs = Date.now();
+  const stopClaiming = () => input.signal?.aborted || Date.now() - startedAtMs >= LIFECYCLE_CLAIM_BUDGET_MS;
+  // A claim can start well after `now`, so its lease runs from the claim, on the same clock as the due check.
+  const leaseUntil = () => new Date(now.getTime() + Date.now() - startedAtMs + LIFECYCLE_LEASE_MS);
   const { reserveDueGameMissedDayCheckIns } = await import("./service");
   await reserveDueGameMissedDayCheckIns(now);
-  const pending = await prisma.hostedLinqDelivery.findMany({
-    where: { source: "game_lifecycle", template: { in: LIFECYCLE_TEMPLATES }, sourceRef: { not: null }, OR: [
-      { status: "awaiting_generation", OR: [{ retryAfterAt: null }, { retryAfterAt: { lte: now } }] },
-      { status: "generation_queued", retryAfterAt: { lte: now } },
-    ] },
-    orderBy: [{ attemptedAt: "asc" }, { id: "asc" }], take: LIFECYCLE_BATCH,
-    select: { id: true, sourceRef: true, template: true, attemptedAt: true, idempotencyKey: true, status: true },
-  });
+  const pending = await readOldestReceiptPerChat(prisma, now);
   let queued = 0;
   let attempted = 0;
-  for (const receipt of pending) {
-    if (input.signal?.aborted) break;
-    if (!LIFECYCLE_TEMPLATES.includes(receipt.template ?? "") || !receipt.sourceRef) continue;
-    const claimed = await prisma.hostedLinqDelivery.updateMany({
-      where: { id: receipt.id, source: "game_lifecycle", status: receipt.status, attemptedAt: receipt.attemptedAt,
-        OR: [{ retryAfterAt: null }, { retryAfterAt: { lte: now } }] },
-      data: { attemptedAt: now, retryAfterAt: new Date(now.getTime() + 60_000) },
-    });
-    if (claimed.count !== 1) continue;
-    attempted += 1;
-    try {
-      if (await processGameChatIntent(receipt, now, prisma)) queued += 1;
-    } catch {
-      // The reserved receipt and retry time remain durable. Provider/model work
-      // never rolls back the accepted challenge and never logs shared words.
+  let next = 0;
+  const work = async () => {
+    while (next < pending.length && !stopClaiming()) {
+      const receipt = pending[next++]!;
+      if (!LIFECYCLE_TEMPLATES.includes(receipt.template ?? "") || !receipt.sourceRef) continue;
+      const claimed = await prisma.hostedLinqDelivery.updateMany({
+        where: { id: receipt.id, source: "game_lifecycle", status: receipt.status, attemptedAt: receipt.attemptedAt,
+          OR: [{ retryAfterAt: null }, { retryAfterAt: { lte: now } }] },
+        data: { attemptedAt: now, retryAfterAt: leaseUntil() },
+      });
+      if (claimed.count !== 1) continue;
+      attempted += 1;
+      try {
+        if (await processGameChatIntent(receipt, now, prisma)) queued += 1;
+      } catch (error) {
+        // The reserved receipt and retry time remain durable. Provider/model work
+        // never rolls back the accepted challenge and never logs shared words.
+        logLifecycleItemFailure(receipt.template, error);
+      }
     }
-  }
+  };
+  // A failed claim still surfaces, but only once no sibling is left running behind a settled drain.
+  const workers = await Promise.allSettled(Array.from({ length: Math.min(LIFECYCLE_WORKERS, pending.length) }, work));
+  for (const worker of workers) if (worker.status === "rejected") throw worker.reason;
   const frozen = await prisma.hostedLinqDelivery.findMany({
     where: { source: "game_lifecycle", payloadSchema: "game_chat_bootstrap_v1", bootstrapRouteAttachedAt: null,
       skippedAt: null, OR: [{ retryAfterAt: null }, { retryAfterAt: { lte: now } }] },
-    orderBy: [{ attemptedAt: "asc" }, { id: "asc" }], take: LIFECYCLE_BATCH,
+    orderBy: [{ attemptedAt: "asc" }, { id: "asc" }], take: LIFECYCLE_FROZEN_BATCH,
     select: { id: true, attemptedAt: true },
   });
   for (const receipt of frozen) {
-    if (input.signal?.aborted) break;
+    if (stopClaiming()) break;
     const claimed = await prisma.hostedLinqDelivery.updateMany({
       where: { id: receipt.id, source: "game_lifecycle", payloadSchema: "game_chat_bootstrap_v1",
         bootstrapRouteAttachedAt: null, skippedAt: null, attemptedAt: receipt.attemptedAt,
         OR: [{ retryAfterAt: null }, { retryAfterAt: { lte: now } }] },
-      data: { attemptedAt: now, retryAfterAt: new Date(now.getTime() + 60_000) },
+      data: { attemptedAt: now, retryAfterAt: leaseUntil() },
     });
     if (claimed.count !== 1) continue;
     attempted += 1;
     try {
       if (await reconcileFrozenGameChatBootstrapReceipt(receipt.id)) queued += 1;
-    } catch {
+    } catch (error) {
       // Frozen text and provider identity stay authoritative on the next sweep.
+      logLifecycleItemFailure("game_chat_bootstrap", error);
     }
   }
   return { attempted, queued, deferred: attempted - queued };
 }
 
-type GameChatIntent = Pick<HostedLinqDelivery, "id" | "sourceRef" | "template" | "status" | "idempotencyKey">;
+type GameChatIntent = Pick<HostedLinqDelivery, "id" | "sourceRef" | "template" | "status" | "idempotencyKey" | "createdAt" | "payloadOwnerMemberId">;
+
+/** One line per failed item. The class or fixed code says what broke; messages can carry identifiers, so they stay out. */
+function logLifecycleItemFailure(template: string | null, error: unknown): void {
+  logHostedOnboardingDiagnostic("game.chat-lifecycle-item", { kind: "item_failed", template: template ?? "unknown",
+    reason: error instanceof GameChatAudienceError ? error.reason : isHostedOnboardingError(error) ? error.code : deriveHostedOnboardingTimingErrorName(error) });
+}
+
+/**
+ * Workers run in parallel, so a later notice must not overtake an earlier one in the same chat: the oldest due receipt of
+ * each chat, then the limit, so a chat with a long backlog takes one slot and hides no other chat. Its own queue still
+ * moves one receipt a pass. `payloadOwnerMemberId` is unset on most receipts until they publish, so the chat comes from the
+ * game binding, or the room in a group check-in's reference. Receipts with no known chat are NULL here and collapse into
+ * one shared slot. The query reads every due row, so its cost grows with the backlog, with no provider or crypto work in
+ * it. Only the outer limit may cut rows: a limit before the dedupe would let one chat's backlog hide every other chat.
+ */
+export async function readOldestReceiptPerChat(prisma: PrismaClient, now: Date): Promise<(GameChatIntent & { attemptedAt: Date })[]> {
+  const oldest = await prisma.$queryRaw<Array<{ id: string }>>`
+    WITH oldest AS (
+      SELECT DISTINCT ON (chat) id, attempted_at FROM (
+        SELECT due.id, due.attempted_at,
+          CASE WHEN due.template = 'game_group_missed' THEN split_part(due.source_ref, ':', 1) ELSE game.chat_container_member_id END AS chat
+        FROM hosted_linq_delivery due LEFT JOIN game ON game.id = split_part(due.source_ref, ':', 1)
+        WHERE due.source = 'game_lifecycle' AND due.template = ANY(${LIFECYCLE_TEMPLATES}::text[]) AND due.source_ref IS NOT NULL
+          AND ((due.status = 'awaiting_generation' AND (due.retry_after_at IS NULL OR due.retry_after_at <= ${now}::timestamp))
+            OR (due.status = 'generation_queued' AND due.retry_after_at <= ${now}::timestamp))
+      ) resolved ORDER BY chat, attempted_at, id
+    )
+    SELECT id FROM oldest ORDER BY attempted_at, id LIMIT ${LIFECYCLE_BATCH}`;
+  return prisma.hostedLinqDelivery.findMany({ where: { id: { in: oldest.map(row => row.id) } }, orderBy: [{ attemptedAt: "asc" }, { id: "asc" }],
+    select: { id: true, sourceRef: true, template: true, attemptedAt: true, idempotencyKey: true, status: true, createdAt: true, payloadOwnerMemberId: true } });
+}
 
 async function processGameChatIntent(receipt: GameChatIntent, now: Date, prisma: PrismaClient): Promise<boolean> {
   if (receipt.template === "game_group_missed") return processGroupMissedDayIntent(receipt, now);
@@ -130,9 +182,26 @@ async function processPairMissedDayIntent(receipt: GameChatIntent, now: Date): P
   if (!parts) return false;
   const [, gameId, memberId, firstMissedDate] = parts;
   const eventId = gameMissedDayEventId(gameId, memberId, firstMissedDate);
+  if (await endExpiredMissedDay(receipt, eventId, now)) return false;
   return receipt.status === "generation_queued"
     ? recoverGameNotificationWake(receipt.id, gameId, eventId, now, "missed")
     : deliverGameMissedDayLifecycle(gameId, memberId, firstMissedDate, now);
+}
+
+/**
+ * Retry while fresh. Past the deadline a check-in ends whatever held it up, with no provider read. An existing mailbox
+ * item is frozen evidence, so nothing here drops a published check-in: it leaves the sweep and egress refuses it.
+ */
+async function endExpiredMissedDay(receipt: GameChatIntent, eventId: string, now: Date): Promise<boolean> {
+  if (!isMissedCheckInExpired({ reservedAt: receipt.createdAt, now })) return false;
+  const prisma = getPrisma();
+  const published = receipt.status === "generation_queued";
+  const room = receipt.payloadOwnerMemberId;
+  if (!published && room && await readHostedMailboxItemByDedupeKey({ dedupeKey: eventId, userId: room, prisma })) return false;
+  const ended = await prisma.hostedLinqDelivery.updateMany({ where: { id: receipt.id, status: receipt.status },
+    data: published ? { retryAfterAt: null } : { status: "skipped", skippedAt: now, skipReason: "game_missed_check_in_expired", retryAfterAt: null } });
+  if (ended.count === 1) logHostedOnboardingWarning("game.missed-day.expired", { reason: "past_deadline" });
+  return true;
 }
 
 async function processGroupMissedDayIntent(receipt: GameChatIntent, now: Date): Promise<boolean> {
@@ -140,6 +209,7 @@ async function processGroupMissedDayIntent(receipt: GameChatIntent, now: Date): 
   if (!parts) return false;
   const eventId = `game-missed:${parts[1]}:group:${parts[2]}`;
   if (receipt.idempotencyKey !== createHostedLinqDeliveryIdempotencyLookupKey(eventId)) return false;
+  if (await endExpiredMissedDay(receipt, eventId, now)) return false;
   return receipt.status === "generation_queued"
     ? recoverGameNotificationWake(receipt.id, parts[1], eventId, now, "missed")
     : deliverGroupMissedDayLifecycle(parts[1], parts[2], now);
