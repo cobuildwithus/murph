@@ -68,8 +68,8 @@ Updated: 2026-11-06
 
 - Commands to run: focused Vitest on real PostgreSQL for
   `game-report-block-postgres`, `game-replies-postgres`, `game-groups-postgres`,
-  `game-service-postgres`, `game-routes` and `production-migration-guard`, plus
-  typecheck, `pnpm complexity:diff` and `pnpm docs:drift`.
+  `game-service-postgres`, `game-routes`, `production-migration-guard` and
+  `hosted-onboarding-privacy-foundation-migration`, plus typecheck, `pnpm complexity:diff` and `pnpm docs:drift`.
 - Expected outcomes: all pass. Breaking any one of the key lines fails a named
   proof.
 Completed: 2026-11-06
