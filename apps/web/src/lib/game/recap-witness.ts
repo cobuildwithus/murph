@@ -3,7 +3,7 @@ import "server-only";
 import type { Game, Prisma } from "@prisma/client";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 import { isRecord } from "../primitives";
-import { gameChatLifecycleEventId } from "./chat-lifecycle-receipt";
+import { GAME_CHAT_BLOCKED, gameChatLifecycleEventId } from "./chat-lifecycle-receipt";
 import { groupGameRecapPlayers } from "./recap-cohort";
 
 type RecapGame = Pick<Game, "id" | "maxPlayers" | "settledAt"> & {
@@ -75,12 +75,17 @@ export async function settleGameRecapGenerationTx(tx: Prisma.TransactionClient, 
   return entries;
 }
 
-/** Exact reason only: a generation skipped for another reason keeps today's behaviour. */
-export async function isGameRecapGenerationRetired(db: Prisma.TransactionClient, eventId: string, roomId: string): Promise<boolean> {
+/** A game_recap_retired receipt is terminal; game_blocked is terminal only for a pair because its room cannot be restored. Group blocks, block rows alone and other skip reasons remain uncertain. */
+export async function isGameRecapGenerationRetired(db: Prisma.TransactionClient, gameId: string, eventId: string, roomId: string): Promise<boolean> {
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(eventId);
-  return Boolean(idempotencyKey && await db.hostedLinqDelivery.count({ where: {
-    idempotencyKey, source: "game_lifecycle", template: "game_recap", status: "skipped", skipReason: GAME_RECAP_RETIRED, payloadOwnerMemberId: roomId,
-  } }));
+  if (!idempotencyKey) return false;
+  const receipt = await db.hostedLinqDelivery.findFirst({ where: {
+    idempotencyKey, source: "game_lifecycle", template: "game_recap", status: "skipped", payloadOwnerMemberId: roomId,
+  }, select: { skipReason: true } });
+  if (receipt?.skipReason === GAME_RECAP_RETIRED) return true;
+  if (receipt?.skipReason !== GAME_CHAT_BLOCKED) return false;
+  const game = await db.game.findUnique({ where: { id: gameId }, select: { maxPlayers: true } });
+  return game?.maxPlayers === 2;
 }
 
 export async function readLatestGameRecapEventIdTx(tx: Prisma.TransactionClient, gameId: string): Promise<string> {

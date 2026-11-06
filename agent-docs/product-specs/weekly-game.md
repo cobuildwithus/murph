@@ -631,6 +631,11 @@ resulting avatar. No private photo is shared with the subject or other players.
   Web answers `GAME_RECAP_GENERATION_RETIRED` before roster work, allowing the
   runner to consume the pending item without sending. Temporary roster, access,
   audience or storage failures and claimed provider work keep their uncertainty.
+  A pair receipt skipped as `game_blocked` also permanently ends the generation,
+  even after unblock: its room cannot be restored. A block row alone leaves an
+  unskipped generation temporary. Group generations skipped for a block stay
+  non-terminal because a group block does not end the game. Nothing yet restores
+  a settled group's room, so such a generation retries without being able to send.
   A dry run can answer `would_regenerate` for stale work without changing rows;
   execution retires it before reserving a clean generation, even without a stored
   story. Unpublished work gets its first clean witness at publication.

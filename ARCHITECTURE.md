@@ -5647,8 +5647,12 @@ existing receipt `skipped` with `game_recap_retired`, at takedown or the next
 material read or seal. After runtime authorization, recap tools answer the shared
 `GAME_RECAP_GENERATION_RETIRED` value before roster work; the runner consumes it
 without sending. Temporary unavailability and claimed provider work remain
-uncertain. Regeneration previews use the pure witness check without writes;
-execution retires stale work before reserving a clean successor. The runner image
+uncertain. A pair receipt skipped as `game_blocked` is also terminal after
+unblock because its room cannot be restored; a block row alone and blocked group
+generations remain uncertain, though nothing yet restores a settled group's room.
+Regeneration previews use the pure witness check
+without writes; execution retires stale work before reserving a clean successor.
+The runner image
 with the #4653 consumer must be live before this Web activation merges.
 
 
