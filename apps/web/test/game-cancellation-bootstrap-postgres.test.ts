@@ -1,3 +1,4 @@
+import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import type { HostedExecutionAssistantNotificationRequestedWake } from "@murphai/hosted-execution";
@@ -41,12 +42,11 @@ vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", () => ({
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murph_test_/u.test(process.env.DATABASE_URL ?? "")) throw new Error("Bootstrap cancellation proof needs an isolated local test database.");
 const members: string[] = [];
-const games: string[] = [];
 
 async function fixture() {
   const db = getPrisma(), suffix = randomUUID(), now = new Date();
   const first = `first_${suffix}`, second = `second_${suffix}`, room = `room_${suffix}`, gameId = `game_${suffix}`;
-  members.push(first, second, room); games.push(gameId); m.room = room;
+  members.push(first, second, room); m.room = room;
   await db.hostedMember.createMany({ data: [first, second, room].map(id => ({ id, billingStatus: "not_started" })) });
   await db.hostedThreadContainer.create({ data: { memberId: room, ownerMemberId: first,
     participants: { create: [first, second].map(participantMemberId => ({ participantMemberId, handleLookupKey: participantMemberId, firstSeenAt: now, lastSeenAt: now })) } } });
@@ -68,9 +68,8 @@ async function fixture() {
 describe.skipIf(!enabled)("cancellation bootstrap ordering PostgreSQL", () => {
   beforeEach(() => { m.published.length = 0; vi.stubEnv("MURPH_GAME_ENABLED", "true"); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", ""); });
   afterAll(async () => {
-    await getPrisma().game.deleteMany({ where: { id: { in: games } } });
+    await cleanupGameFixtures(getPrisma(), members);
     await getPrisma().hostedThreadContainer.deleteMany({ where: { memberId: { in: members } } });
-    await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: members } } });
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: members } } });
     vi.unstubAllEnvs();
   });
