@@ -9,6 +9,6 @@
     "summary": "You can still sign in, play games, and see your saved meals and health data after your plan ends or pauses.",
     "details": "Murph only replies while you have AI usage available. You can restart your plan any time in Settings.",
     "relevanceTags": ["account", "companion"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [4672]
   }
 }
