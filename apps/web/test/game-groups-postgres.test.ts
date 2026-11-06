@@ -30,7 +30,8 @@ vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", async imp
   resolveHostedAssistantNotificationDestination: lifecycleProof.destination,
   bindHostedAssistantNotificationDestination: lifecycleProof.bind,
   assertHostedAssistantNotificationRouteAuthority: lifecycleProof.route,
-  readHostedThreadContainerLinqRouteAuthorities: async ({ containerMemberIds }: { containerMemberIds: string[] }) => ({ authorities: new Map(containerMemberIds.filter(id => chatProof.rooms.has(id)).map(id => [id, { channel: "linq", threadId: id, containerMemberId: id, accountLookupKey: "synthetic-line" }])) }),
+  readHostedThreadContainerLinqRouteAuthorities: async ({ containerMemberIds }: { containerMemberIds: string[] }) => ({ nonLinqContainerMemberIds: new Set(), unavailableContainerMemberIds: new Set(),
+    authorities: new Map(containerMemberIds.filter(id => chatProof.rooms.has(id)).map(id => [id, { channel: "linq", threadId: id, containerMemberId: id, accountLookupKey: "synthetic-line" }])) }),
 }));
 vi.mock("@/src/lib/hosted-onboarding/linq-client", async importOriginal => ({
   ...await importOriginal<object>(), getHostedLinqChatSummary: async ({ chatId }: { chatId: string }) => ({ isGroup: true, handlesComplete: true,

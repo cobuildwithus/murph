@@ -2,11 +2,13 @@ import "server-only";
 
 import { Prisma } from "@prisma/client";
 import { GAME_MISSED_ROOM_MAX_GAMES, gameGroupMissedCheckInPolicySchema, type HostedGameGroupMissedCheckInPolicy } from "@murphai/hosted-execution/runtime-control";
+import { isHostedOnboardingError } from "../hosted-onboarding/errors";
+import { logHostedOnboardingWarning } from "../hosted-onboarding/logging";
 import { getPrisma } from "../prisma";
 import { acquireHostedMailboxCausalAppendLockTx, readHostedMailboxMaxSeqByLane, readHostedMailboxWakeByDedupeKey } from "../hosted-mailbox/store";
 import { isGameOn } from "./access";
 import { gameGroupLoreFingerprint } from "./audience";
-import { readGroupGameChatAuthority, sameGamePlayers, type GameChatAudience } from "./chat-membership";
+import { GameChatAudienceError, readGroupGameChatAuthority, sameGamePlayers, type GameChatAudience } from "./chat-membership";
 import { gameGroupMissedDayEventId, reserveGameMissedDayTx } from "./chat-lifecycle-receipt";
 import { gameMissedCheckInHorizons, gameMissedCheckInRuns, isMissedCheckInDueNow } from "./missed-check-in";
 import { currentTerms, remainingPlayers } from "./rules";
@@ -50,8 +52,19 @@ function freezeBatch(games: Games, firstMissedDate: string, now: Date): HostedGa
   })).sort((a, b) => a.gameId.localeCompare(b.gameId));
 }
 
+const AMBIGUOUS_IDENTITY_CODES = ["HOSTED_MEMBER_IDENTITY_LOOKUP_AMBIGUOUS", "HOSTED_MEMBER_VERIFIED_EMAIL_LOOKUP_AMBIGUOUS"];
+
+/** A room proven unsendable gets no check-in and waits for its next shard. Outages, defects and unreadable responses still stop the sweep. */
+function skipUnprovableRoom(error: unknown): null {
+  const reason = error instanceof GameChatAudienceError ? error.reason
+    : isHostedOnboardingError(error) && AMBIGUOUS_IDENTITY_CODES.includes(error.code) ? "identity_ambiguous" : null;
+  if (!reason) throw error;
+  logHostedOnboardingWarning("game.missed-day.room-skipped", { reason });
+  return null;
+}
+
 export async function reserveGroupGameMissedDay(roomId: string, gameIds: readonly string[], now: Date): Promise<number> {
-  const room = await readGroupMissedDayRoom(roomId, gameIds);
+  const room = await readGroupMissedDayRoom(roomId, gameIds).catch(skipUnprovableRoom);
   if (!room) return 0;
   let reserved = 0;
   const dates = new Set(room.games.flatMap(game => gameMissedCheckInRuns(game.state, now).map(run => run.firstMissedDate)));
