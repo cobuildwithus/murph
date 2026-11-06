@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test, vi } from "vitest";
@@ -227,4 +227,24 @@ test.each([true, false, undefined])("preserved photos keep inline checkpoint and
     expect(mediaStore.get).not.toHaveBeenCalled();
     expect(mediaStore.delete).not.toHaveBeenCalled();
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a photo whose identity cannot be established is kept rather than pruned", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-preserver-doubt-"));
+  try {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const photoPath = path.join(vaultRoot, "source.png");
+    await writeFile(photoPath, png);
+    const meal = await addMeal({ vaultRoot, photoPath, occurredAt: at });
+    const relativePath = meal.photo!.relativePath;
+    const { objects, mediaStore } = storeFixture();
+    await externalizeFixture(vaultRoot, [relativePath], objects);
+    const directory = path.join(vaultRoot, path.dirname(relativePath));
+    const manifest = (await readdir(directory)).find(name => name.startsWith("manifest"));
+    await writeFile(path.join(directory, manifest!), "{ not json");
+    await publishHostedWorkspaceMediaReferencesForSnapshot({ mediaStore, vaultRoot });
+    expect(mediaStore.delete).not.toHaveBeenCalled();
+    expect(objects.size).toBe(1);
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries.map(entry => entry.relativePath)).toEqual([relativePath]);
+  } finally { await rm(vaultRoot, { recursive: true, force: true }); }
 });

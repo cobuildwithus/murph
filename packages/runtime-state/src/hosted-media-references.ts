@@ -57,6 +57,23 @@ export function parseHostedMediaReference(value: unknown): HostedMediaReference 
   };
 }
 
+function isRetainedPhotoPath(relativePath: string): boolean {
+  return relativePath.startsWith("raw/meals/") || relativePath.startsWith("raw/measurements/");
+}
+
+// This reader sits on the checkpoint path, so a stray deployed entry must not
+// stop a member's data being saved. Inbox and capture entries have always been
+// filtered here. Photo and cold references can be a sole copy and fail closed.
+function parseCatalogueEntry(value: unknown): HostedMediaReference | null {
+  try {
+    return parseHostedMediaReference(value);
+  } catch (error) {
+    if (isRecord(value) && (value.mediaKind === "image" || value.mediaKind === "video")
+      && typeof value.relativePath === "string" && /^raw\/(?:inbox|captures)\//u.test(value.relativePath)) return null;
+    throw error;
+  }
+}
+
 function parseHostedMediaIdentity(value: Record<string, unknown>): Pick<HostedMediaReference,
   "relativePath" | "mediaId" | "sha256" | "byteSize" | "mediaKind"> {
   const cold = parseHostedColdIngestReference(value);
@@ -141,15 +158,18 @@ export async function readHostedMediaReferenceCatalogueValue(vaultRoot: string):
     if (!isRecord(value) || value.schema !== HOSTED_MEDIA_REFS_SCHEMA || !Array.isArray(value.entries)) {
       throw new HostedColdHistoryUnavailableError();
     }
-    const seen = new Set<string>();
-    const entries = value.entries.map(parseHostedMediaReference);
-    for (const entry of entries) {
-      if (seen.has(entry.relativePath)) {
+    const byPath = new Map<string, HostedMediaReference>();
+    for (const value_ of value.entries) {
+      const entry = parseCatalogueEntry(value_);
+      if (!entry) continue;
+      if (byPath.has(entry.relativePath)) {
         if (entry.mediaKind === "integration-ingest") throw new HostedColdHistoryUnavailableError();
-        throw new HostedMediaReferenceUnavailableError();
+        if (isRetainedPhotoPath(entry.relativePath)) throw new HostedMediaReferenceUnavailableError();
+        continue;
       }
-      seen.add(entry.relativePath);
+      byPath.set(entry.relativePath, entry);
     }
+    const entries = [...byPath.values()];
     return { schema: HOSTED_MEDIA_REFS_SCHEMA, entries,
       ...(typeof value.mealUploadCursor === "string" ? { mealUploadCursor: value.mealUploadCursor } : {}) };
   } catch (error) {

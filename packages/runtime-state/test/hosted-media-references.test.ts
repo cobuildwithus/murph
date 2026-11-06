@@ -38,6 +38,28 @@ test("malformed sole-copy image descriptors fail closed instead of disappearing"
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("a stray inbox or capture entry cannot block a checkpoint, while photo and cold references stay strict", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "murph-media-catalogue-tolerance-"));
+  const catalogue = resolveHostedMediaReferenceCataloguePath(root);
+  await mkdir(path.dirname(catalogue), { recursive: true });
+  const good = { relativePath: "raw/inbox/a/good.png", mediaKind: "image", mediaId: "a".repeat(64), sha256: "b".repeat(64),
+    byteSize: 4, expiresAt: null, mimeType: "image/png", recordedAt: "2026-01-01T00:00:00.000Z" };
+  const write = (entries: unknown[]) => writeFile(catalogue, JSON.stringify({ schema: HOSTED_MEDIA_REFS_SCHEMA, entries }));
+  try {
+    await write([good, { ...good, relativePath: "raw/inbox/a/bad.png", sha256: "not-a-digest" },
+      { ...good, relativePath: "raw/captures/a/bad.png", byteSize: -1 }, good]);
+    expect((await readHostedMediaReferenceCatalogueValue(root)).entries.map(entry => entry.relativePath)).toEqual([good.relativePath]);
+    for (const relativePath of ["raw/meals/a/bad.png", "raw/measurements/a/bad.png"]) {
+      await write([{ ...good, relativePath, sha256: "not-a-digest" }]);
+      await expect(readHostedMediaReferenceCatalogueValue(root)).rejects.toMatchObject({ code: "HOSTED_MEDIA_REFERENCE_UNAVAILABLE" });
+      await write([{ ...good, relativePath }, { ...good, relativePath }]);
+      await expect(readHostedMediaReferenceCatalogueValue(root)).rejects.toMatchObject({ code: "HOSTED_MEDIA_REFERENCE_UNAVAILABLE" });
+    }
+    await write([{ ...reference, sha256: "not-a-digest" }]);
+    await expect(readHostedMediaReferenceCatalogueValue(root)).rejects.toMatchObject({ code: "HOSTED_COLD_HISTORY_UNAVAILABLE" });
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("old inline snapshots have no cold references; malformed catalogues fail closed", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "cold-catalogue-"));
   try {

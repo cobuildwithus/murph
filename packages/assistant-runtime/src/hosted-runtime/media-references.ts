@@ -272,9 +272,19 @@ async function collectRetainedPhotoReferences(
   for (const entry of entries) {
     assertHostedMediaReferenceLive(input.signal);
     if (isHostedCanonicalPhotoPath(entry.relativePath)
-      && await canonicalRawArtifactMatches({ vaultRoot: input.vaultRoot, ...entry })) retained.push(entry);
+      && await hostedPhotoReferenceMayBeLive(input.vaultRoot, entry)) retained.push(entry);
   }
   return retained;
+}
+
+// Dropping an entry deletes its object, which may be the only copy. Prove a
+// reference obsolete before pruning, and let doubt keep the object.
+async function hostedPhotoReferenceMayBeLive(vaultRoot: string, entry: HostedMediaReference): Promise<boolean> {
+  try {
+    return await canonicalRawArtifactMatches({ vaultRoot, ...entry });
+  } catch {
+    return true;
+  }
 }
 
 export async function materializeHostedWorkspaceMediaReferences(input: {
