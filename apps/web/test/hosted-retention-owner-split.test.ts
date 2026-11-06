@@ -2,10 +2,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   cleanupExpiredRuns: vi.fn(),
+  redriveHostedHealthDataConsentStops: vi.fn(),
   runHostedRuntimeResourceCleanup: vi.fn(),
   deleteExpiredHostedBrowserAssertionNonces: vi.fn(),
   deleteExpiredHostedCallbackRequestNonces: vi.fn(),
   drainHostedAccountDeletionCleanupBatch: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-privacy/health-data-consent-withdrawal", () => ({
+  redriveHostedHealthDataConsentStops: mocks.redriveHostedHealthDataConsentStops,
 }));
 
 vi.mock("@/src/lib/hosted-execution/runtime-resource-cleanup", () => ({ runHostedRuntimeResourceCleanup: mocks.runHostedRuntimeResourceCleanup }));
@@ -44,6 +49,7 @@ import { runHostedNonceRetentionCleanup } from "@/src/lib/hosted-retention/nonce
 describe("hosted retention owner split", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.redriveHostedHealthDataConsentStops.mockResolvedValue({ configured: true, reconciled: 2, failed: 1 });
     mocks.runHostedRuntimeResourceCleanup.mockResolvedValue({ configured: true, deleted: 2, failed: 0 });
     mocks.cleanupExpiredRuns.mockResolvedValue({ expiredRuns: 4 });
     mocks.deleteExpiredHostedBrowserAssertionNonces.mockResolvedValue(3);
@@ -93,6 +99,7 @@ describe("hosted retention owner split", () => {
     const prisma = { $transaction: vi.fn() };
     const now = new Date("2026-08-30T12:00:00.000Z");
     mocks.drainHostedAccountDeletionCleanupBatch.mockImplementationOnce(async () => {
+      expect(mocks.redriveHostedHealthDataConsentStops).toHaveBeenCalledExactlyOnceWith({ prisma });
       await Promise.resolve();
       expect(mocks.cleanupExpiredRuns).not.toHaveBeenCalled();
       expect(mocks.runHostedRuntimeResourceCleanup).not.toHaveBeenCalled();
@@ -108,6 +115,7 @@ describe("hosted retention owner split", () => {
       now,
       prisma: prisma as never,
     })).resolves.toEqual({
+      healthDataConsentStopRedrive: { configured: true, reconciled: 2, failed: 1 },
       accountDeletionCleanup: {
         completed: 1,
         failed: 0,
@@ -130,5 +138,13 @@ describe("hosted retention owner split", () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(mocks.deleteExpiredHostedCallbackRequestNonces).not.toHaveBeenCalled();
     expect(mocks.deleteExpiredHostedBrowserAssertionNonces).not.toHaveBeenCalled();
+  });
+
+  it("redrives consent stops even when a later cleanup owner throws", async () => {
+    mocks.drainHostedAccountDeletionCleanupBatch.mockRejectedValueOnce(new Error("Synthetic cleanup failure"));
+    await expect(runHostedExternalRetentionCleanup({ prisma: {} as never })).rejects.toThrow("Synthetic cleanup failure");
+    expect(mocks.redriveHostedHealthDataConsentStops).toHaveBeenCalledOnce();
+    expect(mocks.redriveHostedHealthDataConsentStops.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.drainHostedAccountDeletionCleanupBatch.mock.invocationCallOrder[0]!);
   });
 });
