@@ -1570,12 +1570,10 @@ async function block(context: CommandContext, command: { memberId?: string; toke
 }
 
 /**
- * Blocks an authorized pair. Under the pair's lock, so no join slips in:
- * every game the two have open or going is called off (void: no winner, no
- * tickets), an invite nobody shook on ends as if cancelled, and their games
- * leave the shared chat with nothing still waiting to be sent there, so Murph
- * stops texting it about them (posts can't happen, so no pushes either). The
- * views then show each to the other as a player who left.
+ * Blocks two members under their pair lock, so no join slips in. Open pair
+ * games are called off with no winner or tickets, and every pair game leaves
+ * its chat with nothing waiting to be sent. A group game keeps its room.
+ * Views then show each to the other as a player who left.
  */
 async function blockMember(context: CommandContext, memberId: string): Promise<void> {
   const { actor } = context;
@@ -1601,9 +1599,9 @@ async function blockMember(context: CommandContext, memberId: string): Promise<v
       }
       ids.push(...batch);
     }
-    // Every game of theirs still bound to a chat lets go of it, in one statement.
+    // Pair games leave their chat; group games keep their room.
     const unbound = await tx.game.updateManyAndReturn({ data: { chatContainerMemberId: null }, select: { id: true },
-      where: { AND: [gamesBetween(actor, memberId), { chatContainerMemberId: { not: null } }] } });
+      where: { maxPlayers: 2, AND: [gamesBetween(actor, memberId), { chatContainerMemberId: { not: null } }] } });
     await skipGameChatLifecycleTx(tx, [...new Set([...ids, ...unbound.map((game) => game.id)])], await databaseNow(tx));
     if (!existing) await tx.gameBlock.create({ data: { blockedMemberId: memberId, blockerMemberId: actor } });
   });

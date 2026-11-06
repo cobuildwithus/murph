@@ -5700,8 +5700,9 @@ material read or seal. After runtime authorization, recap tools answer the share
 `GAME_RECAP_GENERATION_RETIRED` value before roster work; the runner consumes it
 without sending. Temporary unavailability and claimed provider work remain
 uncertain. A pair receipt skipped as `game_blocked` is also terminal after
-unblock because its room cannot be restored; a block row alone and blocked group
-generations remain uncertain, though nothing yet restores a settled group's room.
+unblock because its room cannot be restored. A block row alone remains temporary.
+A group block skips nothing, so its generation waits and completes after the block
+lifts. Older group receipts already skipped as `game_blocked` remain terminal.
 Regeneration previews use the pure witness check
 without writes; execution retires stale work before reserving a clean successor.
 The runner image
@@ -6030,7 +6031,7 @@ calls no provider and checks no image; a provider would plug in at
 blocker deletes it. Block takes the pair's transaction advisory lock
 (`blocks.ts` `lockGamePair`), then every pair game between them in id order: open
 and live pairs end `void` (no result, no tickets; an unshaken invite records
-`cancelled`, otherwise `blocked`), every game between them loses
+`cancelled`, otherwise `blocked`), every pair game between them loses
 `chat_container_member_id`, and their waiting `game_lifecycle` receipts are
 skipped (`game_blocked`), so the chat funding gate finds no game and Murph sends
 nothing more there; `readGameChatState` returns no games for a blocked pair.
@@ -6042,7 +6043,10 @@ days; tickets `left`); the blocker's Home drops those games and tickets and
 lists everyone they blocked in `GameHomeView.blocked`. Media reads refuse a
 blocked pair. Unblocking changes no game.
 
-Groups retain blocked players and their scoring eligibility. Symmetric
+Groups retain blocked players and their scoring eligibility. The game keeps its
+room and receipts. While a block stands, the room fails authority and funding and
+Murph sends nothing there. `readGroupGameNoticeAuthority` keeps talk and challenge from reading the
+block as stale. Anything still current sends after the block lifts. Symmetric
 `hiddenMemberIds` masks strip post payloads, media, blur hashes and timestamps
 before decryption or signing, retaining only aggregate posted status. Recaps are
 suppressed for affected viewers. Left viewers cannot fetch new game content.
