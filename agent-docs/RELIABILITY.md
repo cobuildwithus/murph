@@ -447,10 +447,13 @@ Current product admission, delivery and native runtime safety rules remain.
   existing per-user Cloudflare execution owner to serialize with earlier
   ensures, re-read the Web-owned grant, clear the write fence, and stop the
   runner before acknowledging success. Later ensures re-read consent under the
-  same lock. Renewal waits behind the earlier stop, commits its new grant, then
-  signals the existing Temporal workflow. Best-effort provider cleanup failures
-  are secret-safe, do not roll back the grant, and may be retried idempotently
-  by repeating withdrawal.
+  same lock. The existing external retention tick redrives an interrupted stop
+  through the same reconciliation for explicitly revoked members with a non-idle
+  owner or retained target, without normal processing eligibility. Every member
+  renewal surface waits behind the earlier stop before committing its new grant;
+  hosted Web renewal then signals the existing Temporal workflow. Best-effort
+  provider cleanup failures are secret-safe, do not roll back the grant, and may
+  be retried idempotently by repeating withdrawal.
   Webhooks finalize an already-claimed trace without appending dirty work;
   scheduled selection and wake admission both exclude explicit revocation; and
   queued model work rechecks authority before usage is consumed. Renewal is a
@@ -804,7 +807,9 @@ Current product admission, delivery and native runtime safety rules remain.
   cold. DO reactivation preserves the SDK task, while process replacement does
   not inherit a completed process's watermark.
   Activity expiry rearms and yields to an active invocation before acquiring the
-  lifecycle lock, which the invocation retains until its response settles.
+  lifecycle lock, which the invocation retains until its response settles. An
+  exact completed receipt instead starts abort-and-stop recovery for a retained
+  transport-uncertain invocation whose response was lost.
   Maintenance must not hold the SDK alarm open behind that long-running work.
   Destructive cleanup remains locked and rechecks interaction ownership after
   external reads; scheduling a future check grants no new conversation warmth.
@@ -1399,12 +1404,16 @@ Current product admission, delivery and native runtime safety rules remain.
   leave a participant authoritative forever: stale relationships age out.
   Authenticated Linq inbound can renew only an existing non-removed relationship
   for the currently resolved identity, and future provider timestamps are
-  clamped to server time. Before denying a quiet route, Web makes one bounded
-  provider read and scans the full returned roster. It may create or reinstate
-  exactly the authenticated current sender after the roster handle re-resolves
-  to the same active hosted identity; otherwise it may renew only an existing
-  active participant whose current identity still matches the stored
-  relationship. Provider order and the assistant participant projection cap do
+  clamped to server time. Before denying a quiet route for an eligible verified
+  sender, Web makes one bounded provider read and scans the full returned roster.
+  Missing required roster proof is retryable; a partial roster establishes only
+  presence. Complete verified game-room reads renew the same participant leases.
+  Pre-read observation times and the complete-roster watermark prevent stale
+  evidence from restoring removed access; removal wins equal-time conflicts.
+  Web may create or reinstate exactly the authenticated current sender after
+  the roster handle re-resolves to the same active hosted identity; otherwise it
+  may renew only an existing active participant whose current identity still
+  matches the stored relationship. Provider order and the assistant participant projection cap do
   not decide access.
 - Linq participant add/remove context is a bounded optional sidecar on the
   existing routed group, not another work owner. Provider-event deduplication

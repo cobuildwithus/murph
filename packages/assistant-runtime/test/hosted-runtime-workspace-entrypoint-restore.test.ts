@@ -437,7 +437,7 @@ describe("hosted workspace runtime entrypoint", () => {
       const checkpointBuilderInput =
         mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.mock.calls.at(-1)?.[0];
       assert.deepEqual(
-        checkpointBuilderInput?.metadata.currentSnapshotRef,
+        checkpointBuilderInput?.workspace?.snapshotRef,
         createWorkspaceSnapshotV2Ref(snapshotId),
       );
     } finally {

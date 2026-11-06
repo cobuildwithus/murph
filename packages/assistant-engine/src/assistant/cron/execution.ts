@@ -6,10 +6,8 @@ import {
 import {
   archiveAutomationIfActiveUntilElapsed,
   isVaultError,
-  setScheduledLogStatus,
   splitAutomationAvailabilityConflictBlock,
   stripAutomationAvailabilityConflictEvidenceForProvider,
-  upsertAutomation,
 } from '@murphai/core'
 import {
   isHostedRuntimeProcessEnv,
@@ -132,7 +130,7 @@ import {
   resolveAssistantDeviceActivityParentValidity,
 } from '../device-activity-parent-automation.js'
 import {
-  buildCanonicalAutomationUpsertInput,
+  archiveCanonicalAssistantCronSourceIfOccurrenceCurrent,
   buildVisibleLocalAssistantCronStore,
   hasAssistantCronExtendedRetryWindow,
   isAssistantCronNotificationOccurrenceFresh,
@@ -1340,28 +1338,13 @@ export async function executeClaimedAssistantCronJob(
         run,
         pendingDeliveryIntentId,
         failureConsumesOccurrence,
-      )
+      ) &&
+      await archiveCanonicalAssistantCronSourceIfOccurrenceCurrent({
+        occurrenceAt,
+        source: input.job.source,
+        vault: input.vault,
+      })
     ) {
-      if (input.job.source.kind === 'automation') {
-        await upsertAutomation(
-          { ...buildCanonicalAutomationUpsertInput({
-            vault: input.vault,
-            automationId: input.job.source.automationId,
-            automation: input.job.source,
-            title: input.job.source.title,
-            status: 'archived',
-            schedule: input.job.source.schedule,
-            route: input.job.source.route,
-            instructions: input.job.source.instructions,
-          }), completedOccurrence: true },
-        )
-      } else if (input.job.source.kind === 'scheduledLog') {
-        await setScheduledLogStatus({
-          vaultRoot: input.vault,
-          scheduledLogId: input.job.source.scheduledLogId,
-          status: 'archived',
-        })
-      }
       removeAssistantCronCanonicalRuntimeRecord(
         runtimeStore,
         resolveCanonicalAssistantCronJobId(input.job.source),

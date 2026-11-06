@@ -1877,9 +1877,17 @@ Retired feature residue cleanup is tracked in [the removal record](exec-plans/co
 
 Changelog deletion evidence is owned by `../apps/web/changelog/README.md`; [verification record](exec-plans/completed/2026-11-05-changelog-deleted-entry-proof.md).
 
+Scheduling writer ownership proof is tracked in
+[`scheduling writers`](exec-plans/completed/2026-11-06-sm-pr14-scheduling-writers.md).
+The durable rule remains in `docs/contracts/00-invariants.md`.
+
 Canonical publication uncertainty and operational receipt replay proof are tracked in
 [`canonical evidence preservation`](exec-plans/completed/2026-11-06-preserve-canonical-evidence.md).
 The durable contract remains in `references/hosted-runtime-protocol.md`.
 
 Hosted delivery uncertainty, accepted confirmation, approval consume retries, and
 accounting deadline proofs are recorded in the [delivery settlement execution record](exec-plans/completed/2026-11-06-delivery-settlement.md).
+
+Single-checkpoint receipt recovery and the accepted workspace owner are tracked in
+[`single checkpoint receipt recovery`](exec-plans/completed/2026-11-06-single-checkpoint-receipt-recovery.md).
+The durable contract remains in `references/hosted-runtime-protocol.md`.

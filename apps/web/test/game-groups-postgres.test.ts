@@ -1,3 +1,4 @@
+import { linqRoster } from "./support/linq-roster";
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getPrisma } from "@/src/lib/prisma";
@@ -34,7 +35,7 @@ vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", async imp
     authorities: new Map(containerMemberIds.filter(id => chatProof.rooms.has(id)).map(id => [id, { channel: "linq", threadId: id, containerMemberId: id, accountLookupKey: "synthetic-line" }])) }),
 }));
 vi.mock("@/src/lib/hosted-onboarding/linq-client", async importOriginal => ({
-  ...await importOriginal<object>(), getHostedLinqChatSummary: async ({ chatId }: { chatId: string }) => ({ isGroup: true, handlesComplete: true,
+  ...await importOriginal<object>(), getHostedLinqChatSummary: async ({ chatId }: { chatId: string }) => linqRoster({ isGroup: true, handlesComplete: true,
     handles: [{ handle: "+15555550100", isMe: true, status: "active" }, ...(chatProof.rooms.get(chatId) ?? []).map(handle => ({ handle, isMe: false, status: "active" }))] }),
 }));
 vi.mock("@/src/lib/game/chat-lifecycle", () => ({ deliverGameChatLifecycle: vi.fn() }));

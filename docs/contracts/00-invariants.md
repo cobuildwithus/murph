@@ -445,7 +445,11 @@ it has been explicitly elevated to a cross-cutting invariant.
 
 - Cursors, watermarks, sequences, pending-input indexes, and pagination use one
   total, transitive, owner-shared ordering primitive. Import progress is not
-  handling progress.
+  handling progress. A continuation may mutate only the identity and revision it
+  observed, using current owner state at commit. A scan may only advance the
+  cursor of the entry it read; only enable and disable writers change channel
+  membership. A scheduled completion archives a one-shot only while the registry
+  still holds the revision and occurrence that ran.
 - Explicit owner or provider causal identifiers take precedence over
   positional, "latest," grouping, watermark, and time-window heuristics. Work
   with distinct ordering anchors must not be merged into one turn. A
@@ -521,6 +525,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   transaction, or returning control to a caller that may do either. Preserve the
   first observed failure while awaiting siblings; fail-fast observation must not
   leave detached work mutating scoped state after finalization.
+- A Linq roster observation carries its pre-read time and completeness. Partial
+  evidence establishes presence, never absence; removal and the complete-roster
+  watermark require a complete, nonempty, within-cap roster. Equal-time conflicts
+  resolve to removal. Required roster proof that is unavailable produces a
+  retryable response, never an acknowledgement.
 - Public Linq unbound-group pending-setup admission is bounded by the
   provider-proven 32-member roster. Before `BEGIN`, its owner performs one
   candidate projection, canonical batch runtime-access read, active-managed-line
@@ -712,11 +721,14 @@ direct-Starter gate is fully exhausted again.
   state. The withdrawal response waits for the per-user Cloudflare execution
   barrier to serialize behind earlier ensures, re-read the Web-owned grant,
   clear the write fence, and stop the runner; every later ensure re-reads that
-  grant before work. Renewal waits behind the earlier stop before committing a
-  new grant. Cleanup failure cannot restore authority, while an absent legacy
-  grant is not reinterpreted as withdrawal. Settings, latest-available export,
-  and account deletion remain available; renewed consent is the only processing
-  restore path.
+  grant before work. The existing external retention tick redrives stops
+  interrupted before that barrier for explicitly revoked members with a non-idle
+  owner or retained target, without normal processing eligibility, through the
+  same reconciliation. Every member renewal surface waits behind the earlier stop
+  before committing a new grant. Cleanup failure cannot restore authority, while
+  an absent legacy grant is not reinterpreted as withdrawal. Settings,
+  latest-available export, and account deletion remain available; renewed consent
+  is the only processing restore path.
 - The Cloudflare Worker that can retain an exact user-control stop target after
   clearing write authority is a hard rollback floor after the first such row is
   written. Withdrawal and account deletion must consume that same persisted

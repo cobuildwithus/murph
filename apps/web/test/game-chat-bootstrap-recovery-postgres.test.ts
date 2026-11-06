@@ -1,3 +1,5 @@
+import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
+import { linqRoster } from "./support/linq-roster";
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { getPrisma } from "@/src/lib/prisma";
@@ -24,7 +26,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-line-store", async (original) => ({ ..
 }));
 vi.mock("@/src/lib/hosted-onboarding/linq-client", async (original) => ({ ...await original<typeof import("@/src/lib/hosted-onboarding/linq-client")>(),
   createHostedLinqChat: m.create,
-  getHostedLinqChatSummary: async () => ({ isGroup: true, handlesComplete: true, handles: [
+  getHostedLinqChatSummary: async () => linqRoster({ isGroup: true, handlesComplete: true, handles: [
     { handle: "+15555550100", isMe: true, status: "active" },
     { handle: "+15555550101", isMe: false, status: "active" },
     { handle: "+15555550102", isMe: false, status: "active" },
@@ -42,6 +44,7 @@ describe.skipIf(!enabled)("game bootstrap lifecycle recovery against PostgreSQL"
     await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: members } } });
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: members } } });
     await getPrisma().hostedLinqLine.deleteMany({ where: { phoneNumberLookupKey: { in: lineKeys } } });
+    await getPrisma().hostedGroupParticipantObservation.deleteMany({ where: { contactLookupKey: { in: ["+15555550101", "+15555550102"].map(phone => createHostedPhoneLookupKey(phone)!) } } });
   });
   it("supersedes an empty queued proposal and permits one valid replacement after local text rejection", async () => {
     const db = getPrisma();
@@ -114,6 +117,7 @@ describe.skipIf(!enabled)("game bootstrap lifecycle recovery against PostgreSQL"
     const access = await vi.importActual<typeof import("@/src/lib/hosted-mailbox/runtime-access")>("@/src/lib/hosted-mailbox/runtime-access");
     m.activeAccess.mockImplementation(access.requireHostedRuntimeActiveAccessForUpdateTx);
     await db.hostedMember.createMany({ data: [a, b, room].map(id => ({ id, billingStatus: "not_started" })) });
+    await db.hostedMemberIdentity.createMany({ data: [a, b].map((memberId, index) => ({ memberId, phoneLookupKey: createHostedPhoneLookupKey(index === 0 ? "+15555550101" : "+15555550102") })) });
     for (const actorMemberId of [a, b]) await runGameCommand({ actorMemberId, command: { type: "setProfile", firstName: actorMemberId === a ? "Ava" : "Sam", timeZone: "UTC" } });
     const tokens = new Map<string, string>();
     for (const [index, gameId] of [older, newer].entries()) {

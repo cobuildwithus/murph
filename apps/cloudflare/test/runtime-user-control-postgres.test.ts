@@ -123,6 +123,72 @@ describe("Postgres runtime user controls", () => {
     expect(await h.source.BUNDLES.get(key)).toBeNull();
   });
 
+  it("reconciles an idle retained target without an attempt retirement", async () => {
+    const h = harness();
+    h.owner.phase = "idle";
+    h.owner.attemptId = null;
+    vi.mocked(fetchHostedExecutionWebControlPlaneResponse).mockImplementation(async () => {
+      expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation)).toEqual(["reconcile"]);
+      return Response.json({ userId: h.userId, processingAllowed: false, consentState: "revoked" });
+    });
+    await expect(reconcilePostgresRuntimeConsent(h.source, h.userId)).resolves.toMatchObject({ runnerContainerDestroyOk: true });
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation)).toEqual(["reconcile", "target_retired"]);
+    expect(h.slot.retireStandbySlot).toHaveBeenCalledExactlyOnceWith({ claimId: h.owner.allocationId, target: { slotName: h.target, userId: h.userId } });
+  });
+
+  it("leaves an allowed runtime untouched after the consent read", async () => {
+    const h = harness();
+    vi.mocked(fetchHostedExecutionWebControlPlaneResponse).mockResolvedValue(Response.json({ userId: h.userId, processingAllowed: true, consentState: "granted" }));
+    await expect(reconcilePostgresRuntimeConsent(h.source, h.userId)).resolves.toMatchObject({ processingAllowed: true });
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation)).toEqual(["reconcile"]);
+    expect(h.source.RUNNER_CONTAINER.getByName).not.toHaveBeenCalled();
+    expect(h.slot.retireStandbySlot).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale attempt retirement before touching the slot", async () => {
+    const h = harness();
+    vi.mocked(fetchHostedExecutionWebControlPlaneResponse).mockResolvedValue(Response.json({ userId: h.userId, processingAllowed: false, consentState: "revoked" }));
+    vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => ({ cutover: "postgres",
+      status: command.operation === "reconcile" ? "observed" : "stale", owner: command.operation === "reconcile" ? h.owner : null }));
+    await expect(reconcilePostgresRuntimeConsent(h.source, h.userId)).rejects.toThrow("Runtime changed during user-control retirement.");
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation)).toEqual(["reconcile", "retire"]);
+    expect(h.source.RUNNER_CONTAINER.getByName).not.toHaveBeenCalled();
+    expect(h.slot.retireStandbySlot).not.toHaveBeenCalled();
+  });
+
+  it("accepts a stale target acknowledgement after confirmed native retirement", async () => {
+    const h = harness();
+    vi.mocked(fetchHostedExecutionWebControlPlaneResponse).mockResolvedValue(Response.json({ userId: h.userId, processingAllowed: false, consentState: "revoked" }));
+    vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => {
+      if (command.operation === "target_retired") {
+        expect(h.slot.retireStandbySlot).toHaveBeenCalledOnce();
+        expect(h.slot.readStandbySlotBinding).toHaveBeenCalledOnce();
+      }
+      return { cutover: "postgres", status: command.operation === "reconcile" ? "observed" : command.operation === "target_retired" ? "stale" : "updated",
+        owner: command.operation === "reconcile" ? h.owner : null };
+    });
+    await expect(reconcilePostgresRuntimeConsent(h.source, h.userId)).resolves.toMatchObject({ runnerContainerDestroyOk: true });
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation)).toEqual(["reconcile", "retire", "target_retired"]);
+  });
+
+  it.each(["updated", "stale"] as const)("releases a targetless attempt and requires confirmation (%s)", async status => {
+    const h = harness();
+    h.owner.phase = "starting";
+    h.owner.runnerContainerName = null;
+    vi.mocked(fetchHostedExecutionWebControlPlaneResponse).mockResolvedValue(Response.json({ userId: h.userId, processingAllowed: false, consentState: "revoked" }));
+    vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => ({ cutover: "postgres",
+      status: command.operation === "reconcile" ? "observed" : command.operation === "release" ? status : "updated",
+      owner: command.operation === "reconcile" ? h.owner : null }));
+    const result = reconcilePostgresRuntimeConsent(h.source, h.userId);
+    if (status === "stale") await expect(result).rejects.toThrow("Runtime allocation retirement was not confirmed.");
+    else await expect(result).resolves.toMatchObject({ runnerContainerDestroyAttempted: false });
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation)).toEqual(["reconcile", "retire", "release"]);
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.at(-1)?.[0].command).toEqual({
+      operation: "release", attemptId: h.owner.attemptId, generation: h.owner.generation, runnerContainerName: null,
+    });
+    expect(h.source.RUNNER_CONTAINER.getByName).not.toHaveBeenCalled();
+  });
+
   it("deletes a game-only member's photos though they never had a runtime", async () => {
     const h = harness();
     vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => ({ cutover: "postgres",

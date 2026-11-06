@@ -638,11 +638,16 @@ export type HostedLinqChatHandleSummary = {
   status: string | null;
 };
 
-export type HostedLinqChatSummary = {
-  displayName?: string | null;
-  handleCount?: number;
-  handlesComplete?: boolean;
+/** One provider roster read. observedAt precedes the read, so it is a lower bound for both presence and absence. */
+export type HostedLinqChatRosterObservation = {
+  handleCount: number;
   handles: HostedLinqChatHandleSummary[];
+  handlesComplete: boolean;
+  observedAt: Date;
+};
+
+export type HostedLinqChatSummary = HostedLinqChatRosterObservation & {
+  displayName?: string | null;
   isGroup: boolean | null;
 };
 
@@ -722,6 +727,7 @@ export async function getHostedLinqChatSummary(input: {
   signal?: AbortSignal;
   timeoutMs?: number;
 }): Promise<HostedLinqChatSummary> {
+  const observedAt = new Date();
   const payload = await requestHostedLinqSdkOrThrow({
     operation: "chat read",
     request: (client) => client.chats.retrieve(
@@ -746,6 +752,7 @@ export async function getHostedLinqChatSummary(input: {
     handleCount: handles.length,
     handles: parsedHandles,
     handlesComplete: canonical !== null && parsedHandles.length === handles.length,
+    observedAt,
     isGroup,
   };
 }
@@ -843,14 +850,6 @@ function readHostedLinqCanonicalChat(
     handles: record.handles,
     is_group: record.is_group,
   };
-}
-
-export async function getHostedLinqChatHandles(input: {
-  chatId: string;
-  signal?: AbortSignal;
-  timeoutMs?: number;
-}): Promise<HostedLinqChatHandleSummary[]> {
-  return (await getHostedLinqChatSummary(input)).handles;
 }
 
 function parseHostedLinqChatHandleSummary(value: unknown): HostedLinqChatHandleSummary | null {

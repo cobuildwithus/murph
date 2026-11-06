@@ -873,3 +873,131 @@ describe("Postgres runtime orchestration", () => {
       .toEqual([...(state === "web-admitted" ? [] : ["claim"]), "claim", "accepted"]);
   });
 });
+
+describe("completed demand recovery deadline", () => {
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  async function completedHarness(input: { age: number; phase?: "active" | "retiring"; fence?: "active" | "unknown" | "mismatch" | "inactive" }) {
+    vi.clearAllMocks();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-01T12:00:00Z"));
+    const h = harness();
+    const current = owner({ phase: input.phase ?? "retiring", startedAt: new Date(Date.now() - input.age).toISOString(),
+      completedAt: input.phase === "active" ? null : new Date(Date.now() - input.age).toISOString() });
+    const commands: import("@murphai/hosted-execution/runtime-owner").HostedRuntimeOwnerCommand[] = [];
+    const events: string[] = [];
+    let retired = false;
+    const stop = { outcome: "retired" as "retired" | "reject" | "unconfirmed" };
+    h.container.ensureProcessing.mockResolvedValue({ kind: "start-required", reason: "no-active-child" });
+    h.container.readSupervisedInvocation.mockResolvedValue({ state: "completed", attemptId: "attempt-a", generation: "1", immediateRecheckRequested: false });
+    h.container.readActiveRuntimeUserFence.mockImplementation(async () => {
+      if (input.fence === "unknown") throw new Error("synthetic unavailable fence");
+      return input.fence === "inactive" ? { active: false, reason: "no_active_runtime" }
+        : { active: true, userId: request.userId, attemptId: input.fence === "mismatch" ? "another-attempt" : "attempt-a", leaseGeneration: "1" };
+    });
+    h.container.retireStandbySlot.mockImplementation(async () => {
+      events.push("stop");
+      if (stop.outcome === "reject") throw new Error("synthetic unconfirmed stop");
+      retired = stop.outcome === "retired";
+      return { retired: true };
+    });
+    h.container.readStandbySlotBinding.mockImplementation(async () => {
+      events.push("binding");
+      return retired ? { ...h.binding, state: "retired", userId: null, claimId: null } : h.binding;
+    });
+    const completion = await vi.importActual<typeof import("../src/runtime-owner-completion.ts")>("../src/runtime-owner-completion.ts");
+    vi.mocked(recordHostedRuntimeOwnerCompletion).mockImplementation(completion.recordHostedRuntimeOwnerCompletion);
+    vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => {
+      commands.push(command);
+      events.push(command.operation);
+      const reply = (status: HostedRuntimeOwnerResponse["status"]) => response({ ...current }, status);
+      const idle = (clear: boolean) => Object.assign(current, { phase: "idle", attemptId: null, processingMode: null, workspaceVersion: null,
+        ...(clear ? { runnerContainerName: null, allocationId: null } : {}) });
+      if (command.operation === "claim") {
+        if (current.phase !== "idle") return reply("existing");
+        Object.assign(current, { phase: "starting", attemptId: "attempt-b", generation: "2", processingMode: "default",
+          allocationId: current.allocationId ?? "standby-claim-22222222-2222-4222-8222-222222222222", startedAt: new Date().toISOString(), completedAt: null });
+        return reply("claimed");
+      }
+      if (!("attemptId" in command) || command.attemptId !== current.attemptId || command.generation !== current.generation) return reply("stale");
+      if (command.operation === "complete") {
+        if (command.settledRunnerContainerName !== current.runnerContainerName || current.phase === "idle"
+          || current.phase === "retiring" && current.completedAt === null) return reply("stale");
+        current.completedAt ??= new Date().toISOString();
+        idle(false);
+        return reply("updated");
+      }
+      if (command.operation === "retire" && current.phase !== "idle") {
+        expect(command.completed).toBe(false);
+        current.phase = "retiring";
+        current.completedAt = null;
+        return reply("updated");
+      }
+      if (command.operation === "release" && current.phase === "retiring" && command.runnerContainerName === current.runnerContainerName) {
+        expect(retired).toBe(true);
+        idle(true);
+        return reply("updated");
+      }
+      if (command.operation === "select_target" && current.phase === "starting" && current.runnerContainerName === null) {
+        current.runnerContainerName = command.runnerContainerName;
+        return reply("updated");
+      }
+      if (command.operation === "accepted" && current.phase === "starting") {
+        current.phase = "active";
+        return reply("updated");
+      }
+      throw new Error(`Unexpected command: ${command.operation}`);
+    });
+    return { ...h, current, commands, events, stop };
+  }
+
+  it.each(["active", "unknown", "mismatch"] as const)("preserves warm completion inside the deadline with %s liveness", async fence => {
+    const h = await completedHarness({ age: 10_000, fence });
+    const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
+    expect(await ensurePostgresRuntimeProcessing(h.source, request, diagnostics)).toMatchObject({ kind: "retry_later" });
+    expect(diagnostics.details.runtimeProcessingRetryReason).toBe("completion_unconfirmed");
+    expect(h.commands.map(c => c.operation)).toEqual(["claim"]);
+    expect(h.container.retireStandbySlot).not.toHaveBeenCalled();
+    expect(h.container.ensureProcessing).not.toHaveBeenCalled();
+  });
+
+  it.each(["active", "unknown", "mismatch"] as const)("retires warm completion past the deadline with %s liveness before fresh admission", async fence => {
+    const h = await completedHarness({ age: 40_000, fence });
+    expect(await ensurePostgresRuntimeProcessing(h.source, request)).toMatchObject({ kind: "runtime_processing_accepted", runtimeAttemptId: "attempt-b" });
+    expect(h.events.slice(0, 6)).toEqual(["claim", "retire", "stop", "binding", "release", "claim"]);
+    expect(h.commands.filter(c => c.operation === "retire")).toEqual([{ operation: "retire", attemptId: "attempt-a", generation: "1", completed: false }]);
+    expect(h.commands.some(c => c.operation === "complete")).toBe(false);
+    expect(h.container.retireStandbySlot).toHaveBeenCalledExactlyOnceWith({ claimId: allocationId, target: { slotName: target, userId: request.userId } });
+    expect(h.container.startSupervisedInvocation).toHaveBeenCalledOnce();
+    expect(h.container.bindStandbySlot).toHaveBeenCalledWith(expect.objectContaining({ slotName: expect.not.stringMatching(target) }));
+  });
+
+  it.each(["reject", "unconfirmed"] as const)("keeps an unconfirmed stop cold and retries it on the next ensure: %s", async outcome => {
+    const h = await completedHarness({ age: 40_000 });
+    h.stop.outcome = outcome;
+    if (outcome === "reject") await expect(ensurePostgresRuntimeProcessing(h.source, request)).rejects.toThrow("unconfirmed stop");
+    else expect(await ensurePostgresRuntimeProcessing(h.source, request)).toMatchObject({ kind: "retry_later" });
+    expect(h.current).toMatchObject({ phase: "retiring", completedAt: null, runnerContainerName: target });
+    expect(h.commands.some(c => c.operation === "release" || c.operation === "complete")).toBe(false);
+    h.events.length = 0;
+    h.stop.outcome = "retired";
+    expect(await ensurePostgresRuntimeProcessing(h.source, request)).toMatchObject({ kind: "runtime_processing_accepted", runtimeAttemptId: "attempt-b" });
+    expect(h.events.slice(0, 6)).toEqual(["claim", "retire", "stop", "binding", "release", "claim"]);
+    expect(h.commands.some(c => c.operation === "complete")).toBe(false);
+  });
+
+  it.each([10_000, 40_000])("uses startedAt for an active row with no completedAt: age=%s", async age => {
+    const h = await completedHarness({ age, phase: "active" });
+    expect(await ensurePostgresRuntimeProcessing(h.source, request)).toMatchObject({ kind: age < 30_000 ? "retry_later" : "runtime_processing_accepted" });
+    expect(h.container.retireStandbySlot).toHaveBeenCalledTimes(age < 30_000 ? 0 : 1);
+    expect(h.commands.some(c => c.operation === "complete")).toBe(false);
+  });
+
+  it("settles an inactive exact completed fence through complete without retirement", async () => {
+    const h = await completedHarness({ age: 40_000, fence: "inactive" });
+    expect(await ensurePostgresRuntimeProcessing(h.source, request)).toMatchObject({ kind: "runtime_processing_accepted", runtimeAttemptId: "attempt-b" });
+    expect(h.commands.filter(c => c.operation === "complete")).toEqual([{ operation: "complete", attemptId: "attempt-a", generation: "1", settledRunnerContainerName: target, immediateRecheckRequested: false }]);
+    expect(h.commands.some(c => c.operation === "retire" || c.operation === "release")).toBe(false);
+    expect(h.container.retireStandbySlot).not.toHaveBeenCalled();
+  });
+});

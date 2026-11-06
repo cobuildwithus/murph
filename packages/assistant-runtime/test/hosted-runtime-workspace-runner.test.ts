@@ -1702,15 +1702,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     assert.equal(request.expectedWorkspaceVersion, "2");
   });
 
-  test("snapshot builder mirrors committed wake fields so a follow-up checkpoint cannot resurrect a stale process-start inbox media retention wake", async () => {
-    // Regression for PR 240 round 32: hosted-runtime.ts manually updated
-    // expectedWorkspaceVersion/nextWakeAt/nextWakeReason on checkpointMetadata
-    // after an idle checkpoint, but never inboxMediaRetentionWakeAt. A
-    // subsequent foreground pass (e.g. mailbox/assistant) whose checkpoint
-    // request omitted inboxMediaRetentionWakeAt then fell back to the stale
-    // process-start value via buildHostedWorkspaceSnapshotCheckpointRequest,
-    // overwriting the freshly persisted retention wake and either resurrecting
-    // a due wake or losing the next one.
+  test("snapshot builder uses accepted wake and retention defaults for a follow-up checkpoint", async () => {
     const staleProcessStartWake = "2026-01-01T00:00:00.000Z";
     const advancedRetentionWake = "2026-05-10T00:00:00.000Z";
     const advancedNextWake = "2026-05-09T12:00:00.000Z";
@@ -1746,7 +1738,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     assert.equal(followUpRequest.nextWakeReason, "mailbox");
   });
 
-  test("snapshot builder clears mirrored retention/wake fields when the committed workspace cleared them", async () => {
+  test("snapshot builder uses null defaults after the accepted workspace clears wake and retention", async () => {
     const builder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
       createSnapshot: () => ({ snapshotRef: null }),
       metadata: {
@@ -1778,7 +1770,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     assert.equal(followUpRequest.nextWakeReason, null);
   });
 
-  test("snapshot builder leaves stale metadata in place when a checkpoint is rejected", async () => {
+  test("snapshot builder preserves constructor defaults when a checkpoint is rejected", async () => {
     const staleProcessStartWake = "2026-01-01T00:00:00.000Z";
     const builder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
       createSnapshot: () => ({ snapshotRef: null }),
@@ -1812,6 +1804,191 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     assert.equal(followUpRequest.nextWakeAt, staleProcessStartWake);
     assert.equal(followUpRequest.nextWakeReason, "assistant_due");
   });
+
+  for (const kind of ["plain", "snapshot"] as const) {
+    const constructorWake = "2099-01-01T00:00:00.000Z";
+    const createBuilder = (frozen = false) => {
+      const metadata = {
+        attemptId: "attempt_synthetic_accepted_owner",
+        browserVaultReplicaRef: TEST_BROWSER_VAULT_REPLICA_REF,
+        currentSnapshotRef: createWorkspaceSnapshotV2Ref("constructor-snapshot"),
+        expectedWorkspaceVersion: "1",
+        inboxMediaRetentionWakeAt: constructorWake,
+        leaseGeneration: "7",
+        nextDefaultProcessingWakeAt: constructorWake,
+        nextDefaultProcessingWakeReason: "assistant",
+        nextWakeAt: constructorWake,
+        nextWakeReason: "assistant",
+        snapshotRef: createWorkspaceSnapshotV2Ref("constructor-snapshot"),
+        systemMailboxProgressGeneration: "3",
+      };
+      const original = structuredClone(metadata);
+      if (frozen) Object.freeze(metadata);
+      const builder = kind === "plain"
+        ? createHostedWorkspaceCheckpointRequestBuilder(metadata)
+        : createHostedWorkspaceSnapshotCheckpointRequestBuilder({
+            createSnapshot: (input) => ({ snapshotRef: input.currentSnapshotRef ?? null }),
+            metadata,
+          });
+      return { builder, metadata, original };
+    };
+    const acceptedWorkspace = (version: string, wake: string | null) => createWorkspaceState({
+      version,
+      snapshotRef: createWorkspaceSnapshotV2Ref(`accepted-snapshot-${version}`),
+      inboxMediaRetentionWakeAt: wake,
+      nextWakeAt: wake,
+      nextWakeReason: wake === null ? null : "mailbox",
+      nextDefaultProcessingWakeAt: wake,
+      nextDefaultProcessingWakeReason: wake === null ? null : "assistant",
+      systemMailboxProgressGeneration: version,
+    });
+
+    test(`${kind} builder advances every default only for a newer accepted workspace`, async () => {
+      const { builder } = createBuilder();
+      for (const version of ["2", "3"]) {
+        const workspace = acceptedWorkspace(version, `2099-01-0${version}T00:00:00.000Z`);
+        builder.recordCheckpoint({ checkpointed: true, workspace });
+        const request = await builder.createRequest({ reason: "idle_shutdown" });
+        assert.equal(request.expectedWorkspaceVersion, version);
+        assert.deepEqual(request.snapshotRef, workspace.snapshotRef);
+        if (kind === "snapshot") assert.equal(request.inboxMediaRetentionWakeAt, workspace.inboxMediaRetentionWakeAt);
+        assert.equal(request.nextWakeAt, workspace.nextWakeAt);
+        assert.equal(request.nextWakeReason, workspace.nextWakeReason);
+        assert.equal(request.nextDefaultProcessingWakeAt, workspace.nextDefaultProcessingWakeAt);
+        assert.equal(request.nextDefaultProcessingWakeReason, workspace.nextDefaultProcessingWakeReason);
+        assert.equal(request.systemMailboxProgressGeneration, version);
+      }
+      const accepted = await builder.createRequest({ reason: "idle_shutdown" });
+      for (const version of ["2", "3", "99"]) {
+        builder.recordCheckpoint({
+          checkpointed: version !== "99",
+          workspace: acceptedWorkspace(version, null),
+        });
+        assert.deepEqual(await builder.createRequest({ reason: "idle_shutdown" }), accepted);
+      }
+      if (kind === "snapshot") {
+        assert.equal((await builder.createRequest({
+          expectedWorkspaceVersion: "42", reason: "idle_shutdown",
+        })).expectedWorkspaceVersion, "42");
+      }
+    });
+
+    test(`${kind} builder honors explicit null and accepted wake clearing`, async () => {
+      const { builder } = createBuilder();
+      builder.recordCheckpoint({ checkpointed: true, workspace: acceptedWorkspace("2", constructorWake) });
+      const omitted = await builder.createRequest({ reason: "idle_shutdown" });
+      assert.equal(omitted.nextWakeAt, constructorWake);
+      if (kind === "snapshot") assert.equal(omitted.inboxMediaRetentionWakeAt, constructorWake);
+      const cleared = await builder.createRequest({
+        reason: "idle_shutdown", nextWakeAt: null, nextWakeReason: null,
+        inboxMediaRetentionWakeAt: null,
+        nextDefaultProcessingWakeAt: null, nextDefaultProcessingWakeReason: null,
+      });
+      assert.equal(cleared.nextWakeAt, null);
+      assert.equal(cleared.nextWakeReason, null);
+      if (kind === "snapshot") assert.equal(cleared.inboxMediaRetentionWakeAt, null);
+      assert.equal(cleared.nextDefaultProcessingWakeAt, null);
+      assert.equal(cleared.nextDefaultProcessingWakeReason, null);
+      builder.recordCheckpoint({ checkpointed: true, workspace: acceptedWorkspace("3", null) });
+      const acceptedClear = await builder.createRequest({ reason: "idle_shutdown" });
+      assert.equal(acceptedClear.nextWakeAt, null);
+      assert.equal(acceptedClear.nextWakeReason, null);
+      if (kind === "snapshot") assert.equal(acceptedClear.inboxMediaRetentionWakeAt, null);
+      assert.equal(acceptedClear.nextDefaultProcessingWakeAt, null);
+      assert.equal(acceptedClear.nextDefaultProcessingWakeReason, null);
+    });
+
+    test(`${kind} builder accepts frozen constructor metadata and preserves invocation identity`, async () => {
+      const { builder, metadata, original } = createBuilder(true);
+      const initial = await builder.createRequest({ reason: "idle_shutdown" });
+      assert.equal(initial.expectedWorkspaceVersion, "1");
+      assert.equal(initial.nextWakeAt, constructorWake);
+      assert.equal(initial.nextDefaultProcessingWakeAt, constructorWake);
+      assert.equal(initial.systemMailboxProgressGeneration, "3");
+      assert.deepEqual(initial.snapshotRef, original.snapshotRef);
+      if (kind === "snapshot") assert.equal(initial.inboxMediaRetentionWakeAt, constructorWake);
+      builder.recordCheckpoint({ checkpointed: true, workspace: acceptedWorkspace("2", null) });
+      const accepted = await builder.createRequest({ reason: "idle_shutdown" });
+      assert.equal(accepted.expectedWorkspaceVersion, "2");
+      assert.equal(accepted.attemptId, original.attemptId);
+      assert.equal(accepted.leaseGeneration, original.leaseGeneration);
+      if (kind === "plain") assert.deepEqual(accepted.browserVaultReplicaRef, original.browserVaultReplicaRef);
+      assert.deepEqual(metadata, original);
+    });
+
+    test(`${kind} builder preserves staged status until an accepted snapshot replaces it`, () => {
+      const { builder } = createBuilder();
+      builder.recordRedactedStatus({ staged: true });
+      builder.recordCheckpoint({ checkpointed: true, workspace: createWorkspaceState({
+        version: "2", redactedStatus: { accepted: "status" },
+      }) });
+      assert.deepEqual(builder.readRedactedStatus(), { accepted: "status", staged: true });
+      builder.recordCheckpoint({ checkpointed: true, workspace: createWorkspaceState({
+        version: "3", redactedStatus: { accepted: "snapshot" },
+      }) }, true);
+      assert.deepEqual(builder.readRedactedStatus(), { accepted: "snapshot" });
+    });
+  }
+
+  test.each(["createRequest", "checkpoint"] as const)(
+    "snapshot builder captures one accepted view before %s materialization",
+    async (method) => {
+      const started = createDeferred<void>();
+      const release = createDeferred<void>();
+      const before = createWorkspaceState({
+        version: "2", snapshotRef: createWorkspaceSnapshotV2Ref("captured-snapshot"),
+        nextWakeAt: "2099-02-01T00:00:00.000Z", nextWakeReason: "assistant",
+        inboxMediaRetentionWakeAt: "2099-02-02T00:00:00.000Z",
+        nextDefaultProcessingWakeAt: "2099-02-03T00:00:00.000Z",
+        nextDefaultProcessingWakeReason: "assistant", systemMailboxProgressGeneration: "4",
+      });
+      const builder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
+        workspace: before,
+        metadata: {
+          attemptId: "attempt_synthetic_interleaving", leaseGeneration: "7",
+          expectedWorkspaceVersion: before.version, currentSnapshotRef: before.snapshotRef,
+          nextWakeAt: before.nextWakeAt, nextWakeReason: before.nextWakeReason,
+          inboxMediaRetentionWakeAt: before.inboxMediaRetentionWakeAt,
+          nextDefaultProcessingWakeAt: before.nextDefaultProcessingWakeAt,
+          nextDefaultProcessingWakeReason: before.nextDefaultProcessingWakeReason,
+          systemMailboxProgressGeneration: before.systemMailboxProgressGeneration,
+        },
+        async createSnapshot(input) {
+          started.resolve();
+          await release.promise;
+          assert.equal(input.expectedWorkspaceVersion, before.version);
+          assert.deepEqual(input.currentSnapshotRef, before.snapshotRef);
+          assert.equal(input.systemMailboxProgressGeneration, "4");
+          return { snapshotRef: input.currentSnapshotRef ?? null };
+        },
+      });
+      const requests: HostedWorkspaceCheckpointRequest[] = [];
+      const pending = method === "createRequest"
+        ? builder.createRequest({ reason: "idle_shutdown" })
+        : builder.checkpoint!({ reason: "idle_shutdown" }, createWorkspacePort({ checkpointRequests: requests }));
+      try {
+        await started.promise;
+        builder.recordCheckpoint({ checkpointed: true, workspace: createWorkspaceState({
+          version: "3", snapshotRef: createWorkspaceSnapshotV2Ref("newer-status-snapshot"),
+          nextWakeAt: null, nextWakeReason: null, inboxMediaRetentionWakeAt: null,
+          nextDefaultProcessingWakeAt: null, nextDefaultProcessingWakeReason: null,
+          systemMailboxProgressGeneration: "5",
+        }) });
+      } finally {
+        release.resolve();
+      }
+      const result = await pending;
+      const request = "expectedWorkspaceVersion" in result ? result : requests[0]!;
+      assert.equal(request.expectedWorkspaceVersion, before.version);
+      assert.deepEqual(request.snapshotRef, before.snapshotRef);
+      assert.equal(request.nextWakeAt, before.nextWakeAt);
+      assert.equal(request.nextWakeReason, before.nextWakeReason);
+      assert.equal(request.inboxMediaRetentionWakeAt, before.inboxMediaRetentionWakeAt);
+      assert.equal(request.nextDefaultProcessingWakeAt, before.nextDefaultProcessingWakeAt);
+      assert.equal(request.nextDefaultProcessingWakeReason, before.nextDefaultProcessingWakeReason);
+      assert.equal(request.systemMailboxProgressGeneration, before.systemMailboxProgressGeneration);
+    },
+  );
 
   test("imports mailbox before the assistant phase and schedules enrichment after the assistant", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));

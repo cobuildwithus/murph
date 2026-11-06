@@ -429,7 +429,6 @@ export interface HostedWorkspaceRunnerDeferredUsageCapture {
 
 export interface HostedWorkspaceRunnerRuntimeStatusCheckpointInput {
   canonicalSystemProgressCommitted?: true;
-  clearCanonicalWriteReceiptLog?: true;
   canonicalWriteReceiptLogUpdated?: true;
   nextDefaultProcessingWakeAt?: string | null;
   nextDefaultProcessingWakeReason?: string | null;
@@ -537,6 +536,18 @@ export class HostedWorkspaceRunnerUserMismatchError extends Error {
   }
 }
 
+function readHostedWorkspaceCheckpointDefaults(workspace: HostedWorkspaceState) {
+  return {
+    expectedWorkspaceVersion: workspace.version,
+    inboxMediaRetentionWakeAt: workspace.inboxMediaRetentionWakeAt ?? null,
+    nextDefaultProcessingWakeAt: workspace.nextDefaultProcessingWakeAt ?? null,
+    nextDefaultProcessingWakeReason: workspace.nextDefaultProcessingWakeReason ?? null,
+    nextWakeAt: workspace.nextWakeAt ?? null,
+    nextWakeReason: workspace.nextWakeReason ?? null,
+    systemMailboxProgressGeneration: workspace.systemMailboxProgressGeneration ?? null,
+  };
+}
+
 export function createHostedWorkspaceCheckpointRequestBuilder(
   metadata: HostedWorkspaceCheckpointMetadata,
 ): HostedWorkspaceCheckpointRequestBuilder {
@@ -544,16 +555,20 @@ export function createHostedWorkspaceCheckpointRequestBuilder(
   return {
     ...publication,
     createRequest(input) {
+      const workspace = publication.latestWorkspace();
+      const defaults = workspace
+        ? { ...readHostedWorkspaceCheckpointDefaults(workspace), snapshotRef: workspace.snapshotRef }
+        : metadata;
       const progressProjection = resolveHostedWorkspaceCheckpointProgressProjection({
         input,
-        metadata,
+        metadata: defaults,
       });
       return {
         attemptId: metadata.attemptId,
         ...(Object.hasOwn(metadata, "browserVaultReplicaRef")
           ? { browserVaultReplicaRef: metadata.browserVaultReplicaRef ?? null }
           : {}),
-        expectedWorkspaceVersion: metadata.expectedWorkspaceVersion,
+        expectedWorkspaceVersion: defaults.expectedWorkspaceVersion,
         ...(input.handledConversationMailboxItemIds === undefined
           ? {}
           : {
@@ -567,28 +582,17 @@ export function createHostedWorkspaceCheckpointRequestBuilder(
         ...progressProjection,
         nextWakeAt: Object.hasOwn(input, "nextWakeAt")
           ? input.nextWakeAt ?? null
-          : metadata.nextWakeAt ?? null,
+          : defaults.nextWakeAt ?? null,
         nextWakeReason: Object.hasOwn(input, "nextWakeReason")
           ? input.nextWakeReason ?? null
-          : metadata.nextWakeReason ?? null,
+          : defaults.nextWakeReason ?? null,
         reason: input.reason,
         redactedStatus: cloneHostedRuntimeRedactedJson(input.redactedStatus ?? null),
         ...(input.runtimeWakePendingAtCheckpoint === undefined
           ? {}
           : { runtimeWakePendingAtCheckpoint: input.runtimeWakePendingAtCheckpoint }),
-        snapshotRef: metadata.snapshotRef,
+        snapshotRef: defaults.snapshotRef,
       };
-    },
-    recordCheckpoint(response, replaceRedactedStatus) {
-      if (publication.recordCheckpoint(response, replaceRedactedStatus)) {
-        metadata.expectedWorkspaceVersion = response.workspace.version;
-        metadata.nextDefaultProcessingWakeAt =
-          response.workspace.nextDefaultProcessingWakeAt ?? null;
-        metadata.nextDefaultProcessingWakeReason =
-          response.workspace.nextDefaultProcessingWakeReason ?? null;
-        metadata.systemMailboxProgressGeneration =
-          response.workspace.systemMailboxProgressGeneration ?? null;
-      }
     },
   };
 }
@@ -599,73 +603,52 @@ export function createHostedWorkspaceSnapshotCheckpointRequestBuilder(input: {
   metadata: HostedWorkspaceSnapshotCheckpointMetadata;
 }): HostedWorkspaceCheckpointRequestBuilder {
   const publication = createHostedWorkspacePublicationState(input.workspace ?? null);
-  // The builder owns every field of checkpoint metadata that
-  // buildHostedWorkspaceSnapshotCheckpointRequest falls back to. Mirroring the
-  // committed workspace here after a successful checkpoint prevents a later
-  // pass that omits one of these fields (e.g. a mailbox checkpoint after an
-  // idle retention checkpoint) from resurrecting a stale process-start value.
-  const recordCheckpoint = (response: HostedWorkspaceCheckpointResponse, replaceRedactedStatus = false): void => {
-    if (!publication.recordCheckpoint(response, replaceRedactedStatus)) {
-      return;
-    }
-    input.metadata.currentSnapshotRef = response.workspace.snapshotRef;
-    input.metadata.expectedWorkspaceVersion = response.workspace.version;
-    input.metadata.inboxMediaRetentionWakeAt =
-      response.workspace.inboxMediaRetentionWakeAt ?? null;
-    input.metadata.nextWakeAt = response.workspace.nextWakeAt ?? null;
-    input.metadata.nextWakeReason = response.workspace.nextWakeReason ?? null;
-    input.metadata.nextDefaultProcessingWakeAt =
-      response.workspace.nextDefaultProcessingWakeAt ?? null;
-    input.metadata.nextDefaultProcessingWakeReason =
-      response.workspace.nextDefaultProcessingWakeReason ?? null;
-    input.metadata.systemMailboxProgressGeneration =
-      response.workspace.systemMailboxProgressGeneration ?? null;
-  };
-  const materializeRequestInput = (
+  // Capture accepted defaults once so snapshot creation and publication use one view.
+  const prepareRequest = async (
     requestInput: HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
-  ): HostedWorkspaceSnapshotCheckpointRequestBuilderInput => ({
-    ...requestInput,
-    ...(Object.hasOwn(input.metadata, "currentSnapshotRef")
-      ? { currentSnapshotRef: input.metadata.currentSnapshotRef ?? null }
-      : {}),
-    ...resolveHostedWorkspaceCheckpointProgressProjection({
-      input: requestInput,
-      metadata: input.metadata,
-    }),
-    expectedWorkspaceVersion:
-      requestInput.expectedWorkspaceVersion
-      ?? input.metadata.expectedWorkspaceVersion,
-  });
+    context?: HostedWorkspaceSnapshotCheckpointContext,
+  ) => {
+    const workspace = publication.latestWorkspace();
+    const metadata = workspace
+      ? {
+          ...readHostedWorkspaceCheckpointDefaults(workspace),
+          attemptId: input.metadata.attemptId,
+          currentSnapshotRef: workspace.snapshotRef,
+          leaseGeneration: input.metadata.leaseGeneration,
+        }
+      : input.metadata;
+    const materializedRequestInput = {
+      ...requestInput,
+      ...(Object.hasOwn(metadata, "currentSnapshotRef")
+        ? { currentSnapshotRef: metadata.currentSnapshotRef ?? null }
+        : {}),
+      ...resolveHostedWorkspaceCheckpointProgressProjection({ input: requestInput, metadata }),
+      expectedWorkspaceVersion:
+        requestInput.expectedWorkspaceVersion ?? metadata.expectedWorkspaceVersion,
+    };
+    const snapshot = await input.createSnapshot(materializedRequestInput, context);
+    return { metadata, requestInput: materializedRequestInput, snapshot };
+  };
 
   return {
     ...publication,
     async checkpoint(requestInput, workspacePort, context) {
-      const materializedRequestInput = materializeRequestInput(requestInput);
-      const snapshot = await input.createSnapshot(materializedRequestInput, context);
-      if (snapshot.checkpoint) {
-        recordCheckpoint(snapshot.checkpoint, true);
-        return snapshot.checkpoint;
+      const prepared = await prepareRequest(requestInput, context);
+      if (prepared.snapshot.checkpoint) {
+        publication.recordCheckpoint(prepared.snapshot.checkpoint, true);
+        return prepared.snapshot.checkpoint;
       }
       const response = await workspacePort.checkpoint(
-        buildHostedWorkspaceSnapshotCheckpointRequest({
-          metadata: input.metadata,
-          requestInput: materializedRequestInput,
-          snapshot,
-        }),
+        buildHostedWorkspaceSnapshotCheckpointRequest(prepared),
       );
-      recordCheckpoint(response, true);
+      publication.recordCheckpoint(response, true);
       return response;
     },
     async createRequest(requestInput, context) {
-      const materializedRequestInput = materializeRequestInput(requestInput);
-      const snapshot = await input.createSnapshot(materializedRequestInput, context);
-      return buildHostedWorkspaceSnapshotCheckpointRequest({
-        metadata: input.metadata,
-        requestInput: materializedRequestInput,
-        snapshot,
-      });
+      return buildHostedWorkspaceSnapshotCheckpointRequest(
+        await prepareRequest(requestInput, context),
+      );
     },
-    recordCheckpoint,
   };
 }
 

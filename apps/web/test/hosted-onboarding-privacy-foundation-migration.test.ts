@@ -1252,6 +1252,7 @@ describe("hosted Prisma baseline migration", () => {
       "20261105000000_hosted_linq_ack_reaction",
       "20261105060000_hosted_linq_ack_reaction_message",
       "20261106120000_game_report_alert_inputs",
+      "20261106120000_hosted_thread_container_complete_roster_watermark",
       "20261106120100_hosted_group_offer_gesture_receipt",
       "migration_lock.toml",
     ]);

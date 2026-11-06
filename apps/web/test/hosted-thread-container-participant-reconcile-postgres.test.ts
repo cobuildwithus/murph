@@ -1,3 +1,4 @@
+import { linqRoster } from "./support/linq-roster";
 import { randomUUID } from "node:crypto";
 
 import { Prisma } from "@prisma/client";
@@ -5,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   reconcileHostedThreadContainerParticipants,
+  HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
 } from "@/src/lib/hosted-groups/thread-container-participants";
 import {
   createHostedLinqParticipantContactLookupKey,
@@ -33,20 +35,22 @@ describe.skipIf(!runPostgresProof)(
     it("preserves first-seen state, deterministically dedupes, and removes only from complete rosters", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-      const containerMemberId = "member-roster-container";
-      const firstMemberId = "member-roster-first";
-      const removedMemberId = "member-roster-removed";
-      const insertedMemberId = "member-roster-inserted";
+      const proofId = randomUUID();
+      const containerMemberId = `member-roster-container-${proofId}`;
+      const firstMemberId = `member-roster-first-${proofId}`;
+      const removedMemberId = `member-roster-removed-${proofId}`;
+      const insertedMemberId = `member-roster-inserted-${proofId}`;
       const originalFirstSeenAt = new Date("2026-08-01T00:00:00.000Z");
       const originalCreatedAt = new Date("2026-08-01T00:00:00.000Z");
       const originalLastSeenAt = new Date("2026-08-02T00:00:00.000Z");
       const firstHandle = "+15551110001";
       const laterSameMemberHandle = "+15551110002";
       const insertedHandle = "participant@example.com";
-      const silentHandle = "silent@example.com";
+      const silentHandle = `silent-${proofId}@example.com`;
+      const conversionMemberId = `conversion-${proofId}`;
       const additionalParticipants = Array.from({ length: 28 }, (_, index) => ({
         handle: `+1555333${index.toString().padStart(4, "0")}`,
-        participantMemberId: `member-roster-cap-${index.toString().padStart(2, "0")}`,
+        participantMemberId: `member-roster-cap-${proofId}-${index.toString().padStart(2, "0")}`,
       }));
       const firstLookupKey = requireLookupKey("phone", firstHandle);
       const laterLookupKey = requireLookupKey("phone", laterSameMemberHandle);
@@ -54,259 +58,222 @@ describe.skipIf(!runPostgresProof)(
       const silentLookupKey = requireLookupKey("email", silentHandle);
 
       try {
-        await prisma.$transaction(async (tx) => {
-          await tx.$executeRaw(Prisma.sql`
-            CREATE TEMP TABLE hosted_thread_container_participant (
-              container_member_id TEXT NOT NULL,
-              participant_member_id TEXT NOT NULL,
-              handle_lookup_key TEXT NOT NULL,
-              first_seen_at TIMESTAMP(3) NOT NULL,
-              last_seen_at TIMESTAMP(3) NOT NULL,
-              removed_at TIMESTAMP(3),
-              created_at TIMESTAMP(3) NOT NULL,
-              updated_at TIMESTAMP(3) NOT NULL,
-              PRIMARY KEY (container_member_id, participant_member_id)
-            ) ON COMMIT DROP
-          `);
-          await tx.$executeRaw(Prisma.sql`
-            CREATE TEMP TABLE hosted_group_participant_observation (
-              contact_lookup_key TEXT PRIMARY KEY,
-              first_observed_at TIMESTAMP(3) NOT NULL,
-              expires_at TIMESTAMP(3) NOT NULL
-            ) ON COMMIT DROP
-          `);
-          await tx.$executeRaw(Prisma.sql`
-            INSERT INTO hosted_thread_container_participant (
-              container_member_id,
-              participant_member_id,
-              handle_lookup_key,
-              first_seen_at,
-              last_seen_at,
-              removed_at,
-              created_at,
-              updated_at
+        const memberIds = [containerMemberId, firstMemberId, removedMemberId, insertedMemberId,
+          conversionMemberId, ...additionalParticipants.map(p => p.participantMemberId)];
+        await prisma.hostedMember.createMany({ data: memberIds.map(id => ({ id })) });
+        await prisma.hostedThreadContainer.create({ data: { memberId: containerMemberId, ownerMemberId: firstMemberId } });
+        await prisma.$executeRaw(Prisma.sql`
+          INSERT INTO hosted_thread_container_participant (
+            container_member_id,
+            participant_member_id,
+            handle_lookup_key,
+            first_seen_at,
+            last_seen_at,
+            removed_at,
+            created_at,
+            updated_at
+          )
+          VALUES
+            (
+              ${containerMemberId},
+              ${firstMemberId},
+              'old-first-handle',
+              ${originalFirstSeenAt},
+              ${originalLastSeenAt},
+              ${new Date("2026-08-03T00:00:00.000Z")},
+              ${originalCreatedAt},
+              ${new Date("2026-08-03T00:00:00.000Z")}
+            ),
+            (
+              ${containerMemberId},
+              ${removedMemberId},
+              'old-removed-handle',
+              ${originalFirstSeenAt},
+              ${originalLastSeenAt},
+              NULL,
+              ${originalCreatedAt},
+              ${originalLastSeenAt}
             )
-            VALUES
-              (
-                ${containerMemberId},
-                ${firstMemberId},
-                'old-first-handle',
-                ${originalFirstSeenAt},
-                ${originalLastSeenAt},
-                ${new Date("2026-08-03T00:00:00.000Z")},
-                ${originalCreatedAt},
-                ${new Date("2026-08-03T00:00:00.000Z")}
-              ),
-              (
-                ${containerMemberId},
-                ${removedMemberId},
-                'old-removed-handle',
-                ${originalFirstSeenAt},
-                ${originalLastSeenAt},
-                NULL,
-                ${originalCreatedAt},
-                ${originalLastSeenAt}
-              )
-          `);
+        `);
 
-          await reconcileHostedThreadContainerParticipants({
-            chatId: "chat-roster-complete",
-            containerMemberId,
-            handles: [
-              { handle: firstHandle, isMe: false, status: "active" },
-              { handle: laterSameMemberHandle, isMe: false, status: "active" },
-              { handle: insertedHandle, isMe: false, status: "active" },
-              { handle: silentHandle, isMe: false, status: "active" },
-              ...additionalParticipants.map((participant) => ({
-                handle: participant.handle,
-                isMe: false,
-                status: "active" as const,
-              })),
-            ],
-            prisma: tx,
-            resolvedParticipants: [
-              { handle: firstHandle, participantMemberId: firstMemberId },
-              {
-                handle: laterSameMemberHandle,
-                participantMemberId: firstMemberId,
-              },
-              { handle: insertedHandle, participantMemberId: insertedMemberId },
-              ...additionalParticipants,
-            ],
-          });
-
-          const completeRows = await readRows(tx, containerMemberId);
-          expect(completeRows).toHaveLength(31);
-          expect(completeRows.find((row) =>
-            row.participantMemberId === firstMemberId
-          )).toMatchObject({
-            createdAt: originalCreatedAt,
-            firstSeenAt: originalFirstSeenAt,
-            handleLookupKey: firstLookupKey,
-            removedAt: null,
-          });
-          expect(completeRows.find((row) =>
-            row.participantMemberId === firstMemberId
-          )?.handleLookupKey).not.toBe(laterLookupKey);
-          expect(completeRows.find((row) =>
-            row.participantMemberId === firstMemberId
-          )?.lastSeenAt.getTime()).toBeGreaterThan(originalLastSeenAt.getTime());
-          expect(completeRows.find((row) =>
-            row.participantMemberId === removedMemberId
-          )?.removedAt).toBeInstanceOf(Date);
-          const inserted = completeRows.find((row) =>
-            row.participantMemberId === insertedMemberId
-          );
-          expect(inserted).toMatchObject({
-            handleLookupKey: insertedLookupKey,
-            removedAt: null,
-          });
-          expect(inserted?.firstSeenAt).toEqual(inserted?.lastSeenAt);
-          expect(inserted?.createdAt).toEqual(inserted?.updatedAt);
-          expect(completeRows.find((row) =>
-            row.participantMemberId === additionalParticipants.at(-1)?.participantMemberId
-          )?.removedAt).toBeNull();
-          const observations = await tx.$queryRaw<Array<{
-            contactLookupKey: string;
-            expiresAt: Date;
-          }>>(Prisma.sql`
-            SELECT
-              contact_lookup_key AS "contactLookupKey",
-              expires_at AS "expiresAt"
-            FROM hosted_group_participant_observation
-            ORDER BY contact_lookup_key
-          `);
-          expect(observations).toHaveLength(32);
-          expect(observations).toContainEqual({
-            contactLookupKey: silentLookupKey,
-            expiresAt: expect.any(Date),
-          });
-          expect(observations.find((observation) =>
-            observation.contactLookupKey === silentLookupKey
-          )?.expiresAt.getTime()).toBeGreaterThan(Date.now());
-
-          const staleObservationAt = new Date("2026-01-01T00:00:00.000Z");
-          await tx.$executeRaw(Prisma.sql`
-            UPDATE hosted_group_participant_observation
-            SET
-              first_observed_at = ${staleObservationAt},
-              expires_at = ${staleObservationAt}
-            WHERE contact_lookup_key = ${silentLookupKey}
-          `);
-          const refreshStartedAt = new Date();
-          await reconcileHostedThreadContainerParticipants({
-            chatId: "chat-roster-refreshed-observation",
-            containerMemberId,
-            handles: [
-              { handle: silentHandle, isMe: false, status: "active" },
-            ],
-            prisma: tx,
-            resolvedParticipants: [],
-          });
-          const [refreshedObservation] = await tx.$queryRaw<Array<{
-            expiresAt: Date;
-            firstObservedAt: Date;
-          }>>(Prisma.sql`
-            SELECT
-              first_observed_at AS "firstObservedAt",
-              expires_at AS "expiresAt"
-            FROM hosted_group_participant_observation
-            WHERE contact_lookup_key = ${silentLookupKey}
-          `);
-          if (!refreshedObservation) {
-            throw new Error("Expected the silent observation to be refreshed.");
-          }
-          expect(refreshedObservation.firstObservedAt.getTime())
-            .toBeGreaterThanOrEqual(refreshStartedAt.getTime());
-          expect(
-            refreshedObservation.expiresAt.getTime()
-              - refreshedObservation.firstObservedAt.getTime(),
-          ).toBe(14 * 24 * 60 * 60 * 1000);
-
-          await createAttributionProofTables(tx);
-          const activationAt = new Date(
-            refreshedObservation.firstObservedAt.getTime() + 60_000,
-          );
-          const trackedAt = new Date(activationAt.getTime() + 60_000);
-          await tx.$executeRaw(Prisma.sql`
-            INSERT INTO hosted_member (
-              id,
-              group_private_conversion_tracked_at,
-              updated_at
-            )
-            VALUES ('member_silent_conversion', NULL, ${activationAt})
-          `);
-          await tx.$executeRaw(Prisma.sql`
-            INSERT INTO hosted_member_email_authorization (
-              member_id,
-              verified_email_lookup_key,
-              verified_email_verified_at
-            )
-            VALUES (
-              'member_silent_conversion',
-              ${silentLookupKey},
-              ${activationAt}
-            )
-          `);
-          await tx.$executeRaw(Prisma.sql`
-            INSERT INTO hosted_mailbox_item (id, user_id, kind, created_at)
-            VALUES (
-              'activation_silent_conversion',
-              'member_silent_conversion',
-              'member.activated',
-              ${activationAt}
-            )
-          `);
-
-          await expect(recordHostedGrowthGroupPrivateRosterConversions({
-            prisma: tx,
-            trackedAt,
-          })).resolves.toBe(1);
-          await expect(recordHostedGrowthGroupPrivateRosterConversions({
-            prisma: tx,
-            trackedAt: new Date(trackedAt.getTime() + 60_000),
-          })).resolves.toBe(0);
-          await expect(tx.$queryRaw<Array<{ trackedAt: Date | null }>>(Prisma.sql`
-            SELECT group_private_conversion_tracked_at AS "trackedAt"
-            FROM hosted_member
-            WHERE id = 'member_silent_conversion'
-          `)).resolves.toEqual([{ trackedAt }]);
-
-          await tx.$executeRaw(Prisma.sql`
-            UPDATE hosted_thread_container_participant
-            SET removed_at = NULL
-            WHERE container_member_id = ${containerMemberId}
-              AND participant_member_id = ${removedMemberId}
-          `);
-
-          const oversizedHandles = [
+        await reconcileHostedThreadContainerParticipants({
+          chatId: "chat-roster-complete",
+          containerMemberId,
+          observation: linqRoster({ handles: [
             { handle: firstHandle, isMe: false, status: "active" },
-            ...Array.from({ length: 32 }, (_, index) => ({
-              handle: `+1555222${index.toString().padStart(4, "0")}`,
+            { handle: laterSameMemberHandle, isMe: false, status: "active" },
+            { handle: insertedHandle, isMe: false, status: "active" },
+            { handle: silentHandle, isMe: false, status: "active" },
+            ...additionalParticipants.map((participant) => ({
+              handle: participant.handle,
               isMe: false,
-              status: "active",
+              status: "active" as const,
             })),
-          ];
-          await reconcileHostedThreadContainerParticipants({
-            chatId: "chat-roster-oversized",
-            containerMemberId,
-            handles: oversizedHandles,
-            prisma: tx,
-            resolvedParticipants: [
-              { handle: firstHandle, participantMemberId: firstMemberId },
-            ],
-          });
-
-          const oversizedRows = await readRows(tx, containerMemberId);
-          expect(oversizedRows.find((row) =>
-            row.participantMemberId === removedMemberId
-          )?.removedAt).toBeNull();
-          expect(warn).toHaveBeenCalledWith(
-            "Hosted thread-container participant reconcile skipped.",
-            expect.objectContaining({ reason: "roster_exceeds_cap" }),
-          );
+          ] }),
+          prisma,
+          resolvedParticipants: [
+            { handle: firstHandle, participantMemberId: firstMemberId },
+            {
+              handle: laterSameMemberHandle,
+              participantMemberId: firstMemberId,
+            },
+            { handle: insertedHandle, participantMemberId: insertedMemberId },
+            ...additionalParticipants,
+          ],
         });
+
+        const completeRows = await readRows(prisma, containerMemberId);
+        expect(completeRows).toHaveLength(31);
+        expect(completeRows.find((row) =>
+          row.participantMemberId === firstMemberId
+        )).toMatchObject({
+          createdAt: originalCreatedAt,
+          firstSeenAt: originalFirstSeenAt,
+          handleLookupKey: firstLookupKey,
+          removedAt: null,
+        });
+        expect(completeRows.find((row) =>
+          row.participantMemberId === firstMemberId
+        )?.handleLookupKey).not.toBe(laterLookupKey);
+        expect(completeRows.find((row) =>
+          row.participantMemberId === firstMemberId
+        )?.lastSeenAt.getTime()).toBeGreaterThan(originalLastSeenAt.getTime());
+        expect(completeRows.find((row) =>
+          row.participantMemberId === removedMemberId
+        )?.removedAt).toBeInstanceOf(Date);
+        const inserted = completeRows.find((row) =>
+          row.participantMemberId === insertedMemberId
+        );
+        expect(inserted).toMatchObject({
+          handleLookupKey: insertedLookupKey,
+          removedAt: null,
+        });
+        expect(inserted?.firstSeenAt).toEqual(inserted?.lastSeenAt);
+        expect(inserted?.createdAt).toEqual(inserted?.updatedAt);
+        expect(completeRows.find((row) =>
+          row.participantMemberId === additionalParticipants.at(-1)?.participantMemberId
+        )?.removedAt).toBeNull();
+        const observations = await prisma.$queryRaw<Array<{
+          contactLookupKey: string;
+          expiresAt: Date;
+        }>>(Prisma.sql`
+          SELECT
+            contact_lookup_key AS "contactLookupKey",
+            expires_at AS "expiresAt"
+          FROM hosted_group_participant_observation
+          WHERE contact_lookup_key IN (${Prisma.join([firstLookupKey, laterLookupKey, insertedLookupKey, silentLookupKey, ...additionalParticipants.map(p => requireLookupKey("phone", p.handle))])})
+          ORDER BY contact_lookup_key
+        `);
+        expect(observations).toHaveLength(32);
+        expect(observations).toContainEqual({
+          contactLookupKey: silentLookupKey,
+          expiresAt: expect.any(Date),
+        });
+        expect(observations.find((observation) =>
+          observation.contactLookupKey === silentLookupKey
+        )?.expiresAt.getTime()).toBeGreaterThan(Date.now());
+
+        const staleObservationAt = new Date("2026-01-01T00:00:00.000Z");
+        await prisma.$executeRaw(Prisma.sql`
+          UPDATE hosted_group_participant_observation
+          SET
+            first_observed_at = ${staleObservationAt},
+            expires_at = ${staleObservationAt}
+          WHERE contact_lookup_key = ${silentLookupKey}
+        `);
+        const refreshStartedAt = new Date();
+        await reconcileHostedThreadContainerParticipants({
+          chatId: "chat-roster-refreshed-observation",
+          containerMemberId,
+          observation: linqRoster({ handles: [
+            { handle: silentHandle, isMe: false, status: "active" },
+          ] }),
+          prisma,
+          resolvedParticipants: [],
+        });
+        const [refreshedObservation] = await prisma.$queryRaw<Array<{
+          expiresAt: Date;
+          firstObservedAt: Date;
+        }>>(Prisma.sql`
+          SELECT
+            first_observed_at AS "firstObservedAt",
+            expires_at AS "expiresAt"
+          FROM hosted_group_participant_observation
+          WHERE contact_lookup_key = ${silentLookupKey}
+        `);
+        if (!refreshedObservation) {
+          throw new Error("Expected the silent observation to be refreshed.");
+        }
+        expect(refreshedObservation.firstObservedAt.getTime())
+          .toBeGreaterThanOrEqual(refreshStartedAt.getTime());
+        expect(
+          refreshedObservation.expiresAt.getTime()
+            - refreshedObservation.firstObservedAt.getTime(),
+        ).toBe(14 * 24 * 60 * 60 * 1000);
+
+        const activationAt = new Date(refreshedObservation.firstObservedAt.getTime() + 60_000);
+        const trackedAt = new Date(activationAt.getTime() + 60_000);
+        await prisma.hostedMemberEmailAuthorization.create({ data: {
+          memberId: conversionMemberId, verifiedEmailLookupKey: silentLookupKey,
+          verifiedEmailVerifiedAt: activationAt,
+        } });
+        await prisma.hostedMailboxItem.create({ data: {
+          id: `activation-${proofId}`, userId: conversionMemberId, kind: "member.activated",
+          dedupeKey: `activation-${proofId}`, lane: "system", laneSeq: 1n,
+          occurredAt: activationAt, createdAt: activationAt, payloadSchema: "synthetic-activation",
+        } });
+
+        await expect(recordHostedGrowthGroupPrivateRosterConversions({
+          prisma,
+          trackedAt,
+        })).resolves.toBe(1);
+        await expect(recordHostedGrowthGroupPrivateRosterConversions({
+          prisma,
+          trackedAt: new Date(trackedAt.getTime() + 60_000),
+        })).resolves.toBe(0);
+        await expect(prisma.$queryRaw<Array<{ trackedAt: Date | null }>>(Prisma.sql`
+          SELECT group_private_conversion_tracked_at AS "trackedAt"
+          FROM hosted_member
+          WHERE id = ${conversionMemberId}
+        `)).resolves.toEqual([{ trackedAt }]);
+
+        await prisma.$executeRaw(Prisma.sql`
+          UPDATE hosted_thread_container_participant
+          SET removed_at = NULL
+          WHERE container_member_id = ${containerMemberId}
+            AND participant_member_id = ${removedMemberId}
+        `);
+
+        const oversizedHandles = [
+          { handle: firstHandle, isMe: false, status: "active" },
+          ...Array.from({ length: 32 }, (_, index) => ({
+            handle: `+1555222${index.toString().padStart(4, "0")}`,
+            isMe: false,
+            status: "active",
+          })),
+        ];
+        await reconcileHostedThreadContainerParticipants({
+          chatId: "chat-roster-oversized",
+          containerMemberId,
+          observation: linqRoster({ handles: oversizedHandles }),
+          prisma,
+          resolvedParticipants: [
+            { handle: firstHandle, participantMemberId: firstMemberId },
+          ],
+        });
+
+        const oversizedRows = await readRows(prisma, containerMemberId);
+        expect(oversizedRows.find((row) =>
+          row.participantMemberId === removedMemberId
+        )?.removedAt).toBeNull();
+        expect(warn).toHaveBeenCalledWith(
+          "Hosted thread-container participant reconcile skipped.",
+          expect.objectContaining({ reason: "roster_exceeds_cap" }),
+        );
       } finally {
+        await prisma.hostedThreadContainer.deleteMany({ where: { memberId: containerMemberId } });
+        await prisma.hostedMember.deleteMany({ where: { id: { in: [containerMemberId, firstMemberId, removedMemberId, insertedMemberId, conversionMemberId, ...additionalParticipants.map(p => p.participantMemberId)] } } });
+        await prisma.hostedGroupParticipantObservation.deleteMany({ where: { contactLookupKey: { in: [firstLookupKey, laterLookupKey, insertedLookupKey, silentLookupKey, ...additionalParticipants.map(p => requireLookupKey("phone", p.handle)), ...Array.from({ length: HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX + 1 }, (_, index) => requireLookupKey("phone", `+1555222${index.toString().padStart(4, "0")}`))] } } });
         warn.mockRestore();
         await prisma.$disconnect();
       }
@@ -337,11 +304,11 @@ describe.skipIf(!runPostgresProof)(
       ) => reconcileHostedThreadContainerParticipants({
         chatId: `chat_roster_${containerMemberId}`,
         containerMemberId,
-        handles: handles.map((handle) => ({
+        observation: linqRoster({ handles: handles.map((handle) => ({
           handle,
           isMe: false,
           status: "active" as const,
-        })),
+        })) }),
         prisma,
         resolvedParticipants: handles.map((handle) => ({
           handle,
@@ -438,49 +405,6 @@ type ParticipantRow = {
   removedAt: Date | null;
   updatedAt: Date;
 };
-
-async function createAttributionProofTables(
-  tx: Pick<Prisma.TransactionClient, "$executeRaw">,
-): Promise<void> {
-  await tx.$executeRaw(Prisma.sql`
-    CREATE TEMP TABLE hosted_member (
-      id TEXT PRIMARY KEY,
-      group_private_conversion_tracked_at TIMESTAMP(3),
-      updated_at TIMESTAMP(3) NOT NULL
-    ) ON COMMIT DROP
-  `);
-  await tx.$executeRaw(Prisma.sql`
-    CREATE TEMP TABLE hosted_member_identity (
-      member_id TEXT PRIMARY KEY,
-      phone_lookup_key TEXT
-    ) ON COMMIT DROP
-  `);
-  await tx.$executeRaw(Prisma.sql`
-    CREATE TEMP TABLE hosted_member_email_authorization (
-      member_id TEXT PRIMARY KEY,
-      verified_email_lookup_key TEXT,
-      verified_email_verified_at TIMESTAMP(3)
-    ) ON COMMIT DROP
-  `);
-  await tx.$executeRaw(Prisma.sql`
-    CREATE TEMP TABLE hosted_mailbox_item (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      created_at TIMESTAMP(3) NOT NULL
-    ) ON COMMIT DROP
-  `);
-  await tx.$executeRaw(Prisma.sql`
-    CREATE TEMP TABLE hosted_group (
-      runtime_member_id TEXT
-    ) ON COMMIT DROP
-  `);
-  await tx.$executeRaw(Prisma.sql`
-    CREATE TEMP TABLE hosted_thread_container (
-      member_id TEXT PRIMARY KEY
-    ) ON COMMIT DROP
-  `);
-}
 
 async function readRows(
   tx: Pick<Prisma.TransactionClient, "$queryRaw">,

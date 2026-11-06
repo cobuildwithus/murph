@@ -208,7 +208,6 @@ export {
 } from "./hosted-workspace-restore-preparation.ts";
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_YIELD_THRESHOLD,
-  hostedCanonicalWriteReceiptRecoveryStatusFields,
   omitHostedCanonicalWriteReceiptLogStatusFields,
   readHostedCanonicalWriteReceiptLogStatusFingerprint,
   readHostedCanonicalWriteReceiptRecoveryWake,
@@ -1539,27 +1538,6 @@ function readHostedRuntimeProgressClassifierFailuresForLog(
   return value.map((item) => String(item));
 }
 
-function buildInitialInvocationCheckpointMetadata(
-  request: HostedAssistantWorkspaceRuntimeJobInput["request"],
-  workspace: HostedWorkspaceState | null,
-): Parameters<typeof createHostedWorkspaceSnapshotCheckpointRequestBuilder>[0]["metadata"] {
-  return {
-    attemptId: request.attemptId,
-    currentSnapshotRef: readHostedWorkspaceCurrentSnapshotRef(workspace),
-    expectedWorkspaceVersion: workspace?.version ?? request.workspaceVersion,
-    inboxMediaRetentionWakeAt: workspace?.inboxMediaRetentionWakeAt ?? null,
-    leaseGeneration: request.leaseGeneration,
-    nextDefaultProcessingWakeAt:
-      workspace?.nextDefaultProcessingWakeAt ?? null,
-    nextDefaultProcessingWakeReason:
-      workspace?.nextDefaultProcessingWakeReason ?? null,
-    nextWakeAt: workspace?.nextWakeAt ?? null,
-    nextWakeReason: workspace?.nextWakeReason ?? null,
-    systemMailboxProgressGeneration:
-      workspace?.systemMailboxProgressGeneration ?? null,
-  };
-}
-
 function buildInvocationBaseRuntimeEnv(
   runtime: ReturnType<typeof normalizeHostedAssistantRuntimeConfig>,
   astraAllowed: boolean | undefined,
@@ -2096,15 +2074,18 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     if (!guardedMailboxPort) {
       throw new TypeError("Hosted workspace runtime job mailbox port must be injected.");
     }
-    const checkpointMetadata = buildInitialInvocationCheckpointMetadata(
-      input.request,
-      activeWorkspace,
-    );
     const checkpointRequestBuilder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
       workspace: activeWorkspace,
       createSnapshot: createAbortGuardedCheckpointSnapshot,
-      metadata: checkpointMetadata,
+      metadata: {
+        attemptId: input.request.attemptId,
+        currentSnapshotRef: null,
+        expectedWorkspaceVersion: input.request.workspaceVersion,
+        leaseGeneration: input.request.leaseGeneration,
+      },
     });
+    const readExpectedWorkspaceVersion = () =>
+      checkpointRequestBuilder.latestWorkspace()?.version ?? input.request.workspaceVersion;
     const startingDefaultWakeKey = buildHostedRuntimeWakeKey({
       nextWakeAt: workspaceRead.workspace?.nextWakeAt ?? null,
       nextWakeReason: workspaceRead.workspace?.nextWakeReason ?? null,
@@ -2143,6 +2124,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         const publicationStartedAt = performance.now();
         assertRuntimeNotAborted();
         const workspace = checkpointRequestBuilder.latestWorkspace() ?? checkpointInput.workspace;
+        const expectedWorkspaceVersion = readExpectedWorkspaceVersion();
         const requestedCheckpointNextWakeAt = Object.hasOwn(checkpointInput, "nextWakeAt")
           ? checkpointInput.nextWakeAt ?? null
           : workspace?.nextWakeAt ?? null;
@@ -2175,11 +2157,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           : foregroundWorkspacePort;
         const progressStatusStartedAt = performance.now();
         const redactedStatus = await withHostedMailboxProgressStatus({
-          workspaceVersion: (BigInt(checkpointMetadata.expectedWorkspaceVersion) + 1n).toString(),
+          workspaceVersion: (BigInt(expectedWorkspaceVersion) + 1n).toString(),
           redactedStatus: {
-            ...(checkpointInput.clearCanonicalWriteReceiptLog
-              ? omitHostedCanonicalWriteReceiptLogStatusFields(checkpointRequestBuilder.readRedactedStatus())
-              : checkpointRequestBuilder.readRedactedStatus()),
+            ...checkpointRequestBuilder.readRedactedStatus(),
             ...(checkpointInput.canonicalWriteReceiptLogUpdated
               ? checkpointInput.redactedStatus
               : omitHostedCanonicalWriteReceiptLogStatusFields(checkpointInput.redactedStatus)),
@@ -2199,8 +2179,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           checkpointInput.systemMailboxProgressGeneration
           ?? resolveHostedSystemMailboxCheckpointProgressGeneration({
             currentGeneration:
-              workspace?.systemMailboxProgressGeneration
-              ?? checkpointMetadata.systemMailboxProgressGeneration,
+              workspace?.systemMailboxProgressGeneration ?? null,
             progressed: systemMailboxProgressedForCheckpoint,
           });
         emitHostedExecutionStructuredLog({
@@ -2213,13 +2192,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           },
         });
         const checkpointOperation = checkpointWorkspacePort.checkpoint({
-          attemptId: checkpointMetadata.attemptId,
-          expectedWorkspaceVersion: checkpointMetadata.expectedWorkspaceVersion,
+          attemptId: input.request.attemptId,
+          expectedWorkspaceVersion,
           inboxMediaRetentionWakeAt: selectEarliestHostedRuntimeWake([
             { at: workspace?.inboxMediaRetentionWakeAt ?? null, reason: null },
             { at: checkpointInput.workspace?.inboxMediaRetentionWakeAt ?? null, reason: null },
           ]).nextWakeAt,
-          leaseGeneration: checkpointMetadata.leaseGeneration,
+          leaseGeneration: input.request.leaseGeneration,
           nextDefaultProcessingWakeAt:
             defaultProcessingWake.nextDefaultProcessingWakeAt,
           nextDefaultProcessingWakeReason:
@@ -2253,8 +2232,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         assertHostedWorkspaceCheckpointAccepted(checkpoint, input.request.userId);
         checkpointRequestBuilder.recordCheckpoint(
           checkpoint,
-          checkpointInput.canonicalWriteReceiptLogUpdated === true
-            || checkpointInput.clearCanonicalWriteReceiptLog === true,
+          checkpointInput.canonicalWriteReceiptLogUpdated === true,
         );
         if (canonicalSystemProgressCommitted) {
           acceptedCanonicalSystemProgressCheckpointOrdinal += 1;
@@ -2269,54 +2247,24 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       pendingCanonicalReceiptCount
         >= HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_YIELD_THRESHOLD
     ) {
-      const priorNextWakeAt = pendingCanonicalReceiptRecoveryWake
-        ? pendingCanonicalReceiptRecoveryWake.nextWakeAt
-        : activeWorkspace?.nextWakeAt ?? null;
-      const priorNextWakeReason = pendingCanonicalReceiptRecoveryWake
-        ? pendingCanonicalReceiptRecoveryWake.nextWakeReason
-        : activeWorkspace?.nextWakeReason ?? null;
+      const recoveryWake = pendingCanonicalReceiptRecoveryWake ?? {
+        nextWakeAt: activeWorkspace?.nextWakeAt ?? null,
+        nextWakeReason: activeWorkspace?.nextWakeReason ?? null,
+      };
       const recoveryCheckpoint = await checkpointHostedRuntimeDirtyWorkspace({
         assertRuntimeNotAborted,
         checkpointRequestBuilder,
         expectedUserId: input.request.userId,
         inboxMediaRetentionWakeAt: activeWorkspace?.inboxMediaRetentionWakeAt ?? null,
         issueExportPort: runtime.platform.issueExportPort ?? null,
-        nextWakeAt: new Date().toISOString(),
-        nextWakeReason: "mailbox",
+        ...recoveryWake,
         onCanonicalWriteReceiptLogCleared: clearPendingCanonicalReceiptCount,
-        redactedStatus: {
-          ...(activeWorkspace?.redactedStatus ?? {}),
-          ...hostedCanonicalWriteReceiptRecoveryStatusFields({
-            nextWakeAt: priorNextWakeAt,
-            nextWakeReason: priorNextWakeReason,
-          }),
-        },
-        retainCanonicalWriteReceiptLogStatus: true,
+        redactedStatus: activeWorkspace?.redactedStatus ?? null,
         runtimeAbortSignal: runtimeAbortController.signal,
         vaultRoot: restored.vaultRoot,
         workspacePort: foregroundWorkspacePort,
       });
-      // The mailbox wake only authorizes the recovery snapshot. Clear it
-      // durably before any no-op or early-return path can leave it due forever.
-      const wakeResetCheckpoint = await checkpointRuntimeRedactedStatus({
-        clearCanonicalWriteReceiptLog: true,
-        nextWakeAt: priorNextWakeAt,
-        nextWakeReason: priorNextWakeReason,
-        reason: "import",
-        redactedStatus: omitHostedCanonicalWriteReceiptLogStatusFields(
-          recoveryCheckpoint.workspace.redactedStatus,
-        ),
-        workspace: recoveryCheckpoint.workspace,
-      });
-      checkpointRequestBuilder.recordCheckpoint?.(wakeResetCheckpoint);
-      activeWorkspace = wakeResetCheckpoint.workspace;
-      if (
-        readHostedCanonicalWriteReceiptLogStatusFingerprint(
-          wakeResetCheckpoint.workspace.redactedStatus,
-        ) === null
-      ) {
-        clearPendingCanonicalReceiptCount();
-      }
+      activeWorkspace = recoveryCheckpoint.workspace;
     }
     if (input.request.processingMode === "inbox_media_retention") {
       return await runHostedInboxMediaRetentionOnlyCheckpoint({
@@ -3096,7 +3044,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       const restoredSystemMailboxProgressNeedsCheckpoint =
         await hasRestoredSystemMailboxProgressAheadOfWorkspace({
           assistantExecutionBlocked,
-          workspaceVersion: checkpointMetadata.expectedWorkspaceVersion,
+          workspaceVersion: readExpectedWorkspaceVersion(),
           importedSeq: initialMailboxImport.state.watermarks.system,
           redactedStatus: activeWorkspace?.redactedStatus ?? null,
           vaultRoot: restored.vaultRoot,
@@ -3537,7 +3485,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           && activeWorkspace.nextDefaultProcessingWakeReason === wake.nextDefaultProcessingWakeReason
           && !await hasRestoredSystemMailboxProgressAheadOfWorkspace({
             assistantExecutionBlocked,
-            workspaceVersion: checkpointMetadata.expectedWorkspaceVersion,
+            workspaceVersion: readExpectedWorkspaceVersion(),
             importedSeq: latestMailboxImport.state.watermarks.system,
             redactedStatus: activeWorkspace.redactedStatus ?? null,
             vaultRoot: restored.vaultRoot,
@@ -3702,7 +3650,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           immediateRecheckRequested: recheckOwner !== null,
           nextWake: returnedWake,
           redactedStatus: await withHostedMailboxProgressStatus({
-            workspaceVersion: checkpointMetadata.expectedWorkspaceVersion,
+            workspaceVersion: readExpectedWorkspaceVersion(),
             mailboxState: latestMailboxImport.state,
             redactedStatus: currentRedactedStatus,
             systemMailboxState,
@@ -6880,7 +6828,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           || hostedVaultStartupPreparation.mutated
           || await hasRestoredSystemMailboxProgressAheadOfWorkspace({
             assistantExecutionBlocked,
-            workspaceVersion: checkpointMetadata.expectedWorkspaceVersion,
+            workspaceVersion: readExpectedWorkspaceVersion(),
             importedSeq: result.latestMailboxImport.state.watermarks.system,
             redactedStatus: committedWorkspace?.redactedStatus ?? null,
             vaultRoot: restored.vaultRoot,
@@ -7515,10 +7463,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             workspace: checkpoint.workspace,
           });
         }
-        // checkpointMetadata is mirrored from the committed workspace inside
-        // createHostedWorkspaceSnapshotCheckpointRequestBuilder.recordCheckpoint;
-        // re-mutating it here would be a duplicate state owner and is the seam
-        // that previously let inboxMediaRetentionWakeAt drift.
         // Quiesced reads stay paused through effect drain and return. Their
         // durable successor owns any unfinished work after this checkpoint.
         return {
@@ -8796,7 +8740,6 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
   runtimeAbortSignal: AbortSignal;
   onCheckpointValidated?: (checkpoint: HostedWorkspaceCheckpointResponse) => Promise<void> | void;
   redactedStatus: HostedWorkspaceInvocationResult["redactedStatus"] | null;
-  retainCanonicalWriteReceiptLogStatus?: boolean;
   vaultRoot: string;
   workspacePort: HostedRuntimePlatform["workspacePort"];
   systemMailboxProgressGeneration?: string;
@@ -8817,9 +8760,7 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
   input.assertRuntimeNotAborted();
   const redactedStatus = await withHostedMailboxProgressStatus({
     workspaceVersion: (BigInt(input.checkpointRequestBuilder.latestWorkspace()?.version ?? "0") + 1n).toString(),
-    redactedStatus: input.retainCanonicalWriteReceiptLogStatus
-      ? input.redactedStatus
-      : omitHostedCanonicalWriteReceiptLogStatusFields(input.redactedStatus),
+    redactedStatus: omitHostedCanonicalWriteReceiptLogStatusFields(input.redactedStatus),
     vaultRoot: input.vaultRoot,
   });
   const checkpointInput = {
@@ -8871,8 +8812,7 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
   assertHostedWorkspaceCheckpointAccepted(checkpoint, input.expectedUserId);
   await input.onCheckpointValidated?.(checkpoint);
   if (
-    input.retainCanonicalWriteReceiptLogStatus !== true
-    && readHostedCanonicalWriteReceiptLogStatusFingerprint(
+    readHostedCanonicalWriteReceiptLogStatusFingerprint(
       checkpoint.workspace.redactedStatus,
     ) === null
   ) {
@@ -9719,12 +9659,6 @@ function hasHostedRuntimeEnvValue(
   key: string,
 ): boolean {
   return typeof env[key] === "string" && env[key].trim().length > 0;
-}
-
-function readHostedWorkspaceCurrentSnapshotRef(
-  workspace: HostedWorkspaceState | null,
-): HostedWorkspaceState["snapshotRef"] {
-  return workspace?.snapshotRef ?? null;
 }
 
 // Read-only protected checkpoint diagnostics reuse the pending-index schema owner.

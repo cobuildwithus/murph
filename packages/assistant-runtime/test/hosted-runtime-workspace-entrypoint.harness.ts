@@ -496,7 +496,6 @@ import {
 } from "../src/hosted-runtime/checkpoint-bridge.ts";
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
-  hostedCanonicalWriteReceiptRecoveryStatusFields,
   readHostedCanonicalWriteReceiptRecoveryWake,
 } from "../src/hosted-runtime/canonical-write-receipt-log.ts";
 import type {
@@ -1407,6 +1406,7 @@ function createCanonicalReceiptLogArtifacts(
   entryCount: number,
   options: {
     activeEntryCount?: number;
+    payload?: { bytes: Buffer; targetRelativePath: string };
   } = {},
 ): {
   artifactBytesByHash: Map<string, Uint8Array>;
@@ -1414,8 +1414,18 @@ function createCanonicalReceiptLogArtifacts(
   receiptLogBytes: Buffer;
   receiptLogHash: string;
 } {
+  const payloadHash = options.payload ? sha256Hex(options.payload.bytes) : null;
   const receiptBytes = Buffer.from(`${JSON.stringify({
-    actions: [],
+    actions: options.payload && payloadHash
+      ? [{
+          byteLength: options.payload.bytes.byteLength,
+          contentRef: { byteSize: options.payload.bytes.byteLength, sha256: payloadHash },
+          effect: "create",
+          kind: "text_upsert",
+          sha256: payloadHash,
+          targetRelativePath: options.payload.targetRelativePath,
+        }]
+      : [],
     committedAt: TEST_NOW,
     createdAt: TEST_NOW,
     occurredAt: TEST_NOW,
@@ -1450,6 +1460,9 @@ function createCanonicalReceiptLogArtifacts(
     artifactBytesByHash: new Map<string, Uint8Array>([
       [receiptHash, receiptBytes],
       [receiptLogHash, receiptLogBytes],
+      ...(options.payload && payloadHash
+        ? [[payloadHash, options.payload.bytes] as const]
+        : []),
     ]),
     receiptHash,
     receiptLogBytes,
@@ -1457,11 +1470,12 @@ function createCanonicalReceiptLogArtifacts(
   };
 }
 
-function createSaturatedCanonicalReceiptLogArtifacts(): ReturnType<
-  typeof createCanonicalReceiptLogArtifacts
-> {
+function createSaturatedCanonicalReceiptLogArtifacts(
+  payload?: { bytes: Buffer; targetRelativePath: string },
+): ReturnType<typeof createCanonicalReceiptLogArtifacts> {
   return createCanonicalReceiptLogArtifacts(
     HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
+    payload ? { payload } : {},
   );
 }
 

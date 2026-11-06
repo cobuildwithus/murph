@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 
 import { test } from "vitest";
+import {
+  HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_AT_STATUS_KEY,
+  HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_REASON_STATUS_KEY,
+} from "@murphai/hosted-execution/runtime-control";
 import type {
   HostedCanonicalWritePayload,
   HostedCanonicalWriteReceipt,
@@ -13,7 +18,6 @@ import {
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_BYTES,
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_TOTAL_ENTRIES,
-  hostedCanonicalWriteReceiptRecoveryStatusFields,
   omitHostedCanonicalWriteReceiptLogStatusFields,
   readHostedCanonicalWriteReceiptLog,
   readHostedCanonicalWriteReceiptLogEntries,
@@ -453,7 +457,9 @@ test("hosted canonical receipt recovery preserves and clears the prior wake mark
   const seeded = createSeededReceiptLog(1);
   const status = {
     ...createReceiptLogStatus(seeded.log),
-    ...hostedCanonicalWriteReceiptRecoveryStatusFields(priorWake),
+    [HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_STATUS_KEY]: "pending",
+    [HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_AT_STATUS_KEY]: priorWake.nextWakeAt,
+    [HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_REASON_STATUS_KEY]: priorWake.nextWakeReason,
   };
 
   assert.deepEqual(readHostedCanonicalWriteReceiptRecoveryWake(status), priorWake);

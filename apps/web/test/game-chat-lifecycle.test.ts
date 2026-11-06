@@ -7,7 +7,7 @@ const m = vi.hoisted(() => ({
   missedBatch: vi.fn(), reserveMissed: vi.fn(), recapMaterial: vi.fn(), recapMessages: vi.fn(), transcript: vi.fn(), room: vi.fn(),
 }));
 vi.mock("../src/lib/prisma", () => {
-  const db = { $queryRaw: m.lock, gameEvent: { findUnique: m.event }, hostedLinqDelivery: { findMany: (input: { where: { payloadSchema?: string } }) => input.where.payloadSchema ? m.frozen(input) : m.receipts(input), updateMany: m.receiptUpdate }, game: { findUnique: m.game, findFirst: m.current, updateMany: m.bind } };
+  const db = { $queryRaw: m.lock, gameEvent: { findUnique: m.event }, hostedThreadRoute: { findFirst: async () => ({ containerMemberId: "room" }) }, hostedLinqDelivery: { findMany: (input: { where: { payloadSchema?: string } }) => input.where.payloadSchema ? m.frozen(input) : m.receipts(input), updateMany: m.receiptUpdate }, game: { findUnique: m.game, findFirst: m.current, updateMany: m.bind } };
   return { getPrisma: () => ({ ...db, $transaction: async (fn: (tx: typeof db) => unknown) => fn(db) }) };
 });
 vi.mock("../src/lib/game/service", () => ({ readGameChatState: m.state, readGameNoticeRoom: m.room, readGameMissedCheckInBatch: m.missedBatch, readGameRematchNotice: m.rematchNotice,

@@ -526,22 +526,48 @@ async function upsertScheduledLogWithLatestRegistry(input: UpsertScheduledLogInp
   return { auditPath, created: target.created, record: writtenRecord };
 }
 
+export async function archiveScheduledLogIfOccurrenceCurrent(input: {
+  expectedUpdatedAt: string;
+  now?: Date;
+  occurrenceAt: string;
+  scheduledLogId: string;
+  vaultRoot: string;
+}): Promise<boolean> {
+  return withScheduledLogRegistryLock(input.vaultRoot, async () => {
+    const existing = await showScheduledLog(input);
+    if (
+      !existing ||
+      existing.status !== "active" ||
+      existing.updatedAt !== input.expectedUpdatedAt ||
+      existing.schedule.kind !== "at" ||
+      Date.parse(existing.schedule.at) !== Date.parse(input.occurrenceAt)
+    ) {
+      return false;
+    }
+    await writeScheduledLogStatus({ ...input, status: "archived" }, existing);
+    return true;
+  });
+}
+
 export async function setScheduledLogStatus(input: SetScheduledLogStatusInput): Promise<UpsertScheduledLogResult> {
   return withScheduledLogRegistryLock(input.vaultRoot, async () => {
-    const existing = await readScheduledLog(input);
-    return upsertScheduledLogWithLatestRegistry({
-      vaultRoot: input.vaultRoot,
-      scheduledLogId: existing.scheduledLogId,
-      slug: existing.slug,
-      title: existing.title,
-      status: input.status,
-      summary: existing.summary ?? undefined,
-      schedule: existing.schedule,
-      action: existing.action,
-      tags: existing.tags,
-      body: existing.body,
-      now: input.now,
-    });
+    return writeScheduledLogStatus(input, await readScheduledLog(input));
+  });
+}
+
+function writeScheduledLogStatus(input: SetScheduledLogStatusInput, existing: ScheduledLogRecord): Promise<UpsertScheduledLogResult> {
+  return upsertScheduledLogWithLatestRegistry({
+    vaultRoot: input.vaultRoot,
+    scheduledLogId: existing.scheduledLogId,
+    slug: existing.slug,
+    title: existing.title,
+    status: input.status,
+    summary: existing.summary ?? undefined,
+    schedule: existing.schedule,
+    action: existing.action,
+    tags: existing.tags,
+    body: existing.body,
+    now: input.now,
   });
 }
 
