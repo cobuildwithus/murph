@@ -23,10 +23,11 @@ import { upsertHostedMemberEmailAuthorization } from "@/src/lib/hosted-onboardin
 import { buildHostedMemberPhoneIdentityFields } from "@/src/lib/hosted-onboarding/member-identity-fields";
 
 // Same synthetic provider and local KMS boundaries as game-groups-postgres.
-const proof = vi.hoisted(() => ({ rooms: new Map<string, string[]>(), chatFailures: new Map<string, unknown>(), parsedChats: new Set<string>(), realRoutes: new Set<string>(), signal: vi.fn(), afterPrepare: null as null | (() => Promise<void>) }));
+const proof = vi.hoisted(() => ({ rooms: new Map<string, string[]>(), chatFailures: new Map<string, unknown>(), parsedChats: new Set<string>(), realRoutes: new Set<string>(), audienceReads: [] as string[], signal: vi.fn(), afterPrepare: null as null | (() => Promise<void>) }));
 vi.mock("@/src/lib/hosted-onboarding/linq-client", async original => {
   const actual = await original<typeof import("@/src/lib/hosted-onboarding/linq-client")>();
   return { ...actual, getHostedLinqChatSummary: async (input: Parameters<typeof actual.getHostedLinqChatSummary>[0]) => {
+    proof.audienceReads.push(`chat:${input.chatId}`);
     if (proof.chatFailures.has(input.chatId)) throw proof.chatFailures.get(input.chatId);
     if (proof.parsedChats.has(input.chatId)) return actual.getHostedLinqChatSummary(input);
     return { isGroup: true, handlesComplete: true,
@@ -34,10 +35,13 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", async original => {
   } };
 });
 vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", async original => { const actual = await original<typeof import("@/src/lib/hosted-routing/assistant-notification-destination")>(); return { ...actual,
-  readHostedThreadContainerLinqRouteAuthorities: async (input: Parameters<typeof actual.readHostedThreadContainerLinqRouteAuthorities>[0]) => input.containerMemberIds.some(id => proof.realRoutes.has(id))
-    ? actual.readHostedThreadContainerLinqRouteAuthorities(input)
-    : { nonLinqContainerMemberIds: new Set<string>(), unavailableContainerMemberIds: new Set<string>(), authorities: new Map(input.containerMemberIds.map(id => [id,
-      { channel: "linq" as const, threadId: id, containerMemberId: id, accountLookupKey: "synthetic-line" }])) },
+  readHostedThreadContainerLinqRouteAuthorities: async (input: Parameters<typeof actual.readHostedThreadContainerLinqRouteAuthorities>[0]) => {
+    proof.audienceReads.push(...input.containerMemberIds.map(id => `route:${id}`));
+    return input.containerMemberIds.some(id => proof.realRoutes.has(id))
+      ? actual.readHostedThreadContainerLinqRouteAuthorities(input)
+      : { nonLinqContainerMemberIds: new Set<string>(), unavailableContainerMemberIds: new Set<string>(), authorities: new Map(input.containerMemberIds.map(id => [id,
+        { channel: "linq" as const, threadId: id, containerMemberId: id, accountLookupKey: "synthetic-line" }])) };
+  },
   resolveHostedAssistantNotificationDestination: async ({ memberId }: { memberId: string }) => ({ conversationShape: "thread-container",
     route: { channel: "linq", threadId: memberId, threadIsDirect: false, actorId: null, identityId: null, delivery: { kind: "thread", target: memberId } } }),
   bindHostedAssistantNotificationDestination: ({ destination }: { destination: { route: unknown } }) => ({ route: destination.route }),
@@ -200,7 +204,7 @@ beforeAll(async () => {
   await db.hostedLinqDelivery.updateMany({ where: { source: "game_lifecycle", status: { in: ["awaiting_generation", "generation_queued"] } }, data: { retryAfterAt: new Date("9999-01-01T00:00:00Z") } });
 });
 afterEach(async () => {
-  proof.afterPrepare = null; proof.signal.mockReset(); proof.chatFailures.clear(); proof.parsedChats.clear(); proof.realRoutes.clear();
+  proof.afterPrepare = null; proof.signal.mockReset(); proof.chatFailures.clear(); proof.parsedChats.clear(); proof.realRoutes.clear(); proof.audienceReads.length = 0;
   vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.unstubAllGlobals();
   if (!enabled) return;
   await db.hostedLinqDelivery.deleteMany({ where: { OR: [{ payloadOwnerMemberId: { in: members } }, { idempotencyKey: { in: events.map(event => createHostedLinqDeliveryIdempotencyLookupKey(event)!) } }] } });
@@ -354,6 +358,67 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     const failure = inject(f.roomId);
     await expect(drainGameChatLifecycle({ now })).rejects.toBe(failure);
     expect(await db.hostedLinqDelivery.count({ where: { payloadOwnerMemberId: f.roomId } })).toBe(0);
+  });
+
+  it.each([
+    ["before the day closes", "2030-03-04T12:00:00Z"],
+    ["just before its window", "2030-03-05T08:59:59Z"],
+    ["just after its window", "2030-03-05T11:00:01Z"],
+  ])("makes no provider or audience read %s", async (_when, at) => {
+    const f = await fixture(), id = await f.addGame();
+    expect(await reserveGroupGameMissedDay(f.roomId, [id], new Date(at))).toBe(0);
+    expect(proof.audienceReads).toEqual([]);
+    expect(await db.hostedLinqDelivery.count({ where: { payloadOwnerMemberId: f.roomId } })).toBe(0);
+  });
+
+  it.each([
+    ["the start of its window", "2030-03-05T09:00:00Z"],
+    ["the end of its window", "2030-03-05T11:00:00Z"],
+  ])("reads the audience once and claims at %s", async (_when, at) => {
+    const f = await fixture(), id = await f.addGame();
+    expect(await reserveGroupGameMissedDay(f.roomId, [id], new Date(at))).toBe(1);
+    expect(proof.audienceReads).toEqual([`route:${f.roomId}`, `chat:${f.roomId}`]);
+    expect((await receipt(gameGroupMissedDayEventId(f.roomId, date))).retryAfterAt).toEqual(now);
+  });
+
+  it.each([
+    ["a pair game in a three-person room", 3, (f: Fixture) => f.addGame(2, ["America/Los_Angeles", "America/Los_Angeles"], 2)],
+    ["a group game with a player outside the text", 4, (f: Fixture) => f.addGame(10, f.people.map(() => "America/Los_Angeles"))],
+  ] as const)("claims at the kept game's time when %s has a later horizon", async (_excluded, count, addExcluded) => {
+    const f = await fixture(count), kept = await f.addGame(10, [], 3), excluded = await addExcluded(f);
+    proof.rooms.set(f.roomId, f.people.slice(0, 3).map(person => person.email));
+    expect(await reserveGroupGameMissedDay(f.roomId, [kept, excluded], now)).toBe(1);
+    expect((await receipt(gameGroupMissedDayEventId(f.roomId, date))).retryAfterAt).toEqual(now);
+    expect((await prepareGroupMissedDay(f.roomId, date, now))?.policy.batch.map(game => game.gameId)).toEqual([kept]);
+  });
+
+  it("claims at a horizon set by a game with no miss of its own", async () => {
+    const f = await fixture(2), missed = await f.addGame(), posted = await f.addGame(10, f.people.map(() => "America/Los_Angeles"));
+    for (const person of f.people) await db.gameEntry.create({ data: { id: randomUUID(), gameId: posted, memberId: person.id, dayIndex: 0, attempt: 1, kind: "words", receivedAt: now } });
+    // The missed game's own window costs a read but cannot move the room's later horizon.
+    expect(await reserveGroupGameMissedDay(f.roomId, [missed, posted], now)).toBe(0);
+    expect(proof.audienceReads).toContain(`chat:${f.roomId}`);
+    const late = new Date("2030-03-05T17:00:00Z");
+    expect(await reserveGroupGameMissedDay(f.roomId, [missed, posted], late)).toBe(1);
+    expect((await receipt(gameGroupMissedDayEventId(f.roomId, date))).retryAfterAt).toEqual(late);
+  });
+
+  it("skips a due room with an unsendable audience and warns", async () => {
+    const f = await fixture(), id = await f.addGame();
+    proof.rooms.set(f.roomId, [f.people[0]!.email]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(await reserveGroupGameMissedDay(f.roomId, [id], now)).toBe(0);
+    expect(proof.audienceReads).toEqual([`route:${f.roomId}`, `chat:${f.roomId}`]);
+    expect(warn).toHaveBeenCalledExactlyOnceWith(expect.any(String), { warning: "game.missed-day.room-skipped", reason: "participants_changed" });
+  });
+
+  it("reads nothing and logs nothing for a not-due room with an unsendable audience", async () => {
+    const f = await fixture(), id = await f.addGame();
+    proof.rooms.set(f.roomId, [f.people[0]!.email]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(await reserveGroupGameMissedDay(f.roomId, [id], new Date(now.getTime() - 1_000))).toBe(0);
+    expect(proof.audienceReads).toEqual([]);
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it("serializes pair and group contenders under the verified two-contact pair lock", async () => {
