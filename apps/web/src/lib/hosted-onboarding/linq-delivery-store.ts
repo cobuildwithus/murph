@@ -264,6 +264,8 @@ type HostedLinqDeliveryProviderDispatchData = {
   template: string | null;
 };
 export const HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS = 15 * 60 * 1000;
+// A first-turn send is one bounded POST, and the empty reservation is fenced by its exact attemptedAt.
+export const HOSTED_LINQ_INSTANT_FIRST_TURN_CLAIM_STALE_MS = 5 * 60 * 1000;
 // A rich-link replay is a bounded primary request plus two bounded link
 // attempts. Once that provider window and a small completion margin pass, the
 // partial-delivery fence cannot still own useful work. Reusing the general
@@ -842,7 +844,7 @@ export type HostedLinqInstantFirstTurnRuntimeEgressDisposition =
  * | provider-correlated                   | answered    | receipts and finalization                 | already_answered |
  * | skipped + empty                       | fallback    | nobody                                    | available        |
  * | failed + empty + certified rejection  | fallback    | nobody                                    | available        |
- * | attempted + empty                     | reserved    | exact claim seals or skips; stale reclaim | defer            |
+ * | attempted + empty                     | reserved    | exact claim seals/skips; stale replay, later event or egress | defer            |
  * | attempted, started or failed + sealed | sealed      | exact claim dispatches or fails; a failed | defer            |
  * | (except rejected retries)             |             | or stale row reclaims                     |                  |
  * | anything else                         | held        | positive evidence only                    | held             |
@@ -917,6 +919,13 @@ export async function resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionT
   const disposition = resolveHostedLinqInstantFirstTurnDeliveryDisposition(
     delivery,
   );
+  const now = new Date();
+  if (disposition === "reserved"
+    && delivery.attemptedAt.getTime() <= now.getTime() - HOSTED_LINQ_INSTANT_FIRST_TURN_CLAIM_STALE_MS) {
+    return await skipHostedLinqInstantFirstTurnReservationsTx({
+      deliveries: [delivery], prisma: input.prisma, skippedAt: now, reason: "stale-first-turn-reservation",
+    }) ? "available" : "defer";
+  }
   return disposition === "answered"
     ? "already_answered"
     : disposition === "fallback"
@@ -979,7 +988,7 @@ export async function hasUnresolvedHostedLinqProviderDispatchForChatTx(input: {
   return delivery !== null;
 }
 
-export async function hasConflictingHostedLinqInstantFirstTurnForChatTx(input: {
+export async function releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx(input: {
   eventId: string;
   linqChatId: string;
   prisma: HostedLinqDeliveryClient;
@@ -992,8 +1001,8 @@ export async function hasConflictingHostedLinqInstantFirstTurnForChatTx(input: {
     return false;
   }
 
-  const delivery = await input.prisma.hostedLinqDelivery.findFirst({
-    select: { id: true },
+  const deliveries = await input.prisma.hostedLinqDelivery.findMany({
+    select: hostedLinqDeliveryLifecycleSelect,
     where: {
       acceptedAt: null,
       deliveredAt: null,
@@ -1006,7 +1015,15 @@ export async function hasConflictingHostedLinqInstantFirstTurnForChatTx(input: {
     },
   });
 
-  return delivery !== null;
+  const now = new Date();
+  const staleReservations = deliveries.filter(delivery =>
+    resolveHostedLinqInstantFirstTurnDeliveryDisposition(delivery) === "reserved"
+    && delivery.attemptedAt.getTime() <= now.getTime() - HOSTED_LINQ_INSTANT_FIRST_TURN_CLAIM_STALE_MS);
+  // One read and at most one exact-attempt write, even with multiple old reservations.
+  const skipped = staleReservations.length === 0 || await skipHostedLinqInstantFirstTurnReservationsTx({
+    deliveries: staleReservations, prisma: input.prisma, skippedAt: now, reason: "stale-first-turn-reservation",
+  });
+  return !skipped || staleReservations.length !== deliveries.length;
 }
 
 export async function startHostedAiUsageLimitNoticeDispatchTx(input: {
@@ -1880,11 +1897,23 @@ export async function abandonHostedLinqInstantFirstTurnDeliveryTx(input: {
   const skippedAt = input.now ?? new Date();
   if (disposition !== "reserved"
     || (input.expectedAttemptedAt?.getTime() !== delivery.attemptedAt.getTime()
-      && delivery.attemptedAt.getTime() > skippedAt.getTime() - HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS)) return false;
+      && delivery.attemptedAt.getTime() > skippedAt.getTime() - HOSTED_LINQ_INSTANT_FIRST_TURN_CLAIM_STALE_MS)) return false;
+  return skipHostedLinqInstantFirstTurnReservationsTx({
+    deliveries: [delivery], prisma: input.prisma, skippedAt, reason: input.reason,
+  });
+}
+
+async function skipHostedLinqInstantFirstTurnReservationsTx(input: {
+  deliveries: { id: string; attemptedAt: Date }[];
+  prisma: HostedLinqDeliveryClient;
+  reason: string;
+  skippedAt: Date;
+}): Promise<boolean> {
+  const { deliveries, skippedAt } = input;
   const updated = await input.prisma.hostedLinqDelivery.updateMany({
     where: {
-      id: delivery.id, attemptedAt: delivery.attemptedAt, status: "attempted",
-      failedAt: null, skippedAt: null, acceptedAt: null, deliveredAt: null,
+      OR: deliveries.map(({ id, attemptedAt }) => ({ id, attemptedAt })),
+      status: "attempted", failedAt: null, skippedAt: null, acceptedAt: null, deliveredAt: null,
       lastReceiptAt: null, messageLookupKey: null,
       payloadCiphertext: null, payloadOwnerMemberId: null, payloadSchema: null,
     },
@@ -1896,7 +1925,7 @@ export async function abandonHostedLinqInstantFirstTurnDeliveryTx(input: {
       ),
     },
   });
-  return updated.count === 1;
+  return updated.count === deliveries.length;
 }
 
 export async function recordHostedLinqInstantFirstTurnFirstDispatchRejectionTx(input: {
@@ -3268,7 +3297,7 @@ async function claimHostedLinqInstantFirstTurnDeliveryTx(
     if (input.expectedAttemptedAt?.getTime() !== delivery.attemptedAt.getTime()
       || delivery.status !== "attempted") return { claimed: false, id: delivery.id };
   } else if (delivery.status !== "failed"
-    && delivery.attemptedAt.getTime() > input.attemptedAt.getTime() - HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS) {
+    && delivery.attemptedAt.getTime() > input.attemptedAt.getTime() - HOSTED_LINQ_INSTANT_FIRST_TURN_CLAIM_STALE_MS) {
     return { claimed: false, id: delivery.id };
   }
   const attemptedAt = new Date(Math.max(input.attemptedAt.getTime(), delivery.attemptedAt.getTime() + 1));

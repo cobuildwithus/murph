@@ -14,7 +14,7 @@ import {
   claimHostedLinqDeliveryProviderDispatchTx,
   hasHostedLinqInviteSignupLiveDeliveryTx,
   hasHostedLinqGroupLineRecoveryAuthorityTx,
-  hasConflictingHostedLinqInstantFirstTurnForChatTx,
+  releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx,
   hasUnresolvedHostedLinqProviderDispatchForChatTx,
   HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
   HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE,
@@ -1430,18 +1430,18 @@ describe("hosted Linq observability stores", () => {
 
   it("detects another unresolved instant first-turn obligation in the chat", async () => {
     const fixture = createObservabilityPrismaFixture();
-    fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
-      id: "hld_earlier_first_turn",
-    });
+    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
+      { ...buildInstantFirstTurnDeliveryFixture(), attemptedAt: new Date() },
+    ]);
 
-    await expect(hasConflictingHostedLinqInstantFirstTurnForChatTx({
+    await expect(releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx({
       eventId: "evt_current",
       linqChatId: "chat_123",
       prisma: fixture.prisma as never,
     })).resolves.toBe(true);
 
-    expect(fixture.hostedLinqDeliveryFindFirst).toHaveBeenCalledWith({
-      select: { id: true },
+    expect(fixture.hostedLinqDeliveryFindMany).toHaveBeenCalledWith({
+      select: expect.objectContaining({ id: true, attemptedAt: true, payloadCiphertext: true, status: true }),
       where: expect.objectContaining({
         acceptedAt: null,
         deliveredAt: null,
@@ -1555,7 +1555,7 @@ describe("hosted Linq observability stores", () => {
     },
   ] as const)("returns $expected for $label", async ({ expected, row }) => {
     const fixture = createObservabilityPrismaFixture();
-    fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce(row);
+    fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({ attemptedAt: new Date(), ...row });
 
     await expect(
       resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionTx({

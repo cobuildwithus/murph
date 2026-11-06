@@ -181,7 +181,7 @@ import {
   isHostedLinqInstantStartEligible,
 } from "./linq-instant-start";
 import {
-  hasConflictingHostedLinqInstantFirstTurnForChatTx,
+  releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx,
 } from "./linq-delivery-store";
 import type { HostedWebhookWakeHandoff } from "./webhook-service-types";
 import {
@@ -2567,7 +2567,7 @@ async function planHostedLinqActiveMemberDirectWebhook(input: {
     ?? await bindHostedMemberHomeLinqChat(homeBinding)
     ?? participantContact;
 
-  if (await hasConflictingHostedLinqInstantFirstTurnForChatTx({
+  if (await releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx({
     eventId: plannerInput.event.event_id,
     linqChatId: summary.chatId,
     prisma: plannerInput.prisma,

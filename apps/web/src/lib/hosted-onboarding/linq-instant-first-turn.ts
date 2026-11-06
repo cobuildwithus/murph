@@ -40,7 +40,7 @@ import {
   abandonHostedLinqInstantFirstTurnDeliveryTx,
   buildHostedLinqDeliveryId,
   claimHostedLinqDeliveryProviderDispatchTx,
-  hasConflictingHostedLinqInstantFirstTurnForChatTx,
+  releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx,
   HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
   HOSTED_LINQ_INSTANT_FIRST_TURN_PAYLOAD_SCHEMA,
   HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE,
@@ -354,7 +354,7 @@ export async function claimHostedLinqInstantFirstTurn(input: {
       ) {
         return { kind: "unavailable" } as const;
       }
-      if (await hasConflictingHostedLinqInstantFirstTurnForChatTx({
+      if (await releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx({
         eventId: input.request.eventId,
         linqChatId: input.linqChatId,
         prisma: tx,

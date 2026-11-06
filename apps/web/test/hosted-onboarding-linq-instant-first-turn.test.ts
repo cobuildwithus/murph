@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
     linqFirstContactAdmissionModel: "gpt-5.6-luna",
     linqFirstContactAdmissionOpenAiApiKey: "test-openai-key" as string | null,
   },
-  hasConflictingHostedLinqInstantFirstTurnForChatTx: vi.fn(),
+  releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx: vi.fn(),
   handoffHostedMailboxWake: vi.fn(),
   hostedMemberRoutingRecordsEqual: vi.fn(),
   hostedLinqDeliveryFindUnique: vi.fn(),
@@ -124,8 +124,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async (importOriginal
   buildHostedLinqDeliveryId: (await importOriginal<typeof import("@/src/lib/hosted-onboarding/linq-delivery-store")>()).buildHostedLinqDeliveryId,
   claimHostedLinqDeliveryProviderDispatchTx:
     mocks.claimHostedLinqDeliveryProviderDispatchTx,
-  hasConflictingHostedLinqInstantFirstTurnForChatTx:
-    mocks.hasConflictingHostedLinqInstantFirstTurnForChatTx,
+  releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx:
+    mocks.releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx,
   HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE: "instant_first_turn_v1",
   HOSTED_LINQ_INSTANT_FIRST_TURN_PAYLOAD_SCHEMA: "murph.hosted-linq-delivery-payload.instant-first-turn.v1",
   recordHostedLinqInstantFirstTurnFirstDispatchRejectionTx: mocks.recordHostedLinqInstantFirstTurnFirstDispatchRejectionTx,
@@ -292,7 +292,7 @@ describe("hosted Linq instant first turn", () => {
     });
     mocks.environment.linqFirstContactAdmissionModel = "gpt-5.6-luna";
     mocks.environment.linqFirstContactAdmissionOpenAiApiKey = "test-openai-key";
-    mocks.hasConflictingHostedLinqInstantFirstTurnForChatTx.mockResolvedValue(
+    mocks.releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx.mockResolvedValue(
       false,
     );
     mocks.hostedMemberRoutingRecordsEqual.mockReturnValue(true);
@@ -637,7 +637,7 @@ describe("hosted Linq instant first turn", () => {
 
     expect(mocks.acquireHostedLinqChatOwnershipLockTx).toHaveBeenCalledOnce();
     expect(
-      mocks.hasConflictingHostedLinqInstantFirstTurnForChatTx,
+      mocks.releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx,
     ).toHaveBeenCalledWith(expect.objectContaining({
       eventId: REQUEST.eventId,
       linqChatId: "chat_123",
