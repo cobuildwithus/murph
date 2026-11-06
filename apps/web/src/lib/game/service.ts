@@ -1,5 +1,5 @@
 import "server-only";
-import { clearGameRecapQuotingEntryTx, gameRecapStoryMayQuoteEntry, readGameRecapEntryIdsTx, readGameRecapStoryWitnesses, readPermittedGameRecapEntryIds } from "./recap-witness";
+import { clearGameRecapQuotingEntryTx, gameRecapStoryMayQuoteEntry, readLatestGameRecapEventIdTx, settleGameRecapGenerationTx, readGameRecapStoryWitnesses, readPermittedGameRecapEntryIds } from "./recap-witness";
 import { compareGroupRematch, rematchSeat } from "./rematch";
 
 import { parseGameRecapEventId, hostedGameRecapSchema, type GameNoticeRoom, type HostedGameChatState, type HostedGameUpdate, type HostedGameRecap } from "@murphai/hosted-execution/runtime-control";
@@ -1795,12 +1795,15 @@ export async function removeGamePostForReview(entryId: string): Promise<boolean>
   if (!entry) return false;
   let removed = false;
   // As the system: ops takes a post down whether or not its game is still on.
-  await runLocked(entry.gameId, { actor: SYSTEM_ACTOR }, async ({ clock, tx }) => {
+  await runLocked(entry.gameId, { actor: SYSTEM_ACTOR }, async ({ clock, tx, loaded }) => {
     await deleteEntryReplyTx(tx, entryId);
     const changed = await tx.gameEntry.updateMany({ where: { id: entryId, OR: [{ withdrawnReason: null }, { withdrawnReason: { not: "removed" } }] },
       data: { blurHash: null, mediaKeys: [], payloadEncrypted: null, textEncrypted: null, withdrawnAt: clock, withdrawnReason: "removed" } });
     removed = changed.count === 1;
-    if (removed) await clearGameRecapQuotingEntryTx(tx, entry.gameId, entryId);
+    if (removed) {
+      await clearGameRecapQuotingEntryTx(tx, entry.gameId, entryId);
+      await settleGameRecapGenerationTx(tx, loaded.row, await readLatestGameRecapEventIdTx(tx, entry.gameId));
+    }
     return removed ? [{ payload: { entryId }, type: "removed" }] : [];
   });
   return removed;
@@ -2512,7 +2515,7 @@ export async function readGameRecapMaterial(gameId: string, containerMemberId: s
   const rowEntries = await prisma.gameEntry.findMany({ where: { gameId, ...(row.maxPlayers === 10 ? { memberId: { in: memberIds } } : {}) }, orderBy: { receivedAt: "asc" } });
   const allowed = await prisma.$transaction(async tx => {
     await tx.$queryRaw`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
-    return eventId ? readGameRecapEntryIdsTx(tx, row, eventId) : readPermittedGameRecapEntryIds(tx, row);
+    return eventId ? settleGameRecapGenerationTx(tx, row, eventId) : readPermittedGameRecapEntryIds(tx, row);
   });
   if (!allowed) return null;
   const shownEntries = rowEntries.filter(entry => allowed.has(entry.id));
@@ -2592,7 +2595,7 @@ export async function sealGameRecap(input: {
     if (!current || current.wordsOwnerMemberId !== row.wordsOwnerMemberId) return null;
     if (current.maxPlayers === 10 ? !groupGameRecapPlayers(current) || !audience || !await readGroupGameChatAuthority(current, input.containerMemberId, audience, tx)
       : !sameGamePlayers(current.players.map((player) => player.memberId), input.playerMemberIds) || await hasGameChatBlock(tx, input.playerMemberIds)) return null;
-    if (!await readGameRecapEntryIdsTx(tx, current, input.eventId)) return null;
+    if (!await settleGameRecapGenerationTx(tx, current, input.eventId)) return null;
     if (scope.regenerationId) {
       const requested = await tx.gameEvent.findUnique({ where: { commandKey: input.eventId }, select: { gameId: true, type: true } });
       if (requested?.gameId !== input.gameId || requested.type !== "recap_regeneration_requested") return null;

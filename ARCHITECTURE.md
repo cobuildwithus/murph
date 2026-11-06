@@ -5642,9 +5642,14 @@ Reports keep their existing viewer-specific suppression, and withdrawals or
 retakes alone do not hide a story. A clean accepted replacement can show again.
 Existing mailbox items remain legacy generations with no witness; they proceed only
 while no entry has been removed or reported, and takedown clears their story
-conservatively. Web answers stale work with the existing unavailable shape for
-now and leaves its receipt queued. The runner accepts durable retirement, but
-Web will emit it only in the later activation release.
+conservatively. Web retires stale published, unclaimed generations by marking the
+existing receipt `skipped` with `game_recap_retired`, at takedown or the next
+material read or seal. After runtime authorization, recap tools answer the shared
+`GAME_RECAP_GENERATION_RETIRED` value before roster work; the runner consumes it
+without sending. Temporary unavailability and claimed provider work remain
+uncertain. Regeneration previews use the pure witness check without writes;
+execution retires stale work before reserving a clean successor. The runner image
+with the #4653 consumer must be live before this Web activation merges.
 
 
 `apps/web` owns the weekly game (product: `agent-docs/product-specs/weekly-game.md`).

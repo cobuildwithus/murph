@@ -626,16 +626,26 @@ resulting avatar. No private photo is shared with the subject or other players.
   Pair and game locks, the roster re-read, no departed player, no block, settled
   status, rollout and room binding all apply. Runtime authority, fresh provider
   roster checks, recap validation and normal egress guards still apply downstream.
-  A newer rematch is never changed. An unfinished or uncertain prior delivery
+  Stale published, unclaimed generations retire as `skipped` / `game_recap_retired`
+  during takedown or the next material read or seal. After runtime authorization,
+  Web answers `GAME_RECAP_GENERATION_RETIRED` before roster work, allowing the
+  runner to consume the pending item without sending. Temporary roster, access,
+  audience or storage failures and claimed provider work keep their uncertainty.
+  A dry run can answer `would_regenerate` for stale work without changing rows;
+  execution retires it before reserving a clean generation, even without a stored
+  story. Unpublished work gets its first clean witness at publication.
+  A newer rematch is never changed. Any other unfinished or uncertain prior delivery
   refuses another regeneration; diagnose it through its existing lifecycle owner
   rather than changing the request id to force another send. Request events keep
   retries idempotent even after delivery receipt retention.
-  Web may deploy on merge before the compatible Cloudflare runtime event reader:
-  only an explicit operator execute emits the new identity. Keep operator execution
-  paused until Web and the Cloudflare runtime have converged on the release.
-  Ordinary recap identities remain compatible. No migration or client change is needed.
-  Before rollback, stop operator requests and drain all admitted regeneration work;
-  keep compatible Web and runtime readers while any remains. Accepted replacements
+  The runner image with the #4653 terminal consumer must be live before this Web
+  activation merges. Older runners retry the terminal item forever. Keep that
+  consumer as the runner rollback floor once Web can emit retirement; no migration,
+  new wire field or client change is needed.
+  Before rollback, stop operator requests and drain all admitted regeneration work
+  and every retired recap item, original generations included: older Web no longer
+  answers the terminal value for them. Keep compatible Web and runtime readers while
+  any remains. Accepted replacements
   are canonical: old ciphertext is not retained, and sent messages cannot be undone.
 - **Tickets.** A prize or dare makes the loser owe the winner one ticket; a tie
   or all-perfect game owes nothing. Each ticket carries its stake kind. The
