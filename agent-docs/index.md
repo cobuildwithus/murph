@@ -20,7 +20,8 @@ Native game write outcomes, the empty-slot post guard and the Messages member-ac
 The two-lane production Web admission, the Cloudflare predeploy gates, and the private nightly proof that owns reminder, foreground, and Codex cache-prefix journeys are owned by [Hosted Temporal orchestration](references/hosted-temporal-orchestration.md) and `../apps/cloudflare/DEPLOY.md`.
 
 Vault display-name replication and deterministic actions are owned by
-[Architecture](../ARCHITECTURE.md#vault-display-name-projection-and-actions).
+[Architecture](../ARCHITECTURE.md#vault-display-name-projection-and-actions);
+the [execution record](exec-plans/completed/2026-11-06-vault-display-name-runtime.md) holds the design decisions.
 
 Shared demographic memory, generation-18 projection and native action contracts are owned by [Architecture](../ARCHITECTURE.md#canonical-memory-demographics) and [private numbers](product-specs/ios-meals.md#shared-demographics).
 The [backend execution record](exec-plans/completed/2026-11-04-vault-demographics-backend.md) contains local verification evidence for the parent-owned integration.
