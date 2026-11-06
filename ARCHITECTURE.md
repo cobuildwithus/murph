@@ -1344,7 +1344,8 @@ Member-scoped hosted runner operations validate the existing active runtime writ
 ## Hosted Computer Authentication
 
 `apps/web` owns both Kernel login transports behind the existing durable
-computer handoff. The agent selects `managed_login` for Kernel Hosted UI and a
+computer handoff. Managed-login continuation checks current AI usage before
+claiming the handoff or starting new Kernel work. The agent selects `managed_login` for Kernel Hosted UI and a
 durable profile/domain auth connection, or `login` for the existing Live View
 takeover. Managed Auth connection ids and flow state remain Kernel-owned and
 are rediscovered from the member's deterministic profile plus the
@@ -1493,7 +1494,9 @@ rollbacks must retain this compatibility reader and the enriched importer until
 those pending events settle; reverting only call guidance remains safe.
 
 Outbound hosted phone calls are a web-owned Retell side effect reached through
-one bounded hosted runtime port. The assistant may expose
+one bounded hosted runtime port. New reservations check current AI usage after
+product admission and request-key replay detection, before creating a call or
+starting the provider. Existing calls retain their replay/reconciliation path. The assistant may expose
 `murph.create_phone_call` only when a hosted phone-call port is present, and
 the tool accepts only a compact call brief with an E.164 destination, explicit
 goal, timezone, success criteria, and user-approved shareable facts. Cloudflare
@@ -2559,7 +2562,7 @@ already-consumed submissions.
 
 Schema-v2 enrollment is two-phase on that same row. Identity-authenticated `POST` prepares a complete credential at the requested revision with `activatedAt = null` and returns the existing bearer, idempotency secret, and expiry response shape unchanged. The foreground iOS app must durably save that credential before a bodyless scoped-bearer `PUT` activates it, and it enables background capture only after activation succeeds. Upload rejects a prepared credential. Exact-token activation replay is idempotent; activation and scoped bodyless `DELETE` serialize on the member lock and reread the exact current token, so activation followed by deletion ends revoked while deletion followed by activation fails authorization. Activation also locks any active Family membership and group access rows before rechecking consent and access. Family billing locks its owner and active roster members in stable order before changing those rows, so a sponsor or group access loss cannot commit between the activation guard and success and the existing owners cannot deadlock across member and sponsorship locks. A lost enrollment response or a delayed `POST` after trust-boundary teardown can therefore create at most unusable prepared state, never unknown upload authority. Revision conflicts report the current revision and active, prepared, or revoked state without returning credential material.
 
-Web stores only hashes of the bearer and installation UUID plus an encrypted idempotency secret, validates a bounded metadata-free JPEG, and stages the bytes through the internal Cloudflare control client. Prepared and active enrollment rows have the complete credential triple; only active rows have `activatedAt`, while revoked rows retain neither activation nor credentials. Upload reads fail closed on prepared, expired, revoked, or incomplete state. The nullable revision-and-activation schema expansion deploys before fence-aware Web code. Revision-zero rows with a null activation marker remain active during rollout for old-Web compatibility. After the fence-aware deployment is live and prior Web functions drain, the contract migration marks those final legacy rows active, scrubs historical revoked credentials and activation, and validates the row-shape constraints. Only then may a schema-v2 iOS writer ship. Once a positive revision exists, fence-aware Web is the rollback floor. Each upload attempt owns a distinct staged object. Before the metadata-only mailbox append commits, Web prepares the existing ingress-root mailbox crypto outside the transaction, then locks the hosted member and any active sponsorship membership/group rows. Automatic upload rechecks the exact enrollment, active access, and historical launch consent. Manual upload instead rechecks the authenticated first-party session snapshot and canonical member binding, active access, and the same historical consent without projecting private identity fields or touching enrollment state. The direct route and any verified-email fallback are projected outside the transaction, then the exact raw routing owner rows are locked and compared after those final authority checks but before append; a change fails with the typed route-required conflict. Only database root revalidation, local authenticated encryption, authority reads, and the metadata append remain inside the bounded transaction. Both paths enter one shared staging, mailbox, wake, and cleanup owner. The first accepted mailbox item chooses the canonical object for exact duplicate attempts; losing or failed attempts delete only their own unclaimed object, while ambiguous commit cleanup first reconciles against the mailbox. Postgres, Temporal, and the hosted mailbox receive metadata only.
+Web stores only hashes of the bearer and installation UUID plus an encrypted idempotency secret, validates a bounded metadata-free JPEG, and stages the bytes through the internal Cloudflare control client. Prepared and active enrollment rows have the complete credential triple; only active rows have `activatedAt`, while revoked rows retain neither activation nor credentials. Upload reads fail closed on prepared, expired, revoked, or incomplete state. The nullable revision-and-activation schema expansion deploys before fence-aware Web code. Revision-zero rows with a null activation marker remain active during rollout for old-Web compatibility. After the fence-aware deployment is live and prior Web functions drain, the contract migration marks those final legacy rows active, scrubs historical revoked credentials and activation, and validates the row-shape constraints. Only then may a schema-v2 iOS writer ship. Once a positive revision exists, fence-aware Web is the rollback floor. Each upload attempt owns a distinct staged object. Before the metadata-only mailbox append commits, Web prepares the existing ingress-root mailbox crypto outside the transaction, then locks the hosted member and any active sponsorship membership/group rows. Automatic upload rechecks the exact enrollment, active access, and historical launch consent. Manual upload instead rechecks the authenticated first-party session snapshot and canonical member binding, active access, and the same historical consent without projecting private identity fields or touching enrollment state. The direct route and any verified-email fallback are projected outside the transaction, then the exact raw routing owner rows are locked and compared after those final authority checks but before append; a change fails with the typed route-required conflict. Only database root revalidation, local authenticated encryption, authority reads, and the metadata append remain inside the bounded transaction. Both paths enter one shared staging, mailbox, wake, and cleanup owner. After durable acceptance, an inactive-runtime wake refusal does not reject the upload: the photo waits for access recovery. Other wake failures retain existing error handling. The first accepted mailbox item chooses the canonical object for exact duplicate attempts; losing or failed attempts delete only their own unclaimed object, while ambiguous commit cleanup first reconciles against the mailbox. Postgres, Temporal, and the hosted mailbox receive metadata only.
 
 Conflicting meal-photo retries retain strict immutable payload binding. When the
 existing encrypted envelope matches the authenticated member, event, and capture
@@ -3460,11 +3463,20 @@ latest available retained vault replica without waking the paused runtime.
 Renewal reuses the existing consent documents and grant owner; disconnected
 providers require their ordinary explicit reconnect flow.
 
+The historically named `assertActiveHostedMemberAccessAllowed` is product
+admission: signed-up human members with canceled, paused, unpaid or past-due
+billing can use native and Web product surfaces without billing writes or new
+Starter grants. Suspension, unfinished signup and synthetic-container behavior
+remain unchanged. Strict active-access readers, runtime ownership and AI usage
+checks remain independent and unchanged. Companion heartbeat and push-route
+registration apply product authority under member and sponsorship locks; runtime
+presence still requires its callback fence.
+
 Native companion account admission is a bearer-authenticated member lifecycle
 boundary, not a device-sync lifecycle boundary. `POST
 /api/device-sync/companion/admission` accepts only an optional validated IANA
 time zone, delegates canonical identity creation/recovery, historical launch
-consent, untouched-member starter-usage enrollment, and active-access assertion
+consent, untouched-member starter-usage enrollment, and product-access assertion
 to the existing companion member-access owner, and returns only the fixed
 non-identifying success response. A consented fresh companion activation with a
 verified phone may enter the canonical signup-welcome path. Exact-member

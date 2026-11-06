@@ -27,13 +27,13 @@ import {
   isHostedMemberSuspended,
 } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
-import { hasHostedRecoverableBilling } from "./lifecycle";
+import { hasHostedRecoverableBilling, isHostedLapsedBillingStatus } from "./lifecycle";
 import type { HostedOnboardingReadClient } from "./shared";
 
 /**
- * The one place hosted access is derived.
+ * The owner of hosted AI/runtime access and the separate product guard below.
  *
- * `hosted_member.billing_status=active` records direct product access, backed
+ * `hosted_member.billing_status=active` records direct AI/runtime access, backed
  * by either starter usage or a paid subscription. Access can additionally be
  * sponsored through the edges
  * that already exist in the data model:
@@ -905,6 +905,13 @@ export async function hasAnyActiveHostedThreadContainerParticipant(input: {
   return participant !== null;
 }
 
+/**
+ * Product admission, despite the historical "Active" name. Signed-up human
+ * members retain app access after billing lapses, without changing billing or
+ * granting usage. Suspension and unfinished activation still block access;
+ * synthetic containers retain their existing owner-based behavior. This is
+ * not a spending or runtime gate: those callers must also check AI usage.
+ */
 export async function assertActiveHostedMemberAccessAllowed(input: {
   memberId: string;
   prisma?: HostedOnboardingReadClient;
@@ -919,7 +926,8 @@ export async function assertActiveHostedMemberAccessAllowed(input: {
 
   if (member) {
     assertHostedMemberNotSuspended(member);
-    if (hasActiveHostedMemberAccess(member)) {
+    if (hasActiveHostedMemberAccess(member)
+      || (!member.threadContainer && isHostedLapsedBillingStatus(member.billingStatus))) {
       return;
     }
   }

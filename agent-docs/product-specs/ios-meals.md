@@ -188,7 +188,7 @@ Shared errors remain unchanged:
 | HTTP | Code | Meaning |
 | --- | --- | --- |
 | 401 | `AUTH_REQUIRED` | Missing, malformed, expired or revoked native session; cookies also rejected. |
-| 403 | `HOSTED_ACCESS_REQUIRED` | No active hosted access, including game-only members. |
+| 403 | `HOSTED_ACCESS_REQUIRED` | Unfinished signup or unavailable hosted product access; lapsed billing alone is allowed. |
 | 403 | `HOSTED_MEMBER_SUSPENDED` | Suspended hosted account. |
 | 403 | `HOSTED_CONSENT_REQUIRED` | Current launch consent missing; may include `details.missingScopes`. |
 | 426 | `AUTH_CLIENT_UPGRADE_REQUIRED` | Retired credential format; update the client. |
@@ -356,7 +356,7 @@ field selections from larger responses unless explicitly stated otherwise.
 ### Private numbers
 
 `GET /api/device-sync/companion/numbers` accepts no query parameters. It uses
-Meals' bearer, active-access and consent authority, including native-session and
+Meals' bearer, product-access and consent authority, including native-session and
 authority rechecks after decryption. Every response uses `Cache-Control: no-store`.
 It reads only saved `core`, `metricsIndex` and the deduplicated buckets for
 `resting-heart-rate`, `total-sleep-minutes`, `steps` and `estimated-vo2-max`, passing
@@ -459,7 +459,7 @@ fields return 400 `DEMOGRAPHICS_INVALID_REQUEST` (oversize is 413).
 
 Admission requires both the saved reference and decoded core to have generation
 18 or newer with demographics, otherwise retryable 503
-`DEMOGRAPHICS_PROJECTION_UNAVAILABLE`. It rechecks native auth, active access and
+`DEMOGRAPHICS_PROJECTION_UNAVAILABLE`. It rechecks native auth, product access and
 current consent under the existing admission lock. Messages setup is unnecessary;
 Messages extension credentials do not gain demographic write authority.
 
@@ -523,7 +523,8 @@ and expiry; it is not the contact source.
 `"text"` supports this Messages action. Preserve setup/unavailable handling;
 do not invent an SMS destination for another channel. Contact projection failure
 deliberately returns null without failing onboarding. The endpoint requires
-active member access, which is distinct from game-only access.
+signed-up human product access, including lapsed billing. AI access and usage
+remain separate; suspension and unfinished signup are still refused.
 
 ### First name
 
@@ -568,7 +569,7 @@ Sparse edits preserve other fields. Initial creation requires both `firstName`
 and an IANA `timeZone`; a name-only edit without a profile returns
 `409 PROFILE_REQUIRED`. Names are cleaned and trimmed, then limited to 1–200
 characters; invalid values return `400 INVALID_REQUEST`. These endpoints use
-game access, not the companion active-access gate. Profile edits do not require
+game access, not the companion product-access gate. Profile edits do not require
 renewed legal consent. This is the game profile's first name, not a new vault
 profile owner.
 
@@ -595,7 +596,7 @@ Resources are dynamic and can be empty or contain null timestamps.
 
 "Synced 4 min ago" describes backend receipt evidence, not proof that every
 HealthKit sample has reached the vault. Lifecycle callbacks and data-less
-historical completion do not count. This endpoint requires active member access
+historical completion do not count. This endpoint requires product access (including lapsed billing)
 and historical launch consent. It supplies no health values.
 
 ### Existing errors

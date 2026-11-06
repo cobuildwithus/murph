@@ -343,6 +343,11 @@ Codex CLI 0.160.0 upgrade verification is recorded in
 Garmin history import coalescing and synthetic fetch-work evidence are recorded
 in [the import-speed plan](exec-plans/completed/2026-09-24-garmin-import-speed.md).
 
+Product access after billing lapses, kept separate from AI usage, is owned by
+[Companion App](product-specs/companion-app.md) and [Architecture](../ARCHITECTURE.md).
+The caller audit and local proof are in the
+[execution record](exec-plans/completed/2026-11-06-lapsed-member-access.md).
+
 # Murph Agent Docs Index
 
 The weekly game's flag-gated Terms check on app writes

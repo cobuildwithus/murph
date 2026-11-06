@@ -174,6 +174,24 @@ describe("usage-paused default-owned system progress", () => {
 });
 
 describe("hosted runtime progress health", () => {
+  it("does not page for queued journal, meal or conversation work after billing lapses", async () => {
+    const rows = ["conversation", "system"].map(lane => progressRow({
+      runtimeKey: "member_lapsed_fixture", lane, headKind: lane === "system" ? "member.action.requested" : "conversation.message",
+      progressOriginAt: "2026-08-10T15:00:00Z", pendingCount: 3n,
+    }));
+    const fixture = createProgressMonitorFixture(rows);
+    fixture.hostedMemberFindMany.mockResolvedValue([{
+      id: "member_lapsed_fixture", billingStatus: "canceled", suspendedAt: null,
+      accountGroupMemberships: [], threadContainer: null, consentGrants: [],
+      billingRef: null,
+    }]);
+    const sendAlert = vi.fn();
+    const result = await runHostedRuntimeProgressAlertMonitor({ now, env: alertEnv,
+      prisma: fixture.prisma, sendAlert, scheduleObservation: () => {} });
+    expect(result.health).toMatchObject({ anomalous: false, excludedInactiveLaneCount: 2, stalledLaneCount: 0 });
+    expect(sendAlert).not.toHaveBeenCalled();
+  });
+
   it("detects the exact 15-minute durable progress boundary across both lanes", () => {
     const health = summarizeHostedRuntimeProgressRows({
       activeRuntimeKeys: ["runtime_a", "runtime_b"],

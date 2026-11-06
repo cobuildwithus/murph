@@ -596,6 +596,22 @@ describe("meal photo companion routes", () => {
     });
   });
 
+  it.each([false, true])("accepts a committed photo when runtime access is inactive (manual: %s)", async manual => {
+    mocks.signalHostedMailboxAppendRuntime.mockRejectedValue(hostedOnboardingError({
+      code: "HOSTED_RUNTIME_USER_INACTIVE",
+      httpStatus: 403,
+      message: "Hosted runtime user is not active.",
+    }));
+    const response = await (manual ? manualPhotosRoute : photosRoute).POST(new Request("https://app.example.test/meal-photos", {
+      body: requestBody(JPEG),
+      method: "POST",
+    }));
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({ accepted: true, duplicate: false });
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledOnce();
+    expect(mocks.deleteMealPhoto).not.toHaveBeenCalled();
+  });
+
   it("accepts manual photos with current member login authority independent of enrollment", async () => {
     const request = new Request("https://app.example.test/meal-photos", {
       body: requestBody(JPEG),

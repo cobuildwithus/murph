@@ -28,7 +28,8 @@ export async function requireHostedCompanionMemberIdFromRequest(input: {
   }
 
   // Only untouched acquisition state may enter Starter enrollment. Lapsed and
-  // incomplete billing retain their existing recovery owner.
+  // incomplete billing never receive another grant. Lapsed humans pass the
+  // product guard below; incomplete members retain activation recovery.
   if (auth.member.billingStatus === HostedBillingStatus.not_started) {
     const completion = await readHostedAuthenticationCompletion({ member: auth.member, prisma });
     await ensureHostedStarterUsageEnrollment({
