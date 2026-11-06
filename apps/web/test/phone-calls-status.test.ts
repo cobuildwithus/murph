@@ -16,18 +16,20 @@ describe("hosted phone-call status", () => {
   });
 
   it("binds an exact lookup to the authenticated member and returns its result", async () => {
+    secureBoxMocks.openHostedUserSecureBoxStrings.mockResolvedValueOnce([
+      JSON.stringify({
+        followUp: "The requester must provide one missing detail.",
+        outcome: "not_completed",
+        summary: "The requested task was not completed.",
+      }),
+    ]);
     const findMany = vi.fn(async () => [{
       analyzedAt: new Date("2026-09-01T15:01:10.000Z"),
       createdAt: new Date("2026-09-01T15:00:00.000Z"),
       endedAt: new Date("2026-09-01T15:01:00.000Z"),
       id: "hpc_status_exact",
       memberId: "member_status_owner",
-      resultEncrypted: null,
-      resultJson: {
-        followUp: "The requester must provide one missing detail.",
-        outcome: "not_completed",
-        summary: "The requested task was not completed.",
-      },
+      resultEncrypted: "encrypted-exact-result",
       status: "failed" as const,
       stopRequestedAt: null,
       updatedAt: new Date("2026-09-01T15:01:10.000Z"),
@@ -91,7 +93,6 @@ describe("hosted phone-call status", () => {
             id: "hpc_status_stop_pending",
             memberId: "member_status_owner",
             resultEncrypted: null,
-            resultJson: null,
             status: "starting" as const,
             stopRequestedAt,
             updatedAt: stopRequestedAt,
@@ -130,7 +131,6 @@ describe("hosted phone-call status", () => {
             id: "hpc_status_cleanup_fallback",
             memberId: "member_status_owner",
             resultEncrypted: "encrypted-cleanup-fallback",
-            resultJson: null,
             status: "failed" as const,
             stopRequestedAt: null,
             updatedAt: timestamp,
@@ -163,7 +163,6 @@ describe("hosted phone-call status", () => {
             id: "hpc_status_awaiting_analysis",
             memberId: "member_status_owner",
             resultEncrypted: null,
-            resultJson: null,
             status: "ended" as const,
             stopRequestedAt: null,
             updatedAt: timestamp,
@@ -190,7 +189,6 @@ describe("hosted phone-call status", () => {
       id: `hpc_status_batch_${index}`,
       memberId: "member_status_owner",
       resultEncrypted: `encrypted-result-${index}`,
-      resultJson: null,
       status: "completed" as const,
       stopRequestedAt: null,
       updatedAt: createdAt,
@@ -233,19 +231,15 @@ describe("hosted phone-call status", () => {
     ]);
   });
 
-  it("batches only encrypted results while preserving mixed result order", async () => {
+  it("batches only encrypted results while preserving absent result order", async () => {
     const timestamp = new Date("2026-09-01T15:00:00.000Z");
     const calls = [{
       analyzedAt: timestamp,
       createdAt: timestamp,
       endedAt: timestamp,
-      id: "hpc_status_clear",
+      id: "hpc_status_absent",
       memberId: "member_status_owner",
       resultEncrypted: null,
-      resultJson: {
-        outcome: "completed",
-        summary: "Clear legacy result.",
-      },
       status: "completed" as const,
       stopRequestedAt: null,
       updatedAt: timestamp,
@@ -256,7 +250,6 @@ describe("hosted phone-call status", () => {
       id: "hpc_status_encrypted",
       memberId: "member_status_owner",
       resultEncrypted: "encrypted-result",
-      resultJson: null,
       status: "failed" as const,
       stopRequestedAt: null,
       updatedAt: timestamp,
@@ -281,7 +274,7 @@ describe("hosted phone-call status", () => {
       }),
     );
     expect(result.calls.map((call) => call.result?.summary)).toEqual([
-      "Clear legacy result.",
+      undefined,
       "Encrypted current result.",
     ]);
   });
