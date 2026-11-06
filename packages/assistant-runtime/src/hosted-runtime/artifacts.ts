@@ -1,3 +1,4 @@
+import { AssistantWorkspaceArtifactMaterializationError } from "@murphai/assistant-engine";
 import type {
   HostedWorkspaceArtifactPersistInput,
 } from "@murphai/runtime-state/node";
@@ -38,42 +39,50 @@ export function createHostedArtifactMaterializer(input: {
   vaultRoot: string;
 }): HostedWorkspaceArtifactMaterializer {
   return async (relativePaths, options) => {
-    const mediaResult = await materializeHostedWorkspaceMediaReferences({
-      mediaStore: input.mediaStore ?? null,
-      relativePaths,
-      signal: null,
-      vaultRoot: input.vaultRoot,
-      options,
-    });
-    const materializedArtifactPaths = new Set(mediaResult.materializedArtifactPaths);
-    const missingArtifactPaths = new Set(mediaResult.missingArtifactPaths);
-    for (const relativePath of relativePaths) {
-      const key = toHostedArtifactPathKey({ path: relativePath });
-      // Media expiry, integrity, and size decisions retain authority over local bytes.
-      if (missingArtifactPaths.has(key) || materializedArtifactPaths.has(key)) {
-        continue;
-      }
-      if (await hostedLocalArtifactIsAvailable({
-        key,
-        maxFileBytes: options?.maxFileBytes,
-        operatorHomeRoot: input.operatorHomeRoot,
+    try {
+      options?.signal?.throwIfAborted();
+      const mediaResult = await materializeHostedWorkspaceMediaReferences({
+        mediaStore: input.mediaStore ?? null,
+        relativePaths,
+        signal: options?.signal,
         vaultRoot: input.vaultRoot,
-      })) {
-        materializedArtifactPaths.add(key);
-      } else {
-        missingArtifactPaths.add(key);
+        options,
+      });
+      const materializedArtifactPaths = new Set(mediaResult.materializedArtifactPaths);
+      const missingArtifactPaths = new Map(mediaResult.missingArtifactPaths);
+      for (const relativePath of relativePaths) {
+        options?.signal?.throwIfAborted();
+        const key = toHostedArtifactPathKey({ path: relativePath });
+        // Media expiry, integrity, and size decisions retain authority over local bytes.
+        if (missingArtifactPaths.has(key) || materializedArtifactPaths.has(key)) {
+          continue;
+        }
+        const unavailable = await hostedLocalArtifactUnavailableReason({
+          key,
+          maxFileBytes: options?.maxFileBytes,
+          operatorHomeRoot: input.operatorHomeRoot,
+          vaultRoot: input.vaultRoot,
+        });
+        options?.signal?.throwIfAborted();
+        if (unavailable === null) {
+          materializedArtifactPaths.add(key);
+        } else {
+          missingArtifactPaths.set(key, unavailable);
+        }
       }
+      return { materializedArtifactPaths, missingArtifactPaths };
+    } catch (error) {
+      throw new AssistantWorkspaceArtifactMaterializationError(error);
     }
-    return { materializedArtifactPaths, missingArtifactPaths };
   };
 }
 
-async function hostedLocalArtifactIsAvailable(input: {
+async function hostedLocalArtifactUnavailableReason(input: {
   key: string;
   maxFileBytes?: number;
   operatorHomeRoot: string;
   vaultRoot: string;
-}): Promise<boolean> {
+}): Promise<"missing" | "size" | null> {
   const delimiterIndex = input.key.indexOf(":");
   const root = input.key.slice(0, delimiterIndex);
   const relativePath = input.key.slice(delimiterIndex + 1);
@@ -82,14 +91,14 @@ async function hostedLocalArtifactIsAvailable(input: {
     : root === "operator-home"
       ? input.operatorHomeRoot
       : null;
-  if (!rootPath) return false;
+  if (!rootPath) return "missing";
   try {
     const resolved = await resolveVaultPathOnDisk(rootPath, relativePath);
     const file = await lstat(resolved.absolutePath);
-    return file.isFile()
-      && (input.maxFileBytes === undefined || file.size <= input.maxFileBytes);
+    if (!file.isFile()) return "missing";
+    return input.maxFileBytes !== undefined && file.size > input.maxFileBytes ? "size" : null;
   } catch {
-    return false;
+    return "missing";
   }
 }
 

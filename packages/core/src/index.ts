@@ -290,6 +290,7 @@ export type {
   RecoverableStoredWriteOperation,
 } from "./operations/index.ts";
 export {
+  canonicalRawArtifactMatches,
   buildRawImportManifest,
   parseRawImportManifest,
   resolveRawManifestPath,

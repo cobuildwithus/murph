@@ -36,8 +36,12 @@ export type {
   AssistantGroupRoomModelInitializeResult,
 } from './assistant/group-room-model.js'
 export * from './assistant/hosted-image-completion.js'
-export { scopeAssistantAutomationToolToRoute } from './assistant/execution-context.js'
+export { AssistantWorkspaceArtifactMaterializationError, scopeAssistantAutomationToolToRoute } from './assistant/execution-context.js'
 export type {
+  AssistantWorkspaceArtifactUnavailableReason,
+  AssistantWorkspaceArtifactMaterializationResult,
+  AssistantWorkspaceArtifactMaterializationOptions,
+  AssistantWorkspaceArtifactMaterializer,
   AssistantAutomationOccurrenceProjection,
   AssistantAutomationOccurrenceProjectionIssue,
   AssistantGroupParticipantDisplayName,

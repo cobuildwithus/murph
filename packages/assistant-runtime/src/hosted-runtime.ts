@@ -3793,6 +3793,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 ? await prepareHostedAssistantDeliveryEffectsForDispatch({
                     platform: foregroundRuntime.platform,
                     assistantDeliveryEffects: exactDeliveryEffects,
+                    materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
+                    signal: runtimeAbortController.signal,
                     selectedNonIdempotentEffectIds: exactDeliveryEffects
                       .filter((effect) =>
                         effect.payload.transportIdempotent !== true
@@ -4019,6 +4021,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               },
               write: async () => {
                 await drainHostedPreparedAssistantDeliveries({
+                  materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
                   deliveryTraceContext: {
                     latencyTracePort: foregroundRuntime.platform.latencyTracePort,
                     runtimeAttemptId: input.request.attemptId,
@@ -7954,9 +7957,9 @@ export async function runHostedPendingInputProtectedIdleMaintenance(input: {
             input.generatedImageRetentionMaxCaptures,
         }),
     materializeRetentionCandidatePaths: async (storedPaths) => {
-      const materialized = await input.materializeWorkspaceArtifacts(storedPaths);
+      const materialized = await input.materializeWorkspaceArtifacts(storedPaths, { signal: input.shutdownSignal });
       return {
-        missingStoredPaths: [...materialized.missingArtifactPaths]
+        missingStoredPaths: [...materialized.missingArtifactPaths.keys()]
           .map((artifactPath) =>
             artifactPath.startsWith("vault:")
               ? artifactPath.slice("vault:".length)

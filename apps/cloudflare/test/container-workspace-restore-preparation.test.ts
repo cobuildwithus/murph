@@ -47,6 +47,28 @@ afterEach(async () => {
 });
 
 describe("container workspace restore preparation", () => {
+  it.each([401, 503])("preserves media read failure semantics through the production adapter (%s)", async (status) => {
+    const fixture = await createFixture();
+    const requests = serveSnapshot(fixture, fixture.workspace, status);
+    const signal = new AbortController().signal;
+    const preparation = await prepareHostedContainerWorkspaceRestore({ job: createJob(fixture, true), signal });
+    const { restored } = await preparation.promise;
+    const materialization = restored.materializeWorkspaceArtifacts([MEDIA_PATH]);
+    if (status === 401) {
+      await expect(materialization).rejects.toMatchObject({
+        name: "AssistantWorkspaceArtifactMaterializationError",
+        cause: { code: "HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY", status: 401 },
+      });
+    } else {
+      const result = await materialization;
+      expect(Object.fromEntries(result.missingArtifactPaths)).toEqual({ [`vault:${MEDIA_PATH}`]: "transport" });
+      expect(result.materializedArtifactPaths.size).toBe(0);
+    }
+    expect(signal.aborted).toBe(false);
+    expect(requests.filter(request => new URL(request.url).pathname === `/media/${MEDIA_ID}`)).toHaveLength(1);
+    await expect(stat(path.join(preparation.vaultRoot, MEDIA_PATH))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it.each([true, false])(
     "restores encrypted bytes through the real composition (prepared: %s)",
     async (prepared) => {
@@ -288,7 +310,7 @@ function createJob(fixture: Fixture, prepared: boolean): HostedExecutionWorkspac
   };
 }
 
-function serveSnapshot(fixture: Fixture, workspace = fixture.workspace): Request[] {
+function serveSnapshot(fixture: Fixture, workspace = fixture.workspace, mediaStatus = 200): Request[] {
   const requests: Request[] = [];
   const workspaceUrl = new URL(
     HOSTED_RUNNER_WEB_CONTROL_ROUTES.workspaceRead.path,
@@ -299,6 +321,7 @@ function serveSnapshot(fixture: Fixture, workspace = fixture.workspace): Request
     const request = new Request(input, init);
     requests.push(request);
     if (request.url === `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.mediaStore}/media/${MEDIA_ID}`) {
+      if (mediaStatus !== 200) return new Response(null, { status: mediaStatus });
       return new Response(MEDIA_BYTES);
     }
     if (new URL(request.url).pathname === HOSTED_RUNNER_WEB_CONTROL_ROUTES.mailboxFetch.path) {

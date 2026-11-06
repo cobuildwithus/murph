@@ -1,3 +1,4 @@
+import { AssistantWorkspaceArtifactMaterializationError } from '../src/assistant/execution-context.ts'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -2060,7 +2061,7 @@ describe('prepareAssistantAutoReplyInput', () => {
       }
       return {
         materializedArtifactPaths: new Set(paths.map((item) => `vault:${item}`)),
-        missingArtifactPaths: new Set<string>(),
+        missingArtifactPaths: new Map(),
       }
     })
     const events: unknown[] = []
@@ -2643,6 +2644,19 @@ describe('prepareAssistantAutoReplyInput', () => {
       providerKind: 'status',
       providerState: 'completed',
     })
+  })
+
+  it('lets materialization interruption end the turn instead of degrading attachments', async () => {
+    const interrupted = new AssistantWorkspaceArtifactMaterializationError(new Error('Synthetic owner lost'))
+    promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockRejectedValueOnce(interrupted)
+    await expect(prepareAssistantAutoReplyInput(
+      [createPromptInput({
+        attachmentEvidence: createRawZipAttachmentEvidence({ parseState: null, rawPath: 'raw/inbox/capture-1/attachments/private.zip' }),
+        captureOverrides: { text: 'Please review the attachment.' },
+      })],
+      '/tmp/assistant-engine-prompt-builder-vault',
+      { onEvent: vi.fn() },
+    )).rejects.toBe(interrupted)
   })
 
   it('emits a safe nonblocking event when rich attachment evidence cannot be read', async () => {

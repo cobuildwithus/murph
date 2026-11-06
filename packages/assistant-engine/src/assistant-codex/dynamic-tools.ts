@@ -153,6 +153,7 @@ import {
   type AssistantHostedGroupSharedReadResponse,
   type AssistantHostedGroupSharedReadRequest,
   type AssistantHostedGroupSharedReader,
+  AssistantWorkspaceArtifactMaterializationError,
   type AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
 import type {
@@ -2469,6 +2470,7 @@ async function executeSendVaultFileDynamicTool(
     // Keep opaque errors out of both the legacy classifier and the new detail
     // reader; even instanceof can execute a Proxy's prototype trap.
     const diagnosticError = types.isProxy(error) ? undefined : error
+    AssistantWorkspaceArtifactMaterializationError.rethrowIfInterrupted(diagnosticError)
     if (isAlreadyActiveVaultFileSendError(diagnosticError)) {
       return replyRequiredResult(
         true,
@@ -2751,6 +2753,7 @@ async function executeSendPhysicalNoteDynamicTool(
     }
     artwork = resolvedArtwork
   } catch (error) {
+    AssistantWorkspaceArtifactMaterializationError.rethrowIfInterrupted(error)
     return toolTextResult(
       false,
       'the selected physical-note artwork could not be read from the private vault',
@@ -3511,6 +3514,7 @@ async function executeResponseMediaAttachmentDynamicTool(
     )
   }
   const resolved = await resolveAttachedResponseMedia({
+    materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     media: request.media,
     vaultRoot: input.vaultRoot ?? null,
   })
@@ -4158,6 +4162,7 @@ function matchesTrustedHostedImageCompletionScope(input: {
 }
 
 async function resolveAttachedResponseMedia(input: {
+  materializeWorkspaceArtifacts: AssistantWorkspaceArtifactMaterializer | null
   media: readonly AssistantResponseMedia[]
   vaultRoot: string | null
 }): Promise<
@@ -4179,6 +4184,7 @@ async function resolveAttachedResponseMedia(input: {
         continue
       }
       const resolvedItem = await resolveAssistantVaultImageResponseMedia({
+        materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
         alt: item.alt,
         ref: item.ref,
         source: item.source,
@@ -4192,6 +4198,7 @@ async function resolveAttachedResponseMedia(input: {
     }
     return { media }
   } catch (error) {
+    AssistantWorkspaceArtifactMaterializationError.rethrowIfInterrupted(error)
     return { failureDiagnostic: toolFailureDiagnostic('handler_exception', error) }
   }
 }
@@ -6542,6 +6549,7 @@ async function publishGroupAvatarImageReference(input: {
       vaultRoot: input.vaultRoot ?? '',
     })
   } catch (error) {
+    AssistantWorkspaceArtifactMaterializationError.rethrowIfInterrupted(error)
     if (isAbortError(error)) {
       throw error
     }

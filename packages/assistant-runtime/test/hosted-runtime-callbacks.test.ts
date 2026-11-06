@@ -1,3 +1,11 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { initializeVault } from "@murphai/core";
+import { snapshotHostedBundleRoots, restoreHostedBundleRoots } from "@murphai/runtime-state/node";
+import { createHostedArtifactMaterializer } from "../src/hosted-runtime/artifacts.ts";
+import { readHostedMediaReferenceCatalogue, writeHostedMediaReferenceCatalogue } from "../src/hosted-runtime/media-references.ts";
+import { HostedRuntimeMediaReadError, type HostedRuntimeMediaStore } from "../src/hosted-runtime/platform.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 
@@ -9279,10 +9287,10 @@ describe("hosted runtime callbacks", () => {
       }),
     ]);
 
-    expect(mocks.readVerifiedAssistantVaultImageBytes).toHaveBeenCalledWith({
+    expect(mocks.readVerifiedAssistantVaultImageBytes).toHaveBeenCalledWith(expect.objectContaining({
       image,
       vaultRoot: HOSTED_WAKE.vaultRoot,
-    });
+    }));
     expect(
       mocks.readVerifiedAssistantVaultImageBytes.mock.invocationCallOrder[0],
     ).toBeLessThan(providerFetch.mock.invocationCallOrder[0] ?? 0);
@@ -17866,7 +17874,7 @@ describe("hosted runtime callbacks", () => {
         deliveryChannel: "telegram", deliveryStatus: "sent", providerMessageId: "7",
       })]);
       expect(actionApprovalPort.consume).toHaveBeenCalledTimes(1);
-      expect(mocks.readVerifiedAssistantVaultFileBytes).toHaveBeenCalledWith({ file: vaultFile, vaultRoot: HOSTED_WAKE.vaultRoot });
+            expect(mocks.readVerifiedAssistantVaultFileBytes).toHaveBeenCalledWith(expect.objectContaining({ file: vaultFile, vaultRoot: HOSTED_WAKE.vaultRoot }));
       expect(providerFetch).toHaveBeenCalledTimes(1);
       expect(actionApprovalPort.consume.mock.invocationCallOrder[0]).toBeLessThan(providerFetch.mock.invocationCallOrder[0]!);
       const [url, init] = providerFetch.mock.calls[0]!;
@@ -17979,10 +17987,10 @@ describe("hosted runtime callbacks", () => {
     });
     expect(actionApprovalPort.request).not.toHaveBeenCalled();
     expect(actionApprovalPort.read).not.toHaveBeenCalled();
-    expect(mocks.readVerifiedAssistantVaultFileBytes).toHaveBeenCalledWith({
+    expect(mocks.readVerifiedAssistantVaultFileBytes).toHaveBeenCalledWith(expect.objectContaining({
       file: vaultFile,
       vaultRoot: HOSTED_WAKE.vaultRoot,
-    });
+    }));
     expect(assertRecentInbound).toHaveBeenCalledTimes(2);
     expect(mocks.readVerifiedAssistantVaultFileBytes.mock.invocationCallOrder[0])
       .toBeLessThan(assertRecentInbound.mock.invocationCallOrder[1]!);
@@ -20482,4 +20490,280 @@ describe("hosted runtime callbacks", () => {
       }),
     );
   });
+});
+
+
+it.each(["telegram", "linq"] as const)("hydrates approved %s files after a cold restore without changing approval identity", async (channel) => {
+  const actual = await vi.importActual<typeof import("@murphai/assistant-engine/assistant-outbox")>("@murphai/assistant-engine/assistant-outbox");
+  for (const scenario of ["available", "expired", "missing", "changed"] as const) {
+    vi.clearAllMocks();
+    const root = await mkdtemp(path.join(tmpdir(), "murph-approved-media-"));
+    const warm = path.join(root, "warm"), cold = path.join(root, "cold");
+    const ref = "raw/inbox/synthetic/photo.png";
+    const bytes = Buffer.from("synthetic approved photo bytes");
+    let remote: Uint8Array | null = bytes;
+    const mediaStore: HostedRuntimeMediaStore = { put: async () => {}, get: vi.fn(async () => remote) };
+    const target = channel === "telegram" ? "123" : "chat_123";
+    try {
+      await initializeVault({ vaultRoot: warm, timezone: "UTC" });
+      await writeHostedMediaReferenceCatalogue({ vaultRoot: warm, catalogue: { schema: "murph.hosted-media-refs.v1", entries: [{
+        relativePath: ref, mediaId: "c".repeat(64), mediaKind: "image", mimeType: "image/png", byteSize: bytes.length,
+        sha256: createHash("sha256").update(bytes).digest("hex"), recordedAt: "2030-01-01T00:00:00Z", expiresAt: null,
+      }] } });
+      const pending = { approvalId: `haa_${"a".repeat(32)}`, approvalUrl: "https://murph.test/approve/synthetic", expiresAt: "2099-01-01T00:00:00.000Z", status: "pending" as const };
+      const request = vi.fn(async () => pending);
+      await actual.requestAssistantVaultFileSend({
+        actionApprovalPort: { request, read: vi.fn() }, channel, bindingDelivery: { kind: "thread", target },
+        ref, sessionId: "synthetic-session", threadId: "synthetic-thread", threadIsDirect: true, turnId: "synthetic-turn",
+        vault: warm, materializeWorkspaceArtifacts: createHostedArtifactMaterializer({ vaultRoot: warm, operatorHomeRoot: warm, mediaStore }),
+      });
+      expect(await readFile(path.join(warm, ref))).toEqual(bytes);
+      const [pendingIntent] = await actual.listAssistantOutboxIntents(warm);
+      expect(pendingIntent?.status).toBe("awaiting_approval");
+      // Checkpoint contains approval and catalogue, but not the evictable bytes.
+      await rm(path.join(warm, ref));
+      const snapshot = await snapshotHostedBundleRoots({ kind: "vault", roots: [{ root: warm, rootKey: "vault" }] });
+      assert.ok(snapshot);
+      await restoreHostedBundleRoots({ bytes: snapshot, expectedKind: "vault", roots: { vault: cold } });
+      const [restoredIntent] = await actual.listAssistantOutboxIntents(cold);
+      assert.ok(restoredIntent);
+      expect(restoredIntent.media).toEqual(pendingIntent!.media);
+      const approval = { approvalId: pending.approvalId, approvalGeneration: "b".repeat(64), status: "approved" as const };
+      const approved = actual.applyAssistantVaultFileSendApprovalResult({ intent: restoredIntent, approval, now: new Date() });
+      const file = actual.readAssistantVaultFileMedia(approved)!;
+      const effect = createEffect({ channel, bindingDeliveryKind: "thread", bindingDeliveryTarget: target, media: [file], transportIdempotent: channel === "linq" });
+      const intent = { ...approved, intentId: "intent_123", dedupeKey: effect.fingerprint };
+      mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(createMirrorState(intent));
+      mocks.readAssistantOutboxIntent.mockResolvedValue(intent);
+      mocks.readAssistantVaultFileMedia.mockImplementation(actual.readAssistantVaultFileMedia);
+      mocks.buildAssistantVaultFileSendApprovalRequest.mockImplementation(actual.buildAssistantVaultFileSendApprovalRequest);
+      mocks.readVerifiedAssistantVaultFileBytes.mockImplementation(actual.readVerifiedAssistantVaultFileBytes);
+      if (scenario === "expired") {
+        const catalogue = await readHostedMediaReferenceCatalogue({ vaultRoot: cold });
+        catalogue.entries[0]!.expiresAt = "2000-01-01T00:00:00Z";
+        await writeHostedMediaReferenceCatalogue({ vaultRoot: cold, catalogue });
+      } else if (scenario === "missing") remote = null;
+      else if (scenario === "changed") {
+        remote = Buffer.from("different bytes");
+        const catalogue = await readHostedMediaReferenceCatalogue({ vaultRoot: cold });
+        Object.assign(catalogue.entries[0]!, { byteSize: remote.length, sha256: createHash("sha256").update(remote).digest("hex") });
+        await writeHostedMediaReferenceCatalogue({ vaultRoot: cold, catalogue });
+      }
+      const providerFetch = vi.fn<typeof fetch>(async () => Response.json({ ok: true, result: { message_id: 7 } }));
+      mocks.sendLinqMessage.mockImplementation(async (_request, dependencies) => {
+        expect(await dependencies.loadVaultFile(file)).toEqual(bytes);
+        return { providerMessageId: "synthetic-sent", providerThreadId: target, target, targetKind: "thread" };
+      });
+      mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+        const delivery = channel === "telegram"
+          ? await dependencies.sendTelegramFile({ file, target })
+          : await dependencies.sendLinq({ idempotencyKey: intent.deliveryIdempotencyKey, media: [file], message: "Attached.", target, targetKind: "thread" });
+        return createDispatchResult({ delivery: createDelivery({ channel, providerMessageId: delivery.providerMessageId, target }), status: "sent" });
+      });
+      const consume = vi.fn(async () => approval);
+      const result = drainHostedPreparedAssistantDeliveries({
+        actionApprovalPort: { consume, request, read: vi.fn() }, assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub({ assertLinqRecentInboundEngagement: vi.fn(async value => buildClaimedLinqEngagementResult(value)) }),
+        providerFetch, platformEnv: { TELEGRAM_BOT_TOKEN: "synthetic-token" },
+        materializeWorkspaceArtifacts: createHostedArtifactMaterializer({ vaultRoot: cold, operatorHomeRoot: cold, mediaStore }),
+        vaultRoot: cold, wake: HOSTED_WAKE.wake,
+      });
+      if (scenario === "available") {
+        expect(await result).toEqual([expect.objectContaining({ deliveryStatus: "sent" })]);
+        if (channel === "telegram") {
+          expect(providerFetch).toHaveBeenCalledTimes(1);
+          const form = providerFetch.mock.calls[0]![1]!.body as FormData;
+          expect(Buffer.from(await (form.get("document") as File).arrayBuffer())).toEqual(bytes);
+        } else expect(mocks.sendLinqMessage).toHaveBeenCalledTimes(1);
+      } else {
+        await expect(result).rejects.toThrow();
+        expect(providerFetch).not.toHaveBeenCalled();
+        expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+      }
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(consume).toHaveBeenCalledTimes(1);
+      expect(intent.media).toEqual(approved.media);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  }
+});
+
+it.each(["telegram", "linq"] as const)("recovers interrupted %s file delivery with fresh preparation through the real outbox dispatcher", async (channel) => {
+  const actual = await vi.importActual<typeof import("@murphai/assistant-engine/assistant-outbox")>("@murphai/assistant-engine/assistant-outbox");
+  mocks.listAssistantOutboxIntents.mockImplementation(actual.listAssistantOutboxIntents);
+  mocks.dispatchAssistantOutboxIntent.mockImplementation(actual.dispatchAssistantOutboxIntent);
+  mocks.readAssistantOutboxIntentMirrorState.mockImplementation(actual.readAssistantOutboxIntentMirrorState);
+  mocks.readAssistantOutboxIntent.mockImplementation(actual.readAssistantOutboxIntent);
+  mocks.readAssistantVaultFileMedia.mockImplementation(actual.readAssistantVaultFileMedia);
+  mocks.buildAssistantVaultFileSendApprovalRequest.mockImplementation(actual.buildAssistantVaultFileSendApprovalRequest);
+  mocks.readVerifiedAssistantVaultFileBytes.mockImplementation(actual.readVerifiedAssistantVaultFileBytes);
+  mocks.applyAssistantVaultFileSendApprovalResult.mockImplementation(actual.applyAssistantVaultFileSendApprovalResult);
+  mocks.saveAssistantOutboxIntentIfUnchanged.mockImplementation(actual.saveAssistantOutboxIntentIfUnchanged);
+  mocks.beginAssistantOutboxIntentMirrorPreparedDispatch.mockImplementation(actual.beginAssistantOutboxIntentMirrorPreparedDispatch);
+  mocks.resetAssistantOutboxPreparedDispatchById.mockImplementation(actual.resetAssistantOutboxPreparedDispatchById);
+  mocks.shouldDispatchAssistantOutboxIntent.mockImplementation(actual.shouldDispatchAssistantOutboxIntent);
+  const interruptions = channel === "telegram"
+    ? ["during-read", "before-read", "owner-loss", "transport", "expired", "missing", "changed"] as const
+    : ["during-read", "before-read", "owner-loss"] as const;
+  for (const interruption of interruptions) {
+    const root = await mkdtemp(path.join(tmpdir(), "murph-file-interruption-"));
+    const ref = "raw/inbox/synthetic/photo.png";
+    const bytes = Buffer.from("synthetic approved photo");
+    const target = channel === "telegram" ? "123" : "chat_123";
+    const cancel = new AbortController();
+    const reason = interruption === "owner-loss"
+      ? Object.assign(new Error("Synthetic media GET rejected stale invocation with HTTP 401"), {
+          name: "HostedRuntimeInternalAuthorityRejectedError",
+          code: "HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY",
+          reason: "internal_authority_rejected",
+          status: 401,
+          statusCode: 401,
+          responseStatus: 401,
+        })
+      : new Error("Synthetic materialization interruption");
+    let interrupt = false;
+    let persistedIntentId: string | null = null;
+    const get = vi.fn(async () => {
+      // A failed warm read may be retried by the authoritative read after the
+      // claim. On the normal and interrupted paths no remote read follows it.
+      if (channel === "telegram" && persistedIntentId && !["transport", "missing", "changed"].includes(interruption)) {
+        expect((await actual.readAssistantOutboxIntent(root, persistedIntentId))?.status).toBe("pending");
+      }
+      if (interrupt) {
+        if (interruption === "transport") throw new HostedRuntimeMediaReadError({ cause: reason, retryable: true });
+        if (interruption === "missing") return null;
+        if (interruption === "changed") return Buffer.from("synthetic changed bytes");
+        if (interruption === "during-read") cancel.abort(reason);
+        throw reason;
+      }
+      return bytes;
+    });
+    try {
+      await initializeVault({ vaultRoot: root, timezone: "UTC" });
+      await writeHostedMediaReferenceCatalogue({ vaultRoot: root, catalogue: { schema: "murph.hosted-media-refs.v1", entries: [{
+        relativePath: ref, mediaId: "c".repeat(64), mediaKind: "image", mimeType: "image/png", byteSize: bytes.length,
+        sha256: createHash("sha256").update(bytes).digest("hex"), recordedAt: "2030-01-01T00:00:00Z", expiresAt: null,
+      }] } });
+      const materializeWorkspaceArtifacts = createHostedArtifactMaterializer({
+        vaultRoot: root, operatorHomeRoot: root, mediaStore: { put: async () => {}, get },
+      });
+      const pending = { approvalId: `haa_${"a".repeat(32)}`, approvalUrl: "https://murph.test/approve/synthetic", expiresAt: "2099-01-01T00:00:00.000Z", status: "pending" as const };
+      const approval = { approvalId: pending.approvalId, approvalGeneration: "b".repeat(64), status: "approved" as const };
+      const request = vi.fn(async () => pending);
+      const consume = vi.fn(async () => {
+        if (interrupt && interruption === "before-read") cancel.abort(reason);
+        return approval;
+      });
+      await actual.requestAssistantVaultFileSend({
+        actionApprovalPort: { request, read: vi.fn() }, channel, bindingDelivery: { kind: "thread", target },
+        ref, sessionId: "synthetic-session", threadId: "synthetic-thread", threadIsDirect: true, turnId: "synthetic-turn",
+        vault: root, materializeWorkspaceArtifacts,
+      });
+      const [pendingIntent] = await actual.listAssistantOutboxIntents(root);
+      assert.ok(pendingIntent);
+      const approved = actual.applyAssistantVaultFileSendApprovalResult({ intent: pendingIntent, approval, now: new Date() });
+      const file = actual.readAssistantVaultFileMedia(approved)!;
+      const effect = buildHostedAssistantDeliveryEffect({
+        effectId: approved.intentId, dedupeKey: approved.dedupeKey,
+        payload: createPayload({ channel, bindingDeliveryKind: "thread", bindingDeliveryTarget: target,
+          media: [file], transportIdempotent: channel === "linq", idempotencyKey: approved.deliveryIdempotencyKey ?? undefined }),
+      });
+      await actual.saveAssistantOutboxIntent(root, { ...approved, dedupeKey: effect.fingerprint });
+      persistedIntentId = approved.intentId;
+      await rm(path.join(root, ref));
+      get.mockClear();
+      const providerFetch = vi.fn<typeof fetch>(async () => Response.json({ ok: true, result: { message_id: 7 } }));
+      mocks.sendLinqMessage.mockImplementation(async (_request, dependencies) => {
+        expect(await dependencies.loadVaultFile(file)).toEqual(bytes);
+        return { providerMessageId: "synthetic-sent", providerThreadId: target, target, targetKind: "thread" };
+      });
+      const input = {
+        actionApprovalPort: { consume, request, read: vi.fn(async () => ({
+          ...approval, cycleOwnerKey: buildHostedActionApprovalCycleOwnerKey(pending),
+        })) }, assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub(), providerFetch,
+        platformEnv: { TELEGRAM_BOT_TOKEN: "synthetic-token" }, materializeWorkspaceArtifacts,
+        vaultRoot: root, wake: HOSTED_WAKE.wake,
+      };
+      interrupt = true;
+      if (channel === "telegram") {
+        if (interruption === "before-read") cancel.abort(reason);
+        if (interruption === "expired") {
+          const catalogue = await readHostedMediaReferenceCatalogue({ vaultRoot: root });
+          catalogue.entries[0]!.expiresAt = "2000-01-01T00:00:00Z";
+          await writeHostedMediaReferenceCatalogue({ vaultRoot: root, catalogue });
+        }
+        const preparing = prepareHostedAssistantDeliveryEffectsForDispatch({ ...input, signal: cancel.signal });
+        if (["transport", "expired", "missing", "changed"].includes(interruption)) {
+          // Warming never throws for one bad file: a throw here would stop every
+          // other delivery in the batch. The authoritative read reports the outcome.
+          const prepared = await preparing;
+          expect(prepared.preparedDispatches).toHaveLength(1);
+          await drainHostedPreparedAssistantDeliveries({ ...input, ...prepared, allowPreparedSending: true });
+          expect(providerFetch).not.toHaveBeenCalled();
+          const settled = await actual.readAssistantOutboxIntent(root, approved.intentId);
+          expect(settled?.status).toBe(interruption === "transport" ? "retryable" : "failed");
+          expect(settled?.lastError?.code).toBe("ASSISTANT_VAULT_FILE_UNAVAILABLE");
+          expect(settled?.delivery).toBeNull();
+          continue;
+        }
+        await expect(preparing).rejects.toMatchObject({ name: "AssistantWorkspaceArtifactMaterializationError", cause: reason });
+        expect(consume).not.toHaveBeenCalled();
+        if (interruption === "owner-loss") expect(cancel.signal.aborted).toBe(false);
+        expect(get).toHaveBeenCalledTimes(interruption === "before-read" ? 0 : 1);
+      } else {
+        const prepared = await prepareHostedAssistantDeliveryEffectsForDispatch(input);
+        expect(prepared.preparedDispatches).toHaveLength(0);
+        await expect(drainHostedPreparedAssistantDeliveries({ ...input, ...prepared, allowPreparedSending: true, signal: cancel.signal }))
+          .rejects.toMatchObject({ name: "AssistantWorkspaceArtifactMaterializationError", cause: reason });
+      }
+      const interrupted = await actual.readAssistantOutboxIntent(root, approved.intentId);
+      expect(interrupted?.status).toBe(channel === "telegram" ? "pending" : "sending");
+      expect(interrupted?.lastError).toBeNull();
+      expect(interrupted?.delivery).toBeNull();
+      if (channel === "telegram") {
+        expect(interrupted?.preparedDispatchToken).toBeNull();
+        expect(interrupted?.attemptCount).toBe(0);
+      }
+      expect(providerFetch).not.toHaveBeenCalled();
+      interrupt = false;
+      if (channel === "linq") {
+        // Unprepared Linq sends recover through the existing stale-sending timer.
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(new Date(Date.now() + 11 * 60 * 1000));
+      }
+      // The successor rebuilds its effect and preparation from durable state.
+      const successorEffects = await collectHostedAssistantDeliverySideEffects({
+        actionApprovalPort: input.actionApprovalPort,
+        preferredIntentIds: [approved.intentId],
+        includeBackgroundDueIntents: false,
+        vaultRoot: root,
+      });
+      expect(successorEffects).toHaveLength(1);
+      const successorInput = {
+        ...input,
+        assistantDeliveryEffects: successorEffects,
+        materializeWorkspaceArtifacts: createHostedArtifactMaterializer({
+          vaultRoot: root, operatorHomeRoot: root, mediaStore: { put: async () => {}, get },
+        }),
+      };
+      const freshPreparation = await prepareHostedAssistantDeliveryEffectsForDispatch(successorInput);
+      expect(freshPreparation.preparedDispatches).toHaveLength(channel === "telegram" ? 1 : 0);
+      const readsBeforeDispatch = get.mock.calls.length;
+      const retry = await drainHostedPreparedAssistantDeliveries({ ...successorInput, ...freshPreparation, allowPreparedSending: true });
+      expect(retry).toEqual([expect.objectContaining({ deliveryStatus: "sent" })]);
+      const delivered = await actual.readAssistantOutboxIntent(root, approved.intentId);
+      expect(delivered?.status).toBe("sent");
+      expect(delivered?.media).toEqual(approved.media);
+      expect(providerFetch).toHaveBeenCalledTimes(1);
+      if (channel === "telegram") {
+        expect(get).toHaveBeenCalledTimes(readsBeforeDispatch);
+        const form = providerFetch.mock.calls[0]![1]!.body as FormData;
+        expect(Buffer.from(await (form.get("document") as File).arrayBuffer())).toEqual(bytes);
+      }
+      expect(request).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+      await rm(root, { recursive: true, force: true });
+    }
+  }
 });

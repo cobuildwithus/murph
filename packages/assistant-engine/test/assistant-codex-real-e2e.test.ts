@@ -3035,7 +3035,7 @@ describeRealCodex('real Codex retained image e2e', () => {
           expect(refs).toEqual([rawPath])
           await mkdir(path.dirname(path.join(workingDirectory, rawPath)), { recursive: true })
           await writeFile(path.join(workingDirectory, rawPath), bytes)
-          return { materializedArtifactPaths: new Set(refs), missingArtifactPaths: new Set<string>() }
+          return { materializedArtifactPaths: new Set(refs.map(ref => `vault:${ref}`)), missingArtifactPaths: new Map() }
         },
         model: config.model, modelProvider: config.modelProvider,
         prompt,
@@ -8757,8 +8757,8 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
             materializedVideoPaths.push(...relativePaths)
             await writeFile(path.join(workingDirectory, rawPath), videoBytes)
             return {
-              materializedArtifactPaths: new Set(relativePaths),
-              missingArtifactPaths: new Set<string>(),
+              materializedArtifactPaths: new Set(relativePaths.map(ref => `vault:${ref}`)),
+              missingArtifactPaths: new Map(),
             }
           } : null,
           model: config.model,

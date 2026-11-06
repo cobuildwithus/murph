@@ -1,3 +1,4 @@
+import { AssistantWorkspaceArtifactMaterializationError } from '../assistant/execution-context.js'
 import { types } from 'node:util'
 import {
   HOSTED_USAGE_OPTIMIZATION_AUDIT_REJECTIONS,
@@ -509,4 +510,10 @@ export function createDynamicToolRuntimeIssueInput(input: {
     input.request,
     toolFailureDiagnostic('handler_exception', input.error),
   )
+}
+
+// Interruption and owner loss must unwind the turn. Reporting them to the model
+// as an ordinary tool failure would let a stale invocation keep working.
+export function dynamicToolFailureEndsTurn(requestSettled: boolean, error: unknown): boolean {
+  return requestSettled || error instanceof AssistantWorkspaceArtifactMaterializationError
 }

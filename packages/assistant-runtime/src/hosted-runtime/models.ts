@@ -252,19 +252,11 @@ export type HostedAssistantAutomationLaneMetrics = Omit<
   | "stagedDirtyAcks"
 >;
 
-export interface HostedWorkspaceArtifactMaterializationResult {
-  materializedArtifactPaths: ReadonlySet<string>;
-  missingArtifactPaths: ReadonlySet<string>;
-}
-
-export interface HostedWorkspaceArtifactMaterializationOptions {
-  maxFileBytes?: number;
-}
-
-export type HostedWorkspaceArtifactMaterializer = (
-  relativePaths: readonly string[],
-  options?: HostedWorkspaceArtifactMaterializationOptions,
-) => Promise<HostedWorkspaceArtifactMaterializationResult>;
+export type {
+  AssistantWorkspaceArtifactMaterializationResult as HostedWorkspaceArtifactMaterializationResult,
+  AssistantWorkspaceArtifactMaterializationOptions as HostedWorkspaceArtifactMaterializationOptions,
+  AssistantWorkspaceArtifactMaterializer as HostedWorkspaceArtifactMaterializer,
+} from "@murphai/assistant-engine";
 
 export interface HostedRestoredExecutionContext {
   assistantStateRoot: string;

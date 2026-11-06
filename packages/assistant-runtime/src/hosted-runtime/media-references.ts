@@ -1,3 +1,5 @@
+import type { AssistantWorkspaceArtifactUnavailableReason, AssistantWorkspaceArtifactMaterializationResult } from "@murphai/assistant-engine";
+import { HostedRuntimeMediaReadError } from "./platform.ts";
 import { createHostedMediaReferenceId } from "@murphai/hosted-execution";
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
@@ -6,6 +8,7 @@ import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 
 import {
   collectEventRawReferencePaths,
+  compareEventRevisionPriority,
   eventRecordSchema,
   inboxCaptureRecordSchema,
   safeParseContract,
@@ -22,6 +25,9 @@ import {
   resolveVaultPath,
   resolveVaultPathOnDisk,
   statAndHashVaultFileInterruptible,
+  canonicalRawArtifactMatches,
+  isVaultError,
+  withCanonicalWriteLock,
   VAULT_LAYOUT,
   walkVaultFiles,
 } from "@murphai/core";
@@ -277,13 +283,10 @@ export async function materializeHostedWorkspaceMediaReferences(input: {
   signal?: AbortSignal | null;
   vaultRoot: string;
   options?: { maxFileBytes?: number };
-}): Promise<{
-  materializedArtifactPaths: Set<string>;
-  missingArtifactPaths: Set<string>;
-}> {
+}): Promise<AssistantWorkspaceArtifactMaterializationResult> {
   const materializedArtifactPaths = new Set<string>();
-  const missingArtifactPaths = new Set<string>();
-  if (!input.mediaStore || input.relativePaths.length === 0) {
+  const missingArtifactPaths = new Map<string, AssistantWorkspaceArtifactUnavailableReason>();
+  if (input.relativePaths.length === 0) {
     return { materializedArtifactPaths, missingArtifactPaths };
   }
 
@@ -304,13 +307,31 @@ export async function materializeHostedWorkspaceMediaReferences(input: {
       input.options?.maxFileBytes !== undefined
       && entry.byteSize > input.options.maxFileBytes
     ) {
-      missingArtifactPaths.add(key);
+      missingArtifactPaths.set(key, "size");
+      continue;
+    }
+    try {
+      if (!await hostedMediaReferenceIsCurrent(input.vaultRoot, entry)) {
+        missingArtifactPaths.set(key, "obsolete");
+        continue;
+      }
+    } catch (error) {
+      if (!isHostedMediaCanonicalLockBusy(error)) throw error;
+      missingArtifactPaths.set(key, "transport");
       continue;
     }
     if (entry.expiresAt !== null && Date.parse(entry.expiresAt) <= Date.now()) {
-      const resolved = await resolveVaultPathOnDisk(input.vaultRoot, entry.relativePath);
-      await rm(resolved.absolutePath, { force: true });
-      missingArtifactPaths.add(key);
+      await withHostedMediaInstallGuard(input.vaultRoot, entry, async () => {
+        if (await localHostedMediaReferenceIsValid({ entry, signal: input.signal, vaultRoot: input.vaultRoot })) {
+          assertHostedMediaReferenceLive(input.signal);
+          const resolved = await resolveVaultPathOnDisk(input.vaultRoot, entry.relativePath);
+          await rm(resolved.absolutePath, { force: true });
+        }
+      }).catch((error: unknown) => {
+        // Eviction is best effort: the entry is reported expired either way.
+        if (!isHostedMediaCanonicalLockBusy(error)) throw error;
+      });
+      missingArtifactPaths.set(key, "expired");
       continue;
     }
     if (await localHostedMediaReferenceIsValid({
@@ -322,37 +343,86 @@ export async function materializeHostedWorkspaceMediaReferences(input: {
       continue;
     }
 
-    const bytes = await input.mediaStore.get(
-      {
-        byteSize: entry.byteSize,
-        mediaId: entry.mediaId,
-        mediaKind: entry.mediaKind,
-        sha256: entry.sha256,
-      },
-      {
-        purpose: "workspace_media_materialization",
-        signal: input.signal,
-      },
-    );
+    if (!input.mediaStore) {
+      missingArtifactPaths.set(key, "transport");
+      continue;
+    }
+    let bytes: Uint8Array | null;
+    try {
+      bytes = await input.mediaStore.get(
+        {
+          byteSize: entry.byteSize,
+          mediaId: entry.mediaId,
+          mediaKind: entry.mediaKind,
+          sha256: entry.sha256,
+        },
+        {
+          purpose: "workspace_media_materialization",
+          signal: input.signal,
+        },
+      );
+    } catch (error) {
+      assertHostedMediaReferenceLive(input.signal);
+      // Only the transport's typed read failure becomes a file outcome. Owner
+      // loss and other control-flow failures must abort the caller.
+      if (!(error instanceof HostedRuntimeMediaReadError)) throw error;
+      missingArtifactPaths.set(key, "transport");
+      continue;
+    }
     assertHostedMediaReferenceLive(input.signal);
     if (!bytes) {
-      missingArtifactPaths.add(key);
+      missingArtifactPaths.set(key, "missing");
       continue;
     }
     if (!hostedMediaBytesMatchEntry(bytes, entry)) {
-      missingArtifactPaths.add(key);
+      missingArtifactPaths.set(key, "integrity");
       continue;
     }
 
-    await installHostedMediaReference({
-      bytes,
-      entry,
-      vaultRoot: input.vaultRoot,
-    });
-    materializedArtifactPaths.add(key);
+    try {
+      await withHostedMediaInstallGuard(input.vaultRoot, entry, async () => {
+        assertHostedMediaReferenceLive(input.signal);
+        // A canonical retirement may have committed while the remote read ran.
+        if (!await hostedMediaReferenceIsCurrent(input.vaultRoot, entry)) {
+          missingArtifactPaths.set(key, "obsolete");
+          return;
+        }
+        if (entry.expiresAt !== null && Date.parse(entry.expiresAt) <= Date.now()) {
+          missingArtifactPaths.set(key, "expired");
+          return;
+        }
+        await installHostedMediaReference({ bytes, entry, signal: input.signal, vaultRoot: input.vaultRoot });
+        materializedArtifactPaths.add(key);
+      });
+    } catch (error) {
+      // A long canonical writer must not abort the reader's turn. Retryable.
+      if (!isHostedMediaCanonicalLockBusy(error)) throw error;
+      missingArtifactPaths.set(key, "transport");
+    }
   }
 
   return { materializedArtifactPaths, missingArtifactPaths };
+}
+
+function isHostedCanonicalPhotoPath(relativePath: string): boolean {
+  return relativePath.startsWith("raw/meals/") || relativePath.startsWith("raw/measurements/");
+}
+
+async function hostedMediaReferenceIsCurrent(vaultRoot: string, entry: HostedMediaReference): Promise<boolean> {
+  return !isHostedCanonicalPhotoPath(entry.relativePath) || canonicalRawArtifactMatches({ vaultRoot, ...entry });
+}
+
+// Foreground attachment reads reach this path, so inbox and capture media must
+// never queue behind a canonical writer. Only canonical photo paths can race a
+// retirement tombstone, and only their final install needs exclusion.
+function withHostedMediaInstallGuard<T>(
+  vaultRoot: string, entry: HostedMediaReference, run: () => Promise<T>,
+): Promise<T> {
+  return isHostedCanonicalPhotoPath(entry.relativePath) ? withCanonicalWriteLock(vaultRoot, run) : run();
+}
+
+function isHostedMediaCanonicalLockBusy(error: unknown): boolean {
+  return isVaultError(error) && error.code === "CANONICAL_WRITE_LOCKED";
 }
 
 export async function readHostedMediaReferenceCatalogue(input: {
@@ -468,7 +538,7 @@ async function collectHostedMediaEventInventory(
   latestEvents: EventRecord[];
 }> {
   const durableRawInboxRefs = new Set<string>();
-  const latestEvents = new Map<string, EventRecord>();
+  const latestEvents = new Map<string, { record: EventRecord; relativePath: string }>();
   for (const relativePath of await listEventLedgerShardPaths(vaultRoot)) {
     assertHostedMediaReferenceLive(signal);
     // Validate all JSON before inspecting event values, preserving malformed-row errors.
@@ -486,14 +556,14 @@ async function collectHostedMediaEventInventory(
         continue;
       }
       const current = latestEvents.get(parsed.data.id);
-      if (!current || compareHostedEventRevision(parsed.data, current) > 0) {
-        latestEvents.set(parsed.data.id, parsed.data);
+      if (!current || compareEventRevisionPriority({ ...parsed.data, relativePath }, { ...current.record, relativePath: current.relativePath }) > 0) {
+        latestEvents.set(parsed.data.id, { record: parsed.data, relativePath });
       }
     }
   }
   return {
     durableRawInboxRefs,
-    latestEvents: [...latestEvents.values()],
+    latestEvents: [...latestEvents.values()].map(entry => entry.record),
   };
 }
 
@@ -641,6 +711,7 @@ async function localHostedMediaReferenceIsValid(input: {
 }
 
 async function installHostedMediaReference(input: {
+  signal?: AbortSignal | null;
   bytes: Uint8Array;
   entry: HostedMediaReference;
   vaultRoot: string;
@@ -655,8 +726,10 @@ async function installHostedMediaReference(input: {
     `.hosted-media-${randomUUID()}.tmp`,
   );
   try {
-    await writeFile(tempPath, input.bytes, { mode: 0o600 });
+    assertHostedMediaReferenceLive(input.signal);
+    await writeFile(tempPath, input.bytes, { mode: 0o600, signal: input.signal ?? undefined });
     await chmod(tempPath, 0o600);
+    assertHostedMediaReferenceLive(input.signal);
     await rename(tempPath, resolved.absolutePath);
   } finally {
     await rm(tempPath, { force: true });
@@ -775,18 +848,6 @@ function compareHostedMediaReferences(
 ): number {
   return left.relativePath.localeCompare(right.relativePath)
     || left.mediaId.localeCompare(right.mediaId);
-}
-
-function compareHostedEventRevision(left: EventRecord, right: EventRecord): number {
-  const revisionDelta = (left.lifecycle?.revision ?? 1) - (right.lifecycle?.revision ?? 1);
-  if (revisionDelta !== 0) {
-    return revisionDelta;
-  }
-  const recordedAtDelta = Date.parse(left.recordedAt) - Date.parse(right.recordedAt);
-  if (recordedAtDelta !== 0) {
-    return recordedAtDelta;
-  }
-  return Date.parse(left.occurredAt) - Date.parse(right.occurredAt);
 }
 
 function readHostedMediaKindFromInboxAttachment(

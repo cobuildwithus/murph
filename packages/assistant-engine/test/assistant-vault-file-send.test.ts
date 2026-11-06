@@ -1,3 +1,4 @@
+import { AssistantWorkspaceArtifactMaterializationError } from '../src/assistant/execution-context.js'
 import { createHash } from 'node:crypto'
 import {
   chmod,
@@ -37,6 +38,7 @@ import {
 import {
   createAssistantOutboxIntent,
   dispatchAssistantOutboxIntent,
+  isAssistantOutboxRetryableError,
   listAssistantOutboxIntents,
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
@@ -1769,3 +1771,36 @@ function createVaultFileIntent() {
     updatedAt: '2026-06-24T11:00:00.000Z',
   }
 }
+
+
+it('propagates secure-file materialization interruption through the dynamic tool', async () => {
+  const interrupted = new AssistantWorkspaceArtifactMaterializationError(new Error('Synthetic owner lost'))
+  await expect(dispatchVaultFile('raw/inbox/synthetic/photo.png', async () => { throw interrupted }))
+    .rejects.toBe(interrupted)
+})
+
+it.each(['transport', 'expired', 'missing', 'integrity', 'obsolete', 'size'] as const)(
+  'preserves the outbox retry policy for a %s materialization outcome',
+  async (reason) => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext('murph-file-read-retry-')
+    tempRoots.push(parentRoot)
+    const ref = 'raw/inbox/synthetic/photo.png'
+    const error = await readVerifiedAssistantVaultFileBytes({
+      vaultRoot,
+      file: {
+        kind: 'vault_file', ref, filename: 'photo.png', contentType: 'image/png',
+        sha256: 'a'.repeat(64), sizeBytes: 42, approvalId: null, approvalGeneration: null,
+      },
+      materializeWorkspaceArtifacts: async () => ({
+        materializedArtifactPaths: new Set(),
+        missingArtifactPaths: new Map([[`vault:${ref}`, reason]]),
+      }),
+    }).catch((failure: unknown) => failure)
+    expect(error).toMatchObject({
+      code: 'ASSISTANT_VAULT_FILE_UNAVAILABLE',
+      deliveryMayHaveSucceeded: false,
+      retryable: reason === 'transport',
+    })
+    expect(isAssistantOutboxRetryableError(error)).toBe(reason === 'transport')
+  },
+)

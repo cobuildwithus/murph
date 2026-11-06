@@ -436,6 +436,9 @@ export function createCloudflareMediaStore(input: {
           });
         } catch (error) {
           assertHostedMediaFetchLive(context.signal);
+          if (isHostedRuntimeInternalAuthorityRejectedError(error)) {
+            throw error;
+          }
           const retrying = shouldRetryHostedRuntimeReplaySafeRead({
             attempt,
             error,
@@ -488,6 +491,9 @@ export function createCloudflareMediaStore(input: {
         try {
           assertHostedOk(response, "Hosted media fetch");
         } catch (error) {
+          if (isHostedRuntimeInternalAuthorityRejectedError(error)) {
+            throw error;
+          }
           throw new HostedRuntimeMediaReadError({
             cause: error,
             retryable: isRetryableHostedMediaReadStatus(response.status),

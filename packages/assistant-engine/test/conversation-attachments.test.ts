@@ -1,3 +1,4 @@
+import { AssistantWorkspaceArtifactMaterializationError } from '../src/assistant/execution-context.js'
 import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -71,7 +72,7 @@ it.each(['image', 'video'] as const)('keeps %s references after text retirement 
   const materialize = vi.fn(async (refs: readonly string[]) => {
     expect(refs).toEqual([rawPath]); await mkdir(path.dirname(path.join(vault, rawPath)), { recursive: true })
     await writeFile(path.join(vault, rawPath), bytes)
-    return { materializedArtifactPaths: new Set(refs), missingArtifactPaths: new Set<string>() }
+    return { materializedArtifactPaths: new Set(refs.map(ref => `vault:${ref}`)), missingArtifactPaths: new Map() }
   })
   const context = createAssistantHostedToolContext({ getConversationAttachmentAuthorities: () => authorities,
     getConversationScope: () => 'direct', getUserActionAcceptedInputIds: () => [followup.inputId],
@@ -91,10 +92,15 @@ it.each(['image', 'video'] as const)('keeps %s references after text retirement 
   const opened = await execute(request)
   expect(opened.rpcResult.success).toBe(true); expect(materialize).toHaveBeenCalledTimes(1)
   expect(await readFile(path.join(vault, rawPath))).toEqual(bytes)
+  const interrupted = new AssistantWorkspaceArtifactMaterializationError(new Error('Synthetic owner lost'))
+  materialize.mockImplementationOnce(async () => { throw interrupted })
+  const providerCalls = fetchImpl.mock.calls.length
+  await expect(execute(request)).rejects.toBe(interrupted)
+  expect(fetchImpl).toHaveBeenCalledTimes(providerCalls)
   const lifetimeDays = kind === 'image' ? 90 : 30
   clock.mockReturnValue(start + lifetimeDays * 86_400_000)
   expect((await execute(request)).rpcResult.success).toBe(false)
-  expect(materialize).toHaveBeenCalledTimes(1)
+  expect(materialize).toHaveBeenCalledTimes(2)
   expect((await execute({ kind: 'conversation-attachments', args: { action: 'list' } })).rpcResult.contentItems[0]?.text).toContain('resend')
   await pruneAssistantRuntimeResidue({ vault, pendingInputIds: [], now: new Date(Date.now() + 15 * 86_400_000) })
   expect(await readAssistantInputEvent({ vault, inputId: event.inputId })).toBeNull()

@@ -5901,8 +5901,8 @@ describe("murph.group dynamic tool", () => {
           lookupMaterialized = true;
         }
         return {
-          materializedArtifactPaths: new Set(relativePaths),
-          missingArtifactPaths: new Set<string>(),
+          materializedArtifactPaths: new Set(relativePaths.map(ref => `vault:${ref}`)),
+          missingArtifactPaths: new Map(),
         };
       });
 
