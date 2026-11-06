@@ -731,7 +731,7 @@ async function createHostedWorkspaceV2Snapshot(
       userId: input.userId,
     };
     checkpointAttempted = true;
-    const checkpointRequest = withPendingPhotoRetry(input.request, mediaReferences.hasRetryablePendingPhotos);
+    const checkpointRequest = withPhotoMaintenanceWake(input.request, mediaReferences);
     delete checkpointRequest.handledConversationFrontierSelected;
     const completed = await runHostedWorkspaceSnapshotMeasuredStep({
       key: "snapshotSessionCompleteElapsedMs",
@@ -1409,9 +1409,10 @@ function createAssistantGeneratedDeliveryResiduePruneLogDetails(
   };
 }
 
-function withPendingPhotoRetry(request: HostedWorkspaceSnapshotCheckpointRequest, hasRetryablePendingPhotos: boolean) {
+function withPhotoMaintenanceWake(request: HostedWorkspaceSnapshotCheckpointRequest,
+  mediaReferences: Pick<PublishHostedWorkspaceMediaReferencesResult, "hasRetryablePendingPhotos" | "retirementPendingMediaIds">) {
   const next = { ...request };
-  if (!hasRetryablePendingPhotos) return next;
+  if (!mediaReferences.hasRetryablePendingPhotos && mediaReferences.retirementPendingMediaIds.length === 0) return next;
   const retryAt = new Date(Date.now() + HOSTED_MEAL_MEDIA_RETRY_MS).toISOString();
   if (!next.inboxMediaRetentionWakeAt || next.inboxMediaRetentionWakeAt > retryAt) next.inboxMediaRetentionWakeAt = retryAt;
   if (!next.nextWakeAt || next.nextWakeAt > retryAt) {

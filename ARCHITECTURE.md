@@ -2604,8 +2604,8 @@ photo registration or PUT. Newly discovered IDs are denied to the warm uploader
 until the exact checkpoint is accepted; a rejected or ambiguous checkpoint does
 not release them. Cold restore derives eligibility from the committed catalogue.
 The accepted checkpoint retains an hourly idle retry while pending entries have
-fewer than five persisted `uploadAttempts`. Each attempted delivery increments
-that counter with the cursor; exact-identity receipt replay preserves it.
+fewer than five persisted `uploadAttempts`. Selected work increments that counter
+with the cursor before holder discovery; exact-identity receipt replay preserves it.
 Exhausted entries remain pending and inline and can still run on ordinary idle
 passes, but do not arm dedicated retry wakes.
 Existing thumbnail-v2 intents continue to use canonical receipt durability.
@@ -2616,14 +2616,16 @@ identity, including delivered thumbnails. A cleanup pointer cannot exclude a
 retirement tombstone or replacement file; uncertain identity keeps bytes inline.
 On first observing retirement, reconciliation retains the photo cleanup pointer
 with `retirementPending: true` and fences its ID until that exact checkpoint is
-accepted. A later publication deletes the object and drops the pointer. Cold
+accepted. Outstanding retirements schedule an hourly cleanup wake; its later
+publication deletes the object and drops the pointer. Cold
 restore preserves the marker as evidence that the tombstone was accepted;
 rejected checkpoints cannot release retirement. Marked identities never exclude
 vault bytes. Inbox, capture and cold-ingest pruning retain their own policy.
 Receipt payloads still include local meal and measurement bytes. Deploy the PR 3
-preserver reader to every runner before enabling this producer. That reader is
-the rollback floor after any producer checkpoint; earlier runners can delete
-sole-copy photo objects.
+preserver reader to every runner before enabling this producer. After the producer
+has run, a rollback to #4641 loses the acceptance fence: a meal photo the member
+deleted in a checkpoint that is then rejected may not return with the restored
+meal. Prefer fixing forward.
 
 An obsolete pending photo descriptor is handled outside the snapshot lock: register its exact metadata with an already-due finite expiry, then retire without PUT. An ordinary registration failure still permits retirement, while cancellation or owner loss stops further effects. Keep the pointer until retirement is acknowledged; finite registration alone is not completion. Existing finite-resource sweep covers a crash between registration and retirement. Snapshot reconciliation retains pending pointers and saves newly prepared plus existing cleanup pointers before pruning other media, so a failed deletion cannot forget another upload. Terminal retirement is never relaxed. Old-runner rollback restores the former precommit-upload and failed-prune bugs and is not a safe cleanup rollback floor. The owner-authorized Meals API derives the same path/hash/size/kind identity and mints five-minute thumbnail capabilities without waking a runner. A replica can expose a thumbnail URL before deferred bytes are ready; GET may return 404 until idle recovery. Full-photo expiry is independent of thumbnail delivery. Account deletion uses existing encrypted-object cleanup.
 

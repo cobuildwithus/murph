@@ -951,7 +951,10 @@ function buildInterruptedMaintenanceOutcome(input: {
 
 async function maintainMealMedia(input: Parameters<typeof runHostedIdleCheckpointMaintenance>[0], vaultRoot: string, signal: AbortSignal): Promise<HostedIdleMaintenanceWake> {
   if (input.pendingWork || !input.mealMedia) return {};
-  const media = await runHostedMealMediaMaintenance({ ...input.mealMedia, vaultRoot, signal });
+  const media = await runHostedMealMediaMaintenance({ ...input.mealMedia, vaultRoot, signal }).catch(error => {
+    signal.throwIfAborted();
+    return { failed: 1, failure: error, pending: 1 };
+  });
   if (!await hasHostedPhotoRetry(vaultRoot)) return {};
   if (media.failed > 0) throw media.failure;
   return media.pending > 0 ? resolveInboxMediaRetentionFailureWake(HOSTED_MEAL_MEDIA_RETRY_MS) : {};

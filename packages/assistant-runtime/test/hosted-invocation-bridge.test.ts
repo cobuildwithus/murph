@@ -49,6 +49,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as core from "@murphai/core";
 
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
@@ -466,12 +467,22 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       expect((await readEvent({ vaultRoot: restored, eventId: meal.event.id })).event.lifecycle?.state).not.toBe("deleted");
       expect((await f.checkpoint()).checkpoint?.checkpointed).toBe(true);
       expect(f.store.bytes.size).toBe(2);
+      const wake = f.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest;
+      expect(wake.nextWakeReason).toBe("inbox_media_retention");
+      expect(wake.nextWakeAt).toBe("2030-01-09T13:00:00.000Z");
+      expect(wake.inboxMediaRetentionWakeAt).toBe(wake.nextWakeAt);
       const target = restart ? await restorePhotoCheckpoint(f.archive()) : vaultRoot;
       expect((await readHostedMediaReferenceCatalogue({ vaultRoot: target })).entries.every(entry => entry.retirementPending)).toBe(true);
-      const publication = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot: target, mediaStore: f.store.mediaStore });
-      expect(publication.prunedMediaCount).toBe(2);
+      vi.setSystemTime(new Date(wake.nextWakeAt!));
+      const idle = await runPhotoIdleMaintenance(target, f.store);
+      const cleanup = createPhotoCheckpointFixture(target, f.store);
+      await cleanup.checkpoint(idle);
       expect(f.store.bytes.size).toBe(0);
+      expect([...f.store.rows.values()].every(row => row.retired)).toBe(true);
       expect((await readHostedMediaReferenceCatalogue({ vaultRoot: target })).entries).toEqual([]);
+      expect(cleanup.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest).toMatchObject({
+        inboxMediaRetentionWakeAt: null, nextWakeAt: null, nextWakeReason: null,
+      });
     } finally { vi.useRealTimers(); }
   });
 
@@ -543,33 +554,32 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("a permanently stalled photo stops dedicated wakes after five attempts but stays inline and retryable on idle", async () => {
+  it.each(["put", "discovery"] as const)("a photo stalled at %s stops dedicated wakes across cold restores and uploads on ordinary idle", async stall => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
       vi.setSystemTime(new Date("2030-01-01T12:00:00.000Z"));
-      const vaultRoot = await createVaultRoot();
+      let vaultRoot = await createVaultRoot();
       await initializeVault({ vaultRoot, timezone: "UTC" });
       const sourcePath = path.join(path.dirname(vaultRoot), "photo.jpg"); await writeFile(sourcePath, "synthetic stalled photo");
       const measurement = await addMeasurement({ vaultRoot, attachments: [{ role: "media_1", sourcePath }],
         draft: { title: "Synthetic measurement", occurredAt: new Date().toISOString(), measurements: [{ metric: "weight", value: 70, unit: "kg" }] } });
       const photo = measurement.event.attachments![0]!.relativePath;
       vi.setSystemTime(new Date("2030-01-09T12:00:00.000Z"));
-      const f = createPhotoCheckpointFixture(vaultRoot);
+      let f = createPhotoCheckpointFixture(vaultRoot);
       await f.checkpoint();
-      for (let attempt = 1; attempt <= 6; attempt++) {
+      for (let attempt = 1; attempt <= 5; attempt++) {
         vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
         let started!: () => void;
         const reached = new Promise<void>(resolve => { started = resolve; });
-        f.store.hooks.before = async operation => { if (operation === "put") { started(); await new Promise(() => {}); } };
+        const discovery = stall === "discovery" ? vi.spyOn(core, "visitEventLedgerShardRecordsInterruptible")
+          .mockImplementation(async () => { started(); return await new Promise(() => {}); }) : null;
+        f.store.hooks.before = async operation => { if (stall === "put" && operation === "put") { started(); await new Promise(() => {}); } };
         const persistRetry = vi.fn(async () => {});
-        const running = runHostedIdleCheckpointMaintenance({ vaultRoot, credentialSource: "platform", memberId: "member_synthetic",
-          model: null, providerName: null, pendingWork: false, processingMode: "inbox_media_retention",
-          recordUsage: null, resolveAssistantSessionId: null, shutdownSignal: null, wakeSignal: null,
-          mealMedia: { mediaStore: f.store.mediaStore, budget: createHostedMealMediaBudget(), persistRetry } });
+        const running = runPhotoIdleMaintenance(vaultRoot, f.store, { persistRetry });
         await reached; await vi.advanceTimersByTimeAsync(2_000);
         const idle = await running;
+        discovery?.mockRestore();
         if (attempt >= 5) expect(idle.nextWakeAt).toBeUndefined();
-        if (attempt > 5) expect(persistRetry).not.toHaveBeenCalled();
         const now = Date.now(); vi.useRealTimers(); vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(now);
         const checkpoint = await f.checkpoint(idle);
         const request = f.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest;
@@ -583,8 +593,63 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         const restored = await restorePhotoCheckpoint(f.archive());
         expect((await readHostedMediaReferenceCatalogue({ vaultRoot: restored })).entries[0]).toMatchObject({ uploadAttempts: attempt, pendingUpload: true });
         expect(await readFile(path.join(restored, photo), "utf8")).toBe("synthetic stalled photo");
+        vaultRoot = restored;
+        f = createPhotoCheckpointFixture(vaultRoot, f.store);
       }
-      expect(f.store.calls.filter(call => call.operation === "put")).toHaveLength(6);
+      expect(f.store.calls.filter(call => call.operation === "put")).toHaveLength(stall === "put" ? 5 : 0);
+      f.store.hooks.before = undefined;
+      const persistRetry = vi.fn(async () => {});
+      const idle = await runPhotoIdleMaintenance(vaultRoot, f.store, { processingMode: "default", persistRetry });
+      expect(persistRetry).not.toHaveBeenCalled();
+      expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]).toMatchObject({ uploadAttempts: 6, pendingUpload: false });
+      expect([...f.store.bytes.values()].map(bytes => Buffer.from(bytes).toString())).toEqual(["synthetic stalled photo"]);
+      await f.checkpoint(idle);
+      expect(f.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest.nextWakeAt).toBeNull();
+      const restored = await restorePhotoCheckpoint(f.archive());
+      await expectMissing(path.join(restored, photo));
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("an identity error during maintenance stops dedicated wakes at the persisted attempt cap", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2030-01-01T12:00:00.000Z"));
+      const vaultRoot = await createVaultRoot();
+      await initializeVault({ vaultRoot, timezone: "UTC" });
+      const sourcePath = path.join(path.dirname(vaultRoot), "photo.jpg");
+      await writeFile(sourcePath, "synthetic identity photo");
+      const measurement = await addMeasurement({ vaultRoot, attachments: [{ role: "media_1", sourcePath }],
+        draft: { title: "Synthetic measurement", occurredAt: new Date().toISOString(), measurements: [{ metric: "weight", value: 70, unit: "kg" }] } });
+      const photo = measurement.event.attachments![0]!.relativePath;
+      vi.setSystemTime(new Date("2030-01-09T12:00:00.000Z"));
+      const f = createPhotoCheckpointFixture(vaultRoot);
+      await f.checkpoint();
+      const manifestPath = path.join(path.dirname(vaultRoot), "manifest.json");
+      await writeFile(manifestPath, '{"source":"synthetic"}');
+      await addMeasurement({ vaultRoot, draft: { id: measurement.event.id, title: "Synthetic measurement",
+        occurredAt: measurement.event.occurredAt, measurements: measurement.event.measurements },
+        attachments: [{ role: "source", sourcePath: manifestPath }] });
+      await expect(core.canonicalRawArtifactMatches({ vaultRoot,
+        ...(await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]!,
+      })).rejects.toMatchObject({ code: "RAW_MANIFEST_INVALID" });
+      for (let attempt = 1; attempt <= 6; attempt++) {
+        const reportRetentionIssue = vi.fn(async () => {});
+        const persistRetry = vi.fn(async () => {});
+        const idle = await runPhotoIdleMaintenance(vaultRoot, f.store, { reportRetentionIssue, persistRetry });
+        if (attempt < 5) {
+          expect(idle.nextWakeReason).toBe("inbox_media_retention");
+          expect(reportRetentionIssue).toHaveBeenCalledWith(expect.objectContaining({ stage: "meal_photos", outcome: "failed" }));
+        } else expect(idle.nextWakeAt).toBeUndefined();
+        if (attempt > 5) expect(persistRetry).not.toHaveBeenCalled();
+        await f.checkpoint(idle);
+        if (attempt >= 5) expect(f.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest).toMatchObject({
+          inboxMediaRetentionWakeAt: null, nextWakeAt: null, nextWakeReason: null,
+        });
+        const restored = await restorePhotoCheckpoint(f.archive());
+        expect((await readHostedMediaReferenceCatalogue({ vaultRoot: restored })).entries[0]).toMatchObject({ uploadAttempts: attempt, pendingUpload: true });
+        expect(await readFile(path.join(restored, photo), "utf8")).toBe("synthetic identity photo");
+      }
+      expect(f.store.calls).toEqual([]);
     } finally { vi.useRealTimers(); }
   });
 
@@ -3534,9 +3599,9 @@ async function deliverPendingMealMediaForTest(vaultRoot: string, mediaStore: Non
 
 // Exercise the real checkpoint inventory and bytes with a tar transport double;
 // only encryption and the remote snapshot service are replaced in these tests.
-function createPhotoCheckpointFixture(vaultRoot: string) {
+function createPhotoCheckpointFixture(vaultRoot: string, store = createMealMediaStore()) {
   const { calls, platform } = createRuntimePlatform();
-  const store = createMealMediaStore(); platform.mediaStore = store.mediaStore;
+  platform.mediaStore = store.mediaStore;
   const start = calls.startSnapshotSession.getMockImplementation()!;
   calls.startSnapshotSession.mockImplementation(async input => ({ ...await start(input),
     limits: { maxSinglePartEncryptedBytes: 10_000_000, warnEncryptedBytes: 10_000_000 } }));
@@ -3562,6 +3627,17 @@ function createPhotoCheckpointFixture(vaultRoot: string) {
       ...createCheckpointInput("idle_shutdown"), nextWakeAt: wake.nextWakeAt ?? null,
       nextWakeReason: wake.nextWakeReason ?? null, inboxMediaRetentionWakeAt: wake.nextWakeAt ?? null,
     }) };
+}
+function runPhotoIdleMaintenance(vaultRoot: string, store: ReturnType<typeof createMealMediaStore>, options: {
+  processingMode?: Parameters<typeof runHostedIdleCheckpointMaintenance>[0]["processingMode"];
+  persistRetry?: (retryAt: string, signal: AbortSignal) => Promise<void>;
+  reportRetentionIssue?: Parameters<typeof runHostedIdleCheckpointMaintenance>[0]["reportRetentionIssue"];
+} = {}) {
+  return runHostedIdleCheckpointMaintenance({ vaultRoot, credentialSource: "platform", memberId: "member_synthetic",
+    model: null, providerName: null, pendingWork: false, processingMode: options.processingMode ?? "inbox_media_retention",
+    recordUsage: null, resolveAssistantSessionId: null, shutdownSignal: null, wakeSignal: null,
+    reportRetentionIssue: options.reportRetentionIssue,
+    mealMedia: { mediaStore: store.mediaStore, budget: createHostedMealMediaBudget(), persistRetry: options.persistRetry ?? (async () => {}) } });
 }
 async function restorePhotoCheckpoint(archive: Buffer): Promise<string> {
   const vaultRoot = await createVaultRoot();

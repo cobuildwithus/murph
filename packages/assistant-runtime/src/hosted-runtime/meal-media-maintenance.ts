@@ -58,14 +58,18 @@ export async function runHostedMealMediaMaintenance(input: {
     const selected = [...eligible.filter(entry => entry.mediaId > cursor), ...eligible.filter(entry => entry.mediaId <= cursor)]
       .slice(0, input.budget.remaining);
     if (!selected.length) return result;
-    const holders = await step(() => readSelectedPhotoHolders(input.vaultRoot, selected, signal));
+    // Discovery consumes the same bounded allowance as delivery, including cold retries.
+    for (const entry of selected) {
+      input.budget.remaining -= 1;
+      await step(() => updateCatalogue(input.vaultRoot, entry, signal, "attempt"));
+    }
     if (pending.some(hostedPhotoNeedsRetry)) {
       await step(() => input.persistRetry(new Date(Date.now() + HOSTED_MEAL_MEDIA_RETRY_MS).toISOString(), signal));
     }
+    const holders = await step(() => readSelectedPhotoHolders(input.vaultRoot, selected, signal));
     for (const entry of selected) {
-      live();
-      input.budget.remaining -= 1;
-      await step(() => updateCatalogue(input.vaultRoot, entry, signal, "attempt"));
+      // Resume after the actual delivery head if it stalls partway through this batch.
+      await step(() => updateCatalogue(input.vaultRoot, entry, signal, "cursor"));
       try {
         const owner = inferRawAssetOwnerFromDirectory(path.posix.dirname(entry.relativePath));
         if (!owner) throw new Error("Invalid pending photo owner.");
@@ -154,7 +158,7 @@ async function readSelectedPhotoHolders(vaultRoot: string, entries: HostedMediaR
   return new Map([...latest].map(([id, entry]) => [id, entry.record]));
 }
 
-async function updateCatalogue(vaultRoot: string, entry: HostedMediaReference, signal: AbortSignal, action: "attempt" | "delivered" | "retired") {
+async function updateCatalogue(vaultRoot: string, entry: HostedMediaReference, signal: AbortSignal, action: "attempt" | "cursor" | "delivered" | "retired") {
   await withCanonicalWriteLock(vaultRoot, async () => {
     signal.throwIfAborted();
     const catalogue = await readHostedMediaReferenceCatalogue({ vaultRoot });
@@ -165,6 +169,7 @@ async function updateCatalogue(vaultRoot: string, entry: HostedMediaReference, s
       catalogue.mealUploadCursor = entry.mediaId;
       current.uploadAttempts = (current.uploadAttempts ?? 0) + 1;
     }
+    else if (action === "cursor") catalogue.mealUploadCursor = entry.mediaId;
     else if (action === "delivered") current.pendingUpload = false;
     else catalogue.entries = catalogue.entries.filter(value => value !== current);
     await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue });
