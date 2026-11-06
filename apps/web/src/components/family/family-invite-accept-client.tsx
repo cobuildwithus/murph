@@ -28,7 +28,7 @@ const HOSTED_FAMILY_DRAFT_CONFLICT_MESSAGE =
   "You already have an unfinished Family setup. Resolve it in Settings, then you’ll return here to try this invite again.";
 
 export function FamilyInviteWebAcceptScreen(props: {
-  children: ReactNode;
+  children?: ReactNode;
   initialState?: FamilyInviteWebAcceptInitialState;
   inviteCode: string;
   secondaryActions?: ReactNode;
