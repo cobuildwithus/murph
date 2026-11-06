@@ -877,6 +877,11 @@ describe("hosted local dev stack", () => {
     );
     expect(runCommand).toHaveBeenCalledWith(
       "pnpm",
+      ["--dir", "apps/web", "exec", "prisma", "db", "push"],
+      expect.any(Object),
+    );
+    expect(runCommand).not.toHaveBeenCalledWith(
+      "pnpm",
       ["--dir", "apps/web", "exec", "prisma", "db", "push", "--accept-data-loss"],
       expect.any(Object),
     );
@@ -2702,7 +2707,6 @@ describe("hosted local dev stack", () => {
         "prisma",
         "db",
         "push",
-        "--accept-data-loss",
       ],
       expect.any(Object),
     );
@@ -3044,6 +3048,28 @@ describe("hosted local dev stack", () => {
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(3);
   });
 
+  it("retries a failed plain db push with --accept-data-loss", async () => {
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 111 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 112 }));
+    runCommand.mockImplementation(async (_command, args) => {
+      if (args.at(-1) === "push") {
+        throw new Error("Schema push requires accepting data loss.");
+      }
+    });
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+    const stack = await startHostedLocalDevStack({ env: process.env });
+    await stack.ready;
+    await stack.stop();
+
+    expect(runCommand.mock.calls.filter(([, args]) => args.includes("push"))
+      .map(([, args]) => args)).toEqual([
+      ["--dir", "apps/web", "exec", "prisma", "db", "push"],
+      ["--dir", "apps/web", "exec", "prisma", "db", "push", "--accept-data-loss"],
+    ]);
+  });
+
   it("uses prisma migrate deploy for non-local databases instead of forcing db push", async () => {
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 111 }))
@@ -3063,6 +3089,16 @@ describe("hosted local dev stack", () => {
     expect(runCommand).toHaveBeenCalledWith(
       "pnpm",
       ["--dir", "apps/web", "prisma:migrate:deploy"],
+      expect.any(Object),
+    );
+    expect(runCommand).not.toHaveBeenCalledWith(
+      "pnpm",
+      ["--dir", "apps/web", "exec", "prisma", "db", "push"],
+      expect.any(Object),
+    );
+    expect(runCommand).not.toHaveBeenCalledWith(
+      "pnpm",
+      ["--dir", "apps/web", "exec", "prisma", "db", "push", "--force-reset"],
       expect.any(Object),
     );
     expect(runCommand).not.toHaveBeenCalledWith(
@@ -3346,6 +3382,11 @@ describe("hosted local dev stack", () => {
     expect(runCommand).toHaveBeenCalledWith(
       "pnpm",
       ["--dir", "apps/web", "exec", "prisma", "db", "push", "--force-reset"],
+      expect.any(Object),
+    );
+    expect(runCommand).not.toHaveBeenCalledWith(
+      "pnpm",
+      ["--dir", "apps/web", "exec", "prisma", "db", "push"],
       expect.any(Object),
     );
     expect(runCommand).not.toHaveBeenCalledWith(

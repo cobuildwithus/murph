@@ -251,9 +251,11 @@ function createPrismaPool(input: CreatePrismaClientInput): PgPool {
   });
 
   // Only the backend's own status proves a connection left its transaction.
-  // Prisma's discarded transaction start releases one without SQL ROLLBACK, and
-  // an ordinary write on it would report success and then vanish. Closing the
-  // connection ends the transaction. pg-pool sets release on every checkout.
+  // Prisma sends ROLLBACK for a discarded start, then releases in a finally.
+  // A failed ROLLBACK or any other path can still return a connection inside a
+  // transaction, where a later write would report success and then vanish.
+  // Closing the connection ends the transaction. pg-pool sets release on
+  // every checkout.
   const closeOpenTransactionOnRelease = (client: PoolClient): PoolClient => {
     const release = client.release;
     client.release = (error) => {
