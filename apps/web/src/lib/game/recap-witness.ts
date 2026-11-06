@@ -75,17 +75,14 @@ export async function settleGameRecapGenerationTx(tx: Prisma.TransactionClient, 
   return entries;
 }
 
-/** A game_recap_retired receipt is terminal; game_blocked is terminal only for a pair because its room cannot be restored. Group blocks, block rows alone and other skip reasons remain uncertain. */
-export async function isGameRecapGenerationRetired(db: Prisma.TransactionClient, gameId: string, eventId: string, roomId: string): Promise<boolean> {
+/** Retired or block-skipped receipts are terminal, including older detached group work. A block row alone remains temporary. */
+export async function isGameRecapGenerationRetired(db: Prisma.TransactionClient, eventId: string, roomId: string): Promise<boolean> {
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(eventId);
   if (!idempotencyKey) return false;
-  const receipt = await db.hostedLinqDelivery.findFirst({ where: {
+  return Boolean(await db.hostedLinqDelivery.findFirst({ where: {
     idempotencyKey, source: "game_lifecycle", template: "game_recap", status: "skipped", payloadOwnerMemberId: roomId,
-  }, select: { skipReason: true } });
-  if (receipt?.skipReason === GAME_RECAP_RETIRED) return true;
-  if (receipt?.skipReason !== GAME_CHAT_BLOCKED) return false;
-  const game = await db.game.findUnique({ where: { id: gameId }, select: { maxPlayers: true } });
-  return game?.maxPlayers === 2;
+    skipReason: { in: [GAME_RECAP_RETIRED, GAME_CHAT_BLOCKED] },
+  }, select: { skipReason: true } }));
 }
 
 export async function readLatestGameRecapEventIdTx(tx: Prisma.TransactionClient, gameId: string): Promise<string> {
