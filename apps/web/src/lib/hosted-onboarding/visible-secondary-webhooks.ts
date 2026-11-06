@@ -7,11 +7,13 @@ import {
 import type { HostedMember, PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
+import { sendHostedTelegramIncomingTargetReply } from "../hosted-execution/telegram-access-notice";
 import { sha256Hex } from "../primitives";
 import {
   HOSTED_STRIPE_EFFECT_PENDING_MESSAGE,
   HOSTED_STRIPE_EFFECT_PENDING_VISIBLE_REASON,
   isHostedOnboardingError,
+  hostedOnboardingError,
 } from "./errors";
 import {
   buildHostedFamilyDraftCheckoutConflictReplyText,
@@ -44,6 +46,7 @@ import {
 import { requireHostedOnboardingPublicBaseUrl } from "./runtime";
 import type { HostedOnboardingReadClient } from "./shared";
 import {
+  buildHostedTelegramWebhookEventId,
   parseHostedTelegramWebhookUpdate,
   summarizeHostedTelegramWebhook,
 } from "./telegram";
@@ -69,6 +72,7 @@ export type HostedVisibleSecondaryLinqDependencies = {
 };
 
 export type HostedVisibleSecondaryTelegramDependencies = {
+  getPrisma: typeof getPrisma;
   parseHostedTelegramWebhookUpdate: typeof parseHostedTelegramWebhookUpdate;
   requireHostedOnboardingPublicBaseUrl: typeof requireHostedOnboardingPublicBaseUrl;
   sendHostedTelegramTextMessage: typeof sendHostedTelegramTextMessage;
@@ -87,6 +91,7 @@ const defaultLinqDependencies: HostedVisibleSecondaryLinqDependencies = {
 };
 
 const defaultTelegramDependencies: HostedVisibleSecondaryTelegramDependencies = {
+  getPrisma,
   parseHostedTelegramWebhookUpdate,
   requireHostedOnboardingPublicBaseUrl,
   sendHostedTelegramTextMessage,
@@ -361,12 +366,26 @@ export function withHostedVisibleSecondaryTelegramOutcomes(
       return publicResponse;
     }
 
-    await dependencies.sendHostedTelegramTextMessage({
+    const prisma = input.prisma ?? dependencies.getPrisma();
+    const delivery = await sendHostedTelegramIncomingTargetReply({
       message: reply,
+      prisma,
       replyToMessageId: message.message_id,
+      send: dependencies.sendHostedTelegramTextMessage,
+      sourceEventId: buildHostedTelegramWebhookEventId(update),
       target: buildTelegramThreadTarget(message),
       ...(input.signal ? { signal: input.signal } : {}),
     });
+    if (delivery.status === "in_flight") {
+      throw hostedOnboardingError({
+        code: "HOSTED_TELEGRAM_VISIBLE_SECONDARY_RETRY",
+        details: { retryAt: delivery.retryAt.toISOString() },
+        httpStatus: 503,
+        message: "Hosted Telegram reply delivery is not complete.",
+        retryable: true,
+      });
+    }
+    if (delivery.status !== "sent" && delivery.status !== "already_notified") return publicResponse;
 
     return buildVisibleSecondaryResponse(publicResponse, reason);
   };

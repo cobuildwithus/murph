@@ -3,9 +3,10 @@ import {
 } from "@murphai/cloudflare-hosted-control/client";
 import {
   parseTelegramThreadTarget,
+  serializeTelegramThreadTarget,
   type TelegramThreadTarget,
 } from "@murphai/messaging-ingress/telegram-webhook";
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 
 import {
   claimHostedLinqDeliveryProviderDispatchTx,
@@ -240,14 +241,52 @@ async function sendHostedTelegramUnanchoredAccessNotice(input: {
     input: input.input,
     target: input.target,
   });
+  return sendHostedTelegramClaimedReply({
+    claim, idempotencyKey: input.idempotencyKey, message: input.input.message,
+    prisma: input.input.prisma, replyToMessageId: null,
+  });
+}
+
+export async function sendHostedTelegramIncomingTargetReply(input: {
+  message: string;
+  prisma: PrismaClient;
+  replyToMessageId: number | null;
+  send?: typeof sendHostedTelegramTextMessage;
+  signal?: AbortSignal;
+  sourceEventId: string;
+  target: TelegramThreadTarget;
+}): Promise<HostedTelegramAccessNoticeDeliveryResult> {
+  const idempotencyKey = `telegram-incoming-reply:${sha256Hex(JSON.stringify({
+    sourceEventId: input.sourceEventId,
+    target: serializeTelegramThreadTarget(input.target),
+  })).slice(0, 32)}`;
+  // The authenticated incoming target is the authority; no member binding is needed.
+  const claim = await input.prisma.$transaction(prisma => claimHostedTelegramNoticeDispatchTx({
+    attemptedAt: new Date(), idempotencyKey, prisma, sourceEventId: input.sourceEventId,
+    target: input.target, template: "telegram_incoming_reply",
+  }));
+  return sendHostedTelegramClaimedReply({ ...input, claim, idempotencyKey });
+}
+
+async function sendHostedTelegramClaimedReply(input: {
+  claim: HostedTelegramAccessNoticeDispatchClaim;
+  idempotencyKey: string;
+  message: string;
+  prisma: PrismaClient;
+  replyToMessageId: number | null;
+  send?: typeof sendHostedTelegramTextMessage;
+  signal?: AbortSignal;
+}): Promise<HostedTelegramAccessNoticeDeliveryResult> {
+  const { claim } = input;
   if (claim.status !== "claimed") {
     return claim;
   }
 
   try {
-    await sendHostedTelegramTextMessage({
-      message: input.input.message,
-      replyToMessageId: null,
+    await (input.send ?? sendHostedTelegramTextMessage)({
+      message: input.message,
+      replyToMessageId: input.replyToMessageId,
+      ...(input.signal ? { signal: input.signal } : {}),
       target: claim.target,
     });
   } catch (error) {
@@ -260,7 +299,7 @@ async function sendHostedTelegramUnanchoredAccessNotice(input: {
         failureCode: error.code,
         failureReason: error.message,
         idempotencyKey: input.idempotencyKey,
-        prisma: input.input.prisma,
+        prisma: input.prisma,
       });
     }
 
@@ -274,7 +313,7 @@ async function sendHostedTelegramUnanchoredAccessNotice(input: {
         failureCode: error.code,
         failureReason: error.message,
         idempotencyKey: input.idempotencyKey,
-        prisma: input.input.prisma,
+        prisma: input.prisma,
         retryAfterSeconds: readHostedTelegramRetryAfterSeconds(error),
       });
     }
@@ -284,30 +323,29 @@ async function sendHostedTelegramUnanchoredAccessNotice(input: {
       && error.code === HOSTED_TELEGRAM_API_RESPONSE_REJECTED_CODE
       && isHostedTelegramPermanentResponseRejection(error)
     ) {
-      // Telegram permanently rejected the request, so the private message
-      // definitely did not land. Preserve the terminal provider-effect record
-      // and let the webhook adapter use its account-neutral room fallback.
+      // Preserve definite rejection so the caller can finish the inbound or
+      // choose its existing account-neutral recovery response.
       await markHostedLinqDeliverySendFailedTx({
         expectedAttemptedAt: claim.attemptedAt,
         failedAt: claim.attemptedAt,
         failureCode: HOSTED_TELEGRAM_ACCESS_NOTICE_DEFINITE_FAILURE_CODE,
         failureReason: error.message,
         idempotencyKey: input.idempotencyKey,
-        prisma: input.input.prisma,
+        prisma: input.prisma,
       });
       return { status: "definite_failure" };
     }
 
     // A direct Bot API request that throws after dispatch may already have
     // reached Telegram. Terminalize the exact event instead of risking a second
-    // private recovery message on webhook replay.
+    // reply on webhook replay.
     await markHostedLinqDeliverySendFailedTx({
       expectedAttemptedAt: claim.attemptedAt,
       failedAt: claim.attemptedAt,
       failureCode: readHostedTelegramAccessNoticeFailureCode(error),
       failureReason: error instanceof Error ? error.message : null,
       idempotencyKey: input.idempotencyKey,
-      prisma: input.input.prisma,
+      prisma: input.prisma,
     });
     return { status: "already_notified" };
   }
@@ -315,7 +353,7 @@ async function sendHostedTelegramUnanchoredAccessNotice(input: {
   await markHostedLinqDeliveryAcceptedTx({
     acceptedAt: claim.attemptedAt,
     idempotencyKey: input.idempotencyKey,
-    prisma: input.input.prisma,
+    prisma: input.prisma,
   });
   return { status: "sent" };
 }
@@ -346,46 +384,47 @@ async function claimHostedTelegramAccessNoticeDispatch(input: {
         return { status: "not_applicable" };
       }
 
-      const delivery = await claimHostedLinqDeliveryProviderDispatchTx({
-        attemptedAt,
-        idempotencyKey: input.idempotencyKey,
-        prisma: tx,
-        reclaimStalePreProviderAttempt: true,
-        returnExistingFailureCode: true,
-        source: HOSTED_TELEGRAM_NOTICE_DELIVERY_SOURCE,
-        sourceRef: input.input.sourceEventId,
-        status: "provider_dispatch_started",
-        targetKind: "telegram_thread",
-        template: HOSTED_TELEGRAM_ACCESS_NOTICE_TEMPLATE,
+      return claimHostedTelegramNoticeDispatchTx({
+        attemptedAt, idempotencyKey: input.idempotencyKey, prisma: tx,
+        sourceEventId: input.input.sourceEventId, template: HOSTED_TELEGRAM_ACCESS_NOTICE_TEMPLATE,
+        target: resolveHostedTelegramAccessNoticeDispatchTarget({
+          authorizedTelegramUserId: input.input.authorizedTelegramUserId,
+          currentInboundSenderStillAuthorized,
+          fallbackTarget: input.target,
+          replyToMessageId: input.input.replyToMessageId,
+          routingTelegramThreadId: routing?.telegramThreadId ?? null,
+        }),
       });
-      if (delivery.claimed) {
-        return {
-          attemptedAt,
-          status: "claimed",
-          target: resolveHostedTelegramAccessNoticeDispatchTarget({
-            authorizedTelegramUserId: input.input.authorizedTelegramUserId,
-            currentInboundSenderStillAuthorized,
-            fallbackTarget: input.target,
-            replyToMessageId: input.input.replyToMessageId,
-            routingTelegramThreadId: routing?.telegramThreadId ?? null,
-          }),
-        };
-      }
-      if (delivery.retryAt) {
-        return {
-          retryAt: delivery.retryAt,
-          status: "in_flight",
-        };
-      }
-      if (
-        delivery.failureCode
-        === HOSTED_TELEGRAM_ACCESS_NOTICE_DEFINITE_FAILURE_CODE
-      ) {
-        return { status: "definite_failure" };
-      }
-      return { status: "already_notified" };
     },
   );
+}
+
+async function claimHostedTelegramNoticeDispatchTx(input: {
+  attemptedAt: Date;
+  idempotencyKey: string;
+  prisma: Prisma.TransactionClient;
+  sourceEventId: string;
+  target: TelegramThreadTarget;
+  template: string;
+}): Promise<HostedTelegramAccessNoticeDispatchClaim> {
+  const delivery = await claimHostedLinqDeliveryProviderDispatchTx({
+    attemptedAt: input.attemptedAt,
+    idempotencyKey: input.idempotencyKey,
+    prisma: input.prisma,
+    reclaimStalePreProviderAttempt: true,
+    returnExistingFailureCode: true,
+    source: HOSTED_TELEGRAM_NOTICE_DELIVERY_SOURCE,
+    sourceRef: input.sourceEventId,
+    status: "provider_dispatch_started",
+    targetKind: "telegram_thread",
+    template: input.template,
+  });
+  if (delivery.claimed) return { attemptedAt: input.attemptedAt, status: "claimed", target: input.target };
+  if (delivery.retryAt) return { retryAt: delivery.retryAt, status: "in_flight" };
+  if (delivery.failureCode === HOSTED_TELEGRAM_ACCESS_NOTICE_DEFINITE_FAILURE_CODE) {
+    return { status: "definite_failure" };
+  }
+  return { status: "already_notified" };
 }
 
 function resolveHostedTelegramAccessNoticeDispatchTarget(input: {

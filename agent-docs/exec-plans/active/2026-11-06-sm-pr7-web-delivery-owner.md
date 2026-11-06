@@ -63,7 +63,9 @@ Updated: 2026-11-06
 - Focused first-turn, planner and delivery-store unit proofs passed. Activation
   fixtures and runtime egress coverage passed in the focused six-file run
   (313 tests, exit 0).
-- Typecheck is reserved for the end of all three parts, per task constraints.
+- The single end-of-task typecheck exited 2 on five fixture typing errors.
+  Those fixtures were corrected and focused tests passed; typecheck was not
+  repeated under the task's one-run limit.
 - The plan remains active. No push, CI or remote review is part of this local task.
 
 - Signup suppression now commits within the delivery owner. Transport retains
@@ -77,3 +79,7 @@ Updated: 2026-11-06
   5 passed. The unrelated 20,000-row index fixture was excluded by name.
 - The raw privacy unit command initially lacked the generated changelog module;
   the existing `pnpm --dir apps/web changelog:generate` completed with exit 0.
+- Telegram secondary replies now use a durable incoming-event/target claim
+  without member lookup. Focused Telegram units: 115 passed; PostgreSQL: 7 passed.
+- Complexity passes for all 14 changed source files. The planner reuses its
+  existing model-admission predicate instead of repeating the condition.
