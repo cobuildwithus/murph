@@ -731,10 +731,14 @@ direct-Starter gate is fully exhausted again.
   interrupted before that barrier for explicitly revoked members with a non-idle
   owner or retained target, without normal processing eligibility, through the
   same reconciliation. Every member renewal surface waits behind the earlier stop
-  before committing a new grant. Cleanup failure cannot restore authority, while
-  an absent legacy grant is not reinterpreted as withdrawal. Settings,
-  latest-available export, and account deletion remain available; renewed consent
-  is the only processing restore path.
+  before committing a new grant. The tick redrives clinical, device and
+  meal-photo cleanup last, selecting up to 8 members with revocation at least
+  an hour old and remaining cleanup state; device residue must also be an hour
+  old. Each cleanup step rereads consent, and repeated clinical cleanup
+  preserves the original disconnect fence. Cleanup failure cannot restore
+  authority, while an absent legacy grant is not reinterpreted as withdrawal.
+  Settings, latest-available export, and account deletion remain available;
+  renewed consent is the only processing restore path.
 - The Cloudflare Worker that can retain an exact user-control stop target after
   clearing write authority is a hard rollback floor after the first such row is
   written. Withdrawal and account deletion must consume that same persisted

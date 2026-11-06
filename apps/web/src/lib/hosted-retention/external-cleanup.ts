@@ -10,11 +10,12 @@ import {
   type HostedAccountDeletionCleanupBatchResult,
 } from "../hosted-privacy/account-deletion-cleanup";
 import { runHostedRuntimeResourceCleanup } from "../hosted-execution/runtime-resource-cleanup";
-import { redriveHostedHealthDataConsentStops } from "../hosted-privacy/health-data-consent-withdrawal";
+import { redriveHostedHealthDataConsentCleanups, redriveHostedHealthDataConsentStops } from "../hosted-privacy/health-data-consent-withdrawal";
 import { normalizeHostedRetentionDate } from "./cleanup";
 
 export interface HostedExternalRetentionCleanupResult {
   healthDataConsentStopRedrive: Awaited<ReturnType<typeof redriveHostedHealthDataConsentStops>>;
+  healthDataConsentCleanupRedrive: Awaited<ReturnType<typeof redriveHostedHealthDataConsentCleanups>>;
   accountDeletionCleanup: HostedAccountDeletionCleanupBatchResult;
   runtimeResourceCleanup: Awaited<ReturnType<typeof runHostedRuntimeResourceCleanup>>;
   expiredComputerRunsCleanedUp: number;
@@ -23,7 +24,8 @@ export interface HostedExternalRetentionCleanupResult {
 export async function runHostedExternalRetentionCleanup(input: {
   now?: Date | string;
   prisma?: PrismaClient;
-} = {}): Promise<HostedExternalRetentionCleanupResult> {
+  request: Request;
+}): Promise<HostedExternalRetentionCleanupResult> {
   const prisma = input.prisma ?? getPrisma();
   const healthDataConsentStopRedrive = await redriveHostedHealthDataConsentStops({ prisma });
   const now = normalizeHostedRetentionDate(input.now ?? new Date());
@@ -37,9 +39,11 @@ export async function runHostedExternalRetentionCleanup(input: {
   }).cleanupExpiredRuns({ now }).then((result) => result.expiredRuns);
 
   const runtimeResourceCleanup = await runHostedRuntimeResourceCleanup({ now, prisma });
+  const healthDataConsentCleanupRedrive = await redriveHostedHealthDataConsentCleanups({ now, prisma, request: input.request });
 
   return {
     healthDataConsentStopRedrive,
+    healthDataConsentCleanupRedrive,
     runtimeResourceCleanup,
     accountDeletionCleanup,
     expiredComputerRunsCleanedUp,

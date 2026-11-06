@@ -638,7 +638,7 @@ export class HostedDeviceSyncPublicIngressService {
     return this.completeGoogleHealthFitbitMigration(userId, connection.id);
   }
 
-  async disconnectAllConnections(userId: string): Promise<{
+  async disconnectAllConnections(userId: string, retryBefore?: Date): Promise<{
     attemptedCount: number;
     disconnectedCount: number;
     failedCount: number;
@@ -649,6 +649,7 @@ export class HostedDeviceSyncPublicIngressService {
     let failedCount = 0;
 
     for (const connection of connections) {
+      if (retryBefore && new Date(connection.updatedAt) > retryBefore) continue;
       if (await readHostedHealthDataConsentState({
         memberId: userId,
         prisma: this.context.store.prisma,
@@ -754,8 +755,9 @@ export function createHostedDeviceSyncPublicIngressService(
 
 export async function disconnectAllHostedDeviceSyncConnectionsForUser(input: {
   request: Request;
+  retryBefore?: Date;
   userId: string;
 }) {
   return createHostedDeviceSyncPublicIngressService(input.request)
-    .disconnectAllConnections(input.userId);
+    .disconnectAllConnections(input.userId, input.retryBefore);
 }

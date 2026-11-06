@@ -452,8 +452,10 @@ Current product admission, delivery and native runtime safety rules remain.
   owner or retained target, without normal processing eligibility. Every member
   renewal surface waits behind the earlier stop before committing its new grant;
   hosted Web renewal then signals the existing Temporal workflow. Best-effort
-  provider cleanup failures are secret-safe, do not roll back the grant, and may
-  be retried idempotently by repeating withdrawal.
+  provider cleanup failures are secret-safe and do not roll back the grant. The
+  external retention tick redrives remaining clinical, device and meal-photo
+  cleanup after revocation is an hour old; device residue is eligible an hour
+  after its last update. Repeating withdrawal also retries cleanup idempotently.
   Webhooks finalize an already-claimed trace without appending dirty work;
   scheduled selection and wake admission both exclude explicit revocation; and
   queued model work rechecks authority before usage is consumed. Renewal is a

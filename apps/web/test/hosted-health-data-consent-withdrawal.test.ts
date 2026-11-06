@@ -94,7 +94,7 @@ describe("cleanupWithdrawnHostedHealthDataConsent", () => {
       request: new Request("https://app.example.test/api/legal/consent/revoke") });
     expect(mocks.lockMember).toHaveBeenCalledTimes(1);
     expect(mocks.lockMember.mock.invocationCallOrder[0]).toBeLessThan(mocks.readHostedHealthDataConsentState.mock.invocationCallOrder[0]!);
-    expect(mocks.connections).toHaveBeenCalledWith({ where: { memberId: "member_123" },
+    expect(mocks.connections).toHaveBeenCalledWith({ where: { memberId: "member_123", status: { not: "disconnected" } },
       data: { accessTokenEncrypted: null, accessTokenExpiresAt: null, patientIdEncrypted: null,
         refreshTokenEncrypted: null, refreshLeaseId: null, refreshLeaseExpiresAt: null, nextSyncAt: null, disconnectedAt: expect.any(Date), status: "disconnected" } });
     expect(mocks.runs).toHaveBeenCalledWith({ where: { memberId: "member_123", OR: [{ completedAt: null },

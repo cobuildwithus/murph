@@ -552,7 +552,12 @@ Account deletion and expired-computer cleanup share this cron and keep their
 existing due-time, lease, state-claim and retry guards. Consent stop redrive runs
 first, selecting up to 8 explicitly revoked members with a non-idle owner or
 retained target for the same signed reconciliation, without normal processing
-eligibility. The offset avoids other retention jobs' nominal start minutes;
+eligibility. Consent cleanup redrive runs last, selecting up to 8 revoked
+members with remaining clinical, device or meal-photo cleanup state after one
+hour; device residue must also have gone an hour without an update. Each
+cleanup step rereads consent. Sustained positive `healthDataConsentCleanupRedrive.selected`
+counts and existing cleanup error codes identify unresolved cleanup.
+The offset avoids other retention jobs' nominal start minutes;
 it does not serialize invocations.
 [Vercel cron concurrency](https://vercel.com/docs/cron-jobs/manage-cron-jobs)
 and the existing exact-target/idempotent deletion contracts still apply.

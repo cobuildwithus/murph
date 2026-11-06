@@ -1462,7 +1462,8 @@ Callback auth contract:
   `/api/internal/hosted-execution/retention/control-plane/cron` at minute 20
   for ordinary primary-database cleanup,
   `/api/internal/hosted-execution/retention/external/cron` every five minutes
-  starting at minute 2 for account, computer and runtime resource cleanup, and
+  starting at minute 2 for consent stop redrive, account, computer and runtime
+  resource cleanup, then consent cleanup redrive after the one-hour grace, and
   `/api/internal/hosted-execution/retention/runtime/cron` at minute 50 for
   runtime signals followed by best-effort isolated diagnostic-log cleanup. Each has a 300-second
   duration; none invokes the nonce owner

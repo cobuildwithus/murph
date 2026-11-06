@@ -21,6 +21,11 @@ import {
 } from "../legal/consent";
 
 const CONSENT_STOP_REDRIVE_BATCH_SIZE = 8;
+const CONSENT_CLEANUP_REDRIVE_BATCH_SIZE = 8;
+// The withdrawal route's own cleanup gets the first hour. A settled provider
+// attempt updates its connection and a failed revoke writes a signal and a wake,
+// so the same cutoff spaces each connection's retries.
+const CONSENT_CLEANUP_RETRY_MS = 60 * 60 * 1000;
 
 /** Selection only nominates: signed reconciliation rereads consent and ownership,
  * so a regrant or replaced owner makes the old stop a no-op. */
@@ -43,6 +48,51 @@ export async function redriveHostedHealthDataConsentStops(input: {
     reconcileHostedHealthDataRuntimeConsent({ client, memberId })));
   const reconciled = results.filter(result => result.status === "fulfilled").length;
   return { configured: true, reconciled, failed: results.length - reconciled };
+}
+
+/** Selection only nominates: each cleanup step rereads consent, so a regrant
+ * makes the old cleanup a no-op. */
+export async function redriveHostedHealthDataConsentCleanups(input: {
+  now: Date;
+  prisma: PrismaClient;
+  request: Request;
+}): Promise<{ selected: number }> {
+  const retryBefore = new Date(input.now.getTime() - CONSENT_CLEANUP_RETRY_MS);
+  const candidates = await input.prisma.$queryRaw<Array<{ memberId: string }>>`
+    SELECT consent.member_id AS "memberId"
+    FROM hosted_consent_grant AS consent
+    WHERE consent.scope = ${HOSTED_HEALTH_DATA_CONSENT_SCOPE} AND consent.status = 'revoked'
+      AND consent.revoked_at <= ${retryBefore}
+      AND (
+        EXISTS (
+          SELECT 1 FROM device_connection AS connection
+          WHERE connection.user_id = consent.member_id
+            AND (connection.status <> 'disconnected' OR connection.credential_kind <> 'none')
+            AND connection.updated_at <= ${retryBefore}
+        ) OR EXISTS (
+          SELECT 1 FROM clinical_record_connection AS connection
+          WHERE connection.member_id = consent.member_id AND connection.status <> 'disconnected'
+        ) OR EXISTS (
+          SELECT 1 FROM clinical_record_retrieval_run AS run
+          WHERE run.member_id = consent.member_id
+            AND (run.completed_at IS NULL OR (run.status = 'needs_reauth' AND run.outcome_counts_json IS NULL))
+        ) OR EXISTS (
+          SELECT 1 FROM clinical_record_oauth_session AS session
+          WHERE session.member_id = consent.member_id
+        ) OR EXISTS (
+          SELECT 1 FROM clinical_record_connect_intent AS intent
+          WHERE intent.member_id = consent.member_id
+        ) OR EXISTS (
+          SELECT 1 FROM hosted_meal_photo_capture_enrollment AS enrollment
+          WHERE enrollment.member_id = consent.member_id AND enrollment.revoked_at IS NULL
+        )
+      )
+    ORDER BY random()
+    LIMIT ${CONSENT_CLEANUP_REDRIVE_BATCH_SIZE}
+  `;
+  await Promise.all(candidates.map(({ memberId }) =>
+    cleanupWithdrawnHostedHealthDataConsent({ memberId, prisma: input.prisma, request: input.request, retryBefore })));
+  return { selected: candidates.length };
 }
 
 export async function withdrawHostedHealthDataConsent(input: {
@@ -81,6 +131,7 @@ export async function cleanupWithdrawnHostedHealthDataConsent(input: {
   memberId: string;
   prisma: PrismaClient;
   request: Request;
+  retryBefore?: Date;
 }): Promise<void> {
   await runWithdrawalCleanup("clinical records", async () => {
     await input.prisma.$transaction(async (tx) => {
@@ -88,7 +139,7 @@ export async function cleanupWithdrawnHostedHealthDataConsent(input: {
       if (await readHostedHealthDataConsentState({ memberId: input.memberId, prisma: tx }) !== "revoked") return;
       const now = new Date();
       await tx.clinicalRecordConnection.updateMany({
-        where: { memberId: input.memberId },
+        where: { memberId: input.memberId, status: { not: "disconnected" } },
         data: {
           ...CLEAR_CLINICAL_PERSISTENT_ACCESS,
           accessTokenEncrypted: null,
@@ -115,6 +166,7 @@ export async function cleanupWithdrawnHostedHealthDataConsent(input: {
   await runWithdrawalCleanup("device connections", async () => {
     await disconnectAllHostedDeviceSyncConnectionsForUser({
       request: input.request,
+      retryBefore: input.retryBefore,
       userId: input.memberId,
     });
   });
