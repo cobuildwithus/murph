@@ -1878,3 +1878,6 @@ Changelog deletion evidence is owned by `../apps/web/changelog/README.md`; [veri
 Canonical publication uncertainty and operational receipt replay proof are tracked in
 [`canonical evidence preservation`](exec-plans/completed/2026-11-06-preserve-canonical-evidence.md).
 The durable contract remains in `references/hosted-runtime-protocol.md`.
+
+Hosted delivery uncertainty, accepted confirmation, approval consume retries, and
+accounting deadline proofs are recorded in the [delivery settlement execution record](exec-plans/completed/2026-11-06-delivery-settlement.md).

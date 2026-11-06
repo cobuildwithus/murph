@@ -65,6 +65,7 @@ import {
   assistantDeliveryErrorPreventsFreshIntentRetry,
   createAssistantDeliveryAmbiguousError,
   createAssistantDeliveryConfirmationPendingError,
+  errorImpliesAssistantDeliveryMayHaveSucceeded,
   isAssistantOutboxRetryBudgetExhausted,
   isAssistantOutboxRetryableError,
   normalizeAssistantDeliveryError,
@@ -90,7 +91,6 @@ import {
 import {
   buildAssistantOutboxIntentMirrorState,
   buildAssistantDeliveryIdempotencyKey,
-  errorImpliesAssistantDeliveryMayHaveSucceeded,
   markAssistantOutboxIntentMirrorRetryable,
   markAssistantOutboxIntentMirrorSending,
   markAssistantOutboxIntentMirrorSendingPrepared,
@@ -1446,13 +1446,27 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
   }
 }
 
+function assistantOutboxIntentIntrinsicallyRequiresTerminalConfirmation(intent: AssistantOutboxIntent): boolean {
+  return (intent.threadIsDirect === true && containsNutritionGoalInvitation(intent.message)) ||
+    intent.followUpRequest !== undefined
+}
+
+export function assistantOutboxAcceptedDeliveryRequiresConfirmation(
+  intent: AssistantOutboxIntent,
+  hostRequiresConfirmation = false,
+): boolean {
+  return intent.deliveryConfirmationPending
+    && intent.delivery !== null
+    && (hostRequiresConfirmation || assistantOutboxIntentIntrinsicallyRequiresTerminalConfirmation(intent))
+}
+
 function assistantOutboxIntentRequiresTerminalConfirmation(input: {
   dispatchHooks: AssistantOutboxDispatchHooks | undefined
   intent: AssistantOutboxIntent
   vault: string
 }): boolean {
-  return (input.intent.threadIsDirect === true && containsNutritionGoalInvitation(input.intent.message)) ||
-    input.intent.followUpRequest !== undefined || (input.dispatchHooks?.confirmTerminalIntent !== undefined &&
+  return assistantOutboxIntentIntrinsicallyRequiresTerminalConfirmation(input.intent) ||
+    (input.dispatchHooks?.confirmTerminalIntent !== undefined &&
     input.dispatchHooks.requiresTerminalConfirmation?.({
       intent: input.intent,
       vault: input.vault,
@@ -2555,7 +2569,7 @@ export async function markAssistantOutboxMessageVolumeReceiptRecorded(input: {
       sanitizeAssistantOutboxIntentForPersistence({
         ...current,
         messageVolumeReceiptRecordedAt: input.recordedAt,
-        nextAttemptAt: null,
+        nextAttemptAt: current.deliveryConfirmationPending ? current.nextAttemptAt : null,
       }),
     )
     await writeJsonFileAtomic(
@@ -2584,6 +2598,7 @@ export async function rescheduleAssistantOutboxMessageVolumeReceipt(input: {
     if (
       !current ||
       current.dedupeKey !== input.dedupeKey ||
+      current.deliveryConfirmationPending ||
       !hasPendingAssistantOutboxMessageVolumeReceipt(current)
     ) {
       return current

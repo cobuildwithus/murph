@@ -438,15 +438,29 @@ export function createCloudflareEffectsPort(input: {
         }
       : {}),
     async sendEmail(request) {
+      let headers: Headers;
+      try {
+        headers = await requireHostedEffectsRuntimeWriteFenceHeaders({
+          description: "Hosted email send",
+          workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+        });
+      } catch (error) {
+        throw Object.assign(
+          error instanceof Error
+            ? error
+            : new Error("Hosted email write fence is unavailable.", { cause: error }),
+          {
+            deliveryMayHaveSucceeded: false,
+            retryable: true,
+          },
+        );
+      }
       const payload = await fetchHostedProviderEffectJson({
         body: request,
         boundedResponseBody: true,
         description: "Hosted email send",
         fetchImpl: input.fetchImpl,
-        headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
-          description: "Hosted email send",
-          workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
-        }),
+        headers,
         timeoutMs: input.timeoutMs,
         url: new URL(
           HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,

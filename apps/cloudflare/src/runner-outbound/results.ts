@@ -221,6 +221,8 @@ async function handleRunnerEmailSendRequest(input: {
       env: input.env,
       request: input.request,
       userId: input.userId,
+    }).catch((error: unknown) => {
+      throw new HostedEmailPreProviderError(error);
     });
     if (!ownsWriteFence) {
       return json({

@@ -1,3 +1,5 @@
+import { isAssistantOutboxRetryableError } from "@murphai/assistant-engine/assistant-outbox";
+import { createHostedWebActionApprovalPort } from "../src/runtime-platform/action-approval-port.ts";
 import { HostedCanonicalWriteOutcomeUnknownError } from "@murphai/core";
 import { createCipheriv, createHash } from "node:crypto";
 import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
@@ -11377,6 +11379,46 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  it("marks a failed email fence read as pre-provider retryable", async () => {
+    const reason = new Error("Synthetic fence unavailable");
+    const fetchMock = vi.fn<typeof fetch>();
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123", fetchImpl: fetchMock,
+      workspaceCheckpointBridge: { readCurrentLease: () => { throw reason; } },
+    });
+    await expect(platform.effectsPort.sendEmail({ message: "Reply", target: "member@example.test", targetKind: "explicit" }))
+      .rejects.toMatchObject({ deliveryMayHaveSucceeded: false, retryable: true });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not invent pre-provider proof after losing an email response", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => { throw new Error("Synthetic connection reset"); });
+    const platform = buildTestHostedExecutionRuntimePlatform({ boundUserId: "member_123", fetchImpl: fetchMock });
+    const error = await platform.effectsPort.sendEmail({ message: "Reply", target: "member@example.test", targetKind: "explicit" }).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toHaveProperty("deliveryMayHaveSucceeded", false);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it.each(["reset", "stalled", "503", "409"] as const)("classifies the real approval consume transport: %s", async (failure) => {
+    let canceled = false;
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      if (failure === "reset") throw new Error("Synthetic connection reset");
+      if (failure === "stalled") return new Response(new ReadableStream<Uint8Array>({ cancel() { canceled = true; } }));
+      return Response.json({ error: "Synthetic approval failure" }, { status: Number(failure) });
+    });
+    const port = createHostedWebActionApprovalPort({ boundUserId: "member_synthetic", fetchImpl: fetchMock, timeoutMs: 25, transport: { mode: "proxy" } });
+    const error = await port.consume({
+      approvalGeneration: "b".repeat(64), consumerId: "assistant-outbox:synthetic-file",
+      request: { actionId: "synthetic-file", actionKind: "vault_file_send", actionFingerprint: "a".repeat(64),
+        presentation: { title: "Send file", body: "Synthetic approved file" }, returnContactKind: "telegram" },
+    }).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(Error);
+    expect(isAssistantOutboxRetryableError(error)).toBe(failure !== "409");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    if (failure === "stalled") expect(canceled).toBe(true);
+  });
+
   it("bounds and cancels stalled hosted email response bodies", async () => {
     let bodyCanceled = false;
     const fetchMock = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
@@ -11395,11 +11437,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       fetchImpl: fetchMock as typeof fetch,
     });
 
-    await expect(platform.effectsPort.sendEmail({
+    const error = await platform.effectsPort.sendEmail({
       message: "group reply",
       target: "hosted-group-recipient-target",
       targetKind: "thread",
-    })).rejects.toMatchObject({ name: "TimeoutError" });
+    }).catch((error: unknown) => error);
+    expect(error).toMatchObject({ name: "TimeoutError" });
+    expect(error).not.toHaveProperty("deliveryMayHaveSucceeded", false);
     expect(bodyCanceled).toBe(true);
     expect(fetchMock).toHaveBeenCalledOnce();
   });
