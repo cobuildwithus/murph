@@ -199,13 +199,44 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
       const responses = await Promise.all([actor, peer].map((token, index) => create(request(token, {
         gameId: gameIds[index], previousGameId, inviteeFirstName: "Friend", terms,
       }))));
-      const rematches = await Promise.all(responses.map(response => game(Promise.resolve(response))));
-      expect(rematches[0].id).toBe(rematches[1].id);
-      expect(gameIds).toContain(rematches[0].id);
+      expect(responses.map(response => response.status).sort()).toEqual([200, 409]);
+      const winner = responses.findIndex(response => response.status === 200);
+      const rematch = await game(Promise.resolve(responses[winner]));
+      expect(await responses[1 - winner].json()).toEqual({ error: { code: "ALREADY_IN_A_GAME",
+        message: "They already asked for a rematch. Read it first: pull down on Home to see it.", retryable: false } });
+      expect(rematch).toMatchObject({ id: gameIds[winner], status: "invited" });
       expect(await getPrisma().game.findMany({ where: { previousGameId }, select: { id: true, status: true } }))
-        .toEqual([{ id: rematches[0].id, status: "live" }]);
-      previousGameId = rematches[0].id;
+        .toEqual([{ id: rematch.id, status: "invited" }]);
+      expect(await game(accept(request([actor, peer][1 - winner], { termsVersion: rematch.terms.n, timeZone: "UTC" }),
+        { params: Promise.resolve({ token: rematch.inviteToken! }) }))).toMatchObject({ id: rematch.id, status: "live" });
+      previousGameId = rematch.id;
     }
+  });
+
+  it("refuses a second rematch ask and lets the phone read Home before accepting the offer", async () => {
+    const { actor, peer, id, context } = await livePair();
+    expect(await game(settle(request(actor), context))).toMatchObject({ id, status: "settled" });
+    const terms = {
+      lengthDays: 7, startsOn: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10),
+      tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Read" }],
+      schedule: { count: 3 }, stakes: [{ kind: "prize", item: "Lunch" }],
+    };
+    const offered = await game(create(request(actor, { gameId: randomUUID(), inviteeFirstName: "Partner", previousGameId: id, terms })));
+    expect(offered).toMatchObject({ previousGameId: id, status: "invited", lengthDays: 7 });
+    const refused = await create(request(peer, { gameId: randomUUID(), inviteeFirstName: "Player", previousGameId: id,
+      terms: { ...terms, lengthDays: 14 } }));
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toEqual({ error: { code: "ALREADY_IN_A_GAME",
+      message: "They already asked for a rematch. Read it first: pull down on Home to see it.", retryable: false } });
+    const response = await home(request(peer, undefined, "GET"));
+    expect(response.status).toBe(200);
+    const view: GameHomeView = await response.json();
+    const offer = view.games.find(candidate => candidate.previousGameId === id);
+    expect(offer).toMatchObject({ id: offered.id, status: "invited", inviteToken: offered.inviteToken, lengthDays: 7, terms: offered.terms });
+    expect(offer!.inviteToken).toEqual(expect.any(String));
+    expect(await game(accept(request(peer, { termsVersion: offer!.terms.n, timeZone: "UTC" }),
+      { params: Promise.resolve({ token: offer!.inviteToken! }) })))
+      .toMatchObject({ id: offered.id, status: "live", lengthDays: 7, terms: offered.terms });
   });
 
   it.each(["post", "setProfile", "watchRecap", "block", "unblock"] as const)("rejects %s revoked after admission without writing", async action => {

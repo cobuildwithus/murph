@@ -680,10 +680,13 @@ resulting avatar. No private photo is shared with the subject or other players.
   changes. It never creates or discovers a chat for a rematch, and it drops the
   notice if the rematch is no longer invited before delivery. Only that player
   can accept or negotiate it; anyone else holding the link is refused with
-  `NOT_A_PLAYER`. When both players ask for a rematch of the same game, the
-  second ask accepts the first on its terms. Otherwise it must follow the
-  same rematch chain: an open rematch of that game is refused with
-  `ALREADY_IN_A_GAME`, and a settled descendant makes it `REMATCH_OUTDATED`.
+  `NOT_A_PLAYER`. A rematch must follow the same chain: an open rematch of that
+  game is refused with `ALREADY_IN_A_GAME`, and a settled descendant makes it
+  `REMATCH_OUTDATED`. This includes the other player's open offer, whichever
+  ask arrived first and even on identical terms, because asking for a rematch
+  never agrees to one. The refused player reads the offer on Home and answers
+  with Shake on it or Suggest changes. Repeating your own create with the same
+  game id returns that game.
   Independent games and their rematches do not conflict. The pair's ten-open-game
   cap still applies, including to addressed rematches.
 - **Retries.** Every action is safe to repeat: creating a game with the same id,
