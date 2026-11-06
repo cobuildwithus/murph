@@ -29,9 +29,11 @@ vi.mock("server-only", () => ({}));
 const runId = Date.now();
 const laterMessageUserId = `member_local_first_turn_held_later_${runId}`;
 const loneMessageUserId = `member_local_first_turn_held_lone_${runId}`;
+const nativeReplyUserId = `member_local_first_turn_held_native_${runId}`;
 const linqApiToken = "linq-local-test-token";
 const linqWebhookSecret = "linq-local-first-turn-held-secret";
 const vetoCode = "HOSTED_LINQ_INSTANT_FIRST_TURN_OWNS_REPLY";
+const supersededCode = "HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED";
 
 let linqStub: HostedLocalLinqStub | null = null;
 let scenario: HostedLocalFullStackScenario | null = null;
@@ -46,7 +48,8 @@ describe("hosted local Linq held first turn e2e", () => {
         HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
         HOSTED_ONBOARDING_LINQ_INSTANT_START_PHONE_PREFIXES: "+155550",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
-          [laterMessageUserId, loneMessageUserId].map(buildLinqRecipientPhoneNumber).join(","),
+          [laterMessageUserId, loneMessageUserId, nativeReplyUserId]
+            .map(buildLinqRecipientPhoneNumber).join(","),
         LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
         LINQ_API_TOKEN: linqApiToken,
         LINQ_WEBHOOK_SECRET: linqWebhookSecret,
@@ -101,18 +104,75 @@ describe("hosted local Linq held first turn e2e", () => {
     // One turn covers both inputs, so the veto never spends a second model run.
     expect(listModelRuns(laterText)).toHaveLength(1);
     expect(listModelRuns(laterText)[0]?.body).toContain(heldText);
-    expect(await countVetoes(userId)).toBe(0);
+    expect(await countLogEntries(userId, vetoCode)).toBe(0);
 
-    // A replay of the held input still sends nothing.
+    // A replay of the held input is refused at its claim, before any send attempt.
+    const observedSends = requireLinqStub().countObservedSends(replyPath);
     const replay = await postSignedWebhook(buildInboundEvent({
       chatId, eventId: heldEventId, text: heldText, userId,
     }));
     expect(replay.status).toBe(503);
+    await expect(replay.json()).resolves.toMatchObject({
+      error: { details: { reason: "delivery-in-flight" } },
+    });
+    expect(requireLinqStub().countObservedSends(replyPath)).toBe(observedSends);
     expect(requireLinqStub().countAcceptedSends(replyPath)).toBe(sendBaseline + 1);
     await expect(readHeldRow({ eventId: heldEventId })).resolves.toMatchObject({
       acceptedAt: null,
       failureCode: "HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED",
       status: "failed",
+    });
+  }, 600_000);
+
+  it("ends a reply aimed at a held input when the later message runs in its own turn", async () => {
+    const userId = nativeReplyUserId;
+    const { chatId, replyPath } = await createActiveLinqMember(userId);
+    const heldEventId = `evt_first_turn_held_native_${runId}`;
+    const heldText = `Held message before a native reply ${runId}`;
+    const laterText = `Native reply after the held message ${runId}`;
+    const replyText = "One reply to the native reply.";
+
+    await seedHeldFirstMessage({ chatId, eventId: heldEventId, text: heldText, userId });
+    requireScenario().queueAssistantResponses(["This reply must not be sent."], {
+      matchInputContains: heldText,
+    });
+    requireScenario().queueAssistantResponses([replyText], { matchInputContains: laterText });
+    const sendBaseline = requireLinqStub().countAcceptedSends(replyPath);
+
+    // A different native reply anchor keeps the later message out of the held input's turn.
+    const later = await postSignedWebhook(buildHostedLinqInboundEvent(userId, chatId, {
+      eventId: `evt_first_turn_native_${runId}`,
+      messageId: `msg_evt_first_turn_native_${runId}`,
+      replyToMessageId: `msg_earlier_reply_${runId}`,
+      service: "iMessage",
+      text: laterText,
+    }));
+    expect(later.status).toBe(202);
+
+    const reply = await requireLinqStub().waitForAdditionalAcceptedSend({
+      baselineCount: sendBaseline,
+      expectedPath: replyPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(requireLinqStub().readObservedMessageText(reply)).toBe(replyText);
+    await requireScenario().waitForHostedCompletion(userId);
+
+    // The later turn's history can repeat the held text, so only the first run shows
+    // that the held input ran alone. Its reply must end without a send or a retry.
+    const firstHeldRun = listModelRuns(heldText)[0];
+    expect({
+      acceptedSends: requireLinqStub().countAcceptedSends(replyPath) - sendBaseline,
+      firstRunHeldAlone: firstHeldRun !== undefined && !firstHeldRun.body.includes(laterText),
+      laterRuns: listModelRuns(laterText).length,
+      supersededReplies: await countLogEntries(userId, supersededCode),
+      vetoes: await countLogEntries(userId, vetoCode),
+    }).toEqual({
+      acceptedSends: 1,
+      firstRunHeldAlone: true,
+      laterRuns: 1,
+      supersededReplies: 1,
+      vetoes: 0,
     });
   }, 600_000);
 
@@ -134,7 +194,7 @@ describe("hosted local Linq held first turn e2e", () => {
       mailboxItemId: append.wake.id,
     });
     await vi.waitFor(async () => {
-      expect(await countVetoes(userId)).toBeGreaterThan(0);
+      expect(await countLogEntries(userId, vetoCode)).toBeGreaterThan(0);
     }, { interval: 2_000, timeout: 240_000 });
 
     expect(listModelRuns(heldText).length).toBeGreaterThan(0);
@@ -243,13 +303,13 @@ function listModelRuns(text: string) {
   );
 }
 
-async function countVetoes(userId: string): Promise<number> {
+async function countLogEntries(userId: string, code: string): Promise<number> {
   const logs = await listHostedRuntimeLogsForTest({
     environment: requireScenario().runtimeEnv,
     limit: 1_500,
     userId,
   });
-  return logs.filter((entry) => entry.redactedJson?.errorCode === vetoCode).length;
+  return logs.filter((entry) => JSON.stringify(entry.redactedJson ?? {}).includes(code)).length;
 }
 
 function requireLinqStub(): HostedLocalLinqStub {
