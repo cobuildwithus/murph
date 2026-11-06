@@ -53,23 +53,26 @@ export async function runHostedMealMediaMaintenance(input: {
     const catalogue = await step(() => readHostedMediaReferenceCatalogue(input));
     const pending = catalogue.entries.filter(isHostedPendingMealMedia).sort((a, b) => a.mediaId.localeCompare(b.mediaId));
     result.pending = pending.length;
-    if (!pending.length || input.budget.remaining <= 0) return result;
-    input.budget.deadlineMs = deliveryDeadlineMs;
     const cursor = catalogue.mealUploadCursor ?? "";
     const eligible = pending.filter(entry => hostedPhotoIntentIsCommitted(input.vaultRoot, entry.mediaId));
     const selected = [...eligible.filter(entry => entry.mediaId > cursor), ...eligible.filter(entry => entry.mediaId <= cursor)]
-      .slice(0, input.budget.remaining);
+      .slice(0, Math.max(0, input.budget.remaining));
     if (!selected.length) return result;
+    input.budget.deadlineMs = deliveryDeadlineMs;
     // A fresh head pays for discovery or a stall; partial windows do not charge a new head.
-    const chargedHead = freshWindow ? selected[0] : undefined;
+    let chargedHead = freshWindow ? selected[0] : undefined;
     if (chargedHead) {
-      input.budget.remaining -= 1;
-      await step(() => updateCatalogue(input.vaultRoot, chargedHead, signal, "attempt"));
+      await step(() => updateCatalogue(input.vaultRoot, chargedHead!, signal, "attempt"));
     }
     if (pending.some(hostedPhotoNeedsRetry)) {
       await step(() => input.persistRetry(new Date(Date.now() + HOSTED_MEAL_MEDIA_RETRY_MS).toISOString(), signal));
     }
     const proven = await readSelectedPhotoTombstones(input.vaultRoot, selected, step);
+    // Cleanup gets the fresh window; keep rotation but refund the displaced head.
+    if (chargedHead && proven.size) {
+      await step(() => updateCatalogue(input.vaultRoot, chargedHead!, signal, "refund"));
+      chargedHead = undefined;
+    }
     let holders: Map<string, EventRecord> | undefined;
     const readHolder = async (entry: HostedMediaReference) => {
       const owner = inferRawAssetOwnerFromDirectory(path.posix.dirname(entry.relativePath));
@@ -79,7 +82,7 @@ export async function runHostedMealMediaMaintenance(input: {
       return holders.get(owner.id);
     };
     for (const entry of [...selected.filter(entry => proven.has(entry)), ...selected.filter(entry => !proven.has(entry))]) {
-      if (entry !== chargedHead) input.budget.remaining -= 1;
+      input.budget.remaining -= 1;
       try {
         const action = await settleEntry(entry, await readHolder(entry), input, signal, step);
         await step(() => updateCatalogue(input.vaultRoot, entry, signal, action));
@@ -92,7 +95,7 @@ export async function runHostedMealMediaMaintenance(input: {
         result.failure = error;
         // Owner loss is control flow, not a per-item media failure.
         if (!(error instanceof HostedRuntimeMediaWriteError)) throw error;
-        if (entry !== chargedHead) await step(() => updateCatalogue(input.vaultRoot, entry, signal, "attempt"));
+        if (entry !== chargedHead && !proven.has(entry)) await step(() => updateCatalogue(input.vaultRoot, entry, signal, "attempt"));
       }
     }
   } catch (error) {
@@ -178,7 +181,7 @@ async function readSelectedPhotoHolders(vaultRoot: string, entries: HostedMediaR
   return new Map([...latest].map(([id, entry]) => [id, entry.record]));
 }
 
-async function updateCatalogue(vaultRoot: string, entry: HostedMediaReference, signal: AbortSignal, action: "attempt" | "delivered" | "retired") {
+async function updateCatalogue(vaultRoot: string, entry: HostedMediaReference, signal: AbortSignal, action: "attempt" | "refund" | "delivered" | "retired") {
   await withCanonicalWriteLock(vaultRoot, async () => {
     signal.throwIfAborted();
     const catalogue = await readHostedMediaReferenceCatalogue({ vaultRoot });
@@ -189,6 +192,7 @@ async function updateCatalogue(vaultRoot: string, entry: HostedMediaReference, s
       catalogue.mealUploadCursor = entry.mediaId;
       current.uploadAttempts = (current.uploadAttempts ?? 0) + 1;
     }
+    else if (action === "refund") current.uploadAttempts = Math.max(0, (current.uploadAttempts ?? 0) - 1);
     else if (action === "delivered") current.pendingUpload = false;
     else catalogue.entries = catalogue.entries.filter(value => value !== current);
     await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue });

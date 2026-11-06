@@ -2605,9 +2605,12 @@ until the exact checkpoint is accepted; a rejected or ambiguous checkpoint does
 not release them. Cold restore derives eligibility from the committed catalogue.
 The accepted checkpoint retains an hourly idle retry while pending entries have
 fewer than five persisted `uploadAttempts`. Only the first selected entry of a
-fresh delivery window increments that counter with the cursor up front. Other
-entries are charged and rotate the cursor only after a recorded media write
-failure; timeout or unexpected failure leaves them first for the next pass.
+fresh delivery window increments that counter with the cursor up front, so
+stalled preparation pays. If classification proves any tombstone, cleanup owns
+the window: refund the head's attempt while preserving cursor progress. Other
+entries, including a refunded head, are charged and rotate the cursor only after
+a recorded media write failure; window cutoff costs them no attempt. Proven
+tombstone failures never charge an attempt or move the cursor.
 Proven canonical tombstones settle before lazy shared holder discovery, with
 pointer removal still requiring DELETE acknowledgement. Measurement paths and
 identity read doubt still require discovery. Exact-identity receipt replay

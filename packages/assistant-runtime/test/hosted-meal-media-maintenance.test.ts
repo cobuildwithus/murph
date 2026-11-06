@@ -352,3 +352,57 @@ test("a later slice of the same window does not charge a new head up front", asy
   expect((await f.catalogue()).entries.map(entry => entry.uploadAttempts ?? 0).sort()).toEqual([0, 0, 1]);
   expect(budget.remaining).toBe(6);
 });
+
+test("failed tombstone cleanup never rewinds the cursor or starves a healthy photo behind a stalled PUT", async () => {
+  const f = await fixture(3); await f.maintain();
+  const catalogue = await f.catalogue();
+  const [tombstone, stalled, healthy] = catalogue.entries.sort((a, b) => a.mediaId.localeCompare(b.mediaId));
+  const owner = core.inferRawAssetOwnerFromDirectory(path.posix.dirname(tombstone!.relativePath))!;
+  await deleteEvent({ vaultRoot: f.vaultRoot, eventId: f.meals.find(meal => meal.event.mealId === owner.id)!.event.id });
+  catalogue.mealUploadCursor = tombstone!.mediaId;
+  await writeHostedMediaReferenceCatalogue({ vaultRoot: f.vaultRoot, catalogue });
+  const expected = await readFile(path.join(f.vaultRoot, healthy!.relativePath));
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+  f.store.hooks.before = async (op, id) => {
+    if (op === "delete" && id === tombstone!.mediaId) throw mediaFailure();
+    if (op === "put" && id === stalled!.mediaId) {
+      await vi.advanceTimersByTimeAsync(2_000);
+      await new Promise(() => {});
+    }
+  };
+  const cursors: Array<string | undefined> = [];
+  const cleanupAttempts: number[] = [];
+  for (let pass = 0; pass < 4; pass++) {
+    await f.pass();
+    await f.restore(await f.snapshot(), {});
+    const restored = await f.catalogue();
+    cursors.push(restored.mealUploadCursor);
+    cleanupAttempts.push(restored.entries.find(entry => entry.mediaId === tombstone!.mediaId)?.uploadAttempts ?? 0);
+    if (restored.entries.find(entry => entry.mediaId === healthy!.mediaId)?.pendingUpload === false) break;
+  }
+  expect(await f.store.mediaStore.get(healthy!, { purpose: "workspace_media_materialization" })).toEqual(expected);
+  expect(cursors).toEqual([stalled!.mediaId, healthy!.mediaId]);
+  expect(cleanupAttempts).toEqual([0, 0]);
+});
+
+test("a refunded head pays once when its own media write fails", async () => {
+  const f = await fixture(2); await f.maintain();
+  const catalogue = await f.catalogue();
+  const [head, tombstone] = catalogue.entries.sort((a, b) => a.mediaId.localeCompare(b.mediaId));
+  const owner = core.inferRawAssetOwnerFromDirectory(path.posix.dirname(tombstone!.relativePath))!;
+  await deleteEvent({ vaultRoot: f.vaultRoot, eventId: f.meals.find(meal => meal.event.mealId === owner.id)!.event.id });
+  catalogue.mealUploadCursor = tombstone!.mediaId;
+  await writeHostedMediaReferenceCatalogue({ vaultRoot: f.vaultRoot, catalogue });
+  let attemptsBeforeFailure: number | undefined;
+  f.store.hooks.before = async (op, id) => {
+    if (op !== "put" || id !== head!.mediaId) return;
+    attemptsBeforeFailure = (await f.catalogue()).entries.find(entry => entry.mediaId === id)?.uploadAttempts;
+    throw mediaFailure();
+  };
+  const budget = createHostedMealMediaBudget();
+  expect(await f.pass({ budget })).toMatchObject({ retired: 1, failed: 1, pending: 1 });
+  expect(attemptsBeforeFailure).toBe(0);
+  expect((await f.catalogue()).entries).toEqual([expect.objectContaining({ mediaId: head!.mediaId, uploadAttempts: 1 })]);
+  expect((await f.catalogue()).mealUploadCursor).toBe(head!.mediaId);
+  expect(budget.remaining).toBe(8);
+});

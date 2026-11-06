@@ -691,6 +691,55 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it("cleanup ahead of a thumbnail's last attempt preserves scheduled delivery after cold restore", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2030-01-01T12:00:00.000Z"));
+      let vaultRoot = await createVaultRoot();
+      await initializeVault({ vaultRoot, timezone: "UTC" });
+      const photoPath = path.join(path.dirname(vaultRoot), "fixture.png");
+      await writeFile(photoPath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==", "base64"));
+      const meals = [];
+      for (let i = 0; i < 2; i++) meals.push(await addMeal({ vaultRoot, photoPath, photoCapturedAt: new Date().toISOString() }));
+      vi.setSystemTime(new Date("2030-04-02T12:00:00.000Z"));
+      await runMealPhotoMaintenance({ vaultRoot, maxMeals: 2 });
+      let f = createPhotoCheckpointFixture(vaultRoot);
+      await f.checkpoint();
+      const catalogue = await readHostedMediaReferenceCatalogue({ vaultRoot });
+      const [thumbnail, tombstone] = catalogue.entries.sort((a, b) => a.mediaId.localeCompare(b.mediaId));
+      const expected = await readFile(path.join(vaultRoot, thumbnail!.relativePath));
+      // Pending cleanup models a lost PUT acknowledgement before canonical deletion.
+      await f.store.mediaStore.record!(tombstone!);
+      await f.store.mediaStore.put({ ...tombstone!, bytes: await readFile(path.join(vaultRoot, tombstone!.relativePath)) });
+      const owner = core.inferRawAssetOwnerFromDirectory(path.posix.dirname(tombstone!.relativePath))!;
+      await deleteEvent({ vaultRoot, eventId: meals.find(meal => meal.event.mealId === owner.id)!.event.id });
+      thumbnail!.uploadAttempts = 4;
+      catalogue.mealUploadCursor = tombstone!.mediaId;
+      await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue });
+      await f.checkpoint();
+      f.store.hooks.before = async op => { if (op === "record" || op === "delete") vi.setSystemTime(Date.now() + 750); };
+      let wakes = 0;
+      for (; wakes < 3; wakes++) {
+        const wake = f.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest.inboxMediaRetentionWakeAt;
+        if (!wake) break;
+        vi.setSystemTime(new Date(wake));
+        vaultRoot = await restorePhotoCheckpoint(f.archive());
+        f = createPhotoCheckpointFixture(vaultRoot, f.store);
+        const idle = await runPhotoIdleMaintenance(vaultRoot, f.store);
+        if (!idle.nextWakeAt) expect(await f.store.mediaStore.get(thumbnail!, { purpose: "workspace_media_materialization" })).toEqual(expected);
+        await f.checkpoint(idle);
+      }
+      expect(wakes).toBe(2);
+      expect(f.store.rows.get(tombstone!.mediaId)?.retired).toBe(true);
+      expect(await f.store.mediaStore.get(tombstone!, { purpose: "workspace_media_materialization" })).toBeNull();
+      expect(await f.store.mediaStore.get(thumbnail!, { purpose: "workspace_media_materialization" })).toEqual(expected);
+      const settled = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries;
+      expect(settled).toEqual([expect.objectContaining({ mediaId: thumbnail!.mediaId, pendingUpload: false })]);
+      expect(settled[0]!.uploadAttempts).toBeLessThanOrEqual(5);
+      expect(f.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest.inboxMediaRetentionWakeAt).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
   it.each([false, true])("a cold-restored pending tombstone above the cap settles before stalled discovery (mixed=%s)", async mixed => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
@@ -775,16 +824,19 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       expect(f.store.bytes.size).toBe(1);
       expect(f.store.activeUnlimited()).toBe(1);
       f.store.hooks.after = undefined;
+      const catalogue = await readHostedMediaReferenceCatalogue({ vaultRoot });
+      catalogue.entries[0]!.uploadAttempts = 5;
+      await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue });
       await deleteEvent({ vaultRoot, eventId: meal.event.id });
       f.store.hooks.before = async op => { if (op === "record") { vi.setSystemTime(Date.now() + 2_000); throw mediaFailure("Synthetic registration outage"); } };
-      for (let attempt = 2; attempt <= 5; attempt++) {
+      for (let pass = 0; pass < 4; pass++) {
         await f.checkpoint(await runPhotoIdleMaintenance(vaultRoot, f.store));
         const wake = f.calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest.inboxMediaRetentionWakeAt;
         expect(wake).not.toBeNull();
         vi.setSystemTime(new Date(wake!));
         vaultRoot = await restorePhotoCheckpoint(f.archive());
         f = createPhotoCheckpointFixture(vaultRoot, f.store);
-        expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]).toMatchObject({ pendingUpload: true, uploadAttempts: attempt });
+        expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]).toMatchObject({ pendingUpload: true, uploadAttempts: 5 });
       }
       f.store.sweep(Date.now());
       expect(f.store.activeUnlimited()).toBe(1); expect(f.store.bytes.size).toBe(1);
