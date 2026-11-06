@@ -1,5 +1,5 @@
 import type { AssistantWorkspaceArtifactUnavailableReason, AssistantWorkspaceArtifactMaterializationResult } from "@murphai/assistant-engine";
-import { HostedRuntimeMediaReadError } from "./platform.ts";
+import { HostedRuntimeMediaReadError, HostedRuntimeMediaWriteError } from "./platform.ts";
 import { createHostedMediaReferenceId } from "@murphai/hosted-execution";
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
@@ -166,7 +166,15 @@ export async function publishHostedWorkspaceMediaReferencesForSnapshot(input: {
       entries.push({ ...entry, retirementPending: true });
       continue;
     }
-    await input.mediaStore.delete?.({ mediaId: entry.mediaId });
+    try {
+      await input.mediaStore.delete?.({ mediaId: entry.mediaId });
+    } catch (error) {
+      assertHostedMediaReferenceLive(input.signal);
+      if (!entry.retirementPending || !isHostedCanonicalPhotoPath(entry.relativePath)
+        || !(error instanceof HostedRuntimeMediaWriteError)) throw error;
+      entries.push(entry);
+      continue;
+    }
     prunedMediaCount += 1;
   }
 
@@ -182,7 +190,11 @@ export async function publishHostedWorkspaceMediaReferencesForSnapshot(input: {
   });
 
   const excludedVaultPaths: string[] = [];
+  let hasRetryablePendingPhotos = entries.some(hostedPhotoNeedsRetry);
   for (const entry of entries) {
+    if (isHostedPendingMealMedia(entry) && !await hostedPhotoReferenceMayBeLive(input.vaultRoot, entry)) {
+      hasRetryablePendingPhotos = true;
+    }
     if (hostedMediaReferenceIsSettled(entry) && await hostedMediaReferenceDenialReason(input.vaultRoot, entry) === null) {
       excludedVaultPaths.push(entry.relativePath);
     }
@@ -190,7 +202,7 @@ export async function publishHostedWorkspaceMediaReferencesForSnapshot(input: {
   return {
     pendingPhotoMediaIds: entries.filter(isHostedPendingMealMedia).map(entry => entry.mediaId),
     retirementPendingMediaIds: entries.filter(entry => entry.retirementPending).map(entry => entry.mediaId),
-    hasRetryablePendingPhotos: entries.some(hostedPhotoNeedsRetry),
+    hasRetryablePendingPhotos,
     excludedVaultPaths,
     prunedMediaCount,
     referenceCount: entries.length,

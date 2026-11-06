@@ -39,7 +39,8 @@ export async function runHostedMealMediaMaintenance(input: {
 }): Promise<{ uploaded: number; retired: number; failed: number; pending: number; failure?: unknown }> {
   const result: { uploaded: number; retired: number; failed: number; pending: number; failure?: unknown } = { uploaded: 0, retired: 0, failed: 0, pending: input.budget.pending ?? 1 };
   const deliveryDeadlineMs = input.budget.deadlineMs ?? Date.now() + 2_000;
-  const deadlineMs = Math.min(deliveryDeadlineMs, input.projectedDeadlineMs ?? Infinity);
+  const projectedDeadlineMs = input.projectedDeadlineMs ?? Infinity;
+  const deadlineMs = projectedDeadlineMs > Date.now() ? Math.min(deliveryDeadlineMs, projectedDeadlineMs) : deliveryDeadlineMs;
   const controller = new AbortController();
   const signal = AbortSignal.any([input.signal, controller.signal]);
   const timer = setTimeout(() => controller.abort(), Math.max(0, deadlineMs - Date.now()));
@@ -58,18 +59,18 @@ export async function runHostedMealMediaMaintenance(input: {
     const selected = [...eligible.filter(entry => entry.mediaId > cursor), ...eligible.filter(entry => entry.mediaId <= cursor)]
       .slice(0, input.budget.remaining);
     if (!selected.length) return result;
-    // Discovery consumes the same bounded allowance as delivery, including cold retries.
-    for (const entry of selected) {
-      input.budget.remaining -= 1;
-      await step(() => updateCatalogue(input.vaultRoot, entry, signal, "attempt"));
-    }
+    // Charge discovery to its head; later entries pay only when delivery reaches them.
+    input.budget.remaining -= 1;
+    await step(() => updateCatalogue(input.vaultRoot, selected[0]!, signal, "attempt"));
     if (pending.some(hostedPhotoNeedsRetry)) {
       await step(() => input.persistRetry(new Date(Date.now() + HOSTED_MEAL_MEDIA_RETRY_MS).toISOString(), signal));
     }
     const holders = await step(() => readSelectedPhotoHolders(input.vaultRoot, selected, signal));
     for (const entry of selected) {
-      // Resume after the actual delivery head if it stalls partway through this batch.
-      await step(() => updateCatalogue(input.vaultRoot, entry, signal, "cursor"));
+      if (entry !== selected[0]) {
+        input.budget.remaining -= 1;
+        await step(() => updateCatalogue(input.vaultRoot, entry, signal, "attempt"));
+      }
       try {
         const owner = inferRawAssetOwnerFromDirectory(path.posix.dirname(entry.relativePath));
         if (!owner) throw new Error("Invalid pending photo owner.");
@@ -158,7 +159,7 @@ async function readSelectedPhotoHolders(vaultRoot: string, entries: HostedMediaR
   return new Map([...latest].map(([id, entry]) => [id, entry.record]));
 }
 
-async function updateCatalogue(vaultRoot: string, entry: HostedMediaReference, signal: AbortSignal, action: "attempt" | "cursor" | "delivered" | "retired") {
+async function updateCatalogue(vaultRoot: string, entry: HostedMediaReference, signal: AbortSignal, action: "attempt" | "delivered" | "retired") {
   await withCanonicalWriteLock(vaultRoot, async () => {
     signal.throwIfAborted();
     const catalogue = await readHostedMediaReferenceCatalogue({ vaultRoot });
@@ -169,7 +170,6 @@ async function updateCatalogue(vaultRoot: string, entry: HostedMediaReference, s
       catalogue.mealUploadCursor = entry.mediaId;
       current.uploadAttempts = (current.uploadAttempts ?? 0) + 1;
     }
-    else if (action === "cursor") catalogue.mealUploadCursor = entry.mediaId;
     else if (action === "delivered") current.pendingUpload = false;
     else catalogue.entries = catalogue.entries.filter(value => value !== current);
     await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue });

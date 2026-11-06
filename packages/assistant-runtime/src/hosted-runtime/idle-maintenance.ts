@@ -1,3 +1,4 @@
+import { HostedRuntimeMediaWriteError } from "./platform.ts";
 import { runHostedMealMediaMaintenance, hasHostedPhotoRetry, HOSTED_MEAL_MEDIA_RETRY_MS } from "./meal-media-maintenance.ts";
 import {
   compactWarmCodexThread,
@@ -33,6 +34,7 @@ import {
   archiveClosedIntegrationIngestShards,
   runGeneratedImageCaptureRetention,
   runMealPhotoMaintenance,
+  isVaultError,
   type ArchiveClosedEventLedgerShardsResult,
   type ArchiveClosedIntegrationIngestShardsResult,
   type RunGeneratedImageCaptureRetentionResult,
@@ -163,6 +165,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     if (input.vaultRoot) {
       const vaultRoot = input.vaultRoot;
       let retentionStage: HostedInboxRetentionIssue["stage"] = "pending_inputs";
+      let maintainingMealMedia = false;
       try {
         const pendingInputRetention =
           await runHostedPendingAssistantInputContentRetention({
@@ -201,8 +204,10 @@ export async function runHostedIdleCheckpointMaintenance(input: {
         retentionStage = "meal_photos";
         retentionWake = mergeInboxRetentionWakes(retentionWake,
           await maintainMealPhotos(input, vaultRoot, abortController.signal));
+        maintainingMealMedia = true;
         retentionWake = mergeInboxRetentionWakes(retentionWake,
           await maintainMealMedia(input, vaultRoot, abortController.signal));
+        maintainingMealMedia = false;
         retentionStage = "generated_images";
         const generatedImageRetentionMaxCaptures =
           input.generatedImageRetentionMaxCaptures === undefined
@@ -283,6 +288,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
             wakeInterrupted,
           });
         }
+        rethrowUnexpectedMealMediaFailure(error, maintainingMealMedia);
         // Retention is opportunistic maintenance; a cleanup miss must not block
         // checkpointing or member-visible wake handling. Emit the failure
         // through the shared structured-log boundary so the cause is not
@@ -953,9 +959,17 @@ async function maintainMealMedia(input: Parameters<typeof runHostedIdleCheckpoin
   if (input.pendingWork || !input.mealMedia) return {};
   const media = await runHostedMealMediaMaintenance({ ...input.mealMedia, vaultRoot, signal }).catch(error => {
     signal.throwIfAborted();
+    rethrowUnexpectedMealMediaFailure(error);
     return { failed: 1, failure: error, pending: 1 };
   });
   if (!await hasHostedPhotoRetry(vaultRoot)) return {};
   if (media.failed > 0) throw media.failure;
   return media.pending > 0 ? resolveInboxMediaRetentionFailureWake(HOSTED_MEAL_MEDIA_RETRY_MS) : {};
+}
+
+function rethrowUnexpectedMealMediaFailure(error: unknown, maintainingMealMedia = true): void {
+  if (!maintainingMealMedia) return;
+  if (error instanceof HostedRuntimeMediaWriteError
+    || isVaultError(error) && error.code === "RAW_MANIFEST_INVALID") return;
+  throw error;
 }

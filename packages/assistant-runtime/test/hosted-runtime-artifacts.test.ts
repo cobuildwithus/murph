@@ -1073,9 +1073,12 @@ test.each(["warm", "restored"].flatMap(workspaceKind => ["receipt", "receipt_res
     for (const meal of [first, second]) await deleteEvent({ vaultRoot, eventId: meal.event.id });
     await checkpoint(); // First accept the tombstones and their cleanup pointers.
     failDelete = true;
-    await expect(publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).rejects.toThrow("Synthetic media deletion failure");
-    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toHaveLength(2);
-    expect(await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).toMatchObject({ prunedMediaCount: 2 });
+    expect(await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).toMatchObject({ prunedMediaCount: 1 });
+    const remaining = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries;
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]?.retirementPending).toBe(true);
+    expect(store.storedBytesByMediaId.has(remaining[0]!.mediaId)).toBe(true);
+    expect(await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore })).toMatchObject({ prunedMediaCount: 1 });
     await checkpoint();
     expect(store.storedBytesByMediaId.size).toBe(0);
     expect(lifetimes.size).toBe(0);
