@@ -351,9 +351,35 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     return skipHostedGroupJoinOfferReaction({ reason: "member_inactive" });
   }
 
+  const reactionHandle = input.event.reactionFromHandle;
   let reactionMailboxAppend: HostedLinqGroupReactionMailboxAppend | null = null;
   const result = await acceptHostedGroupOfferAffirmation({
     affirmationEventId: input.event.eventId,
+    assertActorStillBound: async (tx) => {
+      await lockHostedMemberRow(tx, member.id);
+      const phoneNumber = readHostedGroupJoinOfferReactionParticipantPhone(reactionHandle);
+      const locked = reactionHandle.includes("@")
+        ? await lookupHostedMemberByVerifiedEmailAddress({
+            address: reactionHandle,
+            prisma: tx,
+            projection: "core",
+          })
+        : phoneNumber
+          ? await lookupHostedMemberIdentityByPhoneNumber({
+              phoneNumber,
+              prisma: tx,
+              projection: "core",
+            })
+          : null;
+      if (locked?.core.id !== member.id) {
+        throw hostedOnboardingError({
+          code: "HOSTED_GROUP_RUNTIME_UNSUPPORTED",
+          httpStatus: 409,
+          message: "This account is no longer linked to that Murph member.",
+          retryable: false,
+        });
+      }
+    },
     channel: "linq",
     kinds,
     memberId: member.id,
@@ -376,6 +402,9 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     ...(input.signal ? { signal: input.signal } : {}),
     threadIdentityLookupKeyReadCandidates,
   });
+  if (result.status === "replayed") {
+    return { status: "accepted", reason: "accepted" };
+  }
   if (result.status === "accepted") {
     await signalHostedGroupOfferReactionBestEffort({
       append: reactionMailboxAppend,

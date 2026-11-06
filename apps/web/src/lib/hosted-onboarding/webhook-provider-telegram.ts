@@ -15,6 +15,7 @@ import {
 import {
   appendHostedMailboxEnvelopeTx,
   appendHostedMailboxEnvelopeWithPreparedCryptoTx,
+  lockAndReadHostedTelegramUpdateOwnerIdsTx,
   type PreparedHostedMailboxItemAppendCrypto,
 } from "../hosted-mailbox/store";
 import {
@@ -138,7 +139,25 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     return buildIgnoredTelegramWebhookPlan("unsupported-update");
   }
 
-  if (summary.isDirect) {
+  const retainedOwnerIds = summary.isDirect
+    ? await lockAndReadHostedTelegramUpdateOwnerIdsTx({ eventId, tx: input.prisma })
+    : [];
+  if (retainedOwnerIds.length > 0) {
+    const sender = await resolveHostedMemberCoreByTelegramUserId({
+      prisma: input.prisma,
+      telegramUserId: senderTelegramUserId,
+    });
+    if (
+      retainedOwnerIds.length !== 1
+      || sender.status !== "found"
+      || sender.core.id !== retainedOwnerIds[0]
+      || input.preparedDirectTelegramRouting?.kind === "family"
+    ) {
+      return buildIgnoredTelegramWebhookPlan("telegram-update-already-admitted");
+    }
+  }
+
+  if (summary.isDirect && retainedOwnerIds.length === 0) {
     const familyInviteTokenPresent = await resolveHostedFamilyInviteTokenForInbound({
       prisma: input.prisma,
       text: telegramMessage.text ?? null,

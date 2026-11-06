@@ -27,6 +27,7 @@ export type HostedGroupOfferAffirmationSkipReason =
 
 export type HostedGroupOfferAffirmationResult =
   | { status: "accepted"; kind: "disclosure" | "join" }
+  | { status: "replayed" }
   | { status: "ignored"; reason: HostedGroupOfferAffirmationSkipReason };
 
 /**
@@ -112,6 +113,9 @@ export async function acceptHostedGroupOfferAffirmation(input: {
       }
       return { status: "ignored", reason };
     }
+    if (disclosureResult.kind === "replayed") {
+      return { status: "replayed" };
+    }
     if (disclosureResult.kind === "accepted") {
       return { status: "accepted", kind: "disclosure" };
     }
@@ -133,6 +137,7 @@ export async function acceptHostedGroupOfferAffirmation(input: {
   try {
     result = await input.prisma.$transaction(async (tx) => {
       const accepted = await acceptHostedGroupJoinOfferTx({
+        affirmationEventId: input.affirmationEventId,
         channel: input.channel,
         confirmationPublicBaseUrl: resolveHostedPublicBaseUrl(),
         memberId: input.memberId,
@@ -142,6 +147,7 @@ export async function acceptHostedGroupOfferAffirmation(input: {
           input.threadIdentityLookupKeyReadCandidates,
         tx,
       });
+      if (!accepted) return null;
       await input.assertActorStillBound?.(tx);
       await input.onAcceptedTx?.(tx, accepted);
       return accepted;
@@ -153,6 +159,8 @@ export async function acceptHostedGroupOfferAffirmation(input: {
     }
     return { status: "ignored", reason };
   }
+
+  if (!result) return { status: "replayed" };
 
   const runPostCommitTail = async (): Promise<void> => {
     const postCommitDeadlineMs = createHostedPostCommitDeadline(undefined);

@@ -27,7 +27,7 @@ import {
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import { getPrisma } from "../prisma";
-import { lockHostedGroupRow } from "./group-store";
+import { lockHostedGroupRow, spendHostedGroupOfferGestureTx } from "./group-store";
 
 export const HOSTED_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_LENGTH =
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS;
@@ -52,6 +52,7 @@ export type HostedGroupDisclosureReadClient = PrismaClient | Prisma.TransactionC
 
 export type HostedGroupDisclosurePermissionReactionTxResult =
   | { kind: "accepted" }
+  | { kind: "replayed" }
   | { kind: "not_found" | "not_group_member" | "wrong_thread" };
 
 export type HostedGroupDisclosurePermissionAppendTxResult = { kind: "accepted" };
@@ -427,6 +428,14 @@ export async function acceptHostedGroupDisclosurePermissionReactionTx(input: {
     return { kind: "not_found" };
   }
 
+  if (!await spendHostedGroupOfferGestureTx({
+    affirmationEventId: input.reactionEventId,
+    groupId: permission.group.id,
+    tx: input.tx,
+  })) {
+    return { kind: "replayed" };
+  }
+
   const grantId = createHostedGroupDisclosureReactionGrantId(
     input.reactionEventId,
   );
@@ -435,10 +444,19 @@ export async function acceptHostedGroupDisclosurePermissionReactionTx(input: {
     select: { membershipId: true, permissionId: true },
   });
   if (replayedGrant) {
-    return replayedGrant.membershipId === membership.id
-      && replayedGrant.permissionId === permission.id
-      ? { kind: "accepted" }
-      : { kind: "not_found" };
+    if (
+      replayedGrant.membershipId !== membership.id
+      || replayedGrant.permissionId !== permission.id
+    ) {
+      // Roll back the receipt too: this legacy gesture did not accept this offer.
+      throw hostedOnboardingError({
+        code: "HOSTED_GROUP_RUNTIME_UNSUPPORTED",
+        httpStatus: 409,
+        message: "This gesture belongs to a different disclosure grant.",
+        retryable: false,
+      });
+    }
+    return { kind: "accepted" };
   }
 
   const existingOrSupersedingGrant = await input.tx.hostedGroupDisclosureGrant.findFirst({
