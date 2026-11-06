@@ -35318,6 +35318,29 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
         expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
         process.stdout.write(`[repeated-capture-closeout-proof] ${JSON.stringify({ repeated, reply: result.finalMessage })}\n`)
       }
+      const reviewedDate = '2026-08-26'
+      await addMeal({ vaultRoot, occurredAt: `${reviewedDate}T16:00:15.000Z`, name: 'Grain bowl',
+        note: 'Grain bowl with sweet potato, avocado, arugula and chickpeas.',
+        nutrition: { totals: { calories: 520 }, provenance: { source: 'estimated', confidence: 'low' } } })
+      const reviewed = await addMeal({ vaultRoot, source: 'device', occurredAt: `${reviewedDate}T16:00:00.000Z`,
+        photoPath, externalRef: { system: 'meal-photo-capture', resourceType: 'photo', resourceId: 'capture-reviewed' } })
+      await removeAutomaticMealPhoto({ eventId: reviewed.event.id, vaultRoot })
+      await writeFile(commandLog, '', 'utf8')
+      const followUp = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAutomaticMealClarificationDeveloperInstructions({ currentLocalDate: reviewedDate, protectedContext: false, scheduled: false }),
+        env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot },
+        fixtureBinDirectory: binDirectory, groupConversation: false,
+        model: config.model, modelProvider: config.modelProvider,
+        reasoningEffort: 'low', sandbox: 'workspace-write', vaultRoot, workingDirectory: vaultRoot,
+        prompt: 'That bowl photo from today is the lunch I already told you about. What did I eat today?',
+      })
+      const followUpCommands = (await readFile(commandLog, 'utf8')).trim().split('\n')
+      expect(followUpCommands.some(command => isMealDeleteCommand(command, reviewed.mealId))).toBe(false)
+      await expect(showMealRecord(vaultRoot, reviewed.mealId)).resolves.toBeTruthy()
+      process.stdout.write(`[repeated-capture-closeout-proof] ${JSON.stringify({ reviewed: true, reply: followUp.finalMessage })}\n`)
     } finally {
       await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths])
     }

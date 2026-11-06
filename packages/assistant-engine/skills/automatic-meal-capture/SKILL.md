@@ -200,9 +200,9 @@ empty, save a concise `--note` describing only the visible meal or food form and
 material uncertainty; never replace a member-written note. Add `--ingredient`
 values only for identities the photo supports. An imported photo stub is not
 evidence of consumption. After actually inspecting an imported device stub,
-if it shows a non-food image, food/drink the member did not consume, or a meal
-already saved, and has no member-written note, run
-`vault-cli meal delete <meal-id>` and confirm it is
+if it shows a non-food image, food/drink the member did not consume, or, while
+its attachment role is still `photo`, a meal already saved, and has no
+member-written note, run `vault-cli meal delete <meal-id>` and confirm it is
 absent with a fresh bounded `meal list` for its capture date. Write no note and
 run no `remove-photo` for that meal. This applies to interactive enrichment and
 scheduled closeout. Never delete from classifier acceptance, a guess, or

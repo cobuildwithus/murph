@@ -137,7 +137,7 @@ specific honest short name supported by the image or confirmation, such as
 "Prepared food". Never log a meal from a non-food image or food/drink
 that the member did not consume.
 For imported device stubs, follow `automatic-meal-capture`: delete inspected
-non-food, unconsumed-food, or already-saved stubs without member-written notes
+non-food, unconsumed-food, or pending repeat stubs without member-written notes
 and confirm absence; never annotate them as meals. Preserve member-written notes.
 
 Nutrition source is `user`, `label`, `database`, `inherited`, or `estimated`;
