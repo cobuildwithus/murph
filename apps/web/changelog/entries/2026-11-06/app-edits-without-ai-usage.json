@@ -9,6 +9,6 @@
     "summary": "Meal removal, workout updates, and preference changes can finish even when you have no AI usage left.",
     "details": "These edits do not use AI usage. Photo estimates and other AI work still wait until usage is available.",
     "relevanceTags": ["companion", "meals", "workouts", "settings"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [4690]
   }
 }
