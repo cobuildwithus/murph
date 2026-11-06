@@ -204,18 +204,20 @@ reproduced on a real App Server:
   this PR. A confirmation that lands as a mid-turn message is refused and the model
   asks for it in a new message. Allowing steered confirmations is a separate
   product decision for the owner.
-- Final ReviewGPT round 1 found the signal was too late. `turn/steer` only
-  acknowledges transport: Codex holds a steer while a request awaits response
-  headers, and issued tools keep running, so `currentDeliveryContextOrdinal()` can
-  still be 0 after a cancel is acknowledged. A `period_end` change schedules through
-  Stripe with no further confirmation, so this was a billing regression. Accepted
-  and reproduced by holding a request before headers. The rule now counts a steer
-  from submission: `automationRelativeDateReferenceWindows.length > 1`, an entry
-  pushed before `turn/steer` and rolled back if it is rejected.
-- Final ReviewGPT round 2 found the entry was still pushed after the async image
-  write of a steered screenshot, so that write left billing enabled. Accepted and
-  reproduced by holding the write. The entry now goes in before the first await,
-  and image preparation sits inside the same rollback.
+- Final ReviewGPT rounds 1 to 3 each found the signal too late or too fragile, all
+  accepted and reproduced. Round 1: `turn/steer` only acknowledges transport, Codex
+  holds a steer while a request awaits headers, and issued tools keep running, so
+  the consumed ordinal can be 0 after a cancel is acknowledged. A `period_end` change
+  schedules through Stripe with no further confirmation, so this was a billing
+  regression. Round 2: an entry pushed after the async image write left that write
+  unguarded. Round 3: rolling the entry back on a failed image re-enabled billing for
+  a queued call during turn cleanup.
+- All four holes came from deriving "was this turn steered" from state that moves or
+  rolls back. The final rule asks a simpler question, whether a follow-up tried to
+  join: `steerAttempted`, set on the first line of `steerLiveTurn` and never cleared.
+  That also let `steerLiveTurn` return to its original order. Round 3 proposed having
+  tool preflight observe the controller's fatal admission error; this is smaller and
+  needs no controller change.
 - Scope is deliberate. `assistant_configuration` still runs after a steer: it is a
   reversible preference, Web binds no semantics to the input, and refusing it is
   the reported bug.
@@ -247,9 +249,9 @@ expiry, turn commit). Do not merge the two context objects wholesale.
   error `assistant configuration updates require user-sourced input`, and passes
   after the change. All three steered-subscription sequences fail without the rule
   and pass with it: queued behind a slow tool, issued by an older cell, and issued
-  after the steer is acknowledged but before Codex consumes it. A fourth, issued
-  during a steered image write, fails without the reorder and passes with it, and a
-  failed image write releases the block.
+  after the steer is acknowledged but before Codex consumes it.
+  `assistant-codex-steered-billing.test.ts` adds a call during a held image write and
+  a call after a failed steer. Both are refused.
 - Live model: `pnpm test:assistant:live -- --test "explicit Max upgrade"` passed.
   A confirmation with a mid-turn follow-up made no subscription request, and the
   reply said nothing was applied and asked for one more confirmation. Confirming

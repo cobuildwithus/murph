@@ -163,7 +163,7 @@ it('refuses a subscription change while a steered image is still being prepared'
   expect(outcome.claimSubscriptionAssistantInputId).not.toHaveBeenCalled()
 })
 
-it('allows a subscription change after a steered image fails to prepare', async () => {
+it('refuses a subscription change after a steered image fails to prepare', async () => {
   const outcome = await callSubscriptionDuringSteeredImage({
     duringToolCall: async ({ release, steering, toolCall }) => {
       release.reject(new Error('Synthetic image write failure.'))
@@ -172,7 +172,7 @@ it('allows a subscription change after a steered image fails to prepare', async 
     },
   })
 
-  expect(outcome.toolResponse).toMatchObject({ id: 73, result: { success: true } })
-  expect(outcome.subscriptionRequest).toHaveBeenCalledOnce()
-  expect(outcome.claimSubscriptionAssistantInputId).toHaveBeenCalledOnce()
+  expect(outcome.toolResponse).toMatchObject({ id: 73, result: { success: false } })
+  expect(outcome.subscriptionRequest).not.toHaveBeenCalled()
+  expect(outcome.claimSubscriptionAssistantInputId).not.toHaveBeenCalled()
 })

@@ -3298,6 +3298,9 @@ async function runCodexAppServerTurnOnProcess(
   let firstAssistantResponseCompleted = false
   let trailingSteerCandidate: CodexAppServerTrailingResponseCandidate | null = null
   let completedUserMessageOrdinal = -1
+  // Set before any await and never cleared. A plan change must not run once a
+  // follow-up has tried to join the turn, even if that steer fails or is unconsumed.
+  let steerAttempted = false
   const workoutDeliveryContext = createCodexWorkoutDeliveryContextTracker({
     contextReferences: input.trustedContextReferences,
   })
@@ -4863,9 +4866,7 @@ async function runCodexAppServerTurnOnProcess(
               )
             ),
           deliveryContextOrdinal: dynamicToolRequestDeliveryContextOrdinal,
-          // Counted from submission: `turn/steer` only acknowledges transport,
-          // and currentDeliveryContextOrdinal waits for Codex to consume it.
-          providerTurnSteered: automationRelativeDateReferenceWindows.length > 1,
+          providerTurnSteered: steerAttempted,
           nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
           onboardingFirstReadCompletionTransitionAvailable:
             input.onboardingFirstReadCompletionTransitionAvailable ?? false,
@@ -5745,6 +5746,16 @@ async function runCodexAppServerTurnOnProcess(
     steerInput: Omit<CodexAppServerSteerInput, 'threadId' | 'turnId'>,
   ): Promise<void> => {
     const liveTurn = requireLiveTurnIds()
+    steerAttempted = true
+    const preparedSteerImages = await materializeCodexImages({
+      images: normalizeCodexAppServerImageDetails({
+        images: steerInput.images,
+        model: input.model,
+        modelProvider: input.modelProvider,
+        turnKind: 'steer',
+      }),
+      tempRoot: input.tempRoot,
+    })
     const deliveryContextOrdinal = automationRelativeDateReferenceWindows.length
     automationRelativeDateReferenceWindows.push(
       mergeAutomationRelativeDateReferenceWindows(
@@ -5753,15 +5764,6 @@ async function runCodexAppServerTurnOnProcess(
       ),
     )
     try {
-      const preparedSteerImages = await materializeCodexImages({
-        images: normalizeCodexAppServerImageDetails({
-          images: steerInput.images,
-          model: input.model,
-          modelProvider: input.modelProvider,
-          turnKind: 'steer',
-        }),
-        tempRoot: input.tempRoot,
-      })
       await withCodexRpcTimeout(
         sendRequest(
           'turn/steer',
