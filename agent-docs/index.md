@@ -1,6 +1,8 @@
 Meal fiber reader compatibility and deployment boundaries are owned by
 [iOS Meals](product-specs/ios-meals.md#release-order-and-compatibility); focused
 proof is recorded in [the reader plan](exec-plans/completed/2026-11-06-meals-fiber-reader.md).
+The separate [writer plan](exec-plans/completed/2026-11-06-meals-fiber-writer.md)
+records canonical fiber publication and unchanged day totals.
 
 Residual game deletion, the final key-dependency proof and surviving group
 invitation authority are owned by [Weekly Game](product-specs/weekly-game.md)
