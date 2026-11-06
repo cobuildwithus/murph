@@ -476,3 +476,63 @@ it("applies a display name through core, stays silent, and reports changed versu
     }
   } finally { await rm(root, { force: true, recursive: true }); }
 });
+
+
+it("writes a typed reading at requestedAt and keeps an exact replay silent and unchanged", async () => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { deterministicContractId, ID_PREFIXES, initializeVault, readJsonlRecords } = await import("@murphai/core");
+  const { resolveMetricDefinition } = await import("@murphai/query");
+  const root = await mkdtemp(join(tmpdir(), "measurement-action-"));
+  const actionId = "d8653d1f-fb8d-400b-8efe-d3fbdc9f9830";
+  const requestedAt = "2026-11-06T12:34:56.000Z";
+  const wake = {
+    eventId: `member.action.requested:${actionId}`,
+    kind: "member.action.requested" as const, userId: "member_synthetic",
+    occurredAt: "2026-11-07T01:00:00.000Z",
+    request: { actionId, requestedAt, schemaVersion: 1 as const,
+      action: { kind: "measurement.add" as const, version: 1 as const, metric: "estimated-vo2-max" as const, value: 42.5 },
+    },
+  };
+  try {
+    await initializeVault({ vaultRoot: root, title: "Synthetic measurement vault", timezone: "UTC" });
+    for (const status of ["applied", "unchanged"]) {
+      expect(await executeHostedMemberActionWake({ vaultRoot: root, wake })).toMatchObject({
+        conversationMetrics: null, mailboxLane: "member-action", nextWakeAt: null, redactedLogEntries: [],
+        postCheckpointRecord: { kind: "member-action.outcome-recorded", outcome: { actionId, status, reason: null } },
+      });
+    }
+    const records = await readJsonlRecords({ vaultRoot: root, relativePath: "ledger/events/2026/2026-11.jsonl" });
+    expect(records).toEqual([expect.objectContaining({
+      id: deterministicContractId(ID_PREFIXES.event, `member-action:${actionId}`),
+      occurredAt: requestedAt, source: "manual", lifecycle: expect.objectContaining({ revision: 1 }),
+      measurements: [{ metric: "estimated-vo2-max", value: 42.5, unit: resolveMetricDefinition("estimated-vo2-max")!.canonicalUnit }],
+    })]);
+  } finally { await rm(root, { force: true, recursive: true }); }
+});
+
+it("keeps an evening reading on the member's day, not the next UTC day", async () => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { initializeVault } = await import("@murphai/core");
+  const { listMetricPoints } = await import("@murphai/query");
+  const root = await mkdtemp(join(tmpdir(), "measurement-evening-"));
+  const actionId = "c3a1f6de-2f14-4a6e-9a55-6f1e2b7d4c10";
+  const requestedAt = "2026-11-06T20:30:00-05:00";
+  try {
+    await initializeVault({ vaultRoot: root, title: "Synthetic measurement vault", timezone: "America/New_York" });
+    await executeHostedMemberActionWake({ vaultRoot: root, wake: {
+      eventId: `member.action.requested:${actionId}`,
+      kind: "member.action.requested" as const, userId: "member_synthetic", occurredAt: requestedAt,
+      request: { actionId, requestedAt, schemaVersion: 1 as const,
+        action: { kind: "measurement.add" as const, version: 1 as const, metric: "estimated-vo2-max" as const, value: 42 },
+      },
+    } });
+    const points = await listMetricPoints(root, { metricKey: "estimated-vo2-max", limit: null });
+    expect(points).toHaveLength(1);
+    expect(points[0]).toMatchObject({ effectiveDate: "2026-11-06", grain: "day" });
+    expect(Date.parse(points[0]!.observedAt)).toBe(Date.parse(requestedAt));
+  } finally { await rm(root, { force: true, recursive: true }); }
+});

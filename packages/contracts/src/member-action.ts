@@ -498,7 +498,15 @@ export const displayNameSetMemberActionV1Schema = z.object({
   displayName: memoryDisplayNameSchema,
 }).strict();
 
+export const measurementAddMemberActionV1Schema = z.object({
+  kind: z.literal("measurement.add"),
+  version: z.literal(1),
+  metric: z.enum(["estimated-vo2-max"]),
+  value: z.number().finite().min(10).max(90),
+}).strict();
+
 export const memberActionV1Schema = z.discriminatedUnion("kind", [
+  measurementAddMemberActionV1Schema,
   demographicsSetMemberActionV1Schema,
   displayNameSetMemberActionV1Schema,
   // Decode queued/restored legacy requests only; the runner consumes this as a
