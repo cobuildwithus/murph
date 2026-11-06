@@ -35354,10 +35354,11 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
     const skillsRoot = path.join(root, 'skills')
     const commandLog = path.join(root, 'commands.log')
     const photoPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../apps/web/public/meal-snap-2.jpg')
-    const note = 'Grain bowl with sweet potato, avocado, arugula and chickpeas for lunch.'
+    const note = 'Grain bowl with sweet potato, avocado, arugula and chickpeas for lunch. Roughly one large bowl from the place near work, with extra lemon on the side and the dressing kept light, eaten at the desk around noon.'
+    const ingredients = ['brown rice', 'sweet potato', 'avocado', 'arugula', 'chickpeas', 'olive oil', 'lemon juice']
     const nutrition = { totals: { calories: 520 }, provenance: { source: 'estimated', confidence: 'low' } } as const
     const typedMeal = async (date: string, extra: Partial<Parameters<typeof addMeal>[0]> = {}) => await addMeal({
-      vaultRoot, occurredAt: `${date}T16:00:15.000Z`, name: 'Grain bowl', note, nutrition, ...extra })
+      vaultRoot, occurredAt: `${date}T16:00:15.000Z`, name: 'Grain bowl', note, ingredients, nutrition, ...extra })
     const capture = async (date: string) => await addMeal({ vaultRoot, source: 'device', occurredAt: `${date}T16:00:00.000Z`,
       photoPath, externalRef: { system: 'meal-photo-capture', resourceType: 'photo', resourceId: `capture-${date}` } })
     const expectMealGone = async (mealId: string) =>
@@ -35400,6 +35401,7 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
       expect(state.savedCalories).toBe(520)
       expect(state.savedAttachmentCount).toBe(0)
       expect((await showMealRecord(vaultRoot, mealId)).entity.data.title).toBe('Grain bowl')
+      expect([...(await showMealRecord(vaultRoot, mealId)).entity.data.ingredients as string[]].sort()).toEqual([...ingredients].sort())
     }
     try {
       await initializeVault({ vaultRoot, timezone: 'America/New_York' })
@@ -35410,6 +35412,8 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
       const photo = await capture('2026-08-24')
       const merged = await closeout('2026-08-24')
       expect(merged.editedAt(photo.mealId)).toBeGreaterThanOrEqual(0)
+      expect(merged.readBackAt(typed.mealId, -1)).toBeGreaterThanOrEqual(0)
+      expect(merged.readBackAt(typed.mealId, -1)).toBeLessThan(merged.editedAt(photo.mealId))
       expect(merged.readBackAt(photo.mealId, merged.editedAt(photo.mealId))).toBeGreaterThan(merged.editedAt(photo.mealId))
       expect(merged.deletedAt(typed.mealId)).toBeGreaterThan(merged.readBackAt(photo.mealId, merged.editedAt(photo.mealId)))
       expect(merged.reviewedAt(photo.mealId)).toBeGreaterThan(merged.deletedAt(typed.mealId))

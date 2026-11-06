@@ -44,6 +44,7 @@ describe('assistant system prompt health record ingestion invariant', () => {
     expect(closeout).toContain('or, while its attachment role is still `photo`, a meal already saved that the merge rule below does not cover, and has no member-written note')
     expect(closeout).toContain('A pending capture that repeats a typed meal merges instead, so the one entry keeps the photo')
     expect(closeout).toContain('This applies when the saved meal has no attachment and no `externalRef` and shares the capture\'s local date, and the capture has no member-written note')
+    expect(closeout).toContain('Read the saved meal with `meal show`, because `meal list` shortens fields')
     expect(closeout).toContain('such as micronutrients, keep it and delete the capture instead')
     expect(closeout).toContain('If that delete fails, run no `remove-photo`, so the capture stays pending; a later run that finds those details already on the capture resumes at the delete')
     expect(closeout).toContain('and any merge delete has succeeded, run `vault-cli meal remove-photo <meal-id>`')

@@ -219,8 +219,10 @@ and the answer would materially help.
 A pending capture that repeats a typed meal merges instead, so the one entry
 keeps the photo. This applies when the saved meal has no attachment and no
 `externalRef` and shares the capture's local date, and the capture has no
-member-written note. Copy the saved meal's name, note, ingredients, tags and
-nutrition onto the capture with `meal edit`, read it back, run `vault-cli meal delete <saved-meal-id>`, confirm it is absent,
+member-written note. Read the saved meal with `meal show`, because `meal list`
+shortens fields. Copy its name, note, ingredients, tags and nutrition onto the
+capture with `meal edit`, read the capture back against that record, run
+`vault-cli meal delete <saved-meal-id>`, confirm it is absent,
 then continue the capture's normal review. If that delete fails, run no
 `remove-photo`, so the capture stays pending; a later run that finds those
 details already on the capture resumes at the delete. When the saved meal holds
