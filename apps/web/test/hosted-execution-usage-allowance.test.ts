@@ -5038,7 +5038,6 @@ function createAllowanceTx(input: {
     hostedAccountGroupBillingRef: {
       findUnique: vi.fn(async () => input.familyAccessActive
         ? {
-            billedSeatCount: 2,
             currentBillingPlanCode: input.familyBillingPlanCode ?? "launch_family_monthly",
             currentBillingPhase: "paid",
             currentPeriodEnd: familyPeriodEnd,
@@ -5341,7 +5340,6 @@ function createGatePrisma(input: {
     hostedAccountGroupBillingRef: {
       findUnique: vi.fn(async () => input.familyAccessActive
         ? {
-            billedSeatCount: 2,
             currentBillingPlanCode: input.familyBillingPlanCode ?? "launch_family_monthly",
             currentBillingPhase: "paid",
             currentPeriodEnd: familyPeriodEnd,
