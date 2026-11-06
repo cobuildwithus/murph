@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.prisma }));
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({ readHostedRuntimeAiAccessDecision: mocks.access }));
-vi.mock("@/src/lib/legal/consent", () => ({ assertHostedLaunchRequiredConsentGranted: mocks.consent }));
+vi.mock("@/src/lib/legal/consent", () => ({ readHostedConsentStatus: mocks.consent, assertHostedLaunchRequiredConsentGranted: vi.fn() }));
 vi.mock("@/src/lib/hosted-onboarding/shared", () => ({ lockHostedMemberRow: vi.fn(), readHostedMemberSuspensionAfterLockTx: mocks.suspension }));
 vi.mock("@/src/lib/hosted-crypto/domain-root-unwrap-cache", () => ({ runWithHostedDomainRootUnwrapCache: (fn: () => Promise<unknown>) => fn() }));
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({ unwrapHostedDomainRootForWeb: async () => ({ rootKey: Buffer.alloc(32) }) }));
@@ -48,7 +48,7 @@ function fixture() {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.access.mockResolvedValue({ allowed: true });
-  mocks.consent.mockResolvedValue(undefined);
+  mocks.consent.mockResolvedValue({ launchGranted: true });
   mocks.suspension.mockResolvedValue("active");
   mocks.append.mockResolvedValue({ wake: "synthetic" });
   mocks.signal.mockResolvedValue(undefined);
@@ -59,6 +59,12 @@ beforeEach(() => {
 });
 
 describe("daily clinical admission", () => {
+  it("does not write a second date after successful admission", async () => {
+    const f = fixture();
+    expect(await runClinicalDailySyncSweep({ now })).toEqual({ checked: 1, queued: 1, failed: 0 });
+    expect(f.connection.updateMany).not.toHaveBeenCalled();
+  });
+
   it("publishes one new generation and makes replay ineligible", async () => {
     const f = fixture();
     const input = { connectionId: f.row.id, memberId: f.row.memberId, now };
@@ -85,8 +91,8 @@ describe("daily clinical admission", () => {
   });
 
   it("fails closed when consent is withdrawn", async () => {
-    const f = fixture(); mocks.consent.mockRejectedValue(new Error("consent required"));
-    await expect(admitClinicalDailySync({ connectionId: f.row.id, memberId: f.row.memberId, now })).rejects.toThrow("consent required");
+    const f = fixture(); mocks.consent.mockResolvedValue({ launchGranted: false });
+    await expect(admitClinicalDailySync({ connectionId: f.row.id, memberId: f.row.memberId, now })).resolves.toBe(false);
     expect(f.create).not.toHaveBeenCalled();
   });
 });

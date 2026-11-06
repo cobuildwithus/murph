@@ -14,11 +14,13 @@ const mocks = vi.hoisted(() => {
   const connection = { kind: "connection" };
   return {
     clientConstructor: vi.fn(function Client(
-      this: { options?: unknown },
+      this: { options?: unknown; withDeadline?: unknown },
       options: unknown,
     ) {
       this.options = options;
+      this.withDeadline = mocks.withDeadline;
     }),
+    withDeadline: vi.fn(),
     lazy: vi.fn(() => connection),
     connection,
   };
@@ -37,6 +39,9 @@ describe("hosted web Temporal signal client", () => {
     vi.resetModules();
     mocks.lazy.mockClear();
     mocks.clientConstructor.mockClear();
+    mocks.withDeadline.mockReset().mockImplementation(
+      async (_deadline: number, run: () => Promise<unknown>) => run(),
+    );
   });
 
   it("keeps Temporal signaling disabled when no address is configured", async () => {
@@ -54,6 +59,33 @@ describe("hosted web Temporal signal client", () => {
       temporalClient.readHostedRuntimeTemporalSignalClientIfConfigured(),
     ).resolves.toBeNull();
     expect(mocks.lazy).not.toHaveBeenCalled();
+  });
+
+  it("runs without a Temporal deadline context when no client is configured", async () => {
+    const temporalClient = await importTemporalClientModule();
+    const run = vi.fn(async () => "completed");
+
+    await expect(temporalClient.withHostedRuntimeTemporalDeadline(1_500, run)).resolves.toBe("completed");
+
+    expect(run).toHaveBeenCalledExactlyOnceWith();
+    expect(mocks.withDeadline).not.toHaveBeenCalled();
+  });
+
+  it("passes the absolute deadline and callback to the cached client", async () => {
+    vi.stubEnv("HOSTED_TEMPORAL_ADDRESS", "hosted-temporal.example.test:7233");
+    const temporalClient = await importTemporalClientModule();
+    const run = vi.fn(async () => "completed");
+
+    await expect(temporalClient.withHostedRuntimeTemporalDeadline(1_500, run)).resolves.toBe("completed");
+    const failure = new Error("Synthetic signal failure");
+    await expect(temporalClient.withHostedRuntimeTemporalDeadline(2_000, async () => {
+      throw failure;
+    })).rejects.toBe(failure);
+
+    expect(mocks.withDeadline).toHaveBeenNthCalledWith(1, 1_500, run);
+    expect(mocks.withDeadline).toHaveBeenNthCalledWith(2, 2_000, expect.any(Function));
+    expect(run).toHaveBeenCalledExactlyOnceWith();
+    expect(mocks.clientConstructor).toHaveBeenCalledTimes(1);
   });
 
   it("prefers hosted Temporal env names and enables TLS for API-key auth", async () => {

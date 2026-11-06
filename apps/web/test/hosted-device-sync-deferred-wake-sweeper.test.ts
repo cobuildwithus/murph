@@ -44,8 +44,24 @@ describe("hosted device-sync deferred wake sweeper", () => {
 
     expect(listDueDeferredDirtyConnectionWakes).toHaveBeenCalledWith({ dueAt: now, limit: 6 });
     expect(release).toHaveBeenCalledTimes(3);
-    expect(release).toHaveBeenCalledWith({ connectionId: "dsc_0", now, userId: "user-0" });
+    expect(release).toHaveBeenCalledWith({ abortSignal: expect.any(AbortSignal), connectionId: "dsc_0", now, userId: "user-0" });
     expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it("joins a cancelled release without counting failure or postponing it", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "performance", "setTimeout", "clearTimeout"] });
+    try {
+      const postpone = vi.fn();
+      const release = vi.fn(({ abortSignal }: { abortSignal?: AbortSignal }) => new Promise<never>((_, reject) => {
+        abortSignal?.addEventListener("abort", () => reject(abortSignal.reason), { once: true });
+      }));
+      const run = runHostedDeviceSyncDeferredWakeSweeper({ release, logger: { info() {}, warn() {} },
+        store: { listDueDeferredDirtyConnectionWakes: async () => dueRows(6), postponeDeferredDirtyConnectionWake: postpone } });
+      await vi.runAllTimersAsync();
+      expect(await run).toMatchObject({ released: 0, releaseFailed: 0, hasMoreDueConnections: true });
+      expect(release).toHaveBeenCalledTimes(5);
+      expect(postpone).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
   });
 
   it("stops at the release limit and reports remaining due batches", async () => {

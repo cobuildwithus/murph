@@ -77,7 +77,22 @@ describe("hosted device-sync due reconcile sweeper", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("drains slow preflights and wakes the remaining full batch within bounded concurrency", async () => {
+  it("does not count a wake cancelled by the deadline as failed", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "performance", "setTimeout", "clearTimeout"] });
+    try {
+      mocks.appendHostedDeviceSyncScheduledReconcileWake.mockImplementation(({ abortSignal }) => new Promise((_, reject) => {
+        abortSignal.addEventListener("abort", () => reject(abortSignal.reason), { once: true });
+      }));
+      const run = runHostedDeviceSyncDueReconcileSweeper({ logger: buildLogger(), store: buildStore([{
+        connectionId: "synthetic-stop", userId: "synthetic-stop", provider: "oura",
+        connectedAt: "2026-01-01T00:00:00Z", nextReconcileAt: "2026-01-02T00:00:00Z",
+      }]) });
+      await vi.runAllTimersAsync();
+      expect(await run).toMatchObject({ wakeAttempted: 1, wakeFailed: 0, wakeNotAccepted: 0 });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("cancels slow preflights and wakes the remaining full batch within the shared deadline", async () => {
     vi.useFakeTimers({ toFake: ["Date", "performance", "setTimeout", "clearTimeout"] });
     try {
       const rows = Array.from({ length: 100 }, (_, index) => ({
@@ -87,11 +102,14 @@ describe("hosted device-sync due reconcile sweeper", () => {
       let active = 0;
       let peak = 0;
       const starts: number[] = [];
-      mocks.preflight.mockImplementation(async () => {
+      mocks.preflight.mockImplementation(async ({ signal }) => {
         starts.push(performance.now());
         active += 1;
         peak = Math.max(peak, active);
-        await new Promise<void>((resolve) => setTimeout(resolve, 20_000));
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, 20_000);
+          signal.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
+        });
         active -= 1;
         return { outcome: "ineligible", reason: "probe_timeout", wakeAvoided: false,
           requestCount: 1, recordCount: 0, responseBytes: 0, elapsedMs: 20_000 };
@@ -108,11 +126,11 @@ describe("hosted device-sync due reconcile sweeper", () => {
       const run = runHostedDeviceSyncDueReconcileSweeper({ logger, store: buildStore(rows) });
       await vi.runAllTimersAsync();
       expect(await run).toMatchObject({ wakeAccepted: 100, wakeAttempted: 100, hasMoreDueConnections: false });
-      expect(starts.length).toBeGreaterThan(5);
-      expect(starts.every((start) => start - startedAt < 60_000)).toBe(true);
+      expect(starts.length).toBe(5);
+      expect(starts.every((start) => start - startedAt < 16_000)).toBe(true);
       expect(peak).toBe(5);
       expect(active).toBe(0);
-      expect(performance.now() - startedAt).toBeLessThan(90_000);
+      expect(performance.now() - startedAt).toBeLessThanOrEqual(22_000);
       expect(logger.info).toHaveBeenLastCalledWith(expect.any(String), expect.objectContaining({
         preflight: expect.objectContaining({
           attempted: starts.length,
@@ -251,6 +269,7 @@ describe("hosted device-sync due reconcile sweeper", () => {
       recoveryBucketStartedAt: new Date("2026-05-05T00:00:00.000Z"),
     });
     expect(mocks.appendHostedDeviceSyncScheduledReconcileWake).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       connectionId: "dsc_due_1",
       createdAt: "2026-05-05T00:01:00.000Z",
       eventId: "device-sync:scheduled-reconcile:v3:dsc_due_1:2026-05-04T12:00:00.000Z:2026-05-05T00:00:00.000Z",
@@ -337,6 +356,7 @@ describe("hosted device-sync due reconcile sweeper", () => {
       ([left], [right]) => left.connectionId.localeCompare(right.connectionId),
     )).toEqual([
       [{
+        abortSignal: expect.any(AbortSignal),
         connectionId: "dsc_due_1",
         createdAt: "2026-05-05T00:01:00.000Z",
         eventId: "device-sync:scheduled-reconcile:v3:dsc_due_1:2026-05-04T12:00:00.000Z:2026-05-05T00:00:00.000Z",
@@ -347,6 +367,7 @@ describe("hosted device-sync due reconcile sweeper", () => {
         userId: "member_due_1",
       }],
       [{
+        abortSignal: expect.any(AbortSignal),
         connectionId: "dsc_due_2",
         createdAt: "2026-05-05T00:01:00.000Z",
         eventId: "device-sync:scheduled-reconcile:v3:dsc_due_2:2026-05-04T12:05:00.000Z:2026-05-05T00:00:00.000Z",
@@ -457,7 +478,7 @@ describe("hosted device-sync due reconcile sweeper", () => {
       }),
     );
     expect(logger.warn).toHaveBeenCalledWith(
-      "Hosted device-sync due reconcile sweeper has more due connections after wake limit.",
+      "Hosted device-sync due reconcile sweeper has more due connections after its wake limit or deadline.",
       {
         wakeLimit: 1,
         hasMoreDueConnections: true,

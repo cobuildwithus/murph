@@ -338,10 +338,12 @@ export class PrismaDeviceSyncControlPlaneStore
   async materializeStoredConnectionAccount(
     record: HostedConnectionRecord,
     tx?: HostedPrismaTransactionClient,
+    signal?: AbortSignal,
   ): Promise<HostedStoredDeviceSyncAccount | null> {
     return this.connections.materializeStoredConnectionAccount(
       record,
       tx ?? this.prisma,
+      signal,
     );
   }
 
@@ -795,13 +797,12 @@ export class PrismaDeviceSyncControlPlaneStore
       /**
        * Bounds the member-row lock wait via a transaction-local
        * `lock_timeout`, which also covers the advisory-lock step in the same
-       * transaction. Only callers whose failure is absorbed by an external
-       * redelivery loop (webhook acceptance) should pass this: a bounded
-       * waiter fails fast with a retryable error and the provider redelivers.
-       * Journeys without redelivery (connection establishment, companion
-       * ingestion, scheduled wakes) keep the full transaction budget.
+       * transaction. Webhook callers rely on provider redelivery. A sweep's
+       * row stays due, so the next sweep is its redelivery loop. Journeys
+       * without redelivery keep the full transaction budget.
        */
       memberRowLockTimeoutMs?: number;
+      transaction?: { timeout: number };
       /**
        * Require the locked member lifetime to remain active before taking the
        * connection advisory lock. Refresh-lease admission uses this to
@@ -855,7 +856,7 @@ export class PrismaDeviceSyncControlPlaneStore
       }
       await tx.$executeRaw`select pg_advisory_xact_lock(hashtext(${connectionId}))`;
       return callback(tx);
-    });
+    }, options.transaction);
   }
 
 }

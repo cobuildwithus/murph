@@ -5,6 +5,7 @@ import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT, JUNCTION_
 import type { ScheduledReconcileProbeResult, StoredDeviceSyncAccount } from "@murphai/device-syncd/types";
 
 import { acquireHostedMailboxCausalAppendLockTx } from "../hosted-mailbox/store";
+import { HOSTED_RECOVERY_LOCK_TIMEOUT_MS, HOSTED_RECOVERY_TRANSACTION_OPTIONS } from "../hosted-orchestration/recovery-batch";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import { readHostedHealthDataConsentState } from "../legal/consent";
 import { getPrisma } from "../prisma";
@@ -16,8 +17,6 @@ import {
 import { hostedConnectionSourceRecordArgs, mapHostedConnectionSourceRecord } from "./prisma-store/sources";
 import { createHostedDeviceSyncRegistry } from "./providers";
 
-const PROBE_TIMEOUT_MS = 20_000;
-
 export type ScheduledReconcilePreflightResult = ScheduledReconcileProbeResult & {
   wakeAvoided: boolean;
   webhookAgeBucket?: "never" | "under1h" | "1to6h" | "6to24h" | "over24h";
@@ -28,6 +27,7 @@ export type ScheduledReconcilePreflightResult = ScheduledReconcileProbeResult & 
 export async function preflightHostedScheduledReconcile(input: {
   connection: HostedDeviceSyncDueReconcileConnectionRecord;
   now: Date;
+  signal: AbortSignal;
   store?: PrismaDeviceSyncControlPlaneStore;
 }): Promise<ScheduledReconcilePreflightResult> {
   const fallback = (reason: string, webhookAgeBucket?: ScheduledReconcilePreflightResult["webhookAgeBucket"]): ScheduledReconcilePreflightResult => ({
@@ -51,14 +51,14 @@ export async function preflightHostedScheduledReconcile(input: {
       await acquireHostedMailboxCausalAppendLockTx({ tx, userId: input.connection.userId });
       await tx.$queryRaw`SELECT user_id FROM hosted_workspace WHERE user_id = ${input.connection.userId} FOR UPDATE`;
       return apply(await readAuthority(input, store, tx, reject), tx);
-    }, { requireActiveMember: true });
+    }, { requireActiveMember: true, memberRowLockTimeoutMs: HOSTED_RECOVERY_LOCK_TIMEOUT_MS, transaction: HOSTED_RECOVERY_TRANSACTION_OPTIONS });
 
   const baseline = await readLocked(async (state) => state);
   if (!baseline) return fallback(ineligibleReason);
   const webhookAgeBucket = classifyWebhookAge(baseline.record.lastWebhookAt, input.now);
   // The securebox owner can unwrap keys externally. Never perform this inside
   // either database-only authority transaction.
-  const materialized = await store.materializeStoredConnectionAccount(baseline.record);
+  const materialized = await store.materializeStoredConnectionAccount(baseline.record, undefined, input.signal);
   if (!materialized || materialized.credential.kind !== "provider_config") return fallback("account_unavailable", webhookAgeBucket);
   const account: StoredDeviceSyncAccount = {
     ...materialized,
@@ -85,15 +85,8 @@ export async function preflightHostedScheduledReconcile(input: {
     return fallback("authority_changed_before_fetch", webhookAgeBucket);
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
-  let probe: ScheduledReconcileProbeResult;
-  try {
-    probe = await executor.probeScheduledReconcile(account, input.now.toISOString(), { signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
-  }
-  if (controller.signal.aborted && probe.outcome === "unchanged") return { ...probe, webhookAgeBucket, outcome: "ineligible", reason: "probe_timeout", wakeAvoided: false };
+  const probe = await executor.probeScheduledReconcile(account, input.now.toISOString(), { signal: input.signal });
+  if (input.signal.aborted && probe.outcome === "unchanged") return { ...probe, webhookAgeBucket, outcome: "ineligible", reason: "probe_timeout", wakeAvoided: false };
   if (probe.outcome !== "unchanged") return { ...probe, webhookAgeBucket, wakeAvoided: false };
   const nextReconcileAt = probe.nextReconcileAt ? new Date(probe.nextReconcileAt) : null;
   if (!nextReconcileAt || !Number.isFinite(nextReconcileAt.getTime()) || nextReconcileAt <= input.now) {

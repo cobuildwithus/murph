@@ -725,16 +725,18 @@ source lifecycle, or provider inventory changes also require the runtime. A
 future change to comparison/normalization semantics must advance the binding
 version; daily repair remains the independent recovery floor.
 
-The sweeper checks every ordinary Junction candidate in its selected cohort;
+The sweeper checks ordinary Junction candidates while probe time remains;
 there is no separate preflight-count cap. The existing five-worker recovery
-executor and selected-cohort limit bound fanout. Each probe retains a 20-second
-provider budget, two simultaneous summary units, and collection page limits. Web checks
-current member access, consent, connection/source state, dirty payloads, mailbox
-counters, and checkpoint continuation frontier before provider egress and again
-before a cadence-only compare-and-set. Existing member/connection, mailbox
-append, and workspace locks serialize the final decision; provider and securebox
-work stay outside transactions. Missing proof/authority, accepted work, failed or
-incomplete reads, provider timeouts, and failed CAS keep the ordinary wake.
+executor and selected-cohort limit bound fanout. Probes share the Web recovery
+deadline and stop six seconds before its 22-second budget ends, leaving time for
+ordinary wakes. Each probe retains two simultaneous summary units and collection
+page limits. Web checks current member access, consent, connection/source state,
+dirty payloads, mailbox counters, and checkpoint continuation frontier before
+provider egress and again before a cadence-only compare-and-set. Existing
+member/connection, mailbox append, and workspace locks serialize the final
+decision; provider and securebox work stay outside transactions. Missing
+proof/authority, accepted work, failed or incomplete reads, provider timeouts,
+and failed CAS keep the ordinary wake.
 A valid checkpoint-owned continuation behind the settled mailbox frontier does
 not block ordinary content comparison: its retained payload and workspace wake
 remain untouched. The bounded, strictly increasing continuation sequence list

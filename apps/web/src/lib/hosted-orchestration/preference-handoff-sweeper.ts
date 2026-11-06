@@ -12,13 +12,15 @@ import { hostedRuntimeMemberEligibleSql } from "../hosted-onboarding/member-acce
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
   createHostedPostCommitDeadline,
-  waitForHostedPostCommitOperation,
 } from "../hosted-onboarding/bounded-post-commit";
 import {
+  abortAtHostedRecoveryDeadline,
+  HOSTED_RECOVERY_BUDGET_MS,
   HOSTED_RECOVERY_JITTER_WINDOW_MS,
   runHostedRecoveryBatch,
 } from "./recovery-batch";
 import { signalHostedMailboxAppendRuntime } from "./signal-runtime";
+import { withHostedRuntimeTemporalDeadline } from "./temporal-client";
 
 const DEFAULT_HANDOFF_LIMIT = 25;
 const MAX_HANDOFF_LIMIT = 250;
@@ -53,6 +55,7 @@ interface HostedPreferenceHandoffCandidateStore {
 type HostedPreferenceHandoffSweepLogger = Pick<Console, "info" | "warn">;
 
 export async function runHostedPreferenceHandoffSweeper(input: {
+  deadlineMs?: number;
   hasActiveAccess?: typeof hasHostedRuntimeActiveAccess;
   handoffTimeoutMs?: number;
   handoffLimit?: number;
@@ -61,6 +64,8 @@ export async function runHostedPreferenceHandoffSweeper(input: {
   requestHandoff?: typeof signalHostedMailboxAppendRuntime;
   store?: HostedPreferenceHandoffCandidateStore;
 } = {}): Promise<HostedPreferenceHandoffSweepResult> {
+  const deadlineMs = input.deadlineMs ?? Date.now() + HOSTED_RECOVERY_BUDGET_MS;
+  const stop = abortAtHostedRecoveryDeadline(deadlineMs);
   const handoffLimit = normalizeLimit(
     input.handoffLimit,
     DEFAULT_HANDOFF_LIMIT,
@@ -88,7 +93,7 @@ export async function runHostedPreferenceHandoffSweeper(input: {
   // access before LIMIT. Recheck through the canonical async gate to fail closed
   // if access changes after selection; those races do not consume the
   // handoff-attempt budget.
-  await runHostedRecoveryBatch(
+  const unchecked = await runHostedRecoveryBatch(
     uniqueCandidates,
     async (candidate) => {
       if (await hasActiveAccess(candidate.userId)) {
@@ -98,32 +103,35 @@ export async function runHostedPreferenceHandoffSweeper(input: {
       }
     },
     false,
+    stop,
   );
   const activeCandidates = uniqueCandidates.filter((candidate) =>
     activeUserIds.has(candidate.userId)
   );
   const selectedCandidates = activeCandidates.slice(0, handoffLimit);
   // Keep the existing handoff-work budget in addition to the bounded pacing window.
-  const handoffDeadlineMs = createHostedPostCommitDeadline(input.handoffTimeoutMs)
-    + HOSTED_RECOVERY_JITTER_WINDOW_MS;
+  const handoffDeadlineMs = Math.min(
+    deadlineMs,
+    createHostedPostCommitDeadline(input.handoffTimeoutMs) + HOSTED_RECOVERY_JITTER_WINDOW_MS,
+  );
+  const stopHandoffs = abortAtHostedRecoveryDeadline(handoffDeadlineMs);
 
-  await runHostedRecoveryBatch(
+  const unstarted = await withHostedRuntimeTemporalDeadline(handoffDeadlineMs, () => runHostedRecoveryBatch(
     selectedCandidates,
     async (candidate) => {
       handoffAttempted += 1;
       try {
-        const handoff = await waitForHostedPostCommitOperation({
-          deadlineMs: handoffDeadlineMs,
-          operation: (abortSignal) => requestHandoff({
-            abortSignal,
-            expectedUserId: candidate.userId,
-            mailboxItemId: candidate.mailboxItemId,
-          }),
+        const handoff = await requestHandoff({
+          abortSignal: stopHandoffs,
+          expectedUserId: candidate.userId,
+          mailboxItemId: candidate.mailboxItemId,
         });
         if (handoff.signalAccepted) {
           handoffAccepted += 1;
         }
       } catch (error) {
+        // The row stays due.
+        if (stop.aborted) return;
         handoffFailed += 1;
         logger.warn("Hosted preference mailbox handoff recovery failed.", {
           ...formatHostedExecutionSafeLogErrorDetails(error, {
@@ -133,12 +141,13 @@ export async function runHostedPreferenceHandoffSweeper(input: {
       }
     },
     true,
-  );
+    stopHandoffs,
+  ));
 
   const skippedCandidateUsers = Math.max(
     0,
     activeCandidates.length - selectedCandidates.length,
-  );
+  ) + unchecked + unstarted;
   logger.info("Hosted preference mailbox handoff recovery finished.", {
     candidateUsers: uniqueCandidates.length,
     handoffAccepted,

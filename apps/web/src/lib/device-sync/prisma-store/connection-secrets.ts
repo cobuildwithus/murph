@@ -139,6 +139,7 @@ export async function readHostedStoredTokenBundle(
   record: HostedConnectionRecord,
   testCodec?: HostedDeviceSyncSecretTestCodec | null,
   prisma?: HostedSecureBoxPrismaClient,
+  signal?: AbortSignal,
 ): Promise<HostedStoredConnectionTokenBundle | null> {
   if (normalizeHostedDeviceSyncCredentialKind(record.credentialKind) !== "oauth_tokens") {
     return null;
@@ -160,6 +161,7 @@ export async function readHostedStoredTokenBundle(
       connectionId: record.id,
       provider: record.provider,
       prisma,
+      signal,
       purpose: "device-sync-access-token",
       testCodec,
       tokenVersion,
@@ -173,6 +175,7 @@ export async function readHostedStoredTokenBundle(
         connectionId: record.id,
         provider: record.provider,
         prisma,
+        signal,
         purpose: "device-sync-refresh-token",
         testCodec,
         tokenVersion,
@@ -188,6 +191,7 @@ export async function readHostedStoredExternalAccountId(
   record: HostedConnectionRecord,
   testCodec?: HostedDeviceSyncSecretTestCodec | null,
   prisma?: HostedSecureBoxPrismaClient,
+  signal?: AbortSignal,
 ): Promise<string | null> {
   const payload = normalizeNullableString(record.externalAccountIdEncrypted);
 
@@ -199,6 +203,7 @@ export async function readHostedStoredExternalAccountId(
     connectionId: record.id,
     provider: record.provider,
     prisma,
+    signal,
     purpose: "device-sync-external-account-id",
     testCodec,
     tokenVersion: null,
@@ -569,6 +574,7 @@ async function decryptHostedConnectionSecret(input: {
   connectionId: string;
   provider: string;
   prisma?: HostedSecureBoxPrismaClient;
+  signal?: AbortSignal;
   purpose: HostedDeviceSyncSecretPurpose;
   testCodec?: HostedDeviceSyncSecretTestCodec | null;
   tokenVersion?: number | null;
@@ -591,6 +597,7 @@ async function decryptHostedConnectionSecret(input: {
     }),
     lane: descriptor.lane,
     prisma: input.prisma,
+    signal: input.signal,
     scope: descriptor.scope,
     userId: input.userId,
     value: input.value,

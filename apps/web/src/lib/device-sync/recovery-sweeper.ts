@@ -1,3 +1,4 @@
+import { HOSTED_RECOVERY_BUDGET_MS } from "../hosted-orchestration/recovery-batch";
 import {
   runHostedDeviceSyncDeferredWakeSweeper,
   type HostedDeviceSyncDeferredWakeSweeperResult,
@@ -31,13 +32,13 @@ type HostedDeviceSyncDeferredWakeSweepRunner =
 // The route/API name is legacy compatibility. The current behavior is a bounded
 // scheduled-reconcile mailbox wake sweep, not recovery-signal production.
 export async function runHostedDeviceSyncRecoverySweep(input: {
+  deadlineMs?: number;
   logger?: HostedDeviceSyncRecoverySweepLogger;
   runDeferredWakeSweeper?: HostedDeviceSyncDeferredWakeSweepRunner;
   runDueReconcileSweeper?: HostedDeviceSyncDueReconcileSweepRunner;
   runPreferenceHandoffSweeper?: HostedPreferenceHandoffSweepRunner;
 } = {}): Promise<HostedDeviceSyncRecoverySweepResult> {
-  // Keep this cutoff ahead of every producer stage, even if a sweep is slow.
-  const sweepStartedAt = new Date();
+  const deadlineMs = input.deadlineMs ?? Date.now() + HOSTED_RECOVERY_BUDGET_MS;
   const logger = input.logger ?? console;
   const runDueReconcileSweeper = input.runDueReconcileSweeper
     ?? runHostedDeviceSyncDueReconcileSweeper;
@@ -46,17 +47,39 @@ export async function runHostedDeviceSyncRecoverySweep(input: {
   const runDeferredWakeSweeper = input.runDeferredWakeSweeper
     ?? runHostedDeviceSyncDeferredWakeSweeper;
 
-  // Release due routine batches first. Both producer stages signal their own
-  // new wakes; the final handoff stage recovers only older unimported items.
+  // Recover old handoffs before deferred and due producers. The handoff age
+  // gate is independent of this sweep's new work, so slow producers cannot
+  // consume its time or make their own new items eligible for recovery.
+  let preferenceHandoffSweep: HostedPreferenceHandoffSweepResult | null = null;
+  let preferenceHandoffError: unknown = null;
+  try {
+    preferenceHandoffSweep = await runPreferenceHandoffSweeper({ deadlineMs });
+  } catch (error) {
+    preferenceHandoffError = error;
+  }
+  if (
+    preferenceHandoffSweep !== null
+    && preferenceHandoffSweep.handoffFailed > 0
+  ) {
+    logger.warn("Hosted preference mailbox handoff recovery failed.", {
+      errorCode: "HOSTED_PREFERENCE_HANDOFF_RECOVERY_SWEEP_FAILED",
+      errorMessage: "Hosted preference mailbox handoff recovery did not request every handoff.",
+      handoffFailed: preferenceHandoffSweep.handoffFailed,
+    });
+    preferenceHandoffError = new Error(
+      "Hosted preference mailbox handoff recovery failed.",
+    );
+  }
+
   const {
     error: deferredWakeError,
     result: deferredWakeSweep,
-  } = await runDeferredWakeSweepStage(runDeferredWakeSweeper);
+  } = await runDeferredWakeSweepStage(runDeferredWakeSweeper, deadlineMs);
 
   let dueReconcileSweep: HostedDeviceSyncDueReconcileSweeperResult | null = null;
   let dueReconcileError: unknown = null;
   try {
-    dueReconcileSweep = await runDueReconcileSweeper();
+    dueReconcileSweep = await runDueReconcileSweeper({ deadlineMs });
   } catch (error) {
     logger.warn("Hosted device-sync scheduled wake sweep failed.", {
       ...formatHostedExecutionSafeLogErrorDetails(error, {
@@ -85,27 +108,6 @@ export async function runHostedDeviceSyncRecoverySweep(input: {
 
     dueReconcileError = new Error(
       "Hosted device-sync due reconcile sweeper failed to request one or more wakes.",
-    );
-  }
-
-  let preferenceHandoffSweep: HostedPreferenceHandoffSweepResult | null = null;
-  let preferenceHandoffError: unknown = null;
-  try {
-    preferenceHandoffSweep = await runPreferenceHandoffSweeper({ now: sweepStartedAt });
-  } catch (error) {
-    preferenceHandoffError = error;
-  }
-  if (
-    preferenceHandoffSweep !== null
-    && preferenceHandoffSweep.handoffFailed > 0
-  ) {
-    logger.warn("Hosted preference mailbox handoff recovery failed.", {
-      errorCode: "HOSTED_PREFERENCE_HANDOFF_RECOVERY_SWEEP_FAILED",
-      errorMessage: "Hosted preference mailbox handoff recovery did not request every handoff.",
-      handoffFailed: preferenceHandoffSweep.handoffFailed,
-    });
-    preferenceHandoffError = new Error(
-      "Hosted preference mailbox handoff recovery failed.",
     );
   }
 
@@ -140,9 +142,10 @@ export async function runHostedDeviceSyncRecoverySweep(input: {
 
 async function runDeferredWakeSweepStage(
   run: HostedDeviceSyncDeferredWakeSweepRunner,
+  deadlineMs: number,
 ): Promise<{ error: unknown; result: HostedDeviceSyncDeferredWakeSweeperResult | null }> {
   try {
-    const result = await run();
+    const result = await run({ deadlineMs });
     return {
       error: result.releaseFailed > 0
         ? new Error("Hosted device-sync deferred wake sweep failed to release one or more wakes.")

@@ -1,3 +1,5 @@
+import { HOSTED_RECOVERY_BUDGET_MS } from "@/src/lib/hosted-orchestration/recovery-batch";
+import { withHostedRuntimeTemporalDeadline } from "@/src/lib/hosted-orchestration/temporal-client";
 import { runClinicalDailySyncSweep } from "@/src/lib/clinical-records/daily-sync";
 import {
   HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_CALLBACK_USER_ID,
@@ -31,6 +33,7 @@ export async function GET(): Promise<Response> {
 }
 
 export const POST = withJsonError(async (request: Request) => {
+  const deadlineMs = Date.now() + HOSTED_RECOVERY_BUDGET_MS;
   const callbackUserId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_MAX_BODY_BYTES,
   });
@@ -43,9 +46,11 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  const [devices, clinical] = await Promise.allSettled([
-    runHostedDeviceSyncRecoverySweep(), runClinicalDailySyncSweep(),
-  ]);
+  const [devices, clinical] = await withHostedRuntimeTemporalDeadline(deadlineMs, () =>
+    Promise.allSettled([
+      runHostedDeviceSyncRecoverySweep({ deadlineMs }), runClinicalDailySyncSweep({ deadlineMs }),
+    ]),
+  );
   if (devices.status === "rejected") throw devices.reason;
   if (clinical.status === "rejected" || clinical.value.failed > 0) {
     throw hostedOnboardingError({ code: "CLINICAL_RECORD_DAILY_ADMISSION_FAILED", httpStatus: 503,

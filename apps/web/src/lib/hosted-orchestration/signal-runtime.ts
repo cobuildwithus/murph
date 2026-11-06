@@ -121,6 +121,7 @@ export interface SignalHostedRuntimeOwnerReleasedInput
 }
 
 export interface SignalHostedDeviceSyncMailboxInput {
+  abortSignal?: AbortSignal;
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
   mailboxItemId: string;
@@ -329,6 +330,7 @@ export async function signalHostedDeviceSyncMailboxRuntime(
   }
 
   return signalHostedUserRuntimeWorkflow({
+    abortSignal: input.abortSignal,
     client: input.client,
     environment: input.environment,
     ensureWorkspace: true,

@@ -698,9 +698,11 @@ export function buildClinicalRetrievalWakeEventId(input: {
 
 export async function signalClinicalRetrievalWake(
   checkpoint: ClinicalMailboxCheckpoint,
+  abortSignal?: AbortSignal,
 ): Promise<void> {
   try {
     await signalHostedMailboxAppendRuntime({
+      abortSignal,
       expectedUserId: checkpoint.userId,
       knownCheckpoint: {
         lane: checkpoint.lane,

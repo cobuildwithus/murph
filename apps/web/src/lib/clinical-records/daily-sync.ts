@@ -8,15 +8,20 @@ import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root
 import { unwrapHostedDomainRootForWeb } from "../hosted-crypto/domain-root-store";
 import { readHostedRuntimeAiAccessDecision } from "../hosted-onboarding/member-access";
 import { lockHostedMemberRow, readHostedMemberSuspensionAfterLockTx } from "../hosted-onboarding/shared";
-import { assertHostedLaunchRequiredConsentGranted } from "../legal/consent";
+import { abortAtHostedRecoveryDeadline, HOSTED_RECOVERY_BUDGET_MS, HOSTED_RECOVERY_LOCK_TIMEOUT_MS, HOSTED_RECOVERY_TRANSACTION_OPTIONS } from "../hosted-orchestration/recovery-batch";
+import { readHostedConsentStatus } from "../legal/consent";
 import { getPrisma } from "../prisma";
 import { buildEpicDailyRetrievalPlan } from "./epic-policy";
 import { CLINICAL_DAILY_SYNC_MS } from "./persistent-access";
 import { appendClinicalRetrievalWakeTx, signalClinicalRetrievalWake } from "./retrieval";
 
+// Just under the 15-minute sweep, so the next sweep sees the row.
+export const CLINICAL_DAILY_ADMISSION_RETRY_MS = 14 * 60_000;
+
 /** Existing recovery scheduler; one bounded selection and sequential admission, no provider egress. */
-export async function runClinicalDailySyncSweep(input: { now?: Date } = {}) {
+export async function runClinicalDailySyncSweep(input: { now?: Date; deadlineMs?: number } = {}) {
   const now = input.now ?? new Date();
+  const stop = abortAtHostedRecoveryDeadline(input.deadlineMs ?? Date.now() + HOSTED_RECOVERY_BUDGET_MS);
   const candidates = await getPrisma().clinicalRecordConnection.findMany({
     where: { member: { suspendedAt: null }, status: { in: ["active", "error"] }, nextSyncAt: { lte: now },
       refreshTokenEncrypted: { not: null }, retrievalRuns: { none: { completedAt: null } } },
@@ -26,29 +31,39 @@ export async function runClinicalDailySyncSweep(input: { now?: Date } = {}) {
   let queued = 0;
   let failed = 0;
   for (const candidate of candidates) {
+    if (stop.aborted) break; // Unstarted rows stay due.
+    let retryMs = CLINICAL_DAILY_SYNC_MS;
     try {
-      if (await admitClinicalDailySync({ connectionId: candidate.id, memberId: candidate.memberId, now })) queued++;
-    } catch { failed++; }
+      if (await admitClinicalDailySync({ abortSignal: stop, connectionId: candidate.id, memberId: candidate.memberId, now })) {
+        queued++;
+        continue; // Admission committed its own date.
+      }
+    } catch {
+      if (!stop.aborted) failed++;
+      retryMs = CLINICAL_DAILY_ADMISSION_RETRY_MS;
+    }
     // Ineligible or failing rows must not monopolize the bounded candidate window.
+    // The still-due guard lets a concurrent admission keep its date.
     await getPrisma().clinicalRecordConnection.updateMany({
       where: { id: candidate.id, nextSyncAt: { lte: now } },
-      data: { nextSyncAt: new Date(now.getTime() + CLINICAL_DAILY_SYNC_MS) },
+      data: { nextSyncAt: new Date(now.getTime() + retryMs) },
     });
   }
   return { checked: candidates.length, queued, failed };
 }
 
-export async function admitClinicalDailySync(input: { connectionId: string; memberId: string; now: Date }): Promise<boolean> {
+export async function admitClinicalDailySync(input: { abortSignal?: AbortSignal; connectionId: string; memberId: string; now: Date }): Promise<boolean> {
   if (!(await readHostedRuntimeAiAccessDecision({ memberId: input.memberId })).allowed) return false;
   return runWithHostedDomainRootUnwrapCache(async () => {
     const prisma = getPrisma();
     const root = await unwrapHostedDomainRootForWeb({ domain: getHostedCryptoDomainForLane("mailbox-payload"),
-      prisma, retainFailureInScopedCache: true, userId: input.memberId });
+      prisma, retainFailureInScopedCache: true, signal: input.abortSignal, userId: input.memberId });
     root.rootKey.fill(0);
+    input.abortSignal?.throwIfAborted();
     const wake = await prisma.$transaction(async (tx) => {
-      await lockHostedMemberRow(tx, input.memberId);
+      await lockHostedMemberRow(tx, input.memberId, { timeoutMs: HOSTED_RECOVERY_LOCK_TIMEOUT_MS });
       if (await readHostedMemberSuspensionAfterLockTx(tx, input.memberId) !== "active") return null;
-      await assertHostedLaunchRequiredConsentGranted({ memberId: input.memberId, prisma: tx });
+      if (!(await readHostedConsentStatus({ memberId: input.memberId, prisma: tx })).launchGranted) return null;
       const connection = await tx.clinicalRecordConnection.findFirst({
         where: { id: input.connectionId, memberId: input.memberId },
         include: { retrievalRuns: { orderBy: { generation: "desc" }, take: 1 } },
@@ -73,9 +88,9 @@ export async function admitClinicalDailySync(input: { connectionId: string; memb
         grantedScopesJson,
       } });
       return appendClinicalRetrievalWakeTx({ generation, memberId: input.memberId, occurredAt: input.now, runId, tx });
-    });
+    }, HOSTED_RECOVERY_TRANSACTION_OPTIONS);
     if (!wake) return false;
-    await signalClinicalRetrievalWake(wake);
+    await signalClinicalRetrievalWake(wake, input.abortSignal);
     return true;
   });
 }

@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  withHostedRuntimeTemporalDeadline: vi.fn(),
   queryRaw: vi.fn((...args: unknown[]): Promise<Array<{
     mailboxItemId: string;
     userId: string;
@@ -14,11 +15,70 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: () => ({ $queryRaw: mocks.queryRaw }),
 }));
 
+vi.mock("@/src/lib/hosted-orchestration/temporal-client", () => ({
+  withHostedRuntimeTemporalDeadline: mocks.withHostedRuntimeTemporalDeadline,
+}));
+
 import {
   runHostedPreferenceHandoffSweeper,
 } from "@/src/lib/hosted-orchestration/preference-handoff-sweeper";
 
 describe("hosted preference handoff sweeper", () => {
+  beforeEach(() => {
+    mocks.withHostedRuntimeTemporalDeadline.mockReset().mockImplementation(
+      async (_deadlineMs: number, run: () => Promise<unknown>) => run(),
+    );
+  });
+
+  it.each([
+    { deadlineMs: 22_000, expectedStopMs: 12_000, handoffFailed: 1 },
+    { deadlineMs: 8_000, expectedStopMs: 8_000, handoffFailed: 0 },
+  ])("bounds only handoffs at $expectedStopMs with shared deadline $deadlineMs", async ({ deadlineMs, expectedStopMs, handoffFailed }) => {
+    vi.useFakeTimers({ toFake: ["Date", "performance", "setTimeout", "clearTimeout"] });
+    vi.setSystemTime(0);
+    let temporalDeadlineMs: number | undefined;
+    mocks.withHostedRuntimeTemporalDeadline.mockImplementation(async (deadlineMs, run) => {
+      temporalDeadlineMs = deadlineMs;
+      try { return await run(); } finally { temporalDeadlineMs = undefined; }
+    });
+    const hasActiveAccess = vi.fn(async () => {
+      expect(temporalDeadlineMs).toBeUndefined();
+      expect(mocks.withHostedRuntimeTemporalDeadline).not.toHaveBeenCalled();
+      // The stage cap starts after the access recheck has settled.
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      return true;
+    });
+    const handoffDeadlines: Array<number | undefined> = [];
+    const abortTimes: number[] = [];
+    const requestHandoff = vi.fn(({ abortSignal }: { abortSignal?: AbortSignal }) => {
+      handoffDeadlines.push(temporalDeadlineMs);
+      return new Promise<never>((_, reject) => {
+        abortSignal?.addEventListener("abort", () => {
+          abortTimes.push(Date.now());
+          reject(abortSignal.reason);
+        }, { once: true });
+      });
+    });
+    const logger = buildLogger();
+    try {
+      const sweep = runHostedPreferenceHandoffSweeper({
+        deadlineMs, hasActiveAccess, requestHandoff, logger,
+        store: buildStore([{ userId: "synthetic-member", mailboxItemId: "synthetic-mailbox" }]),
+      });
+      await vi.runAllTimersAsync();
+      expect(await sweep).toMatchObject({ handoffAttempted: 1, handoffFailed });
+      expect(logger.warn).toHaveBeenCalledTimes(handoffFailed);
+      expect(hasActiveAccess).toHaveBeenCalledTimes(1);
+      expect(requestHandoff).toHaveBeenCalledTimes(1);
+      expect(handoffDeadlines).toEqual([expectedStopMs]);
+      expect(abortTimes).toEqual([expectedStopMs]);
+      expect(mocks.withHostedRuntimeTemporalDeadline).toHaveBeenCalledExactlyOnceWith(expectedStopMs, expect.any(Function));
+      expect(temporalDeadlineMs).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("spreads individual handoffs without spending their timeout on jitter", async () => {
     vi.useFakeTimers({ toFake: ["Date", "performance", "setTimeout", "clearTimeout"] });
     vi.setSystemTime(0);
@@ -128,7 +188,8 @@ describe("hosted preference handoff sweeper", () => {
   });
 
   it("bounds a hung handoff so the recovery sweep can finish", async () => {
-    const requestHandoff = vi.fn(() => new Promise<never>(() => {}));
+    const requestHandoff = vi.fn(({ abortSignal }: { abortSignal?: AbortSignal }) =>
+      new Promise<never>((_, reject) => abortSignal?.addEventListener("abort", () => reject(abortSignal.reason), { once: true })));
     const dateNow = vi.spyOn(Date, "now").mockReturnValue(0);
 
     try {
@@ -382,10 +443,10 @@ describe("hosted preference handoff sweeper", () => {
       userId: "member_clinical_hung_retry",
     }]);
     let handoffCalls = 0;
-    const requestHandoff = vi.fn(() => {
+    const requestHandoff = vi.fn(({ abortSignal }: { abortSignal?: AbortSignal }) => {
       handoffCalls += 1;
       return handoffCalls === 1
-        ? new Promise<never>(() => {})
+        ? new Promise<never>((_, reject) => abortSignal?.addEventListener("abort", () => reject(abortSignal.reason), { once: true }))
         : Promise.resolve({
             signalAccepted: true as const,
             workflowId: "hosted-user-runtime:synthetic",
