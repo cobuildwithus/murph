@@ -1649,6 +1649,23 @@ describe("executeHostedMailboxEvent", () => {
     }
   });
 
+  it.each(["binding_absent", "route_mismatch", "contract_mismatch", "profile_isolated", "native_resume_disabled", "private-unrecognized-reason"])("allowlists provider thread rotation reason %s", (reason) => {
+    const entry = emitHostedAssistantProviderTraceLog({
+      event: { rawEvent: {
+        schema: "murph.assistant-provider-plan-diagnostics.v1",
+        type: "assistant.provider.plan", codexContinuation: "thread-start",
+        workingDirectoryKind: "hosted-stable-proc-cwd", threadRotationReason: reason,
+      }, updates: [] },
+      wake: { kind: "runtime.timer", eventId: "synthetic-event", userId: "synthetic-member", occurredAt: "2026-11-05T00:00:00Z", triggerKind: "runtime_timer" },
+    });
+    if (reason === "private-unrecognized-reason") {
+      expect(entry?.redacted).not.toHaveProperty("threadRotationReason");
+      expect(JSON.stringify(entry)).not.toContain(reason);
+    } else {
+      expect(entry?.redacted).toMatchObject({ threadRotationReason: reason });
+    }
+  });
+
   it.each(["assistant_context_snapshot", "assistant_context_snapshot_refresh", "follow_up_context"])("captures route-planning tail stage %s", (stage) => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_provider_plan_context_snapshot",

@@ -174,6 +174,7 @@ export interface AssistantRouteTurnPlan {
 }
 
 export interface AssistantRoutePlanningDiagnostics {
+  threadRotationReason: 'binding_absent' | 'route_mismatch' | 'contract_mismatch' | 'profile_isolated' | 'native_resume_disabled' | null
   assistantContextSnapshotElapsedMs: number | null
   assistantContextSnapshotRefreshElapsedMs: number | null
   followUpContextElapsedMs: number | null
@@ -852,7 +853,7 @@ function resolveRouteNativeResumeThreadId({
   assistantContractFingerprint: string
   threadStartDeveloperInstructions: string | null
   dynamicTools: readonly MurphDynamicTool[]
-}): string | null {
+}): { resumeCodexThreadId: string | null; threadRotationReason: AssistantRoutePlanningDiagnostics['threadRotationReason'] } {
   const storedAssistantContractFingerprint = normalizeNullableString(
     resumeBinding?.assistantContractFingerprint,
   )
@@ -882,7 +883,15 @@ function resolveRouteNativeResumeThreadId({
           }),
         })
       : null
-  return resumeCodexThreadId
+  return {
+    resumeCodexThreadId,
+    threadRotationReason: resumeCodexThreadId !== null ? null
+      : !nativeResumeEnabled ? 'profile_isolated'
+      : !supportsNativeResume ? 'native_resume_disabled'
+      : resumeBinding === null
+        ? readAssistantCodexResume(input.session) === null ? 'binding_absent' : 'route_mismatch'
+        : 'contract_mismatch',
+  }
 }
 
 export async function resolveAssistantRouteTurnPlan(
@@ -1418,7 +1427,7 @@ export async function resolveAssistantRouteTurnPlan(
     dynamicTools,
     routeFingerprint: readCodexThreadCompatibilityFingerprint(input.route),
   })
-  const resumeCodexThreadId = resolveRouteNativeResumeThreadId({
+  const { resumeCodexThreadId, threadRotationReason } = resolveRouteNativeResumeThreadId({
     input,
     resumeBinding,
     supportsNativeResume: followUp.supportsNativeResume,
@@ -1489,6 +1498,7 @@ export async function resolveAssistantRouteTurnPlan(
       resumeCodexThreadId,
     }),
     planningDiagnostics: {
+      threadRotationReason,
       assistantContextSnapshotElapsedMs: readRoutePlanningSpan(routePlanningSpans, 'assistantContextSnapshotElapsedMs'),
       assistantContextSnapshotRefreshElapsedMs: readRoutePlanningSpan(routePlanningSpans, 'assistantContextSnapshotRefreshElapsedMs'),
       followUpContextElapsedMs: readRoutePlanningSpan(routePlanningSpans, 'followUpContextElapsedMs'),

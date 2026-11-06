@@ -22,6 +22,11 @@ Cloudflare-hosted execution plane for the hosted Murph path.
 
 ## Focused tests
 
+`Hosted runtime mailbox fetch finished.` includes `mailboxFetchKind`
+(`initial`, `pre-assistant-system`, `runtime-wake-conversation`, or
+`runtime-wake-system`) and `mailboxFetchLanes`. Kind is classified from the
+request suffix; the raw request identity is never included in this log.
+
 Hosted-local failure status retains at most eight recent runtime log metadata
 entries, selected only from the existing level, component, phase and event-code
 enums. The formatter omits timestamps, identifiers, free-form errors and all log

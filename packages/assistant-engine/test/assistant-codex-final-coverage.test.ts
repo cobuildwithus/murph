@@ -220,6 +220,7 @@ function createRoute(input?: {
 
 function createRoutePlanningDiagnostics(): AssistantRouteTurnPlan['planningDiagnostics'] {
   return {
+    threadRotationReason: 'binding_absent',
     assistantContextSnapshotElapsedMs: null,
     assistantContextSnapshotRefreshElapsedMs: null,
     followUpContextElapsedMs: null,
@@ -535,6 +536,7 @@ describe('Codex provider routing', () => {
         type: 'assistant.provider.plan',
         routePlanningAssistantContextSnapshotRefreshElapsedMs: 73,
         routePlanningFollowUpContextElapsedMs: 41,
+        threadRotationReason: 'binding_absent',
         reasoningEffort: expectedReasoningEffort,
       })
       expect(planTrace).not.toHaveProperty('providerConfig')

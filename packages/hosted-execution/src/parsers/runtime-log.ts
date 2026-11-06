@@ -51,6 +51,8 @@ const FORBIDDEN_RAW_REDACTED_KEY_NAMES = [
   "token",
 ] as const;
 const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_NAMES = new Set([
+  "automationCrossSessionContextMs",
+  "automationPromptPreparationMs",
   "authorizationHeaderValue",
   "assistantContextSnapshotRefreshAttempted",
   "assistantContextSnapshotRefreshed",
@@ -78,6 +80,13 @@ const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_NAMES = new Set([
 const BOOLEAN_REDACTED_KEY_NAMES = new Set([
   "assistantContextSnapshotRefreshAttempted",
   "assistantContextSnapshotRefreshed",
+]);
+const AUTOMATION_PREPARATION_ELAPSED_MS_REDACTED_KEY_NAMES = new Set([
+  "automationGroupAndOperationScopeMs",
+  "automationTerminalEvidenceMs",
+  "automationSessionPreflightMs",
+  "automationCrossSessionContextMs",
+  "automationPromptPreparationMs",
 ]);
 const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_PATTERN =
   /^[A-Za-z][A-Za-z0-9_.-]{0,127}(?:ErrorMessage|ErrorDetail|ErrorCause|ErrorStatusText)$/u;
@@ -403,11 +412,16 @@ function parseHostedRuntimeRedactedValue(
   if (BOOLEAN_REDACTED_KEY_NAMES.has(key)) {
     return parseHostedRuntimeRedactedBoolean(value, label);
   }
-  if (ROUTE_PLANNING_ELAPSED_MS_REDACTED_KEY_NAMES.has(key)) {
+  if (ROUTE_PLANNING_ELAPSED_MS_REDACTED_KEY_NAMES.has(key)
+    || AUTOMATION_PREPARATION_ELAPSED_MS_REDACTED_KEY_NAMES.has(key)) {
     return parseHostedRuntimeRedactedElapsedMs(value, label);
   }
   if (key === "routePlanningSlowestStage") {
     return parseHostedRuntimeRedactedRoutePlanningStage(value, label);
+  }
+  if (key === "threadRotationReason") {
+    return value === null ? null : parseAllowedString(value, label,
+      ["binding_absent", "route_mismatch", "contract_mismatch", "profile_isolated", "native_resume_disabled"]);
   }
   if (key === "reasoningEffort") {
     return parseHostedRuntimeRedactedReasoningEffort(value, label);

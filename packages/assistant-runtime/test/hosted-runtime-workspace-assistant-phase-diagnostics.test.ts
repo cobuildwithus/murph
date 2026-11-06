@@ -503,6 +503,34 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
     );
   });
 
+  it("preserves provider-start critical path timing through the durable log boundary", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const timing = {
+      automationGroupAndOperationScopeMs: 11,
+      automationTerminalEvidenceMs: 12,
+      automationSessionPreflightMs: 13,
+      automationCrossSessionContextMs: 14,
+      automationPromptPreparationMs: 15,
+    };
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      deviceSyncProcessed: 0, deviceSyncSkipped: true, nextWakeAt: null,
+      parserProcessed: 0, postCheckpointRecord: null, progressed: true,
+      redactedLogEntries: [{
+        component: "runtime", level: "info", phase: "wake.running",
+        message: "Hosted assistant provider-start critical path timing.",
+        redacted: timing,
+      }],
+    });
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+    await drainHostedRuntimeLogWritesBestEffort();
+    expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        eventCode: "assistant.automation_detail",
+        redactedJson: expect.objectContaining(timing),
+      }),
+    );
+  });
+
   it("revalidates Codex resume-failure diagnostics before durable logging", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
