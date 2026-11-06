@@ -3,6 +3,47 @@
 The canonical wire types live in `apps/web/src/lib/game/contract.ts`.
 The [weekly-game spec](weekly-game.md) owns rules, authority and delivery.
 
+## First-name persistence
+
+Home's response shape stays unchanged. The app shows name entry only when
+`me.firstName` is null. If `game_profile` is absent, the server may silently
+adopt the saved vault name; it never prefills the name screen. Existing profiles
+cause no replica or hosted-control calls. The optional lookup runs alongside
+Home reads and has one 1.5-second deadline, including browser-session creation.
+It loads only the replica core shard and requires browser-vault member authority
+before reading, then current native-session and member authority inside the
+transaction that creates the row. Free invitees can still play without vault
+access or consent.
+
+Adoption requires `displayName` with no whitespace, a saved vault time zone in
+`meals.timeZone`, and the ordinary `setProfile` parser and moderation checks.
+A longer name is never split into a guessed first name. Missing, invalid,
+unavailable, refused or timed-out reads leave the ordinary null-name Home
+response and create no row. The server inserts with duplicate skipping and
+re-reads, so a concurrent app save wins. Adoption sends no vault action. The
+existing app behavior corrects the initial vault zone to the phone's zone.
+
+Native login tries the same adoption first, so the read happens under the login
+screen's loading state instead of a blank Home. It runs only after `otp/verify`
+has committed the session, never before the code is proven, because a profile
+row is visible to other players' game setup. It uses the phone's time zone, so a
+member without a saved vault zone can still be adopted. The read has 2 seconds
+and the whole step one 2.5-second deadline, including loading the game code. A
+replica parse already running can finish past it; it is synchronous, so the
+timer waits for it. A member with a profile stops at one lookup. Nothing in this step can fail the
+login or change its response. Home's lookup stays as the fallback for members
+already signed in and for logins that missed.
+
+An explicit profile save also submits `display-name.set` after saving the game
+row, only for a first save or a changed name. A same-name time-zone update and
+updates that omit the name submit nothing. Each name change gets a fresh action
+UUID, including a change back to an earlier name. Names beyond memory's
+120-character limit still obey the game's 200-character limit and save only to
+the game profile. A refused or failed vault submission never fails the app save.
+
+Deploy the package/runtime consumer before this Web behavior. Older shipped app
+builds benefit without an iOS change; Numbers and Meals never return the name.
+
 ## Group change requests
 
 Opt in with `X-Murph-Game-Multiplayer: 1`; immutable `maxPlayers === 10` selects
