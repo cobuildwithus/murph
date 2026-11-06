@@ -19,6 +19,7 @@ import {
   removeTempRoot,
   runHostedWorkspaceRuntimeJobInProcess,
   stagePendingLinqAssistantInputForMailboxItem,
+  withRealTimeout,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 import assert from "node:assert/strict";
 import { mkdtemp, readdir, utimes } from "node:fs/promises";
@@ -41,19 +42,18 @@ import * as maintenanceCancellation from "../src/hosted-runtime/background-maint
 import { HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS } from "../src/hosted-runtime/device-sync-maintenance-limits.ts";
 import { readHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
 
-// These steps do real CPU work, so how long one takes says more about the host than the
-// product. The test timeout is their only deadline; racing it still unwinds `finally`.
-function untilTestTimeout<T>(step: Promise<T>, signal: AbortSignal, events: string[]): Promise<T> {
-  return Promise.race([step, new Promise<never>((_resolve, reject) => {
-    signal.addEventListener("abort", () => {
-      // Vitest reports its own timeout error, so keep the event order here.
-      process.stderr.write(`${events.join(",")}\n`);
-      reject(signal.reason);
-    }, { once: true });
-  })]);
+// Each step does real CPU work, so its duration says more about the host than the product.
+// One deadline per test, set inside vitest's 60-second timeout so `finally` still unwinds.
+function createTestDeadline(events: string[]) {
+  const deadlineAt = performance.now() + 50_000;
+  const remainingMs = () => Math.max(deadlineAt - performance.now(), 0);
+  return {
+    remainingMs,
+    within: <T>(step: Promise<T>) => withRealTimeout(step, remainingMs(), () => events.join(",")),
+  };
 }
 
-test.for(["completed", "stalled", "absent", "persistent", "cold", "reminder", "acknowledgment", "empty-wake", "finalization", "long-finalization"] as const)("preserves foreground delivery with a %s concurrent device import", async (scenario, { signal, task }) => {
+test.each(["completed", "stalled", "absent", "persistent", "cold", "reminder", "acknowledgment", "empty-wake", "finalization", "long-finalization"] as const)("preserves foreground delivery with a %s concurrent device import", async (scenario) => {
   const finalization = scenario === "finalization" || scenario === "long-finalization";
   const completesBeforeReply = scenario === "completed" || scenario === "acknowledgment" || scenario === "empty-wake";
   const cold = scenario === "cold" || scenario === "reminder";
@@ -66,6 +66,7 @@ test.for(["completed", "stalled", "absent", "persistent", "cold", "reminder", "a
   let idleClock: ReturnType<typeof setInterval> | undefined;
   let runtimeCompletion: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
   const events: string[] = [];
+  const { remainingMs, within } = createTestDeadline(events);
   const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
   const artifactBytesByHash = new Map<string, Uint8Array>();
   const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
@@ -193,9 +194,8 @@ test.for(["completed", "stalled", "absent", "persistent", "cold", "reminder", "a
       if (scenario !== "absent" && !cold && handledInputIds.size === 1) {
         items.push(deviceItem);
         runtimeWakeSignal.notify();
-        await untilTestTimeout(
+        await within(
           finalization ? indexing.promise : completesBeforeReply ? imported.promise : providerStarted.promise,
-          signal, events,
         );
       }
       if (completesBeforeReply) {
@@ -421,7 +421,7 @@ test.for(["completed", "stalled", "absent", "persistent", "cold", "reminder", "a
       },
     );
     if (cold) {
-      await untilTestTimeout(providerStarted.promise, signal, events);
+      await within(providerStarted.promise);
       if (scenario === "reminder") {
         // No conversation or external wake announces this local deadline.
         vi.setSystemTime(new Date(reminderAt));
@@ -431,17 +431,17 @@ test.for(["completed", "stalled", "absent", "persistent", "cold", "reminder", "a
       }
     }
     if (completesBeforeReply || persistent) {
-      await untilTestTimeout(Promise.race([
+      await within(Promise.race([
         secondReply.promise,
         runtimeCompletion.then(() => assert.fail("Runtime exited before the second reply.")),
-      ]), signal, events);
+      ]));
       assert.equal(dirtyAcks.length, 0);
       if (persistent) {
         assert.equal(events.includes("provider.aborted"), false, events.join(","));
         assert.equal(events.filter((event) => event.includes("/summary/sleep/")).length, 1);
         assert.equal(events.includes("device.receipt.uploaded"), false, events.join(","));
         releaseDownload.resolve();
-        await untilTestTimeout(imported.promise, signal, events);
+        await within(imported.promise);
       }
       assert.equal(events.filter((event) => event === "device.receipt.uploaded").length, 1);
       releaseSnapshot.resolve();
@@ -449,20 +449,21 @@ test.for(["completed", "stalled", "absent", "persistent", "cold", "reminder", "a
     if (finalization) {
       // Keep this invocation alive through the retry. A 1-ms idle fixture can
       // legitimately shut down between dispatch and resumed preparation.
-      await untilTestTimeout(replyDispatched.promise, signal, events);
+      await within(replyDispatched.promise);
       assert.equal(preparationAborts, 1);
       assert.ok(events.includes("foreground.lock.acquired"));
-      await untilTestTimeout(vi.waitFor(async () => {
+      await vi.waitFor(async () => {
         const item = (await readHostedSystemMailboxState(vaultRoot)).pending.find(item => item.itemId === deviceItem.id);
         assert.equal(item?.status, "recording");
-      }, { timeout: task.timeout, interval: 25 }), signal, events);
-      // Advance the fake idle clock only after the retained import is durable.
+      }, { timeout: remainingMs(), interval: 25 });
+      // Advance the fake idle clock only after the retained import is durable. Each tick expires
+      // one idle window. A wake cancels an idle checkpoint in flight, so ticks stay far apart.
       idleClock = setInterval(() => {
-        vi.setSystemTime(Date.now() + 1_000);
+        vi.setSystemTime(Date.now() + 61_000);
         runtimeWakeSignal.notify();
-      }, 10);
+      }, 500);
     }
-    await untilTestTimeout(runtimeCompletion, signal, events);
+    await within(runtimeCompletion);
     assert.ok(replySent, JSON.stringify({ events, intents: await listAssistantOutboxIntents(vaultRoot) }));
     if (completesBeforeReply || persistent) {
       assert.equal(handledInputIds.size, scenario === "acknowledgment" ? 3 : 2);
@@ -542,13 +543,14 @@ test.for(["completed", "stalled", "absent", "persistent", "cold", "reminder", "a
 });
 
 
-test.for(["workspace boundary", "pass timeout"] as const)("retains unstarted device work after %s and imports it after restore", async (scenario, { signal }) => {
+test.each(["workspace boundary", "pass timeout"] as const)("retains unstarted device work after %s and imports it after restore", async (scenario) => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-preload-retry-"));
   const controller = new AbortController();
   let runtimeCompletion: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
   const preloadStarted = createDeferred<void>();
   const preloadAborted = createDeferred<void>();
   const events: string[] = [];
+  const { within } = createTestDeadline(events);
   const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
   const artifactBytesByHash = new Map<string, Uint8Array>();
   const connectionId = "synthetic-preload-connection";
@@ -686,7 +688,7 @@ test.for(["workspace boundary", "pass timeout"] as const)("retains unstarted dev
       }),
     });
     runtimeCompletion = run();
-    await untilTestTimeout(runtimeCompletion, signal, events);
+    await within(runtimeCompletion);
     assert.equal(controller.signal.aborted, false);
     assert.ok(preloadAbortReason instanceof Error);
     assert.equal(preloadAbortReason.message, scenario === "workspace boundary"
@@ -715,7 +717,7 @@ test.for(["workspace boundary", "pass timeout"] as const)("retains unstarted dev
     checkpointRequests.length = 0;
     vi.setSystemTime(new Date(retryAt));
     runtimeCompletion = run();
-    await untilTestTimeout(runtimeCompletion, signal, events);
+    await within(runtimeCompletion);
     assert.equal(acknowledgments, 1, JSON.stringify({ events, pending: (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => ({ status: item.status, error: item.lastErrorCode })) }));
     assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
     assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "1");

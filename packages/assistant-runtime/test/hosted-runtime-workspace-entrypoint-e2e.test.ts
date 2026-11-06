@@ -288,6 +288,9 @@ describe("hosted workspace runtime entrypoint", () => {
       }),
     ];
     const foregroundImported = createDeferred<void>();
+    // Device work publishes a status checkpoint whose response replaces the pending wake.
+    // Park it until the retry phase ends so the wake and checkpoint order below are fixed.
+    const retryPhaseFinished = createDeferred<void>();
     let pendingInputId: string | null = null;
     const deviceSyncPort = createSnapshotDeviceSyncPort({
       async onFetchSnapshot() {
@@ -299,7 +302,7 @@ describe("hosted workspace runtime entrypoint", () => {
         }));
         runtimeWakeSignal.notify();
         await withRealTimeout(
-          foregroundImported.promise,
+          retryPhaseFinished.promise,
           runtimeTransitionTimeoutMs,
           () => events.join(","),
         );
@@ -401,8 +404,8 @@ describe("hosted workspace runtime entrypoint", () => {
               inputId: pendingInputId,
               vaultRoot,
             });
-            events.push("assistant.phase:2:finished");
             shutdownController.abort();
+            retryPhaseFinished.resolve();
             return {
               checkpointReason: "assistant_runtime_commit" as const,
               progressed: true,
@@ -413,14 +416,19 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
+      await withRealTimeout(
+        retryPhaseFinished.promise,
+        runtimeTransitionTimeoutMs,
+        () => events.join(","),
+      );
+      assert.equal(assistantPhaseCalls, 2);
+      assert.equal(checkpointRequests.length, 0);
+
       const result = await withRealTimeout(
         resultPromise,
         runtimeTransitionTimeoutMs,
         () => events.join(","),
       );
-      assert.equal(assistantPhaseCalls, 2);
-      // Concurrent device work can publish a status-only commit on either side of phase 2.
-      assert.ok(events.indexOf("assistant.phase:2:finished") < events.indexOf("snapshot:idle_shutdown"), events.join(","));
       const checkpoint = checkpointRequests.at(-1);
       assert.ok(checkpoint);
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
