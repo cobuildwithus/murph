@@ -2814,10 +2814,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
     expect(filteredLogRequests.map((request) => request.entries[0]?.eventCode)).toEqual([
-      "assistant.pass_finished",
       "outbox.delivery_finished",
+      "assistant.pass_finished",
     ]);
-    expect(filteredLogRequests[1]?.entries[0]).toEqual(expect.objectContaining({
+    expect(filteredLogRequests[0]?.entries[0]).toEqual(expect.objectContaining({
       component: "outbox",
       eventCode: "outbox.delivery_finished",
       level: "info",

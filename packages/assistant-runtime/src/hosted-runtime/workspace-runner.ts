@@ -56,9 +56,6 @@ import type {
 } from "./vault-share-projection.ts";
 
 import {
-  HostedRuntimeBridgeCheckpointLeaseError,
-} from "./checkpoint-bridge.ts";
-import {
   buildHostedMailboxImportRedactedStatus,
   HostedMailboxImportCheckpointConflictError,
   HostedMailboxImportCheckpointUserMismatchError,
@@ -88,11 +85,13 @@ import type {
   HostedAssistantEmailDeliveryContext,
 } from "./email-delivery-context.ts";
 import {
+  buildHostedMailboxPostCheckpointEffectFailureLog,
   buildHostedRuntimeLogContextFields,
   compactHostedRuntimeLogCodes,
   type HostedRuntimeLogContext,
   toHostedRuntimeLogCode,
   writeHostedRuntimeLogBestEffort,
+  writeHostedWorkspaceAssistantPostCheckpointFailureRuntimeLog,
 } from "./runtime-logs.ts";
 import {
   resolveHostedPendingAssistantInputWakeAt,
@@ -329,6 +328,7 @@ interface HostedDeferredAssistantUsageRecord {
 }
 
 interface HostedWorkspaceRunnerAssistantPhaseResultBase {
+  afterDurableCheckpoint?: HostedWorkspaceDurableCheckpointEffects | null;
   afterCheckpoint?: (() => Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null | void>) | null;
   afterCheckpointKeepsForegroundImportLoop?: true;
   browserVaultReplicaRefreshRequested?: true;
@@ -1297,6 +1297,10 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       hostedCanonicalWritePort,
       () => runAssistantPhase(assistantPhaseInput),
     );
+    appendHostedWorkspaceDurableCheckpointEffect({
+      effects: afterDurableCheckpoint,
+      postCheckpoint: assistantPhaseResult,
+    });
     if (
       assistantContextSnapshotDirty
       || await isAssistantContextSnapshotRefreshPendingBestEffort(input.vaultRoot)
@@ -2274,9 +2278,9 @@ async function rebuildHostedWorkspaceRunnerAssistantInputBatchAfterSelectedPrefi
   const pendingSelectedInputIds = input.selectedInitialAssistantInputIds.filter(
     (inputId) => pendingInputIds.has(inputId),
   );
-  // Foreground-causal system work can checkpoint before the foreground reply
-  // starts while deliberately retaining its import loop. With no distinct
-  // boundary tail, the still-pending selection must remain invocation-local
+  // General delivery or foreground-causal system work can finish before the
+  // foreground reply. Only passes marked for that continuation retain their
+  // still-pending selection locally when there is no distinct boundary tail,
   // even when the next owner wake is for model-free work. Once a reply phase
   // has run, retain the narrower handled-prefix repair behavior below.
   if (
@@ -2617,36 +2621,6 @@ async function writeHostedMailboxImportRuntimeLog(input: {
   });
 }
 
-async function writeHostedWorkspaceAssistantPostCheckpointFailureRuntimeLog(context: {
-  error: unknown;
-  errorCode: "assistant_after_checkpoint_checkpoint_failed" | "assistant_after_checkpoint_failed" | "foreground_device_sync_failed";
-  input: HostedWorkspaceRunnerInput;
-}): Promise<void> {
-  const failure = buildHostedMailboxPostCheckpointEffectFailureLog(context.error);
-  console.warn("Hosted workspace deferred work failed.", {
-    errorCode: context.errorCode,
-    errorName: failure.name ?? (context.error instanceof Error ? context.error.name : typeof context.error),
-  });
-  await writeHostedRuntimeLogBestEffort({
-    entry: {
-      ...buildHostedRuntimeLogContextFields(context.input.runtimeLogContext),
-      component: "runner",
-      errorCode: context.errorCode,
-      eventCode: "runner.error",
-      level: "warn",
-      phase: "checkpoint",
-      redactedJson: {
-        checkpointed: false,
-        failureCodeDetails: failure.codeDetail ? [failure.codeDetail] : [],
-        failureNames: failure.name ? [failure.name] : [],
-        failureSummaries: failure.summary ? [failure.summary] : [],
-        nestedErrorCode: failure.errorCode,
-      },
-    },
-    now: context.input.now,
-    platform: context.input.platform,
-  });
-}
 
 export async function resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs(input: {
   inputIds: readonly string[];
@@ -3792,46 +3766,6 @@ async function runHostedMailboxPostCheckpointEffectBestEffort(
   });
 }
 
-function buildHostedMailboxPostCheckpointEffectFailureLog(error: unknown): {
-  checkpointLeaseDiagnostics?: {
-    checkpointResponseCheckpointed: boolean;
-    checkpointLeaseMatchesResponse: boolean;
-  };
-  codeDetail: string | null;
-  errorCode: string;
-  name: string | null;
-  summary: string | null;
-} {
-  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
-  // The shared sanitizer intentionally drops arbitrary error properties. Project
-  // only these booleans from the local lease error, never spread its metadata.
-  const postWebCheckpoint = error instanceof HostedRuntimeBridgeCheckpointLeaseError
-    && error.code === "stale_workspace_version"
-    && error.stage === "after_web_checkpoint"
-    ? error.postWebCheckpoint
-    : undefined;
-  const responseCheckpointed = postWebCheckpoint?.responseCheckpointed;
-  const leaseMatchesResponse = postWebCheckpoint?.leaseMatchesResponse;
-  return {
-    ...(typeof responseCheckpointed === "boolean"
-      && typeof leaseMatchesResponse === "boolean"
-      ? {
-          checkpointLeaseDiagnostics: {
-            checkpointResponseCheckpointed: responseCheckpointed,
-            checkpointLeaseMatchesResponse: leaseMatchesResponse,
-          },
-        }
-      : {}),
-    codeDetail: normalizeHostedMailboxPostCheckpointFailureValue(diagnostics?.errorCodeDetail),
-    errorCode: typeof diagnostics?.errorCode === "string" ? diagnostics.errorCode : "runtime_error",
-    name: normalizeHostedMailboxPostCheckpointFailureValue(diagnostics?.errorName),
-    summary: normalizeHostedMailboxPostCheckpointFailureValue(
-      typeof diagnostics?.errorDetail === "string"
-        ? diagnostics.errorDetail
-        : diagnostics?.errorMessage,
-    ),
-  };
-}
 
 function compactHostedMailboxPostCheckpointFailureValues(values: readonly string[]): string[] {
   return Array.from(new Set(values)).slice(0, 16);
@@ -3843,40 +3777,6 @@ function normalizeHostedMailboxPostCheckpointEffectReasonCode(
   return reasonCode === null ? null : toHostedRuntimeLogCode(reasonCode);
 }
 
-function normalizeHostedMailboxPostCheckpointFailureValue(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.replace(/\s+/gu, " ").trim();
-  if (normalized.length === 0) {
-    return null;
-  }
-
-  const bounded = normalized.length > 128
-    ? `${normalized.slice(0, 125).trimEnd()}...`
-    : normalized;
-  return isHostedMailboxPostCheckpointRedactedStringSafe(bounded) ? bounded : null;
-}
-
-function isHostedMailboxPostCheckpointRedactedStringSafe(value: string): boolean {
-  if (/\/Users\/|file:\/\/|[A-Za-z]:\\|<HOME_DIR>|(^|[\s(])\/[^\s)]+/u.test(value)) {
-    return false;
-  }
-  if (/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu.test(value)) {
-    return false;
-  }
-  if (/\+\d[\d().\s-]{7,}\d/u.test(value)) {
-    return false;
-  }
-  return !(
-    /(["']?(?:authorization|secret|token|password|cookie|set-cookie|api[-_]?key)["']?\s*[:=]\s*["']?)([^"',\s}]+)/iu
-      .test(value)
-    || /\b(Basic|Bearer)\s+[A-Z0-9._~+/=-]+\b/iu.test(value)
-    || /\b(?:sk|pk|rk)_(?:live|test)_[A-Z0-9]+\b/iu.test(value)
-    || /\bwhsec_[A-Z0-9]+\b/iu.test(value)
-  );
-}
 
 async function runHostedMailboxPostCheckpointEffectsAndLogBestEffort(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
@@ -4117,7 +4017,7 @@ function mergeDeferredPostCheckpointWake(input: {
 
 function appendHostedWorkspaceDurableCheckpointEffect(input: {
   effects: HostedWorkspaceDurableCheckpointEffect[];
-  postCheckpoint: HostedWorkspaceRunnerAssistantPhasePostCheckpoint;
+  postCheckpoint: Pick<HostedWorkspaceRunnerAssistantPhasePostCheckpoint, "afterDurableCheckpoint">;
 }): void {
   const effect = input.postCheckpoint.afterDurableCheckpoint ?? null;
   if (!effect) {
