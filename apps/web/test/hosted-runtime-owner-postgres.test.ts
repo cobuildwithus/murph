@@ -30,6 +30,7 @@ import {
   type HostedRuntimeOwner,
 } from "@/src/lib/hosted-execution/runtime-owner";
 import { executeHostedRuntimeOwnerCommand } from "@/src/lib/hosted-execution/runtime-owner-control";
+import type { HostedRuntimeOwnerCommand } from "@murphai/hosted-execution/runtime-owner";
 import { readHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowance";
 import { executeHostedRuntimeReplicaPutCommand } from "@/src/lib/hosted-execution/runtime-replica-puts";
 import { hostedWorkspaceSnapshotObjectKey, hostedBrowserVaultReplicaUserPrefix, listHostedBrowserVaultReplicaSiblingObjectKeys } from "@murphai/hosted-execution/storage-paths";
@@ -99,6 +100,20 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     const result = await claimHostedRuntime({ prisma, userId, processingMode: "default" });
     if (result.status === "blocked") throw new Error(`Unexpected admission rejection: ${result.reason}`);
     return result;
+  }
+
+  async function launchedRuntime() {
+    const userId = await member();
+    const owner = (await claim(userId)).owner;
+    const runtime = identity(owner);
+    const target = "synthetic-retirement-slot";
+    const send = (command: HostedRuntimeOwnerCommand, prisma = first) =>
+      executeHostedRuntimeOwnerCommand({ prisma, userId, command });
+    expect(await send({ operation: "prepare_launch", ...runtime, runnerContainerName: target,
+      workspaceVersion: "0", providerEgressTokenHash: null, platformAiUsageAllowed: true, processingMode: "default",
+    })).toMatchObject({ status: "updated" });
+    expect(await send({ operation: "accepted", ...runtime })).toMatchObject({ status: "updated" });
+    return { userId, owner, runtime, target, send };
   }
 
   async function gameFundingRooms(now: Date) {
@@ -765,7 +780,6 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       workspaceVersion: "0",
       platformAiUsageAllowed: true, providerEgressTokenHash: null,
     });
-    await retireHostedRuntime({ prisma: first, identity: original });
     expect(await releaseHostedRuntimeAfterCompletion({ prisma: first, identity: original, runnerContainerName: "synthetic-warm-slot" })).toBe(false);
     await retireHostedRuntime({ prisma: first, identity: original, completed: true });
     expect(await releaseHostedRuntimeAfterCompletion({ prisma: first, identity: original, runnerContainerName: "wrong-slot" })).toBe(false);
@@ -779,6 +793,197 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     expect(await retireHostedRuntime({ prisma: first, identity: original, completed: true })).toBe(false);
     expect(await releaseHostedRuntimeAfterCompletion({ prisma: first, identity: original, runnerContainerName: "synthetic-warm-slot" })).toBe(false);
     await expect(first.$transaction((tx) => requireHostedRuntimeOwnerTx(tx, original))).rejects.toMatchObject({ code: "HOSTED_RUNTIME_OWNER_STALE" });
+  });
+
+  it("keeps a stop in flight cold through completion retries until exact physical release", async () => {
+    const { userId, owner, runtime, target, send } = await launchedRuntime();
+    expect(await send({ operation: "retire", ...runtime, completed: false })).toMatchObject({ status: "updated" });
+    const cold = await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } });
+    expect(cold).toMatchObject({ phase: "retiring", completedAt: null, platformAiUsageAllowed: false,
+      allocationId: owner.allocationId, runnerContainerName: target });
+    for (const command of [
+      { operation: "complete", ...runtime, settledRunnerContainerName: null, immediateRecheckRequested: false },
+      { operation: "complete", ...runtime, settledRunnerContainerName: target, immediateRecheckRequested: false },
+      { operation: "release_completed", ...runtime, runnerContainerName: target },
+      { operation: "retire", ...runtime, completed: true },
+    ] satisfies HostedRuntimeOwnerCommand[]) {
+      expect(await send(command)).toMatchObject({ status: "stale" });
+      expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toEqual(cold);
+    }
+    expect(await claim(userId, second)).toMatchObject({ status: "existing", owner: {
+      generation: owner.generation, attemptId: runtime.attemptId, phase: "retiring",
+    } });
+    // A lost stop acknowledgement must leave destruction authorized on retry.
+    expect(await send({ operation: "retire", ...runtime, completed: false })).toMatchObject({ status: "updated" });
+    expect(await send({ operation: "release", ...runtime, runnerContainerName: "synthetic-wrong-slot" }))
+      .toMatchObject({ status: "stale" });
+    expect(await send({ operation: "release", ...runtime, runnerContainerName: target })).toMatchObject({ status: "updated" });
+    const successor = (await claim(userId, second)).owner;
+    expect(successor).toMatchObject({ generation: owner.generation + 1n, runnerContainerName: null, completedAt: null });
+    expect(successor.allocationId).not.toBe(owner.allocationId);
+    expect(await send({ operation: "complete", ...runtime, settledRunnerContainerName: target, immediateRecheckRequested: false }))
+      .toMatchObject({ status: "stale" });
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toEqual(successor);
+  });
+
+  it("keeps a settled warm assignment safe from an old stop before and after reuse", async () => {
+    const { userId, owner, runtime, target, send } = await launchedRuntime();
+    expect(await send({ operation: "complete", ...runtime, settledRunnerContainerName: target, immediateRecheckRequested: false }))
+      .toMatchObject({ status: "updated" });
+    const idle = await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } });
+    expect(idle).toMatchObject({ phase: "idle", runnerContainerName: target, allocationId: owner.allocationId });
+    expect(await send({ operation: "retire", ...runtime, completed: false })).toMatchObject({ status: "stale" });
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toEqual(idle);
+    const successor = (await claim(userId, second)).owner;
+    expect(successor).toMatchObject({ generation: owner.generation + 1n, runnerContainerName: target, allocationId: owner.allocationId });
+    expect(await send({ operation: "retire", ...runtime, completed: false })).toMatchObject({ status: "stale" });
+    expect(await send({ operation: "release", ...runtime, runnerContainerName: target })).toMatchObject({ status: "stale" });
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toEqual(successor);
+  });
+
+  it.each(["target_retired", "release"] as const)("destroys a warm receipt after an uncertain outer response through %s", async operation => {
+    const { userId, owner, runtime, target, send } = await launchedRuntime();
+    const prefix = await hostedBrowserVaultReplicaUserPrefix({ userId });
+    await executeHostedRuntimeReplicaPutCommand({ prisma: first, userId, command: {
+      operation: "admit", ...runtime, writeId: "synthetic-retirement-drain", objectKey: `${prefix}single.json`,
+    } });
+    expect(await send({ operation: "complete", ...runtime, settledRunnerContainerName: null, immediateRecheckRequested: false }))
+      .toMatchObject({ status: "updated" });
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } }))
+      .toMatchObject({ phase: "retiring", completedAt: expect.any(Date) });
+    expect(await send({ operation: "retire", ...runtime, completed: false })).toMatchObject({ status: "updated" });
+    const cold = await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } });
+    expect(cold).toMatchObject({ phase: "retiring", completedAt: null, allocationId: owner.allocationId, runnerContainerName: target });
+    for (const command of [
+      { operation: "complete", ...runtime, settledRunnerContainerName: target, immediateRecheckRequested: false },
+      { operation: "release_completed", ...runtime, runnerContainerName: target },
+      { operation: "retire", ...runtime, completed: true },
+    ] satisfies HostedRuntimeOwnerCommand[]) {
+      expect(await send(command)).toMatchObject({ status: "stale" });
+      expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toEqual(cold);
+    }
+    expect(await observer.hostedRuntimePutDrain.findFirstOrThrow({ where: { userId } })).toMatchObject({ drainUntil: null });
+    const release = operation === "target_retired"
+      ? { operation, runnerContainerName: target }
+      : { operation, ...runtime, runnerContainerName: target };
+    expect(await send(release)).toMatchObject({ status: "updated" });
+    const idle = await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } });
+    expect(idle).toMatchObject({ phase: "idle", runnerContainerName: null, allocationId: null });
+    const drains = await observer.hostedRuntimePutDrain.findMany({ where: { userId } });
+    expect(drains).toHaveLength(1);
+    expect(drains[0]).toMatchObject({ drainUntil: expect.any(Date), completedAt: null });
+    expect(await send(release)).toMatchObject({ status: "stale" });
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toEqual(idle);
+    expect(await observer.hostedRuntimePutDrain.findMany({ where: { userId } })).toEqual(drains);
+    const successor = (await claim(userId, second)).owner;
+    expect(successor).toMatchObject({ generation: owner.generation + 1n, runnerContainerName: null, completedAt: null });
+    expect(successor.allocationId).not.toBe(owner.allocationId);
+  });
+
+  it.each(["consent_revoked", "member_deleted"] as const)("allows destruction of a warm owner after %s", async restriction => {
+    const { userId, runtime, target, send } = await launchedRuntime();
+    expect(await send({ operation: "complete", ...runtime, settledRunnerContainerName: null, immediateRecheckRequested: false }))
+      .toMatchObject({ status: "updated" });
+    if (restriction === "consent_revoked") {
+      await revokeHostedConsentScope({ prisma: observer, memberId: userId, scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE });
+    } else {
+      await observer.hostedMember.delete({ where: { id: userId } });
+    }
+    expect(await send({ operation: "retire", ...runtime, completed: false })).toMatchObject({ status: "updated" });
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } }))
+      .toMatchObject({ phase: "retiring", completedAt: null, runnerContainerName: target });
+    expect(await send({ operation: "target_retired", runnerContainerName: target })).toMatchObject({ status: "updated" });
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } }))
+      .toMatchObject({ phase: "idle", runnerContainerName: null, allocationId: null });
+    if (restriction === "member_deleted") expect(await isHostedRuntimeDeletionReady({ prisma: first, userId })).toBe(true);
+  });
+
+  // Settled complete is the production warm release; release_completed stays on the wire.
+  it.each([
+    ["destruction", "complete"], ["warm_release", "complete"],
+    ["destruction", "release_completed"], ["warm_release", "release_completed"],
+  ] as const)("serializes warm release and destruction with %s first through %s", async (winner, operation) => {
+    const { userId, owner, runtime, target, send } = await launchedRuntime();
+    expect(await send({ operation: "complete", ...runtime, settledRunnerContainerName: null, immediateRecheckRequested: false }))
+      .toMatchObject({ status: "updated" });
+    const destroy = { operation: "retire" as const, ...runtime, completed: false };
+    const warmRelease: HostedRuntimeOwnerCommand = operation === "complete"
+      ? { operation, ...runtime, settledRunnerContainerName: target, immediateRecheckRequested: false }
+      : { operation, ...runtime, runnerContainerName: target };
+    const locked = deferred();
+    const release = deferred();
+    const [firstPid, secondPid] = await Promise.all([backendPid(first), backendPid(second)]);
+    const blocker = blockerClient.$transaction(async tx => {
+      await tx.$queryRaw`SELECT user_id FROM hosted_runtime_owner WHERE user_id = ${userId} FOR UPDATE`;
+      locked.resolve();
+      await release.promise;
+    });
+    await locked.promise;
+    const winnerSettled = Promise.allSettled([send(winner === "destruction" ? destroy : warmRelease, first)]);
+    let loserSettled: typeof winnerSettled | undefined;
+    try {
+      await waitBlocked(observer, firstPid);
+      loserSettled = Promise.allSettled([send(winner === "destruction" ? warmRelease : destroy, second)]);
+      await waitBlocked(observer, secondPid);
+    } finally {
+      release.resolve();
+      await Promise.all([blocker, winnerSettled, loserSettled]);
+    }
+    expect((await winnerSettled)[0]).toMatchObject({ status: "fulfilled", value: { status: "updated" } });
+    expect((await loserSettled!)[0]).toMatchObject({ status: "fulfilled", value: { status: "stale" } });
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toMatchObject({
+      phase: winner === "destruction" ? "retiring" : "idle",
+      attemptId: winner === "destruction" ? runtime.attemptId : null,
+      completedAt: winner === "destruction" ? null : expect.any(Date),
+      allocationId: owner.allocationId, runnerContainerName: target,
+    });
+  });
+
+  it("leaves a live owner unchanged when settled completion names the wrong target", async () => {
+    const { userId, runtime, send } = await launchedRuntime();
+    const before = await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } });
+    expect(before).toMatchObject({ phase: "active", completedAt: null, platformAiUsageAllowed: true });
+    expect(await send({ operation: "complete", ...runtime, settledRunnerContainerName: "synthetic-wrong-slot", immediateRecheckRequested: false }))
+      .toMatchObject({ status: "stale" });
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toEqual(before);
+  });
+
+  it("rejects destructive retirement for a different attempt or generation without changing the owner", async () => {
+    const { userId, runtime, send } = await launchedRuntime();
+    const before = await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } });
+    for (const wrong of [{ ...runtime, attemptId: "synthetic-wrong-attempt" },
+      { ...runtime, generation: (BigInt(runtime.generation) - 1n).toString() }]) {
+      expect(await send({ operation: "retire", ...wrong, completed: false })).toMatchObject({ status: "stale" });
+      expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toEqual(before);
+    }
+  });
+
+  it("keeps a cold null target stale for early completion until exact null release", async () => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const send = (command: HostedRuntimeOwnerCommand) => executeHostedRuntimeOwnerCommand({ prisma: first, userId, command });
+    expect(await send({ operation: "retire", ...runtime, completed: false })).toMatchObject({ status: "updated" });
+    const cold = await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } });
+    expect(cold).toMatchObject({ phase: "retiring", completedAt: null, runnerContainerName: null });
+    expect(await send({ operation: "complete", ...runtime, settledRunnerContainerName: null, immediateRecheckRequested: false }))
+      .toMatchObject({ status: "stale" });
+    expect(await send({ operation: "release_completed", ...runtime, runnerContainerName: "synthetic-wrong-slot" }))
+      .toMatchObject({ status: "stale" });
+    expect(await send({ operation: "release", ...runtime, runnerContainerName: "synthetic-wrong-slot" }))
+      .toMatchObject({ status: "stale" });
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toEqual(cold);
+    expect(await send({ operation: "release", ...runtime, runnerContainerName: null })).toMatchObject({ status: "updated" });
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } }))
+      .toMatchObject({ phase: "idle", allocationId: null, runnerContainerName: null });
+  });
+
+  it("preserves the first completion timestamp on repeated completed retirement", async () => {
+    const { userId, runtime, send } = await launchedRuntime();
+    expect(await send({ operation: "retire", ...runtime, completed: true })).toMatchObject({ status: "updated" });
+    const warm = await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } });
+    expect(warm).toMatchObject({ phase: "retiring", completedAt: expect.any(Date) });
+    expect(await send({ operation: "retire", ...runtime, completed: true })).toMatchObject({ status: "updated" });
+    expect((await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).completedAt).toEqual(warm.completedAt);
   });
 
   it("records early completion without releasing the live invocation or retaining effect authority", async () => {

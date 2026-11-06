@@ -13,6 +13,8 @@ it has been explicitly elevated to a cross-cutting invariant.
   share one transaction; workspace CAS version is a separate freshness check.
 - An uncertain native launch or stop retains its exact allocation and target.
   Elapsed time can request reconciliation, never prove stoppedness.
+  Once destruction of an attempt is authorized it can never become reusable,
+  and completion never vetoes destruction.
 - Upload and cleanup obligations survive member deletion. A pending multipart
   write requires exact completion/abort proof before cleanup can pass it.
 - The migration gate is monotonic: legacy, draining, Postgres. Frozen legacy

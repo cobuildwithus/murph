@@ -22,6 +22,21 @@ export interface HostedRuntimeIdentity {
 type OwnerTransaction = Prisma.TransactionClient;
 const OWNER_TRANSACTION_OPTIONS = { maxWait: 5_000, timeout: 5_000 };
 
+/** Retirement disposition for one exact attempt and generation. Retiring is warm
+ * with completedAt and cold without it; read phase first because idle rows keep
+ * a historical completedAt. Warm may become cold, which clears completedAt so a
+ * delayed warm release loses. Cold never becomes warm: its stop may still be in
+ * flight and would interrupt a successor reusing the slot. Warm cannot veto
+ * destruction: a completed child with a lost outer response still needs a stop
+ * to clear its native fence. */
+const COLD_RETIREMENT = { phase: "retiring", completedAt: null, platformAiUsageAllowed: false } as const;
+const WARM_RETIREMENT = { phase: "retiring", completedAt: { not: null } } as const;
+const IDLE_OWNER = {
+  phase: "idle", attemptId: null, processingMode: null, workspaceVersion: null,
+  providerEgressTokenHash: null, platformAiUsageAllowed: false,
+} as const;
+const IDLE_OWNER_WITHOUT_ASSIGNMENT = { ...IDLE_OWNER, allocationId: null, runnerContainerName: null } as const;
+
 export async function claimHostedRuntime(input: {
   prisma: PrismaClient;
   userId: string;
@@ -49,7 +64,7 @@ export async function claimHostedRuntime(input: {
         && existing.phase === "starting" && existing.workspaceVersion === null) {
         const owner = await tx.hostedRuntimeOwner.update({
           where: { userId: input.userId },
-          data: { phase: "retiring", platformAiUsageAllowed: false },
+          data: COLD_RETIREMENT,
         });
         return { cutover, status: "existing", owner };
       }
@@ -250,12 +265,36 @@ export async function retireHostedRuntimeTx(
   tx: Prisma.TransactionClient,
   input: { identity: HostedRuntimeIdentity; completed?: boolean },
 ): Promise<boolean> {
-  const where = { ...identityWhere(input.identity), phase: { in: ["starting", "active", "retiring"] } };
-  const result = await tx.hostedRuntimeOwner.updateMany({ where, data: { phase: "retiring", platformAiUsageAllowed: false } });
-  if (result.count === 1 && input.completed) await tx.hostedRuntimeOwner.updateMany({
-    where: { ...identityWhere(input.identity), phase: "retiring", completedAt: null }, data: { completedAt: new Date() },
+  const exact = identityWhere(input.identity);
+  if (!input.completed) {
+    const retired = await tx.hostedRuntimeOwner.updateMany({
+      where: { ...exact, phase: { in: ["starting", "active", "retiring"] } }, data: COLD_RETIREMENT,
+    });
+    return retired.count === 1;
+  }
+  const entered = await tx.hostedRuntimeOwner.updateMany({
+    where: { ...exact, phase: { in: ["starting", "active"] } },
+    data: { phase: "retiring", completedAt: new Date(), platformAiUsageAllowed: false },
   });
-  return result.count === 1;
+  return entered.count === 1
+    || await tx.hostedRuntimeOwner.count({ where: { ...exact, ...WARM_RETIREMENT } }) === 1;
+}
+
+/** Early completion, with a null target, leaves the attempt warm. A settled report
+ * also releases it in this transaction; a wrong target changes nothing. */
+export async function completeHostedRuntime(input: {
+  prisma: PrismaClient;
+  identity: HostedRuntimeIdentity;
+  settledRunnerContainerName: string | null;
+}): Promise<boolean> {
+  return input.prisma.$transaction(async tx => {
+    const owner = await lockHostedRuntimeOwnerRowTx(tx, input.identity.userId);
+    if (input.settledRunnerContainerName !== null && input.settledRunnerContainerName !== owner?.runnerContainerName) return false;
+    if (!await retireHostedRuntimeTx(tx, { identity: input.identity, completed: true })) return false;
+    return input.settledRunnerContainerName === null || releaseHostedRuntimeAfterCompletionTx(tx, {
+      identity: input.identity, runnerContainerName: input.settledRunnerContainerName,
+    });
+  }, OWNER_TRANSACTION_OPTIONS);
 }
 
 /** The trusted adapter must first prove this exact target cannot execute again.
@@ -266,21 +305,9 @@ export async function releaseHostedRuntimeAfterRetirement(input: {
   identity: HostedRuntimeIdentity;
   runnerContainerName: string | null;
 }): Promise<boolean> {
-  return input.prisma.$transaction(async tx => {
-    const result = await tx.hostedRuntimeOwner.updateMany({
-      where: { ...identityWhere(input.identity), phase: "retiring", runnerContainerName: input.runnerContainerName },
-      data: {
-        phase: "idle", attemptId: null, allocationId: null, runnerContainerName: null,
-        processingMode: null, workspaceVersion: null, providerEgressTokenHash: null,
-        platformAiUsageAllowed: false,
-      },
-    });
-    if (result.count === 1) await tx.hostedRuntimePutDrain.updateMany({
-      where: { ...identityWhere(input.identity), kind: "replica", uploadId: null, completedAt: null, drainUntil: null },
-      data: { drainUntil: new Date(Date.now() + HOSTED_RUNTIME_REPLICA_POST_STOP_DRAIN_MS) },
-    });
-    return result.count === 1;
-  }, OWNER_TRANSACTION_OPTIONS);
+  return input.prisma.$transaction(tx => releaseHostedRuntimeTx(tx, input.identity,
+    { phase: "retiring", runnerContainerName: input.runnerContainerName }, IDLE_OWNER_WITHOUT_ASSIGNMENT,
+  ), OWNER_TRANSACTION_OPTIONS);
 }
 
 /** A terminal native invocation receipt permits reuse of the member-bound
@@ -291,24 +318,34 @@ export async function releaseHostedRuntimeAfterCompletion(input: {
   identity: HostedRuntimeIdentity;
   runnerContainerName: string;
 }): Promise<boolean> {
-  return input.prisma.$transaction(async tx => {
-    const result = await tx.hostedRuntimeOwner.updateMany({
-      where: {
-        ...identityWhere(input.identity), phase: "retiring", completedAt: { not: null },
-        runnerContainerName: input.runnerContainerName,
-      },
-      data: {
-        phase: "idle", attemptId: null, processingMode: null,
-        workspaceVersion: null, providerEgressTokenHash: null,
-        platformAiUsageAllowed: false,
-      },
-    });
-    if (result.count === 1) await tx.hostedRuntimePutDrain.updateMany({
-      where: { ...identityWhere(input.identity), kind: "replica", uploadId: null, completedAt: null, drainUntil: null },
-      data: { drainUntil: new Date(Date.now() + HOSTED_RUNTIME_REPLICA_POST_STOP_DRAIN_MS) },
-    });
-    return result.count === 1;
-  }, OWNER_TRANSACTION_OPTIONS);
+  return input.prisma.$transaction(tx => releaseHostedRuntimeAfterCompletionTx(tx, input), OWNER_TRANSACTION_OPTIONS);
+}
+
+function releaseHostedRuntimeAfterCompletionTx(
+  tx: OwnerTransaction,
+  input: { identity: HostedRuntimeIdentity; runnerContainerName: string },
+): Promise<boolean> {
+  return releaseHostedRuntimeTx(tx, input.identity,
+    { ...WARM_RETIREMENT, runnerContainerName: input.runnerContainerName }, IDLE_OWNER,
+  );
+}
+
+async function releaseHostedRuntimeTx(
+  tx: OwnerTransaction,
+  identity: HostedRuntimeIdentity,
+  where: Prisma.HostedRuntimeOwnerWhereInput,
+  data: Prisma.HostedRuntimeOwnerUpdateManyMutationInput,
+): Promise<boolean> {
+  const result = await tx.hostedRuntimeOwner.updateMany({ where: { ...where, ...identityWhere(identity) }, data });
+  if (result.count === 1) await drainHostedRuntimeReplicaPutsTx(tx, identity);
+  return result.count === 1;
+}
+
+async function drainHostedRuntimeReplicaPutsTx(tx: OwnerTransaction, identity: HostedRuntimeIdentity): Promise<void> {
+  await tx.hostedRuntimePutDrain.updateMany({
+    where: { ...identityWhere(identity), kind: "replica", uploadId: null, completedAt: null, drainUntil: null },
+    data: { drainUntil: new Date(Date.now() + HOSTED_RUNTIME_REPLICA_POST_STOP_DRAIN_MS) },
+  });
 }
 
 export async function revokeHostedRuntimeAiUsageTx(
@@ -423,13 +460,10 @@ export async function recordHostedRuntimeTargetRetired(input: { prisma: PrismaCl
   return input.prisma.$transaction(async tx => {
     const current = await lockHostedRuntimeOwnerRowTx(tx, input.userId);
     if (!current || current.runnerContainerName !== input.runnerContainerName) return false;
-    await tx.hostedRuntimeOwner.update({ where: { userId: input.userId }, data: {
-      phase: "idle", attemptId: null, allocationId: null, runnerContainerName: null, processingMode: null,
-      workspaceVersion: null, providerEgressTokenHash: null, platformAiUsageAllowed: false,
-    } });
-    if (current.attemptId) await tx.hostedRuntimePutDrain.updateMany({ where: {
-      userId: input.userId, attemptId: current.attemptId, generation: current.generation, kind: "replica", uploadId: null, completedAt: null, drainUntil: null,
-    }, data: { drainUntil: new Date(Date.now() + HOSTED_RUNTIME_REPLICA_POST_STOP_DRAIN_MS) } });
+    await tx.hostedRuntimeOwner.update({ where: { userId: input.userId }, data: IDLE_OWNER_WITHOUT_ASSIGNMENT });
+    if (current.attemptId) await drainHostedRuntimeReplicaPutsTx(tx, {
+      userId: input.userId, attemptId: current.attemptId, generation: current.generation.toString(),
+    });
     return true;
   }, OWNER_TRANSACTION_OPTIONS);
 }
