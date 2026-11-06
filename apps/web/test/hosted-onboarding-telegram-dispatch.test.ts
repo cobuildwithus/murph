@@ -258,6 +258,7 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
 
   return {
     ...actual,
+    lockAndReadHostedTelegramUpdateOwnerIdsTx: vi.fn(async () => []),
     appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
     appendHostedMailboxEnvelopeWithPreparedCryptoTx:
       mocks.appendHostedMailboxEnvelopeTx,

@@ -1986,10 +1986,21 @@ model HostedGroup {
   members           HostedGroupMember[]
   joinOffers        HostedGroupJoinOffer[]
   disclosurePermissions HostedGroupDisclosurePermission[]
+  offerGestureReceipts HostedGroupOfferGestureReceipt[]
 
   @@index([ownerMemberId])
   @@index([kind])
   @@map("hosted_group")
+}
+
+model HostedGroupOfferGestureReceipt {
+  id        String      @id
+  groupId   String      @map("group_id")
+  createdAt DateTime    @default(now()) @map("created_at")
+  group     HostedGroup @relation(fields: [groupId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([groupId])
+  @@map("hosted_group_offer_gesture_receipt")
 }
 
 model HostedGroupJoinOffer {

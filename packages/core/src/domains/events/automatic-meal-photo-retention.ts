@@ -1,6 +1,6 @@
 import { type EventAttachment, eventRecordSchema } from "@murphai/contracts";
 import { emitAuditRecord } from "../../audit.ts";
-import { statAndHashVaultFile } from "../../raw-artifact-integrity.ts";
+import { resolveRetainedRawArtifact } from "../../retained-raw-artifact.ts";
 import { loadPhotoManifestSnapshot } from "./meal-photo-files.ts";
 import { VaultError } from "../../errors.ts";
 import { buildEventSpineLifecycle, eventSpineRevision, isDeletedEventSpineRecord } from "../../history/event-spine.ts";
@@ -43,7 +43,7 @@ export async function removeAutomaticMealPhoto(input: RemoveAutomaticMealPhotoIn
 }
 
 async function assertReviewPhotoIntegrity(vaultRoot: string, mealId: string, attachment: EventAttachment) {
-  const integrity = await statAndHashVaultFile(vaultRoot, attachment.relativePath);
+  const integrity = (await resolveRetainedRawArtifact(vaultRoot, attachment.relativePath))?.integrity;
   if (!integrity || integrity.sha256 !== attachment.sha256) {
     throw new VaultError("MEAL_PHOTO_RETENTION_PRECONDITION_FAILED", "Automatic meal photo bytes changed after canonical capture.");
   }

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 
 import {
   HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
@@ -40,6 +40,8 @@ import {
 import {
   runHostedOnboardingWebhookTransaction,
 } from "@/src/lib/hosted-onboarding/webhook-service";
+import { resolveHostedFamilyInviteTokenForInbound } from "@/src/lib/hosted-onboarding/family-plan";
+import { removeHostedMemberLinkedAccountProjectionTx } from "@/src/lib/hosted-onboarding/linked-account-removal";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const rootAuthority = vi.hoisted(() => ({
@@ -120,6 +122,129 @@ function createDeferred<T = void>(): Deferred<T> {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "hosted Telegram routing PostgreSQL concurrency",
   () => {
+    it("fences an admitted DM after relink and admits a new update for the new owner", async () => {
+      await withTelegramReplayFixture(async (f) => {
+        const original = await f.plan(f.memberA);
+        const rows = await f.rows();
+        expect(rows).toHaveLength(1);
+        expect(original.wakeHandoffs?.[0]?.mailboxItemId).toBe(rows[0].id);
+        await f.prisma.$transaction(f.relink, transactionOptions);
+        const replay = await f.plan(f.memberB);
+        expect.soft(await f.prisma.hostedMailboxItem.count({ where: { userId: f.memberB } })).toBe(0);
+        expectFencedTelegramReplay(replay);
+        expect.soft(await f.rows()).toEqual(rows);
+        const fresh = await f.plan(f.memberB, buildDirectTelegramUpdate(f.update.update_id + 1));
+        expect(fresh.wakeHandoffs?.[0]?.userId).toBe(f.memberB);
+        expect(await f.prisma.hostedMailboxItem.count({ where: { userId: f.memberB, dedupeKey: `telegram:update:${f.update.update_id + 1}` } })).toBe(1);
+      });
+    });
+
+    it("returns the original mailbox pointer for a same-owner retry", async () => {
+      await withTelegramReplayFixture(async (f) => {
+        const original = await f.plan(f.memberA);
+        const rows = await f.rows();
+        expect(rows).toHaveLength(1);
+        expect(original.wakeHandoffs?.[0]?.mailboxItemId).toBe(rows[0].id);
+        const replay = await f.plan(f.memberA);
+        expect(replay.wakeHandoffs?.[0]?.mailboxItemId).toBe(original.wakeHandoffs?.[0]?.mailboxItemId);
+        expect(await f.rows()).toEqual(rows);
+      });
+    });
+
+    it("serializes the same update on the event lock while its identity moves", async () => {
+      await withTelegramReplayFixture(async (f) => {
+        const contender = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const appended = createDeferred();
+        const release = createDeferred();
+        const contenderPid = createDeferred<number>();
+        let second: ReturnType<typeof f.plan> | undefined;
+        const first = f.plan(f.memberA, f.update, {
+          onPlanned: async (tx) => {
+            appended.resolve();
+            await release.promise;
+            await f.relink(tx);
+          },
+        });
+        try {
+          await Promise.race([appended.promise, first]);
+          second = f.plan(f.memberB, f.update, {
+            prisma: contender,
+            beforePlan: async (tx) => { contenderPid.resolve(await readBackendPid(tx)); },
+          });
+          // Attach a rejection handler while inspecting the blocking backend.
+          void second.catch(() => undefined);
+          const pid = await contenderPid.promise;
+          await waitForBlockedBackend({ observer, pid });
+          const locks = await observer.$queryRaw<Array<{ locktype: string }>>`
+            SELECT locktype FROM pg_locks WHERE pid = ${pid} AND NOT granted
+              AND classid = hashtext('mailbox-telegram-update')::oid
+              AND objid = hashtext(${`telegram:update:${f.update.update_id}`})::oid
+          `;
+          expect(locks).toEqual([{ locktype: "advisory" }]);
+          release.resolve();
+          await first;
+          expectFencedTelegramReplay(await second);
+          expect(await f.rows()).toMatchObject([{ userId: f.memberA }]);
+          expect(await f.rows()).toHaveLength(1);
+        } finally {
+          release.resolve();
+          await Promise.allSettled([first, ...(second ? [second] : [])]);
+          await disconnectClients([observer, contender]);
+        }
+      });
+    });
+
+    it("fences historical conflicting owners without exposing either pointer", async () => {
+      await withTelegramReplayFixture(async (f) => {
+        await f.plan(f.memberA);
+        const [original] = await f.rows();
+        await f.prisma.hostedMailboxItem.create({
+          data: { ...original, id: `mailbox_conflict_${randomUUID()}`, userId: f.memberB },
+        });
+        await f.prisma.$transaction(f.relink, transactionOptions);
+        const rows = await f.rows();
+        expectFencedTelegramReplay(await f.plan(f.memberB));
+        expect(await f.rows()).toEqual(rows);
+      });
+    });
+
+    it("does not reinterpret an admitted DM when its text becomes a family invite", async () => {
+      await withTelegramReplayFixture(async (f) => {
+        const inviteCode = randomUUID();
+        const groupId = `family_replay_${randomUUID()}`;
+        const update = buildDirectTelegramUpdate(f.update.update_id, `family_${inviteCode}`);
+        const original = await f.plan(f.memberA, update);
+        const rows = await f.rows();
+        expect(rows).toHaveLength(1);
+        await f.prisma.hostedAccountGroup.create({ data: {
+          id: groupId, ownerMemberId: f.memberB, billingStatus: HostedBillingStatus.active,
+        } });
+        try {
+          const invite = await f.prisma.hostedAccountGroupInvite.create({ data: {
+            id: `family_invite_${randomUUID()}`, groupId, inviteCode, invitedByMemberId: f.memberB,
+            expiresAt: new Date("2099-01-01T00:00:00.000Z"),
+          } });
+          expect(await resolveHostedFamilyInviteTokenForInbound({
+            prisma: f.prisma, text: update.message?.text,
+          })).toBe(inviteCode);
+          const replay = await f.prisma.$transaction((tx) => planHostedOnboardingTelegramWebhook({
+            preparedDirectTelegramRouting: { kind: "family", telegramThreadId, telegramUserId },
+            prisma: tx, update,
+          }), transactionOptions);
+          expectFencedTelegramReplay(replay);
+          // Without a family preparation, the admitted owner still gets its original pointer.
+          const sameOwner = await f.plan(f.memberA, update);
+          expect(sameOwner.wakeHandoffs?.[0]?.mailboxItemId).toBe(original.wakeHandoffs?.[0]?.mailboxItemId);
+          expect(await f.rows()).toEqual(rows);
+          expect(await f.prisma.hostedAccountGroupInvite.findUnique({ where: { id: invite.id } })).toEqual(invite);
+          expect(await f.prisma.hostedAccountGroupMembership.count({ where: { groupId } })).toBe(0);
+        } finally {
+          await f.prisma.hostedAccountGroup.delete({ where: { id: groupId } });
+        }
+      });
+    });
+
     it.each([
       {
         owner: "inbound planner",
@@ -537,6 +662,8 @@ async function runPreparedTelegramPlanTransaction(input: {
   memberId: string;
   prisma: PrismaClient;
   update: ReturnType<typeof buildDirectTelegramUpdate>;
+  beforePlan?: (tx: Prisma.TransactionClient) => Promise<void>;
+  onPlanned?: (tx: Prisma.TransactionClient) => Promise<void>;
 }) {
   let preparedDirectTelegramRouting: NonNullable<
     Parameters<typeof planHostedOnboardingTelegramWebhook>[0][
@@ -545,15 +672,18 @@ async function runPreparedTelegramPlanTransaction(input: {
   > | undefined;
   return runHostedOnboardingWebhookTransaction(
     input.prisma,
-    (transaction) => {
+    async (transaction) => {
+      await input.beforePlan?.(transaction);
       if (!preparedDirectTelegramRouting) {
         throw new Error("Expected prepared direct Telegram routing.");
       }
-      return planHostedOnboardingTelegramWebhook({
+      const plan = await planHostedOnboardingTelegramWebhook({
         preparedDirectTelegramRouting,
         prisma: transaction,
         update: input.update,
       });
+      await input.onPlanned?.(transaction);
+      return plan;
     },
     async () => {
       seedPreparedTelegramRoot({
@@ -631,7 +761,7 @@ function seedPreparedTelegramRoot(input: {
   );
 }
 
-function buildDirectTelegramUpdate(updateId: number) {
+function buildDirectTelegramUpdate(updateId: number, text = "hello") {
   return parseHostedTelegramWebhookUpdate(JSON.stringify({
     message: {
       business_connection_id: "setup",
@@ -645,7 +775,7 @@ function buildDirectTelegramUpdate(updateId: number) {
         id: Number(telegramUserId),
       },
       message_id: updateId,
-      text: "hello",
+      text,
     },
     update_id: updateId,
   }));
@@ -699,4 +829,58 @@ function isClearlyLocalPostgresUrl(value: string): boolean {
   const effectiveHost = (hostOverrides[0] || parsed.hostname).toLowerCase();
   return ["127.0.0.1", "::1", "[::1]", "localhost"].includes(effectiveHost)
     || effectiveHost.startsWith("/");
+}
+
+type TelegramReplayFixture = Awaited<ReturnType<typeof createTelegramReplayFixture>>;
+
+async function createTelegramReplayFixture() {
+  const suffix = randomUUID();
+  const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+  const memberA = `telegram_replay_a_${suffix}`;
+  const memberB = `telegram_replay_b_${suffix}`;
+  const update = buildDirectTelegramUpdate(randomInt(100_000_000, 900_000_000));
+  await prisma.hostedMember.createMany({ data: [memberA, memberB].map((id) => ({
+    id, billingStatus: HostedBillingStatus.active,
+  })) });
+  await prisma.$transaction((tx) => upsertHostedMemberTelegramRoutingBindingTx({
+    memberId: memberA, prisma: tx, telegramUserId,
+  }), transactionOptions);
+  const relink = async (tx: Prisma.TransactionClient) => {
+    expect(await removeHostedMemberLinkedAccountProjectionTx({
+      expectedIdentity: telegramUserId, memberId: memberA, method: "telegram", prisma: tx,
+    })).toBe(true);
+    await upsertHostedMemberTelegramRoutingBindingTx({ memberId: memberB, prisma: tx, telegramUserId });
+  };
+  return {
+    prisma, memberA, memberB, update, relink,
+    rows: () => prisma.hostedMailboxItem.findMany({
+      where: { dedupeKey: `telegram:update:${update.update_id}` }, orderBy: { id: "asc" },
+    }),
+    plan: (memberId: string, nextUpdate = update, hooks: Pick<Parameters<typeof runPreparedTelegramPlanTransaction>[0], "beforePlan" | "onPlanned"> & { prisma?: PrismaClient } = {}) => {
+      const activeControlRootKeyId = `control_${memberId}`;
+      const mailboxRootKeyId = `ingress_${memberId}`;
+      rootAuthority.activeRootKeyIdsByDomain.set("control", [activeControlRootKeyId]);
+      rootAuthority.activeRootKeyIdsByDomain.set("ingress", [mailboxRootKeyId]);
+      return runPreparedTelegramPlanTransaction({
+        activeControlRootKeyId, existingControlRootKeyId: null, mailboxRootKeyId,
+        memberId, prisma, update: nextUpdate, ...hooks,
+      });
+    },
+  };
+}
+
+async function withTelegramReplayFixture(run: (f: TelegramReplayFixture) => Promise<void>) {
+  const f = await createTelegramReplayFixture();
+  try { await run(f); } finally {
+    rootAuthority.activeRootKeyIdsByDomain.clear();
+    await f.prisma.hostedMember.deleteMany({ where: { id: { in: [f.memberA, f.memberB] } } });
+    await f.prisma.$disconnect();
+  }
+}
+
+function expectFencedTelegramReplay(plan: Awaited<ReturnType<typeof runPreparedTelegramPlanTransaction>>) {
+  expect.soft(plan.response).toEqual({ ok: true, ignored: true, reason: "telegram-update-already-admitted" });
+  expect.soft(plan.desiredSideEffects).toEqual([]);
+  expect.soft(plan.wakeHandoffs ?? []).toEqual([]);
+  expect.soft(JSON.stringify(plan)).not.toContain("mailboxItemId");
 }

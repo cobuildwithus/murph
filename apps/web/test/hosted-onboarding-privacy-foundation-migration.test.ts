@@ -983,6 +983,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260826190000_hosted_vault_share_delivery_cursor_index",
       "20260905120000_hosted_operator_task_result_retention_index",
       "20261019120000_final_reply_delivery_alert_retention",
+      "20261106120000_hosted_mailbox_telegram_update_lookup",
     ]);
     expect(
       migrationEntries.filter((entry) => !queryShapeMigrationEntries.has(entry)),
@@ -1252,6 +1253,7 @@ describe("hosted Prisma baseline migration", () => {
       "20261105060000_hosted_linq_ack_reaction_message",
       "20261106120000_game_report_alert_inputs",
       "20261106120000_hosted_thread_container_complete_roster_watermark",
+      "20261106120100_hosted_group_offer_gesture_receipt",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(
