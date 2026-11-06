@@ -1,3 +1,4 @@
+import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { linqRoster } from "./support/linq-roster";
 import { randomUUID } from "node:crypto";
@@ -41,7 +42,7 @@ describe.skipIf(!enabled)("game bootstrap lifecycle recovery against PostgreSQL"
   afterAll(async () => {
     await getPrisma().hostedLinqDelivery.deleteMany({ where: { id: { in: receiptIds } } });
     await getPrisma().hostedThreadContainer.deleteMany({ where: { memberId: { in: members } } });
-    await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: members } } });
+    await cleanupGameFixtures(getPrisma(), members);
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: members } } });
     await getPrisma().hostedLinqLine.deleteMany({ where: { phoneNumberLookupKey: { in: lineKeys } } });
     await getPrisma().hostedGroupParticipantObservation.deleteMany({ where: { contactLookupKey: { in: ["+15555550101", "+15555550102"].map(phone => createHostedPhoneLookupKey(phone)!) } } });

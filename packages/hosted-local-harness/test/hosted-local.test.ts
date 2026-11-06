@@ -289,6 +289,11 @@ describe("hosted-local harness", () => {
   });
 
   test("keeps diagnostic hosted-local E2E scenarios opt-in", () => {
+    expect(resolveHostedLocalE2eScenarios("linq-first-turn-held")[0]).toEqual({
+      file: "apps/cloudflare/test/hosted-local-linq-first-turn-held-e2e.test.ts",
+      manualOnly: true,
+      name: "linq-first-turn-held",
+    });
     expect(resolveHostedLocalE2eScenarios("active-turn-latency")[0]?.file).toBe(
       "apps/cloudflare/test/hosted-local-active-turn-latency-e2e.test.ts",
     );

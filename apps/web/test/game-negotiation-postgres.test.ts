@@ -1,3 +1,4 @@
+import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { getPrisma } from "@/src/lib/prisma";
@@ -32,7 +33,7 @@ function negotiate(token: string, proposalId = randomUUID()): Extract<GameComman
 }
 
 describe.skipIf(!enabled)("game negotiation persistence", () => {
-  afterAll(async () => { await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: members } } });
+  afterAll(async () => { await cleanupGameFixtures(getPrisma(), members);
     await getPrisma().hostedMember.deleteMany({where:{id:{in:members}}}); });
   it("keeps a delayed fixed start date when negotiation approval arrives after the default cutoff", async () => {
     const {a,b,room,gameId,token}=await setup();

@@ -1,3 +1,4 @@
+import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import { getPrisma } from "@/src/lib/prisma";
@@ -33,7 +34,7 @@ async function setup() {
 
 describe.skipIf(!enabled)("self-reported game days against PostgreSQL", () => {
   afterAll(async () => {
-    await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: members } } });
+    await cleanupGameFixtures(getPrisma(), members);
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: members } } }); });
 
   it("marks only the speaker's own post, preserves visibility, and is idempotent under concurrent retries", async () => {

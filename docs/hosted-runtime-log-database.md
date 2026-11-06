@@ -13,17 +13,15 @@ The existing signed callback remains the only ingestion boundary:
 Cloudflare runtime
   -> POST /api/internal/hosted-runtime/log
   -> ECDSA verification + one primary anti-replay nonce insert
-  -> accepted-attempt recovery claim, when present
   -> isolated runtime-log Postgres append
 ```
 
 The callback stays in `apps/web`; Cloudflare receives no database credential and
 there is no new service or queue. The anti-replay nonce remains in the primary
-control database because `runner.accepted_attempt_failed` recovery shares this
-callback. Admission performs one insert keyed by the nonce hash; primary-key
-uniqueness rejects a replay, and the callback performs no expiry sweep. A
-runtime-log database outage must not prevent a valid recovery claim from being
-authenticated and signaled.
+control database with shared signed-callback authentication and nonce retention.
+Admission performs one insert keyed by the nonce hash; primary-key uniqueness
+rejects a replay, and the callback performs no expiry sweep. Runtime-log database
+outages fail diagnostic writes; recovery does not use this callback.
 
 The isolated database is the only runtime-log owner. Production fails closed
 when its URL is missing. Local development may leave it unconfigured; runtime
@@ -406,9 +404,9 @@ summary nor schedules a standalone signed log callback. Fresh starts (action
 `started`, consumed by the device-import cycling monitor), other accepted
 actions, every `retry_later` result, and thrown outcomes retain their summaries.
 The summary is not a poll trace, mailbox admission, runtime health proof, or
-recovery signal. The independent `runner.accepted_attempt_failed` event still
-requests failure recovery through this callback. Runtime log batching and
-foreground latency milestones are unchanged. No schema migration or new durable
+recovery signal. Historical `runner.accepted_attempt_failed` rows remain
+parseable without signaling recovery. Runtime log batching and foreground
+latency milestones are unchanged. No schema migration or new durable
 state is required.
 
 The route owner sends retained summaries through the existing log transport in a

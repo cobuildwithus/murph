@@ -288,6 +288,9 @@ describe("hosted workspace runtime entrypoint", () => {
       }),
     ];
     const foregroundImported = createDeferred<void>();
+    // Device work publishes a status checkpoint whose response replaces the pending wake.
+    // Park it until the retry phase ends so the wake and checkpoint order below are fixed.
+    const retryPhaseFinished = createDeferred<void>();
     let pendingInputId: string | null = null;
     const deviceSyncPort = createSnapshotDeviceSyncPort({
       async onFetchSnapshot() {
@@ -299,7 +302,7 @@ describe("hosted workspace runtime entrypoint", () => {
         }));
         runtimeWakeSignal.notify();
         await withRealTimeout(
-          foregroundImported.promise,
+          retryPhaseFinished.promise,
           runtimeTransitionTimeoutMs,
           () => events.join(","),
         );
@@ -313,8 +316,6 @@ describe("hosted workspace runtime entrypoint", () => {
       vi.setSystemTime(new Date(firstNow));
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
 
-      const firstPhaseFinished = createDeferred<void>();
-      const secondPhaseFinished = createDeferred<void>();
       let assistantPhaseCalls = 0;
       const platform = createPlatform({
         deviceSyncPort,
@@ -404,7 +405,7 @@ describe("hosted workspace runtime entrypoint", () => {
               vaultRoot,
             });
             shutdownController.abort();
-            firstPhaseFinished.resolve();
+            retryPhaseFinished.resolve();
             return {
               checkpointReason: "assistant_runtime_commit" as const,
               progressed: true,
@@ -416,7 +417,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       await withRealTimeout(
-        firstPhaseFinished.promise,
+        retryPhaseFinished.promise,
         runtimeTransitionTimeoutMs,
         () => events.join(","),
       );

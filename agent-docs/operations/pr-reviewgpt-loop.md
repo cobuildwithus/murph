@@ -54,6 +54,10 @@ the prepared draft or conversation is the user-facing result. Never implement
 this cleanup as a profile-wide tab sweep or close a target that the current run
 did not create.
 
+Up to 10 ReviewGPT reviews may run on each browser lane at the same time. Each
+must run from its own worktree. Never run two from one worktree, because they
+share its `audit-packages` output and can overwrite each other's files.
+
 Synchronous prompt insertion uses the configured draft timeout so healthy large
 multiline inserts can finish. Other page commands retain their shorter deadline;
 insertion still fails when its configured budget expires.
