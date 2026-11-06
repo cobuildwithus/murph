@@ -67,6 +67,8 @@ const SAFE_DIAGNOSTIC_TEXT_REDACTED_KEY_NAMES = new Set([
   "providerRequestBodyFieldNames",
   "routePlanningActiveExperimentContextElapsedMs",
   "routePlanningAssistantContextSnapshotElapsedMs",
+  "routePlanningAssistantContextSnapshotRefreshElapsedMs",
+  "routePlanningFollowUpContextElapsedMs",
   "routePlanningAnyBootstrapContextPrepared",
   "routePlanningBootstrapContextPrepared",
   "routePlanningPrimarySystemPromptElapsedMs",
@@ -86,6 +88,8 @@ const HOSTED_RUNTIME_DIRECT_ID_TEXT_PATTERNS: readonly RegExp[] = [
 const ROUTE_PLANNING_ELAPSED_MS_REDACTED_KEY_NAMES = new Set([
   "routePlanningActiveExperimentContextElapsedMs",
   "routePlanningAssistantContextSnapshotElapsedMs",
+  "routePlanningAssistantContextSnapshotRefreshElapsedMs",
+  "routePlanningFollowUpContextElapsedMs",
   "routePlanningCliBootstrapElapsedMs",
   "routePlanningElapsedMs",
   "routePlanningFallbackInstructionsElapsedMs",
@@ -103,6 +107,8 @@ const ROUTE_PLANNING_ELAPSED_MS_REDACTED_KEY_NAMES = new Set([
 const ROUTE_PLANNING_STAGE_VALUES = new Set([
   "active_experiment_context",
   "assistant_context_snapshot",
+  "assistant_context_snapshot_refresh",
+  "follow_up_context",
   "cli_bootstrap",
   "fallback_instructions",
   "memory_overview",

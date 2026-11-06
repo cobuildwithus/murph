@@ -490,6 +490,10 @@ function emitCodexPlanTraceEvent(input: {
         routePlanningMemoryOverviewElapsedMs: null,
         routePlanningVaultOverviewElapsedMs: null,
         routePlanningActiveExperimentContextElapsedMs: null,
+        routePlanningFollowUpContextElapsedMs:
+          input.routePlanningDiagnostics.followUpContextElapsedMs,
+        routePlanningAssistantContextSnapshotRefreshElapsedMs:
+          input.routePlanningDiagnostics.assistantContextSnapshotRefreshElapsedMs,
         routePlanningAssistantContextSnapshotElapsedMs:
           input.routePlanningDiagnostics.assistantContextSnapshotElapsedMs,
         routePlanningAnyBootstrapContextPrepared:

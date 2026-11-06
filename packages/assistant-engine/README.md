@@ -16,6 +16,18 @@ endpoint. Local execution explicitly selects OpenAI even when the saved target
 omits a provider, and rejects local OSS mode. OpenAI API, ChatGPT subscription,
 and synthetic local-test transports retain their existing execution boundaries.
 
+## Route-planning telemetry
+
+Provider-plan diagnostics time follow-up context resolution as
+`routePlanningFollowUpContextElapsedMs` and foreground snapshot refresh as
+`routePlanningAssistantContextSnapshotRefreshElapsedMs`. The existing
+`routePlanningAssistantContextSnapshotElapsedMs` times the subsequent current-state
+read. These serial spans contribute to measured/unaccounted time and slowest-stage
+selection (`follow_up_context`, `assistant_context_snapshot_refresh`, and
+`assistant_context_snapshot`). Both hosted trace projection and durable-log
+validation preserve the numeric fields and stage values. Skipped refreshes remain
+`null`; timing does not change follow-up expiry, authority, or resume decisions.
+
 ## Codex failure telemetry
 
 Auto-reply failure context retains `codexErrorInfoPresent` only as a boolean,

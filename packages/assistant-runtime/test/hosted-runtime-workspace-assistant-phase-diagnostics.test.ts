@@ -641,7 +641,7 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
     expect(JSON.stringify(logRequests)).not.toContain("test-token-value");
   });
 
-  it("preserves neutral provider-plan diagnostics", async () => {
+  it.each(["fallback_instructions", "follow_up_context", "assistant_context_snapshot_refresh"])("preserves route-planning tail stage %s in durable logs", async (stage) => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       deviceSyncProcessed: 0,
@@ -659,12 +659,14 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
           providerTraceKind: "assistant.provider.plan",
           reasoningEffort: "high",
           routePlanningElapsedMs: 71_000,
+          routePlanningFollowUpContextElapsedMs: 101,
+          routePlanningAssistantContextSnapshotRefreshElapsedMs: 202,
           routePlanningFallbackInstructionsElapsedMs: 66_000,
           routePlanningMeasuredElapsedMs: 70_990,
           routePlanningMemoryOverviewElapsedMs: 900,
           routePlanningPrimaryInstructionsElapsedMs: 70,
           routePlanningPrimarySystemPromptElapsedMs: 70,
-          routePlanningSlowestStage: "fallback_instructions",
+          routePlanningSlowestStage: stage,
           routePlanningSlowestStageElapsedMs: 66_000,
           routePlanningVaultOverviewElapsedMs: 900,
           schema: "murph.assistant-provider-plan.v1",
@@ -682,11 +684,13 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
       redactedJson: expect.objectContaining({
         reasoningEffort: "high",
         routePlanningElapsedMs: 71_000,
+        routePlanningFollowUpContextElapsedMs: 101,
+        routePlanningAssistantContextSnapshotRefreshElapsedMs: 202,
         routePlanningFallbackInstructionsElapsedMs: 66_000,
         routePlanningMeasuredElapsedMs: 70_990,
         routePlanningMemoryOverviewElapsedMs: 900,
         routePlanningPrimaryInstructionsElapsedMs: 70,
-        routePlanningSlowestStage: "fallback_instructions",
+        routePlanningSlowestStage: stage,
         routePlanningSlowestStageElapsedMs: 66_000,
       }),
     }));

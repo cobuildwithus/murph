@@ -175,6 +175,8 @@ export interface AssistantRouteTurnPlan {
 
 export interface AssistantRoutePlanningDiagnostics {
   assistantContextSnapshotElapsedMs: number | null
+  assistantContextSnapshotRefreshElapsedMs: number | null
+  followUpContextElapsedMs: number | null
   cliBootstrapElapsedMs: number | null
   dynamicToolCount: number
   messageTargetingAvailable: boolean
@@ -192,6 +194,8 @@ export interface AssistantRoutePlanningDiagnostics {
 
 type AssistantRoutePlanningSpanKey =
   | 'assistantContextSnapshotElapsedMs'
+  | 'assistantContextSnapshotRefreshElapsedMs'
+  | 'followUpContextElapsedMs'
   | 'cliBootstrapElapsedMs'
   | 'primarySystemPromptElapsedMs'
   | 'routeResumeBindingElapsedMs'
@@ -203,6 +207,8 @@ type AssistantRoutePlanningSpanMetrics = Partial<
 
 export type AssistantRoutePlanningStage =
   | 'assistant_context_snapshot'
+  | 'assistant_context_snapshot_refresh'
+  | 'follow_up_context'
   | 'cli_bootstrap'
   | 'primary_instructions'
   | 'resume_binding'
@@ -212,6 +218,14 @@ const ASSISTANT_ROUTE_PLANNING_SPAN_STAGES: readonly {
   key: AssistantRoutePlanningSpanKey
   stage: AssistantRoutePlanningStage
 }[] = [
+  {
+    key: 'assistantContextSnapshotRefreshElapsedMs',
+    stage: 'assistant_context_snapshot_refresh',
+  },
+  {
+    key: 'followUpContextElapsedMs',
+    stage: 'follow_up_context',
+  },
   {
     key: 'assistantContextSnapshotElapsedMs',
     stage: 'assistant_context_snapshot',
@@ -961,13 +975,21 @@ export async function resolveAssistantRouteTurnPlan(
     input.profile.toolProfile === 'provider-turn'
   const privateInteractiveProviderTurn =
     privateInteractiveAudience && conversationProviderTurn
-  const followUp = await resolveAssistantFollowUpTurnContext({
-    message: input.input, session: input.session, privateConversation: privateInteractiveAudience,
-    interactiveConversation: conversationProviderTurn, systemNotification: systemNotificationTurn,
-    outputOnly: outputOnlyTurn, providerTools: input.profile.toolProfile === 'provider-turn',
-    onboardingGoalCheckin: onboardingGoalCheckinTurn,
-    supportsNativeResume: routeProviderCapabilities.supportsNativeResume,
-  })
+  let followUpContextElapsedMs: number | null = null
+  const followUp = await measureRoutePlanningAsync(
+    routePlanningSpans,
+    'followUpContextElapsedMs',
+    () => resolveAssistantFollowUpTurnContext({
+      message: input.input, session: input.session, privateConversation: privateInteractiveAudience,
+      interactiveConversation: conversationProviderTurn, systemNotification: systemNotificationTurn,
+      outputOnly: outputOnlyTurn, providerTools: input.profile.toolProfile === 'provider-turn',
+      onboardingGoalCheckin: onboardingGoalCheckinTurn,
+      supportsNativeResume: routeProviderCapabilities.supportsNativeResume,
+    }),
+    (elapsedMs) => {
+      followUpContextElapsedMs = elapsedMs
+    },
+  )
   const followUpInvocation = followUp.invocation
   const followUpAttachmentAllowed = followUp.attachmentAllowed
   const authenticatedGroupProviderTurn =
@@ -1133,21 +1155,29 @@ export async function resolveAssistantRouteTurnPlan(
     contract: unscopedAssistantCliContract,
     hostedRuntime: input.executionContext?.hosted != null,
   })
+  let assistantContextSnapshotRefreshElapsedMs: number | null = null
   if (privateInteractiveProviderTurn) {
     // A small vault can repair its navigation snapshot before provider start.
     // Larger vaults yield to the degraded prompt instead of delaying the turn.
     let remainingRefreshSteps =
       ASSISTANT_CONTEXT_SNAPSHOT_FOREGROUND_REFRESH_MAX_STEPS
-    await refreshAssistantContextSnapshotBestEffort({
-      shouldYield: () => {
-        if (remainingRefreshSteps <= 0) {
-          return true
-        }
-        remainingRefreshSteps -= 1
-        return false
+    await measureRoutePlanningAsync(
+      routePlanningSpans,
+      'assistantContextSnapshotRefreshElapsedMs',
+      () => refreshAssistantContextSnapshotBestEffort({
+        shouldYield: () => {
+          if (remainingRefreshSteps <= 0) {
+            return true
+          }
+          remainingRefreshSteps -= 1
+          return false
+        },
+        vaultRoot: input.input.vault,
+      }),
+      (elapsedMs) => {
+        assistantContextSnapshotRefreshElapsedMs = elapsedMs
       },
-      vaultRoot: input.input.vault,
-    })
+    )
   }
   let assistantContextSnapshotElapsedMs: number | null = null
   const assistantContextSnapshotPrompt =
@@ -1476,6 +1506,8 @@ export async function resolveAssistantRouteTurnPlan(
     }),
     planningDiagnostics: {
       assistantContextSnapshotElapsedMs,
+      assistantContextSnapshotRefreshElapsedMs,
+      followUpContextElapsedMs,
       cliBootstrapElapsedMs,
       dynamicToolCount: dynamicTools.length,
       messageTargetingAvailable,
