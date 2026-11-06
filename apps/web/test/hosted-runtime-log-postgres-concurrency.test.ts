@@ -12,6 +12,7 @@ import {
 import {
   deleteExpiredHostedRuntimeLogs,
   deleteHostedRuntimeLogDataForUsers,
+  hostedRuntimeLogLockKey,
   hostedRuntimeLogSubjectKey,
   listHostedRuntimeLogs,
   listHostedRuntimeTurnTimingLogs,
@@ -189,8 +190,81 @@ describe.skipIf(!runPostgresProof)("isolated runtime-log deletion fence", () => 
       "DELETE FROM hosted_account_deletion_cleanup WHERE id = ANY($1::text[])",
       [[oldWebReceiptId, preExpandReceiptId]],
     );
-    database = poolDatabase(pool);
+    database = pool;
   }, 30_000);
+
+  it("keeps later writes visible after a query timeout strands rollback", async () => {
+    const postgres = requirePool(pool);
+    const userId = `member_runtime_log_timeout_${randomToken()}`;
+    const subjectKey = rememberSubject(subjectKeys, userId);
+    const id = randomUUID();
+    const timeoutPool = new PgPool({
+      connectionString: postgresDatabaseUrl(primaryDatabaseUrl, testDatabaseName),
+      max: 1,
+      query_timeout: 1_000,
+    });
+
+    try {
+      const lockClient = await postgres.connect();
+      try {
+        await lockClient.query("BEGIN");
+        await lockClient.query("SELECT pg_advisory_xact_lock($1::bigint)", [
+          hostedRuntimeLogLockKey(subjectKey),
+        ]);
+        await expect(recordHostedRuntimeLogs({
+          database: timeoutPool,
+          entries: [runtimeEntry()],
+          isUserActive: async () => true,
+          userId,
+        })).rejects.toThrow("Query read timeout");
+      } finally {
+        try {
+          await lockClient.query("ROLLBACK");
+        } finally {
+          lockClient.release();
+        }
+      }
+
+      const insert = {
+        text: `
+          INSERT INTO hosted_runtime_log (
+            id, subject_key, at, level, component, phase, event_code
+          ) VALUES ($1, $2, CURRENT_TIMESTAMP, 'info', 'mailbox', 'import', 'mailbox.imported')
+        `,
+        values: [id, subjectKey],
+        query_timeout: 30_000,
+      };
+      await timeoutPool.query(insert);
+      await expect(postgres.query<{ id: string }>(
+        "SELECT id FROM hosted_runtime_log WHERE id = $1",
+        [id],
+      )).resolves.toMatchObject({ rows: [{ id }] });
+    } finally {
+      await timeoutPool.end();
+    }
+  });
+
+  it("reuses the connection after an acknowledged rollback", async () => {
+    const rollbackPool = new PgPool({
+      connectionString: postgresDatabaseUrl(primaryDatabaseUrl, testDatabaseName),
+      max: 1,
+    });
+    const failure = new Error("member authority unavailable");
+
+    try {
+      const before = await rollbackPool.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+      await expect(recordHostedRuntimeLogs({
+        database: rollbackPool,
+        entries: [runtimeEntry()],
+        isUserActive: async () => { throw failure; },
+        userId: `member_runtime_log_rollback_${randomToken()}`,
+      })).rejects.toBe(failure);
+      const after = await rollbackPool.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+      expect(after.rows[0]!.pid).toBe(before.rows[0]!.pid);
+    } finally {
+      await rollbackPool.end();
+    }
+  });
 
   it("projects bounded device import metadata without exposing payloads", async () => {
     const db = requireDatabase(database);
@@ -747,41 +821,8 @@ function hookClient(
       await hook(text, values ?? []);
       return result;
     },
-    release() {
-      client.release();
-    },
-  };
-}
-
-function poolDatabase(pool: Pool): HostedRuntimeLogSqlDatabase {
-  return {
-    async connect() {
-      const client = await pool.connect();
-      return {
-        async query<Row extends Record<string, unknown>>(
-          text: string,
-          values?: readonly unknown[],
-        ): Promise<HostedRuntimeLogSqlResult<Row>> {
-          const result = await client.query<Row>(
-            text,
-            values === undefined ? undefined : [...values],
-          );
-          return { rowCount: result.rowCount, rows: result.rows };
-        },
-        release() {
-          client.release();
-        },
-      };
-    },
-    async query<Row extends Record<string, unknown>>(
-      text: string,
-      values?: readonly unknown[],
-    ): Promise<HostedRuntimeLogSqlResult<Row>> {
-      const result = await pool.query<Row>(
-        text,
-        values === undefined ? undefined : [...values],
-      );
-      return { rowCount: result.rowCount, rows: result.rows };
+    release(destroy?: boolean) {
+      client.release(destroy);
     },
   };
 }
