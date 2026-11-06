@@ -2935,6 +2935,12 @@ model GameReport {
   about                 String
   // sexual, harassment, hate, violence, self_harm, money, or other
   reason                String
+  // Frozen when accepted so every alert under its provider key is byte-identical.
+  // alertGameId is plain text because gameId is SET NULL. Legacy rows hold NULL.
+  alertBlocked          Boolean?     @map("alert_blocked")
+  alertEntryKind        String?      @map("alert_entry_kind")
+  alertFromInvite       Boolean?     @map("alert_from_invite")
+  alertGameId           String?      @map("alert_game_id")
   noteEncrypted         String?      @map("note_encrypted")
   snapshotTextEncrypted String?      @map("snapshot_text_encrypted")
   snapshotMediaKeys     String[]     @default([]) @map("snapshot_media_keys")
