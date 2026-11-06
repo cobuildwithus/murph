@@ -336,7 +336,7 @@ async function forwardWithRuntimeUsageSettlement(input: {
   let allowed: boolean | null = null;
   if (response.ok) {
     try { allowed = parseHostedRuntimeUsageRecordResponse(await response.clone().json()).platformAiUsageAllowedAfter; }
-    catch { /* Keep the durable pending receipt. */ }
+    catch { /* An unreadable answer stays unknown. */ }
   }
   await receipt.finish(allowed);
   return response;

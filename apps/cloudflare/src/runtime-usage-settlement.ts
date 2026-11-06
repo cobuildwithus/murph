@@ -15,10 +15,10 @@ export async function beginHostedRuntimeUsageSettlement(input: {
   if (!await container.beginRuntimeUsageSettlement(receipt)) throw new Error("Native usage settlement receipt was rejected.");
   return {
     async finish(allowed) {
-      if (allowed !== null) await container.finishRuntimeUsageSettlement!({ ...receipt, allowed });
+      // Unknown is a terminal native denial, written before Web is told to
+      // revoke. A replay can settle the ledger but cannot reopen this generation.
+      await container.finishRuntimeUsageSettlement!({ ...receipt, allowed: allowed === true });
       if (allowed !== true) {
-        // An outage cannot erase the pending native receipt. Once Web is
-        // reachable, revocation becomes durable at the admission owner too.
         await commandHostedRuntimeOwner({ source: input.env, userId: input.userId, command: { operation: "revoke_ai_usage", ...identity } });
       }
     },

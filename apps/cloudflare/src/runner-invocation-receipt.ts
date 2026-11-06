@@ -116,7 +116,7 @@ export class RunnerInvocationReceiptStore {
 
   finishUsageSettlement(identity: RunnerInvocationIdentity, reportId: string, allowed: boolean): void {
     // Success clears only pending evidence; denial survives success replays.
-    // Lost responses/eviction leave durable pending evidence.
+    // Only settlement interrupted before finish leaves durable pending evidence.
     if (allowed) this.sql.exec("DELETE FROM runner_usage_settlement WHERE report_id = ? AND attempt_id = ? AND generation = ? AND state = 'pending'", reportId, identity.attemptId, identity.generation);
     else {
       // register clears all rows on identity change, so conflicts belong to this receipt.
