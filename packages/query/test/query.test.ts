@@ -4907,6 +4907,7 @@ test("rebuildQueryProjection recreates v24 stores without unused indexes", async
       const indexNames = new Set(indexRows.map((row) => row.name));
 
       assert.ok(columnNames.includes("payload_id"));
+      assert.equal(columnNames.includes("sort_rank"), false);
       assert.equal(columnNames.includes("metric_point_json"), false);
       assert.equal(columnNames.includes("provenance_json"), false);
       assert.equal(columnNames.includes("context_json"), false);
@@ -4920,6 +4921,7 @@ test("rebuildQueryProjection recreates v24 stores without unused indexes", async
         "query_entities_record_class_idx",
         "query_entities_stream_idx",
         "query_metric_points_source_idx",
+        "query_metric_points_metric_latest_idx",
       ]) {
         assert.equal(indexNames.has(indexName), false, indexName);
       }
@@ -4928,7 +4930,6 @@ test("rebuildQueryProjection recreates v24 stores without unused indexes", async
         "query_entities_family_idx",
         "query_entities_kind_idx",
         "query_metric_points_biomarker_latest_idx",
-        "query_metric_points_metric_latest_idx",
         "query_search_document_experiment_idx",
         "query_search_document_kind_idx",
         "query_search_document_record_type_idx",

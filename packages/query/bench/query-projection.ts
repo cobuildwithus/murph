@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { copyFile, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
@@ -34,12 +35,14 @@ function observation(index: number, version = originalVersion, corrected = false
     occurredAt: new Date(Date.UTC(2025, 0, 1) + index * 60_000).toISOString(),
     recordedAt: version,
     timeZone: "UTC",
-    title: "Synthetic benchmark caffeine observation",
+    title: "Synthetic benchmark metric observation",
     externalRef: {
       system: "synthetic", resourceType: "metric", resourceId: `sample-${index}`, version,
     },
     fields: {
-      metric: "caffeine", unit: "mg", value: corrected ? 500 + index : 45 + index % 200,
+      // Interleave keys so rebuild order differs from the clustered table order.
+      metric: index % 4 === 0 ? "caffeine" : `synthetic-metric-${index % 4}`,
+      unit: "mg", value: corrected ? 500 + index : 45 + index % 200,
       observationGrain: "summary", qualifiers: { summary: true },
     },
   };
@@ -85,7 +88,7 @@ async function databaseStats(scenario: string) {
   try {
     const scalar = (sql: string) => Object.values(db.prepare(sql).get() ?? {})[0] ?? null;
     emit(scenario, {
-      dbBytes, walBytes, shmBytes, exists: true,
+      dbBytes, zstdBytes: compressedBytes(dbPath), walBytes, shmBytes, exists: true,
       pageCount: scalar("PRAGMA page_count"), freeListCount: scalar("PRAGMA freelist_count"),
       pageSize: scalar("PRAGMA page_size"), userVersion: scalar("PRAGMA user_version"),
       entityRows: scalar("SELECT count(*) FROM query_entities"),
@@ -94,6 +97,42 @@ async function databaseStats(scenario: string) {
       searchRows: scalar("SELECT count(*) FROM query_search_document"),
     });
   } finally { db.close(); }
+}
+
+function compressedBytes(filePath: string): number {
+  return execFileSync("zstd", ["-q", "-9", "--long=27", "-c", filePath], {
+    maxBuffer: 128 * 1024 * 1024,
+  }).byteLength;
+}
+
+async function compareSortedPacking() {
+  const sortedPath = path.join(vaultRoot, "sorted-query.sqlite");
+  await copyFile(dbPath, sortedPath);
+  const database = new DatabaseSync(sortedPath);
+  try {
+    const orderedRows = () => JSON.stringify(database.prepare(`
+      SELECT * FROM query_metric_points
+      ORDER BY metric_key, effective_date DESC, observed_at DESC, id
+    `).all());
+    const before = orderedRows();
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TEMP TABLE metric_copy AS SELECT * FROM query_metric_points;
+      DELETE FROM query_metric_points;
+      INSERT INTO query_metric_points SELECT * FROM metric_copy
+        ORDER BY metric_key, effective_date DESC, observed_at DESC, id;
+      DROP TABLE metric_copy;
+      COMMIT;
+      VACUUM;
+    `);
+    assert.equal(orderedRows(), before);
+  } finally { database.close(); }
+  emit("sorted-packing", {
+    dbBytes: await fileBytes(dbPath), sortedDbBytes: await fileBytes(sortedPath),
+    zstdBytes: compressedBytes(dbPath), sortedZstdBytes: compressedBytes(sortedPath),
+    rowsIdentical: true,
+  });
+  await rm(sortedPath);
 }
 
 function semanticHash(points: readonly MetricPoint[]): string {
@@ -108,13 +147,13 @@ function expectedHash(count: number, corrected: boolean): string {
   const hash = createHash("sha256");
   for (let index = 0; index < count; index++) {
     const event = observation(index, originalVersion, corrected && index < 12);
-    hash.update(JSON.stringify([event.occurredAt, "caffeine", "mg", event.fields.value]));
+    hash.update(JSON.stringify([event.occurredAt, event.fields.metric, "mg", event.fields.value]));
   }
   return hash.digest("hex");
 }
 
 async function verifyAll(count: number, corrected: boolean, scenario: string) {
-  const points = await listMetricPoints(vaultRoot, { metricKey: "caffeine", limit: null });
+  const points = await listMetricPoints(vaultRoot, { limit: null });
   assert.equal(points.length, count);
   const hash = semanticHash(points);
   assert.equal(hash, expectedHash(count, corrected));
@@ -131,7 +170,7 @@ async function warmReads(scenario: string) {
     const points = await measure(`${scenario}-${run}`, () => listMetricPoints(vaultRoot, {
       metricKey: "caffeine", limit: 50,
     }), { collectBefore: false });
-    assert.equal(points.length, Math.min(50, seedCount + (scenario === "warm-after-edit" ? 12 : 0)));
+    assert.equal(points.length, Math.min(50, Math.ceil((seedCount + (scenario === "warm-after-edit" ? 12 : 0)) / 4)));
     const hash = semanticHash(points);
     expected ??= hash;
     assert.equal(hash, expected);
@@ -212,6 +251,7 @@ try {
   await databaseStats("after-correction-invalidation");
   await verifyAll(seedCount + 12, true, "correction-correctness");
   await warmReads("warm-after-edit");
+  await compareSortedPacking();
   emit("complete", { passed: true });
 } finally {
   await rm(vaultRoot, { recursive: true, force: true });

@@ -22,7 +22,9 @@ function globalSnapshot(root: string) {
       database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table));
     return {
       tables,
-      rows: tables.map(table => database.prepare(`SELECT rowid, * FROM ${table} ORDER BY rowid`).all()),
+      rows: tables.map(table => database.prepare(table === "query_metric_points"
+        ? "SELECT * FROM query_metric_points ORDER BY metric_key, effective_date DESC, observed_at DESC, id"
+        : `SELECT rowid, * FROM ${table} ORDER BY rowid`).all()),
       meta: database.prepare("SELECT * FROM query_meta WHERE key != 'wearable_source_manifest' ORDER BY key").all(),
     };
   } finally { database.close(); }
