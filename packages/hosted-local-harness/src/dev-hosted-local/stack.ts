@@ -1293,21 +1293,25 @@ async function prepareHostedLocalDatabase({
 }): Promise<void> {
   if (!config.skipPrismaMigrate) {
     if (shouldSyncLocalDatabaseSchema(runtimeEnv.DATABASE_URL)) {
-      await runCommand("pnpm", [
+      const pushSchema = (...flags: string[]) => runCommand("pnpm", [
         "--dir",
         "apps/web",
         "exec",
         "prisma",
         "db",
         "push",
-        config.forceResetLocalDatabase ? "--force-reset" : "--accept-data-loss",
+        ...flags,
       ], {
         cwd: repoRoot,
         env: runtimeEnv,
         name: "setup",
         signal: abortSignal,
       });
-;
+      if (config.forceResetLocalDatabase) {
+        await pushSchema("--force-reset");
+      } else {
+        await pushSchema().catch(() => pushSchema("--accept-data-loss"));
+      }
     } else {
       await runCommand("pnpm", ["--dir", "apps/web", "prisma:migrate:deploy"], {
         cwd: repoRoot,
