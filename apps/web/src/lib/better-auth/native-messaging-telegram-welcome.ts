@@ -7,7 +7,7 @@ import { prepareHostedMailboxItemAppendCrypto } from "../hosted-mailbox/store";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { readHostedMemberRoutingState, upsertHostedMemberTelegramRoutingBindingTx } from "../hosted-onboarding/hosted-member-routing-store";
-import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
+import { readActiveHostedMemberAccess, readStrictHostedPersonAccess } from "../hosted-onboarding/member-access";
 import { enqueueHostedMemberChannelsUpdatedForActiveMemberTx } from "../hosted-onboarding/member-channel-sync";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import { withMurphTelegramText } from "../murph-contact-routing";
@@ -26,6 +26,7 @@ export async function welcomeNativeMessagingTelegram(input: { memberId: string; 
   const routing = await readHostedMemberRoutingState(input);
   if (routing?.telegramUserId !== input.telegramUserId) throw changedAccount();
   if (routing.telegramThreadId) return result(false);
+  if (!await readStrictHostedPersonAccess(input)) return result(true);
   try {
     const response = acceptedMessage.safeParse(await callHostedTelegramApi({ method: "sendMessage", readJson: true, body: {
       chat_id: input.telegramUserId,

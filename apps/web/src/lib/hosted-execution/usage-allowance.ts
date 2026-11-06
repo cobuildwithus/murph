@@ -55,7 +55,6 @@ import {
   type HostedMemberPersonAccessState,
   hostedMemberPersonAccessSelect,
   hasActiveHostedThreadContainerAccessWithParticipants,
-  readActiveHostedMemberAccess,
   readGameChatAllowanceBeneficiary,
 } from "../hosted-onboarding/member-access";
 import { getPrisma } from "../prisma";
@@ -456,8 +455,10 @@ async function hasHostedAiUsageThreadContainerAccess(input: {
     return null;
   }
 
-  return await readActiveHostedMemberAccess({
-    memberId: input.containerMemberId,
+  return hasActiveHostedThreadContainerAccessWithParticipants({
+    container: input.container,
+    containerMemberId: input.containerMemberId,
+    owner: input.threadContainer.owner,
     now: input.now,
     prisma: input.tx,
   });

@@ -35,7 +35,7 @@ import {
   createHostedTelegramUserLookupKey,
   parseHostedBlindIndex,
 } from "../hosted-onboarding/contact-privacy";
-import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
+import { readStrictHostedPersonAccess } from "../hosted-onboarding/member-access";
 import {
   resolveHostedMemberRoutingByTelegramUserId,
 } from "../hosted-onboarding/hosted-member-routing-store";
@@ -1407,7 +1407,7 @@ async function resolveNewlyActivatedIntroducedMemberTx(input: {
   ) {
     return null;
   }
-  return await readActiveHostedMemberAccess({ memberId, prisma: input.tx })
+  return await readStrictHostedPersonAccess({ memberId, prisma: input.tx })
     ? memberId
     : null;
 }
@@ -1457,7 +1457,7 @@ async function resolveHostedUsageReferralActor(input: {
     select: { memberId: true },
   });
   if (!container) {
-    if (!(await readActiveHostedMemberAccess({
+    if (!(await readStrictHostedPersonAccess({
       memberId: input.memberId,
       prisma: input.prisma,
     }))) {
@@ -1480,7 +1480,7 @@ async function resolveHostedUsageReferralActor(input: {
   });
   if (
     referrerContainer
-    || !(await readActiveHostedMemberAccess({
+    || !(await readStrictHostedPersonAccess({
       memberId: referrer.memberId,
       prisma: input.prisma,
     }))

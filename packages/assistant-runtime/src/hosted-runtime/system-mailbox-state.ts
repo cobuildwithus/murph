@@ -160,6 +160,7 @@ export async function recoverHostedSystemMailboxClaims(vaultRoot: string): Promi
 }
 
 export async function readHostedSystemMailboxProgress(input: {
+  assistantExecutionBlocked?: boolean;
   importedSeq: string;
   now?: () => string;
   state?: HostedSystemMailboxState;
@@ -170,8 +171,9 @@ export async function readHostedSystemMailboxProgress(input: {
   // Filter items before selecting a wake: future retries have no executionClass,
   // and the unrestricted selector can hide them behind an earlier assistant head.
   const { next } = await resolveHostedSystemMailboxWakeCandidates({
+    assistantExecutionBlocked: input.assistantExecutionBlocked,
     now: () => now,
-    state: selectHostedModelFreeSystemMailboxItems(state),
+    state: selectHostedModelFreeSystemMailboxItems(state, input.assistantExecutionBlocked),
     vaultRoot: input.vaultRoot,
   });
   return {
@@ -550,6 +552,7 @@ function isHostedDeviceSyncDenseRawRetentionMailboxItem(
 }
 
 export async function resolveHostedSystemMailboxNextWakeAt(input: {
+  assistantExecutionBlocked?: boolean;
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
   now?: () => string;
@@ -559,6 +562,7 @@ export async function resolveHostedSystemMailboxNextWakeAt(input: {
 }
 
 export async function resolveHostedSystemMailboxNextWakeCandidate(input: {
+  assistantExecutionBlocked?: boolean;
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
   excludeItemId?: string | null;
@@ -579,6 +583,7 @@ export async function resolveHostedSystemMailboxNextWakeCandidate(input: {
 }
 
 export async function resolveHostedSystemMailboxWakeCandidates(input: {
+  assistantExecutionBlocked?: boolean;
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
   excludeItemId?: string | null;
@@ -603,6 +608,7 @@ export async function resolveHostedSystemMailboxWakeCandidates(input: {
 }
 
 function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
+  assistantExecutionBlocked?: boolean;
   continuationItemIds: ReadonlySet<string>;
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
@@ -630,7 +636,7 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
   const modelFreeProjectedState = usesHostedModelFreeSystemMailboxSelection({
     allowedRouteActions: input.allowedRouteActions ?? null,
     allowedWakeKinds: input.allowedWakeKinds ?? null,
-  }) ? selectHostedModelFreeSystemMailboxItems(remainingState) : remainingState;
+  }) ? selectHostedModelFreeSystemMailboxItems(remainingState, input.assistantExecutionBlocked) : remainingState;
   const selectionState = input.allowedWakeKinds == null
     ? modelFreeProjectedState
     : {
@@ -650,7 +656,7 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
   const defaultOwnedItems = findNextHostedSystemMailboxQueueItemsForWake({
     allowedRouteActions: null,
     state: remainingState,
-  }).filter((item) => resolveHostedSystemMailboxItemExecutionClass(item) === "default_owned");
+  }).filter((item) => resolveHostedSystemMailboxItemExecutionClass(item, input.assistantExecutionBlocked) === "default_owned");
   const readyDefaultOwnedItem = findNextHostedSystemMailboxQueueItem({
     allowedRouteActions: null,
     now,
@@ -660,26 +666,26 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
     ? selectHostedRuntimeWakeCandidate(defaultOwnedItems.map((item) =>
         createHostedRuntimeWakeCandidate(
           resolveSystemMailboxItemNextWakeAt(item, now),
-          resolveHostedSystemMailboxItemWakeReason(item),
+          resolveHostedSystemMailboxItemWakeReason(item, input.assistantExecutionBlocked),
         )
       ))
     : createHostedRuntimeWakeCandidate(
         resolveSystemMailboxItemNextWakeAt(readyDefaultOwnedItem, now),
-        resolveHostedSystemMailboxItemWakeReason(readyDefaultOwnedItem),
+        resolveHostedSystemMailboxItemWakeReason(readyDefaultOwnedItem, input.assistantExecutionBlocked),
       );
   const next: HostedSystemMailboxWakeCandidate = ready !== null
     ? {
       ...createHostedRuntimeWakeCandidate(
         now,
-        resolveHostedSystemMailboxItemWakeReason(ready),
+        resolveHostedSystemMailboxItemWakeReason(ready, input.assistantExecutionBlocked),
       ),
-      executionClass: resolveHostedSystemMailboxItemExecutionClass(ready),
+      executionClass: resolveHostedSystemMailboxItemExecutionClass(ready, input.assistantExecutionBlocked),
     }
     : {
       ...selectHostedRuntimeWakeCandidate(items.map((item) =>
         createHostedRuntimeWakeCandidate(
           resolveSystemMailboxItemNextWakeAt(item, now),
-          resolveHostedSystemMailboxItemWakeReason(item),
+          resolveHostedSystemMailboxItemWakeReason(item, input.assistantExecutionBlocked),
         )
       )),
       executionClass: null,
@@ -692,10 +698,11 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
 
 function resolveHostedSystemMailboxItemExecutionClass(
   item: HostedSystemMailboxPendingItem,
+  assistantExecutionBlocked = false,
 ): "default_owned" | "model_free" {
   // Local timers have no Web lane sequence, but use the same execution owner
   // as imported work. Sequence numbers track handling, not execution class.
-  return isHostedModelFreeSystemMailboxItem(item)
+  return isHostedModelFreeSystemMailboxItem(item, assistantExecutionBlocked)
     ? "model_free"
     : "default_owned";
 }
@@ -1252,9 +1259,11 @@ export function isHostedSystemMailboxModelFreeExactNotificationItem(
 
 export function isHostedModelFreeSystemMailboxItem(
   item: HostedSystemMailboxPendingItem,
+  assistantExecutionBlocked = false,
 ): boolean {
   if (
     classifyHostedSystemMailboxExecutionClass({
+      assistantExecutionBlocked,
       dedupeKey: item.mailboxDedupeKey,
       kind: item.wake.kind,
     }) !== "model_free"
@@ -1268,8 +1277,9 @@ export function isHostedModelFreeSystemMailboxItem(
 
 export function selectHostedModelFreeSystemMailboxItems(
   state: HostedSystemMailboxState,
+  assistantExecutionBlocked = false,
 ): HostedSystemMailboxState {
-  return { pending: state.pending.filter(isHostedModelFreeSystemMailboxItem) };
+  return { pending: state.pending.filter((item) => isHostedModelFreeSystemMailboxItem(item, assistantExecutionBlocked)) };
 }
 
 export function mergeHostedSystemMailboxRollbackItems(input: {
@@ -1797,12 +1807,13 @@ function resolveSystemMailboxItemNextWakeAt(
 
 function resolveHostedSystemMailboxItemWakeReason(
   item: HostedSystemMailboxPendingItem,
+  assistantExecutionBlocked = false,
 ): string {
   if (item.routeAction === "run-device-sync-wake") {
     return HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON;
   }
 
-  return isHostedModelFreeSystemMailboxItem(item)
+  return isHostedModelFreeSystemMailboxItem(item, assistantExecutionBlocked)
     ? "mailbox"
     : HOSTED_ASSISTANT_WAKE_REASON;
 }

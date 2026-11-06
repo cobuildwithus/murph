@@ -1,3 +1,5 @@
+import { buildHostedExecutionSafeErrorDiagnostics } from "@murphai/hosted-execution";
+import { HostedRuntimeBridgeCheckpointLeaseError } from "./checkpoint-bridge.ts";
 import type { AssistantRunEvent } from "@murphai/assistant-engine";
 import {
   HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
@@ -561,4 +563,115 @@ export function summarizeHostedAssistantAutoReplyEligibleAfter(
       `${toHostedRuntimeLogCode(entry.channel)}:${entry.eligibleAfter == null ? "none" : "present"}`
     )
     .join(",");
+}
+
+export async function writeHostedWorkspaceAssistantPostCheckpointFailureRuntimeLog(context: {
+  error: unknown;
+  errorCode: "assistant_after_checkpoint_checkpoint_failed" | "assistant_after_checkpoint_failed" | "foreground_device_sync_failed";
+  input: {
+    runtimeLogContext?: HostedRuntimeLogContext | null;
+    now?: () => string;
+    platform: Pick<HostedRuntimePlatform, "logPort">;
+  };
+}): Promise<void> {
+  const failure = buildHostedMailboxPostCheckpointEffectFailureLog(context.error);
+  console.warn("Hosted workspace deferred work failed.", {
+    errorCode: context.errorCode,
+    errorName: failure.name ?? (context.error instanceof Error ? context.error.name : typeof context.error),
+  });
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields(context.input.runtimeLogContext),
+      component: "runner",
+      errorCode: context.errorCode,
+      eventCode: "runner.error",
+      level: "warn",
+      phase: "checkpoint",
+      redactedJson: {
+        checkpointed: false,
+        failureCodeDetails: failure.codeDetail ? [failure.codeDetail] : [],
+        failureNames: failure.name ? [failure.name] : [],
+        failureSummaries: failure.summary ? [failure.summary] : [],
+        nestedErrorCode: failure.errorCode,
+      },
+    },
+    now: context.input.now,
+    platform: context.input.platform,
+  });
+}
+
+export function buildHostedMailboxPostCheckpointEffectFailureLog(error: unknown): {
+  checkpointLeaseDiagnostics?: {
+    checkpointResponseCheckpointed: boolean;
+    checkpointLeaseMatchesResponse: boolean;
+  };
+  codeDetail: string | null;
+  errorCode: string;
+  name: string | null;
+  summary: string | null;
+} {
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
+  // The shared sanitizer intentionally drops arbitrary error properties. Project
+  // only these booleans from the local lease error, never spread its metadata.
+  const postWebCheckpoint = error instanceof HostedRuntimeBridgeCheckpointLeaseError
+    && error.code === "stale_workspace_version"
+    && error.stage === "after_web_checkpoint"
+    ? error.postWebCheckpoint
+    : undefined;
+  const responseCheckpointed = postWebCheckpoint?.responseCheckpointed;
+  const leaseMatchesResponse = postWebCheckpoint?.leaseMatchesResponse;
+  return {
+    ...(typeof responseCheckpointed === "boolean"
+      && typeof leaseMatchesResponse === "boolean"
+      ? {
+          checkpointLeaseDiagnostics: {
+            checkpointResponseCheckpointed: responseCheckpointed,
+            checkpointLeaseMatchesResponse: leaseMatchesResponse,
+          },
+        }
+      : {}),
+    codeDetail: normalizeHostedMailboxPostCheckpointFailureValue(diagnostics?.errorCodeDetail),
+    errorCode: typeof diagnostics?.errorCode === "string" ? diagnostics.errorCode : "runtime_error",
+    name: normalizeHostedMailboxPostCheckpointFailureValue(diagnostics?.errorName),
+    summary: normalizeHostedMailboxPostCheckpointFailureValue(
+      typeof diagnostics?.errorDetail === "string"
+        ? diagnostics.errorDetail
+        : diagnostics?.errorMessage,
+    ),
+  };
+}
+
+function normalizeHostedMailboxPostCheckpointFailureValue(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  if (normalized.length === 0) {
+    return null;
+  }
+
+  const bounded = normalized.length > 128
+    ? `${normalized.slice(0, 125).trimEnd()}...`
+    : normalized;
+  return isHostedMailboxPostCheckpointRedactedStringSafe(bounded) ? bounded : null;
+}
+
+function isHostedMailboxPostCheckpointRedactedStringSafe(value: string): boolean {
+  if (/\/Users\/|file:\/\/|[A-Za-z]:\\|<HOME_DIR>|(^|[\s(])\/[^\s)]+/u.test(value)) {
+    return false;
+  }
+  if (/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu.test(value)) {
+    return false;
+  }
+  if (/\+\d[\d().\s-]{7,}\d/u.test(value)) {
+    return false;
+  }
+  return !(
+    /(["']?(?:authorization|secret|token|password|cookie|set-cookie|api[-_]?key)["']?\s*[:=]\s*["']?)([^"',\s}]+)/iu
+      .test(value)
+    || /\b(Basic|Bearer)\s+[A-Z0-9._~+/=-]+\b/iu.test(value)
+    || /\b(?:sk|pk|rk)_(?:live|test)_[A-Z0-9]+\b/iu.test(value)
+    || /\bwhsec_[A-Z0-9]+\b/iu.test(value)
+  );
 }

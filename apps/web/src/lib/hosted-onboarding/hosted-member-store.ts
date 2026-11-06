@@ -17,7 +17,7 @@ import {
 } from "./contact-privacy";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import { createHostedMemberReplyAliasRoute } from "./hosted-email-reply-alias";
-import { activeHostedMemberAccessWhere } from "./member-access";
+import { activeHostedMemberAccessWhere, strictHostedPersonAccessWhere } from "./member-access";
 import {
   decryptHostedWebNullableString,
   decryptHostedWebNullableStrings,
@@ -476,7 +476,7 @@ export async function claimHostedMemberSignupNotificationEmailAttempt(input: {
       signupNotificationEmailAttemptedAt: input.attemptedAt,
     },
     where: {
-      ...activeHostedMemberAccessWhere(),
+      ...strictHostedPersonAccessWhere(),
       id: input.memberId,
       signupNotificationEmailAttemptedAt: null,
     },

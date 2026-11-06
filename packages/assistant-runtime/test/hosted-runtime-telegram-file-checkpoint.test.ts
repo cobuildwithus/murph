@@ -130,18 +130,20 @@ it.each(["approval", "retry"] as const)(
         expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith(expect.objectContaining({ preferredEffectIds: [approvalEffectId] }));
         expect(actionApprovalPort.read).toHaveBeenCalledOnce();
       }
-      const postCheckpoint = await phase.afterCheckpoint?.();
+      // Approval still records its system-mailbox item after checkpointing;
+      // an ordinary outbox retry now returns its durable effect inline.
+      const deliveryPhase = entry === "approval" ? await phase.afterCheckpoint?.() : phase;
       expect(providerFetch).toHaveBeenCalledTimes(callsBeforePhase);
-      expect(postCheckpoint?.afterDurableCheckpoint).toBeDefined();
+      expect(deliveryPhase?.afterDurableCheckpoint).toBeDefined();
       const prepared = await readAssistantOutboxIntent(vaultRoot, intent.intentId);
       expect(prepared).toMatchObject({ status: "sending", deliveryTransportIdempotent: false, preparedDispatchToken: expect.any(String) });
       const recoveryWakeAt = await callbacks.resolveHostedAssistantOutboxNextWakeAt({ vaultRoot });
       expect(recoveryWakeAt).toBe(new Date(Date.now() + 2 * 60_000).toISOString());
-      expect(postCheckpoint).toMatchObject({ nextWakeAt: recoveryWakeAt, nextWakeReason: HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON });
+      expect(deliveryPhase).toMatchObject({ nextWakeAt: recoveryWakeAt, nextWakeReason: HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON });
       // Publish the complete local snapshot before running the durable callback.
       await rm(snapshot, { force: true, recursive: true });
       await cp(vaultRoot, snapshot, { recursive: true });
-      await runHostedWorkspaceDurableCheckpointEffects(postCheckpoint?.afterDurableCheckpoint);
+      await runHostedWorkspaceDurableCheckpointEffects(deliveryPhase?.afterDurableCheckpoint);
       expect(acceptedUploads).toBe(1);
       expect(await readAssistantOutboxIntent(vaultRoot, intent.intentId)).toMatchObject({ status: "sent" });
       // Lose the accepted receipt and recover only the last published snapshot.

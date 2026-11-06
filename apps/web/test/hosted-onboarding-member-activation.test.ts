@@ -40,7 +40,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberActivationCoreState: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
-  readActiveHostedMemberAccess: vi.fn(),
+  readActiveHostedFamilySponsorship: vi.fn(),
   readHostedMemberEmailAuthorization: vi.fn(),
   readHostedMemberIdentity: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
@@ -98,7 +98,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-home-routing", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>(),
-  readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
+  readActiveHostedFamilySponsorship: mocks.readActiveHostedFamilySponsorship,
+  readStrictHostedPersonAccess: mocks.readActiveHostedFamilySponsorship,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
@@ -213,7 +214,7 @@ describe("hosted onboarding member activation", () => {
     mocks.readUserIdsWithActiveHostedCryptoDomainRootsTx.mockResolvedValue(new Set());
     mocks.clearHostedMemberPendingActivationTimeZone.mockResolvedValue(undefined);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
-    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
+    mocks.readActiveHostedFamilySponsorship.mockResolvedValue(true);
     setActivationMemberSnapshot(makeMemberSnapshot());
     mocks.resolveHostedMemberActivationLinqRoute.mockResolvedValue({
       welcomeRoute: expectedLinqParticipantWelcomeRoute(),

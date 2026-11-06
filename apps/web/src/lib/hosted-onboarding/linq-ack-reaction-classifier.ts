@@ -31,6 +31,14 @@ export const HOSTED_LINQ_ACK_REACTION_KINDS = [
 export type HostedLinqAckReactionKind =
   typeof HOSTED_LINQ_ACK_REACTION_KINDS[number];
 
+/** Quick asks need no extra acknowledgment while the conversation is live. */
+export const HOSTED_LINQ_ACK_REACTION_QUICK_KINDS: readonly HostedLinqAckReactionKind[] = [
+  "my_data",
+  "calendar",
+  "reminder",
+  "challenge",
+];
+
 /**
  * The go-ahead tapback. Linq sends it as iMessage's native Like, not a custom
  * emoji, so it looks like a person's thumbs up.

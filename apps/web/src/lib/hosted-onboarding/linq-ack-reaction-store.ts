@@ -34,6 +34,9 @@ import {
  * finish-without-reply) would otherwise keep the burst open and cost the
  * member's next message its tapback and progress note.
  *
+ * Opted-in quick asks skip a live conversation without writing burst state,
+ * leaving later tapbacks and progress updates eligible.
+ *
  * Claims and heavy marks take the same chat ownership lock as the engagement
  * route's dispatch fence, so a claim and a progress send serialize. Every
  * transaction is short, bounded, and never holds the lock across a network
@@ -45,6 +48,11 @@ type HostedLinqAckReactionClient = Pick<PrismaClient, "$transaction">;
 type HostedLinqAckReactionTx = Pick<Prisma.TransactionClient, "$executeRaw" | "$queryRaw">;
 
 export const HOSTED_LINQ_ACK_REACTION_BURST_MAX_AGE_MS = 120_000;
+/**
+ * A message this soon after Murph's last send is part of a live conversation.
+ * Counted from receipt, so classifier time cannot push it past the window.
+ */
+const HOSTED_LINQ_ACK_REACTION_LIVE_WINDOW_MS = 5 * 60_000;
 
 const HOSTED_LINQ_ACK_REACTION_TX_OPTIONS = { timeout: 1_500 } as const;
 const HOSTED_LINQ_ACK_REACTION_LOCK_TIMEOUT = "300ms";
@@ -96,19 +104,31 @@ async function withBoundedTransaction<T>(input: {
   }, HOSTED_LINQ_ACK_REACTION_TX_OPTIONS);
 }
 
-/**
- * Reserves the burst's single tapback. Returns the reservation token, or null
- * when the burst already has a reservation or a heavy message, or when Murph
- * has sent anything since `messageReceivedAt` (the reply beat us).
- */
-export async function claimHostedLinqAckReaction(input: {
+type HostedLinqAckReactionClaimInput = {
   linqChatId: string;
   messageId: string;
   messageReceivedAt: Date;
   now?: () => Date;
   prisma: HostedLinqAckReactionClient;
   reaction: string;
-}): Promise<Date | null> {
+  skipLiveConversation?: boolean;
+};
+
+/**
+ * Reserves the burst's single tapback. Returns the reservation token, or null
+ * when the burst already has a reservation or a heavy message, or when Murph
+ * has sent anything since `messageReceivedAt` (the reply beat us). Otherwise,
+ * opted-in quick asks return `live_conversation` for a recent prior outbound.
+ */
+export function claimHostedLinqAckReaction(
+  input: HostedLinqAckReactionClaimInput & { skipLiveConversation?: false },
+): Promise<Date | null>;
+export function claimHostedLinqAckReaction(
+  input: HostedLinqAckReactionClaimInput,
+): Promise<Date | "live_conversation" | null>;
+export async function claimHostedLinqAckReaction(
+  input: HostedLinqAckReactionClaimInput,
+): Promise<Date | "live_conversation" | null> {
   const keys = resolveKeys(input.linqChatId);
   const messageKey = createHostedLinqMessageLookupKey(input.messageId);
   if (!keys || !messageKey) return null;
@@ -117,9 +137,13 @@ export async function claimHostedLinqAckReaction(input: {
     prisma: input.prisma,
     run: async (tx) => {
       const claimedAt = input.now?.() ?? new Date();
-      const [state] = await tx.$queryRaw<Array<{ fresh: boolean; taken: boolean }>>`
+      const liveSince = new Date(input.messageReceivedAt.getTime() - HOSTED_LINQ_ACK_REACTION_LIVE_WINDOW_MS);
+      const [state] = await tx.$queryRaw<Array<{ fresh: boolean; live: boolean; taken: boolean }>>`
         SELECT
           ${noOutboundSinceSql(keys.candidates, input.messageReceivedAt)} AS fresh,
+          ${input.skipLiveConversation
+            ? Prisma.sql`COALESCE(${lastOutboundSql(keys.candidates)} >= ${liveSince}, FALSE)`
+            : Prisma.sql`FALSE`} AS live,
           EXISTS (
             SELECT 1 FROM hosted_linq_ack_reaction s
             WHERE s.linq_chat_lookup_key IN (${Prisma.join(keys.candidates)})
@@ -132,6 +156,7 @@ export async function claimHostedLinqAckReaction(input: {
       if (!state?.fresh || state.taken) {
         return null;
       }
+      if (state.live) return "live_conversation";
       await tx.$executeRaw`
         INSERT INTO hosted_linq_ack_reaction AS s
           (linq_chat_lookup_key, claimed_at, reacted_at, message_lookup_key, reaction, updated_at)

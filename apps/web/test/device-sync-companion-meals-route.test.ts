@@ -318,3 +318,11 @@ it.each(["thumbnail.jpg", "thumbnail-v2-synthetic-operation.jpg"])("signs select
   });
   expect((await detail(request(), context())).status).toBe(401);
 });
+
+
+it("preserves the meal-removal unavailable response on an action identity collision", async () => {
+  mocks.submit.mockResolvedValueOnce({ accepted: true, actionId: "synthetic-action", dedupeConflict: true });
+  const response = await DELETE(request(), context());
+  expect(response.status).toBe(503);
+  expect(await response.json()).toMatchObject({ error: { code: "MEAL_REMOVAL_UNAVAILABLE", retryable: true } });
+});

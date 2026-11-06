@@ -9,7 +9,7 @@ import {
   readHostedMemberCoreState,
   readHostedMemberSignupNotificationContext,
 } from "./hosted-member-store";
-import { readActiveHostedMemberAccess } from "./member-access";
+import { readStrictHostedPersonAccess } from "./member-access";
 import { readHostedLinqProductionCanaryMemberId } from "./linq-production-canary";
 import {
   HostedResendPlainTextEmailError,
@@ -132,7 +132,7 @@ export async function sendHostedSignupNotificationEmailForMember(input: {
     };
   }
 
-  const hasActiveAccess = await readActiveHostedMemberAccess({
+  const hasActiveAccess = await readStrictHostedPersonAccess({
     memberId: input.memberId,
     prisma,
   });

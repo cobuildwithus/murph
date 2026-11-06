@@ -121,7 +121,21 @@ describe("usage-paused default-owned system progress", () => {
       .toMatchObject({ anomalous: true, excludedUsageBlockedSystemLaneCount: 1, stalledSystemLaneCount: 1 });
   });
 
-  it.each(["member.action.requested", "unknown.future-kind"])("excludes a usage-paused %s head while keeping model-free work alertable", async (headKind) => {
+  it.each(["member.action.requested", "member.preferences.updated", "clinical-records.sync-requested"])(
+    "exempts dormant imported %s after usage denial but alerts when AI is allowed", async (headKind) => {
+      usageGate.mockResolvedValue({ allowed: false, reason: "ai_usage_limit_exceeded" });
+      const fixture = createProgressMonitorFixture([notification("runtime_deterministic", { headKind, headDedupeKey: `${headKind}:synthetic` })]);
+      expect(await readHostedRuntimeProgressHealth({ now, prisma: fixture.prisma }))
+        .toMatchObject({ anomalous: false, excludedUsageBlockedSystemLaneCount: 1, stalledSystemLaneCount: 0 });
+      expect(await readHostedRuntimeProgressHealth({ now: new Date(now.getTime() + 30 * 60_000), prisma: fixture.prisma }))
+        .toMatchObject({ anomalous: false, excludedUsageBlockedSystemLaneCount: 1, stalledSystemLaneCount: 0 });
+      usageGate.mockResolvedValue({ allowed: true });
+      expect(await readHostedRuntimeProgressHealth({ now, prisma: fixture.prisma }))
+        .toMatchObject({ anomalous: true, excludedUsageBlockedSystemLaneCount: 0, stalledSystemLaneCount: 1 });
+    },
+  );
+
+  it.each(["clinical-records.enrichment-requested", "unknown.future-kind"])("excludes a usage-paused %s head while keeping model-free work alertable", async (headKind) => {
     usageGate.mockResolvedValue({ allowed: false, reason: "ai_usage_limit_exceeded" });
     const action = notification("runtime_action", {
       headKind,

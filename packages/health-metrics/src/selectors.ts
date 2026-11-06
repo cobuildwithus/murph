@@ -21,6 +21,11 @@ import type {
 } from "./types.ts";
 import { METRIC_POINT_SCHEMA_VERSION, METRIC_SELECTION_SCHEMA_VERSION } from "./types.ts";
 
+/** Canonical manual measurements use this label, including existing replicas. */
+export function isManualMetricSource(sourceLabel: string | null): boolean {
+  return sourceLabel === "Manual";
+}
+
 export function selectMetricValue(input: {
   metricKey?: string;
   biomarkerKey?: string;

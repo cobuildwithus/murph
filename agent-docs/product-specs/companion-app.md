@@ -420,6 +420,14 @@ owns sparse fields, explicit clearing, immutable retries, terminal polling,
 generation-18 admission and rollback requirements. Native UI remains in the
 separate app repository.
 
+## Typed VO2 readings
+
+The companion backend accepts typed VO2 readings through
+`POST /api/device-sync/companion/measurements`. The
+[wire contract](ios-meals.md#typed-vo2-readings) owns limits, replay, outcomes,
+additive Numbers provenance/time fields and consumer-first deployment. Native
+field and overlay adoption remain a separate release after the backend.
+
 ## Repo Placement
 
 The native app lives in its own Swift/Xcode repository beside this monorepo.
