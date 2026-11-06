@@ -226,16 +226,16 @@ failure or replaying earlier confirmed work.
 Workspace-version movement may bypass same-version no-progress backoff, but
 cannot prove that the pointed system item was handled.
 
-Web/runtime status is durable truth when no runner owns execution. Cloudflare's
-write fence is the active ownership truth while a run is in flight.
+Web owns the runtime owner row and increments its generation. Cloudflare
+validates and enforces the Web-issued write fence while a run is in flight.
 
 ## Ownership Table
 
 | Owner | Owns | Must not own |
 | --- | --- | --- |
-| `apps/web` | Webhook verification, provider minimization, mailbox append and dedupe, device-sync dirty state, hosted member/billing/usage/product policy, hosted workspace metadata, mailbox lag, redacted runtime logs/status, reconciliation-facts endpoint. | Codex invocation, assistant automation semantics, outbox truth, internal runtime timers, container routing, Temporal workflow state. |
+| `apps/web` | Webhook verification, provider minimization, mailbox append and dedupe, device-sync dirty state, hosted member/billing/usage/product policy, hosted workspace metadata, runtime owner state (generation, target assignment, retirement disposition), mailbox lag, redacted runtime logs/status, reconciliation-facts endpoint. | Codex invocation, assistant automation semantics, outbox truth, internal runtime timers, container routing, Temporal workflow state. |
 | Temporal | Per-user workflow identity, pointer-only signals, coalesced wake hints, durable timers from web-owned reconciliation facts, retry policy for web facts reads and Cloudflare processing adapter calls, continue-as-new history bounds, and global device-sync scheduled-wake cadence/retry through a short-lived reconciler workflow. | Raw payloads, decrypted mailbox contents, provider headers, prompts, transcripts, vault data, full workspace state, full runtime invocation results, signed usage decisions, assistant automation logic, device provider semantics, usage policy decisions, Cloudflare state, provider tokens, dirty resource bodies, or canonical dirty/reconcile facts. |
-| `apps/cloudflare` | Durable Object routing, write-fence generation and validation, container invoke/wake, runtime callback authorization, direct R2/snapshot transport, execution cleanup, alarm cleanup for active write fences. | Reconciliation-facts derivation, mailbox backlog decisions, assistant wake calculation, browser-vault scheduling policy, device-sync dirty semantics, retry caps as orchestration, queue history, product facts. |
+| `apps/cloudflare` | Durable Object routing, write-fence validation and enforcement, container invoke/wake, runtime callback authorization, direct R2/snapshot transport, execution cleanup, alarm cleanup for active write fences. | Reconciliation-facts derivation, mailbox backlog decisions, assistant wake calculation, browser-vault scheduling policy, device-sync dirty semantics, retry caps as orchestration, queue history, product facts. |
 | Murph runtime | Mailbox import watermarks, `AssistantInputEvent` staging, active-turn admission, Codex invocation, assistant automation and timers, device-sync runtime execution, outbox/provider cleanup, idle-floor/shutdown checkpointing plus invocation-local projected wake service for every reason before the live wait deadline, assistant `nextWakeAt`/`nextWakeReason` projection including model-free `assistant_delivery` retries, and inbox media retention wake projection. | Temporal workflow state, web product policy, hosted member/billing facts, Durable Object routing, Cloudflare execution lease ownership. |
 
 ## Temporal State

@@ -4,7 +4,7 @@ import type { HostedRuntimeOwner } from "./runtime-owner";
 import { parseHostedRuntimeOwnerResponse, type HostedRuntimeOwnerCommand, type HostedRuntimeOwnerResponse } from "@murphai/hosted-execution/runtime-owner";
 import {
   recordHostedRuntimeFailure, isHostedRuntimeDeletionReady, recordHostedRuntimeTargetRetired, authorizeHostedRuntimeProvider,
-  claimHostedRuntime, prepareHostedRuntimeLaunch, recordHostedRuntimeAccepted,
+  claimHostedRuntime, completeHostedRuntime, prepareHostedRuntimeLaunch, recordHostedRuntimeAccepted,
   releaseHostedRuntimeAfterRetirement, authorizeHostedRuntimeEffect, retireHostedRuntime,
   revokeHostedRuntimeAiUsageTx, selectHostedRuntimeTarget, releaseHostedRuntimeAfterCompletion,
 } from "./runtime-owner";
@@ -64,13 +64,8 @@ async function executeIdentityCommand(input: Omit<CommandInput, "command"> & { c
       return mutated(await recordHostedRuntimeAccepted({ prisma, identity }));
     case "record_failure":
       return mutated(await recordHostedRuntimeFailure({ prisma, identity, errorCode: command.errorCode }));
-    case "complete": {
-      if (!await retireHostedRuntime({ prisma, identity, completed: true })) return mutated(false);
-      if (command.settledRunnerContainerName !== null && !await releaseHostedRuntimeAfterCompletion({
-        prisma, identity, runnerContainerName: command.settledRunnerContainerName,
-      })) return mutated(false);
-      return mutated(true);
-    }
+    case "complete":
+      return mutated(await completeHostedRuntime({ prisma, identity, settledRunnerContainerName: command.settledRunnerContainerName }));
     case "retire":
       return mutated(await retireHostedRuntime({ prisma, identity, completed: command.completed }));
     case "release":

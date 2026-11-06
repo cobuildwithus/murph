@@ -22,7 +22,6 @@ import { moderateGameCommand } from "./moderation";
 import { parseStoredGameEntryData } from "./entry-data";
 import {
   GAME_ENTRY_KINDS,
-  GAME_REPORT_REASONS,
   type GamePendingChange,
   type AcceptInviteBody,
   type GameChange,
@@ -1504,15 +1503,7 @@ async function rejectBlockedPair(db: Pick<Prisma.TransactionClient, "gameBlock">
   if (blocks.blockedBy.has(other)) reject("PLAYER_UNAVAILABLE", message);
 }
 
-/**
- * Blocks someone the actor plays or played with, or whoever sent the invite
- * they hold. Under the pair's lock, so no join slips in: every game the two
- * have open or going is called off (void: no winner, no tickets), an invite
- * nobody shook on ends as if cancelled, and their games leave the shared chat
- * with nothing still waiting to be sent there, so Murph stops texting it about
- * them (posts can't happen, so no pushes either). The views then show each to
- * the other as a player who left.
- */
+/** Resolves and authorizes a block through shared play or an invite link. */
 async function block(context: CommandContext, command: { memberId?: string; token?: string }): Promise<null> {
   const { actor } = context;
   const prisma = getPrisma();
@@ -1521,6 +1512,20 @@ async function block(context: CommandContext, command: { memberId?: string; toke
   if (command.token === undefined && !await prisma.game.findFirst({ select: { id: true }, where: gamesBetween(actor, memberId) })) {
     reject("NOT_A_PLAYER", "You can only block someone you play with.");
   }
+  await blockMember(context, memberId);
+  return null;
+}
+
+/**
+ * Blocks an authorized pair. Under the pair's lock, so no join slips in:
+ * every game the two have open or going is called off (void: no winner, no
+ * tickets), an invite nobody shook on ends as if cancelled, and their games
+ * leave the shared chat with nothing still waiting to be sent there, so Murph
+ * stops texting it about them (posts can't happen, so no pushes either). The
+ * views then show each to the other as a player who left.
+ */
+async function blockMember(context: CommandContext, memberId: string): Promise<void> {
+  const { actor } = context;
   await commandTransaction(context, async (tx) => {
     await lockGamePair(tx, actor, memberId);
     const existing = await tx.gameBlock.findUnique({ select: { createdAt: true },
@@ -1549,7 +1554,6 @@ async function block(context: CommandContext, command: { memberId?: string; toke
     await skipGameChatLifecycleTx(tx, [...new Set([...ids, ...unbound.map((game) => game.id)])], await databaseNow(tx));
     if (!existing) await tx.gameBlock.create({ data: { blockedMemberId: memberId, blockerMemberId: actor } });
   });
-  return null;
 }
 
 /** Changes no game: what a block called off stays called off. */
@@ -1627,15 +1631,26 @@ async function reportSnapshot(loaded: LoadedGame, about: ReportCommand["about"],
 }
 
 /**
- * A report on the other player's post, their name and photo, or the task and
+ * A report on the other player's post or reply, their name and photo, or the task and
  * stake they wrote; from inside a game (finished too) or from an invite before
  * accepting it. The row is the record, with a sealed snapshot; the views hide
  * a reported post, and a reported player's photo, from the reporter from then
- * on. Then a person is told. The same id, or the same post again, is the same
- * report and retries its alert. The reported player is never told who.
+ * on. Then a person is told. The same id, post or reply recovers the accepted
+ * receipt before live visibility checks and retries its frozen alert, even
+ * after blocking or deletion. The reported player is never told who.
  */
 async function report(context: CommandContext, command: ReportCommand): Promise<string | null> {
-  if (command.about === "reply") return reportReply(context, command);
+  // Recover before requiring live content: reporting hides it, a block closes it, deletion may remove it.
+  const row = await readReportReceipt(getPrisma(), context.actor, command)
+    ?? await (command.about === "reply" ? acceptReplyReport : acceptContentReport)(context, command);
+  // The stored subject, never one from the command. Deletion may have cleared it.
+  if (command.block && row.reportedMemberId) await blockMember(context, row.reportedMemberId);
+  if (await isReportAlertDue(row)) await sendGameReportAlert(row);
+  // From an invite there's no game of theirs to show back.
+  return command.token === undefined ? row.gameId : null;
+}
+
+async function acceptContentReport(context: CommandContext, command: ReportCommand): Promise<ReportReceipt> {
   const { actor } = context;
   const subject = await readReportSubject(actor, command);
   const target = (field: string): GameSealTarget => ({ field, memberId: actor, rowId: command.reportId, table: "game_report" });
@@ -1643,12 +1658,9 @@ async function report(context: CommandContext, command: ReportCommand): Promise<
     command.note ? seal(target("note"), command.note) : null,
     subject.snapshotText ? seal(target("snapshot"), subject.snapshotText) : null,
   ]);
-  let stored: GameReport | null = null;
+  let stored: ReportReceipt | null = null;
   await runLocked(subject.gameId, context, async ({ clock, loaded, tx }) => {
-    const sameId = await tx.gameReport.findUnique({ where: { id: command.reportId } });
-    if (sameId && sameId.reporterMemberId !== actor) reject("INVALID_REQUEST", "That report id is taken.");
-    const prior = sameId ?? (subject.entry ? await tx.gameReport.findUnique({
-      where: { reporterMemberId_entryId: { entryId: subject.entry.id, reporterMemberId: actor } } }) : null);
+    const prior = await readReportReceipt(tx, actor, command);
     if (prior) {
       stored = prior;
       return [];
@@ -1663,79 +1675,82 @@ async function report(context: CommandContext, command: ReportCommand): Promise<
       about: command.about, createdAt: clock, entryId: subject.entry?.id ?? null, gameId: subject.gameId, id: command.reportId,
       noteEncrypted, reason: command.reason, reportedMemberId: subject.reportedMemberId, reporterMemberId: actor,
       snapshotMediaKeys: subject.snapshotMediaKeys, snapshotTextEncrypted,
-    } });
+      alertBlocked: command.block === true, alertEntryKind: subject.entry ? toEntryKind(subject.entry.kind) : null,
+      alertFromInvite: subject.fromInvite, alertGameId: subject.gameId,
+    }, select: reportReceiptSelect });
     return [];
   });
-  const row = stored as GameReport | null;
-  if (!row) throw new Error("Game report produced no row.");
-  if (command.block) await block(context, subject.fromInvite ? { token: command.token } : { memberId: subject.reportedMemberId });
-  if (await isReportAlertDue(row)) {
-    await sendGameReportAlert({
-      about: command.about, blocked: command.block === true, createdAt: row.createdAt, entryKind: subject.entry ? toEntryKind(subject.entry.kind) : null,
-      fromInvite: subject.fromInvite, gameId: subject.gameId, reason: command.reason, reportId: row.id,
-    });
-  }
-  // From an invite there's no game of theirs to show back.
-  return subject.fromInvite ? null : subject.gameId;
+  if (!stored) throw new Error("Game report produced no row.");
+  return stored;
 }
 
-const replyReportReceiptSelect = {
-  id: true, gameId: true, reporterMemberId: true, reportedMemberId: true, replyId: true,
+const reportReceiptSelect = {
+  id: true, gameId: true, reporterMemberId: true, reportedMemberId: true, entryId: true, replyId: true,
   about: true, reason: true, createdAt: true,
+  alertBlocked: true, alertEntryKind: true, alertFromInvite: true, alertGameId: true,
 } as const satisfies Prisma.GameReportSelect;
-type ReplyReportReceipt = Prisma.GameReportGetPayload<{ select: typeof replyReportReceiptSelect }>;
+type ReportReceipt = Prisma.GameReportGetPayload<{ select: typeof reportReceiptSelect }>;
 
-async function readReplyReportReceipt(db: Db, actor: string, command: ReportCommand): Promise<ReplyReportReceipt | null> {
-  const sameId = await db.gameReport.findUnique({ where: { id: command.reportId }, select: replyReportReceiptSelect });
-  const prior = sameId ?? (command.replyId ? await db.gameReport.findUnique({
-    where: { reporterMemberId_replyId: { reporterMemberId: actor, replyId: command.replyId } }, select: replyReportReceiptSelect,
+async function readReportReceipt(db: Db, actor: string, command: ReportCommand): Promise<ReportReceipt | null> {
+  const sameId = await db.gameReport.findUnique({ where: { id: command.reportId }, select: reportReceiptSelect });
+  const prior = sameId ?? (command.entryId ? await db.gameReport.findUnique({
+    where: { reporterMemberId_entryId: { reporterMemberId: actor, entryId: command.entryId } }, select: reportReceiptSelect,
+  }) : command.replyId ? await db.gameReport.findUnique({
+    where: { reporterMemberId_replyId: { reporterMemberId: actor, replyId: command.replyId } }, select: reportReceiptSelect,
   }) : null);
-  if (prior && (prior.reporterMemberId !== actor || prior.about !== "reply"
-    || (prior.gameId !== null && prior.gameId !== command.gameId)
-    || (prior.replyId !== null && prior.replyId !== command.replyId))) reject("INVALID_REQUEST", "That report id is taken.");
+  if (!prior) return null;
+  const gameId = command.token === undefined ? command.gameId
+    : (await db.game.findUnique({ where: { inviteTokenHash: sha256Hex(command.token) }, select: { id: true } }))?.id;
+  if (!reportReceiptMatches(prior, actor, command, gameId)) reject("INVALID_REQUEST", "That report id is taken.");
   return prior;
 }
 
-async function reportReply(context: CommandContext, command: ReportCommand): Promise<string | null> {
+/** Cleared foreign keys or an unresolvable token cannot contradict an accepted receipt. */
+function reportReceiptMatches(prior: ReportReceipt, actor: string, command: ReportCommand, gameId: string | undefined): boolean {
+  const acceptedGameId = prior.alertGameId ?? prior.gameId;
+  return prior.reporterMemberId === actor && prior.about === command.about
+    && (acceptedGameId === null || gameId === undefined || acceptedGameId === gameId)
+    && (prior.entryId === null || prior.entryId === command.entryId)
+    && (prior.replyId === null || prior.replyId === command.replyId)
+    && (prior.alertFromInvite === null || prior.alertFromInvite === (command.token !== undefined))
+    && (command.about !== "player" || prior.reportedMemberId === null || command.reportedMemberId === undefined
+      || prior.reportedMemberId === command.reportedMemberId);
+}
+
+async function acceptReplyReport(context: CommandContext, command: ReportCommand): Promise<ReportReceipt> {
   const { actor } = context;
   const db = getPrisma();
-  // Recover before requiring live content: reporting hides it, and deletion may have removed it.
-  let stored = await readReplyReportReceipt(db, actor, command);
-  if (!stored) {
-    const { gameId, loaded } = await readReportedGame(actor, command);
-    const reply = command.replyId ? await db.gameReply.findUnique({ where: { id: command.replyId },
-      select: { ...replyMetadataSelect, audioEncrypted: true } }) : null;
-    const access = await readReplyContext(db, loaded, actor);
-    if (!reply || loaded.entries.find(entry => entry.id === reply.entryId)?.memberId !== actor || !replyReadAccess(actor, reply, access)) {
-      reject("INVALID_REQUEST", "You can only report a reply on your post that you can see.");
-    }
-    const [text] = await openGameTexts([{ table: "game_reply", rowId: reply.id, field: "text", memberId: reply.authorMemberId, value: reply.textEncrypted }]);
-    const audio = reply.audioEncrypted ? await openGameMedia({ envelope: reply.audioEncrypted, key: `game_reply:${reply.id}`, ownerMemberId: reply.authorMemberId }) : null;
-    const target = { table: "game_report" as const, rowId: command.reportId, memberId: actor };
-    const [noteEncrypted, snapshotTextEncrypted, snapshotAudioEncrypted] = await Promise.all([
-      command.note ? seal({ ...target, field: "note" }, command.note) : null,
-      text ? seal({ ...target, field: "snapshot" }, text) : null,
-      audio ? sealGameMedia({ bytes: audio, key: `game_report:${command.reportId}`, ownerMemberId: actor }) : null,
-    ]);
-    await runLocked(gameId, context, async ({ tx, loaded, clock }) => {
-      const prior = await readReplyReportReceipt(tx, actor, command);
-      if (prior) { stored = prior; return []; }
-      const exists = await tx.gameReply.findUnique({ where: { id: reply.id }, select: { id: true } });
-      if (!exists || !replyReadAccess(actor, reply, await readReplyContext(tx, loaded, actor))) reject("INVALID_REQUEST", "This changed. Take another look.");
-      stored = await tx.gameReport.create({ data: {
-        id: command.reportId, about: "reply", gameId, entryId: null, replyId: reply.id,
-        reporterMemberId: actor, reportedMemberId: reply.authorMemberId, reason: command.reason, createdAt: clock,
-        noteEncrypted, snapshotTextEncrypted, snapshotAudioEncrypted, snapshotMediaKeys: [],
-      }, select: replyReportReceiptSelect });
-      return [];
-    });
+  const { gameId, loaded } = await readReportedGame(actor, command);
+  const reply = command.replyId ? await db.gameReply.findUnique({ where: { id: command.replyId },
+    select: { ...replyMetadataSelect, audioEncrypted: true } }) : null;
+  const access = await readReplyContext(db, loaded, actor);
+  if (!reply || loaded.entries.find(entry => entry.id === reply.entryId)?.memberId !== actor || !replyReadAccess(actor, reply, access)) {
+    reject("INVALID_REQUEST", "You can only report a reply on your post that you can see.");
   }
+  const [text] = await openGameTexts([{ table: "game_reply", rowId: reply.id, field: "text", memberId: reply.authorMemberId, value: reply.textEncrypted }]);
+  const audio = reply.audioEncrypted ? await openGameMedia({ envelope: reply.audioEncrypted, key: `game_reply:${reply.id}`, ownerMemberId: reply.authorMemberId }) : null;
+  const target = { table: "game_report" as const, rowId: command.reportId, memberId: actor };
+  const [noteEncrypted, snapshotTextEncrypted, snapshotAudioEncrypted] = await Promise.all([
+    command.note ? seal({ ...target, field: "note" }, command.note) : null,
+    text ? seal({ ...target, field: "snapshot" }, text) : null,
+    audio ? sealGameMedia({ bytes: audio, key: `game_report:${command.reportId}`, ownerMemberId: actor }) : null,
+  ]);
+  let stored: ReportReceipt | null = null;
+  await runLocked(gameId, context, async ({ tx, loaded, clock }) => {
+    const prior = await readReportReceipt(tx, actor, command);
+    if (prior) { stored = prior; return []; }
+    const exists = await tx.gameReply.findUnique({ where: { id: reply.id }, select: { id: true } });
+    if (!exists || !replyReadAccess(actor, reply, await readReplyContext(tx, loaded, actor))) reject("INVALID_REQUEST", "This changed. Take another look.");
+    stored = await tx.gameReport.create({ data: {
+      id: command.reportId, about: "reply", gameId, entryId: null, replyId: reply.id,
+      reporterMemberId: actor, reportedMemberId: reply.authorMemberId, reason: command.reason, createdAt: clock,
+      noteEncrypted, snapshotTextEncrypted, snapshotAudioEncrypted, snapshotMediaKeys: [],
+      alertBlocked: command.block === true, alertEntryKind: null, alertFromInvite: false, alertGameId: gameId,
+    }, select: reportReceiptSelect });
+    return [];
+  });
   if (!stored) throw new Error("Game reply report produced no row.");
-  if (command.block && stored.reportedMemberId) await block(context, { memberId: stored.reportedMemberId });
-  if (await isReportAlertDue(stored)) await sendGameReportAlert({ about: "reply", blocked: command.block === true,
-    createdAt: stored.createdAt, entryKind: null, fromInvite: false, gameId: stored.gameId,
-    reason: GAME_REPORT_REASONS.find(reason => reason === stored!.reason) ?? "other", reportId: stored.id });
-  return stored.gameId;
+  return stored;
 }
 
 /** Within the reporter's daily alert budget, counting reports up to this one. */
@@ -2869,8 +2884,9 @@ function canView(game: LoadedGame, memberId: string): boolean {
  * The HTTP door. A listed member may use every route. Anyone else enters only
  * for a game that is on: one they play or are the addressed rematch invitee
  * of, or the open invite they're holding, so a new invitee can set up and
- * accept. Owners of outgoing blocks may also enter to reach their unblock
- * controls after their last game ends. Each command still checks its own game.
+ * accept. Owners of outgoing blocks or reports may also enter to unblock or
+ * retry an accepted report after the source is gone. Each command still checks
+ * its own game, so this grants no game access.
  */
 export async function canEnterGame(memberId: string, inviteToken: string | null): Promise<boolean> {
   if (isGameEnabledFor(memberId)) return true;
@@ -2883,6 +2899,7 @@ export async function canEnterGame(memberId: string, inviteToken: string | null)
   ] } });
   if (yours) return true;
   if (await prisma.gameBlock.findFirst({ select: { blockedMemberId: true }, where: { blockerMemberId: memberId } })) return true;
+  if (await prisma.gameReport.findFirst({ select: { id: true }, where: { reporterMemberId: memberId } })) return true;
   if (!inviteToken) return false;
   const invite = await prisma.game.findUnique({ include: { invitees: true, players: true }, where: { inviteTokenHash: sha256Hex(inviteToken) } });
   if (!invite || !(invite.status === "invited" || invite.maxPlayers === 10 && invite.status === "live") || !isGameOn(invite)) return false;

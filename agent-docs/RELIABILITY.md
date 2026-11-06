@@ -577,10 +577,10 @@ Current product admission, delivery and native runtime safety rules remain.
   unchanged. Each serial candidate adds one exact source-row lock and at most
   one unique mailbox read, with no new external calls or pooled concurrency.
 - Exact Cloudflare runtime completion makes the existing bounded owner-release
-  callback after clearing the matching fence, including when a mailbox retry
-  remains in the future. Without an explicit immediate-recheck edge, Web sends
-  `runtime_owner_released` only when it observes actionable work; a live system
-  item beyond handled-through still qualifies. Its opaque runtime-attempt pointer
+  callback, including when a mailbox retry remains in the future. Web sends
+  `runtime_owner_released` after every successful final release, for either value
+  of the immediate-recheck bit, regardless of actionable work. Early completion,
+  duplicates and stale commands send nothing. Its opaque runtime-attempt pointer
   may clear the accepted-processing horizon only for that same owner; stale
   callbacks cannot release a newer owner. The signal creates no work and normal reconciliation
   facts still choose the processing mode. Callback or signal failure retains
@@ -588,15 +588,19 @@ Current product admission, delivery and native runtime safety rules remain.
 - A completed hosted runtime does not depend on the originating
   `RunnerContainer` activation surviving long enough to deliver its result.
   After a successful invocation, the container entrypoint clears its local wake
-  and abort pointers, decrements active work, and cleans request transport before
-  sending the exact result, attempt, and generation over the existing bound
-  internal route to `UserRunner`. That release-first order prevents the durable
-  fence from admitting a successor while the process still reports busy.
-  `UserRunner`'s existing compare-and-swap remains the only write-fence clear
-  authority. The ordinary outer result remains the normal path; duplicate or
-  stale receipts are harmless. The one-second best-effort receipt reports only
-  `recorded` or `not_recorded`, never changes the completed result, and adds no
-  completion poller or recovery queue.
+  and abort pointers and cleans request transport, then awaits the completion
+  callback before decrementing the active-job count. Admission subtracts settling
+  callbacks from that count, so a settling callback keeps the process alive
+  without blocking a successor; running work still blocks admission. The bound
+  completion route checks the attempt and generation against the Web owner and
+  routes the result to its exact `RunnerContainer`. The container validates and
+  completes its native invocation receipt, sends Web the early `complete`
+  command, and records lifecycle cleanup acknowledgment only if Web accepts it.
+  Web owns the final-release compare-and-swap. The ordinary settled outer result
+  supplies the target for warm release; early completion alone retains ownership.
+  Duplicate or stale receipts are harmless. The one-second best-effort callback
+  reports `recorded` or `not_recorded` in diagnostics, never changes the completed
+  result, and adds no completion poller or recovery queue.
 - Hosted background admission uses one capability-scoped projection on the
   existing workspace checkpoint row. A capable runtime checkpoints an absolute
   `systemMailboxProgressGeneration` plus the independently calculated next
