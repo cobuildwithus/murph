@@ -336,6 +336,8 @@ missing object or empty session also returns 503 instead of implying absence. Un
 Each is null when no usable daily value exists in the window; otherwise it has:
 
 - `unit`: respectively `bpm`, `minutes`, `steps`, `ml/kg/min`.
+- `source`: the device behind the latest date's value, such as `WHOOP`, or null.
+  The app ranks resting heart rate by it, because some devices read overnight.
 - `latest: { date, value }` and ascending `daily: [{ date, value }]`, with one
   value per saved local date. Provider precedence is already applied in the
   replica. Remaining same-date daily/value rows use the last observed row (ID

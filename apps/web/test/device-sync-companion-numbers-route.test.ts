@@ -126,6 +126,7 @@ it("serves only the documented four saved series and comparison fields, includin
     const metricThrough = name === "steps" ? stepsThrough : through;
     expect(body.numbers[name]).toEqual({
       unit, latest: { date: metricThrough, value: current }, stale: false,
+      source: "Garmin",
       daily: [
         ...name === "steps" ? [{ date: addDaysToIsoDate(from, -30), value: 300 }] : [],
         ...[0, 1, 2, 3].map(offset => ({ date: addDaysToIsoDate(from, offset), value: baseline })),
@@ -139,6 +140,7 @@ it("serves only the documented four saved series and comparison fields, includin
   }
   expect(body.numbers.vo2Max).toEqual({
     unit: "ml/kg/min", latest: { date: through, value: 48.3 }, stale: false,
+    source: "Garmin",
     daily: [{ date: from, value: 42.2 }, { date: "2026-08-13", value: 44.2 }, { date: "2026-10-29", value: 46.3 }, { date: through, value: 48.3 }],
     comparison: {
       baseline: { from, through: "2026-08-13", value: 43.2, days: 2 },
@@ -272,16 +274,18 @@ it("requires distinct covered dates, ignores summary/comparator rows, and keeps 
       row("steps", addDaysToIsoDate(from, offset), 100, "count"),
       row("steps", addDaysToIsoDate(stepsThrough, -offset), 200, "count"),
     ]),
-    row("steps", stepsThrough, 300, "count", { observedAt: `${stepsThrough}T13:00:00Z` }),
+    row("steps", stepsThrough, 300, "count", { observedAt: `${stepsThrough}T13:00:00Z`, sourceLabel: "WHOOP" }),
     row("steps", addDaysToIsoDate(from, 3), 900, "count", { statistic: "mean" }),
     row("steps", addDaysToIsoDate(stepsThrough, -3), 900, "count", { comparator: ">" }),
     row("steps", stepsThrough, 999, "count", { grain: "week" }),
     row("estimated-vo2-max", from, 40, "mL/kg/min"),
-    row("estimated-vo2-max", through, 45, "mL/kg/min"),
+    row("estimated-vo2-max", through, 45, "mL/kg/min", { sourceLabel: null }),
   ]));
   const body = await (await GET(request())).json();
   expect(body.numbers.steps.daily).toHaveLength(6);
   expect(body.numbers.steps.latest).toEqual({ date: stepsThrough, value: 300 });
+  expect(body.numbers.steps.source).toBe("WHOOP");
+  expect(body.numbers.vo2Max.source).toBeNull();
   expect(body.numbers.steps.comparison).toBeNull();
   expect(body.numbers.vo2Max.comparison).toBeNull();
   expect(body.numbers.sleep).toBeNull();

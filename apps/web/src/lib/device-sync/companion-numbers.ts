@@ -121,7 +121,7 @@ function presentNumber(
 ) {
   const definition = resolveMetricDefinition(metric.key)!;
   const round = (value: number) => Number(value.toFixed(metric.precision));
-  const byDate = new Map<string, { date: string; value: number }>();
+  const byDate = new Map<string, { date: string; value: number; source: string | null }>();
   const rows = client.metrics.series({ metricKey: metric.key, from: window.from, to: window.through, grain: "day" });
   // Series rows end each date on its highest-priority source, so the last stands;
   // do not average multiple observations or manufacture missing dates.
@@ -129,7 +129,7 @@ function presentNumber(
     if (row.statistic !== "value" || row.comparator != null) continue;
     const normalized = normalizeMetricValue({ metricKey: metric.key, unit: row.unit, value: row.value });
     if (normalized.canonicalValue === null) continue;
-    byDate.set(row.date, { date: row.date, value: normalized.canonicalValue });
+    byDate.set(row.date, { date: row.date, value: normalized.canonicalValue, source: row.sourceLabel });
   }
   const points = [...byDate.values()];
   const latest = points.at(-1);
@@ -145,6 +145,7 @@ function presentNumber(
   });
   return {
     unit: metric.unit,
+    source: latest.source,
     latest: { date: latest.date, value: round(latest.value) },
     stale: latest.date < addDaysToIsoDate(window.through, -(definition.selectionPolicy.staleAfterDays ?? 14)),
     daily: points.map(point => ({ date: point.date, value: round(point.value) })),
