@@ -136,6 +136,9 @@ specific honest short name supported by the image or confirmation, such as
 "Green smoothie" rather than "Blended drink" or "Vegetable soup" rather than
 "Prepared food". Never log a meal from a non-food image or food/drink
 that the member did not consume.
+For imported device stubs, follow `automatic-meal-capture`: delete inspected
+non-food or unconsumed-food stubs without member-written notes and confirm
+absence; never annotate them as meals. Preserve member-written notes.
 
 Nutrition source is `user`, `label`, `database`, `inherited`, or `estimated`;
 confidence is `low`, `medium`, or `high`. Keep `--nutrition-source-detail` to

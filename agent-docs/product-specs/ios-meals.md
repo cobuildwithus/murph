@@ -1,6 +1,6 @@
 # iOS Meals API
 
-Last verified: 2026-11-04
+Last verified: 2026-11-05
 
 ## Scope and ownership
 
@@ -141,6 +141,12 @@ Deletion also retires the canonical thumbnail and any remaining full photo.
 Encrypted media objects are removed by the existing runtime snapshot cleanup;
 metadata-only privacy tombstones preserve append-only history references.
 Account deletion uses the existing encrypted-object cleanup for both copies.
+
+Murph removes a meal the same way, through `deleteMealRecord`, when inspection
+shows an automatically captured photo is not food the member ate and the meal has
+no member-written note. A meal can therefore leave the list without a member
+action, normally after the 9pm closeout. Notes already saved on older non-food
+meals stay until the member removes them.
 
 Hide the meal optimistically after acceptance. Until a new projection is saved,
 or if the runtime rejects removal, it may reappear on a read. Missing canonical

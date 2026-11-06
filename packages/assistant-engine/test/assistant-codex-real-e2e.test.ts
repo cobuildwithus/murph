@@ -131,6 +131,7 @@ import {
 } from '@murphai/query'
 import { importDeviceProviderSnapshot } from '@murphai/importers'
 import { showAssistantPersonality } from '@murphai/vault-usecases/preferences'
+import { showMealRecord } from '@murphai/vault-usecases/records'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 import type { VoiceMemoToolRuntime } from '../src/assistant-codex/generate-voice-memo-tool.ts'
 import {
@@ -35133,7 +35134,7 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
     } finally { await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths]) }
   })
 
-  it('corrects non-food stubs without blocking meal closeout or masking removal failures', { timeout: 1_800_000 }, async () => {
+  it('deletes inspected non-food stubs without blocking meal closeout or masking command failures', { timeout: 2_400_000 }, async () => {
     const config = await resolveRealCodexE2eConfig()
     const root = await mkdtemp(path.join(tmpdir(), 'murph-nonfood-closeout-e2e-'))
     const vaultRoot = path.join(root, 'vault')
@@ -35141,21 +35142,35 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
     const skillsRoot = path.join(root, 'skills')
     const commandLog = path.join(root, 'commands.log')
     const publicRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../apps/web/public')
+    const nonFoodPhoto = path.join(publicRoot, 'brand-logos/connect/runkeeper.png')
+    const expectMealGone = async (mealId: string) =>
+      await expect(showMealRecord(vaultRoot, mealId)).rejects.toMatchObject({ code: 'not_found' })
     try {
       await initializeVault({ vaultRoot, timezone: 'America/New_York' })
       await Promise.all((['automatic-meal-capture', 'food-journal'] as const).map(slug =>
         materializeAssistantSkill({ skillsRoot, slug })))
       const nonFood = await addMeal({ vaultRoot, source: 'device', occurredAt: '2026-08-23T16:00:00.000Z',
-        photoPath: path.join(publicRoot, 'brand-logos/connect/runkeeper.png'),
+        photoPath: nonFoodPhoto,
         externalRef: { system: 'meal-photo-capture', resourceType: 'photo', resourceId: 'nonfood-icon' } })
-      for (const day of [24, 25, 26]) {
-        const failPhotoRemoval = day === 26
+      const memberNote = 'Keeping this one, it reminds me of my running group.'
+      const noted = await addMeal({ vaultRoot, source: 'device', occurredAt: '2026-08-23T18:00:00.000Z',
+        note: memberNote, photoPath: nonFoodPhoto,
+        externalRef: { system: 'meal-photo-capture', resourceType: 'photo', resourceId: 'nonfood-noted' } })
+      let retried: Awaited<ReturnType<typeof addMeal>> | null = null
+      for (const day of [24, 25, 26, 27]) {
+        const failMealDelete = day === 25
+        const failPhotoRemoval = day === 27
         const currentLocalDate = `2026-08-${day}`
         const scheduledOccurrenceAt = `2026-08-${day + 1}T01:00:00.000Z`
+        if (failMealDelete) {
+          retried = await addMeal({ vaultRoot, source: 'device', occurredAt: '2026-08-24T18:00:00.000Z',
+            photoPath: nonFoodPhoto,
+            externalRef: { system: 'meal-photo-capture', resourceType: 'photo', resourceId: 'nonfood-retried' } })
+        }
         const current = await addMeal({ vaultRoot, source: 'device', occurredAt: `${currentLocalDate}T16:00:00.000Z`,
           photoPath: path.join(publicRoot, 'meal-snap-2.jpg'),
           externalRef: { system: 'meal-photo-capture', resourceType: 'photo', resourceId: `food-${day}` } })
-        await materializeAutomaticMealClarificationVaultCli({ binDirectory, commandLog, vaultRoot, failPhotoRemoval })
+        await materializeAutomaticMealClarificationVaultCli({ binDirectory, commandLog, vaultRoot, failMealDelete, failPhotoRemoval })
         await writeFile(commandLog, '', 'utf8')
         const result = await executeRealCodexAppServerTurn({
           approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -35168,31 +35183,38 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
           reasoningEffort: 'low', sandbox: 'workspace-write', vaultRoot, workingDirectory: vaultRoot,
           prompt: [MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions,
             `Scheduled occurrence context: Occurrence local date: ${currentLocalDate}. Occurrence instant: ${scheduledOccurrenceAt}.`,
-            'The member prefers nonnumeric tracking. The current capture is food they ate; the older capture may be a classifier mistake. Inspect the actual attachments. There are no duplicate meals.',
+            'The member prefers nonnumeric tracking. The current capture is food they ate; older captures may be classifier mistakes. Inspect the actual attachments. There are no duplicate meals.',
           ].join('\n\n'),
         })
         const commands = (await readFile(commandLog, 'utf8')).trim().split('\n')
-        const state = await readAutomaticMealClarificationState({ vaultRoot, mealId: current.mealId })
-        const corrected = await readAutomaticMealClarificationState({ vaultRoot, mealId: nonFood.mealId })
-        expect(corrected.savedNote).toMatch(/non.food|not food|not.*consum|app icon|logo/iu)
-        expect(corrected.savedCalories).toBeNull()
-        expect(corrected.savedAttachmentCount).toBe(0)
-        const correctedEvent = (await readVaultRawTolerant(vaultRoot)).events.filter(event => event.entityId === nonFood.mealId).at(-1)
-        expect(correctedEvent?.attributes.title).toBe('Meal')
-        expect(correctedEvent?.attributes.nutrition).toBeUndefined()
-        expect(commands.filter(command => isMealRemovePhotoCommand(command, nonFood.mealId))).toHaveLength(day === 24 ? 1 : 0)
-        expect(commands.some(command => /meal (?:add|delete|import-json)\b/u.test(command))).toBe(false)
-        const edit = commands.findIndex(command => isMealEditMutationCommand(command) && command.includes(current.mealId))
-        const readback = commands.findIndex((command, index) => index > edit && command.startsWith(`meal show ${current.mealId}`))
-        const remove = commands.findIndex(command => isMealRemovePhotoCommand(command, current.mealId))
-        expect(edit).toBeGreaterThanOrEqual(0)
-        expect(readback).toBeGreaterThan(edit)
-        expect(remove).toBeGreaterThan(readback)
-        expect(state.savedNote).toBeTruthy()
-        expect(state.savedCalories).toBeNull()
-        expect(state.savedAttachmentCount).toBe(failPhotoRemoval ? 1 : 0)
-        if (failPhotoRemoval) {
-          const decision = parseAssistantNotificationDecision(result.finalMessage)
+        const deletes = (mealId: string) => commands.filter(command => isMealDeleteCommand(command, mealId)).length
+        expect(commands.some(command => /meal (?:add|import-json)\b/u.test(command))).toBe(false)
+        expect(deletes(current.mealId)).toBe(0)
+        expect(deletes(noted.mealId)).toBe(0)
+        expect(deletes(nonFood.mealId)).toBe(day === 24 ? 1 : 0)
+        await expectMealGone(nonFood.mealId)
+        expect(commands.some(command => isMealRemovePhotoCommand(command, nonFood.mealId))).toBe(false)
+        expect(commands.some(command => isMealEditMutationCommand(command) && command.includes(nonFood.mealId))).toBe(false)
+        const notedState = await readAutomaticMealClarificationState({ vaultRoot, mealId: noted.mealId })
+        expect(notedState.savedNote).toBe(memberNote)
+        expect(notedState.savedCalories).toBeNull()
+        expect(notedState.savedAttachmentCount).toBe(0)
+        if (retried) {
+          const retriedMealId = retried.mealId
+          expect(commands.some(command => isMealRemovePhotoCommand(command, retriedMealId))).toBe(false)
+          expect(commands.some(command => isMealEditMutationCommand(command) && command.includes(retriedMealId))).toBe(false)
+          if (failMealDelete) {
+            expect(deletes(retriedMealId)).toBeGreaterThanOrEqual(1)
+            const retriedState = await readAutomaticMealClarificationState({ vaultRoot, mealId: retriedMealId })
+            expect(retriedState.savedNote).toBeNull()
+            expect(retriedState.savedAttachmentCount).toBe(1)
+          } else {
+            expect(deletes(retriedMealId)).toBe(day === 26 ? 1 : 0)
+            await expectMealGone(retriedMealId)
+          }
+        }
+        const decision = parseAssistantNotificationDecision(result.finalMessage)
+        if (failMealDelete || failPhotoRemoval) {
           expect(decision.privateSummary).toMatch(/fail|couldn|unable|error/iu)
           if (decision.kind === 'send_message') {
             expect(decision.text).toMatch(/could not|couldn['’]t|unable|failed/iu)
@@ -35201,12 +35223,23 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
           expect(result.responseCard).toBeNull()
           expect(commands.some(command => command.startsWith('meal totals '))).toBe(false)
         } else {
-          const decision = parseAssistantNotificationDecision(result.finalMessage)
           expect(decision.kind).toBe('send_message')
           if (decision.kind === 'send_message') expect(decision.text).not.toMatch(/runkeeper|non-food|classifier|calories|\bkcal\b/iu)
         }
+        if (!failMealDelete) {
+          const state = await readAutomaticMealClarificationState({ vaultRoot, mealId: current.mealId })
+          const edit = commands.findIndex(command => isMealEditMutationCommand(command) && command.includes(current.mealId))
+          const readback = commands.findIndex((command, index) => index > edit && command.startsWith(`meal show ${current.mealId}`))
+          const remove = commands.findIndex(command => isMealRemovePhotoCommand(command, current.mealId))
+          expect(edit).toBeGreaterThanOrEqual(0)
+          expect(readback).toBeGreaterThan(edit)
+          expect(remove).toBeGreaterThan(readback)
+          expect(state.savedNote).toBeTruthy()
+          expect(state.savedCalories).toBeNull()
+          expect(state.savedAttachmentCount).toBe(failPhotoRemoval ? 1 : 0)
+        }
         expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
-        process.stdout.write(`[nonfood-closeout-proof] ${JSON.stringify({ day, failPhotoRemoval, nonFoodPhotoCleaned: true, reply: result.finalMessage })}\n`)
+        process.stdout.write(`[nonfood-closeout-proof] ${JSON.stringify({ day, failMealDelete, failPhotoRemoval, reply: result.finalMessage })}\n`)
       }
     } finally {
       await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths])
@@ -38893,6 +38926,7 @@ async function materializeAutomaticMealClarificationVaultCli(input: {
   binDirectory: string
   commandLog: string
   vaultRoot: string
+  failMealDelete?: boolean
   failPhotoRemoval?: boolean
 }): Promise<void> {
   await mkdir(input.binDirectory, { recursive: true })
@@ -38903,6 +38937,7 @@ async function materializeAutomaticMealClarificationVaultCli(input: {
       '#!/bin/sh',
       'set -eu',
       `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLog)}`,
+      ...(input.failMealDelete ? ['if [ "$1 $2" = "meal delete" ]; then printf \'synthetic meal delete failure\\n\' >&2; exit 1; fi'] : []),
       ...(input.failPhotoRemoval ? ['if [ "$1 $2" = "meal remove-photo" ]; then printf \'synthetic photo removal failure\\n\' >&2; exit 1; fi'] : []),
       `exec ${quoteNutritionShellLiteral(process.execPath)} --import ${quoteNutritionShellLiteral(VAULT_E2E_TSX_LOADER)} ${quoteNutritionShellLiteral(VAULT_E2E_CLI_ENTRYPOINT)} "$@" --vault ${quoteNutritionShellLiteral(input.vaultRoot)}`,
       '',
@@ -39358,6 +39393,11 @@ function isMealEditMutationCommand(command: string): boolean {
     && typeof tokens[2] === 'string'
     && !tokens[2].startsWith('-')
     && !tokens.includes('--help')
+}
+
+function isMealDeleteCommand(command: string, mealId: string): boolean {
+  const tokens = command.trim().split(/\s+/u)
+  return tokens[0] === 'meal' && tokens[1] === 'delete' && tokens.includes(mealId)
 }
 
 function isMealRemovePhotoCommand(
