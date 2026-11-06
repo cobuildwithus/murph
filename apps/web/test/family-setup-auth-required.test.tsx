@@ -9,38 +9,41 @@ type AuthCompletion = {
 };
 
 const mocks = vi.hoisted(() => ({
-  authDialogProps: null as {
+  authPanelProps: null as {
     onCompleted?: (payload: AuthCompletion) => Promise<void> | void;
-    open?: boolean;
+    requireLaunchConsentOnCompletion?: boolean;
   } | null,
 }));
 
-vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
-  AuthDialog(props: {
+vi.mock("next/image", () => ({
+  default: ({ alt, src }: { alt?: string; src: string }) =>
+    createElement("img", { alt: alt ?? "", src }),
+}));
+
+vi.mock("@/src/components/hosted-onboarding/hosted-first-party-auth-panel", () => ({
+  HostedFirstPartyAuthPanel(props: {
     onCompleted?: (payload: AuthCompletion) => Promise<void> | void;
-    open?: boolean;
+    requireLaunchConsentOnCompletion?: boolean;
   }) {
-    mocks.authDialogProps = props;
-    return props.open
-      ? createElement(
-          "button",
-          {
-            type: "button",
-            onClick: () =>
-              void props.onCompleted?.({
-                joinUrl: "/join/invite-code",
-                stage: "active",
-              }),
-          },
-          "Complete Family auth",
-        )
-      : null;
+    mocks.authPanelProps = props;
+    return createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () =>
+          void props.onCompleted?.({
+            joinUrl: "/join/invite-code",
+            stage: "active",
+          }),
+      },
+      "Complete Family auth",
+    );
   },
 }));
 
 afterEach(() => {
   vi.clearAllMocks();
-  mocks.authDialogProps = null;
+  mocks.authPanelProps = null;
 });
 
 test("Family setup reloads the handoff after an accessible sign-in", async () => {
@@ -63,6 +66,8 @@ test("Family setup reloads the handoff after an accessible sign-in", async () =>
     rendered.container.querySelectorAll("button"),
   ).find((button) => button.textContent === "Complete Family auth");
 
+  expect(rendered.container.textContent).toContain("Sign in to set up Family.");
+  expect(mocks.authPanelProps?.requireLaunchConsentOnCompletion).toBe(true);
   expect(completeButton).toBeTruthy();
   await act(async () => {
     completeButton?.dispatchEvent(new rendered.window.Event("click", {
