@@ -4,12 +4,10 @@ import { redirect } from "next/navigation";
 import { ActionApprovalAuthRequiredState } from "@/src/components/sensitive-actions/action-approval-auth-required";
 import { ActionApprovalCard } from "@/src/components/sensitive-actions/action-approval-card";
 import {
-  ACTION_APPROVAL_DENIED_DESCRIPTION,
-  ACTION_APPROVAL_RECORDED_DESCRIPTION,
+  ActionApprovalDecisionScreen,
   ActionApprovalScreen,
   readActionApprovalFileName,
 } from "@/src/components/sensitive-actions/action-approval-screen";
-import { LinkPageSheet } from "@/src/components/link-page/link-page-sheet";
 import { LINK_PAGE_PILL_CLASS, LinkPageFrame } from "@/src/components/link-page/link-page-shell";
 import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
 import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
@@ -108,7 +106,6 @@ async function ActionApprovalTerminalState({
 }: {
   approval: TerminalActionApprovalView;
 }) {
-  const content = terminalContent(approval.status);
   const replyBody = approval.returnContactKind === null
     ? null
     : terminalReplyBody(approval.status);
@@ -130,32 +127,33 @@ async function ActionApprovalTerminalState({
   }
 
   const contactOption = contactOptions[0] ?? null;
-  const stamp = approval.status === "approved"
-    ? "Approved"
-    : approval.status === "denied"
-      ? "Denied"
-      : null;
+  const actionLabel = approval.status === "expired" ? "Request a new link" : "Return to Murph";
+  const contactLink = contactOption ? (
+    <MurphContactLink
+      actionLabel={actionLabel}
+      className={LINK_PAGE_PILL_CLASS}
+      option={contactOption}
+    >
+      {actionLabel}
+    </MurphContactLink>
+  ) : undefined;
+
+  if (approval.status !== "expired") {
+    return (
+      <ActionApprovalDecisionScreen
+        action={contactLink}
+        decision={approval.status}
+        fileName={readActionApprovalFileName(approval.presentation.body)}
+      />
+    );
+  }
 
   return (
     <ActionApprovalScreen
-      actions={contactOption ? (
-        <MurphContactLink
-          actionLabel={content.actionLabel}
-          className={LINK_PAGE_PILL_CLASS}
-          option={contactOption}
-        >
-          {content.actionLabel}
-        </MurphContactLink>
-      ) : undefined}
-      body={content.description}
-      title={content.title}
+      actions={contactLink}
+      body="Nothing was approved or changed."
+      title="This link expired."
     >
-      {stamp ? (
-        <LinkPageSheet
-          name={readActionApprovalFileName(approval.presentation.body)}
-          stamp={stamp}
-        />
-      ) : null}
       {!contactOption && replyBody ? (
         <div className="flex flex-col gap-2">
           <p className="text-base font-medium leading-[22px] text-[#FFFCF6]/60">
@@ -195,37 +193,6 @@ function ActionApprovalUnavailableState() {
       title="This link isn’t available."
     />
   );
-}
-
-interface TerminalContent {
-  actionLabel: string;
-  description: string;
-  title: string;
-}
-
-function terminalContent(
-  status: Exclude<HostedActionApprovalStatus, "pending">,
-): TerminalContent {
-  switch (status) {
-    case "approved":
-      return {
-        actionLabel: "Return to Murph",
-        description: ACTION_APPROVAL_RECORDED_DESCRIPTION,
-        title: "Approved.",
-      };
-    case "denied":
-      return {
-        actionLabel: "Return to Murph",
-        description: ACTION_APPROVAL_DENIED_DESCRIPTION,
-        title: "Denied.",
-      };
-    case "expired":
-      return {
-        actionLabel: "Request a new link",
-        description: "Nothing was approved or changed.",
-        title: "This link expired.",
-      };
-  }
 }
 
 function isTerminalActionApproval(

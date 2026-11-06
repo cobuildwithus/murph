@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 
-import { renderToReadableStream } from "react-dom/server";
+import { createElement } from "react";
+import { renderToReadableStream, renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+import {
+  ActionApprovalDecisionScreen,
+  readActionApprovalFileName,
+} from "@/src/components/sensitive-actions/action-approval-screen";
 
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(() => ({ database: "test" })),
@@ -41,6 +47,30 @@ vi.mock("@/src/lib/prisma", () => ({
 type ActionApprovalPageModule = typeof import("../app/approve/[approvalId]/page");
 
 let actionApprovalPage: ActionApprovalPageModule;
+
+describe("readActionApprovalFileName", () => {
+  it("reads the whole name when the name contains a closing quote", () => {
+    expect(readActionApprovalFileName(
+      "Murph will send “report.pdf” — confidential.pdf” (1.2 MB) to your current iMessage chat.",
+    )).toBe("report.pdf” — confidential.pdf");
+  });
+
+  it("keeps a quoted name on both decisions", () => {
+    for (const decision of ["approved", "denied"] as const) {
+      const markup = renderToStaticMarkup(createElement(ActionApprovalDecisionScreen, {
+        decision,
+        fileName: readActionApprovalFileName("Murph will send “report.zip” (1 KB) to your chat."),
+      }));
+      assert.match(markup, /report\.zip/);
+      assert.match(markup, decision === "approved" ? />Approved</ : />Denied</);
+      assert.match(markup, /Return to the Murph conversation where this request started\./);
+    }
+  });
+
+  it("shows no name when the sentence has none", () => {
+    expect(readActionApprovalFileName("Allow the requested action.")).toBeNull();
+  });
+});
 
 describe("action approval page", () => {
   beforeAll(async () => {

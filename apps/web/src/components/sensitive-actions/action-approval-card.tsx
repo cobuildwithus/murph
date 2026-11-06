@@ -11,8 +11,7 @@ import {
   LinkPagePill,
 } from "@/src/components/link-page/link-page-shell";
 import {
-  ACTION_APPROVAL_DENIED_DESCRIPTION,
-  ACTION_APPROVAL_RECORDED_DESCRIPTION,
+  ActionApprovalDecisionScreen,
   ActionApprovalScreen,
   readActionApprovalFileName,
 } from "@/src/components/sensitive-actions/action-approval-screen";
@@ -118,58 +117,45 @@ export function ActionApprovalCard({
               : "Denied."
           : null);
   const fileName = readActionApprovalFileName(approval.presentation.body);
-  const status = busyStatus ? (
-    <p aria-live="polite" className="sr-only" role="status">
-      {busyStatus}
-    </p>
-  ) : null;
-
-  if (returningDecision) {
-    const approved = returningDecision === "approved";
-    return (
-      <ActionApprovalScreen
-        actions={
-          <>
-            {redirectTo ? (
-              <a className={LINK_PAGE_PILL_CLASS} href={redirectTo}>
-                Return to Murph
-              </a>
-            ) : null}
-            {status}
-          </>
-        }
-        body={approved ? ACTION_APPROVAL_RECORDED_DESCRIPTION : ACTION_APPROVAL_DENIED_DESCRIPTION}
-        title={approved ? "Approved." : "Denied."}
-      >
-        <LinkPageSheet name={fileName} stamp={approved ? "Approved" : "Denied"} />
-        {redirectTo ? null : (
-          <p className="pt-6 text-center text-base font-medium leading-[22px] text-[#FFFCF6]/60">
-            Return to the Murph conversation where this request started.
-          </p>
-        )}
-      </ActionApprovalScreen>
-    );
-  }
 
   return (
-    <ActionApprovalScreen
-      actions={
-        <div aria-busy={busy} className="flex w-full flex-col items-center gap-1">
-          {error ? <LinkPageError>{error}</LinkPageError> : null}
-          <LinkPagePill disabled={busy} onClick={approve}>
-            {submission === "approving" ? "Verifying approval…" : "Approve with passkey"}
-          </LinkPagePill>
-          <LinkPageLink disabled={busy} onClick={deny}>
-            {submission === "denying" ? "Denying…" : "Deny"}
-          </LinkPageLink>
-          {status}
-        </div>
-      }
-      body={<span className="break-words">{approval.presentation.body}</span>}
-      title={approval.presentation.title}
-    >
-      <LinkPageSheet name={fileName} />
-    </ActionApprovalScreen>
+    <>
+      {returningDecision ? (
+        <ActionApprovalDecisionScreen
+          action={redirectTo ? (
+            <a className={LINK_PAGE_PILL_CLASS} href={redirectTo}>
+              Return to Murph
+            </a>
+          ) : undefined}
+          decision={returningDecision}
+          fileName={fileName}
+        />
+      ) : (
+        <ActionApprovalScreen
+          actions={
+            <div aria-busy={busy} className="flex w-full flex-col items-center gap-1">
+              {error ? <LinkPageError>{error}</LinkPageError> : null}
+              <LinkPagePill disabled={busy} onClick={approve}>
+                {submission === "approving" ? "Verifying approval…" : "Approve with passkey"}
+              </LinkPagePill>
+              <LinkPageLink disabled={busy} onClick={deny}>
+                {submission === "denying" ? "Denying…" : "Deny"}
+              </LinkPageLink>
+            </div>
+          }
+          body={<span className="break-words">{approval.presentation.body}</span>}
+          title={approval.presentation.title}
+        >
+          <LinkPageSheet name={fileName} />
+        </ActionApprovalScreen>
+      )}
+      {/* One region outside the swap, so the result is announced after the progress. */}
+      {busyStatus ? (
+        <p aria-live="polite" className="sr-only" role="status">
+          {busyStatus}
+        </p>
+      ) : null}
+    </>
   );
 }
 

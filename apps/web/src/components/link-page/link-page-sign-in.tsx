@@ -42,7 +42,10 @@ export function LinkPageSignInScreen({ children, detail, title }: LinkPageSignIn
   return (
     <LinkPageScreen
       actions={
-        <div className="flex w-full flex-col items-center gap-1" style={LINK_PAGE_NIGHT_TOKENS}>
+        <div
+          className="flex w-full flex-col items-center gap-1 [&_button[data-slot=button]]:rounded-full [&_input]:border-[#FFFCF6]/15 [&_input]:bg-[#2A2622] [&_input]:text-[#FFFCF6]"
+          style={LINK_PAGE_NIGHT_TOKENS}
+        >
           <div className="w-full">
             <HostedFirstPartyAuthPanel
               methods={otherMethods ? ["phone", "telegram", "email"] : ["phone"]}

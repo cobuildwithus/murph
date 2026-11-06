@@ -206,3 +206,44 @@ test("announces denial before following a valid return link", async () => {
     await rendered.cleanup();
   }
 });
+
+test("keeps one status region through the result, outside the busy controls", async () => {
+  let resolveDecision: (value: unknown) => void = () => {};
+  mocks.requestHostedOnboardingJson.mockReturnValueOnce(
+    new Promise((resolve) => {
+      resolveDecision = resolve;
+    }),
+  );
+  const rendered = await renderClientComponent(createElement(ActionApprovalCard, {
+    approval: {
+      approvalId: "approval-test",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      presentation: {
+        body: "Allow the requested action.",
+        title: "Approve action",
+      },
+      returnContactKind: null,
+      status: "pending",
+    },
+  }));
+
+  try {
+    const deny = Array.from(rendered.container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Deny");
+    await act(async () => {
+      deny?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    const status = rendered.container.querySelector("[role='status']");
+    expect(status?.textContent).toBe("Denying…");
+    expect(status?.closest("[aria-busy='true']")).toBeNull();
+
+    await act(async () => {
+      resolveDecision({ redirectTo: null, status: "denied" });
+    });
+
+    expect(status?.isConnected).toBe(true);
+    expect(status?.textContent).toBe("Denied.");
+  } finally {
+    await rendered.cleanup();
+  }
+});

@@ -3,11 +3,7 @@ import { LinkPageSheet } from "@/src/components/link-page/link-page-sheet";
 import { LinkPageSurface } from "@/src/components/link-page/link-page-shell";
 import { LinkPageSignInScreen } from "@/src/components/link-page/link-page-sign-in";
 import { ActionApprovalCard } from "@/src/components/sensitive-actions/action-approval-card";
-import {
-  ACTION_APPROVAL_DENIED_DESCRIPTION,
-  ACTION_APPROVAL_RECORDED_DESCRIPTION,
-  ActionApprovalScreen,
-} from "@/src/components/sensitive-actions/action-approval-screen";
+import { ActionApprovalDecisionScreen } from "@/src/components/sensitive-actions/action-approval-screen";
 
 const STUDY_BODY = "Murph will send “report.zip” (1.2 MB) to your current iMessage chat.";
 
@@ -48,24 +44,17 @@ export function ActionApprovalLifecycleStudy() {
         </LinkPageSurface>
       </div>
 
-      <DecisionStudy decision="Approved" />
-      <DecisionStudy decision="Denied" />
+      <DecisionStudy decision="approved" />
+      <DecisionStudy decision="denied" />
     </div>
   );
 }
 
-function DecisionStudy({ decision }: { decision: "Approved" | "Denied" }) {
+function DecisionStudy({ decision }: { decision: "approved" | "denied" }) {
   return (
     <div className="flex min-h-[46rem] flex-col rounded-[2rem] bg-[#1C1915]" inert>
       <LinkPageSurface>
-        <ActionApprovalScreen
-          body={decision === "Approved"
-            ? ACTION_APPROVAL_RECORDED_DESCRIPTION
-            : ACTION_APPROVAL_DENIED_DESCRIPTION}
-          title={`${decision}.`}
-        >
-          <LinkPageSheet name="report.zip" stamp={decision} />
-        </ActionApprovalScreen>
+        <ActionApprovalDecisionScreen decision={decision} fileName="report.zip" />
       </LinkPageSurface>
     </div>
   );
