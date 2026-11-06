@@ -10,8 +10,8 @@ import { exactChat } from "@/src/lib/game/chat-membership";
 import { gameAudienceKeys } from "@/src/lib/game/audience";
 import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
-import { localRosterCrypto, rosterPhoneIdentity, rosterRoute, syntheticPhone } from "./helpers/roster-postgres";
-import { linqRoster } from "./helpers/linq-roster";
+import { localRosterCrypto, rosterPhoneIdentity, rosterRoute, syntheticPhone } from "./support/roster-postgres";
+import { linqRoster } from "./support/linq-roster";
 
 const provider = vi.hoisted(() => ({ read: vi.fn(), signal: vi.fn() }));
 vi.mock("@/src/lib/hosted-onboarding/linq-client", async original => ({

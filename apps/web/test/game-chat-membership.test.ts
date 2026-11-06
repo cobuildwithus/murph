@@ -1,4 +1,4 @@
-import { linqRoster } from "./helpers/linq-roster";
+import { linqRoster } from "./support/linq-roster";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({ container: vi.fn(), games: vi.fn(), identity: vi.fn(), route: vi.fn(), chat: vi.fn() }));

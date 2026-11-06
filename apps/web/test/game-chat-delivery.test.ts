@@ -1,4 +1,4 @@
-import { linqRoster } from "./helpers/linq-roster";
+import { linqRoster } from "./support/linq-roster";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GameChange, GamePendingChange } from "../src/lib/game/contract";
 const m = vi.hoisted(() => ({

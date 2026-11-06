@@ -6,7 +6,7 @@ import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/w
 import { armHostedPendingGroupSetupTx } from "@/src/lib/hosted-groups/pending-group-setup";
 import { createHostedLinqChatLookupKey, createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { upsertHostedMemberHomeLinqRecipientPhoneTx } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
-import { localRosterCrypto, rosterPhoneIdentity, rosterRoute, syntheticPhone } from "./helpers/roster-postgres";
+import { localRosterCrypto, rosterPhoneIdentity, rosterRoute, syntheticPhone } from "./support/roster-postgres";
 
 const provider = vi.hoisted(() => ({ retrieve: vi.fn(), send: vi.fn(async () => ({ message: { id: crypto.randomUUID() } })), signal: vi.fn() }));
 vi.mock("@linqapp/sdk", async original => ({

@@ -1,4 +1,4 @@
-import { linqRoster } from "./helpers/linq-roster";
+import { linqRoster } from "./support/linq-roster";
 import { randomUUID } from "node:crypto";
 
 import { Prisma } from "@prisma/client";

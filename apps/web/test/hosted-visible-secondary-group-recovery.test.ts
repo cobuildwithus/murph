@@ -1,4 +1,4 @@
-import { linqRoster } from "./helpers/linq-roster";
+import { linqRoster } from "./support/linq-roster";
 import { describe, expect, it, vi } from "vitest";
 
 import {

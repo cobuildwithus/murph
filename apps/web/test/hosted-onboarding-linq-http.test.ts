@@ -1,4 +1,4 @@
-import { linqRoster } from "./helpers/linq-roster";
+import { linqRoster } from "./support/linq-roster";
 import { createServer, type Server } from "node:http";
 
 import type { Chat } from "@linqapp/sdk/resources/chats";

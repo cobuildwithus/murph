@@ -1,6 +1,6 @@
 import { parseHostedRuntimeGroupToolResponse } from "@murphai/hosted-execution/parsers";
 import * as participantOwner from "@/src/lib/hosted-groups/thread-container-participants";
-import { linqRoster } from "./helpers/linq-roster";
+import { linqRoster } from "./support/linq-roster";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";

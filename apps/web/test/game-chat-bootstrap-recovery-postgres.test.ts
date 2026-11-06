@@ -1,5 +1,5 @@
 import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
-import { linqRoster } from "./helpers/linq-roster";
+import { linqRoster } from "./support/linq-roster";
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { getPrisma } from "@/src/lib/prisma";

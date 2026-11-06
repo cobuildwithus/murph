@@ -1,4 +1,4 @@
-import { linqRoster } from "./helpers/linq-roster";
+import { linqRoster } from "./support/linq-roster";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import {
   parseHostedExecutionGroupReactionEventText,

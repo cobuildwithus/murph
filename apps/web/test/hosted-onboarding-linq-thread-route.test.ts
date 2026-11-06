@@ -1,4 +1,4 @@
-import { linqRoster } from "./helpers/linq-roster";
+import { linqRoster } from "./support/linq-roster";
 import { HostedBillingStatus, Prisma } from "@prisma/client";
 import {
   buildHostedExecutionLinqConversationMessageWake,
