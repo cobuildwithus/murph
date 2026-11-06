@@ -1,8 +1,11 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { addMeal, initializeVault, removeAutomaticMealPhoto } from '@murphai/core'
-import { listAutomaticMealPhotoCloseoutWorkRecords } from '@murphai/vault-usecases/records'
+import { addMeal, initializeVault, readEvent, removeAutomaticMealPhoto, runMealPhotoMaintenance } from '@murphai/core'
+import { readMealNutritionTotals, readVault } from '@murphai/query'
+import { createBrowserVaultReplica } from '@murphai/query/browser-replica'
+import { deleteMealRecord, listAutomaticMealPhotoCloseoutWorkRecords, listMealRecords, showMealRecord } from '@murphai/vault-usecases/records'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { canSkipManagedAutomaticMealCloseout } from '../src/assistant/automatic-meal-closeout-eligibility.js'
 import { MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID } from '../src/assistant/managed-automations.js'
@@ -54,6 +57,32 @@ describe('automatic meal closeout eligibility', () => {
     await removeAutomaticMealPhoto({ vaultRoot, eventId: meal.event.id, now: new Date(occurrenceAt) })
     expect(await check()).toBe(false)
     expect(await check({ occurrenceAt: '2030-05-10T01:00:00.000Z' })).toBe(true)
+  })
+
+  it('deleting a device stub retires both photos and removes it from canonical meals, totals, projection, and retry work', async () => {
+    const stub = await addMeal({ vaultRoot, source: 'device', occurredAt: '2030-05-08T16:00:00.000Z',
+      photoCapturedAt: '2030-05-08T16:00:00.000Z',
+      photoPath: fileURLToPath(new URL('../../../apps/web/public/brand-logos/connect/runkeeper.png', import.meta.url)),
+      externalRef: { system: 'meal-photo-capture', resourceType: 'photo', resourceId: 'synthetic-nonfood' },
+    })
+    await runMealPhotoMaintenance({ vaultRoot, now: new Date('2030-05-08T18:00:00.000Z') })
+    const before = (await readEvent({ vaultRoot, eventId: stub.event.id })).event
+    if (before.kind !== 'meal' || !before.photoThumbnail || !stub.photo) throw new Error('Expected both meal photos')
+    expect((await readMealNutritionTotals(vaultRoot, {})).mealCount).toBe(1)
+    expect(await check()).toBe(false)
+    expect(await deleteMealRecord({ vault: vaultRoot, lookup: stub.mealId })).toMatchObject({ deleted: true })
+    await expect(showMealRecord(vaultRoot, stub.mealId)).rejects.toMatchObject({ code: 'not_found' })
+    expect((await listMealRecords({ vault: vaultRoot })).items).toEqual([])
+    expect((await readMealNutritionTotals(vaultRoot, {})).mealCount).toBe(0)
+    const replica = await createBrowserVaultReplica({ vault: await readVault(vaultRoot), metricPoints: [],
+      generatedAt: occurrenceAt, sourceBundleHash: 'a'.repeat(64) })
+    expect(replica.meals?.days).toEqual([])
+    expect(await check()).toBe(true)
+    expect((await listAutomaticMealPhotoCloseoutWorkRecords({ vault: vaultRoot, occurrenceAt, to: '2030-05-08', limit: 20 })).items).toEqual([])
+    for (const photo of [stub.photo.relativePath, before.photoThumbnail.relativePath]) {
+      expect(JSON.parse(await readFile(path.join(vaultRoot, photo), 'utf8'))).toMatchObject({ reason: 'meal_deleted' })
+    }
+    await expect(deleteMealRecord({ vault: vaultRoot, lookup: stub.mealId })).rejects.toMatchObject({ code: 'not_found' })
   })
 
   it('drains a full corrected non-food batch instead of selecting it forever', async () => {

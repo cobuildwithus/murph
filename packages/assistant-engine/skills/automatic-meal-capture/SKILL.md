@@ -197,14 +197,16 @@ numeric estimate, do not leave a model-reviewed capture blank. When its note is
 empty, save a concise `--note` describing only the visible meal or food form and
 material uncertainty; never replace a member-written note. Add `--ingredient`
 values only for identities the photo supports. An imported photo stub is not
-evidence of consumption. If inspection shows a
-non-food image or food/drink the member did not consume, do not add a meal,
-assign a dish name, or invent ingredients or nutrition. Do not use a generic
-image-review note as a meal description. For an already-imported stub with an
-empty note, record only the supported non-food or non-consumption fact, without
-a dish name, ingredients, or nutrition. Preserve member-written notes. This
-corrects an existing record; it never authorizes adding a meal. Read the factual
-observation back, then follow the existing photo cleanup below. Clarification is a last resort,
+evidence of consumption. After actually inspecting an imported device stub,
+if it shows a non-food image or food/drink the member did not consume and has
+no member-written note, run `vault-cli meal delete <meal-id>` and confirm it is
+absent with a fresh bounded `meal list` for its capture date. Write no note and
+run no `remove-photo` for that meal. This applies to interactive enrichment and
+scheduled closeout. Never delete from classifier acceptance, a guess, or
+difficulty estimating food; unclear images follow the food workflow above.
+Never delete a stub with a member-written note: preserve the record and note,
+add no invented dish, ingredients, or nutrition, and read it back before
+scheduled photo review completion. Clarification is a last resort,
 not a confidence check: ask
 one narrow identity or portion question only when actual attachment inspection
 leaves identity or amount too indeterminate for any meaningful bounded estimate
@@ -256,20 +258,23 @@ On a scheduled run:
    same-occurrence retry evidence, use only the already-saved structured fields
    and uncertainty. Enrich the existing meal when supported, apply the bounded
    re-identification and single-retry rule above after a failed edit, and read
-   the result back. When numeric nutrition is unsupported, save and read back
-   the evidence-based observation fallback above. A meal with neither saved
-   nutrition nor that observation is not ready for cleanup.
-5. Only after the read-back proves saved nutrition or the observation fallback,
+   the result back. Apply the inspected non-food/unconsumed-stub deletion rule
+   above before the food observation fallback. A confirmed deletion completes
+   that stub's work. On retry, refresh the queue and skip meals already absent;
+   never recreate or delete them again. For food without supported nutrition,
+   save and read back the observation fallback above.
+5. For surviving meals only, after read-back proves saved nutrition, the food
+   observation fallback, or a preserved member-written note,
    run `vault-cli meal remove-photo <meal-id>` and read the meal back again.
    This compatibility-named command marks pending attachments `reviewed_photo`
    and records `photoReviewedAt`; it preserves the structured meal and media.
    Full photos expire 90 days after capture. A private thumbnail remains while
    the meal exists. Verify no attachment with role `photo` remains. Any command
-   failure fails the run. On retry, combine pending photos with same-occurrence
+   failure, including a failed delete, fails the run. On retry, combine pending photos with same-occurrence
    review evidence so a provider or partial-closeout failure loses no meal.
 
-After all selected cleanup, exclude identified non-food or unconsumed-food
-records from presentation and questions. Stop before any presentation work when
+After all selected cleanup, exclude deleted stubs and any preserved non-food or
+unconsumed-food records from closeout text, questions, and cards. Stop before any presentation work when
 no remaining selected capture has the occurrence local date. Return
 `{"kind":"skip","privateSummary":"Historical meal cleanup completed."}` and
 run no Goal, totals, card, or clarification work. When current and historical
