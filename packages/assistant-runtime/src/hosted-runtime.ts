@@ -2909,6 +2909,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       ) !== null;
     const pendingDurableCheckpointEffects: HostedWorkspaceDurableCheckpointEffect[] = [];
     const readyDurableCheckpointEffects: HostedWorkspaceDurableCheckpointEffect[] = [];
+    const readOutstandingDurableCheckpointEffects = (
+      additionalEffects: readonly HostedWorkspaceDurableCheckpointEffect[] = [],
+    ): HostedWorkspaceDurableCheckpointEffect[] => [
+      ...pendingDurableCheckpointEffects,
+      ...readyDurableCheckpointEffects,
+      ...additionalEffects,
+    ];
     let idleCheckpointStartByMs: number | null = null;
     let idleWakeOrdinal = 0;
     const publishCheckpointPublicationExpectation = (
@@ -2966,10 +2973,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         // another quiet window or weakening Ask authority.
         setIdleCheckpointStartBy(Date.now());
       }
-      const effectDeadline = readHostedDurableEffectsCheckpointStartByMs([
-        ...pendingDurableCheckpointEffects,
-        ...passResult.afterDurableCheckpoint,
-      ]);
+      const effectDeadline = readHostedDurableEffectsCheckpointStartByMs(
+        readOutstandingDurableCheckpointEffects(passResult.afterDurableCheckpoint),
+      );
       if (effectDeadline < (idleCheckpointStartByMs ?? Infinity)) {
         setIdleCheckpointStartBy(effectDeadline);
       }
@@ -6895,12 +6901,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       let pendingCheckpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null = null;
       const readBackgroundCheckpointWaitDeadline = (): number | null => {
         if (options.shutdownSignal?.aborted) return null;
-        if (hostedDurableEffectsCheckpointIsDue(pendingDurableCheckpointEffects)) return null;
+        const effects = readOutstandingDurableCheckpointEffects();
+        if (hostedDurableEffectsCheckpointIsDue(effects)) return null;
         const backgroundReadDeadline = resolveHostedBackgroundReadCheckpointDeadline({
           assistantAskDeadline: detachedAssistantAskController?.activeDeadline() ?? null,
           clinicalDeadline: clinicalEnrichmentController?.activeDeadline() ?? null,
           canonicalReceiptCount: pendingCanonicalReceiptCount,
-          durableEffectCount: pendingDurableCheckpointEffects.length + readyDurableCheckpointEffects.length,
+          durableEffectCount: effects.length,
           durableFollowUpPending: durableCheckpointFollowUpPending,
         });
         let workDeadline = !runtimeOwnerHandoffRequested
@@ -6912,13 +6919,14 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         if (imageGenerationController?.hasCompleted()) return Date.now();
         if (
           imageGenerationController?.hasWork()
-          && pendingDurableCheckpointEffects.length === 0
-          && readyDurableCheckpointEffects.length === 0
+          && effects.length === 0
           && !durableCheckpointFollowUpPending
         ) {
           workDeadline ??= Date.now() + runnerIdleTtlMs;
         }
-        return workDeadline;
+        return workDeadline === null
+          ? null
+          : Math.min(workDeadline, readHostedDurableEffectsCheckpointStartByMs(effects));
       };
       const prepareDirtyRuntimeCheckpointAttempt = async (
         initialCheckpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null,

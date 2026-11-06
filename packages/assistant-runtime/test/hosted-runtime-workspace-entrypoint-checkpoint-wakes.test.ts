@@ -209,6 +209,141 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("keeps a ready publication deadline through foreground work accepted during publication", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-publication-ready-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const items = [createMailboxItem()];
+    const snapshots: number[] = [];
+    const shutdown = new AbortController();
+    const effect = Object.assign(vi.fn(async () => { events.push("effect"); }), { checkpointStartByMs: Date.parse(TEST_NOW) });
+    let passes = 0;
+    let job: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | undefined;
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      job = runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({ request: { runnerIdleTtlMs: 600_000 } }), {
+        vaultRoot, shutdownSignal: shutdown.signal,
+        async importItem(item) {
+          return { assistantInputId: await stageAssistantInputEventForMailboxItem({ item: item.item, vaultRoot }), status: "imported" };
+        },
+        async createCheckpointSnapshot() {
+          snapshots.push(Date.now()); events.push(`snapshot:${snapshots.length}`);
+          return { snapshotRef: createSnapshotFixtureRef({ hash: "a".repeat(64), size: 512 }) };
+        },
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ events, items }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests, events, workspace: createWorkspaceState(),
+            checkpointResponse(request) {
+              if (checkpointRequests.length === 1) items.push(createMailboxItem({ id: "mailbox_publication_late", dedupeKey: "publication_late", laneSeq: "2" }));
+              return { checkpointed: true, conversationInputAhead: checkpointRequests.length === 1, workspace: createWorkspaceState({
+                snapshotRef: request.snapshotRef, version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+              }) };
+            },
+          }),
+        }),
+        async runAssistantPhase(input) {
+          events.push(`pass:${++passes}`);
+          for (const inputId of input.initialMailboxImport.importResult.assistantInputIds ?? []) {
+            await writeSyntheticAssistantAutoReplyTerminalEvidence({ inputId, vaultRoot });
+          }
+          if (passes === 1) return { progressed: true, checkpointReason: "outbox_sending", afterCheckpoint: async () => ({
+            checkpointReason: "outbox_sending", afterDurableCheckpoint: effect,
+          }) };
+          return { progressed: true, checkpointReason: "assistant_runtime_commit" };
+        },
+      });
+      await withRealTimeout(job, 5_000, () => `Ready hook stalled: snapshots=${snapshots.length}, hook calls=${effect.mock.calls.length}; ${events.join(",")}`);
+      expect(snapshots).toEqual([Date.parse(TEST_NOW), Date.parse(TEST_NOW)]);
+      expect(passes).toBe(2);
+      expect(effect).toHaveBeenCalledOnce();
+      expect(requireEventIndex(events, "workspace.checkpoint")).toBeLessThan(requireEventIndex(events, "pass:2"));
+      expect(requireEventIndex(events, "pass:2")).toBeLessThan(requireEventIndex(events, "snapshot:2"));
+      expect(requireEventIndex(events, "snapshot:2")).toBeLessThan(requireEventIndex(events, "effect"));
+    } finally {
+      shutdown.abort(new Error("Synthetic cleanup"));
+      await job?.catch(() => undefined);
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("caps an active Ask wait at a future publication deadline", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-publication-ask-future-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const askStarted = createDeferred<void>();
+    const effectPending = createDeferred<void>();
+    const shutdown = new AbortController();
+    let snapshotAt: number | null = null;
+    let first = true;
+    let job: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | undefined;
+    const effect = Object.assign(vi.fn(async () => { events.push("effect"); }), { checkpointStartByMs: Date.parse(TEST_NOW) + 480_000 });
+    mocks.executeReadOnlyAssistantAsk.mockImplementationOnce(async (input) => {
+      askStarted.resolve();
+      await new Promise<never>((_, reject) => {
+        const abort = () => { events.push("ask-abort"); reject(input.abortSignal?.reason); };
+        if (input.abortSignal?.aborted) abort();
+        else input.abortSignal?.addEventListener("abort", abort, { once: true });
+      });
+      return { answer: "Synthetic answer.", outcome: "answered" };
+    });
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const ask = createMailboxItem({ dedupeKey: "ask_publication_future", id: "mailbox_ask_publication_future", kind: "assistant.ask.requested", lane: "system", laneSeq: "1" });
+      job = runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({ request: { runnerIdleTtlMs: 600_000 } }), {
+        vaultRoot, shutdownSignal: shutdown.signal,
+        async importItem(item) {
+          const wake = createAssistantAskRequestedWake({ eventId: ask.dedupeKey });
+          wake.occurredAt = TEST_NOW;
+          wake.ask.expiresAt = new Date(Date.parse(TEST_NOW) + 600_000).toISOString();
+          return enqueueHostedSystemMailboxItem({ item, vaultRoot, wake });
+        },
+        async createCheckpointSnapshot() {
+          snapshotAt ??= Date.now(); events.push("snapshot");
+          return { snapshotRef: createSnapshotFixtureRef({ hash: "a".repeat(64), size: 512 }) };
+        },
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ events, items: [ask] }),
+          workspacePort: createWorkspacePort({ checkpointRequests, events, workspace: createWorkspaceState() }),
+          assistantAskPort: { async request(request) {
+            return request.action === "complete" ? { action: "complete", status: "completed" }
+              : { action: "prepare", question: "Synthetic question?", status: "ready", targetLabel: "Synthetic group" };
+          } },
+        }),
+        async runAssistantPhase() {
+          if (!first) return { progressed: false };
+          first = false;
+          await askStarted.promise;
+          return { progressed: true, checkpointReason: "outbox_sending", afterCheckpoint: async () => {
+            effectPending.resolve();
+            return { checkpointReason: "outbox_sending", afterDurableCheckpoint: effect };
+          } };
+        },
+      });
+      await withRealTimeout(effectPending.promise, 5_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(479_999);
+      expect(snapshotAt).toBeNull();
+      expect(events).not.toContain("ask-abort");
+      await vi.advanceTimersByTimeAsync(1);
+      await withRealTimeout(job, 5_000, () => `Future deadline missed: snapshot=${snapshotAt}, hook calls=${effect.mock.calls.length}; ${events.join(",")}`);
+      expect(snapshotAt).toBe(Date.parse(TEST_NOW) + 480_000);
+      expect(effect).toHaveBeenCalledOnce();
+      expect(requireEventIndex(events, "ask-abort")).toBeLessThan(requireEventIndex(events, "snapshot"));
+      expect(requireEventIndex(events, "workspace.checkpoint")).toBeLessThan(requireEventIndex(events, "effect"));
+    } finally {
+      shutdown.abort(new Error("Synthetic cleanup"));
+      await job?.catch(() => undefined);
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test.each([true, false])("a due publication effect interrupts an active Ask: %s", async (due) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-publication-ask-"));
     const events: string[] = [];
