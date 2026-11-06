@@ -9,6 +9,7 @@ import {
 import type { DeviceSyncProvider, DeviceSyncAccount } from "@murphai/device-syncd/types";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 import * as providers from "@/src/lib/device-sync/providers";
+import { decodeHostedDeviceRoutingIndexKey } from "@/src/lib/device-sync/routing-index";
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
 import * as runtimeSignal from "@/src/lib/hosted-orchestration/signal-runtime";
 import { redriveHostedHealthDataConsentCleanups } from "@/src/lib/hosted-privacy/health-data-consent-withdrawal";
@@ -97,7 +98,7 @@ describe.skipIf(!enabled)("Postgres consent cleanup redrive", () => {
   async function device(memberId: string, accountId = memberId, provider = "oura") {
     const old = new Date(now.getTime() - 2 * hour);
     const store = new PrismaDeviceSyncControlPlaneStore({ prisma,
-      providerAccountBlindIndexKey: Buffer.from(process.env.HOSTED_DEVICE_ROUTING_INDEX_KEY!, "base64url") });
+      providerAccountBlindIndexKey: decodeHostedDeviceRoutingIndexKey(process.env.HOSTED_DEVICE_ROUTING_INDEX_KEY!) });
     accounts.add(accountId);
     const connection = await store.upsertConnection({ ownerId: memberId, provider, externalAccountId: accountId,
       existingAccountPolicy: "replace", connectedAt: old.toISOString(),
