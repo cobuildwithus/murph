@@ -1,6 +1,6 @@
 # Merge a typed meal into its capture
 
-Status: active
+Status: completed
 Created: 2026-11-05
 Updated: 2026-11-05
 
@@ -61,3 +61,6 @@ Updated: 2026-11-05
 - Commands to run: focused CLI and engine tests, `pnpm docs:drift`, and
   `pnpm test:assistant:live -- --test "merges a typed meal into its pending capture"`.
 - Expected outcomes: all pass, and the printed replies meet the reply bar.
+- Result: all passed on `gpt-6.1-sol` with local subscription auth, reply review Ready. The first live run found that a failed delete still reviewed the capture, which would have left the meal double-counted for good, so the rule and closeout step 5 now hold review.
+- A Codex deep review found the merge could move nutrition across a local date, so it now requires the same local date. Dangling references to a deleted meal were left as they are: every `meal delete` already leaves them and no reader fails on them.
+Completed: 2026-11-05
