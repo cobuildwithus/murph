@@ -414,9 +414,9 @@ scheduled-question exception; its answer uses the existing-meal recovery above.
 - **Low light, mixed plates, packaging, or food-like objects:** classification
   and portion estimates can be wrong. Use the actual photo and retain
   uncertainty.
-- **Several photos of one meal:** they can become separate meal records. Do not
-  silently sum, delete, or merge them; identify the likely duplicate and ask
-  only if it would materially change tracking.
+- **Several photos of one meal:** they can become separate meal records. Count
+  the meal once under the inspected-stub deletion rule; when you cannot tell,
+  ask only if it would materially change tracking.
 - **App says Sent but the assistant did not mention it:** automatic background
   imports may stay quiet. A manual Send to Murph submission requests estimation;
   query meals by captured time and complete the existing meal or clarify missing
