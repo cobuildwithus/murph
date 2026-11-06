@@ -241,8 +241,7 @@ or project a distinct successor. Otherwise the invocation
 remains dirty until the runtime-owned idle-floor—or last-chance shutdown—
 `idle_shutdown` checkpoint succeeds; inherited or committed assistant wakes and
 durability barriers remain checkpoint-first. When replyable input is pending, an
-unserviced carried assistant wake caps both the quiet window and active
-background-work wait at its exact deadline,
+unserviced carried assistant wake caps the quiet window at its exact deadline,
 including after later foreground admissions. Existing pause and quiesce policy
 runs before publication; the due wake then passes to the ordinary successor.
 Voice checkpoints in place and may service it once clean, preserving its exact
@@ -257,8 +256,8 @@ do not restart it; cleanup that dirties state after a checkpoint uses the spent
 window and proceeds directly to its required follow-up checkpoint. Provider
 cleanup still runs only after its saved intent, and required post-checkpoint
 effects are not removed or collapsed into an unsafe single snapshot. Active
-background-work waits use their existing work deadlines, capped by an unserviced
-carried assistant wake when replyable input is pending, and remain wakeable without extending conversation warmth. Once a checkpoint pauses
+background-work waits use their existing work deadlines and remain wakeable
+without extending conversation warmth. Once a checkpoint pauses
 background reads, they stay paused through checkpoint retries, effect drain and
 return. Foreground work still proceeds; unfinished asks and clinical extraction
 retain their durable successors instead of repeatedly reclaiming canceled work.

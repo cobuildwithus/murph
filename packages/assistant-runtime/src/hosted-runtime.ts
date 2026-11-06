@@ -2936,6 +2936,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       idleCheckpointStartByMs = checkpointStartByMs;
       publishCheckpointPublicationExpectation(checkpointStartByMs);
     };
+    const capIdleCheckpointStartBy = (checkpointStartByMs: number) => {
+      if (checkpointStartByMs < (idleCheckpointStartByMs ?? Infinity)) {
+        setIdleCheckpointStartBy(checkpointStartByMs);
+      }
+    };
     const ensureIdleCheckpointStartBy = (checkpointStartByMs: number) => {
       if (idleCheckpointStartByMs === null) {
         setIdleCheckpointStartBy(checkpointStartByMs);
@@ -6934,8 +6939,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           ? null
           : Math.min(workDeadline, readHostedDurableEffectsCheckpointStartByMs(effects));
       };
-      const backgroundWorkHoldsCheckpoint = (retryCheckpointDeadline: number): boolean =>
-        Date.now() < retryCheckpointDeadline && readBackgroundCheckpointWaitDeadline() !== null;
       const prepareDirtyRuntimeCheckpointAttempt = async (
         initialCheckpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null,
       ): Promise<{
@@ -6988,12 +6991,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           pendingWake,
           vaultRoot: restored.vaultRoot,
         });
-        setIdleCheckpointStartBy(Math.min(idleCheckpointStartByMs, retryCheckpointDeadline));
+        capIdleCheckpointStartBy(retryCheckpointDeadline);
+        // Projected wakes share the full wait deadline, including retained work.
+        // Background work keeps its hold: a checkpoint return would abort it.
         const backgroundWorkDeadline = readBackgroundCheckpointWaitDeadline();
-        const waitDeadlineMs = Math.min(
-          Math.max(idleCheckpointStartByMs, backgroundWorkDeadline ?? 0),
-          retryCheckpointDeadline,
-        );
+        const waitDeadlineMs = Math.max(idleCheckpointStartByMs, backgroundWorkDeadline ?? 0);
         const hotProjectedWake = resolveHotProjectedWake(waitDeadlineMs);
         if (
           hotProjectedWake !== null
@@ -7009,7 +7011,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           pendingCheckpointWakeLatencySeed ??= checkpointWakeLatencySeed;
           return null;
         }
-        // Wait through the existing wakeable checkpoint boundary.
+        // Share the existing wakeable wait without moving the batching window.
         const dirtyWaitResult = await waitForHostedRuntimeDirtyWindow({
           idleCheckpointStartByMs: waitDeadlineMs,
           projectedWakeAtMs: hotProjectedWake?.wakeAtMs ?? null,
@@ -7046,7 +7048,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           pendingCheckpointWakeLatencySeed ??= checkpointWakeLatencySeed;
           return null;
         }
-        if (backgroundWorkHoldsCheckpoint(retryCheckpointDeadline)) {
+        if (readBackgroundCheckpointWaitDeadline() !== null) {
           // Recheck work that arrived during the wait and drain staged results.
           return null;
         }

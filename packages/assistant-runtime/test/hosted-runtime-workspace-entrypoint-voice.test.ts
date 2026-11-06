@@ -4,6 +4,7 @@ import {
   createWorkspaceRuntimeJobInput, createWorkspaceState, createResolvedRuntimeControlSystemMailboxItem, createVaultSnapshotBundle, removeTempRoot,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 import { mkdtemp } from "node:fs/promises";
+import { setTimeout as sleepRealTime } from "node:timers/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, it, vi } from "vitest";
@@ -421,6 +422,18 @@ it.each(["no-progress", "backoff", "held-background", "budget", "shutdown"] as c
       expect(checkpoints).toHaveLength(0);
       expect(phases).toBe(1);
       await vi.advanceTimersByTimeAsync(1);
+      if (outcome === "held-background") {
+        // A checkpoint return would abort detached work, so a due retry waits.
+        // Publication does real I/O, so give it real time to prove it stays held.
+        await vi.advanceTimersByTimeAsync(60_000);
+        const publishedWhileHeld = await Promise.race([
+          published.promise.then(() => true),
+          sleepRealTime(1_500).then(() => false),
+        ]);
+        expect(publishedWhileHeld).toBe(false);
+        expect(events).not.toContain("background:joined");
+        return;
+      }
       await withRealTimeout(published.promise, 5_000, () => events.join(","));
       if (outcome === "budget" || outcome === "shutdown") {
         const result = await withRealTimeout(invocation, 5_000, () => events.join(","));

@@ -38,7 +38,7 @@ Updated: 2026-11-06
 ## Tasks
 
 1. Delete the supersession path and invert its test.
-2. Cap the dirty checkpoint wait at the carried assistant wake, including background-work waits.
+2. Cap the conversation quiet window at the carried assistant wake when input is pending.
 3. Add timing, no-progress, voice and group tests.
 4. Update the reliability owner doc.
 
@@ -53,6 +53,7 @@ Updated: 2026-11-06
   - `too_old` stays as an explicit limit: accepted. Deleting it is a separate product decision.
   - Old runners keep discarding until drained, and existing suppressions are not reopened: accepted.
 - Parent review of the implementation, 2026-11-06: `assistant` is the general wake reason (1,904 wakes for 179 members in 3 days), covering scheduled work as well as retries. Capping on the reason alone would end warm conversations early on routine work. The cap now requires a pending member message, using the existing `inspectHostedPendingAssistantInputWakeCandidate`, off the reply path. Unknown pending state keeps the quiet window. The existing collapse tests stay unmodified apart from pinning "no message waiting" in their fixture.
+- ReviewGPT PR round 1, 2026-11-06, one High, accepted: the deadline also overrode the background-work hold, so a retry could checkpoint and end the runner while an image was generating, aborting it after the member was told it was coming. The suggested fix kept the image controller alive across the checkpoint. A smaller fix was taken: the cap touches only the quiet window, and the background hold is back to its `main` form. This supersedes the architecture review's advice to carry the deadline into that hold. A retry waits for active background work, then checkpoints at once.
 - Codex deep review, 2026-11-06, one P2, rejected with wording fixed: a pending system delivery-failure note also counts as pending, so it can shorten the quiet window. That note is itself waiting work, the harm is one earlier checkpoint in a rare case, and excluding it would need a second inspection variant. Docs now say pending input rather than member message. Spin, voice, effect order, compaction and batching were traced with no other defects.
 
 ## Verification

@@ -4537,8 +4537,8 @@ the same invocation; a dirty progressed attempt restarts the full idle window.
 Mailbox budget exhaustion, pending durable checkpoint effects, staged durable
 follow-ups, and inherited, committed, or otherwise unproven wake keys remain
 checkpoint-first. When replyable input is pending, a carried, unserviced
-assistant wake caps the dirty checkpoint wait, including active background-work
-deadlines, at its exact wake time. With nothing pending, it keeps the quiet window. Later
+assistant wake caps the conversation quiet window at its exact wake time. Active
+background work keeps its hold. With nothing pending, the quiet window stays. Later
 foreground admissions cannot postpone it with another quiet window. Existing
 pause and quiesce policy runs before publication, then the ordinary successor
 receives the still-due wake. Voice checkpoints in place without requesting an
