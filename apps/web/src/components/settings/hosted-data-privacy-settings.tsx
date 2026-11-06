@@ -43,6 +43,15 @@ import {
 import { AccountExitReasonStep } from "./account-exit-reason-step";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 
+// A suspended account cannot reload this page, so these retries stay in the dialog.
+const HOSTED_ACCOUNT_DELETION_DIALOG_RETRY_CODES: ReadonlySet<string | null> = new Set([
+  HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE,
+  "ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG",
+  "ACCOUNT_DELETION_CONNECTED_APP_SETUP_IN_PROGRESS",
+  "ACCOUNT_DELETION_GAME_HISTORY_PENDING",
+  "ACCOUNT_DELETION_GAME_STATE_CHANGED",
+]);
+
 interface HostedAccountVendorDeletionSummary {
   errorCode: string | null;
   status: string;
@@ -211,22 +220,15 @@ function HostedDataPrivacySettingsContent(props: {
         requestError instanceof HostedOnboardingApiError
         && requestError.code
           === "ACCOUNT_DELETION_DEVICE_TOKEN_REFRESH_RECOVERY_REQUIRED";
-      const stripeEffectPending =
+      const dialogRetry =
         requestError instanceof HostedOnboardingApiError
-        && requestError.code === HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE;
-      const connectedAppCompletionRecoveryRequired =
-        requestError instanceof HostedOnboardingApiError
-        && (
-          requestError.code === "ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG"
-          || requestError.code === "ACCOUNT_DELETION_CONNECTED_APP_SETUP_IN_PROGRESS"
-        );
+        && HOSTED_ACCOUNT_DELETION_DIALOG_RETRY_CODES.has(requestError.code);
       if (sessionEndingDispatched && !receivedReplacementHeaders) {
         publishBrowserVaultSessionInvalidation();
         if (
           !providerRecoveryRequired
           && !deviceTokenRefreshRecoveryRequired
-          && !stripeEffectPending
-          && !connectedAppCompletionRecoveryRequired
+          && !dialogRetry
         ) {
           reloadCurrentHostedAuthDocument();
         }

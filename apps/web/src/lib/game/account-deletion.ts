@@ -9,10 +9,10 @@ import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboardi
 import { labelTarget, openGameTexts, sealGameText } from "./crypto";
 import { GAME_ROSTER_CHANGE_REASON, resolveGroupGameChangeTx } from "./change-resolution";
 
-const GAME_DELETION_LIMIT = 1_000;
+const GAME_DELETION_PAGE_SIZE = 100;
 const ACTIVE = new Set(["invited", "negotiating", "live"]);
 type GameRow = Game & { players: GamePlayer[]; invitees: GameInvitee[] };
-type Db = Pick<Prisma.TransactionClient, "game" | "gameContactLabel" | "gameProfile">;
+type Db = Pick<Prisma.TransactionClient, "game" | "gameEvent" | "gameContactLabel" | "gameProfile">;
 
 /** Each viewer keeps only their own encrypted name for a deleted person. */
 export type DepartedLabel = { ownerMemberId: string; nameEncrypted: string | null };
@@ -35,7 +35,7 @@ interface PreparedGame {
     departures: { seat: number; joined: boolean; labels: DepartedLabel[] }[];
   };
 }
-export interface PreparedGameAccountDeletion { games: PreparedGame[] }
+export interface PreparedGameAccountDeletion { games: PreparedGame[]; more: boolean }
 
 function participantOf(memberIds: readonly string[]): Prisma.GameWhereInput {
   return { OR: [
@@ -47,10 +47,16 @@ function participantOf(memberIds: readonly string[]): Prisma.GameWhereInput {
     ] },
   ] };
 }
-async function readAffectedGames(db: Pick<Db, "game">, memberIds: readonly string[]): Promise<GameRow[]> {
-  const rows = await db.game.findMany({ include: { players: true, invitees: true }, orderBy: { id: "asc" }, take: GAME_DELETION_LIMIT + 1, where: participantOf(memberIds) });
-  if (rows.length > GAME_DELETION_LIMIT) throw new Error("Account deletion game set exceeds its bound.");
-  return rows;
+function noteSelector(memberIds: readonly string[]): Prisma.GameEventWhereInput {
+  return { actor: { in: [...memberIds] }, type: "talk_requested", game: { maxPlayers: 10 } };
+}
+async function readAffectedGames(
+  db: Pick<Db, "game">,
+  memberIds: readonly string[],
+  ids?: readonly string[],
+): Promise<GameRow[]> {
+  return db.game.findMany({ include: { players: true, invitees: true }, orderBy: { id: "asc" }, take: GAME_DELETION_PAGE_SIZE + 1,
+    where: { ...participantOf(memberIds), ...(ids === undefined ? {} : { id: { in: [...ids] } }) } });
 }
 function participants(row: GameRow) {
   const players = row.players.flatMap(player => player.memberId ? [{ memberId: player.memberId, seat: player.seat, joined: true }] : []);
@@ -65,11 +71,15 @@ function fingerprint(row: GameRow): string {
     [...row.players].sort((a, b) => a.seat - b.seat), [...row.invitees].sort((a, b) => a.seat - b.seat)]);
 }
 
-/** Bounded crypto preparation runs without a transaction or game lock. */
+/** Prepare one residual page, with crypto outside transactions and game locks. */
 export async function prepareGameAccountDeletion(input: { memberIds: readonly string[]; prisma: Db }): Promise<PreparedGameAccountDeletion> {
   const leaving = new Set(input.memberIds);
-  const rows = await readAffectedGames(input.prisma, input.memberIds);
-  const plans = rows.map(row => ({ row, survivors: participants(row).filter(player => !leaving.has(player.memberId)),
+  const [rows, noteCount] = await Promise.all([
+    readAffectedGames(input.prisma, input.memberIds),
+    input.prisma.gameEvent.count({ where: noteSelector(input.memberIds), take: GAME_DELETION_PAGE_SIZE + 1 }),
+  ]);
+  const more = rows.length > GAME_DELETION_PAGE_SIZE || noteCount > GAME_DELETION_PAGE_SIZE;
+  const plans = rows.slice(0, GAME_DELETION_PAGE_SIZE).map(row => ({ row, survivors: participants(row).filter(player => !leaving.has(player.memberId)),
     leavers: participants(row).filter(player => leaving.has(player.memberId)) }));
   const owners = [...new Set(plans.flatMap(plan => plan.survivors.map(player => player.memberId)))];
   const [labels, profiles] = await Promise.all([
@@ -107,26 +117,22 @@ export async function prepareGameAccountDeletion(input: { memberIds: readonly st
     if (!termsWordsEncrypted) throw new Error("Game words transfer returned no ciphertext.");
     games.push({ id: row.id, fingerprint: fingerprint(row), kept: { owner, termsWordsEncrypted, departures } });
   }
-  return { games };
+  return { games, more };
 }
 
-/** Caller locks deleting members first; revalidation fails closed for a fresh preparation. */
+/** Apply one page under caller-held member locks; prove the final page before key removal. */
 export async function applyGameAccountDeletionTx(input: { memberIds: readonly string[]; now: Date; prepared: PreparedGameAccountDeletion; tx: Prisma.TransactionClient }): Promise<{ calledOff: number; deleted: number; kept: number }> {
   const { tx } = input;
   const leaving = [...input.memberIds];
-  const discovered = await readAffectedGames(tx, leaving);
+  const preparedIds = input.prepared.games.map(game => game.id);
   // Unseated note authors own only their note, never another player's terms or recap.
-  const notes = await tx.gameEvent.findMany({ where: { actor: { in: leaving }, type: "talk_requested", game: { maxPlayers: 10 } },
-    select: { id: true, gameId: true, actor: true, commandKey: true, payload: true }, take: GAME_DELETION_LIMIT + 1 });
-  if (notes.length > GAME_DELETION_LIMIT) throw new Error("Account deletion note set exceeds its bound.");
-  const ids = [...new Set([...input.prepared.games.map(game => game.id), ...discovered.map(game => game.id), ...notes.map(note => note.gameId)])].sort();
+  const notes = await tx.gameEvent.findMany({ where: noteSelector(leaving), orderBy: { id: "asc" },
+    select: { id: true, gameId: true, actor: true, commandKey: true, payload: true }, take: GAME_DELETION_PAGE_SIZE });
+  const ids = [...new Set([...preparedIds, ...notes.map(note => note.gameId)])].sort();
   if (ids.length) await tx.$queryRaw`SELECT id FROM game WHERE id = ANY(${ids}::text[]) ORDER BY id FOR UPDATE`;
-  const current = await readAffectedGames(tx, leaving);
+  const current = await readAffectedGames(tx, leaving, preparedIds);
   const prepared = new Map(input.prepared.games.map(game => [game.id, game]));
-  if (current.length !== prepared.size || current.some(row => prepared.get(row.id)?.fingerprint !== fingerprint(row))) {
-    throw hostedOnboardingError({ code: "ACCOUNT_DELETION_GAME_STATE_CHANGED", httpStatus: 503,
-      message: "A game changed while your account was being deleted. Retry account deletion.", retryable: true });
-  }
+  if (current.length !== prepared.size || current.some(row => prepared.get(row.id)?.fingerprint !== fingerprint(row))) gameStateChanged();
   let calledOff = 0;
   let deleted = 0;
   for (const row of current) {
@@ -152,10 +158,29 @@ export async function applyGameAccountDeletionTx(input: { memberIds: readonly st
       payload: { v: 1, calledOff: active, seat: departure.seat }, type: "player_left" } });
   }
   await redactTalkNotesTx(tx, notes, input.now);
+  // Anonymizing after redaction is what moves a note out of the selector.
+  await tx.gameEvent.updateMany({ where: { id: { in: notes.map(note => note.id) } }, data: { actor: "system" } });
+  // A void pair game still naming its departed invitee would be selected again and insert the seat twice.
+  await tx.gameInvitee.updateMany({ where: { gameId: { in: preparedIds }, memberId: { in: leaving } },
+    data: { memberId: null, recipientLookupKey: null, pendingLabel: Prisma.DbNull } });
+  const counts = { calledOff, deleted, kept: current.length - deleted };
+  if (input.prepared.more) return counts;
+  await assertGameDeletionCompleteTx(tx, leaving);
   // Cancelled/expired invitations need no crypto plan, but keep no lookup or label.
   await tx.gameInvitee.updateMany({ where: { memberId: { in: leaving } }, data: { memberId: null, recipientLookupKey: null, pendingLabel: Prisma.DbNull } });
   await tx.gameEvent.updateMany({ where: { actor: { in: leaving } }, data: { actor: "system" } });
-  return { calledOff, deleted, kept: current.length - deleted };
+  return counts;
+}
+
+/** Prove no residual dependency needs the keys before clearing global references. */
+async function assertGameDeletionCompleteTx(tx: Prisma.TransactionClient, leaving: readonly string[]): Promise<void> {
+  if (await tx.game.findFirst({ where: participantOf(leaving), select: { id: true } })
+    || await tx.gameEvent.findFirst({ where: noteSelector(leaving), select: { id: true } })) gameStateChanged();
+}
+
+function gameStateChanged(): never {
+  throw hostedOnboardingError({ code: "ACCOUNT_DELETION_GAME_STATE_CHANGED", httpStatus: 503,
+    message: "A game changed while your account was being deleted. Retry account deletion.", retryable: true });
 }
 
 /** Redact by accepted identity before anonymization, preserving the spent quota. */

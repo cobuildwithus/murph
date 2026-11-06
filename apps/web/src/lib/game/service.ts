@@ -16,7 +16,7 @@ import { generateHostedRandomPrefixedId, isRecord, sha256Hex } from "../primitiv
 import { getPrisma } from "../prisma";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 import { areGameDevToolsAllowed, areGameGroupsEnabled, gameOnSql, gameOnWhere, isGameEnabled, isGameEnabledFor, isGameOn, mediaKeyOwner, mediaKeyPrefixFor } from "./access";
-import { parseGameCommand, type GameCommand } from "./command";
+import { parseGameAcceptance, parseGameCommand, type GameCommand } from "./command";
 import { addressedGameInvite, lockGameAudience, prepareGameAudience, readGameVerifiedContacts, verifiedGameContactKeys } from "./audience";
 import { lookupHostedGroupParticipantMemberIdsByHandles } from "../hosted-groups/participant-member";
 import { moderateGameCommand } from "./moderation";
@@ -261,7 +261,9 @@ export async function runGameChatUpdate(input: Omit<Parameters<typeof runGameCom
     else if (update.operation === "edit_terms") {
       command = await gameChatEditCommand(input, update);
     } else if (update.operation === "propose" || (update.operation === "approve" && !update.proposalId)) {
-      command = await gameChatTermsCommand(input, update);
+      const translated = await gameChatTermsCommand(input, update);
+      if ("result" in translated) return translated.result;
+      command = translated.command;
     } else if (update.operation === "cancel_game") {
       command = { type: "cancelInvite", gameId: update.gameId };
     } else if ("date" in update) {
@@ -295,10 +297,13 @@ async function requireGameChatTerms(input: Parameters<typeof runGameChatUpdate>[
   const group = input.update.operation === "create"
     ? parsed.type === "createGame" && parsed.maxPlayers === 10
     : (await getPrisma().game.findUnique({ where: { id: input.update.gameId }, select: { maxPlayers: true } }))?.maxPlayers === 10;
-  if (!group) return;
+  if (group) await requireCurrentGameChatTerms(input.actorMemberId, parsed);
+}
+
+async function requireCurrentGameChatTerms(actor: string, command: { type?: unknown }) {
   const { requireCurrentTermsFor } = await import("./http/auth");
   const { isHostedOnboardingError } = await import("../hosted-onboarding/errors");
-  try { await requireCurrentTermsFor(input.actorMemberId, parsed); }
+  try { await requireCurrentTermsFor(actor, command); }
   catch (error) {
     if (isHostedOnboardingError(error) && error.code === "TERMS_REQUIRED") reject("TERMS_REQUIRED", "Accept Murph’s current Terms in the app, then try again.");
     throw error;
@@ -332,23 +337,40 @@ async function gameChatCreateCommand(input: Parameters<typeof runGameChatUpdate>
 }
 
 /** The app uses join for a yes, negotiate for an unseated invitee's counter. */
-async function gameChatTermsCommand(input: Parameters<typeof runGameChatUpdate>[0], update: Extract<HostedGameUpdate, { operation: "approve" | "propose" }>): Promise<unknown> {
+async function gameChatTermsCommand(input: Parameters<typeof runGameChatUpdate>[0], update: Extract<HostedGameUpdate, { operation: "approve" | "propose" }>): Promise<{ command: unknown } | { result: GameCommandResult }> {
   const row = await getPrisma().game.findUnique({ where: { id: update.gameId }, include: { invitees: true, players: true } });
   if (!row || !await gameChatContextCurrent(row, input) || !isGameOn(row)) reject("NOT_A_PLAYER", "This game belongs to its players.");
   if (row.maxPlayers === 10 && update.operation === "propose" && update.change.kind !== "start_now") reject("INVALID_REQUEST", "Ask for group changes with edit_terms and a new proposalId.");
   if (update.operation === "propose" && (row.status !== "invited" || row.maxPlayers === 10)) {
-    return { type: "proposeChange", gameId: update.gameId, proposalId: update.proposalId, expectedTermsVersion: update.expectedTermsVersion, change: update.change };
+    return { command: { type: "proposeChange", gameId: update.gameId, proposalId: update.proposalId, expectedTermsVersion: update.expectedTermsVersion, change: update.change } };
   }
   const addressed = row.maxPlayers === 10 ? await addressedGameInvitation(row, input.actorMemberId) : row.invitees.find(invitee => invitee.memberId === input.actorMemberId);
   if ((row.status === "invited" || row.maxPlayers === 10) && !addressed) reject("NOT_A_PLAYER", "Only the other player can agree or suggest changes to this rematch.");
   const profile = await getPrisma().gameProfile.findUnique({ where: { memberId: input.actorMemberId }, select: { timeZone: true } });
   if (!profile) reject("PROFILE_REQUIRED", "Add your first name and time zone in the app's Game profile.");
+  if (row.maxPlayers === 10) return { result: await acceptGroupChatInvitation(input, row,
+    { termsVersion: update.expectedTermsVersion, timeZone: profile.timeZone }) };
   const [token] = await openGameTexts([{ ...gameTarget(row, "invite_token"), value: row.inviteTokenEncrypted }]);
   if (!token) reject("INVITE_EXPIRED", "This invite isn't open anymore.");
   const invite = { token, termsVersion: update.expectedTermsVersion!, timeZone: profile.timeZone };
-  return update.operation === "propose"
+  return { command: update.operation === "propose"
     ? { type: "negotiate", ...invite, proposalId: update.proposalId, change: update.change }
-    : { type: "join", ...invite };
+    : { type: "join", ...invite } };
+}
+
+/** Chat authority admits by id; public commands still require the bearer token. */
+async function acceptGroupChatInvitation(
+  input: Parameters<typeof runGameChatUpdate>[0],
+  row: Pick<Game, "id" | "createdBy">,
+  body: unknown,
+): Promise<GameCommandResult> {
+  if (!input.multiplayer) reject("INVITE_NOT_FOUND", "That invite isn't available.");
+  const acceptance = parseGameAcceptance(body);
+  await requireCurrentGameChatTerms(input.actorMemberId, { type: "join" });
+  await joinGame({ actor: input.actorMemberId, beforeMutationTx: input.beforeMutationTx,
+    chatContainerMemberId: input.chatContainerMemberId, chatPlayerMemberIds: input.chatPlayerMemberIds,
+    chatAudience: input.chatAudience, now: input.now }, { id: row.id, createdBy: row.createdBy, maxPlayers: 10 }, acceptance);
+  return { game: null, ok: true };
 }
 
 /** Names are the players' own Game profiles, not private relationship labels. */
@@ -935,6 +957,7 @@ async function accept(context: CommandContext, command: AcceptInviteBody, gameId
       timeZone: command.timeZone, invitationSeat: invitation?.seat,
     });
     if (decision.kind === "already-joined") return [];
+    if (row.maxPlayers === 10 && context.chatContainerMemberId && !invitation) reject("NOT_A_PLAYER", "Only an addressed invitee can agree.");
     if (row.maxPlayers === 2) await assertPairCapacity(tx, creator!, actor, now, gameId);
     const claimed = playerFor(loaded.state, actor);
     if (!claimed) await tx.gamePlayer.create({ data: { gameId: row.id, memberId: actor, seat: decision.seat, timeZone: command.timeZone, joinedAt: now } });
@@ -1898,8 +1921,8 @@ async function negotiate(context: CommandContext, command: Extract<GameCommand, 
   const prisma = getPrisma();
   const owner = await prisma.game.findUnique({ where: { inviteTokenHash: sha256Hex(command.token) } });
   if (!owner) reject("INVITE_NOT_FOUND", "Invite not found.");
-  if (!owner.createdBy) reject("INVITE_EXPIRED", "This invite isn't open anymore.");
   if (owner.maxPlayers === 10) return negotiateGroupNote(context, command, owner);
+  if (!owner.createdBy) reject("INVITE_EXPIRED", "This invite isn't open anymore.");
   const creator = owner.createdBy;
   if (creator === context.actor) reject("NOT_A_PLAYER", "Only the invited player can suggest changes here.");
   if (!await prisma.gameProfile.findUnique({ where: { memberId: context.actor }, select: { memberId: true } })) reject("PROFILE_REQUIRED", "Add your first name first.");

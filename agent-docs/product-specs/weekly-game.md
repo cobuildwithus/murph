@@ -95,6 +95,9 @@ App and chat reads expose remaining seated votes and yeses still needed.
 Unjoined invitees retain invitations and cannot vote; stale acceptance must
 refresh the terms version. Controls are closed for invitees and leavers.
 Cancelling the game stays starter-only until the first check-in, while not due.
+Posted history retained after account deletion still locks cancellation. Excuses
+alone keep their existing behavior: they block cancellation while present, and
+removing the last excuser's account permits cancellation when no posted history remains.
 Terms reports target the latest applied change's proposer, falling back to the
 starter for initial terms, for both pairs and groups.
 
@@ -1052,7 +1055,8 @@ receive that field. The usual proposal, approval, cancellation and Shake on it
 paths handle the rest. The original invite deadline still applies.
 
 Group Talk uses the same `/invites/:token/negotiate` note request and nullable
-command envelope. An authenticated, profiled, verified addressed invitee who
+command envelope. The starter's deletion does not close Talk or addressed chat
+acceptance for a surviving group. An authenticated, profiled, verified addressed invitee who
 holds no current or departed seat may send one cleaned, moderated note while
 the game is invited or live/not due, with current terms and presence in the
 bound authorized room. Token possession alone grants no speaking authority.

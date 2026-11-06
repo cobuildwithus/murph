@@ -591,7 +591,7 @@ function admissionSeat(state: RuleState, input: JoinInput, claimed: RulePlayer |
 
 /** The starter can call off a group until anyone checks in; invited direct edits share this guard. */
 export function areGroupTermsOpen(state: RuleState, now: Date): boolean {
-  return ["invited", "live"].includes(state.game.status) && !(state.game.status === "live" && isGameDue(state, now)) && state.entries.length === 0;
+  return ["invited", "live"].includes(state.game.status) && !(state.game.status === "live" && isGameDue(state, now)) && state.entries.length === 0 && !hasGameCheckInAttempt(state);
 }
 
 export function assertGroupTermsOpen(state: RuleState, actor: string, now: Date, expectedVersion?: number): void {

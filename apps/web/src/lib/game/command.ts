@@ -8,6 +8,7 @@ import {
   GAME_STAKE_KINDS,
   GAME_WEEKDAYS,
   type GameCommand,
+  type AcceptInviteBody,
   type GameInviteTargetInput,
   type GameChange,
   type GameInviteeLabel,
@@ -67,8 +68,7 @@ export function parseGameCommand(value: unknown): GameCommand {
       return negotiate(input);
     case "join":
       return {
-        termsVersion: integer(input.termsVersion, "termsVersion", 1),
-        timeZone: timeZone(input.timeZone),
+        ...parseGameAcceptance(input),
         token: opaque(input.token, "token"),
         type: "join",
       };
@@ -85,6 +85,12 @@ export function parseGameCommand(value: unknown): GameCommand {
     default:
       return reject("INVALID_REQUEST", "Unknown command.");
   }
+}
+
+/** Shared acceptance body for public token joins and addressed chat acceptance. */
+export function parseGameAcceptance(value: unknown): AcceptInviteBody {
+  const input = record(value, "acceptance");
+  return { termsVersion: integer(input.termsVersion, "termsVersion", 1), timeZone: timeZone(input.timeZone) };
 }
 
 /** No-body removal routes carry only their path identities. */

@@ -2047,6 +2047,9 @@ describe.skipIf(!enabled)("group app change parity", () => {
     const state = await readGameChatState(context.chatContainerMemberId, people.map(p => p.id), people[0].id);
     expect(state.games[0]?.changeControls).toMatchObject({ canStartNow: false, canEditStartDate: false });
     expect(await run(people[0].id, { type: "proposeChange", gameId: game.id, proposalId: randomUUID(), expectedTermsVersion: 1, change: { kind: "start_now" } }, at)).toMatchObject({ ok: false });
+    expect(await readGame(game.id, people[0].id, true)).toMatchObject({ permissions: { canCancel: false } });
+    expect(await run(people[0].id, { type: "cancelInvite", gameId: game.id }, at)).toMatchObject({ ok: false, error: { code: "GAME_NOT_LIVE" } });
+    expect((await gameRow(game.id)).status).toBe("live");
     // An older accepted request is still refused at the deciding-vote boundary.
     const proposalId = randomUUID();
     await db.game.update({ where: { id: game.id }, data: { pendingChange: { v: 1, id: proposalId, proposedByMemberId: people[0].id, expectedTermsVersion: 1,
@@ -2534,4 +2537,84 @@ describe.skipIf(!enabled)("group exact notice ordering", () => {
     const cohort = await readGameChatProfiles([f.people[0].id, f.people[1].id, f.people[3].id]);
     expect(lifecycleProof.prepare.mock.lastCall![0].envelope.notification.instructions).toContain(JSON.stringify(cohort.find(p => p.memberId === f.people[3].id)!.firstName));
   });
+});
+
+describe.skipIf(!enabled)("surviving group authority", () => {
+  async function survivingGroup() {
+    const f = await talkGroup(4, true);
+    await ok(f.people[2].id, join(f.group.token), caseNow);
+    await db.hostedThreadContainer.update({ where: { memberId: f.context.chatContainerMemberId }, data: { ownerMemberId: f.people[1].id } });
+    await erase(f.people[0].id);
+    const context = { ...f.context, chatPlayerMemberIds: f.people.slice(1).map(p => p.id),
+      chatAudience: await readGameChatAudience(f.context.chatContainerMemberId) };
+    expect(await gameRow(f.group.id)).toMatchObject({ status: "live", createdBy: null, inviteTokenEncrypted: null });
+    return { ...f, context, actor: f.people[3] };
+  }
+
+  it("keeps excuse-only cancellation closed until the excuser deletes", async () => {
+    const people = [await person(), await person(), await person()];
+    const game = await create(people[0], people.slice(1));
+    for (const p of people.slice(1)) await ok(p.id, join(game.token));
+    const at = new Date("2030-03-10T12:00:00Z");
+    await ok(people[2].id, { type: "post", gameId: game.id, entryId: randomUUID(), kind: "excuse", text: "Missed yesterday", mediaKeys: [] }, at);
+    expect(await db.gameEntry.findFirst({ where: { gameId: game.id } })).toMatchObject({ attempt: 0 });
+    expect(await run(people[0].id, { type: "cancelInvite", gameId: game.id }, at)).toMatchObject({ ok: false, error: { code: "GAME_NOT_LIVE" } });
+    await erase(people[2].id);
+    expect(await readGame(game.id, people[0].id, true)).toMatchObject({ permissions: { canCancel: true } });
+    expect(await run(people[0].id, { type: "cancelInvite", gameId: game.id }, at)).toMatchObject({ ok: true });
+    expect((await gameRow(game.id)).status).toBe("void");
+  }, 60_000);
+
+  it("accepts surviving Talk and exact replay, while a creatorless pair still expires", async () => {
+    const f = await survivingGroup();
+    const { readInvitePreview } = await import("@/src/lib/game/service");
+    expect(await readInvitePreview(f.group.token, true, f.actor.id)).toMatchObject({ canTalk: true });
+    const command = f.command(3);
+    expect(await run(f.actor.id, command, caseNow)).toMatchObject({ ok: true });
+    expect(await talkReceipt(f.group.id, command.proposalId)).toMatchObject({ status: "awaiting_generation" });
+    expect(await run(f.actor.id, command, caseNow)).toMatchObject({ ok: true });
+    expect(await db.gameEvent.count({ where: { gameId: f.group.id, type: "talk_requested" } })).toBe(1);
+    const pairStarter = await person(), pairSurvivor = await person();
+    const pair = await ok(pairStarter.id, { type: "createGame", gameId: randomUUID(), inviteeFirstName: "Teammate",
+      terms: { ...terms, defaultTask: undefined, tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Read" }] } });
+    await ok(pairSurvivor.id, join(pair!.inviteToken!));
+    await erase(pairStarter.id);
+    expect(await run(pairSurvivor.id, { ...command, token: pair!.inviteToken! }, caseNow)).toMatchObject({ ok: false, error: { code: "INVITE_EXPIRED" } });
+  }, 60_000);
+
+  it("accepts surviving chat at the addressed seat exactly once without a bearer token", async () => {
+    const f = await survivingGroup();
+    const input = { ...f.context, actorMemberId: f.actor.id, now: caseNow,
+      update: { operation: "approve" as const, gameId: f.group.id, expectedTermsVersion: 1 } };
+    expect(await runGameChatUpdate(input)).toEqual({ ok: true, game: null });
+    const before = await db.gameEvent.count({ where: { gameId: f.group.id } });
+    expect(await runGameChatUpdate(input)).toEqual({ ok: true, game: null });
+    expect(await db.gameEvent.count({ where: { gameId: f.group.id } })).toBe(before);
+    expect(await db.gamePlayer.findMany({ where: { gameId: f.group.id, memberId: f.actor.id } })).toMatchObject([{ seat: 3 }]);
+    expect(await db.gamePlayer.count({ where: { gameId: f.group.id, seat: { gte: 10 } } })).toBe(0);
+    const { parseGameCommand } = await import("@/src/lib/game/command");
+    expect(() => parseGameCommand({ type: "join", gameId: f.group.id, termsVersion: 1, timeZone: "UTC" })).toThrow();
+  }, 60_000);
+
+  it.each(["unaddressed", "contact", "invitation", "terms", "disabled", "legacy", "room", "version"] as const)("refuses surviving chat admission after %s authority loss", async kind => {
+    const f = await survivingGroup();
+    let hookReached = false;
+    if (kind === "contact") await db.gameInvitee.update({ where: { gameId_seat: { gameId: f.group.id, seat: 3 } }, data: { memberId: null } });
+    if (kind === "unaddressed") await db.gameInvitee.update({ where: { gameId_seat: { gameId: f.group.id, seat: 3 } }, data: { memberId: null, recipientLookupKey: null } });
+    if (kind === "terms") vi.stubEnv("MURPH_GAME_REQUIRE_CURRENT_TERMS", "true");
+    if (kind === "disabled") vi.stubEnv("MURPH_GAME_GROUPS_ENABLED", "false");
+    const result = await runGameChatUpdate({ ...f.context, actorMemberId: f.actor.id, now: caseNow, multiplayer: kind !== "legacy",
+      update: { operation: "approve", gameId: f.group.id, expectedTermsVersion: kind === "version" ? 0 : 1 },
+      beforeMutationTx: async tx => {
+        hookReached = true;
+        if (kind === "contact") await tx.hostedMemberEmailAuthorization.deleteMany({ where: { memberId: f.actor.id } });
+        if (kind === "invitation") await tx.gameInvitee.update({ where: { gameId_seat: { gameId: f.group.id, seat: 3 } }, data: { memberId: null, recipientLookupKey: null } });
+        if (kind === "room") await tx.game.update({ where: { id: f.group.id }, data: { chatContainerMemberId: null } });
+      } });
+    const code = kind === "terms" ? "TERMS_REQUIRED" : kind === "disabled" ? "GAME_DISABLED" : kind === "legacy" ? "INVITE_NOT_FOUND" : kind === "version" ? "INVALID_REQUEST" : "NOT_A_PLAYER";
+    expect(result).toMatchObject({ ok: false, error: { code } });
+    if (["contact", "invitation", "room"].includes(kind)) expect(hookReached).toBe(true);
+    if (["contact", "invitation"].includes(kind)) expect(result).toMatchObject({ error: { message: "Only an addressed invitee can agree." } });
+    expect(await db.gamePlayer.count({ where: { gameId: f.group.id, memberId: f.actor.id } })).toBe(0);
+  }, 60_000);
 });

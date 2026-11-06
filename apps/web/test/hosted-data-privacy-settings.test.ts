@@ -829,6 +829,14 @@ describe("HostedDataPrivacySettings", () => {
       code: "ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG",
       message: "Multiple connected-app setups are still finishing. Try account deletion again after they finish or time out.",
     },
+    {
+      code: "ACCOUNT_DELETION_GAME_HISTORY_PENDING",
+      message: "We're still removing your game history. Retry account deletion.",
+    },
+    {
+      code: "ACCOUNT_DELETION_GAME_STATE_CHANGED",
+      message: "A game changed while your account was being deleted. Retry account deletion.",
+    },
   ])("keeps $code guidance and confirmation in the open dialog", async ({
     code,
     message,

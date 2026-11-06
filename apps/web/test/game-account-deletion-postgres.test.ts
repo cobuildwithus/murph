@@ -1,14 +1,37 @@
 import { randomUUID } from "node:crypto";
 
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: vi.fn(async () => {}) }));
 
+import { Prisma } from "@prisma/client";
+import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
+import { createHostedLinqDeliveryIdempotencyLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import type { GameCommand, GameTermsInput } from "@/src/lib/game/contract";
 import { applyGameAccountDeletionTx, prepareGameAccountDeletion } from "@/src/lib/game/account-deletion";
 import { devSettleNow, devStartNow, readGame, readHome, runGameCommand } from "@/src/lib/game/service";
 import { labelTarget, sealGameText, openGameTexts } from "@/src/lib/game/crypto";
 import { getPrisma } from "@/src/lib/prisma";
+
+vi.mock("@/src/lib/hosted-crypto/env", async () => {
+  const { generateKeyPairSync } = await import("node:crypto");
+  const { createHostedAuthorityVerifyKeyring } = await vi.importActual<typeof import("@murphai/runtime-state")>("@murphai/runtime-state");
+  const { createHostedGcpKmsClientFromEnv } = await vi.importActual<typeof import("@/src/lib/hosted-crypto/gcp-kms")>("@/src/lib/hosted-crypto/gcp-kms");
+  const authoritySignKeyVersionName = "projects/example/locations/global/keyRings/hosted/cryptoKeys/authority/cryptoKeyVersions/1";
+  const authorityKey = generateKeyPairSync("ec", { namedCurve: "prime256v1", privateKeyEncoding: { format: "jwk" }, publicKeyEncoding: { format: "pem", type: "spki" } });
+  const gcpKms = createHostedGcpKmsClientFromEnv({
+    HOSTED_CRYPTO_ENV: "test", HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
+    HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: JSON.stringify(authorityKey.privateKey),
+    HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: Buffer.alloc(32, 7).toString("base64"), NODE_ENV: "test",
+  });
+  return {
+    getHostedWebCryptoConfig: () => ({
+      authoritySignKeyVersionName, authoritySignPublicKeyPem: authorityKey.publicKey,
+      authorityVerifyKeyring: createHostedAuthorityVerifyKeyring({ activeKeyVersionName: authoritySignKeyVersionName, activePublicKeyPem: authorityKey.publicKey }),
+      env: "test", gcpKms, webWrapKmsKeyName: "projects/example/locations/global/keyRings/hosted/cryptoKeys/history-benchmark",
+    }),
+  };
+});
 
 const runPostgresProof = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (runPostgresProof && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murph_test_/u.test(process.env.DATABASE_URL ?? "")) {
@@ -22,10 +45,19 @@ const TERMS: GameTermsInput = {
 };
 const memberIds: string[] = [];
 
+let realCrypto = false;
 async function member(firstName: string): Promise<string> {
   const id = `hbm_gamedel_${firstName.toLowerCase()}_${randomUUID().slice(0, 8)}`;
   await getPrisma().hostedMember.create({ data: { billingStatus: "active", id } });
   memberIds.push(id);
+  if (realCrypto) {
+    const { prepareHostedDomainRootForWeb, revalidatePreparedHostedDomainRootForWebTx } = await import("@/src/lib/hosted-crypto/domain-root-store");
+    const { runWithHostedDomainRootUnwrapCache } = await import("@/src/lib/hosted-crypto/domain-root-unwrap-cache");
+    await runWithHostedDomainRootUnwrapCache(async () => {
+      const prepared = await prepareHostedDomainRootForWeb({ domain: "control", reason: "test", userId: id });
+      await getPrisma().$transaction(tx => revalidatePreparedHostedDomainRootForWebTx({ prepared, tx }));
+    });
+  }
   await ok(id, { firstName, timeZone: "America/New_York", type: "setProfile" });
   return id;
 }
@@ -333,4 +365,218 @@ describe.skipIf(!runPostgresProof)("weekly game when a player deletes their acco
     expect(await db.game.findUnique({ where: { id: gameId } })).toBeNull();
   });
 
+});
+
+/** Every bulk row uses its own authenticated encryption target. */
+async function seedHistory(owner: string, count: number, survivor?: string, invited?: string) {
+  const db = getPrisma();
+  const ids = Array.from({ length: count }, () => `history-${randomUUID()}`).sort();
+  const rows: Prisma.GameCreateManyInput[] = [];
+  for (const id of ids) rows.push({ id, createdBy: owner, wordsOwnerMemberId: owner,
+    status: invited ? "invited" : "settled", terms: [{ n: 1, effectiveFromDay: 0, schedule: TERMS.schedule, stakes: [{ kind: "prize" }] }],
+    termsWordsEncrypted: (await sealGameText({ table: "game", field: "terms_words", rowId: id, memberId: owner }, JSON.stringify({ tasks: TERMS.tasks, stakes: TERMS.stakes })))!,
+    result: { scores: [{ memberId: owner, seat: 0, score: 1 }] } });
+  await db.game.createMany({ data: rows });
+  await db.gamePlayer.createMany({ data: ids.flatMap(gameId => [
+    { gameId, memberId: owner, seat: 0, joinedAt: new Date(), timeZone: "UTC" },
+    ...(survivor ? [{ gameId, memberId: survivor, seat: 1, joinedAt: new Date(), timeZone: "UTC" }] : []),
+  ]) });
+  if (invited) await db.gameInvitee.createMany({ data: ids.map(gameId => ({ gameId, memberId: invited, seat: 1, recipientLookupKey: "synthetic-address" })) });
+  await db.gameEvent.createMany({ data: ids.map(gameId => ({ gameId, actor: owner, type: "created", payload: {} })) });
+  return ids;
+}
+async function assertWords(gameId: string, owner: string) {
+  const row = await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } });
+  expect(await openGameTexts([{ table: "game", field: "terms_words", rowId: gameId, memberId: owner, value: row.termsWordsEncrypted }])).toEqual([expect.stringContaining("100 pushups")]);
+}
+async function seedNotes(author: string, gameIds: string[]) {
+  const data: Prisma.GameEventCreateManyInput[] = [];
+  for (const gameId of gameIds) {
+    const proposalId = randomUUID();
+    data.push({ gameId, actor: author, type: "talk_requested", commandKey: `game-change:${gameId}:${proposalId}`,
+      payload: { v: 2, proposalId, invitationSeat: 2, termsVersion: 1,
+        noteEncrypted: await sealGameText({ table: "game", field: `talk_note:${proposalId}`, rowId: gameId, memberId: author }, "An outdoor prize?") } });
+  }
+  await getPrisma().gameEvent.createMany({ data });
+  return data;
+}
+const pageTxOptions = { timeout: 60_000 };
+const changed = { code: "ACCOUNT_DELETION_GAME_STATE_CHANGED", retryable: true };
+
+describe.skipIf(!runPostgresProof)("residual account deletion pages", () => {
+  const holder = globalThis as typeof globalThis & { __murphHostedSecureBoxStringTestCodec?: Parameters<typeof setHostedSecureBoxStringTestCodecForTests>[0] };
+  let codec: Parameters<typeof setHostedSecureBoxStringTestCodecForTests>[0];
+  beforeEach(() => { realCrypto = true; codec = holder.__murphHostedSecureBoxStringTestCodec ?? null; setHostedSecureBoxStringTestCodecForTests(null); });
+  afterEach(() => { realCrypto = false; setHostedSecureBoxStringTestCodecForTests(codec); });
+  afterAll(async () => {
+    await getPrisma().hostedLinqDelivery.deleteMany({ where: { id: { startsWith: "deletion-note-proof-" } } });
+    await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: memberIds } } });
+    await getPrisma().hostedMember.deleteMany({ where: { id: { in: memberIds } } });
+  });
+
+  it("drains over 1,000 sealed games with rollback and fresh preparation at every boundary", async () => {
+    const db = getPrisma(), leaver = await member("Leaver"), survivor = await member("Survivor");
+    const kept = await seedHistory(leaver, 1_001, survivor);
+    const sole = await seedHistory(leaver, 3);
+    let residual = kept.length + sole.length;
+    while (residual) {
+      const prepared = await prepareGameAccountDeletion({ memberIds: [leaver], prisma: db });
+      expect(prepared.games.length).toBe(Math.min(100, residual));
+      expect(prepared.more).toBe(residual > 100);
+      const pageIds = prepared.games.map(game => game.id);
+      const snapshot = () => db.game.findMany({ where: { id: { in: pageIds } }, include: { players: true, invitees: true, events: true }, orderBy: { id: "asc" } });
+      const before = await snapshot();
+      await expect(db.$transaction(async tx => {
+        await applyGameAccountDeletionTx({ memberIds: [leaver], prepared, tx, now: new Date() });
+        throw new Error("rollback page");
+      }, pageTxOptions)).rejects.toThrow("rollback page");
+      expect(await snapshot()).toEqual(before);
+      await db.$transaction(async tx => {
+        await applyGameAccountDeletionTx({ memberIds: [leaver], prepared, tx, now: new Date() });
+        if (!prepared.more) await tx.hostedMember.delete({ where: { id: leaver } });
+      }, pageTxOptions);
+      residual -= pageIds.length;
+      expect(await db.game.count({ where: { wordsOwnerMemberId: leaver } })).toBe(residual);
+      const processed = pageIds.find(id => kept.includes(id));
+      if (processed) await assertWords(processed, survivor);
+      if (prepared.more) {
+        expect(await db.hostedMember.findUnique({ where: { id: leaver } })).not.toBeNull();
+        expect(await db.gameProfile.findUnique({ where: { memberId: leaver } })).not.toBeNull();
+        const untouched = await db.game.findFirstOrThrow({ where: { wordsOwnerMemberId: leaver } });
+        await assertWords(untouched.id, leaver);
+      }
+    }
+    expect(await db.game.count({ where: { id: { in: sole } } })).toBe(0);
+    const retained = await db.game.findMany({ where: { id: { in: kept } }, include: { players: true, events: true } });
+    expect(retained).toHaveLength(1_001);
+    for (const game of retained) {
+      expect(game).toMatchObject({ createdBy: null, wordsOwnerMemberId: survivor });
+      expect(game.players.find(player => player.seat === 0)).toMatchObject({ memberId: null, leftAt: expect.any(Date) });
+      expect(JSON.stringify([game.events.map(event => ({ actor: event.actor, payload: event.payload })), game.result])).not.toContain(leaver);
+    }
+  }, 180_000);
+
+  it("drains over 1,000 unseated notes independently, scrubbing ciphertext before actor and retaining quota", async () => {
+    const db = getPrisma(), author = await member("Author"), owner = await member("Owner");
+    const games = await seedHistory(owner, 1_001);
+    await db.game.updateMany({ where: { id: { in: games } }, data: { maxPlayers: 10 } });
+    await db.gameInvitee.createMany({ data: games.map(gameId => ({ gameId, memberId: author, seat: 2 })) });
+    const notes = await seedNotes(author, games);
+    const first = notes[0], payload = first.payload as Prisma.InputJsonObject;
+    const receiptId = `deletion-note-proof-${randomUUID()}`;
+    await db.hostedLinqDelivery.create({ data: { id: receiptId, source: "game_lifecycle", sourceRef: `${first.gameId}:${payload.proposalId}`,
+      template: "game_talk", status: "generation_queued", attemptedAt: new Date(),
+      idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(`game-talk:${first.gameId}:${payload.proposalId}`) } });
+    let residual = 1_001;
+    while (residual) {
+      const prepared = await prepareGameAccountDeletion({ memberIds: [author], prisma: db });
+      expect(prepared.games).toEqual([]);
+      // Applying before this assertion also proves the old independent note overflow.
+      await db.$transaction(tx => applyGameAccountDeletionTx({ memberIds: [author], prepared, tx, now: new Date() }), pageTxOptions);
+      expect(prepared.more).toBe(residual > 100);
+      residual -= Math.min(100, residual);
+      const rows = await db.gameEvent.findMany({ where: { gameId: { in: games }, type: "talk_requested" }, orderBy: { id: "asc" } });
+      expect(rows.filter(row => row.actor === author)).toHaveLength(residual);
+      for (const row of rows) {
+        expect(row.payload).toMatchObject({ v: 2, invitationSeat: 2, termsVersion: 1,
+          noteEncrypted: row.actor === "system" ? null : expect.any(String) });
+      }
+      const untouched = rows.find(row => row.actor === author);
+      if (untouched) {
+        const value = untouched.payload as { proposalId: string; noteEncrypted: string };
+        expect(await openGameTexts([{ table: "game", rowId: untouched.gameId, field: `talk_note:${value.proposalId}`, memberId: author, value: value.noteEncrypted }])).toEqual(["An outdoor prize?"]);
+      }
+      expect(await db.hostedLinqDelivery.findUniqueOrThrow({ where: { id: receiptId } })).toMatchObject({ status: "skipped" });
+    }
+    await deleteAccount(author);
+  }, 180_000);
+
+  it("never selects a processed unjoined pair invitee again on resume", async () => {
+    const db = getPrisma(), owner = await member("Owner"), leaver = await member("Invitee");
+    const games = await seedHistory(owner, 101, undefined, leaver);
+    const prepared = await prepareGameAccountDeletion({ memberIds: [leaver], prisma: db });
+    expect(prepared.games).toHaveLength(100);
+    await db.$transaction(tx => applyGameAccountDeletionTx({ memberIds: [leaver], prepared, tx, now: new Date() }), pageTxOptions);
+    const next = await prepareGameAccountDeletion({ memberIds: [leaver], prisma: db });
+    // Apply first so removal of the page invitation clear proves a duplicate-seat failure.
+    await db.$transaction(tx => applyGameAccountDeletionTx({ memberIds: [leaver], prepared: next, tx, now: new Date() }), pageTxOptions);
+    expect(next.games).toHaveLength(1);
+    expect(next.games.every(game => !prepared.games.some(prior => prior.id === game.id))).toBe(true);
+    expect(await db.gamePlayer.count({ where: { gameId: { in: games }, memberId: null, leftAt: { not: null } } })).toBe(101);
+    expect(await db.gameInvitee.count({ where: { gameId: { in: games }, OR: [{ memberId: { not: null } }, { recipientLookupKey: { not: null } }] } })).toBe(0);
+  }, 60_000);
+
+  it("reprepares after a survivor command and serializes a waiting command with page commit", async () => {
+    const db = getPrisma(), leaver = await member("Leaver"), survivor = await member("Survivor");
+    const gameId = await live(leaver, survivor);
+    await seedHistory(leaver, 101);
+    const prepared = await prepareGameAccountDeletion({ memberIds: [leaver], prisma: db });
+    expect(prepared.more).toBe(true);
+    expect(prepared.games.some(game => game.id === gameId)).toBe(true);
+    const snapshot = () => db.game.findMany({ where: { id: { in: prepared.games.map(game => game.id) } }, include: { players: true, events: true }, orderBy: { id: "asc" } });
+    const proposalId = randomUUID();
+    await ok(survivor, { type: "proposeChange", gameId, proposalId, expectedTermsVersion: 1, change: { kind: "edit", stakes: [{ kind: "prize", item: "Choose a film" }] } });
+    const before = await snapshot();
+    await expect(db.$transaction(tx => applyGameAccountDeletionTx({ memberIds: [leaver], prepared, tx, now: new Date() }), pageTxOptions)).rejects.toMatchObject(changed);
+    expect(await snapshot()).toEqual(before);
+    expect(await db.gameEvent.count({ where: { gameId, type: "change_proposed", actor: survivor } })).toBe(1);
+    const fresh = await prepareGameAccountDeletion({ memberIds: [leaver], prisma: db });
+    let waiting: ReturnType<typeof run> | undefined;
+    let waited = false;
+    await db.$transaction(async tx => {
+      await applyGameAccountDeletionTx({ memberIds: [leaver], prepared: fresh, tx, now: new Date() });
+      waiting = run(survivor, { type: "post", gameId, entryId: randomUUID(), kind: "words", text: "After deletion", mediaKeys: [] });
+      for (let tries = 0; tries < 100 && !waited; tries++) {
+        const [locks] = await db.$queryRaw<{ waiting: number }[]>`SELECT count(*)::int AS waiting FROM pg_locks WHERE NOT granted`;
+        waited = locks.waiting > 0;
+        if (!waited) await new Promise(resolve => setTimeout(resolve, 20));
+      }
+    }, pageTxOptions);
+    expect(waited).toBe(true);
+    expect(await waiting).toMatchObject({ ok: false, error: { code: "GAME_NOT_LIVE" } });
+    expect(await db.gameEvent.count({ where: { gameId, type: "change_proposed", actor: survivor } })).toBe(1);
+    await deleteAccount(leaver);
+  }, 60_000);
+
+  it.each(["game", "invitation", "note"] as const)("retains keys when a new %s arrives after final preparation", async kind => {
+    const db = getPrisma(), leaver = await member("Leaver"), survivor = await member("Survivor");
+    await seedHistory(leaver, 101);
+    const page = await prepareGameAccountDeletion({ memberIds: [leaver], prisma: db });
+    expect(page.more).toBe(true);
+    await db.$transaction(tx => applyGameAccountDeletionTx({ memberIds: [leaver], prepared: page, tx, now: new Date() }), pageTxOptions);
+    if (kind === "note") {
+      const noteGames = await seedHistory(survivor, 100);
+      await db.game.updateMany({ where: { id: { in: noteGames } }, data: { maxPlayers: 10 } });
+      await seedNotes(leaver, noteGames);
+    }
+    const final = await prepareGameAccountDeletion({ memberIds: [leaver], prisma: db });
+    expect(final.more).toBe(false);
+    const [newId] = await seedHistory(kind === "game" ? leaver : survivor, 1, undefined, kind === "invitation" ? leaver : undefined);
+    if (kind === "note") {
+      await db.game.update({ where: { id: newId }, data: { maxPlayers: 10 } });
+      await seedNotes(leaver, [newId]);
+    }
+    await expect(db.$transaction(async tx => {
+      await applyGameAccountDeletionTx({ memberIds: [leaver], prepared: final, tx, now: new Date() });
+      await tx.hostedMember.delete({ where: { id: leaver } });
+    }, pageTxOptions)).rejects.toMatchObject(changed);
+    expect(await db.hostedMember.findUnique({ where: { id: leaver } })).not.toBeNull();
+    const profile = await db.gameProfile.findUniqueOrThrow({ where: { memberId: leaver } });
+    expect(await openGameTexts([{ table: "game_profile", field: "first_name", rowId: leaver, memberId: leaver, value: profile.firstNameEncrypted }])).toEqual(["Leaver"]);
+    await assertWords(newId, kind === "game" ? leaver : survivor);
+    if (kind === "note") {
+      const note = await db.gameEvent.findFirstOrThrow({ where: { gameId: newId, actor: leaver, type: "talk_requested" } });
+      const payload = note.payload as { proposalId: string; noteEncrypted: string };
+      expect(await openGameTexts([{ table: "game", field: `talk_note:${payload.proposalId}`, rowId: newId, memberId: leaver, value: payload.noteEncrypted }])).toEqual(["An outdoor prize?"]);
+    }
+    for (;;) {
+      const fresh = await prepareGameAccountDeletion({ memberIds: [leaver], prisma: db });
+      await db.$transaction(async tx => {
+        await applyGameAccountDeletionTx({ memberIds: [leaver], prepared: fresh, tx, now: new Date() });
+        if (!fresh.more) await tx.hostedMember.delete({ where: { id: leaver } });
+      }, pageTxOptions);
+      if (!fresh.more) break;
+    }
+    expect(await db.hostedMember.findUnique({ where: { id: leaver } })).toBeNull();
+  }, 90_000);
 });
