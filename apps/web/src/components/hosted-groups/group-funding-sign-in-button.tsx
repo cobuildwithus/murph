@@ -5,21 +5,21 @@ import { useState } from "react";
 import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
 import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
 import {
-  GroupFundingFrame,
-  GroupFundingPill,
-  GroupFundingScreen,
-} from "./group-usage-funding-shell";
+  LinkPageFrame,
+  LinkPagePill,
+  LinkPageScreen,
+} from "@/src/components/link-page/link-page-shell";
 
 export function GroupFundingSignInRequired(props: {
   initiallyOpen?: boolean;
 } = {}) {
   return (
-    <GroupFundingFrame>
-      <GroupFundingScreen
+    <LinkPageFrame>
+      <LinkPageScreen
         actions={<GroupFundingSignInButton initiallyOpen={props.initiallyOpen} />}
         title="Sign in to continue."
       />
-    </GroupFundingFrame>
+    </LinkPageFrame>
   );
 }
 
@@ -34,7 +34,7 @@ export function GroupFundingSignInButton(props: {
 
   return (
     <>
-      <GroupFundingPill onClick={() => setOpen(true)}>Sign in</GroupFundingPill>
+      <LinkPagePill onClick={() => setOpen(true)}>Sign in</LinkPagePill>
       <AuthDialog
         open={open}
         onCompleted={handleCompleted}

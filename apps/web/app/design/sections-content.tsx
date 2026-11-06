@@ -223,7 +223,7 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Secure approval pending and recorded states">
+          <StudySection title="File approval link: signed out, pending, and decided">
             <div id="action-approval-lifecycle">
               <ActionApprovalLifecycleStudy />
             </div>

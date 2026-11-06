@@ -499,16 +499,34 @@ have already been granted. Existing members reopen the same surface with only
 their currently active shares selected, and the list includes both the current
 group request and every older share that member can still revoke.
 
+### Link Pages
+
+A page someone reaches from a link in a Murph message sits on the app's night
+ground, the twin of a challenge invite link: `LinkPageFrame`, then
+`LinkPageScreen` for each state. A state is one Fraunces headline ending in a
+period, at most one supporting sentence, and at most one cream pill plus one
+quiet link. The headline is the state, so there is no fixed header and no status
+box. Paint `html` and `body` night too, so overscroll and Safari's bars don't
+show the cream page beneath. Render `LinkPageFrame` at page level; the catalog
+uses `LinkPageSurface`, because the frame repaints the whole document.
+
+Give a page one object where the funding dial sits, when it has something real
+to show: `LinkPageSheet` for a file or a record, a ticket for an invite. Do not
+add one to a page with nothing to act on, such as a dead link.
+
+A private link keeps its reason for being opened: `LinkPageSignIn` puts the
+sign-in form on the page under a headline that names the task, and finishes the
+way the sign-in dialog does. Never show the private subject of a link, such as
+a file name, before sign-in.
+
+Consent wording, sharing descriptions, and privacy promises keep their exact
+words on these pages. An approval keeps the server's sentence word for word,
+because it is what the member is authorizing.
+
 ### Group Usage Funding
 
-The funding link is one page on the app's night ground, the twin of a challenge
-invite link: `GroupFundingFrame`, then `GroupFundingScreen` for each state. A
-state is one Fraunces headline ending in a period, at most one supporting
-sentence, and at most one cream pill plus one quiet link. The headline is the
-state, so there is no fixed header and no status box. The page does not add a
-drawer, a sales card, a status badge, a note under the button, an optional form,
-or a list of supporters. Paint `html` and `body` night too, so overscroll and
-Safari's bars don't show the cream page beneath.
+The funding link is a link page. The page does not add a drawer, a sales card, a
+status badge, a note under the button, an optional form, or a list of supporters.
 
 A signed-out link shows one sign-in action and returns to the exact funding URL.
 Do not reveal whether the viewer has a private sponsorship relationship before

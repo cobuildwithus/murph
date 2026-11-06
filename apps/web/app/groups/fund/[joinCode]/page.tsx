@@ -7,9 +7,9 @@ import {
   GroupFundingSignInRequired,
 } from "@/src/components/hosted-groups/group-funding-sign-in-button";
 import {
-  GroupFundingFrame,
-  GroupFundingScreen,
-} from "@/src/components/hosted-groups/group-usage-funding-shell";
+  LinkPageFrame,
+  LinkPageScreen,
+} from "@/src/components/link-page/link-page-shell";
 import {
   GroupSponsorshipManagementCard,
 } from "@/src/components/hosted-groups/group-sponsorship-management-card";
@@ -208,9 +208,9 @@ export default async function GroupFundingPage({
   ) : null;
 
   return (
-    <GroupFundingFrame>
+    <LinkPageFrame>
       {!member ? (
-        <GroupFundingScreen
+        <LinkPageScreen
           actions={<GroupFundingSignInButton />}
           title={`Keep Murph in ${groupName}.`}
         />
@@ -230,7 +230,7 @@ export default async function GroupFundingPage({
       ) : visibleActivePurchase || oneTimeOffers.length > 0 ? (
         checkout
       ) : (
-        <GroupFundingScreen
+        <LinkPageScreen
           title={
             sponsoredByAnother
               ? "Murph is sponsored in this chat."
@@ -238,7 +238,7 @@ export default async function GroupFundingPage({
           }
         />
       )}
-    </GroupFundingFrame>
+    </LinkPageFrame>
   );
 }
 
@@ -251,12 +251,12 @@ function projectHostedMonthlyCapOptions(): GroupFundingMonthlyCapOption[] {
 
 function GroupFundingUnavailable() {
   return (
-    <GroupFundingFrame>
-      <GroupFundingScreen
+    <LinkPageFrame>
+      <LinkPageScreen
         detail="Ask the group for a new one."
         title="This link isn’t working."
       />
-    </GroupFundingFrame>
+    </LinkPageFrame>
   );
 }
 

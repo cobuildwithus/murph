@@ -52,6 +52,8 @@ const HOSTED_USAGE_CREDIT_PURCHASE_ID_PATTERN = /^hucp_[A-Za-z0-9_-]{16}$/u;
 interface AuthContextValue {
   authenticated: boolean;
   authenticationStatus: "ready" | "unavailable";
+  /** The same finish as the dialog, for a sign-in form that sits on the page. */
+  completeAuthentication: (payload: HostedAuthenticationCompletionPayload) => void;
   openAuthDialog: () => void;
   reauthenticate?: () => Promise<void>;
   openDataPrivacyAuthDialog?: () => void;
@@ -62,6 +64,7 @@ interface AuthContextValue {
 export const AuthContext = createContext<AuthContextValue>({
   authenticated: false,
   authenticationStatus: "ready",
+  completeAuthentication: () => {},
   openAuthDialog: () => {},
   openDataPrivacyAuthDialog: () => {},
   prepareAuth: () => {},
@@ -191,13 +194,14 @@ export function AuthProvider({
     () => ({
       authenticated,
       authenticationStatus,
+      completeAuthentication: handleAuthCompleted,
       openAuthDialog,
       reauthenticate,
       openDataPrivacyAuthDialog,
       prepareAuth: () => {},
       shared: false,
     }),
-    [authenticated, authenticationStatus, openAuthDialog, openDataPrivacyAuthDialog, reauthenticate],
+    [authenticated, authenticationStatus, handleAuthCompleted, openAuthDialog, openDataPrivacyAuthDialog, reauthenticate],
   );
 
   return (

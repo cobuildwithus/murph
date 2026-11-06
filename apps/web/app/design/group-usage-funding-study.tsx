@@ -22,9 +22,9 @@ import {
   GroupFundingSignInButton,
 } from "@/src/components/hosted-groups/group-funding-sign-in-button";
 import {
-  GroupFundingScreen,
-  GroupFundingSurface,
-} from "@/src/components/hosted-groups/group-usage-funding-shell";
+  LinkPageScreen,
+  LinkPageSurface,
+} from "@/src/components/link-page/link-page-shell";
 import {
   GroupSponsorshipCanceledReceipt,
   GroupSponsorshipManagementCard,
@@ -511,7 +511,7 @@ function GroupUsageFundingStudy() {
         </DesignSponsorshipState>
 
         <DesignSponsorshipState label="Signed out, group known" state="signed-out">
-          <GroupFundingScreen
+          <LinkPageScreen
             actions={<GroupFundingSignInButton initiallyOpen={false} />}
             title={headline}
           />
@@ -521,14 +521,14 @@ function GroupUsageFundingStudy() {
           label="Signed out, link not public"
           state="monthly-management-sign-in"
         >
-          <GroupFundingScreen
+          <LinkPageScreen
             actions={<GroupFundingSignInButton initiallyOpen={false} />}
             title="Sign in to continue."
           />
         </DesignSponsorshipState>
 
         <DesignSponsorshipState label="Link unavailable" state="unavailable">
-          <GroupFundingScreen
+          <LinkPageScreen
             detail="Ask the group for a new one."
             title="This link isn’t working."
           />
@@ -630,7 +630,7 @@ function DesignSponsorshipState(props: {
         className="mx-auto flex min-h-[44rem] w-full max-w-sm flex-col overflow-hidden rounded-3xl"
         data-design-surface
       >
-        <GroupFundingSurface>{props.children}</GroupFundingSurface>
+        <LinkPageSurface>{props.children}</LinkPageSurface>
       </div>
     </section>
   );

@@ -1,14 +1,20 @@
 "use client";
 
-import { ShieldCheck } from "lucide-react";
 import { useState } from "react";
 
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
+import { LinkPageSheet } from "@/src/components/link-page/link-page-sheet";
 import {
-  ActionApprovalDecisionFallback,
+  LINK_PAGE_PILL_CLASS,
+  LinkPageError,
+  LinkPageLink,
+  LinkPagePill,
+} from "@/src/components/link-page/link-page-shell";
+import {
+  ActionApprovalDecisionScreen,
   ActionApprovalScreen,
+  readActionApprovalFileName,
 } from "@/src/components/sensitive-actions/action-approval-screen";
-import { Button } from "@/src/components/ui/button";
 import type {
   HostedActionApprovalDecisionResponse,
   HostedActionApprovalView,
@@ -92,7 +98,6 @@ export function ActionApprovalCard({
   }
 
   const busy = submission !== null;
-  const primaryLabel = submission === "approving" ? "Verifying approval…" : "Approve with passkey";
   const returningDecision = submission === "returning-approved"
     ? "approved"
     : submission === "returning-denied"
@@ -111,69 +116,46 @@ export function ActionApprovalCard({
               ? "Denied. Returning to Murph…"
               : "Denied."
           : null);
-  const surfacedError = error;
+  const fileName = readActionApprovalFileName(approval.presentation.body);
 
   return (
-    <ActionApprovalScreen
-      badgeIcon={ShieldCheck}
-      body={<p className="break-words">{approval.presentation.body}</p>}
-      title={approval.presentation.title}
-    >
-      {surfacedError ? (
-        <p
-          className="mt-6 rounded-lg border border-[#8b5d3f]/30 bg-[#8b5d3f]/[0.06] px-4 py-3 text-[13px] leading-[1.5] text-[#8b5d3f]"
-          role="alert"
+    <>
+      {returningDecision ? (
+        <ActionApprovalDecisionScreen
+          action={redirectTo ? (
+            <a className={LINK_PAGE_PILL_CLASS} href={redirectTo}>
+              Return to Murph
+            </a>
+          ) : undefined}
+          decision={returningDecision}
+          fileName={fileName}
+        />
+      ) : (
+        <ActionApprovalScreen
+          actions={
+            <div aria-busy={busy} className="flex w-full flex-col items-center gap-1">
+              {error ? <LinkPageError>{error}</LinkPageError> : null}
+              <LinkPagePill disabled={busy} onClick={approve}>
+                {submission === "approving" ? "Verifying approval…" : "Approve with passkey"}
+              </LinkPagePill>
+              <LinkPageLink disabled={busy} onClick={deny}>
+                {submission === "denying" ? "Denying…" : "Deny"}
+              </LinkPageLink>
+            </div>
+          }
+          body={<span className="break-words">{approval.presentation.body}</span>}
+          title={approval.presentation.title}
         >
-          {surfacedError}
+          <LinkPageSheet name={fileName} />
+        </ActionApprovalScreen>
+      )}
+      {/* One region outside the swap, so the result is announced after the progress. */}
+      {busyStatus ? (
+        <p aria-live="polite" className="sr-only" role="status">
+          {busyStatus}
         </p>
       ) : null}
-
-      <div className="mt-7 border-t border-[#c4a882]/25 pt-6">
-        <div
-          aria-busy={busy}
-          className="flex flex-col gap-3 sm:flex-row sm:items-center"
-        >
-          <Button
-            className="w-full sm:w-auto"
-            disabled={busy}
-            onClick={approve}
-            size="lg"
-            type="button"
-          >
-            {primaryLabel}
-          </Button>
-          <Button
-            className="w-full sm:w-auto sm:px-5"
-            disabled={busy}
-            onClick={deny}
-            size="lg"
-            type="button"
-            variant="ghost"
-          >
-            {submission === "denying" ? "Denying…" : "Deny"}
-          </Button>
-        </div>
-
-        {busyStatus ? (
-          <p aria-live="polite" className="sr-only" role="status">
-            {busyStatus}
-          </p>
-        ) : null}
-
-        {returningDecision ? (
-          redirectTo ? (
-            <p className="mt-5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-              Redirecting…{" "}
-              <a className="text-[#5a6e32] underline-offset-4 hover:underline" href={redirectTo}>
-                Return to Murph
-              </a>
-            </p>
-          ) : (
-            <ActionApprovalDecisionFallback decision={returningDecision} />
-          )
-        ) : null}
-      </div>
-    </ActionApprovalScreen>
+    </>
   );
 }
 

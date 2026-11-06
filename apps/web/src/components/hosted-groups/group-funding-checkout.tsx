@@ -27,13 +27,13 @@ import {
   type GroupFundingDialOption,
 } from "./group-funding-dial";
 import {
-  GROUP_FUNDING_PILL_CLASS,
-  GroupFundingError,
-  GroupFundingLink,
-  GroupFundingPill,
-  GroupFundingScreen,
-  GroupFundingTicket,
-} from "./group-usage-funding-shell";
+  LINK_PAGE_PILL_CLASS,
+  LinkPageError,
+  LinkPageLink,
+  LinkPagePill,
+  LinkPageScreen,
+  LinkPageTicket,
+} from "@/src/components/link-page/link-page-shell";
 
 type GroupFundingMode = "monthly" | "one_time";
 type GroupFundingFailure = "not_opened" | "unconfirmed";
@@ -221,8 +221,8 @@ function GroupFundingCapacityConflict({
   onTryAgain?: () => void;
 }) {
   return (
-    <GroupFundingScreen
-      actions={<GroupFundingPill onClick={onTryAgain}>Try again</GroupFundingPill>}
+    <LinkPageScreen
+      actions={<LinkPagePill onClick={onTryAgain}>Try again</LinkPagePill>}
       detail="Try again once the group has used some of it."
       headingRef={headingRef}
       title="The group’s topped up for now."
@@ -396,10 +396,10 @@ function GroupFundingAttemptFailure({
 }) {
   const unconfirmed = failure === "unconfirmed";
   return (
-    <GroupFundingScreen
+    <LinkPageScreen
       actions={
         <>
-          <GroupFundingPill
+          <LinkPagePill
             aria-busy={busy}
             disabled={busy || blockedReason !== null}
             onClick={onRetry}
@@ -412,11 +412,11 @@ function GroupFundingAttemptFailure({
               : busy
                 ? "Opening checkout"
                 : "Try again"}
-          </GroupFundingPill>
+          </LinkPagePill>
           {unconfirmed ? null : (
-            <GroupFundingLink onClick={onChangeAmount}>
+            <LinkPageLink onClick={onChangeAmount}>
               Change amount
-            </GroupFundingLink>
+            </LinkPageLink>
           )}
         </>
       }
@@ -511,25 +511,25 @@ function GroupFundingSelection<Value extends number | string>({
     amount.options.find((option) => option.value === amount.value)
       ?.amountLabel ?? "";
   return (
-    <GroupFundingScreen
+    <LinkPageScreen
       actions={
         <>
-          <GroupFundingPill
+          <LinkPagePill
             aria-busy={busy}
             disabled={!canSubmit || locked}
             onClick={onSubmit}
           >
             {busy ? <Spinner className="size-5" /> : null}
             {readGroupFundingActionLabel({ busy, mode, selectedLabel })}
-          </GroupFundingPill>
+          </LinkPagePill>
           {onModeChange ? (
-            <GroupFundingLink
+            <LinkPageLink
               onClick={() =>
                 onModeChange(mode === "monthly" ? "one_time" : "monthly")
               }
             >
               {MODE_SWITCH_LABELS[mode]}
-            </GroupFundingLink>
+            </LinkPageLink>
           ) : null}
         </>
       }
@@ -546,7 +546,7 @@ function GroupFundingSelection<Value extends number | string>({
         options={amount.options}
         value={amount.value}
       />
-    </GroupFundingScreen>
+    </LinkPageScreen>
   );
 }
 
@@ -713,30 +713,30 @@ function GroupFundingPurchaseStatus({
 }) {
   const busy = operation !== "idle";
   return (
-    <GroupFundingScreen
+    <LinkPageScreen
       actions={
         <>
           {checkoutError ? (
-            <GroupFundingError>{checkoutError}</GroupFundingError>
+            <LinkPageError>{checkoutError}</LinkPageError>
           ) : null}
           {status.next === "messages" ? (
             // Messages has no deep link into an existing group thread, so the
             // group follow-up can only open the app itself.
-            <a className={GROUP_FUNDING_PILL_CLASS} href="sms:">
+            <a className={LINK_PAGE_PILL_CLASS} href="sms:">
               <MessageCircle aria-hidden="true" className="size-5" />
               Open Messages
             </a>
           ) : null}
           {status.next === "start_over" ? (
-            <GroupFundingPill onClick={onStartOver}>Start over</GroupFundingPill>
+            <LinkPagePill onClick={onStartOver}>Start over</LinkPagePill>
           ) : null}
           {actions.canResume ? (
-            <GroupFundingPill disabled={busy} onClick={onResume}>
+            <LinkPagePill disabled={busy} onClick={onResume}>
               Keep going
-            </GroupFundingPill>
+            </LinkPagePill>
           ) : null}
           {actions.canRetry ? (
-            <GroupFundingPill
+            <LinkPagePill
               aria-busy={operation === "opening_checkout"}
               disabled={busy}
               onClick={onRetry}
@@ -744,21 +744,21 @@ function GroupFundingPurchaseStatus({
               {operation === "opening_checkout"
                 ? "Checking payment"
                 : "Retry payment"}
-            </GroupFundingPill>
+            </LinkPagePill>
           ) : null}
           {actions.canCheckAgain ? (
-            <GroupFundingPill disabled={busy} onClick={onCheckAgain}>
+            <LinkPagePill disabled={busy} onClick={onCheckAgain}>
               Check again
-            </GroupFundingPill>
+            </LinkPagePill>
           ) : null}
           {actions.canCancel ? (
-            <GroupFundingLink
+            <LinkPageLink
               aria-busy={operation === "canceling_checkout"}
               disabled={busy}
               onClick={onCancel}
             >
               {operation === "canceling_checkout" ? "Canceling" : cancelLabel}
-            </GroupFundingLink>
+            </LinkPageLink>
           ) : null}
         </>
       }
@@ -766,7 +766,7 @@ function GroupFundingPurchaseStatus({
         status.working ? (
           <Spinner className="mt-[22px] size-6 text-[#EBD18B]" />
         ) : status.next === "messages" ? (
-          <GroupFundingTicket kicker={`For ${groupName}`} title="More Murph" />
+          <LinkPageTicket kicker={`For ${groupName}`} title="More Murph" />
         ) : null
       }
       detail={status.message}

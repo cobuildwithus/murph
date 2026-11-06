@@ -108,7 +108,7 @@ test("records approval without promising that a cancelled request will run", asy
     });
 
     expect(rendered.container.textContent).toContain(
-      "Approval recorded. Murph will continue only if this request is still pending.",
+      "Murph will continue if this request is still open.",
     );
     expect(rendered.container.textContent).not.toContain(
       "Approval saved.",
@@ -149,8 +149,12 @@ test("reports a denied decision truthfully when no return link is available", as
     });
 
     expect(rendered.container.querySelector("[role='status']")?.textContent).toBe("Denied.");
+    expect(rendered.container.textContent).toContain("Denied.");
     expect(rendered.container.textContent).toContain(
-      "Denied. Murph will not continue with this action.",
+      "Murph will not continue with this action.",
+    );
+    expect(rendered.container.textContent).toContain(
+      "Return to the Murph conversation where this request started.",
     );
     expect(rendered.container.textContent).not.toContain("Approval recorded.");
     expect(rendered.container.textContent).not.toContain("Murph will continue");
@@ -198,6 +202,47 @@ test("announces denial before following a valid return link", async () => {
     );
     expect(rendered.container.textContent).not.toContain("Approval recorded.");
     expect(rendered.container.textContent).not.toContain("Murph will continue");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("keeps one status region through the result, outside the busy controls", async () => {
+  let resolveDecision: (value: unknown) => void = () => {};
+  mocks.requestHostedOnboardingJson.mockReturnValueOnce(
+    new Promise((resolve) => {
+      resolveDecision = resolve;
+    }),
+  );
+  const rendered = await renderClientComponent(createElement(ActionApprovalCard, {
+    approval: {
+      approvalId: "approval-test",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      presentation: {
+        body: "Allow the requested action.",
+        title: "Approve action",
+      },
+      returnContactKind: null,
+      status: "pending",
+    },
+  }));
+
+  try {
+    const deny = Array.from(rendered.container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Deny");
+    await act(async () => {
+      deny?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    const status = rendered.container.querySelector("[role='status']");
+    expect(status?.textContent).toBe("Denying…");
+    expect(status?.closest("[aria-busy='true']")).toBeNull();
+
+    await act(async () => {
+      resolveDecision({ redirectTo: null, status: "denied" });
+    });
+
+    expect(status?.isConnected).toBe(true);
+    expect(status?.textContent).toBe("Denied.");
   } finally {
     await rendered.cleanup();
   }

@@ -10,8 +10,8 @@ import {
 } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
 import {
-  GroupFundingSurface,
-} from "@/src/components/hosted-groups/group-usage-funding-shell";
+  LinkPageSurface,
+} from "@/src/components/link-page/link-page-shell";
 import { GroupFundingCheckout } from "@/src/components/hosted-groups/group-funding-checkout";
 import { GroupSponsorshipManagementCard } from "@/src/components/hosted-groups/group-sponsorship-management-card";
 import { MetricCard } from "@/src/components/ui/metric-card";
@@ -1171,7 +1171,7 @@ export function ComponentsContent() {
               data-design-component="group-usage-funding"
               id="group-usage-funding-component"
             >
-              <GroupFundingSurface>
+              <LinkPageSurface>
                 <GroupFundingCheckout
                   checkoutUrl={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/usage-credit/checkout`}
                   groupName="Sunday sleep crew"
@@ -1184,14 +1184,14 @@ export function ComponentsContent() {
                   oneTimeOffers={DESIGN_GROUP_SPONSORSHIP_OFFERS}
                   payerMemberId="design_usage_top_up_payer"
                 />
-              </GroupFundingSurface>
+              </LinkPageSurface>
             </div>
             <div
               data-design-component="group-sponsorship-management"
               id="group-sponsorship-management-component"
               inert
             >
-<GroupFundingSurface>
+<LinkPageSurface>
               <GroupSponsorshipManagementCard
                 periodEndTimeZone="UTC"
                 endpoint={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/sponsorship`}
@@ -1207,7 +1207,7 @@ export function ComponentsContent() {
                   status: "active",
                 }}
               />
-              </GroupFundingSurface>
+              </LinkPageSurface>
             </div>
             <GroupSponsorshipManagementConfirmationStudy />
             <div

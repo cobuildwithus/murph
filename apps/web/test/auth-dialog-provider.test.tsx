@@ -6,6 +6,7 @@ import { renderClientComponent } from "./render-client-component";
 const mocks = vi.hoisted(() => ({
   pathname: "/",
   segment: null as string | null,
+  authPanelProps: null as Record<string, unknown> | null,
   authDialogProps: null as {
     onOpenChange?: (open: boolean) => void;
     description?: string;
@@ -34,6 +35,13 @@ vi.mock("next/navigation", async (importOriginal) => ({
   ...await importOriginal<typeof import("next/navigation")>(),
   usePathname: () => mocks.pathname,
   useSelectedLayoutSegment: () => mocks.segment,
+}));
+
+vi.mock("@/src/components/hosted-onboarding/hosted-first-party-auth-panel", () => ({
+  HostedFirstPartyAuthPanel: (props: Record<string, unknown>) => {
+    mocks.authPanelProps = props;
+    return null;
+  },
 }));
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
@@ -1169,7 +1177,7 @@ test("AuthProvider can re-authenticate an already signed-in page and reload the 
   await rendered.cleanup();
 });
 
-test("ComputerHandoffAuthRequiredState opens the shared auth dialog on mount", async () => {
+test("ComputerHandoffAuthRequiredState keeps sign-in on the page", async () => {
   const { AuthProvider } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"
   );
@@ -1181,11 +1189,20 @@ test("ComputerHandoffAuthRequiredState opens the shared auth dialog on mount", a
     createElement(AuthProvider, {
       authenticated: false,
     }, createElement(ComputerHandoffAuthRequiredState)),
-    { requireButton: false },
+    {
+      location: {
+        href: "https://join.example.test/computer/handoff/token",
+        origin: "https://join.example.test",
+        pathname: "/computer/handoff/token",
+      },
+      requireButton: false,
+    },
   );
 
-  expect(rendered.container.textContent).toContain("Sign in to open this private page");
-  expect(mocks.authDialogProps?.open).toBe(true);
+  expect(rendered.container.textContent).toContain("Sign in to finish this step.");
+  expect(mocks.authPanelProps?.methods).toEqual(["phone"]);
+  expect(mocks.authPanelProps?.requireLaunchConsentOnCompletion).toBe(true);
+  expect(mocks.authDialogProps?.open).toBe(false);
 
   await rendered.cleanup();
 });

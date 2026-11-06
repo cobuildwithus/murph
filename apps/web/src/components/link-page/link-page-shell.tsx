@@ -1,18 +1,18 @@
 import Image from "next/image";
-import type { ComponentProps, ReactNode, Ref } from "react";
+import type { ComponentProps, CSSProperties, ReactNode, Ref } from "react";
 
 import { Button } from "@/src/components/ui/button";
 import { cn } from "@/src/lib/utils";
 
-// The page sits on the app's night ground, the same as a challenge invite link.
-const GROUP_FUNDING_PILL_CLASS =
+// A page Murph links to sits on the app's night ground, like a challenge invite.
+const LINK_PAGE_PILL_CLASS =
   "flex h-14 w-full items-center justify-center gap-2 rounded-full bg-[#FFFCF6] text-[17px] font-semibold text-[#2D3436] transition-[opacity,scale] duration-150 hover:opacity-90 active:scale-[0.98] motion-reduce:transition-none";
 
-function GroupFundingSurface({ children }: { children: ReactNode }) {
+function LinkPageSurface({ children }: { children: ReactNode }) {
   return (
     <div
       className="flex flex-1 flex-col bg-[#1C1915] text-[#FFFCF6]"
-      data-slot="group-funding-surface"
+      data-slot="link-page-surface"
     >
       <div className="mx-auto flex w-full max-w-[26rem] flex-1 flex-col px-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-3 sm:my-auto sm:flex-none sm:py-12">
         <div className="flex h-11 shrink-0 items-center">
@@ -31,19 +31,20 @@ function GroupFundingSurface({ children }: { children: ReactNode }) {
   );
 }
 
-function GroupFundingFrame({ children }: { children: ReactNode }) {
+function LinkPageFrame({ children }: { children: ReactNode }) {
   return (
     <main className="flex min-h-dvh flex-col bg-[#1C1915]">
       {/* The night ground reaches past the page: overscroll and Safari's bars. */}
       <style>{"html,body{background:#1C1915}"}</style>
-      <GroupFundingSurface>{children}</GroupFundingSurface>
+      <LinkPageSurface>{children}</LinkPageSurface>
     </main>
   );
 }
 
 /** One state of the page: its headline, then what it needs, then its actions. */
-function GroupFundingScreen({
+function LinkPageScreen({
   actions,
+  announceDetail = true,
   below,
   children,
   detail,
@@ -52,6 +53,8 @@ function GroupFundingScreen({
   title,
 }: {
   actions?: ReactNode;
+  /** A state's sentence is announced; a fixed description of the page is not. */
+  announceDetail?: boolean;
   /** What belongs with the words, rather than centered in the space below. */
   below?: ReactNode;
   children?: ReactNode;
@@ -61,7 +64,7 @@ function GroupFundingScreen({
   title: string;
 }) {
   return (
-    <section className="flex flex-1 flex-col" data-slot="group-funding-screen">
+    <section className="flex flex-1 flex-col" data-slot="link-page-screen">
       <div className="shrink-0 pt-5">
         <h1
           className="text-balance break-words font-serif text-[40px] font-semibold leading-[44px] tracking-[-0.02em] outline-none"
@@ -74,7 +77,7 @@ function GroupFundingScreen({
           <p
             className="mt-2.5 text-pretty text-base font-medium leading-[22px] text-[#FFFCF6]/60 outline-none"
             ref={detailRef}
-            role="status"
+            role={announceDetail ? "status" : undefined}
             tabIndex={-1}
           >
             {detail}
@@ -92,13 +95,13 @@ function GroupFundingScreen({
   );
 }
 
-function GroupFundingPill({
+function LinkPagePill({
   className,
   ...props
 }: ComponentProps<typeof Button>) {
   return (
     <Button
-      className={cn(GROUP_FUNDING_PILL_CLASS, className)}
+      className={cn(LINK_PAGE_PILL_CLASS, className)}
       size="unstyled"
       type="button"
       variant="unstyled"
@@ -107,7 +110,7 @@ function GroupFundingPill({
   );
 }
 
-function GroupFundingLink({
+function LinkPageLink({
   className,
   ...props
 }: ComponentProps<typeof Button>) {
@@ -126,7 +129,7 @@ function GroupFundingLink({
 }
 
 /** The app's prize ticket: gold, with a quarter circle cut from each corner. */
-function GroupFundingTicket({
+function LinkPageTicket({
   kicker,
   title,
 }: {
@@ -163,7 +166,31 @@ function GroupFundingTicket({
   );
 }
 
-function GroupFundingError({ children }: { children: ReactNode }) {
+/**
+ * The app's theme, turned to night, for shared controls that read theme tokens
+ * rather than the page's own colors, such as the sign-in form.
+ */
+const LINK_PAGE_NIGHT_TOKENS = {
+  "--background": "#1C1915",
+  "--border": "rgba(255, 252, 246, 0.14)",
+  "--card": "#2A2622",
+  "--card-foreground": "#FFFCF6",
+  "--destructive": "#E27B6E",
+  "--foreground": "#FFFCF6",
+  "--input": "rgba(255, 252, 246, 0.14)",
+  "--muted": "#2A2622",
+  "--muted-foreground": "rgba(255, 252, 246, 0.6)",
+  "--popover": "#2A2622",
+  "--popover-foreground": "#FFFCF6",
+  "--primary": "#FFFCF6",
+  "--primary-foreground": "#2D3436",
+  "--ring": "rgba(255, 252, 246, 0.7)",
+  "--secondary": "#2A2622",
+  "--secondary-foreground": "#FFFCF6",
+  "--secondary-hover": "#34302B",
+} as CSSProperties;
+
+function LinkPageError({ children }: { children: ReactNode }) {
   return (
     <p className="pb-2 text-center text-[15px] leading-5 text-[#E27B6E]" role="alert">
       {children}
@@ -172,12 +199,13 @@ function GroupFundingError({ children }: { children: ReactNode }) {
 }
 
 export {
-  GROUP_FUNDING_PILL_CLASS,
-  GroupFundingError,
-  GroupFundingFrame,
-  GroupFundingLink,
-  GroupFundingPill,
-  GroupFundingScreen,
-  GroupFundingSurface,
-  GroupFundingTicket,
+  LINK_PAGE_NIGHT_TOKENS,
+  LINK_PAGE_PILL_CLASS,
+  LinkPageError,
+  LinkPageFrame,
+  LinkPageLink,
+  LinkPagePill,
+  LinkPageScreen,
+  LinkPageSurface,
+  LinkPageTicket,
 };
