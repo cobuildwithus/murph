@@ -3332,6 +3332,120 @@ test("reconciles a fulfilled Settings return without presenting a confirmation",
   }
 });
 
+const CHAT_OPTION = { href: "sms:+15550100001", kind: "text", label: "Messages" } as const;
+
+async function renderChatHandoffReturn(status: string) {
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+    purchaseId: "hucp_chat_handoff00",
+    status,
+  });
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      offers: usageCreditOffers(),
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      purchaseReturn: { kind: "success", purchaseId: "hucp_chat_handoff00" },
+      quietSuccessfulReturn: true,
+      usageAddedContactOption: CHAT_OPTION,
+    }),
+    {
+      location: {
+        href: "https://example.test/settings?usagePurchase=hucp_chat_handoff00&usageCheckout=success",
+      },
+      requireButton: false,
+    },
+  );
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  return rendered;
+}
+
+test("ends a verified purchase on the chat page and refreshes only when it closes", async () => {
+  const rendered = await renderChatHandoffReturn("fulfilled");
+
+  try {
+    const dialog = rendered.container.querySelector('[role="dialog"]');
+    assert.ok(dialog);
+    assert.equal(dialog.classList.contains("h-dvh"), true);
+    assert.equal(rendered.container.querySelector("h2")?.textContent, "Usage added.");
+    assert.match(rendered.container.textContent ?? "", /Murph can keep going\./);
+    assert.ok(rendered.container.querySelector('a[href="sms:+15550100001"]'));
+    assert.match(rendered.container.textContent ?? "", /Open Messages/);
+    // A refresh can unmount the dialog, so the page holds it until it closes.
+    expect(mocks.routerRefresh).not.toHaveBeenCalled();
+
+    await clickButton(rendered.container, rendered.window, "Back to Settings");
+    assert.equal(rendered.container.querySelector('[role="dialog"]'), null);
+    expect(mocks.routerRefresh).toHaveBeenCalledTimes(1);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("shows nothing while a returning purchase is still unconfirmed", async () => {
+  const rendered = await renderChatHandoffReturn("reconciling");
+
+  try {
+    assert.equal(rendered.container.querySelector('[role="dialog"]'), null);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Usage added\./);
+    assert.equal(rendered.container.querySelector('a[href="sms:+15550100001"]'), null);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("offers recovery, never the chat page, when a payment failed", async () => {
+  const rendered = await renderChatHandoffReturn("payment_failed");
+
+  try {
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Usage added\./);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Murph can keep going/);
+    assert.equal(rendered.container.querySelector('a[href="sms:+15550100001"]'), null);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("ends a saved-card purchase on the chat page without leaving Settings", async () => {
+  mocks.requestHostedOnboardingJson.mockImplementation(async (request: {
+    method: string;
+  }) => request.method === "POST"
+    ? { purchaseId: "hucp_saved_card_chat", status: "payment_pending" }
+    : { purchaseId: "hucp_saved_card_chat", status: "fulfilled" });
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      initialOpen: true,
+      offers: usageCreditOffers(),
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      quietSuccessfulReturn: true,
+      usageAddedContactOption: CHAT_OPTION,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    await clickRadio(rendered.container, rendered.window, "usage_1000");
+    await clickButton(rendered.container, rendered.window, "Add usage · $10");
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    assert.equal(rendered.container.querySelector("h2")?.textContent, "Usage added.");
+    assert.ok(rendered.container.querySelector('a[href="sms:+15550100001"]'));
+    expect(mocks.routerRefresh).not.toHaveBeenCalled();
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("keeps an in-place Family saved-card result visible until dismissal", async () => {
   mocks.requestHostedOnboardingJson.mockImplementation(async (request: {
     method: string;

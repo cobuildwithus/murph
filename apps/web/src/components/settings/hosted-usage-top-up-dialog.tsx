@@ -28,7 +28,13 @@ import { RadioGroup } from "@/src/components/ui/radio-group";
 import {
   HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE,
 } from "@/src/lib/hosted-onboarding/usage-credit-capacity-conflict";
-import { LINK_PAGE_NIGHT_TOKENS } from "@/src/components/link-page/link-page-shell";
+import { LinkPageContactPill } from "@/src/components/link-page/link-page-contact";
+import {
+  LINK_PAGE_NIGHT_TOKENS,
+  LinkPageLink,
+  LinkPageTicket,
+} from "@/src/components/link-page/link-page-shell";
+import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import { cn } from "@/src/lib/utils";
 
 import {
@@ -56,6 +62,7 @@ type HostedUsageTopUpSelectionScreen = Extract<
 interface StatusPresentation {
   closeOwnedFulfilledConfirmation: boolean;
   compact: boolean;
+  chatHandoff: boolean;
   fulfilledConfirmation: boolean;
   needsRecovery: boolean;
   quietSuccessfulReturn: boolean;
@@ -112,6 +119,21 @@ function readTriggerLabel(
   return purchaseTriggerLabel ?? props.triggerLabel ?? "Add usage";
 }
 
+function purchaseNeedsRecovery(purchase: HostedUsageTopUpPurchaseScreen | null): boolean {
+  return Boolean(
+    purchase &&
+      (purchase.checkoutError ||
+        purchase.selectionConflict ||
+        purchase.targetConflict ||
+        purchase.status === "expired" ||
+        purchase.status === "payment_failed" ||
+        purchase.poll.kind === "failed" ||
+        (purchase.poll.kind === "exhausted" &&
+          (purchase.status === null ||
+            shouldPollPurchaseStatus(purchase.status)))),
+  );
+}
+
 function readStatusPresentation(input: {
   actions: HostedUsageTopUpPurchaseActions;
   familyTarget: string | null;
@@ -139,9 +161,15 @@ function readStatusPresentation(input: {
     purchase.status === "fulfilled" &&
     !purchase.selectionConflict &&
     !purchase.targetConflict;
+  const needsRecovery = purchaseNeedsRecovery(purchase);
+  // Only a verified purchase with nothing left to resolve ends on this page.
+  const chatHandoff =
+    fulfilledConfirmation && !needsRecovery && Boolean(props.usageAddedContactOption);
   const closeOwnedFulfilledConfirmation =
     fulfilledConfirmation && props.deferTerminalRefreshUntilClose === true;
-  const statusContent = closeOwnedFulfilledConfirmation
+  const statusContent = chatHandoff
+    ? { message: "Murph can keep going.", title: "Usage added." }
+    : closeOwnedFulfilledConfirmation
     ? {
         message:
           props.scope === "family" && props.targetLabel
@@ -152,22 +180,12 @@ function readStatusPresentation(input: {
     : defaultStatusContent;
   const quietSuccessfulReturn =
     props.quietSuccessfulReturn === true &&
+    !chatHandoff &&
     (returnedFromSuccessfulCheckout || fulfilledConfirmation);
-  const needsRecovery = Boolean(
-    purchase &&
-      (purchase.checkoutError ||
-        purchase.selectionConflict ||
-        purchase.targetConflict ||
-        purchase.status === "expired" ||
-        purchase.status === "payment_failed" ||
-        purchase.poll.kind === "failed" ||
-        (purchase.poll.kind === "exhausted" &&
-          (purchase.status === null ||
-            shouldPollPurchaseStatus(purchase.status)))),
-  );
   return {
+    chatHandoff,
     closeOwnedFulfilledConfirmation,
-    compact: needsRecovery || closeOwnedFulfilledConfirmation,
+    compact: needsRecovery || (closeOwnedFulfilledConfirmation && !chatHandoff),
     fulfilledConfirmation,
     needsRecovery,
     quietSuccessfulReturn,
@@ -202,8 +220,10 @@ function readDialogHeader(input: {
   purchase: HostedUsageTopUpPurchaseScreen | null;
   selectionPresentation: SelectionPresentation;
   statusContent: StatusPresentation["statusContent"];
+  chatHandoff: boolean;
 }): DialogHeaderPresentation {
   const {
+    chatHandoff,
     compactStatusPresentation,
     familyTarget,
     props,
@@ -211,6 +231,10 @@ function readDialogHeader(input: {
     selectionPresentation,
     statusContent,
   } = input;
+  if (chatHandoff && statusContent) {
+    return { description: statusContent.message, title: statusContent.title };
+  }
+
   let title: string;
   if (statusContent) {
     title = `${statusContent.title}${familyTarget && !purchase?.targetConflict ? ` for ${familyTarget}` : ""}`;
@@ -404,6 +428,27 @@ function CloseScreenContent({
       >
         Close
       </Button>
+    </div>
+  );
+}
+
+/** The end of a verified purchase: back to the chat, or back to Settings. */
+function HostedUsageAddedHandoff({
+  contactOption,
+  onClose,
+}: {
+  contactOption: MurphContactOption;
+  onClose?: () => void;
+}) {
+  return (
+    <div className="flex min-h-[calc(100dvh-14rem)] flex-col" data-slot="usage-added-handoff">
+      <div className="flex flex-1 flex-col justify-center">
+        <LinkPageTicket className="mt-0" kicker="Added to your account" title="More Murph" />
+      </div>
+      <div className="flex shrink-0 flex-col items-center gap-1">
+        <LinkPageContactPill option={contactOption} />
+        <LinkPageLink onClick={onClose}>Back to Settings</LinkPageLink>
+      </div>
     </div>
   );
 }
@@ -680,6 +725,14 @@ function ScreenContent({
   selectionPresentation,
   statusPresentation,
 }: ScreenContentProps) {
+  if (statusPresentation.chatHandoff && props.usageAddedContactOption) {
+    return (
+      <HostedUsageAddedHandoff
+        contactOption={props.usageAddedContactOption}
+        onClose={onClose}
+      />
+    );
+  }
   if (purchase && statusPresentation.statusContent) {
     return (
       <PurchaseScreenContent
@@ -745,6 +798,8 @@ function HostedUsageTopUpSurface({
   titleRef,
   triggerLabel,
 }: SurfaceProps) {
+  const linkPage = props.linkPage || statusPresentation.chatHandoff;
+
   return (
     <>
       {props.quietSuccessfulReturn ? (
@@ -788,9 +843,9 @@ function HostedUsageTopUpSurface({
           className={cn(
             "max-h-[calc(100dvh-2rem)] gap-7 overflow-y-auto border border-border bg-popover p-6 sm:max-w-xl sm:p-8",
             statusPresentation.compact && "sm:max-w-md",
-            props.linkPage && USAGE_LINK_PAGE_CLASS,
+            linkPage && USAGE_LINK_PAGE_CLASS,
           )}
-          style={props.linkPage ? LINK_PAGE_NIGHT_TOKENS : undefined}
+          style={linkPage ? LINK_PAGE_NIGHT_TOKENS : undefined}
           initialFocus={titleRef}
         >
           <DialogHeader className="pr-10">
@@ -799,7 +854,7 @@ function HostedUsageTopUpSurface({
               tabIndex={-1}
               className={cn(
                 "text-3xl font-semibold leading-[1.1] tracking-tight outline-none",
-                props.linkPage && "text-[40px] leading-[44px] tracking-[-0.02em]",
+                linkPage && "text-[40px] leading-[44px] tracking-[-0.02em]",
               )}
             >
               {header.title}
@@ -821,7 +876,11 @@ function HostedUsageTopUpSurface({
   );
 }
 
-function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
+function HostedUsageTopUpDialog(dialogProps: HostedUsageTopUpDialogProps) {
+  // A refresh can unmount this dialog, so it waits until the handoff page closes.
+  const props = dialogProps.usageAddedContactOption
+    ? { ...dialogProps, deferTerminalRefreshUntilClose: true }
+    : dialogProps;
   const controller = useHostedUsageTopUpDialog(props);
   const { screen } = controller.state;
   const scrollContentRef = useRef<HTMLDivElement>(null);
@@ -916,18 +975,21 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
     if (
       props.quietSuccessfulReturn === true &&
       controller.state.open &&
-      statusPresentation.fulfilledConfirmation
+      statusPresentation.fulfilledConfirmation &&
+      !statusPresentation.chatHandoff
     ) {
       controller.handleOpenChange(false);
     }
   }, [
     controller,
     props.quietSuccessfulReturn,
+    statusPresentation.chatHandoff,
     statusPresentation.fulfilledConfirmation,
   ]);
 
   const selectionPresentation = readSelectionPresentation(selection);
   const header = readDialogHeader({
+    chatHandoff: statusPresentation.chatHandoff,
     compactStatusPresentation: statusPresentation.compact,
     familyTarget,
     props,
@@ -996,7 +1058,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
   return <HostedUsageTopUpSurface {...surfaceProps} />;
 }
 
-export { HostedUsageTopUpDialog };
+export { HostedUsageAddedHandoff, HostedUsageTopUpDialog };
 export type {
   HostedUsageTopUpActivePurchase,
   HostedUsageTopUpDialogProps,

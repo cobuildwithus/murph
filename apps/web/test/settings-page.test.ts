@@ -1201,6 +1201,17 @@ test("SettingsPage reads the app session and persisted account settings into the
         telegram: true,
         text: true,
       },
+      murphEmailAddress: null,
+      murphPhoneNumber: "+15550100001",
+      preferredKind: "text",
+      userEmailAddress: "verified@example.com",
+    });
+    expect(mocks.resolveMurphContactOptions).toHaveBeenNthCalledWith(3, {
+      contactChannels: {
+        email: false,
+        telegram: true,
+        text: true,
+      },
       message: {
         body: "Hey Murph, what referral options can I choose from?",
       },

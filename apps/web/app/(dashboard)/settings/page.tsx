@@ -277,6 +277,7 @@ function renderAuthenticatedSettingsPage(input: {
   });
   const {
     murphPhoneNumber,
+    usageAddedContactOption,
     usageMissionContactOption,
     visibleUsageActivity,
     voiceTestContactOption,
@@ -342,6 +343,7 @@ function renderAuthenticatedSettingsPage(input: {
           payerMemberId={authenticatedMember?.id}
           scheduledBillingEffectiveAt={billingRef?.scheduledBillingEffectiveAt}
           scheduledBillingPlanCode={billingRef?.scheduledBillingPlanCode}
+          usageAddedContactOption={usageAddedContactOption}
           usageRecoveryInitialOpen={usageRecoveryPresentationOpen}
           usageStatus={usageStatus}
           usageTopUpActivePurchase={billingUsageTopUpActivePurchase}
@@ -541,6 +543,7 @@ function resolveSettingsAccountPresentation(input: {
     resolvedVoiceTestOption && resolvedVoiceTestOption.kind !== "email"
       ? resolvedVoiceTestOption
       : null;
+  const usageAddedContactOption = readUsageAddedContactOption(account, routing);
   const usageMissionContactOption =
     usageActivity?.missionsEnabled === true && account
       ? resolveMurphContactOptions({
@@ -573,10 +576,32 @@ function resolveSettingsAccountPresentation(input: {
 
   return {
     murphPhoneNumber,
+    usageAddedContactOption,
     usageMissionContactOption,
     visibleUsageActivity,
     voiceTestContactOption,
   };
+}
+
+/** The way back to the chat once a usage purchase is verified. */
+function readUsageAddedContactOption(
+  account: Parameters<typeof resolveSettingsAccountPresentation>[0]["account"],
+  routing: Parameters<typeof resolveSettingsAccountPresentation>[0]["routing"],
+) {
+  if (!account) {
+    return null;
+  }
+  return resolveMurphContactOptions({
+    contactChannels: {
+      email: Boolean(account.email.murphEmailAddress),
+      telegram: Boolean(account.telegram.telegramUserId),
+      text: Boolean(account.phone.number),
+    },
+    murphEmailAddress: account.email.murphEmailAddress ?? null,
+    murphPhoneNumber: routing?.linqRecipientPhone ?? null,
+    preferredKind: "text",
+    userEmailAddress: account.email.address,
+  })[0] ?? null;
 }
 
 function resolveSettingsBillingPresentation(input: {
