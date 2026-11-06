@@ -102,19 +102,6 @@ export function buildAssistantOutboxIntentMirrorState(input: {
   }
 }
 
-export function errorImpliesAssistantDeliveryMayHaveSucceeded(error: unknown): boolean {
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'deliveryMayHaveSucceeded' in error &&
-    typeof (error as { deliveryMayHaveSucceeded?: unknown }).deliveryMayHaveSucceeded === 'boolean'
-  ) {
-    return (error as { deliveryMayHaveSucceeded: boolean }).deliveryMayHaveSucceeded
-  }
-
-  return normalizeAssistantDeliveryError(error).code === 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING'
-}
-
 export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(input: {
   completedAt: string
   delivery: AssistantChannelDelivery
@@ -657,7 +644,7 @@ function isAmbiguousDeliveryWithoutProviderIds(input: {
     isTelegramAmbiguousDeliveryWithoutProviderIds(input) ||
     isLinqMessageReactionAmbiguityWithoutProviderIds(input) ||
     isLinqPartialDeliveryWithoutProviderIds(input) ||
-    isEmailGroupFanoutAmbiguityWithoutProviderIds(input)
+    isEmailAmbiguityWithoutProviderIds(input)
 }
 
 function isLinqIMessageAppCardAmbiguityWithoutProviderIds(input: {
@@ -734,7 +721,7 @@ function isLinqAttachmentReservationAmbiguity(input: {
     )
 }
 
-function isEmailGroupFanoutAmbiguityWithoutProviderIds(input: {
+function isEmailAmbiguityWithoutProviderIds(input: {
   deliveryMayHaveSucceeded: boolean
   error: unknown
   sending: AssistantOutboxIntent
@@ -750,7 +737,7 @@ function isEmailGroupFanoutAmbiguityWithoutProviderIds(input: {
     readNonEmptyString(context?.code) ??
     null
 
-  return code === 'ASSISTANT_EMAIL_GROUP_FANOUT_INCOMPLETE'
+  return code === 'ASSISTANT_DELIVERY_AMBIGUOUS' || code === 'ASSISTANT_EMAIL_GROUP_FANOUT_INCOMPLETE'
 }
 
 function isAssistantOutboxAuthoritySuperseded(input: {

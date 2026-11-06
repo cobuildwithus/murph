@@ -86,6 +86,8 @@ import {
   deliverAssistantOutboxMessage,
   listAssistantOutboxIntentsForAutoReplyRoute,
   listAssistantOutboxIntentsLocal,
+  markAssistantOutboxMessageVolumeReceiptRecorded,
+  rescheduleAssistantOutboxMessageVolumeReceipt,
   readAssistantOutboxIntentMirrorState,
   readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
@@ -96,6 +98,7 @@ import {
   pruneAssistantTerminalOutboxIntents,
 } from '../src/assistant/outbox/store.ts'
 import { createAssistantAutoReplyHistoryReader } from '../src/assistant/automation/reply.ts'
+import { markAssistantOutboxIntentSent, rescheduleAssistantOutboxConfirmationRetry } from '../src/assistant/outbox/dispatch-state.ts'
 import { withAssistantRuntimeWriteLock } from '../src/assistant/runtime-write-lock.ts'
 import {
   buildAssistantCronNotificationDedupeToken,
@@ -3915,6 +3918,75 @@ describe('assistant outbox runtime', () => {
       sessionId: generatedDelivery.sessionId,
       transcriptEntries: [],
     })).toBe(false)
+  })
+
+  it.each([undefined, null, '2026-09-04T12:00:01.000Z'])(
+    'preserves confirmation deadlines and receipt marker semantics (%s)', async (marker) => {
+      const { vaultRoot } = await createAssistantVault('message-volume-confirmation-')
+      const seed = await createIntent(vaultRoot, { channel: 'email' })
+      const deadline = '2026-09-04T12:00:30.000Z'
+      const current = await saveAssistantOutboxIntent(vaultRoot, {
+        ...seed, status: 'retryable', deliveryConfirmationPending: true,
+        delivery: createDelivery({ channel: 'email' }), nextAttemptAt: deadline,
+        ...(marker === undefined ? {} : { messageVolumeReceiptRecordedAt: marker }),
+      })
+      expect(current.messageVolumeReceiptRecordedAt).toBe(marker)
+      const rescheduled = await rescheduleAssistantOutboxMessageVolumeReceipt({
+        vault: vaultRoot, intentId: seed.intentId, dedupeKey: seed.dedupeKey,
+        nextAttemptAt: '2026-09-04T12:01:00.000Z',
+      })
+      expect(rescheduled).toEqual(current)
+      const recorded = await markAssistantOutboxMessageVolumeReceiptRecorded({
+        vault: vaultRoot, intentId: seed.intentId, dedupeKey: seed.dedupeKey,
+        channel: 'email', recordedAt: '2026-09-04T12:00:02.000Z',
+      })
+      expect(recorded?.nextAttemptAt).toBe(deadline)
+      expect(recorded?.messageVolumeReceiptRecordedAt).toBe(marker === null ? '2026-09-04T12:00:02.000Z' : marker)
+    },
+  )
+
+  it.each([undefined, null, '2026-09-04T12:00:01.000Z'])(
+    'uses the ordinary accounting clock after settlement (%s)', async (marker) => {
+      const { vaultRoot } = await createAssistantVault('message-volume-settled-')
+      const seed = await createIntent(vaultRoot, { channel: 'email' })
+      const current = await saveAssistantOutboxIntent(vaultRoot, {
+        ...seed, status: 'sent', delivery: createDelivery({ channel: 'email' }),
+        ...(marker === undefined ? {} : { messageVolumeReceiptRecordedAt: marker }),
+      })
+      const retryAt = '2026-09-04T12:01:00.000Z'
+      const retry = await rescheduleAssistantOutboxMessageVolumeReceipt({
+        vault: vaultRoot, intentId: seed.intentId, dedupeKey: seed.dedupeKey, nextAttemptAt: retryAt,
+      })
+      expect(retry?.nextAttemptAt).toBe(marker === null ? retryAt : current.nextAttemptAt)
+      const recorded = await markAssistantOutboxMessageVolumeReceiptRecorded({
+        vault: vaultRoot, intentId: seed.intentId, dedupeKey: seed.dedupeKey,
+        channel: 'email', recordedAt: '2026-09-04T12:00:02.000Z',
+      })
+      expect(recorded?.nextAttemptAt).toBe(marker === null ? null : current.nextAttemptAt)
+      expect(recorded?.messageVolumeReceiptRecordedAt).toBe(marker === null ? '2026-09-04T12:00:02.000Z' : marker)
+    },
+  )
+
+  it('rereads a recorded marker when stale confirmation work reschedules and settles', async () => {
+    const { paths, vaultRoot } = await createAssistantVault('message-volume-stale-confirmation-')
+    const seed = await createIntent(vaultRoot, { channel: 'email' })
+    const delivery = createDelivery({ channel: 'email' })
+    const stale = await saveAssistantOutboxIntent(vaultRoot, {
+      ...seed, status: 'retryable', deliveryConfirmationPending: true,
+      delivery, nextAttemptAt: '2026-09-04T12:00:30.000Z', messageVolumeReceiptRecordedAt: null,
+    })
+    const intentPath = path.join(paths.outboxDirectory, `${seed.intentId}.json`)
+    const recordedAt = '2026-09-04T12:00:02.000Z'
+    await markAssistantOutboxMessageVolumeReceiptRecorded({
+      vault: vaultRoot, intentId: seed.intentId, dedupeKey: seed.dedupeKey, channel: 'email', recordedAt,
+    })
+    const retry = await rescheduleAssistantOutboxConfirmationRetry({
+      sending: stale, intentPath, vault: vaultRoot,
+      error: { code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING', message: 'Synthetic confirmation failure' },
+    })
+    expect(retry.messageVolumeReceiptRecordedAt).toBe(recordedAt)
+    const sent = await markAssistantOutboxIntentSent({ intent: stale, intentPath, vault: vaultRoot, delivery })
+    expect(sent).toMatchObject({ status: 'sent', messageVolumeReceiptRecordedAt: recordedAt, nextAttemptAt: null })
   })
 
   it('retains pending message-volume receipts until acknowledgement, then restores ordinary pruning', async () => {

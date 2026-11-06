@@ -3290,6 +3290,45 @@ describe("handleRunnerOutboundRequest", () => {
     expect(emailSendMock).not.toHaveBeenCalled();
   });
 
+  it.each(["unavailable", "unauthorized"] as const)("keeps an %s email owner check outside provider entry", async (owner) => {
+    const emailSendMock = vi.fn(async (_message: unknown) => undefined);
+    if (owner === "unavailable") {
+      vi.mocked(runtimeOwnerClient.commandHostedRuntimeOwner).mockRejectedValueOnce(new Error("Synthetic owner command unavailable"));
+    } else {
+      vi.mocked(runtimeOwnerClient.commandHostedRuntimeOwner).mockResolvedValueOnce({ cutover: "postgres", status: "stale", owner: null });
+    }
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://results.worker/send", {
+        body: JSON.stringify({
+          message: "hello",
+          target: "member@example.test",
+          targetKind: "explicit",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_EMAIL: { send: emailSendMock },
+        HOSTED_EMAIL_DOMAIN: "mail.example.test",
+        HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
+        HOSTED_EMAIL_SIGNING_SECRET: "fixture-signing-key",
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(owner === "unavailable" ? 503 : 401);
+    await expect(response.json()).resolves.toEqual({
+      code: owner === "unavailable" ? "ASSISTANT_EMAIL_PROVIDER_ENTRY_FAILED" : "ASSISTANT_EMAIL_PROVIDER_AUTHORITY_REJECTED",
+      deliveryMayHaveSucceeded: false,
+      error: owner === "unavailable" ? "Hosted email delivery failed before provider entry." : "Hosted email provider authority was rejected.",
+      retryable: true,
+    });
+    expect(runtimeOwnerClient.commandHostedRuntimeOwner).toHaveBeenCalledOnce();
+    expect(runtimeOwnerClient.commandHostedRuntimeOwner).toHaveBeenCalledWith(expect.objectContaining({ command: expect.objectContaining({ operation: "authorize_effect" }) }));
+    expect(emailSendMock).not.toHaveBeenCalled();
+  });
+
   it("authorizes thread reply email sends that carry legacy identityId and timeoutMs fields", async () => {
     // Incident regression: hosted email replies (targetKind "thread") from
     // older runner bundles carried the privacy-blinded binding identity as

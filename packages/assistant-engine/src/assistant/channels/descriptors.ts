@@ -32,7 +32,10 @@ import {
   readDeliveredTargetKind,
   readDeliveredTargetMessageId,
 } from './helpers.js'
-import { createAssistantDeliveryConfirmationPendingError } from '../outbox/retry-policy.js'
+import {
+  createAssistantDeliveryConfirmationPendingError,
+  errorImpliesAssistantDeliveryMayHaveSucceeded,
+} from '../outbox/retry-policy.js'
 import {
   sendLinqMessage,
   setLinqMessageReaction,
@@ -303,7 +306,7 @@ async function sendTelegramVoiceMemoDelivery(input: {
   const text = messageTextOrNull(input.message)
   const fallbackText = messageTextOrNull(voiceMemo.transcript ?? '')
   const voiceMemoRuntimeDependencies = {
-    ...(input.dependencies.telegramVoiceMemoRuntime ?? {}),
+    ...input.dependencies.telegramVoiceMemoRuntime,
     ...(input.dependencies.signal ? { signal: input.dependencies.signal } : {}),
   }
   let preparedVoiceMemo: Awaited<ReturnType<typeof prepareTelegramVoiceMemoMessage>>
@@ -386,6 +389,7 @@ async function sendTelegramVoiceMemoDelivery(input: {
       voiceMemoRuntimeDependencies,
     )
   } catch (error) {
+    let deliveryError = error
     if (fallbackText) {
       try {
         const deliveredFallback = await sendTelegramTextDelivery({
@@ -406,13 +410,16 @@ async function sendTelegramVoiceMemoDelivery(input: {
           fallbackTargetKind: input.candidate.kind,
           providerMessageIds,
         })
-      } catch {
-        // Preserve the existing partial-delivery owner when accepted text is
-        // the only effect we can prove.
+      } catch (fallbackError) {
+        // An uncertain fallback must block a resend even without accepted text.
+        // Accepted companion text retains the existing partial-delivery owner.
+        if (errorImpliesAssistantDeliveryMayHaveSucceeded(fallbackError)) {
+          deliveryError = fallbackError
+        }
       }
     }
     if (!text) {
-      throw error
+      throw deliveryError
     }
     throw createTelegramVoiceMemoPartialDeliveryFailure({
       cleanupTargetAliases: [...cleanupTargetAliases],

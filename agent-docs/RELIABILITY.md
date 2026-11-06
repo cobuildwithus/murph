@@ -3702,7 +3702,9 @@ Current product admission, delivery and native runtime safety rules remain.
 
 Optional private follow-ups register under required outbox terminal confirmation.
 A failed canonical write retries confirmation without repeating the source send;
-source-key lookup under the registry lock prevents duplicate or resurrected work.
+the hosted drain selects and wakes that confirmation retry, including after the
+channel is later disabled. Source-key lookup under the registry lock prevents
+duplicate or resurrected work.
 Live finite children protect source dispatch evidence from terminal retention.
 Before the first transport attempt, a changed accepted-input cursor fails the
 unsent child intent and leaves its occurrence retryable. Existing failed-intent
