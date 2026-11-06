@@ -21,6 +21,9 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMa
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murph_test(?:_[a-z0-9_]+)?$/u.test(process.env.DATABASE_URL ?? "")) throw new Error("Game roster proof requires its isolated local test database.");
 
+// The drain's missed-day sweep parses these on the minute a room's shard comes up.
+const storedTerms = { v: 1, versions: [{ fromDay: 0, n: 1, schedule: { count: 7 }, stakes: [] }] };
+
 describe.skipIf(!enabled)("game roster leases and pointer recovery on migrated PostgreSQL", () => {
   const db = getPrisma();
   let room: string, a: string, b: string, game: string, chat: string, lineKey: string, line: string;
@@ -56,7 +59,7 @@ describe.skipIf(!enabled)("game roster leases and pointer recovery on migrated P
   });
   async function pointer(group = false, consumed = false) {
     await db.game.create({ data: { id: game, maxPlayers: group ? 10 : 2, status: "live", createdBy: a, wordsOwnerMemberId: a,
-      chatContainerMemberId: room, terms: { v: 1, versions: [] }, termsWordsEncrypted: "synthetic",
+      chatContainerMemberId: room, terms: storedTerms, termsWordsEncrypted: "synthetic",
       audienceKey: group ? gameAudienceKeys(phones.map(value => ({ kind: "phone", value }))).current : null,
       invitees: { create: { seat: 1, memberId: b } },
       players: { create: [a, b].map((memberId, seat) => ({ memberId, seat, joinedAt: now, timeZone: "UTC" })) } } });
@@ -103,7 +106,7 @@ describe.skipIf(!enabled)("game roster leases and pointer recovery on migrated P
   });
   it("keeps bootstrap participant creation separate from roster reconciliation through route attachment", async () => {
     await db.game.create({ data: { id: game, status: "live", createdBy: a, wordsOwnerMemberId: a,
-      terms: { v: 1, versions: [] }, termsWordsEncrypted: "synthetic",
+      terms: storedTerms, termsWordsEncrypted: "synthetic",
       players: { create: [a, b].map((memberId, seat) => ({ memberId, seat, joinedAt: now, timeZone: "UTC" })) } } });
     const eventId = gameChatLifecycleEventId(game, "started");
     await reserveGameChatLifecycleTx({ gameId: game, kind: "started", now, tx: db });
