@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import { addBodyMeasurement, addMeasurement, addMeal, buildBodyMeasurementEventDraft, deleteEvent, initializeVault, runMealPhotoMaintenance } from "@murphai/core";
-import { publishHostedWorkspaceMediaReferences, publishHostedWorkspaceMediaReferencesForSnapshot, readHostedMediaReferenceCatalogue, releaseHostedPhotoIntents } from "../src/hosted-runtime/media-references.ts";
+import { publishHostedWorkspaceMediaReferences, publishHostedWorkspaceMediaReferencesForSnapshot, readHostedMediaReferenceCatalogue, writeHostedMediaReferenceCatalogue, releaseHostedPhotoIntents } from "../src/hosted-runtime/media-references.ts";
+import { HOSTED_MEDIA_REFS_SCHEMA } from "@murphai/runtime-state/node";
 import { createHostedMealMediaBudget, runHostedMealMediaMaintenance } from "../src/hosted-runtime/meal-media-maintenance.ts";
 import { createMealMediaStore, mediaFailure } from "./hosted-meal-media.harness.ts";
 
@@ -150,4 +152,21 @@ test("expired meals never create full-photo intents; measurement deletion preser
   await deleteEvent({ vaultRoot: measurement.vaultRoot, eventId: measurement.ids[0]! });
   expect(await measurement.pass()).toMatchObject({ uploaded: 1, retired: 0 });
   expect((await measurement.publish()).excludedVaultPaths).toContain(measurement.paths[0]);
+});
+
+test("a photo leaves the archive only with explicit proof of delivery", async () => {
+  const seeded = await fixture("meal");
+  const relativePath = seeded.paths[0]!;
+  const bytes = await readFile(path.join(seeded.vaultRoot, relativePath));
+  const entry = { relativePath, mediaId: "e".repeat(64), mediaKind: "image" as const, mimeType: "image/png", byteSize: bytes.length,
+    sha256: createHash("sha256").update(bytes).digest("hex"), recordedAt: captured, expiresAt: null };
+  const excluded = async (extra: { pendingUpload?: boolean }) => {
+    await writeHostedMediaReferenceCatalogue({ vaultRoot: seeded.vaultRoot,
+      catalogue: { schema: HOSTED_MEDIA_REFS_SCHEMA, entries: [{ ...entry, ...extra }] } });
+    return (await seeded.publish()).excludedVaultPaths;
+  };
+  // Absent is the legacy "do not bulk upload" meaning, never proof the store has it.
+  expect(await excluded({})).not.toContain(relativePath);
+  expect(await excluded({ pendingUpload: true })).not.toContain(relativePath);
+  expect(await excluded({ pendingUpload: false })).toContain(relativePath);
 });

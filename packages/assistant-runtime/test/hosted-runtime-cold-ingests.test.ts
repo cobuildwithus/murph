@@ -320,7 +320,7 @@ test("cold catalogue survives restore, media merge, checkpoint and another resto
       attachments: [{ role: "media_1", sourcePath: photoPath }] });
     for (const attachment of [meal.photo!, measurement.event.attachments![0]!]) {
       const bytes = await readFile(path.join(source, attachment.relativePath));
-      catalogue.entries.push({ relativePath: attachment.relativePath, mediaKind: "image",
+      catalogue.entries.push({ relativePath: attachment.relativePath, mediaKind: "image", pendingUpload: false,
         mediaId: createHash("sha256").update(attachment.relativePath).digest("hex"),
         sha256: createHash("sha256").update(bytes).digest("hex"), byteSize: bytes.length,
         mimeType: "image/jpeg", recordedAt: entry.recordedAt, expiresAt: null });

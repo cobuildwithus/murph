@@ -161,7 +161,7 @@ export async function publishHostedWorkspaceMediaReferencesForSnapshot(input: {
 
   const excludedVaultPaths: string[] = [];
   for (const entry of entries) {
-    if (entry.pendingUpload !== true && await hostedMediaReferenceDenialReason(input.vaultRoot, entry) === null) {
+    if (hostedMediaReferenceIsSettled(entry) && await hostedMediaReferenceDenialReason(input.vaultRoot, entry) === null) {
       excludedVaultPaths.push(entry.relativePath);
     }
   }
@@ -434,6 +434,12 @@ export async function materializeHostedWorkspaceMediaReferences(input: {
 
 function isHostedCanonicalPhotoPath(relativePath: string): boolean {
   return relativePath.startsWith("raw/meals/") || relativePath.startsWith("raw/measurements/");
+}
+
+// Leaving the archive makes the store the only copy. A photo needs positive proof
+// of delivery: an absent marker only means "do not bulk upload this legacy entry".
+function hostedMediaReferenceIsSettled(entry: HostedMediaReference): boolean {
+  return isHostedCanonicalPhotoPath(entry.relativePath) ? entry.pendingUpload === false : entry.pendingUpload !== true;
 }
 
 async function hostedMediaReferenceDenialReason(vaultRoot: string, entry: HostedMediaReference): Promise<AssistantWorkspaceArtifactUnavailableReason | null> {
