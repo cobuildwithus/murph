@@ -3,10 +3,12 @@ import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
-import { promises as fs } from "node:fs";
+import nodeFs, { promises as fs } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { brotliDecompressSync, crc32, deflateRawSync, gunzipSync, gzipSync } from "node:zlib";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 
 import type { IntegrationIngestRecord } from "@murphai/contracts";
 
@@ -2267,4 +2269,30 @@ test("large active ingest shards compress losslessly and remain writable and rep
     assert.deepEqual(await fs.readFile(path.join(vaultRoot, logicalPath)), original);
     assert.deepEqual(await fs.readFile(path.join(vaultRoot, `${logicalPath}.br`)), archiveAfterImport);
   } finally { await fs.rm(vaultRoot, { recursive: true, force: true }); }
+});
+
+test("an archive read failure stays operational instead of reporting corruption", async () => {
+  const vaultRoot = await makeTempDirectory("murph-ingest-archive-read-failure");
+  const logicalPath = "ledger/integration-ingests/2025/2025-10.jsonl";
+  const readFailure = Object.assign(new Error("Synthetic archive read failure."), {
+    code: "EIO",
+    errno: -5,
+    syscall: "read",
+  });
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+  await writeIntegrationIngestGzipArchiveText(vaultRoot, logicalPath, "{}\n");
+  const realCreateReadStream = nodeFs.createReadStream;
+  const createReadStream = vi.spyOn(nodeFs, "createReadStream").mockImplementation(
+    ((...args: Parameters<typeof nodeFs.createReadStream>) =>
+      String(args[0]).endsWith(`${logicalPath}.gz`)
+        ? new Readable({ read() { this.destroy(readFailure); } })
+        : realCreateReadStream(...args)) as typeof nodeFs.createReadStream,
+  );
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(readIntegrationIngestEntries(vaultRoot), (error) => error === readFailure);
+  } finally {
+    createReadStream.mockRestore();
+    syncBuiltinESMExports();
+  }
 });

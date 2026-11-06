@@ -115,6 +115,20 @@ export class IMessageMiniAppService {
     );
   }
 
+  async assertCredentialCurrentTx(
+    credential: HostedAgentSessionRecord,
+    tx: Pick<Prisma.TransactionClient, "deviceAgentSession">,
+  ): Promise<void> {
+    const now = new Date();
+    const updated = await tx.deviceAgentSession.updateMany({
+      where: { id: credential.id, userId: credential.userId,
+        tokenHash: hashIMessageMiniAppBearerToken(this.requireBearerToken()),
+        revokedAt: null, expiresAt: { gt: now } },
+      data: { lastSeenAt: now },
+    });
+    if (updated.count !== 1) throw invalidIMessageMiniAppAuthorization();
+  }
+
   private requireBearerToken(): string {
     const token = this.readBearerToken();
 

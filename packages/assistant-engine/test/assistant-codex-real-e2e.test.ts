@@ -1,3 +1,5 @@
+import { HOSTED_MEDIA_REFS_SCHEMA, resolveHostedMediaReferenceCataloguePath } from '@murphai/runtime-state/node'
+import { MURPH_MATERIALIZE_VAULT_MEDIA_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.ts'
 import { REMINDER_LANGUAGE_CASES, runReminderLanguageJourney } from './support/reminder-language-journey.js'
 import { listCanonicalWriteEvidence, readCanonicalAuditRecords } from './canonical-audit-test-helpers.js'
 import { GAME_CHAT_SETUP_SCENARIOS, SETUP_PLAYERS, SETUP_TERMS } from './support/game-chat-setup-scenarios.js'
@@ -6105,10 +6107,11 @@ describe('real Codex live fixture contracts', () => {
 
 describeRealCodex('real Codex personal archive e2e', () => {
   it.each([
-    { name: 'an original-file workspace ZIP', includeRuntime: false, explicitRuntime: false },
-    { name: 'a full workspace ZIP including member runtime files', includeRuntime: true, explicitRuntime: true },
-    { name: 'a complete workspace ZIP from a general backup request', includeRuntime: true, explicitRuntime: false },
-  ])('prepares $name without relocating source files', async ({ includeRuntime, explicitRuntime }) => {
+    { name: 'an original-file workspace ZIP', includeRuntime: false, explicitRuntime: false, unavailablePhoto: false },
+    { name: 'a full workspace ZIP including member runtime files', includeRuntime: true, explicitRuntime: true, unavailablePhoto: false },
+    { name: 'a complete workspace ZIP from a general backup request', includeRuntime: true, explicitRuntime: false, unavailablePhoto: false },
+    { name: 'a disclosed incomplete workspace ZIP', includeRuntime: true, explicitRuntime: false, unavailablePhoto: true },
+  ])('prepares $name without relocating source files', async ({ includeRuntime, explicitRuntime, unavailablePhoto }) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-personal-archive-e2e-'))
     const originals: Record<string, string | Buffer> = {
@@ -6129,6 +6132,14 @@ describeRealCodex('real Codex personal archive e2e', () => {
       'AGENTS.md': '# Synthetic workspace\nNo additional instructions.\n',
       '.runtime/operations/device-sync/fixture.bin': Buffer.from([0, 255, 17, 128, 0]),
     } : {}
+    const hostedFiles: Record<string, Buffer> = {
+      'raw/inbox/old/saved-photo.png': Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==', 'base64'),
+      'ledger/integration-ingests/2025/2025-01.jsonl.br': brotliCompressSync(Buffer.from('{"source":"synthetic","records":[]}\n')),
+    }
+    const unavailableRef = 'raw/inbox/old/unverified-photo.png'
+    if (unavailablePhoto) originals[unavailableRef] = Buffer.from('synthetic unverified local bytes')
+    const materializeCalls: (readonly string[])[] = []
+    const restoredRefs: string[] = []
     const requestedRefs: string[] = []
     let approvalRequests = 0
     const sendErrors: string[] = []
@@ -6137,18 +6148,42 @@ describeRealCodex('real Codex personal archive e2e', () => {
         await mkdir(path.dirname(path.join(workingDirectory, ref)), { recursive: true })
         await writeFile(path.join(workingDirectory, ref), contents)
       }
+      const cataloguePath = resolveHostedMediaReferenceCataloguePath(workingDirectory)
+      const catalogueBytes = JSON.stringify({ schema: HOSTED_MEDIA_REFS_SCHEMA, entries: Object.entries({ ...hostedFiles, ...(unavailablePhoto ? { [unavailableRef]: Buffer.from('synthetic original unavailable') } : {}) }).map(([relativePath, bytes]) => ({
+        relativePath, mediaId: createHash('sha256').update(relativePath).digest('hex'),
+        sha256: createHash('sha256').update(bytes).digest('hex'), byteSize: bytes.length,
+        mediaKind: relativePath.endsWith('.br') ? 'integration-ingest' : 'image', expiresAt: null,
+      })) })
+      await mkdir(path.dirname(cataloguePath), { recursive: true })
+      await writeFile(cataloguePath, catalogueBytes)
       const result = await executeRealCodexAppServerTurn({
         approvalPolicy: 'never',
         baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildDirectConversationDeveloperInstructions(),
-        dynamicTools: [MURPH_SEND_VAULT_FILE_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL],
+        dynamicTools: [MURPH_MATERIALIZE_VAULT_MEDIA_TOOL, MURPH_SEND_VAULT_FILE_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL],
+        materializeWorkspaceArtifacts: async (refs) => {
+          materializeCalls.push(refs)
+          for (const ref of refs) {
+            const relative = ref.slice('vault:'.length)
+            if (relative === unavailableRef && unavailablePhoto) continue
+            const bytes = hostedFiles[relative]
+            if (!bytes) throw new Error('Unexpected materialization path')
+            await mkdir(path.dirname(path.join(workingDirectory, relative)), { recursive: true })
+            await writeFile(path.join(workingDirectory, relative), bytes)
+            restoredRefs.push(relative)
+          }
+          return { materializedArtifactPaths: new Set(refs.filter(ref => ref !== `vault:${unavailableRef}`)),
+            missingArtifactPaths: new Map(unavailablePhoto ? [[`vault:${unavailableRef}`, 'missing' as const]] : []) }
+        },
         env: config.env,
         hostedToolContext: {
           ...createRealCodexSupportHostedToolContext('direct'),
+          currentConversationScope: () => 'direct',
           vaultFileSendAvailable: true,
           sendVaultFile: async (ref, toolCallId, retireExportPackIds) => {
+            expect(restoredRefs.sort()).toEqual(Object.keys(hostedFiles).sort())
             requestedRefs.push(ref)
             return requestAssistantVaultFileSend({
               actionApprovalPort: {
@@ -6188,7 +6223,7 @@ describeRealCodex('real Codex personal archive e2e', () => {
           : 'Back up my reading list and supply list along with the other personal files in this Murph runtime workspace. Make one ZIP attachment with their folders intact.',
         reasoningEffort: 'low',
         sandbox: 'workspace-write',
-        workingDirectory,
+        vaultRoot: workingDirectory, workingDirectory,
       })
       process.stdout.write(`[personal-archive-e2e] ${JSON.stringify({
         finalMessage: result.finalMessage.replaceAll(workingDirectory, '<VAULT>'),
@@ -6210,11 +6245,22 @@ describeRealCodex('real Codex personal archive e2e', () => {
         ' print(json.dumps({name: base64.b64encode(archive.read(name)).decode() for name in archive.namelist() if not name.endswith("/")}))',
       ].join('\n'), path.join(workingDirectory, attachment.ref)])
       const archiveFiles: Record<string, string> = JSON.parse(inspected.stdout)
-      const expectedFiles = { ...originals, ...completeOnly }
+      expect(materializeCalls).toHaveLength(1)
+      const materializeActions = readCapabilityRoutingActions(result.jsonEvents).filter(action => action.kind === 'dynamic' && action.tool === 'materialize_vault_media')
+      expect(materializeActions).toHaveLength(1)
+      expect(materializeActions[0]).toMatchObject({ argumentsValue: { all: true } })
+      const expectedFiles = { ...originals, ...completeOnly, ...hostedFiles,
+        [path.relative(workingDirectory, cataloguePath)]: catalogueBytes }
       expect(archiveFiles).toEqual(Object.fromEntries(
         Object.entries(expectedFiles).map(([ref, contents]) => [ref, Buffer.from(contents).toString('base64')]),
       ))
-      expect(result.finalMessage).not.toMatch(/exclud|omitt|saniti[sz]|redact|left out/iu)
+      if (unavailablePhoto) {
+        expect(result.finalMessage).toMatch(/unavailable|unverified|couldn.t|could not|missing/iu)
+        expect(result.finalMessage).toMatch(/photo/iu)
+        expect(result.finalMessage.replaceAll(unavailableRef, '<photo>')).toMatch(/unverified|not verified|couldn.t verify|could not be restored/iu)
+        expect(result.finalMessage).not.toMatch(/(?:not|could not|couldn.t) be included|excluded|left out|omitted/iu)
+        expect(result.finalMessage).not.toMatch(/(?:complete|full|everything) (?:backup|archive)|all (?:originals|photos) (?:restored|verified)/iu)
+      } else expect(result.finalMessage).not.toMatch(/exclud|omitt|saniti[sz]|redact|left out/iu)
       expect(result.finalMessage).not.toContain('synthetic-export-inclusion-marker')
       for (const [ref, contents] of Object.entries(expectedFiles)) {
         expect(await readFile(path.join(workingDirectory, ref))).toEqual(Buffer.from(contents))
@@ -6229,6 +6275,52 @@ describeRealCodex('real Codex personal archive e2e', () => {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }
   }, 5 * 60_000)
+})
+
+describeRealCodex('real Codex old saved photo e2e', () => {
+  it('restores a locally missing saved photo and answers from the image', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-old-photo-e2e-'))
+    const ref = 'raw/inbox/old/label.webp'
+    const bytes = await readFile(new URL('./fixtures/photo-import/label.webp', import.meta.url))
+    const calls: (readonly string[])[] = []
+    try {
+      const cataloguePath = resolveHostedMediaReferenceCataloguePath(workingDirectory)
+      await mkdir(path.dirname(cataloguePath), { recursive: true })
+      await writeFile(cataloguePath, JSON.stringify({ schema: HOSTED_MEDIA_REFS_SCHEMA, entries: [{
+        relativePath: ref, mediaKind: 'image', mimeType: 'image/webp', byteSize: bytes.length,
+        mediaId: 'a'.repeat(64), sha256: createHash('sha256').update(bytes).digest('hex'), expiresAt: null,
+      }] }))
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, developerInstructions: buildDirectConversationDeveloperInstructions(),
+        dynamicTools: [MURPH_MATERIALIZE_VAULT_MEDIA_TOOL], env: config.env,
+        hostedToolContext: { ...createRealCodexSupportHostedToolContext('direct'),
+          currentConversationScope: () => 'direct', vaultFileSendAvailable: true },
+        materializeWorkspaceArtifacts: async (refs) => {
+          calls.push(refs)
+          expect(refs).toEqual([`vault:${ref}`])
+          await mkdir(path.dirname(path.join(workingDirectory, ref)), { recursive: true })
+          await writeFile(path.join(workingDirectory, ref), bytes)
+          return { materializedArtifactPaths: new Set(refs), missingArtifactPaths: new Map() }
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: `What background color and portion amount are on my old saved label photo at ${ref}?`,
+        reasoningEffort: 'low', sandbox: 'workspace-write', vaultRoot: workingDirectory, workingDirectory,
+      })
+      process.stdout.write(`[old-saved-photo-e2e] ${JSON.stringify({ finalMessage: result.finalMessage.replaceAll(workingDirectory, '<VAULT>') })}\n`)
+      expect(calls).toHaveLength(1)
+      expect(readCapabilityRoutingActions(result.jsonEvents).filter(action => action.kind === 'dynamic'))
+        .toEqual([expect.objectContaining({ tool: 'materialize_vault_media', argumentsValue: { paths: [ref] }, success: true })])
+      expect(result.jsonEvents).toContainEqual(expect.objectContaining({ method: 'item/completed',
+        params: expect.objectContaining({ item: expect.objectContaining({ type: 'imageView' }) }) }))
+      expect(result.finalMessage).toMatch(/green/iu)
+      expect(result.finalMessage).toMatch(/42\s*(?:g|grams)\b/iu)
+      expect(result.finalMessage).not.toMatch(/can.t|cannot|unavailable|upload|send.*again/iu)
+      expect(await readFile(path.join(workingDirectory, ref))).toEqual(bytes)
+    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
+  }, 300_000)
 })
 
 describeRealCodex('real Codex missing knowledge recovery e2e', () => {

@@ -2,7 +2,7 @@ import { AssistantWorkspaceArtifactMaterializationError } from "@murphai/assista
 import type {
   HostedWorkspaceArtifactPersistInput,
 } from "@murphai/runtime-state/node";
-import { resolveVaultPathOnDisk } from "@murphai/core";
+import { canonicalRawArtifactIsPrivacyTombstone, isVaultError, resolveVaultPathOnDisk } from "@murphai/core";
 import { lstat } from "node:fs/promises";
 
 import type {
@@ -82,7 +82,7 @@ async function hostedLocalArtifactUnavailableReason(input: {
   maxFileBytes?: number;
   operatorHomeRoot: string;
   vaultRoot: string;
-}): Promise<"missing" | "size" | null> {
+}): Promise<"missing" | "size" | "obsolete" | "integrity" | "transport" | null> {
   const delimiterIndex = input.key.indexOf(":");
   const root = input.key.slice(0, delimiterIndex);
   const relativePath = input.key.slice(delimiterIndex + 1);
@@ -92,6 +92,13 @@ async function hostedLocalArtifactUnavailableReason(input: {
       ? input.operatorHomeRoot
       : null;
   if (!rootPath) return "missing";
+  if (root === "vault" && (relativePath.startsWith("raw/meals/") || relativePath.startsWith("raw/measurements/"))) {
+    try {
+      if (await canonicalRawArtifactIsPrivacyTombstone({ vaultRoot: rootPath, relativePath })) return "obsolete";
+    } catch (error) {
+      return isVaultError(error) && error.code === "CANONICAL_WRITE_LOCKED" ? "transport" : "integrity";
+    }
+  }
   try {
     const resolved = await resolveVaultPathOnDisk(rootPath, relativePath);
     const file = await lstat(resolved.absolutePath);

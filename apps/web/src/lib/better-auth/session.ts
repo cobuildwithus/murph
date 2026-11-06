@@ -64,7 +64,7 @@ export async function assertHostedAuthSessionCurrentTx(input: {
   if (proof.row.model !== "session" || proof.row.id !== input.sessionId || proof.row.memberId !== input.memberId
     || proof.expiresAt <= (input.now ?? new Date())
     || !timingSafeEqual(proof.credentialDigest, credentialDigest(input.credential))) throw authRequired();
-  await lockHostedMemberRow(input.prisma, input.memberId, { timeoutMs: 5_000 });
+  await lockHostedMemberRow(input.prisma, input.memberId, { timeoutMs: 5_000, noKeyUpdate: true });
   await input.prisma.$queryRaw`SELECT id FROM hosted_auth_record WHERE model = 'session' AND id = ${input.sessionId} FOR UPDATE`;
   const [row, member] = await Promise.all([
     input.prisma.hostedAuthRecord.findUnique({ where: { model_id: { model: "session", id: input.sessionId } } }),

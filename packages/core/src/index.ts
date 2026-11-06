@@ -257,6 +257,7 @@ export {
   withCanonicalWriteLock,
   inspectCanonicalWriteLock,
   withCanonicalWriteLockScope,
+  HostedCanonicalWriteOutcomeUnknownError,
   applyHostedCanonicalWriteReceipt,
   isProtectedCanonicalPath,
   listProtectedCanonicalPaths,
@@ -291,6 +292,7 @@ export type {
 } from "./operations/index.ts";
 export {
   canonicalRawArtifactMatches,
+  canonicalRawArtifactIsPrivacyTombstone,
   buildRawImportManifest,
   parseRawImportManifest,
   resolveRawManifestPath,

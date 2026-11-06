@@ -731,6 +731,27 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     expect(realHandler).toHaveBeenCalledTimes(2);
   });
 
+  it("drops the committed acknowledgement and the next conflict response when armed twice", async () => {
+    const userId = "member_canonical_two_lost_acks";
+    const realHandler = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ checkpointed: true }), { status: 200 }))
+      .mockImplementation(async () => new Response(JSON.stringify({ checkpointed: false }), { status: 200 }));
+    const handler = wrapCanonicalCheckpointLostAckForTest(realHandler);
+    armCanonicalCheckpointLostAck(userId);
+    armCanonicalCheckpointLostAck(userId);
+    const statuses: number[] = [];
+    for (let ordinal = 0; ordinal < 3; ordinal += 1) {
+      statuses.push((await handler(createCanonicalCheckpointRequest(userId), createOutboundEnv(), {
+        className: "RunnerContainer", containerId: "opaque-container-id",
+      })).status);
+    }
+    expect(statuses).toEqual([503, 503, 200]);
+    expect(realHandler).toHaveBeenCalledTimes(3);
+    expect(mocks.emitHostedExecutionStructuredLog.mock.calls.filter(([entry]) =>
+      entry.userId === userId && entry.details?.faultKind === "canonical_checkpoint_lost_ack"
+    )).toHaveLength(2);
+  });
+
   it("keeps the one-shot fault armed when the real checkpoint does not commit", async () => {
     const userId = "member_canonical_lost_ack_upstream_failure";
     const realHandler = vi.fn()

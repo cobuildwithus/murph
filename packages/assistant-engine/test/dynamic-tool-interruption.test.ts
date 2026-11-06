@@ -1,3 +1,4 @@
+import { HostedCanonicalWriteOutcomeUnknownError } from '@murphai/core'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -14,6 +15,12 @@ describe('dynamic tool interruption', () => {
     expect(dynamicToolFailureEndsTurn(false, interrupted)).toBe(true)
     expect(dynamicToolFailureEndsTurn(true, new Error('after settlement'))).toBe(true)
     expect(dynamicToolFailureEndsTurn(false, new Error('ordinary tool failure'))).toBe(false)
+  })
+
+  it('ends the turn when an unknown canonical outcome escapes a tool uncaught', () => {
+    expect(dynamicToolFailureEndsTurn(false, new HostedCanonicalWriteOutcomeUnknownError({
+      cause: new Error('Uncertain publication'),
+    }))).toBe(true)
   })
 
   it('does not turn owner loss during image attachment into a tool failure', async () => {

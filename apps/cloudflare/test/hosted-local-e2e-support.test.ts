@@ -968,6 +968,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       && name !== "murph.resolve_physical_note"
       && name !== "murph.send_physical_note"
       && name !== "murph.send_vault_file"
+      && name !== "murph.materialize_vault_media"
       && name !== "murph.ask_grok"
       && name !== "murph.attach_response_card"
       && name !== "murph.attach_sleep_card"
@@ -1071,7 +1072,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       },
     );
     expectAdvertisedMurphDynamicTools(
-      [buildResponsesRequest([...baseToolNames, "murph.send_vault_file"])],
+      [buildResponsesRequest([...baseToolNames, "murph.send_vault_file", "murph.materialize_vault_media"])],
       {
         vaultFileSendAvailable: true,
       },
@@ -1332,6 +1333,7 @@ function buildResponsesRequest(
         && name !== "murph.generate_voice_memo"
         && name !== "murph.generate_song"
         && name !== "murph.analyze_video"
+        && name !== "murph.materialize_vault_media"
         && name !== "murph.submit_product_feedback"
         && name !== "murph.usage_diagnostics"
         && name !== "murph.family_plan"

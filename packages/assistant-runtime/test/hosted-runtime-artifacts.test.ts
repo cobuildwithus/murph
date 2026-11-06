@@ -1,5 +1,6 @@
+import { assistantVaultFileMaxBytes } from "@murphai/operator-config/assistant-cli-contracts";
 import { readVerifiedAssistantVaultImageBytes, resolveAssistantVaultFileResponseMedia, resolveAssistantVaultImageResponseMedia } from "@murphai/assistant-engine/assistant-outbox";
-import { resolveGenerateImageReferences } from "@murphai/assistant-engine/assistant-codex";
+import { materializeVaultMedia, resolveGenerateImageReferences } from "@murphai/assistant-engine/assistant-codex";
 import { HostedRuntimeMediaReadError } from "../src/hosted-runtime/platform.ts";
 import { createMealMediaStore } from "./hosted-meal-media.harness.ts";
 import { runHostedMealMediaMaintenance, createHostedMealMediaBudget } from "../src/hosted-runtime/meal-media-maintenance.ts";
@@ -1248,6 +1249,12 @@ test("meal thumbnail and full-photo deletion survives canonical receipt replay a
     const cleaned = await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot: restoredRoot, mediaStore: store.mediaStore });
     expect(cleaned.prunedMediaCount).toBe(0);
     expect(store.storedBytesByMediaId.size).toBe(0);
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot: restoredRoot })).entries).toEqual([]);
+    // Use the real cleaned catalogue and manifest, not a materializer double.
+    const retired = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]!;
+    const materialize = createHostedArtifactMaterializer({ vaultRoot: restoredRoot, operatorHomeRoot: restoredRoot, mediaStore: store.mediaStore });
+    expect(await materializeVaultMedia({ args: { paths: [retired.relativePath] }, vaultRoot: restoredRoot, materialize }))
+      .toEqual({ requested: 1, available: 0, removed: 0, unavailable: [{ path: retired.relativePath, reason: "obsolete" }] });
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -1303,10 +1310,10 @@ test.each([false, true])("cold-restored meal reads retain inspectable bytes afte
 test("real materialization rejects wrong local images and classifies mixed outcomes", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-materialization-outcomes-"));
   const good = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==", "base64");
-  const names = ["good", "missing", "corrupt", "transport", "large", "expired"];
+  const names = ["good", "missing", "corrupt", "transport", "expired", "large"];
   try {
     const entries = names.map(name => ({ relativePath: `raw/inbox/synthetic/${name}.png`, mediaId: createHash("sha256").update(name).digest("hex"),
-      byteSize: name === "large" ? 1000 : good.length, sha256: createHash("sha256").update(good).digest("hex"),
+      byteSize: name === "large" ? 100 * 1024 * 1024 + 1 : good.length, sha256: createHash("sha256").update(good).digest("hex"),
       mediaKind: "image" as const, mimeType: "image/png", recordedAt: "2030-01-01T00:00:00Z",
       expiresAt: name === "expired" ? "2000-01-01T00:00:00Z" : null }));
     await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue: { schema: "murph.hosted-media-refs.v1", entries } });
@@ -1326,6 +1333,14 @@ test("real materialization rejects wrong local images and classifies mixed outco
       "vault:raw/inbox/synthetic/transport.png": "transport", "vault:raw/inbox/synthetic/large.png": "size",
       "vault:raw/inbox/synthetic/expired.png": "expired",
     });
+    const report = await materializeVaultMedia({ args: { all: true }, vaultRoot, materialize });
+    expect(report).toEqual({ requested: 6, available: 1, removed: 0, unavailable: [
+      { path: "raw/inbox/synthetic/missing.png", reason: "missing" },
+      { path: "raw/inbox/synthetic/corrupt.png", reason: "integrity" },
+      { path: "raw/inbox/synthetic/transport.png", reason: "transport" },
+      { path: "raw/inbox/synthetic/expired.png", reason: "expired" },
+      { path: "raw/inbox/synthetic/large.png", reason: "size" },
+    ] });
     for (const name of ["missing", "corrupt", "expired"]) {
       expect(await readFile(path.join(vaultRoot, `raw/inbox/synthetic/${name}.png`))).toEqual(wrong);
       await expect(resolveGenerateImageReferences({ vaultRoot, refs: [`raw/inbox/synthetic/${name}.png`], materializeWorkspaceArtifacts: materialize }))
@@ -1341,6 +1356,8 @@ test("real materialization rejects wrong local images and classifies mixed outco
     expect(await readFile(path.join(vaultRoot, entries[1]!.relativePath))).toEqual(wrong);
     const stale = createHostedArtifactMaterializer({ vaultRoot, operatorHomeRoot: vaultRoot, mediaStore: { ...mediaStore, get: async () => { throw ownerLost; } } });
     await expect(stale([entries[1]!.relativePath])).rejects.toMatchObject({ cause: ownerLost });
+    await expect(materializeVaultMedia({ args: { all: true }, vaultRoot, materialize: stale })).rejects.toMatchObject({ cause: ownerLost });
+    await expect(materializeVaultMedia({ args: { all: true }, vaultRoot, materialize, signal: controller.signal })).rejects.toBeDefined();
   } finally { await rm(vaultRoot, { recursive: true, force: true }); }
 });
 
@@ -1437,6 +1454,51 @@ test("image sends hydrate absent bytes for preparation and delivery, and refuse 
     get.mockResolvedValueOnce(null);
     await expect(readVerifiedAssistantVaultImageBytes({ image, vaultRoot, materializeWorkspaceArtifacts }))
       .rejects.toMatchObject({ code: "ASSISTANT_VAULT_FILE_UNAVAILABLE" });
+  } finally { await rm(vaultRoot, { recursive: true, force: true }); }
+});
+
+test("the restore budget charges only real downloads, so expired media cannot block a deliverable export", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-restore-budget-"));
+  const photo = Buffer.from("retained photo");
+  const cached = Buffer.from("cached expired copy");
+  const descriptor = (name: string, bytes: Buffer, byteSize: number, expiresAt: string | null) => ({
+    relativePath: `raw/inbox/synthetic/${name}`, mediaId: createHash("sha256").update(name).digest("hex"), byteSize,
+    sha256: createHash("sha256").update(bytes).digest("hex"), mediaKind: "video" as const, mimeType: "video/mp4",
+    recordedAt: "2030-01-01T00:00:00.000Z", expiresAt });
+  try {
+    const entries = [
+      // Together these reach the cap, and neither needs a download.
+      descriptor("a-expired.mp4", photo, assistantVaultFileMaxBytes, "2000-01-01T00:00:00.000Z"),
+      descriptor("b-expired.mp4", photo, assistantVaultFileMaxBytes, "2000-01-01T00:00:00.000Z"),
+      descriptor("c-cached-expired.mp4", cached, cached.length, "2000-01-01T00:00:00.000Z"),
+      { ...descriptor("d-retained.png", photo, photo.length, null), mediaKind: "image" as const, mimeType: "image/png" },
+    ];
+    await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue: { schema: "murph.hosted-media-refs.v1", entries } });
+    await mkdir(path.join(vaultRoot, "raw/inbox/synthetic"), { recursive: true });
+    await writeFile(path.join(vaultRoot, entries[2]!.relativePath), cached);
+    const get = vi.fn(async () => photo);
+    const materialize = createHostedArtifactMaterializer({ vaultRoot, operatorHomeRoot: vaultRoot, mediaStore: { put: async () => {}, get } });
+    const report = await materializeVaultMedia({ args: { all: true }, vaultRoot, materialize });
+    expect(report).toEqual({ requested: 4, available: 1, removed: 3, unavailable: [] });
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(await readFile(path.join(vaultRoot, entries[3]!.relativePath))).toEqual(photo);
+    await expect(stat(path.join(vaultRoot, entries[2]!.relativePath))).rejects.toMatchObject({ code: "ENOENT" });
+  } finally { await rm(vaultRoot, { recursive: true, force: true }); }
+});
+
+test("downloads past the restore budget are reported, not attempted", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-restore-over-budget-"));
+  const bytes = Buffer.from("synthetic media");
+  try {
+    const entries = ["a", "b", "c"].map(name => ({ relativePath: `raw/inbox/synthetic/${name}.png`, mediaId: createHash("sha256").update(name).digest("hex"),
+      byteSize: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), mediaKind: "image" as const, mimeType: "image/png",
+      recordedAt: "2030-01-01T00:00:00.000Z", expiresAt: null }));
+    await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue: { schema: "murph.hosted-media-refs.v1", entries } });
+    const get = vi.fn(async () => bytes);
+    const materialize = createHostedArtifactMaterializer({ vaultRoot, operatorHomeRoot: vaultRoot, mediaStore: { put: async () => {}, get } });
+    const result = await materialize(entries.map(entry => entry.relativePath), { maxTotalDownloadBytes: bytes.length * 2 });
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(Object.fromEntries(result.missingArtifactPaths)).toEqual({ [`vault:${entries[2]!.relativePath}`]: "size" });
   } finally { await rm(vaultRoot, { recursive: true, force: true }); }
 });
 

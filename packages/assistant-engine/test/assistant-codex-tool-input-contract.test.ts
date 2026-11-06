@@ -1,3 +1,4 @@
+import { VAULT_MEDIA_EXPORT_GUIDANCE } from '../src/assistant-codex/dynamic-tools/materialize-vault-media.ts'
 import { GAME_HOST_BASE_READ_GAME_TOOL, INCOMPLETE_BASE_UPDATE_GAME_TOOL } from './support/game-input-baselines.ts'
 import { GAME_INPUT_BASELINES } from './support/game-input-baselines.ts'
 import assert from 'node:assert/strict'
@@ -580,6 +581,65 @@ describe('Codex canonical tool input contract upgrade guard', () => {
       process.stdout.write('[goal-input-proof] ' + JSON.stringify({ scope, model: 'gpt-6-luna', measurements,
         tokens: null, tokenLimitation: 'No exact Luna tokenizer configured; scripted usage is not tokenization.',
         baseline: '55f5518a480f; exact nine eager-text replacements; identical tools and synthetic history',
+      }) + '\n')
+    },
+  )
+
+  it.skipIf(process.env.MURPH_MEASURE_VAULT_MEDIA_INPUT !== '1').each(['direct', 'group'] as const)(
+    'vault media: complete first provider input (%s)', { timeout: 180_000 }, async (scope) => {
+      stub ??= await startScriptedResponsesStub()
+      const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths)
+      const headTools = resolveMurphDynamicTools({
+        vaultFileSendAvailable: scope === 'direct',
+        allowFinishWithoutReply: true, automationAvailable: true, personalizationAvailable: true,
+        groupSharedReadAvailable: scope === 'group', responseCardsAvailable: scope === 'direct',
+        imageGenerationAvailable: false, progressUpdatesAvailable: false,
+      })
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: true,
+        assistantHostedGroupToolSurface: scope === 'group' ? 'shared_read' : 'none',
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
+        conversationScope: scope, currentLocalDate: '2026-10-01',
+        currentInstant: '2026-10-01T08:00:00.000Z', currentTimeZone: 'Europe/Paris',
+        hostedRuntime: true,
+        onboardingGuidance: false, ordinaryInboundTurn: true,
+      })
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
+      })
+      const headInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
+      const measurements = []
+      for (const phase of ['base', 'head'] as const) {
+        await stopWarmCodexAppServer()
+        stub.markRequestBaseline()
+        stub.captureProviderRequestDiagnostics({ completeInput: true })
+        stub.queue({ text: CONTRACT_CAPTURE_DONE })
+        const developerInstructions = headInstructions
+        const tools = phase === 'head' ? headTools : headTools.filter(tool => tool.name !== 'materialize_vault_media').map(tool =>
+          tool.name === 'send_vault_file' ? { ...tool, description: tool.description.replace(VAULT_MEDIA_EXPORT_GUIDANCE, 'archive') } : tool)
+        const prompt = [layers.dynamicTurnContextPrompt,
+          'Please prepare a complete workspace backup.'].filter(Boolean).join('\n\n')
+        const result = await executeCodexAppServerTurn({
+          ...scenario.turnInput, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          dynamicTools: tools, developerInstructions, prompt, groupConversation: scope === 'group',
+          env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+        })
+        assert.equal(result.finalMessage, CONTRACT_CAPTURE_DONE)
+        assert.equal(stub.requestCountSinceBaseline(), 1)
+        const captured = stub.requestSummariesSinceBaseline()[0]?.completeProviderInput
+        assert.ok(captured)
+        const body = readRecord(JSON.parse(captured.json))
+        assert.ok(body)
+        delete body.prompt_cache_key
+        measurements.push({ phase, decodedRequestUtf8Bytes: Buffer.byteLength(JSON.stringify(body)),
+          registeredToolsUtf8Bytes: Buffer.byteLength(JSON.stringify(tools)),
+          instructionsUtf8Bytes: Buffer.byteLength([developerInstructions, prompt].join('\n\n')),
+          exclusions: [...new Set([...captured.excludedTransportFields, 'prompt_cache_key'])],
+        })
+      }
+      process.stdout.write('[vault-media-input-proof] ' + JSON.stringify({ scope, model: scenario.turnInput.model, measurements,
+        tokens: null, tokenLimitation: 'No exact target tokenizer configured; scripted usage is not tokenization.',
+        baseline: 'PR 1; in-fixture removal of materialize_vault_media and exact export-guidance replacement; same synthetic history',
       }) + '\n')
     },
   )

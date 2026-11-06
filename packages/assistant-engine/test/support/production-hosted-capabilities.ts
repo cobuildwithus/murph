@@ -5,7 +5,7 @@ export const PRODUCTION_HOSTED_TOOL_NAMES = `send_progress_update automation dev
 attach_response_media attach_response_card attach_sleep_card generate_image generate_voice_memo
 assistant_configuration personalization family_plan plan_usage usage_diagnostics poll subscription
 group_consult group_data group_membership group_usage group_chat group_email generate_song analyze_video
-conversation_attachments create_calendar_link ask_grok submit_product_feedback send_vault_file pending_vault_files
+conversation_attachments create_calendar_link ask_grok submit_product_feedback send_vault_file materialize_vault_media pending_vault_files
 finish_without_reply select_reply_target react_to_message create_clinical_records_connect_link get_sender_contact
 create_phone_call get_phone_call_status stop_phone_call resolve_physical_note send_physical_note labs
 computer_open computer_act computer_os_control computer_pause_for_user computer_finish_run
@@ -15,7 +15,7 @@ export function assertProductionHostedCapabilityParity(input: {
   developerInstructions?: string | null
   dynamicTools: readonly { namespace: string; name: string }[]
 }): void {
-  assert.equal(input.dynamicTools.length, 49)
+  assert.equal(input.dynamicTools.length, 50)
   assert.deepEqual(input.dynamicTools.map((tool) => `${tool.namespace}.${tool.name}`), PRODUCTION_HOSTED_TOOL_NAMES)
   const bytes = Buffer.byteLength(input.developerInstructions ?? '')
   assert.ok(bytes >= 87_330 * 0.97 && bytes <= 87_330 * 1.03, `Hosted developer instructions outside production envelope: ${bytes} bytes`)

@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const m = vi.hoisted(() => ({ member: vi.fn(), current: vi.fn(), upsert: vi.fn() }));
-vi.mock("@/src/lib/game/http/auth", () => ({ requireGameMemberAuth: m.member }));
+vi.mock("@/src/lib/game/http/auth", async original => ({
+  ...await original<typeof import("@/src/lib/game/http/auth")>(), requireGameMemberAuth: m.member,
+}));
 vi.mock("@/src/lib/better-auth/native-auth", () => ({ assertHostedNativeMemberAuthCurrentTx: m.current }));
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: () => ({ $transaction: async (run: (tx: object) => Promise<void>) => run({ companionPushRoute: { upsert: m.upsert } }) }),
 }));
 import { POST } from "../app/api/game/v1/push-route/route";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { gameHttpError } from "@/src/lib/game/http/errors";
 
 const registration = {
@@ -40,8 +43,17 @@ describe("game push registration", () => {
     expect(m.upsert).not.toHaveBeenCalled();
   });
   it("refuses a session revoked between admission and registration", async () => {
-    m.current.mockRejectedValue(gameHttpError("UNAUTHENTICATED", 401, "Sign in to continue."));
-    expect((await POST(request(registration))).status).toBe(401);
+    m.current.mockRejectedValue(hostedOnboardingError({ code: "AUTH_REQUIRED", httpStatus: 401, message: "Sign in to continue." }));
+    const response = await POST(request(registration));
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({ error: { code: "UNAUTHENTICATED" } });
+    expect(m.upsert).not.toHaveBeenCalled();
+  });
+  it("preserves a commit-time suspension refusal", async () => {
+    m.current.mockRejectedValue(hostedOnboardingError({ code: "MEMBER_SUSPENDED", httpStatus: 403, message: "Access suspended." }));
+    const response = await POST(request(registration));
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: { code: "MEMBER_SUSPENDED", retryable: false } });
     expect(m.upsert).not.toHaveBeenCalled();
   });
   it("records revoked alert permission without erasing the wearable background address", async () => {

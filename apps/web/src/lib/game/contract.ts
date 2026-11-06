@@ -186,6 +186,8 @@ export interface PostEntryBody {
   blurHash?: string;
   /** Milliseconds since capture, from a monotonic clock on the phone. */
   captureAgeMs?: number;
+  /** Refuse to replace a live post on the day the server places this one. It names no day. */
+  expectEmptySlot?: true;
 }
 
 // DELETE /games/:id/entries/:entryId and POST /tickets/:id/redeem have no body.
@@ -619,6 +621,8 @@ export type GameErrorCode =
   | "GAME_NOT_LIVE"
   | "DAY_CLOSED"
   | "RETAKE_USED"
+  /** An empty-slot post found an existing post on its posting day. */
+  | "SLOT_TAKEN"
   | "CHALLENGE_USED"
   | "MEDIA_MISSING"
   | "TICKET_NOT_HELD"

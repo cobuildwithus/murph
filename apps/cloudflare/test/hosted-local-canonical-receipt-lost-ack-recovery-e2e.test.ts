@@ -53,6 +53,8 @@ const userId = `member_local_canonical_lost_ack_${runId}`;
 const chatId = `chat_local_canonical_lost_ack_${runId}`;
 const preferenceRecoveryUserId = `member_local_preference_receipt_recovery_${runId}`;
 const preferenceRecoveryChatId = `chat_local_preference_receipt_recovery_${runId}`;
+const fencedUserId = `member_local_canonical_fenced_${runId}`;
+const fencedChatId = `chat_local_canonical_fenced_${runId}`;
 const automationSlug = `canonical-receipt-probe-${runId}`;
 const inboundText = "Save a durable canonical receipt recovery probe.";
 const replyText = "The durable recovery probe is saved.";
@@ -101,6 +103,7 @@ describe("hosted local canonical receipt lost-ack recovery e2e", () => {
           [
             buildLinqRecipientPhoneNumber(userId),
             buildLinqRecipientPhoneNumber(preferenceRecoveryUserId),
+            buildLinqRecipientPhoneNumber(fencedUserId),
           ].join(","),
         LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
         LINQ_API_TOKEN: linqApiToken,
@@ -219,6 +222,82 @@ describe("hosted local canonical receipt lost-ack recovery e2e", () => {
       requireScenario().harness.stderrTail(2_000_000),
     ].join("\n");
     expect(countOccurrences(faultLogs, lostAckLogMessage)).toBe(1);
+  }, 420_000);
+
+  it("fences a real automation after two lost acknowledgements and cold-restores it exactly once", async () => {
+    const memberPhone = buildLinqRecipientPhoneNumber(fencedUserId);
+    const text = "Save the automation once even if publication acknowledgements are lost.";
+    const slug = `fenced-receipt-probe-${runId}`;
+    await requireScenario().seedActiveHostedLinqMember({
+      homePhone: buildLinqHomePhoneNumber(fencedUserId), memberId: fencedUserId, memberPhone,
+    });
+    await requireScenario().runWake(buildActivationWake(fencedUserId), fencedUserId);
+    await requireScenario().waitForHostedCompletion(fencedUserId);
+    await requireScenario().bindActiveHostedLinqHomeChat({ chatId: fencedChatId, memberId: fencedUserId, recipientPhone: memberPhone });
+    const replyPath = `/chats/${encodeURIComponent(fencedChatId)}/messages`;
+    const outboundBaseline = requireLinqStub().countObservedSends(replyPath);
+    const providerBaseline = countResponsesApiRequests();
+    const readFaultLogs = () => [requireScenario().harness.stdoutTail(2_000_000), requireScenario().harness.stderrTail(2_000_000)].join("\n");
+    const faultBaseline = countOccurrences(readFaultLogs(), lostAckLogMessage);
+    const due = new Date(Date.now() + 24 * 60 * 60 * 1_000);
+    due.setUTCSeconds(0, 0);
+    const dueAt = due.toISOString();
+    const coldRestoreCanary = ".runtime/tmp/canonical-publication-canary";
+    const probe = { dueAt, slug, chatId: fencedChatId, coldRestoreCanary };
+    requireScenario().queueAssistantResponses([
+      buildAssistantProviderShellCommandCall(`node -e ${quoteShellArgument(
+        'const fs = require("node:fs"); fs.mkdirSync(".runtime/tmp", { recursive: true });'
+        + `fs.writeFileSync(${JSON.stringify(coldRestoreCanary)}, "unpublished local tree");`
+        + 'console.log("CANONICAL_CANARY_WRITTEN=1");',
+      )}`),
+      buildAssistantProviderMurphToolCall("automation", {
+        action: "save", continuityPolicy: "fresh", slug,
+        instructions: "Record the hosted canonical checkpoint recovery probe.",
+        summary: "Hosted canonical checkpoint recovery probe.", title: "Canonical receipt recovery probe", tags: ["assistant"],
+        schedule: { kind: "at", localAt: { date: dueAt.slice(0, 10), time: dueAt.slice(11, 16), timeZone: "UTC" } },
+      }, async () => {
+        // Arm at the tool boundary so the initial mailbox receipt cannot consume the fault.
+        await requireScenario().harness.armCanonicalCheckpointLostAckForTest(fencedUserId);
+        await requireScenario().harness.armCanonicalCheckpointLostAckForTest(fencedUserId);
+      }),
+      buildAssistantProviderShellCommandCall(buildCanonicalAutomationStateProbeCommand(probe)),
+      replyText,
+    ], { matchInputContains: text });
+    const response = await postSignedLinqWebhook(buildHostedLinqInboundEvent(fencedUserId, fencedChatId, {
+      eventId: `evt_canonical_fenced_${runId}`, messageId: `msg_canonical_fenced_${runId}`, text,
+    }));
+    expect(response.status).toBe(202);
+    await requireScenario().waitForLatestPendingWake(fencedUserId);
+    const reply = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: outboundBaseline, expectedPath: replyPath, scenario: requireScenario(), userId: fencedUserId,
+    });
+    expect(requireLinqStub().readObservedMessageText(reply)).toBe(replyText);
+    const finalStatus = await requireScenario().waitForHostedCompletion(fencedUserId);
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
+    expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+    expect(requireLinqStub().countObservedSends(replyPath)).toBe(outboundBaseline + 1);
+
+    const requests = requireScenario().assistantProviderRequests
+      .filter((request) => request.url === "/v1/responses").slice(providerBaseline);
+    const toolRequests = requests.filter((request) => request.responseToolCallId);
+    expect(toolRequests).toHaveLength(3);
+    const fencedCallId = toolRequests[1]?.responseToolCallId;
+    expect(fencedCallId).toBeTruthy();
+    const outputs = requests.flatMap((request) => {
+      const body = parseJsonObject(request.body);
+      return Array.isArray(body.input) ? body.input.flatMap((item) => {
+        const record = readRecord(item);
+        return record?.type === "custom_tool_call_output" || record?.type === "function_call_output" ? [record] : [];
+      }) : [];
+    });
+    // The earlier call proves the filter matches real outputs and the canary exists.
+    expect(outputs.filter((output) => output.call_id === toolRequests[0]?.responseToolCallId)).not.toEqual([]);
+    expect(outputs.filter((output) => output.call_id === fencedCallId)).toEqual([]);
+    expect(requests.flatMap(readHostedLocalAssistantProviderToolOutputs).join("\n")).toContain("CANONICAL_CANARY_WRITTEN=1");
+    expect(requests.map((request) => request.body).join("\n")).not.toContain("automation operation is unavailable");
+    expect(requests.flatMap(readHostedLocalAssistantProviderToolOutputs).join("\n")).toContain(buildCanonicalAutomationStateMarker(probe));
+    expect(countOccurrences(readFaultLogs(), lostAckLogMessage) - faultBaseline).toBe(2);
+    expect(requests.flatMap(readHostedLocalAssistantProviderToolOutputs).join("\n")).toContain("CANONICAL_COLD_RESTORE=1");
   }, 420_000);
 
   it("cold-restores the two-preference audit drift incident without blocking foreground reply", async () => {
@@ -673,25 +752,32 @@ function buildPreferenceRecoveryStateProbeCommand(
   return `node -e ${quoteShellArgument(script)}`;
 }
 
-function buildCanonicalAutomationStateMarker(input: { dueAt: string }): string {
+function buildCanonicalAutomationStateMarker(input: { dueAt: string; slug?: string; chatId?: string }): string {
   return [
     "CANONICAL_AUTOMATION_STATE",
-    automationSlug,
+    input.slug ?? automationSlug,
     input.dueAt,
-    chatId,
+    input.chatId ?? chatId,
     "audit=1",
   ].join("|");
 }
 
 function buildCanonicalAutomationStateProbeCommand(input: {
   dueAt: string;
+  coldRestoreCanary?: string;
+  slug?: string;
+  chatId?: string;
 }): string {
   const script = [
     'const fs = require("node:fs");',
     'const { execFileSync } = require("node:child_process");',
-    `const slug = ${JSON.stringify(automationSlug)};`,
+    ...(input.coldRestoreCanary ? [
+      `if (fs.existsSync(${JSON.stringify(input.coldRestoreCanary)})) throw new Error("Unpublished tree was warm-reused.");`,
+      'console.log("CANONICAL_COLD_RESTORE=1");',
+    ] : []),
+    `const slug = ${JSON.stringify(input.slug ?? automationSlug)};`,
     `const dueAt = ${JSON.stringify(input.dueAt)};`,
-    `const chatId = ${JSON.stringify(chatId)};`,
+    `const chatId = ${JSON.stringify(input.chatId ?? chatId)};`,
     'const shown = JSON.parse(execFileSync("vault-cli", ["automation", "show", slug, "--format", "json"], { encoding: "utf8" }));',
     'const automation = shown && (shown.data || shown).automation;',
     'if (!automation || automation.slug !== slug || automation.status !== "active" || automation.continuityPolicy !== "fresh") throw new Error("Canonical automation readback mismatch.");',

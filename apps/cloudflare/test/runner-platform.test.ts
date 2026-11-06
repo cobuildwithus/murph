@@ -1,3 +1,4 @@
+import { HostedCanonicalWriteOutcomeUnknownError } from "@murphai/core";
 import { createCipheriv, createHash } from "node:crypto";
 import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -39,7 +40,6 @@ import {
 import {
   HostedRuntimeArtifactReadError,
   HostedRuntimeArtifactWriteError,
-  HostedRuntimeCanonicalCheckpointError,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH,
@@ -9924,15 +9924,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         },
       });
 
-      await expect(platform.workspacePort!.checkpoint(request)).rejects.toThrow(
-        "Hosted workspace checkpoint request failed.",
-      );
+      await expect(platform.workspacePort!.checkpoint(request)).rejects.toBeInstanceOf(HostedCanonicalWriteOutcomeUnknownError);
       expect(fetchMock, rejectionCase.label).toHaveBeenCalledTimes(2);
       expect(recordCheckpoint, rejectionCase.label).not.toHaveBeenCalled();
     }
   });
 
-  it("rethrows the first error when canonical checkpoint reconciliation stays ambiguous", async () => {
+  it("preserves the first cause as unknown when canonical checkpoint reconciliation stays ambiguous", async () => {
     const firstFailure = new Error("Synthetic first ambiguous checkpoint failure.");
     const retryFailure = new Error("Synthetic retry checkpoint failure.");
     const recordCheckpoint = vi.fn();
@@ -9977,12 +9975,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     if (!(rejected instanceof Error)) {
       throw new Error("Expected canonical checkpoint failure.");
     }
-    expect(rejected.cause).toBe(firstFailure);
+    expect(rejected).toBeInstanceOf(HostedCanonicalWriteOutcomeUnknownError);
+    expect(rejected.cause).toMatchObject({ cause: firstFailure });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(recordCheckpoint).not.toHaveBeenCalled();
   });
 
-  it("marks canonical checkpoint timeouts retryable only after reconciliation also times out", async () => {
+  it("marks two canonical checkpoint timeouts as an unknown outcome", async () => {
     const fetchMock = vi.fn(async () => {
       throw new DOMException("Synthetic checkpoint timeout.", "TimeoutError");
     });
@@ -10013,14 +10012,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
       snapshotRef: null,
     })).rejects.toMatchObject({
-      name: "HostedRuntimeCanonicalCheckpointError",
+      name: "HostedCanonicalWriteOutcomeUnknownError",
       retryable: true,
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps a deterministic checkpoint rejection terminal after an ambiguous timeout", async () => {
+  it("keeps the outcome unknown after a timeout then 401", async () => {
     const fetchMock = vi.fn(async () => {
       if (fetchMock.mock.calls.length === 1) {
         throw new DOMException("Synthetic checkpoint timeout.", "TimeoutError");
@@ -10061,11 +10060,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
 
     expect(rejected).toBeInstanceOf(Error);
-    expect(rejected).not.toBeInstanceOf(HostedRuntimeCanonicalCheckpointError);
+    expect(rejected).toBeInstanceOf(HostedCanonicalWriteOutcomeUnknownError);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps a deterministic checkpoint rejection terminal when its response body is lost", async () => {
+  it("keeps the outcome unknown after a timeout then a 401 with a lost body", async () => {
     const firstFailure = new DOMException("Synthetic checkpoint timeout.", "TimeoutError");
     const fetchMock = vi.fn(async () => {
       if (fetchMock.mock.calls.length === 1) {
@@ -10111,15 +10110,15 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
 
     expect(rejected).toMatchObject({
-      hostedRuntimeFetchCauseKind: "timeout",
+      cause: { hostedRuntimeFetchCauseKind: "timeout" },
     });
-    expect(rejected).not.toBeInstanceOf(HostedRuntimeCanonicalCheckpointError);
+    expect(rejected).toBeInstanceOf(HostedCanonicalWriteOutcomeUnknownError);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("does not retry a canonical checkpoint after its active lease changes", async () => {
+  it("keeps the outcome unknown when the retry loses its active lease", async () => {
     const fetchMock = vi.fn(async () => {
-      throw new Error("Synthetic ambiguous checkpoint failure.");
+      throw new DOMException("Synthetic checkpoint timeout.", "TimeoutError");
     });
     const recordCheckpoint = vi.fn();
     let leaseReads = 0;
@@ -10153,9 +10152,45 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         hostedCanonicalWriteReceiptLogSha256: "1".repeat(64),
       },
       snapshotRef: null,
-    })).rejects.toThrow("Hosted workspace checkpoint request failed.");
+    })).rejects.toBeInstanceOf(HostedCanonicalWriteOutcomeUnknownError);
 
     expect(fetchMock).toHaveBeenCalledOnce();
+    expect(recordCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it.each(["before_web_checkpoint", "after_web_checkpoint"] as const)("classifies a stale lease at %s by whether Web may have committed", async (stage) => {
+    const recordCheckpoint = vi.fn();
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      checkpointed: true,
+      workspace: {
+        checkpointedAt: "2026-04-26T00:00:04.000Z", createdAt: "2026-04-26T00:00:00.000Z",
+        updatedAt: "2026-04-26T00:00:04.000Z", userId: "member_123", version: "5",
+        snapshotRef: null, redactedStatus: null, nextWakeAt: null, nextWakeReason: null,
+      },
+    }), { headers: { "content-type": "application/json" } }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123", fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1", leaseGeneration: "9", userId: "member_123",
+          workspaceVersion: stage === "before_web_checkpoint" || fetchMock.mock.calls.length > 0 ? "5" : "4",
+        }),
+        recordCheckpoint,
+      },
+    });
+    const error = await platform.workspacePort!.checkpoint({
+      attemptId: "attempt_1", expectedWorkspaceVersion: "4", leaseGeneration: "9",
+      reason: "canonical_runtime_commit", snapshotRef: null,
+    }).catch((error: unknown) => error);
+    if (stage === "after_web_checkpoint") {
+      expect(error).toBeInstanceOf(HostedCanonicalWriteOutcomeUnknownError);
+      expect(error).toMatchObject({ cause: { stage, code: "stale_workspace_version" }, retryable: true });
+      expect(fetchMock).toHaveBeenCalledOnce();
+    } else {
+      expect(error).not.toBeInstanceOf(HostedCanonicalWriteOutcomeUnknownError);
+      expect(error).toMatchObject({ stage, code: "stale_workspace_version" });
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
     expect(recordCheckpoint).not.toHaveBeenCalled();
   });
 

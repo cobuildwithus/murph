@@ -333,6 +333,9 @@ it has been explicitly elevated to a cross-cutting invariant.
   not release the claim or permit blind resend without provider idempotency or
   proof that the effect did not begin. Acknowledge, clean up, or advance
   progress only after terminal or durable pending evidence.
+- Failure to observe an outcome does not prove rejection. Once a native game
+  write has read its request, a server failure is reported as retryable, never
+  as a final refusal of that request.
 - Any path that suppresses or defers a user-visible effect records a typed
   durable outcome. A persisted pending effect names its current validity
   predicate and is durably superseded instead of delivered when that predicate
@@ -359,6 +362,9 @@ it has been explicitly elevated to a cross-cutting invariant.
   irreversible-effect boundary. Carry narrow typed proof within that bounded
   operation instead of making sibling layers rediscover it. Model-supplied
   targets are requests, never authority.
+- A native game command or Messages member action admitted before request
+  reading or preparation rechecks its exact session inside the transaction that
+  commits its effect. A failed recheck writes nothing.
 - Participant-target phone egress is denied unless its exact send kind has a
   narrow durable authority binding the idempotency key, participant identity,
   and source line. Adding one allowed first-contact kind must not widen another
@@ -370,6 +376,9 @@ it has been explicitly elevated to a cross-cutting invariant.
 - Canonical vault writes go through the owning canonical API with provenance.
   Importers prepare data; CLIs, assistants, and runtimes call the owner.
   Transcripts, projections, and runtime state are never promoted implicitly.
+  Failure to observe publication does not prove rejection: once a submission may
+  have committed, its evidence stays and the invocation stops until exact
+  reconciliation or cold restore follows Web.
 - Workspace packages use declared public entrypoints and keep dependencies
   one-way and acyclic. Shared behavior moves to the lower owning package instead
   of reaching into sibling internals or creating circular re-exports.
