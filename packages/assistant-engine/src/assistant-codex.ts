@@ -3,6 +3,7 @@ import {
   completeDynamicToolFailureDiagnostics,
   createDynamicToolFailureIssue,
   createDynamicToolRuntimeIssueInput,
+  dynamicToolFailureEndsTurn,
   toolFailureDiagnostic,
   type ToolFailureReason,
 } from './assistant-codex/tool-failure-diagnostics.js'
@@ -5115,7 +5116,7 @@ async function runCodexAppServerTurnOnProcess(
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()
       }
-      if (dynamicToolRequestSettled) {
+      if (dynamicToolFailureEndsTurn(dynamicToolRequestSettled, error)) {
         rejectOnce(error)
         return
       }

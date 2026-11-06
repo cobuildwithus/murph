@@ -4198,6 +4198,7 @@ async function resolveAttachedResponseMedia(input: {
     }
     return { media }
   } catch (error) {
+    AssistantWorkspaceArtifactMaterializationError.rethrowIfInterrupted(error)
     return { failureDiagnostic: toolFailureDiagnostic('handler_exception', error) }
   }
 }

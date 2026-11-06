@@ -7,6 +7,7 @@ import type {
   AssistantGroupParticipantDisplayNameSource,
   AssistantWorkspaceArtifactMaterializer,
 } from '../execution-context.js'
+import { AssistantWorkspaceArtifactMaterializationError } from '../execution-context.js'
 import type {
   AssistantInputAttachmentEvidence,
   AssistantInputAttachmentEvidenceItem,
@@ -937,7 +938,8 @@ async function buildPromptAttachmentBundlesBestEffort(input: {
       },
       vaultRoot: input.vaultRoot,
     })
-  } catch {
+  } catch (error) {
+    AssistantWorkspaceArtifactMaterializationError.rethrowIfInterrupted(error)
     input.onEvent?.({
       type: 'input.reply-progress',
       inputId: input.entry.inputId,
