@@ -1,6 +1,6 @@
 # Bind provider ingress and consent gestures to original identity
 
-Status: active
+Status: completed
 Created: 2026-11-06
 Updated: 2026-11-06
 
@@ -30,8 +30,8 @@ a member after its sender handle was unlinked.
 
 ## Constraints
 
-- Technical constraints: additive migrations only. No provider call or decryption
-  inside the grant transaction.
+- Technical constraints: additive migrations only. The new checks add no provider
+  call or decryption to the grant transaction.
 - Product/process constraints: existing buttons keep their wire contract. A fenced
   replay sends nobody a message.
 
@@ -65,6 +65,13 @@ a member after its sender handle was unlinked.
   mismatch keeps its receipt: that gesture was already spent.
 - A family-prepared replay is acknowledged without a pointer. Skipping the family
   branch with that preparation would otherwise fail on every retry.
+- A family acceptance writes no `telegram:update` row, so the fence cannot see it.
+  An explicit token replay still stops at `family-invite-not-accepted`. Only the
+  username fallback continues, and it requires the exact text `/start`, so no
+  member content can cross owners. Fencing that constant would need another index
+  or receipt, which it does not justify.
+- Existing permission decryption inside the grant transaction is unchanged. It
+  predates this work and belongs to a separate preparation change.
 
 ## Verification
 
@@ -72,3 +79,4 @@ a member after its sender handle was unlinked.
   `hosted-group-offer-gesture-replay-postgres.test.ts` on a migrated loopback
   database, the touched unit files, and the Web typecheck.
 - Expected outcomes: all pass, and the proofs fail on the unchanged code.
+Completed: 2026-11-06

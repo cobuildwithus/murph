@@ -355,11 +355,10 @@ export async function handleHostedGroupJoinOfferReaction(input: {
   let reactionMailboxAppend: HostedLinqGroupReactionMailboxAppend | null = null;
   const result = await acceptHostedGroupOfferAffirmation({
     affirmationEventId: input.event.eventId,
-    // The lookup above is mutable, and unlink commits under the member lock.
-    // Re-resolve under that lock through the core projection: no decryption or
-    // provider call may run inside the grant transaction.
+    // The lookup above is mutable, and unlink commits under the member lock the
+    // acceptance owner already holds here. Re-resolve through the core projection
+    // so this check adds no decryption or provider call to the transaction.
     assertActorStillBound: async (tx) => {
-      await lockHostedMemberRow(tx, member.id);
       const phoneNumber = readHostedGroupJoinOfferReactionParticipantPhone(reactionHandle);
       const locked = reactionHandle.includes("@")
         ? await lookupHostedMemberByVerifiedEmailAddress({
