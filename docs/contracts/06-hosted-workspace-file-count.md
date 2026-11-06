@@ -321,6 +321,31 @@ landing; record the chosen posture here so the decision is reviewable.
   publication. After publication, the index-aware runner is the rollback floor;
   an older writer would not maintain its candidate set.
 
+- `.runtime/operations/assistant/cron/runs/cron_device_activity_*.jsonl`
+  remains subject to existing generic cron history retention (200 records,
+  90 days) and response redaction. The proposed fourteen-day whole-file policy
+  is deferred: a disabled device job with old settled rows and no pending or
+  running state can still be manually claimed and append another run under the
+  same id. Occurrence-specific ids and atomic job-store replacement do not
+  prevent a claim after an unlocked eligibility read. Existing maintenance
+  continues without a cron lock, with its unchanged cadence and cancellation
+  behavior. No device-specific deletion or generic-limit exemption ships.
+  The writer counterexample and session assessment are recorded in
+  `agent-docs/exec-plans/completed/2026-11-06-retire-settled-device-cron.md`.
+
+- `.runtime/operations/assistant/sessions/*.json` and `transcripts/*.jsonl`
+  retain their current lifecycle: native resumes expire under their existing
+  policy and transcript content is bounded/redacted, but whole sessions are
+  not age-deleted. The approved narrow candidate (0–1 turns, idle at least
+  90 days, no resume, no references) is deferred: runtime maintenance's lock
+  does not fence cron pin publication or canonical automation reference writes.
+  An unreferenced scan followed by deletion can race a new reference. A future
+  bounded implementation must first prove reference publication/deletion
+  serialization, pending-input and private-completion protection, and coupled
+  session/transcript/routing cleanup. Receipts and terminal evidence retaining
+  ids are not themselves a safety proof. The reader assessment is recorded in
+  `agent-docs/exec-plans/completed/2026-11-06-retire-settled-device-cron.md`.
+
 - `.runtime/operations/assistant/state/session-routing.sqlite` is one portable,
   rebuildable projection per workspace. It stores hashed exact alias and
   conversation-key routes plus at most 50 recent-session timestamps, while
