@@ -124,28 +124,28 @@ function hashJoinInviteRefreshPayload(payload: string): string {
 export function resolveJoinInviteTitle(status: HostedInviteStatusPayload): string {
   switch (status.stage) {
     case "invalid":
-      return "Invite link not valid";
+      return "This link isn’t working.";
     case "expired":
-      return "Invite link expired";
+      return "This link expired.";
     case "verify":
       if (status.invite?.verificationMode === "invite_email") {
-        return "Verify your email";
+        return "Verify your email.";
       }
       return status.invite?.verificationMode === "manual_phone"
-        ? "Log in or sign up"
-        : "Verify your phone";
+        ? "Log in or sign up."
+        : "Verify your phone.";
     case "checkout":
       return status.messagingSetupRequired
         ? "How should Murph reach you?"
-        : "Choose your Murph plan";
+        : "Choose your Murph plan.";
     case "activating":
-      return "Finishing your setup";
+      return "Finishing your setup.";
     case "blocked":
-      return "Account blocked";
+      return "This account can’t continue.";
     case "active":
-      return "Welcome to Murph";
+      return "Welcome to Murph.";
     default:
-      return "Murph";
+      return "Murph.";
   }
 }
 
@@ -153,22 +153,22 @@ export function resolveJoinInviteSubtitle(status: HostedInviteStatusPayload): st
   switch (status.stage) {
     case "invalid":
     case "expired":
-      return "Text Murph again for a fresh link.";
+      return "Ask Murph for a new one.";
     case "verify":
       if (status.invite?.verificationMode === "invite_email") {
         return "Use the iMessage email address that received this join link.";
       }
       return status.invite?.verificationMode === "manual_phone"
         ? "Choose phone, Telegram, or email to continue with this invite."
-        : "";
+        : "We’ll text you a code.";
     case "checkout":
       return status.messagingSetupRequired
         ? "Add your phone or Telegram so Murph can message you."
-        : "Choose the plan that fits how you want to use Murph.";
+        : "Your data stays yours, and it’s never sold.";
     case "activating":
       return JOIN_INVITE_ACTIVATION_PENDING_COPY.subtitle;
     case "blocked":
-      return "This account can’t continue from this invite.";
+      return "Contact support and we’ll help you get back in.";
     case "active":
       if (status.telegramStartRequired) {
         return "Message Murph on Telegram to start.";

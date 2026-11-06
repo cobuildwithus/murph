@@ -11,6 +11,7 @@ import {
   getHostedDefaultBillingPlanCode,
   listHostedBillingPlanPresentations,
 } from "@/src/lib/hosted-onboarding/billing-plans";
+import { JOIN_FAMILY_FEATURES } from "@/src/lib/hosted-onboarding/plan-features";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 
@@ -58,15 +59,27 @@ vi.mock("@/src/components/hosted-onboarding/join-invite-islands", () => ({
     mocks.messagingSetupProps = input;
     return createElement("div", { "data-messaging-setup-island": "true" });
   },
-  JoinInvitePhoneVerificationIsland(input: Record<string, unknown>) {
+  JoinInvitePhoneVerificationIsland(input: Record<string, unknown> & {
+    detail: string;
+    title: string;
+  }) {
     mocks.phoneVerificationProps = input;
-    return createElement("div", { "data-phone-verification-island": "true" });
+    return createElement(
+      "div",
+      { "data-phone-verification-island": "true" },
+      input.title,
+      input.detail,
+    );
   },
   JoinInviteRefreshButtonIsland() {
     return createElement("button", { type: "button" }, "Try again");
   },
-  JoinInviteSignOutButtonIsland() {
-    return createElement("button", { type: "button" }, "Use this invite instead");
+  JoinInviteSignOutButtonIsland(input: { idleLabel?: string }) {
+    return createElement(
+      "button",
+      { "data-sign-out": "true", type: "button" },
+      input.idleLabel ?? "Use this invite instead",
+    );
   },
   JoinInviteStatusRefreshIsland(input: Record<string, unknown>) {
     mocks.statusRefreshProps = input;
@@ -95,8 +108,9 @@ test("JoinInvitePageView renders verify copy without exposing the masked phone h
     }),
   );
 
-  assert.match(markup, /Chat with Murph/);
-  assert.match(markup, /Verify your phone/);
+  assert.doesNotMatch(markup, /Chat with Murph/);
+  assert.match(markup, /Verify your phone\./);
+  assert.match(markup, /We’ll text you a code\./);
   assert.doesNotMatch(markup, /Use the number that received this join link\./);
   assert.match(markup, /data-phone-verification-island="true"/);
   assert.doesNotMatch(markup, /\*\*\* 2671/);
@@ -176,7 +190,7 @@ test("JoinInvitePageView renders invite email verification without phone setup c
   });
 });
 
-test("JoinInvitePageView keeps the desktop invite rail sticky", () => {
+test("JoinInvitePageView puts a stage on the night frame and keeps its status refresh", () => {
   const model = createModel({
     launchConsent: {
       gateActive: false,
@@ -198,9 +212,10 @@ test("JoinInvitePageView keeps the desktop invite rail sticky", () => {
     }),
   );
 
-  assert.match(markup, /md:sticky/);
-  assert.match(markup, /md:top-0/);
-  assert.match(markup, /md:h-svh/);
+  assert.match(markup, /data-slot="link-page-surface"/);
+  assert.match(markup, /html,body\{background:#1C1915\}/);
+  assert.doesNotMatch(markup, /md:sticky/);
+  assert.doesNotMatch(markup, /Private by default/);
   assert.match(markup, /data-starter-usage-island="true"/);
   expect(mocks.statusRefreshProps).toMatchObject({
     current: buildJoinInviteStatusRefreshSnapshot(model.status),
@@ -263,12 +278,15 @@ test("JoinInvitePageView offers direct checkout and Family retry after terminal 
     createElement(JoinInvitePageView, { model }),
   );
 
-  assert.match(markup, /Choose how to continue/);
+  assert.match(markup, /Choose how to continue\./);
   assert.match(markup, /Restart Family or choose an individual plan\./);
-  assert.match(markup, /Restart Family/);
-  assert.match(markup, /Get Pulse/);
-  assert.match(markup, /Get Edge/);
-  assert.match(markup, /2 to 6 people, one bill/);
+  assert.match(markup, />Restart Family</);
+  assert.match(markup, /value="Family"/);
+  assert.match(markup, /value="Pulse"/);
+  assert.match(markup, /value="Edge"/);
+  for (const feature of JOIN_FAMILY_FEATURES) {
+    assert.match(markup, new RegExp(feature.replaceAll("'", "&#x27;")));
+  }
   assert.doesNotMatch(markup, /data-starter-usage-island="true"/);
   expect(mocks.statusRefreshProps).toMatchObject({
     current: buildJoinInviteStatusRefreshSnapshot(
@@ -301,10 +319,10 @@ test("JoinInvitePageView keeps a reusable Family checkout actionable after cance
     createElement(JoinInvitePageView, { model }),
   );
 
-  assert.match(markup, /Continue Family checkout/);
-  assert.match(markup, /Your existing Stripe checkout is ready to resume\./);
-  assert.match(markup, /Your Family checkout is still open/);
-  assert.match(markup, /same secure checkout/);
+  assert.match(markup, /Continue Family checkout\./);
+  assert.match(markup, />Continue Family checkout</);
+  assert.match(markup, /Individual plans stay unavailable while this Family checkout is open\./);
+  assert.doesNotMatch(markup, /Stripe/);
   assert.doesNotMatch(markup, /Restart Family/);
   assert.doesNotMatch(markup, /Get Pulse/);
   assert.doesNotMatch(markup, /Get Edge/);
@@ -340,9 +358,10 @@ test("JoinInvitePageView persists Family syncing and withholds individual checko
     createElement(JoinInvitePageView, { model }),
   );
 
-  assert.match(markup, /Family billing is in progress/);
-  assert.match(markup, /Your Family plan is syncing/);
+  assert.match(markup, /Family billing is in progress\./);
   assert.match(markup, /This page checks automatically/);
+  assert.match(markup, /data-slot="link-page-dots"/);
+  assert.doesNotMatch(markup, /Stripe/);
   assert.doesNotMatch(markup, /Restart Family/);
   assert.doesNotMatch(markup, /Get Pulse/);
   assert.doesNotMatch(markup, /Get Edge/);
@@ -378,9 +397,10 @@ test("JoinInvitePageView offers Stripe management for inactive Family billing", 
     createElement(JoinInvitePageView, { model }),
   );
 
-  assert.match(markup, /Resolve Family billing/);
-  assert.match(markup, /Open Family billing/);
-  assert.match(markup, /Stripe/);
+  assert.match(markup, /Resolve Family billing\./);
+  assert.match(markup, />Open Family billing</);
+  assert.match(markup, /Update payment details, review invoices, or cancel the plan\./);
+  assert.doesNotMatch(markup, /Stripe/);
   assert.doesNotMatch(markup, /Restart Family/);
   assert.doesNotMatch(markup, /Get Pulse/);
   assert.doesNotMatch(markup, /Get Edge/);
@@ -503,8 +523,10 @@ test("JoinInvitePageView renders support mailto action for blocked accounts", ()
     }),
   );
 
-  assert.match(markup, /Needs support/);
-  assert.match(markup, /Email support/);
+  assert.doesNotMatch(markup, /Needs support/);
+  assert.match(markup, /This account can’t continue\./);
+  assert.match(markup, /Contact support and we’ll help you get back in\./);
+  assert.match(markup, />Contact support</);
   assert.match(markup, /mailto:support@withmurph\.ai/);
   assert.match(markup, /subject=Murph\+account\+support/);
   assert.match(markup, /Context%3A\+Invite\+or\+hosted\+account\+is\+blocked/);
@@ -551,13 +573,179 @@ test("JoinInvitePageView renders active and activating account states", () => {
     }),
   );
 
-  assert.match(activeMarkup, /Welcome to Murph/);
-  assert.match(activeMarkup, /Murph is ready whenever you are\./);
+  assert.match(activeMarkup, /Welcome to Murph\./);
+  assert.match(activeMarkup, /Text Murph below to start\./);
   assert.doesNotMatch(activeMarkup, /Murph will text you shortly/);
-  assert.match(activeMarkup, /Text Murph/);
+  assert.doesNotMatch(activeMarkup, /What Murph can help with/);
+  assert.match(activeMarkup, /href="sms:\+15550100999"/);
+  assert.match(activeMarkup, /Hey Murph/);
   assert.match(activeMarkup, /Add Murph to Contacts/);
-  assert.match(activatingMarkup, /Finishing your setup/);
-  assert.match(activatingMarkup, /Setting up your account and assistant/);
+  assert.match(activatingMarkup, /Finishing your setup\./);
+  assert.match(activatingMarkup, /Setup finishes in about ten seconds\./);
+  assert.match(activatingMarkup, /data-slot="link-page-dots"/);
+  assert.doesNotMatch(activatingMarkup, /Hey Murph/);
+});
+
+test("JoinInvitePageView sends a Telegram member to message first", () => {
+  vi.stubEnv("TELEGRAM_BOT_USERNAME", "synthetic_murph_bot");
+  const markup = renderToStaticMarkup(
+    createElement(JoinInvitePageView, {
+      model: createModel({
+        launchConsent: {
+          gateActive: false,
+          initialStatus: createConsentStatus({ launchGranted: true }),
+          status: "granted",
+        },
+        status: createStatus({
+          session: {
+            authenticated: true,
+            expiresAt: null,
+            matchesInvite: true,
+          },
+          stage: "active",
+          telegramStartRequired: true,
+        }),
+      }),
+    }),
+  );
+
+  vi.unstubAllEnvs();
+
+  assert.match(markup, /Message Murph on Telegram to start\./);
+  assert.match(markup, />Message Murph on Telegram</);
+  assert.match(markup, /href="https:\/\/t\.me\/synthetic_murph_bot"/);
+  assert.doesNotMatch(markup, /Add Murph to Contacts/);
+});
+
+test("JoinInvitePageView withholds the first message when there is no way to send it", () => {
+  const markup = renderToStaticMarkup(
+    createElement(JoinInvitePageView, {
+      model: createModel({
+        launchConsent: {
+          gateActive: false,
+          initialStatus: createConsentStatus({ launchGranted: true }),
+          status: "granted",
+        },
+        status: createStatus({
+          session: {
+            authenticated: true,
+            expiresAt: null,
+            matchesInvite: true,
+          },
+          stage: "active",
+        }),
+      }),
+    }),
+  );
+
+  assert.match(markup, /You’re all set\./);
+  assert.doesNotMatch(markup, /Hey Murph/);
+  assert.doesNotMatch(markup, /Text Murph/);
+});
+
+test("JoinInvitePageView shows a dead invite like every other dead link", () => {
+  const invalid = renderToStaticMarkup(
+    createElement(JoinInvitePageView, {
+      model: createModel({ status: createStatus({ invite: null, stage: "invalid" }) }),
+    }),
+  );
+  const expired = renderToStaticMarkup(
+    createElement(JoinInvitePageView, {
+      model: createModel({ status: createStatus({ stage: "expired" }) }),
+    }),
+  );
+
+  assert.match(invalid, /This link isn’t working\./);
+  assert.match(expired, /This link expired\./);
+  for (const markup of [invalid, expired]) {
+    assert.match(markup, /Ask Murph for a new one\./);
+    assert.equal(markup.includes("Open Messages"), false);
+    assert.doesNotMatch(markup, /Link no longer works/);
+    assert.doesNotMatch(markup, /data-sign-out/);
+  }
+});
+
+test("JoinInvitePageView keeps sign-out on a dead link for another account", () => {
+  const markup = renderToStaticMarkup(
+    createElement(JoinInvitePageView, {
+      model: createModel({
+        status: createStatus({
+          session: {
+            authenticated: true,
+            expiresAt: null,
+            matchesInvite: false,
+          },
+          stage: "expired",
+        }),
+      }),
+    }),
+  );
+
+  assert.match(markup, /This link expired\./);
+  assert.match(markup, /data-sign-out="true"/);
+  assert.match(markup, />Sign out</);
+});
+
+test("JoinInvitePageView recovers when legal consent fails to load", () => {
+  const markup = renderToStaticMarkup(
+    createElement(JoinInvitePageView, {
+      model: createModel({
+        launchConsent: {
+          errorMessage: "Could not load Murph legal consent right now.",
+          gateActive: true,
+          initialStatus: null,
+          status: "error",
+        },
+        status: createStatus({
+          session: {
+            authenticated: true,
+            expiresAt: null,
+            matchesInvite: true,
+          },
+          stage: "checkout",
+        }),
+      }),
+    }),
+  );
+
+  assert.match(markup, /Unable to load Murph legal consent\./);
+  assert.match(markup, /Could not load Murph legal consent right now\./);
+  assert.match(markup, />Try again</);
+  assert.doesNotMatch(markup, /Legal consent island/);
+  assert.doesNotMatch(markup, /value="Pulse"/);
+});
+
+test("JoinInvitePageView prices the plan rows from the billing data", () => {
+  const plans = listHostedBillingPlanPresentations().map((plan) => ({
+    ...plan,
+    recurringAmountUsdCents: plan.code === "launch_monthly" ? 900 : 2_500,
+  }));
+  const markup = renderToStaticMarkup(
+    createElement(JoinInvitePageView, {
+      model: createModel({
+        status: createStatus({
+          billing: {
+            defaultPlanCode: getHostedDefaultBillingPlanCode(),
+            plans,
+          },
+          session: {
+            authenticated: false,
+            expiresAt: null,
+            matchesInvite: false,
+          },
+          stage: "checkout",
+        }),
+      }),
+    }),
+  );
+
+  assert.match(markup, /Choose your Murph plan\./);
+  assert.match(markup, /Your data stays yours, and it’s never sold\./);
+  assert.match(markup, />\$9</);
+  assert.match(markup, />\$25</);
+  assert.match(markup, /data-checkout-plan="launch_monthly"/);
+  assert.match(markup, />Get Pulse</);
+  assert.doesNotMatch(markup, /personal health assistant/);
 });
 
 function createModel(
