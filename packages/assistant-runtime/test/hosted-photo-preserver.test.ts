@@ -80,6 +80,10 @@ test.each([true, false, undefined])("measurement receipt recovery preserves pend
     } }, () => deleteEvent({ vaultRoot: source, eventId: measurement.event.id }));
     for (const receipt of receipts) await replay(restored, receipt);
     expect((await readHostedMediaReferenceCatalogue({ vaultRoot: restored })).entries).toEqual(entries);
+    expect(receipts.flatMap(value => value.receipt.actions)).toContainEqual(expect.objectContaining({
+      kind: "raw_upsert", targetRelativePath: relativePath, sha256: entries[0]!.sha256,
+      mediaRef: expect.objectContaining({ id: entries[0]!.mediaId }),
+    }));
     await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot: restored, mediaStore });
     expect((await readHostedMediaReferenceCatalogue({ vaultRoot: restored })).entries).toEqual(entries);
     if (pendingUpload) {
@@ -95,6 +99,11 @@ test.each([true, false, undefined])("measurement receipt recovery preserves pend
       }
     }
     expect(mediaStore.put).not.toHaveBeenCalled(); expect(mediaStore.get).not.toHaveBeenCalled(); expect(mediaStore.delete).not.toHaveBeenCalled();
+    if (!pendingUpload) {
+      const materialize = createHostedArtifactMaterializer({ vaultRoot: restored, operatorHomeRoot: path.join(root, "operator"), mediaStore });
+      expect((await materialize([relativePath])).missingArtifactPaths.size).toBe(0);
+      expect(await readFile(path.join(restored, relativePath))).toEqual(png);
+    }
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -293,6 +302,88 @@ test.each(["repeat", "rewrite"])("measurement %s preserves the original object a
       await expect(readFile(path.join(vaultRoot, relativePath))).rejects.toMatchObject({ code: "ENOENT" });
     }
     expect(mediaStore.put).not.toHaveBeenCalled();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("measurement rewrite and later reference receipts replay without asserting the retained old identity", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "measurement-receipt-rewrite-"));
+  const vaultRoot = path.join(root, "vault"), restored = path.join(root, "restored"), again = path.join(root, "again");
+  const { objects, mediaStore } = storeFixture();
+  try {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const sourcePath = path.join(root, "fixture.png");
+    await writeFile(sourcePath, png);
+    const attachments = [{ role: "media_1", sourcePath, allowExistingMatch: true }];
+    const draft = { title: "Synthetic measurement", occurredAt: at,
+      measurements: [{ metric: "weight", value: 70, unit: "kg" }] };
+    const first = await addMeasurement({ vaultRoot, attachments, draft, rawImport: { importedAt: at } });
+    const relativePath = first.event.attachments![0]!.relativePath;
+    const entries = await externalizeFixture(vaultRoot, [relativePath], objects);
+    await restore(vaultRoot, restored);
+    await expect(readFile(path.join(restored, relativePath))).rejects.toMatchObject({ code: "ENOENT" });
+    const replacement = Buffer.concat([png, Buffer.from("synthetic revision")]);
+    await writeFile(sourcePath, replacement);
+    const receipts: HostedCanonicalWritePersistenceInput[] = [];
+    const port = { persistCanonicalWrite: async (persistence: HostedCanonicalWritePersistenceInput) => {
+      receipts.push(await externalizeHostedCanonicalWriteMediaPayloads({ persistence, vaultRoot, mediaStore }));
+    } };
+    const second = await withHostedCanonicalWritePort(port, () => addMeasurement({
+      vaultRoot, attachments, draft: { ...draft, id: first.event.id },
+      rawImport: { importedAt: "2026-01-02T00:00:00.000Z" },
+    }));
+    expect(second.event.attachments![0]!.relativePath).toBe(relativePath);
+    expect(second.manifestPath).not.toBe(first.manifestPath);
+    expect(receipts).toHaveLength(1);
+    await replay(restored, receipts[0]!);
+    expect(await readFile(path.join(restored, relativePath))).toEqual(replacement);
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot: restored })).entries).toEqual(entries);
+
+    // A later holder-only write must not reassert the old digest either.
+    await withHostedCanonicalWritePort(port, () => deleteEvent({ vaultRoot, eventId: first.event.id }));
+    expect(receipts).toHaveLength(2);
+    expect(receipts[1]!.receipt.actions.some(action => action.kind === "raw_upsert")).toBe(false);
+    await replay(restored, receipts[1]!);
+    expect(await readFile(path.join(restored, relativePath))).toEqual(replacement);
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toEqual(entries);
+    expect(await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot: restored, mediaStore }))
+      .toMatchObject({ prunedMediaCount: 0, uploadedMediaCount: 0, excludedVaultPaths: [] });
+    await restore(restored, again);
+    expect(await readFile(path.join(again, relativePath))).toEqual(replacement);
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot: again })).entries).toEqual(entries);
+    expect(objects.get(entries[0]!.mediaId)).toEqual(png);
+    expect(mediaStore.put).not.toHaveBeenCalled();
+    expect(mediaStore.get).not.toHaveBeenCalled();
+    expect(mediaStore.delete).not.toHaveBeenCalled();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a malformed measurement manifest omits the receipt identity without failing the write", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "measurement-receipt-malformed-"));
+  const vaultRoot = path.join(root, "vault"), restored = path.join(root, "restored");
+  const { objects, mediaStore } = storeFixture();
+  try {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const sourcePath = path.join(root, "fixture.png");
+    await writeFile(sourcePath, png);
+    const measurement = await addMeasurement({ vaultRoot, attachments: [{ role: "media_1", sourcePath }],
+      draft: { title: "Synthetic measurement", occurredAt: at, measurements: [{ metric: "weight", value: 70, unit: "kg" }] } });
+    const relativePath = measurement.event.attachments![0]!.relativePath;
+    const entries = await externalizeFixture(vaultRoot, [relativePath], objects);
+    await restore(vaultRoot, restored);
+    const receipts: HostedCanonicalWritePersistenceInput[] = [];
+    await withHostedCanonicalWritePort({ persistCanonicalWrite: async persistence => {
+      await writeFile(path.join(vaultRoot, measurement.manifestPath!), "{ not json");
+      receipts.push(await externalizeHostedCanonicalWriteMediaPayloads({ persistence, vaultRoot, mediaStore }));
+    } }, () => deleteEvent({ vaultRoot, eventId: measurement.event.id }));
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0]!.receipt.actions.some(action => action.kind === "raw_upsert")).toBe(false);
+    await replay(restored, receipts[0]!);
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toEqual(entries);
+    expect((await readHostedMediaReferenceCatalogue({ vaultRoot: restored })).entries).toEqual(entries);
+    expect(objects.get(entries[0]!.mediaId)).toEqual(png);
+    expect(mediaStore.put).not.toHaveBeenCalled();
+    expect(mediaStore.get).not.toHaveBeenCalled();
+    expect(mediaStore.delete).not.toHaveBeenCalled();
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

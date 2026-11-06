@@ -4,6 +4,7 @@ import { hostedMediaPendingUpload } from "@murphai/runtime-state/node";
 import { collectEventRawReferencePaths } from "@murphai/contracts";
 import {
   applyHostedCanonicalWriteReceipt,
+  canonicalRawArtifactMatches,
   isEventLedgerLogicalPath,
   normalizeRelativeVaultPath,
   VAULT_LAYOUT,
@@ -72,6 +73,14 @@ export async function externalizeHostedCanonicalWriteMediaPayloads(input: {
     // Keep photo bytes in the receipt for cold CLI/native image reads, and also
     // retain the delivery-object pointer for cleanup after receipt-only recovery.
     if (entry && (!actionPaths.has(relativePath) || isRetainedPhotoPath(relativePath))) {
+      if (isRetainedPhotoPath(relativePath)) {
+        try {
+          if (!await canonicalRawArtifactMatches({ vaultRoot: input.vaultRoot, ...entry })) continue;
+        } catch {
+          // Keep the historical pointer, but do not assert an unproven identity.
+          continue;
+        }
+      }
       actions.push(toHostedMediaReceiptAction(entry));
     }
   }
