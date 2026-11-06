@@ -4,10 +4,10 @@ const m = vi.hoisted(() => ({
   event: vi.fn(), receipts: vi.fn(), frozen: vi.fn(), recover: vi.fn(), receiptUpdate: vi.fn(), game: vi.fn(), current: vi.fn(), bind: vi.fn(),
   state: vi.fn(), rematchNotice: vi.fn(), identity: vi.fn(), discover: vi.fn(), exact: vi.fn(), bootstrap: vi.fn(), proposal: vi.fn(),
   destination: vi.fn(), mailbox: vi.fn(), prepare: vi.fn(), append: vi.fn(), signal: vi.fn(), route: vi.fn(),
-  missedBatch: vi.fn(), reserveMissed: vi.fn(), recapMaterial: vi.fn(), recapMessages: vi.fn(), transcript: vi.fn(), room: vi.fn(),
+  chats: vi.fn(), missedBatch: vi.fn(), reserveMissed: vi.fn(), recapMaterial: vi.fn(), recapMessages: vi.fn(), transcript: vi.fn(), room: vi.fn(),
 }));
 vi.mock("../src/lib/prisma", () => {
-  const db = { $queryRaw: m.lock, gameEvent: { findUnique: m.event }, hostedLinqDelivery: { findMany: (input: { where: { payloadSchema?: string } }) => input.where.payloadSchema ? m.frozen(input) : m.receipts(input), updateMany: m.receiptUpdate }, game: { findUnique: m.game, findFirst: m.current, updateMany: m.bind } };
+  const db = { $queryRaw: m.lock, gameEvent: { findUnique: m.event }, hostedLinqDelivery: { findMany: (input: { where: { payloadSchema?: string } }) => input.where.payloadSchema ? m.frozen(input) : m.receipts(input), updateMany: m.receiptUpdate }, game: { findUnique: m.game, findFirst: m.current, findMany: async () => (await m.chats()) ?? [], updateMany: m.bind } };
   return { getPrisma: () => ({ ...db, $transaction: async (fn: (tx: typeof db) => unknown) => fn(db) }) };
 });
 vi.mock("../src/lib/game/service", () => ({ readGameChatState: m.state, readGameNoticeRoom: m.room, readGameMissedCheckInBatch: m.missedBatch, readGameRematchNotice: m.rematchNotice,
@@ -81,7 +81,7 @@ describe("durable game chat lifecycle", () => {
     expect(m.receipts).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
       template: { in: ["game_started", "game_rematch", "game_proposal", "game_talk", "game_change_cancelled", "game_change_expired", "game_change_resolved", "game_cancelled", "game_recap", "game_missed", "game_group_missed", "game_challenge"] },
       sourceRef: { not: null },
-    }), take: 1 }));
+    }), take: 50 }));
   });
 
   it.each(["awaiting_generation", "generation_queued"])("queues or recovers one bound Prove it notice: %s", async status => {
@@ -302,9 +302,40 @@ describe("durable game chat lifecycle", () => {
     expect(instructions).not.toContain("Briefly offer reminders");
     expect(JSON.parse(instructions.split("\n").at(-1))).toEqual({ thisGameTasks: room.tasks, otherGames: room.otherGames });
   });
+  it("recovers one frozen bootstrap per pass, and none once the claim budget is spent", async () => {
+    m.receipts.mockResolvedValue([]);
+    m.frozen.mockResolvedValue([{ id: "frozen", attemptedAt: now }]);
+    m.recover.mockResolvedValue(true);
+    await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });
+    expect(m.frozen).toHaveBeenCalledWith(expect.objectContaining({ take: 1 }));
+    m.recover.mockClear();
+    const clock = vi.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValue(90_000);
+    await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 0, queued: 0, deferred: 0 });
+    expect(m.recover).not.toHaveBeenCalled();
+    clock.mockRestore();
+  });
+
+  it("surfaces a failed claim only after its sibling worker has finished", async () => {
+    let finishSibling = () => {};
+    const sibling = new Promise<null>(resolve => { finishSibling = () => resolve(null); });
+    m.chats.mockResolvedValueOnce([{ id: "game-a", chatContainerMemberId: "room-a" }, { id: "game-b", chatContainerMemberId: "room-b" }]);
+    m.receipts.mockResolvedValue([{ ...receipt, id: "first", sourceRef: "game-a" }, { ...receipt, id: "second", sourceRef: "game-b" }]);
+    m.receiptUpdate.mockReset();
+    m.receiptUpdate.mockRejectedValueOnce(new Error("Synthetic claim failure.")).mockResolvedValue({ count: 1 });
+    m.game.mockImplementationOnce(() => sibling);
+    let settled = false;
+    const draining = drainGameChatLifecycle({ now }).finally(() => { settled = true; });
+    draining.catch(() => {});
+    await vi.waitFor(() => expect(m.game).toHaveBeenCalled());
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(settled).toBe(false);
+    finishSibling();
+    await expect(draining).rejects.toThrow("Synthetic claim failure.");
+  });
+
   it("publishes one generated kickoff and advances the existing receipt atomically", async () => {
     await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });
-    expect(m.receipts).toHaveBeenCalledWith(expect.objectContaining({ take: 1, where: expect.objectContaining({ source: "game_lifecycle" }) }));
+    expect(m.receipts).toHaveBeenCalledWith(expect.objectContaining({ take: 50, where: expect.objectContaining({ source: "game_lifecycle" }) }));
     expect(m.receiptUpdate).toHaveBeenNthCalledWith(1, {
       where: { id: "receipt", source: "game_lifecycle", status: "awaiting_generation", attemptedAt: now, OR: [{ retryAfterAt: null }, { retryAfterAt: { lte: now } }] },
       data: { attemptedAt: now, retryAfterAt: new Date(now.getTime() + 60_000) },

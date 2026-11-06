@@ -6473,6 +6473,19 @@ receipt is skipped unless its mailbox item already exists, and a published one
 leaves the sweep without being skipped. Final egress refuses either past the same
 deadline, which also bounds outbox retries.
 
+The minute drain handles up to ten lifecycle receipts a pass, four at a time and
+at most one per chat, oldest first; the rest wait for the next pass. A receipt's
+chat comes from its game's binding, or the room in a group check-in's reference,
+because the room owner is unset on most receipts until they publish. Every
+receipt with no known chat shares one slot. Claims stop 90 seconds of real time
+after the drain starts, counting the missed-day sweep, so the drain ends inside
+the 180-second cron it shares with Stripe reconciliation. Frozen recovery handles
+one receipt a pass under the same budget. Ten a pass is about 600 turns an hour.
+A burst publishes at that rate because older receipts go first, but each notice
+also costs a recovery turn, so sustained capacity is about 300 notices an hour.
+A check-in backlog that cannot publish within its two-hour deadline, about 1,200
+receipts in a burst, expires rather than sends late.
+
 The isolated runner exposes only lore and quiet tools and returns text or skip.
 It omits individually explained misses, stays quiet if all are explained, or
 names all remaining qualified people and missing tasks/date in one warm line.

@@ -30,10 +30,18 @@ import { logHostedOnboardingWarning } from "../hosted-onboarding/logging";
 import { gameGroupLoreFingerprint, gamePairLoreFingerprint } from "./audience";
 import { readGameRematchDeliveryRevision } from "./chat-delivery-authority";
 
-// One discovery (20 × 3s plus one 3s recheck) and one frozen recovery
-// (10s create + 3s roster check) cap provider wait at 76s per 180s cron.
-// Database/crypto work remains outside those provider calls and short locks.
-const LIFECYCLE_BATCH = 1;
+// This cron also runs Stripe reconciliation, so the drain must end inside its 180s.
+// One receipt can wait 63s on the provider (20 discovery reads × 3s plus a 3s recheck),
+// and frozen recovery 13s (10s create + 3s roster check). No claim starts 90s after the
+// drain starts, sweep included, and workers overlap, so the last one ends near 153s. That
+// leaves about 27s for database, crypto and the runtime signal, which has no deadline of
+// its own. Four workers hold at most four interactive transactions on the shared pool.
+const LIFECYCLE_BATCH = 10;
+const LIFECYCLE_WORKERS = 4;
+const LIFECYCLE_CLAIM_BUDGET_MS = 90_000;
+/** A busy chat takes one slot, so extra rows keep the rest of the batch full behind it. */
+const LIFECYCLE_CANDIDATES = LIFECYCLE_BATCH * 5;
+const LIFECYCLE_FROZEN_BATCH = 1;
 
 /**
  * Selected in the query, before the batch limit: a receipt this build cannot
@@ -46,43 +54,53 @@ const LIFECYCLE_TEMPLATES = ["game_started", "game_rematch", "game_proposal", "g
 export async function drainGameChatLifecycle(input: { prisma?: PrismaClient; now?: Date; signal?: AbortSignal } = {}): Promise<{ attempted: number; queued: number; deferred: number }> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
+  // Real elapsed time, sweep included: `now` is the receipt clock and does not advance during a drain.
+  const startedAtMs = Date.now();
+  const stopClaiming = () => input.signal?.aborted || Date.now() - startedAtMs >= LIFECYCLE_CLAIM_BUDGET_MS;
   const { reserveDueGameMissedDayCheckIns } = await import("./service");
   await reserveDueGameMissedDayCheckIns(now);
-  const pending = await prisma.hostedLinqDelivery.findMany({
+  const candidates = await prisma.hostedLinqDelivery.findMany({
     where: { source: "game_lifecycle", template: { in: LIFECYCLE_TEMPLATES }, sourceRef: { not: null }, OR: [
       { status: "awaiting_generation", OR: [{ retryAfterAt: null }, { retryAfterAt: { lte: now } }] },
       { status: "generation_queued", retryAfterAt: { lte: now } },
     ] },
-    orderBy: [{ attemptedAt: "asc" }, { id: "asc" }], take: LIFECYCLE_BATCH,
+    orderBy: [{ attemptedAt: "asc" }, { id: "asc" }], take: LIFECYCLE_CANDIDATES,
     select: { id: true, sourceRef: true, template: true, attemptedAt: true, idempotencyKey: true, status: true, createdAt: true, payloadOwnerMemberId: true },
   });
+  const pending = await oneReceiptPerChat(candidates, prisma);
   let queued = 0;
   let attempted = 0;
-  for (const receipt of pending) {
-    if (input.signal?.aborted) break;
-    if (!LIFECYCLE_TEMPLATES.includes(receipt.template ?? "") || !receipt.sourceRef) continue;
-    const claimed = await prisma.hostedLinqDelivery.updateMany({
-      where: { id: receipt.id, source: "game_lifecycle", status: receipt.status, attemptedAt: receipt.attemptedAt,
-        OR: [{ retryAfterAt: null }, { retryAfterAt: { lte: now } }] },
-      data: { attemptedAt: now, retryAfterAt: new Date(now.getTime() + 60_000) },
-    });
-    if (claimed.count !== 1) continue;
-    attempted += 1;
-    try {
-      if (await processGameChatIntent(receipt, now, prisma)) queued += 1;
-    } catch {
-      // The reserved receipt and retry time remain durable. Provider/model work
-      // never rolls back the accepted challenge and never logs shared words.
+  let next = 0;
+  const work = async () => {
+    while (next < pending.length && !stopClaiming()) {
+      const receipt = pending[next++]!;
+      if (!LIFECYCLE_TEMPLATES.includes(receipt.template ?? "") || !receipt.sourceRef) continue;
+      const claimed = await prisma.hostedLinqDelivery.updateMany({
+        where: { id: receipt.id, source: "game_lifecycle", status: receipt.status, attemptedAt: receipt.attemptedAt,
+          OR: [{ retryAfterAt: null }, { retryAfterAt: { lte: now } }] },
+        data: { attemptedAt: now, retryAfterAt: new Date(now.getTime() + 60_000) },
+      });
+      if (claimed.count !== 1) continue;
+      attempted += 1;
+      try {
+        if (await processGameChatIntent(receipt, now, prisma)) queued += 1;
+      } catch {
+        // The reserved receipt and retry time remain durable. Provider/model work
+        // never rolls back the accepted challenge and never logs shared words.
+      }
     }
-  }
+  };
+  // A failed claim still surfaces, but only once no sibling is left running behind a settled drain.
+  const workers = await Promise.allSettled(Array.from({ length: Math.min(LIFECYCLE_WORKERS, pending.length) }, work));
+  for (const worker of workers) if (worker.status === "rejected") throw worker.reason;
   const frozen = await prisma.hostedLinqDelivery.findMany({
     where: { source: "game_lifecycle", payloadSchema: "game_chat_bootstrap_v1", bootstrapRouteAttachedAt: null,
       skippedAt: null, OR: [{ retryAfterAt: null }, { retryAfterAt: { lte: now } }] },
-    orderBy: [{ attemptedAt: "asc" }, { id: "asc" }], take: LIFECYCLE_BATCH,
+    orderBy: [{ attemptedAt: "asc" }, { id: "asc" }], take: LIFECYCLE_FROZEN_BATCH,
     select: { id: true, attemptedAt: true },
   });
   for (const receipt of frozen) {
-    if (input.signal?.aborted) break;
+    if (stopClaiming()) break;
     const claimed = await prisma.hostedLinqDelivery.updateMany({
       where: { id: receipt.id, source: "game_lifecycle", payloadSchema: "game_chat_bootstrap_v1",
         bootstrapRouteAttachedAt: null, skippedAt: null, attemptedAt: receipt.attemptedAt,
@@ -101,6 +119,26 @@ export async function drainGameChatLifecycle(input: { prisma?: PrismaClient; now
 }
 
 type GameChatIntent = Pick<HostedLinqDelivery, "id" | "sourceRef" | "template" | "status" | "idempotencyKey" | "createdAt" | "payloadOwnerMemberId">;
+
+/**
+ * Workers run in parallel, so a later notice must not overtake an earlier one in the same chat: at most one receipt per
+ * chat per pass, oldest first, and the rest wait for the next pass. `payloadOwnerMemberId` is unset on most receipts until
+ * they publish, so the chat comes from the game binding, or the room in a group check-in's reference. Every receipt with
+ * no known chat shares one slot, which keeps them at the old one-at-a-time rate.
+ */
+async function oneReceiptPerChat<T extends Pick<HostedLinqDelivery, "sourceRef" | "template">>(candidates: readonly T[], prisma: PrismaClient): Promise<T[]> {
+  const leadingId = (receipt: T) => (receipt.sourceRef ?? "").split(":")[0]!;
+  const gameIds = candidates.flatMap(receipt => receipt.template === "game_group_missed" ? [] : [leadingId(receipt)]);
+  const games = await prisma.game.findMany({ where: { id: { in: [...new Set(gameIds)] } }, select: { id: true, chatContainerMemberId: true } });
+  const chatByGame = new Map(games.map(game => [game.id, game.chatContainerMemberId]));
+  const taken = new Set<string | null>();
+  return candidates.filter(receipt => {
+    const chat = receipt.template === "game_group_missed" ? leadingId(receipt) : chatByGame.get(leadingId(receipt)) ?? null;
+    if (taken.has(chat)) return false;
+    taken.add(chat);
+    return true;
+  }).slice(0, LIFECYCLE_BATCH);
+}
 
 async function processGameChatIntent(receipt: GameChatIntent, now: Date, prisma: PrismaClient): Promise<boolean> {
   if (receipt.template === "game_group_missed") return processGroupMissedDayIntent(receipt, now);

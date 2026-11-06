@@ -7,7 +7,7 @@ import { runGameCommand, reserveDueGameMissedDayCheckIns } from "@/src/lib/game/
 import { gameAudienceKeys } from "@/src/lib/game/audience";
 import { sealGameText } from "@/src/lib/game/crypto";
 import { readGameChatTranscript } from "@/src/lib/game/chat-tool";
-import { reserveGameMissedDayTx, gameGroupMissedDayEventId, gameMissedDayEventId } from "@/src/lib/game/chat-lifecycle-receipt";
+import { gameChatLifecycleEventId, reserveGameChatLifecycleTx, reserveGameMissedDayTx, gameGroupMissedDayEventId, gameMissedDayEventId } from "@/src/lib/game/chat-lifecycle-receipt";
 import { drainGameChatLifecycle } from "@/src/lib/game/chat-lifecycle";
 import { GameChatAudienceError } from "@/src/lib/game/chat-membership";
 import { readGroupMissedDayDeliveryAuthority, prepareGroupMissedDay, reserveGroupGameMissedDay, isGroupMissedDayBatchCurrentTx } from "@/src/lib/game/group-missed-day";
@@ -75,8 +75,8 @@ const db = getPrisma();
 const members: string[] = [], games: string[] = [], events: string[] = [];
 const date = "2030-03-04", now = new Date("2030-03-05T09:00:00Z");
 function barrier() { let release!: () => void; return { promise: new Promise<void>(resolve => { release = resolve; }), release: () => release() }; }
-async function fixture(count = 3, roomId = `missed_room_${randomUUID()}`) {
-  const people = await Promise.all(Array.from({ length: count }, async (_, seat) => {
+async function fixture(count = 3, roomId = `missed_room_${randomUUID()}`, sharedPeople?: Array<{ id: string; email: string }>) {
+  const people = sharedPeople ?? await Promise.all(Array.from({ length: count }, async (_, seat) => {
     const id = `missed_person_${randomUUID()}`, email = `${randomUUID()}@example.test`;
     members.push(id);
     await db.hostedMember.create({ data: { id } });
@@ -123,15 +123,13 @@ async function drainPastBrokenRoom(reason: string, breakRoom: (f: Fixture) => un
   await bad.addGame(); await healthy.addGame();
   expect(await reserveGroupGameMissedDay(pending.roomId, [await pending.addGame()], now)).toBe(1);
   const pendingEvent = gameGroupMissedDayEventId(pending.roomId, date);
-  // Oldest in the drain, so this delivery rather than the sweep's fresh reservation takes the batch.
-  await db.hostedLinqDelivery.update({ where: { id: (await receipt(pendingEvent)).id }, data: { attemptedAt: new Date(0) } });
   await breakRoom(bad);
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-  expect(await drainGameChatLifecycle({ now })).toMatchObject({ attempted: 1, queued: 1 });
+  await drainGameChatLifecycle({ now });
 
   expect((await receipt(pendingEvent)).status).toBe("generation_queued");
-  expect((await receipt(gameGroupMissedDayEventId(healthy.roomId, date))).status).toBe("awaiting_generation");
+  expect((await receipt(gameGroupMissedDayEventId(healthy.roomId, date))).status).toBe("generation_queued");
   expect(await db.hostedLinqDelivery.count({ where: { payloadOwnerMemberId: bad.roomId } })).toBe(0);
   expect(await db.hostedMailboxItem.count({ where: { userId: bad.roomId } })).toBe(0);
   expect(warn).toHaveBeenCalledWith(expect.any(String), { warning: "game.missed-day.room-skipped", reason });
@@ -539,17 +537,16 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect(await db.hostedMailboxItem.count({ where: { userId: f.roomId } })).toBe(0);
   });
 
-  it("frees the batch once a stuck receipt ends, so a healthy one behind it proceeds", async () => {
+  it("ends a stuck receipt without holding up a healthy one, and gives it no further turn", async () => {
     const stuck = await reservedRoom(), healthy = await fixture(), healthyId = await healthy.addGame();
     proof.rooms.set(stuck.f.roomId, [stuck.f.people[0]!.email]);
     expect(await reserveGroupGameMissedDay(healthy.roomId, [healthyId], hours(1.5))).toBe(1);
-    const healthyEvent = gameGroupMissedDayEventId(healthy.roomId, date);
-    expect(await turn(stuck.eventId, justLate)).toMatchObject({ attempted: 1, queued: 0 });
+    await turn(stuck.eventId, justLate);
     expect((await receipt(stuck.eventId)).status).toBe("skipped");
-    expect((await receipt(healthyEvent)).status).toBe("awaiting_generation");
+    expect((await receipt(gameGroupMissedDayEventId(healthy.roomId, date))).status).toBe("generation_queued");
     proof.audienceReads.length = 0;
-    expect(await turn(healthyEvent, new Date(justLate.getTime() + 60_000))).toMatchObject({ attempted: 1, queued: 1 });
-    expect((await receipt(healthyEvent)).status).toBe("generation_queued");
+    await drainGameChatLifecycle({ now: new Date(justLate.getTime() + 60_000) });
+    expect((await receipt(stuck.eventId)).attemptedAt).toEqual(justLate);
     expect(proof.audienceReads.filter(read => read.endsWith(stuck.f.roomId))).toEqual([]);
   });
 
@@ -728,5 +725,153 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     proof.rooms.get(f.roomId)!.push("outsider@example.test");
     await expect(readGameProposalDeliveryPlayers(authority.policy.eventId, f.roomId, f.roomId)).rejects.toThrow();
     await expect(assertGameProposalDeliveryCurrentTx({ tx: db, deliveryIdempotencyKey: authority.policy.eventId, containerMemberId: f.roomId })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+  });
+});
+
+describe.skipIf(!enabled)("lifecycle batch", () => {
+  /** Due receipts, oldest first and ahead of anything else in the shared database. Shard 17 keeps the pre-sweep away. */
+  async function dueRooms(count: number) {
+    const rooms = [];
+    for (const [index, roomId] of (await shardRooms(count, 17)).entries()) {
+      const f = await fixture(2, roomId), id = await f.addGame();
+      expect(await reserveGroupGameMissedDay(f.roomId, [id], now)).toBe(1);
+      const eventId = gameGroupMissedDayEventId(f.roomId, date);
+      await db.hostedLinqDelivery.update({ where: { id: (await receipt(eventId)).id }, data: { attemptedAt: new Date(index * 1_000) } });
+      rooms.push({ f, id, eventId });
+    }
+    return rooms;
+  }
+  /** Holds every receipt at its prepare step, so concurrency is observed rather than inferred. */
+  function holdInFlight() {
+    const gate = barrier(), full = barrier(), seen = { inside: 0, peak: 0 };
+    proof.afterPrepare = async () => {
+      seen.inside += 1; seen.peak = Math.max(seen.peak, seen.inside);
+      if (seen.inside === 4) full.release();
+      await gate.promise;
+      seen.inside -= 1;
+    };
+    return { gate, full, seen };
+  }
+  /** A notice in the same chat that identifies it by game, because its room owner is unset until publication. */
+  async function notice(gameId: string, attemptedAt: Date, kind: "change_cancelled" | "started" = "change_cancelled") {
+    const proposalId = randomUUID(), eventId = gameChatLifecycleEventId(gameId, kind, proposalId);
+    events.push(eventId);
+    await reserveGameChatLifecycleTx({ gameId, kind, proposalId, now, tx: db });
+    await db.hostedLinqDelivery.update({ where: { id: (await receipt(eventId)).id }, data: { attemptedAt } });
+    return eventId;
+  }
+  const untouched = async (eventId: string, attemptedAt: Date) => expect(await receipt(eventId)).toMatchObject({ status: "awaiting_generation", attemptedAt });
+
+  it("publishes ten rooms in one pass and leaves the eleventh for the next", async () => {
+    const rooms = await dueRooms(11);
+    expect(await drainGameChatLifecycle({ now })).toMatchObject({ attempted: 10, queued: 10 });
+    for (const room of rooms.slice(0, 10)) expect((await receipt(room.eventId)).status).toBe("generation_queued");
+    await untouched(rooms[10]!.eventId, new Date(10_000));
+    await drainGameChatLifecycle({ now });
+    expect((await receipt(rooms[10]!.eventId)).status).toBe("generation_queued");
+  });
+
+  it("never has more than four receipts in flight", async () => {
+    await dueRooms(10);
+    const { gate, full, seen } = holdInFlight();
+    const draining = drainGameChatLifecycle({ now });
+    await full.promise;
+    // A fifth worker would arrive during this wait; a correct cap cannot.
+    await new Promise(resolve => setTimeout(resolve, 500));
+    expect(seen).toEqual({ inside: 4, peak: 4 });
+    gate.release();
+    expect(await draining).toMatchObject({ attempted: 10, queued: 10 });
+    expect(seen.peak).toBe(4);
+  });
+
+  it.each(["check-in", "notice"] as const)("gives a chat one receipt per pass across templates, the older %s first", async older => {
+    const [room] = await dueRooms(1), { id, eventId: checkIn } = room!;
+    const noticeAt = new Date(older === "notice" ? -1_000 : 1_000), later = older === "notice" ? checkIn : await notice(id, noticeAt);
+    const first = older === "notice" ? await notice(id, noticeAt) : checkIn;
+    await drainGameChatLifecycle({ now });
+    expect((await receipt(first)).attemptedAt).toEqual(now);
+    await untouched(later, older === "notice" ? new Date(0) : noticeAt);
+    const next = new Date(now.getTime() + 60_000);
+    await drainGameChatLifecycle({ now: next });
+    expect((await receipt(later)).attemptedAt).toEqual(next);
+  });
+
+  it("treats every receipt with no known chat as one chat", async () => {
+    const [a, b] = await dueRooms(2);
+    await db.game.updateMany({ where: { id: { in: [a!.id, b!.id] } }, data: { chatContainerMemberId: null } });
+    await db.hostedLinqDelivery.deleteMany({ where: { idempotencyKey: { in: [a!, b!].map(room => createHostedLinqDeliveryIdempotencyLookupKey(room.eventId)!) } } });
+    const [older, newer] = [await notice(a!.id, new Date(1_000), "started"), await notice(b!.id, new Date(2_000), "started")];
+    await drainGameChatLifecycle({ now });
+    expect((await receipt(older)).attemptedAt).toEqual(now);
+    await untouched(newer, new Date(2_000));
+  });
+
+  it("keeps the batch full behind one busy chat", async () => {
+    const [busy, ...others] = await dueRooms(4);
+    const backlog = [];
+    for (let index = 0; index < 12; index += 1) backlog.push(await notice(busy!.id, new Date(index + 1)));
+    expect(await drainGameChatLifecycle({ now })).toMatchObject({ attempted: 4, queued: 4 });
+    expect((await receipt(busy!.eventId)).status).toBe("generation_queued");
+    for (const room of others) expect((await receipt(room.eventId)).status).toBe("generation_queued");
+    for (const [index, eventId] of backlog.entries()) await untouched(eventId, new Date(index + 1));
+  });
+
+  it.each([["one second short of", 89_000, 6], ["exactly at", 90_000, 4]] as const)("%s the claim budget, in-flight receipts finish and the rest stay unclaimed", async (_side, elapsed, published) => {
+    const rooms = await dueRooms(6);
+    const { gate, full } = holdInFlight();
+    let clock = 1_000_000_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => clock);
+    const draining = drainGameChatLifecycle({ now });
+    await full.promise;
+    clock += elapsed; gate.release();
+    expect(await draining).toMatchObject({ attempted: published, queued: published });
+    for (const [index, room] of rooms.entries()) {
+      if (index < published) expect((await receipt(room.eventId)).status).toBe("generation_queued");
+      else await untouched(room.eventId, new Date(index * 1_000));
+    }
+  });
+
+  it("counts time spent in the sweep against the claim budget", async () => {
+    const [room] = await dueRooms(1);
+    let clock = 1_000_000_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => clock);
+    vi.spyOn(await import("@/src/lib/game/service"), "reserveDueGameMissedDayCheckIns").mockImplementation(async () => { clock += 90_000; return 0; });
+    expect(await drainGameChatLifecycle({ now })).toMatchObject({ attempted: 0 });
+    await untouched(room!.eventId, new Date(0));
+  });
+
+  it("keeps one receipt's failure away from its siblings", async () => {
+    const rooms = await dueRooms(5);
+    proof.chatFailures.set(rooms[2]!.f.roomId, new Error("Synthetic provider failure."));
+    expect(await drainGameChatLifecycle({ now })).toMatchObject({ attempted: 5, queued: 4, deferred: 1 });
+    for (const [index, room] of rooms.entries()) expect((await receipt(room.eventId)).status).toBe(index === 2 ? "awaiting_generation" : "generation_queued");
+  });
+
+  it("claims nothing new once the request aborts, and lets in-flight receipts finish", async () => {
+    const rooms = await dueRooms(6), controller = new AbortController();
+    const { gate, full } = holdInFlight();
+    const draining = drainGameChatLifecycle({ now, signal: controller.signal });
+    await full.promise;
+    controller.abort(); gate.release();
+    expect(await draining).toMatchObject({ attempted: 4, queued: 4 });
+    for (const [index, room] of rooms.slice(4).entries()) await untouched(room.eventId, new Date((index + 4) * 1_000));
+  });
+
+  it("never lets overlapping drains publish one receipt twice", async () => {
+    const rooms = await dueRooms(10), prepared = vi.fn();
+    proof.afterPrepare = async () => { prepared(); };
+    await Promise.all([drainGameChatLifecycle({ now }), drainGameChatLifecycle({ now }), drainGameChatLifecycle({ now })]);
+    expect(prepared).toHaveBeenCalledTimes(10);
+    for (const room of rooms) expect(await db.hostedMailboxItem.count({ where: { userId: room.f.roomId } })).toBe(1);
+  });
+
+  it("publishes two rooms that share their members in one pass", async () => {
+    const [firstRoom, secondRoom] = await shardRooms(2, 17);
+    const first = await fixture(2, firstRoom), second = await fixture(2, secondRoom, first.people);
+    expect(await reserveGroupGameMissedDay(first.roomId, [await first.addGame()], now)).toBe(1);
+    expect(await reserveGroupGameMissedDay(second.roomId, [await second.addGame()], now)).toBe(1);
+    for (const f of [first, second]) await db.hostedLinqDelivery.update({ where: { id: (await receipt(gameGroupMissedDayEventId(f.roomId, date))).id }, data: { attemptedAt: new Date(0) } });
+    expect(await drainGameChatLifecycle({ now })).toMatchObject({ attempted: 2, queued: 2 });
+    for (const f of [first, second]) expect(await db.hostedMailboxItem.count({ where: { userId: f.roomId } })).toBe(1);
   });
 });
