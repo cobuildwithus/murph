@@ -1,6 +1,8 @@
 import "server-only";
 
-import { GAME_REPORT_REASONS, type GameEntryKind, type GameReportAbout, type GameReportReason } from "./contract";
+import type { GameReport } from "@prisma/client";
+
+import { GAME_ENTRY_KINDS, GAME_REPORT_ABOUT, GAME_REPORT_REASONS, type GameEntryKind, type GameReportAbout, type GameReportReason } from "./contract";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { readHostedOperationalAlertEmailConfig } from "../hosted-onboarding/operational-alert-email-config";
 import { sendHostedResendPlainTextEmail } from "../hosted-onboarding/resend-plain-text-email";
@@ -9,9 +11,10 @@ import { sendHostedResendPlainTextEmail } from "../hosted-onboarding/resend-plai
  * Tells a person about a game report on the operational alert email, so they
  * review it within a day at /ops/game-reports. Recipients come from
  * `HOSTED_GAME_REPORT_ALERT_EMAILS`, else the ops list. One email per report,
- * keyed by its id, so a retried report sends once. It names the reason, what
- * kind of content, the report and the game: never the reported words or
- * photos, health values, or who reported.
+ * keyed by its id, with inputs frozen on the accepted receipt. Legacy receipts
+ * without frozen inputs stay in the Ops queue without rebuilding an email.
+ * It names the reason, what kind of content, the report and the game: never
+ * the reported words or photos, health values, or who reported.
  */
 
 /** A burst from one reporter can't flood the inbox; every report is still stored. */
@@ -47,10 +50,29 @@ export interface GameReportAlert {
   createdAt: Date;
 }
 
-export async function sendGameReportAlert(alert: GameReportAlert, input: {
+/**
+ * Repeats only the accepted alert inputs. A legacy receipt may already have
+ * reached the provider, so never rebuild its unknown payload under that key.
+ * Its retry succeeds and blocking still runs; the Ops queue is the record.
+ */
+export async function sendGameReportAlert(receipt: Pick<GameReport,
+  "id" | "about" | "reason" | "createdAt" | "alertBlocked" | "alertEntryKind" | "alertFromInvite" | "alertGameId"
+>, input: {
   env?: Readonly<Record<string, string | undefined>>;
   sendEmail?: typeof sendHostedResendPlainTextEmail;
 } = {}): Promise<void> {
+  const reportId = receipt.id;
+  if (receipt.alertBlocked === null || receipt.alertFromInvite === null) {
+    console.warn("Game report alert skipped for a legacy receipt.", { reportId });
+    return;
+  }
+  const alert: GameReportAlert = {
+    reportId, about: GAME_REPORT_ABOUT.find(about => about === receipt.about) ?? "post",
+    reason: GAME_REPORT_REASONS.find(reason => reason === receipt.reason) ?? "other",
+    entryKind: GAME_ENTRY_KINDS.find(kind => kind === receipt.alertEntryKind) ?? null,
+    blocked: receipt.alertBlocked, fromInvite: receipt.alertFromInvite,
+    gameId: receipt.alertGameId, createdAt: receipt.createdAt,
+  };
   const env = input.env ?? process.env;
   const config = readHostedOperationalAlertEmailConfig(env, env.HOSTED_GAME_REPORT_ALERT_EMAILS?.trim()
     ? "HOSTED_GAME_REPORT_ALERT_EMAILS" : "HOSTED_LINQ_ALERT_EMAILS");
