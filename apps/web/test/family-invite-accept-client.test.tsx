@@ -96,7 +96,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-test("renders the Messages alternative as a compact ghost button and opens sign-in", async () => {
+test("renders the Messages alternative as a quiet link and opens sign-in", async () => {
   const { FamilyInviteSignInButton } = await import(
     "@/src/components/family/family-invite-accept-client"
   );
@@ -109,9 +109,8 @@ test("renders the Messages alternative as a compact ghost button and opens sign-
   cleanupRender = cleanup;
 
   expect(button.textContent).toBe("Prefer not to text?");
-  expect(button.getAttribute("data-variant")).toBe("ghost");
-  expect(button.getAttribute("data-size")).toBe("sm");
-  expect(button.className.split(/\s+/u)).toContain("w-fit");
+  expect(button.getAttribute("data-variant")).toBe("unstyled");
+  expect(button.className.split(/\s+/u)).toContain("h-11");
   expect(mocks.authDialogProps).toMatchObject({
     description: "Use the same phone number this invite was sent to.",
     open: false,
@@ -137,12 +136,16 @@ test("links an active Family draft conflict to Settings and preserves the invite
       message: "Resolve the unfinished Family checkout first.",
     }),
   );
-  const { FamilyInviteWebAcceptButton } = await import(
+  const { FamilyInviteWebAcceptScreen } = await import(
     "@/src/components/family/family-invite-accept-client"
   );
   const inviteCode = "invite_return_target";
   const rendered = await renderClientComponent(
-    createElement(FamilyInviteWebAcceptButton, { inviteCode }),
+    createElement(FamilyInviteWebAcceptScreen, {
+      children: null,
+      inviteCode,
+      title: "The Ridgeline crew invited you to Murph Family.",
+    }),
   );
   cleanupRender = rendered.cleanup;
 
@@ -152,6 +155,10 @@ test("links an active Family draft conflict to Settings and preserves the invite
     );
   });
 
+  expect(rendered.container.textContent).toContain("Finish your Family setup first.");
+  expect(rendered.container.textContent).toContain(
+    "You already have an unfinished Family setup. Resolve it in Settings, then you’ll return here to try this invite again.",
+  );
   expect(rendered.container.textContent).toContain("Open Family settings");
   const recoveryButton = [...rendered.window.document.querySelectorAll("button")]
     .find((button) => button.textContent === "Open Family settings");
@@ -165,4 +172,65 @@ test("links an active Family draft conflict to Settings and preserves the invite
   expect(mocks.routerPush).toHaveBeenCalledWith(
     "/settings?familyInviteReturn=%2Ffamily%2Faccept%2Finvite_return_target#subscription",
   );
+});
+
+test("turns the whole page into the welcome once the invite is accepted", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ ok: true });
+  const { FamilyInviteWebAcceptScreen } = await import(
+    "@/src/components/family/family-invite-accept-client"
+  );
+  const rendered = await renderClientComponent(
+    createElement(FamilyInviteWebAcceptScreen, {
+      children: createElement("p", null, "They pay for your Murph access."),
+      inviteCode: "invite_accept",
+      title: "The Ridgeline crew invited you to Murph Family.",
+    }),
+  );
+  cleanupRender = rendered.cleanup;
+
+  expect(rendered.button.textContent).toBe("Accept invite");
+  await act(async () => {
+    rendered.button.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+    method: "POST",
+    url: "/api/family/invites/invite_accept/accept",
+  });
+  expect(rendered.container.textContent).toContain("You're in.");
+  expect(rendered.container.textContent).toContain("Welcome to Murph.");
+  expect(rendered.container.textContent).not.toContain("invited you to Murph Family");
+
+  const openMurph = [...rendered.window.document.querySelectorAll("button")]
+    .find((button) => button.textContent === "Open Murph");
+  await act(async () => {
+    openMurph?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+  expect(mocks.routerPush).toHaveBeenCalledWith("/home");
+});
+
+test("keeps the invite on the page with the error when accepting fails", async () => {
+  mocks.requestHostedOnboardingJson.mockRejectedValueOnce(new Error("Temporary failure."));
+  const { FamilyInviteWebAcceptScreen } = await import(
+    "@/src/components/family/family-invite-accept-client"
+  );
+  const rendered = await renderClientComponent(
+    createElement(FamilyInviteWebAcceptScreen, {
+      children: null,
+      inviteCode: "invite_accept",
+      title: "The Ridgeline crew invited you to Murph Family.",
+    }),
+  );
+  cleanupRender = rendered.cleanup;
+
+  await act(async () => {
+    rendered.button.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  expect(rendered.container.querySelector('[role="alert"]')?.textContent).toBe("error");
+  expect(rendered.button.textContent).toBe("Accept invite");
 });

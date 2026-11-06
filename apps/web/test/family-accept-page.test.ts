@@ -1,4 +1,4 @@
-import { createElement } from "react";
+import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, test, vi } from "vitest";
 
@@ -29,12 +29,24 @@ vi.mock("@/src/components/family/family-invite-accept-client", () => ({
       props.variant === "link" ? "Prefer not to text?" : "Sign in to join",
     );
   },
-  FamilyInviteWebAcceptButton(props: { inviteCode: string }) {
-    mocks.webAcceptButtonProps = props;
+  FamilyInviteWebAcceptScreen(props: {
+    children: ReactNode;
+    inviteCode: string;
+    secondaryActions?: ReactNode;
+    title: string;
+  }) {
+    mocks.webAcceptButtonProps = { inviteCode: props.inviteCode };
     return createElement(
-      "button",
-      { "data-family-web-accept": props.inviteCode },
-      "Accept invite",
+      "section",
+      null,
+      props.title,
+      props.children,
+      createElement(
+        "button",
+        { "data-family-web-accept": props.inviteCode },
+        "Accept invite",
+      ),
+      props.secondaryActions,
     );
   },
 }));
@@ -144,6 +156,9 @@ test("leads phone-bound invites with the Messages accept path, not Telegram", as
   expect(markup).toContain(
     "sms:+15551230000?body=Hi%20Murph%2C%20joining%20the%20family%20plan%20(code%20family_CODEPHONE)",
   );
+  expect(markup).toContain(
+    "Joining by text works from the phone this invite was sent to.",
+  );
   // The web sign-in is offered only as a compact secondary option.
   expect(mocks.signInButtonProps).toEqual({
     bindingLabel: "phone number",
@@ -179,9 +194,19 @@ test("uses the one-tap web accept path for authenticated phone-bound invites", a
   expect(markup).toContain(
     "sms:+15551230000?body=Hi%20Murph%2C%20joining%20the%20family%20plan%20(code%20family_CODEPHONE)",
   );
-  expect(markup).toContain(
+  // The sentence belongs to the text path; a signed-in invite is one tap.
+  expect(markup).not.toContain(
     "Joining by text works from the phone this invite was sent to.",
   );
+});
+
+test("keeps the three promises word for word on a live invite", async () => {
+  const markup = await renderFamilyAcceptPage("CODEMAIL");
+
+  expect(markup).toContain("Kim Family invited you to Murph Family.");
+  expect(markup).toContain("They pay for your Murph access.");
+  expect(markup).toContain("You get your own private Murph account.");
+  expect(markup).toContain("They can&#x27;t see your messages, health data, or vault.");
 });
 
 test("continues in Telegram only for Telegram-bound invites", async () => {
@@ -257,7 +282,6 @@ test.each([
       "This family plan is full",
     ],
     expectedCopy: [
-      "Link no longer works",
       "This invite isn&#x27;t valid",
       "This family invite is no longer available. Ask the person who invited you to send a new one.",
     ],
@@ -271,7 +295,6 @@ test.each([
       "This family plan is full",
     ],
     expectedCopy: [
-      "Link no longer works",
       "This invite has expired",
       "Ask the plan owner to send you a fresh family invite.",
     ],
@@ -290,7 +313,6 @@ test.each([
       "This family plan is full",
     ],
     expectedCopy: [
-      "Link no longer works",
       "This invite was canceled",
       "Ask the plan owner for a new invite.",
     ],
@@ -309,7 +331,6 @@ test.each([
       "This family plan is full",
     ],
     expectedCopy: [
-      "Murph Family",
       "This invite was already used",
       "If that was you, open Murph to continue.",
     ],
@@ -325,7 +346,6 @@ test.each([
     action: null,
     excludedCopy: ["This family plan is full"],
     expectedCopy: [
-      "Almost ready",
       "This family plan isn&#x27;t active yet",
       "Ask the plan owner to finish setting up billing, then open this invite again.",
     ],
@@ -340,7 +360,6 @@ test.each([
     action: null,
     excludedCopy: [],
     expectedCopy: [
-      "Family is full",
       "This family plan is full",
       "The plan has no open paid seats. Ask the owner to add a Family seat.",
     ],

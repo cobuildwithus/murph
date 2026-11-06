@@ -1,3 +1,4 @@
+import { LINK_PAGE_LINK_CLASS } from "@/src/components/link-page/link-page-shell";
 import { PageHeader } from "@/src/components/ui/page-header";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 
@@ -28,7 +29,12 @@ export function JoinInvitePageView({ model }: { model: JoinInvitePageModel }) {
     return (
       <JoinInviteSignedInMismatchView
         signOutAction={
-          <JoinInviteSignOutButtonIsland idleLabel="Sign out and use invite" />
+          <JoinInviteSignOutButtonIsland
+            className={LINK_PAGE_LINK_CLASS}
+            idleLabel="Sign out and use invite"
+            size="unstyled"
+            variant="unstyled"
+          />
         }
       />
     );

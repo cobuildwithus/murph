@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 
+import { LinkPageFrame } from "@/src/components/link-page/link-page-shell";
 import { gameRecapAppUrl } from "@/src/lib/game/app-links";
 import { createMurphOgImageRef, createMurphPageMetadata, MURPH_NOINDEX_PAGE_ROBOTS } from "@/src/lib/site-metadata";
 
@@ -30,13 +31,16 @@ export default async function GameRecapPage(props: { params: Promise<{ gameId: s
   const userAgent = (await headers()).get("user-agent") ?? "";
   const isAppleMobile = /iPhone|iPad|iPod/i.test(userAgent)
     || (/Macintosh/i.test(userAgent) && /Mobile\//i.test(userAgent));
+  if (isAppleMobile) {
+    return (
+      <LinkPageFrame>
+        <GameRecapView appUrl={gameRecapAppUrl(gameId)} />
+      </LinkPageFrame>
+    );
+  }
   return (
-    <main className={isAppleMobile
-      ? "min-h-dvh bg-background px-6 py-7 text-foreground sm:px-10 sm:py-9"
-      : "min-h-dvh bg-background text-foreground"}>
-      <GameRecapView {...(isAppleMobile
-        ? { appUrl: gameRecapAppUrl(gameId) }
-        : { recapUrl: `https://www.withmurph.ai/recap/${gameId}` })} />
+    <main className="min-h-dvh bg-background text-foreground">
+      <GameRecapView recapUrl={`https://www.withmurph.ai/recap/${gameId}`} />
     </main>
   );
 }

@@ -7,14 +7,38 @@ import { cn } from "@/src/lib/utils";
 // A page Murph links to sits on the app's night ground, like a challenge invite.
 const LINK_PAGE_PILL_CLASS =
   "flex h-14 w-full items-center justify-center gap-2 rounded-full bg-[#FFFCF6] text-[17px] font-semibold text-[#2D3436] transition-[opacity,scale] duration-150 hover:opacity-90 active:scale-[0.98] motion-reduce:transition-none";
+const LINK_PAGE_LINK_CLASS =
+  "inline-flex h-11 items-center justify-center rounded-lg px-3 text-[15px] font-semibold text-[#FFFCF6] underline-offset-4 hover:underline";
+const LINK_PAGE_GOLD =
+  "linear-gradient(135deg, #EBD18B 0%, #D9B969 55%, #C59D4E 100%)";
 
-function LinkPageSurface({ children }: { children: ReactNode }) {
+/** A name from outside the page, as a headline that ends in one period. */
+function linkPageHeadline(text: string): string {
+  return /[.!?…]$/u.test(text) ? text : `${text}.`;
+}
+
+function LinkPageSurface({
+  children,
+  fit = false,
+}: {
+  children: ReactNode;
+  /** One screen tall, so a long list scrolls inside it and the pill stays in view. */
+  fit?: boolean;
+}) {
   return (
     <div
-      className="flex flex-1 flex-col bg-[#1C1915] text-[#FFFCF6]"
+      className={cn(
+        "flex flex-1 flex-col bg-[#1C1915] text-[#FFFCF6]",
+        fit && "min-h-0",
+      )}
       data-slot="link-page-surface"
     >
-      <div className="mx-auto flex w-full max-w-[26rem] flex-1 flex-col px-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-3 sm:my-auto sm:flex-none sm:py-12">
+      <div
+        className={cn(
+          "mx-auto flex w-full max-w-[26rem] flex-1 flex-col px-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-3 sm:my-auto sm:py-12",
+          fit ? "min-h-0 sm:max-h-[56rem]" : "sm:flex-none",
+        )}
+      >
         <div className="flex h-11 shrink-0 items-center">
           <Image
             alt="Murph"
@@ -31,12 +55,23 @@ function LinkPageSurface({ children }: { children: ReactNode }) {
   );
 }
 
-function LinkPageFrame({ children }: { children: ReactNode }) {
+function LinkPageFrame({
+  children,
+  fit = false,
+}: {
+  children: ReactNode;
+  fit?: boolean;
+}) {
   return (
-    <main className="flex min-h-dvh flex-col bg-[#1C1915]">
+    <main
+      className={cn(
+        "flex flex-col bg-[#1C1915]",
+        fit ? "h-dvh min-h-[34rem]" : "min-h-dvh",
+      )}
+    >
       {/* The night ground reaches past the page: overscroll and Safari's bars. */}
       <style>{"html,body{background:#1C1915}"}</style>
-      <LinkPageSurface>{children}</LinkPageSurface>
+      <LinkPageSurface fit={fit}>{children}</LinkPageSurface>
     </main>
   );
 }
@@ -49,6 +84,7 @@ function LinkPageScreen({
   children,
   detail,
   detailRef,
+  fill = false,
   headingRef,
   title,
 }: {
@@ -60,11 +96,16 @@ function LinkPageScreen({
   children?: ReactNode;
   detail?: ReactNode;
   detailRef?: Ref<HTMLParagraphElement>;
+  /** The children are a list that takes the whole space, not a centered object. */
+  fill?: boolean;
   headingRef?: Ref<HTMLHeadingElement>;
   title: string;
 }) {
   return (
-    <section className="flex flex-1 flex-col" data-slot="link-page-screen">
+    <section
+      className={cn("flex flex-1 flex-col", fill && "min-h-0")}
+      data-slot="link-page-screen"
+    >
       <div className="shrink-0 pt-5">
         <h1
           className="text-balance break-words font-serif text-[40px] font-semibold leading-[44px] tracking-[-0.02em] outline-none"
@@ -85,7 +126,14 @@ function LinkPageScreen({
         ) : null}
         {below}
       </div>
-      <div className="flex flex-1 flex-col justify-center py-6">{children}</div>
+      <div
+        className={cn(
+          "flex flex-1 flex-col",
+          fill ? "min-h-0 pb-2" : "justify-center py-6",
+        )}
+      >
+        {children}
+      </div>
       {actions ? (
         <div className="flex shrink-0 flex-col items-center gap-1">
           {actions}
@@ -116,10 +164,7 @@ function LinkPageLink({
 }: ComponentProps<typeof Button>) {
   return (
     <Button
-      className={cn(
-        "h-11 rounded-lg px-3 text-[15px] font-semibold text-[#FFFCF6] underline-offset-4 hover:underline",
-        className,
-      )}
+      className={cn(LINK_PAGE_LINK_CLASS, className)}
       size="unstyled"
       type="button"
       variant="unstyled"
@@ -130,26 +175,51 @@ function LinkPageLink({
 
 /** The app's prize ticket: gold, with a quarter circle cut from each corner. */
 function LinkPageTicket({
+  className,
   kicker,
+  note,
+  noteId,
+  size = "default",
   title,
 }: {
+  className?: string;
   kicker: string;
+  /** The ticket's small print. */
+  note?: string;
+  noteId?: string;
+  size?: "default" | "display" | "large";
   title: string;
 }) {
   return (
     <div
-      className="relative mt-[26px] flex flex-col gap-1 overflow-hidden px-5 py-[18px]"
-      style={{
-        background:
-          "linear-gradient(135deg, #EBD18B 0%, #D9B969 55%, #C59D4E 100%)",
-      }}
+      className={cn(
+        "relative mt-[26px] flex flex-col gap-1 overflow-hidden px-5 py-[18px]",
+        size === "display" && "px-6 py-[26px]",
+        className,
+      )}
+      style={{ background: LINK_PAGE_GOLD }}
     >
       <span className="break-words font-mono text-[10px] uppercase leading-[14px] tracking-[0.2em] text-[#3B2A12]/80">
         {kicker}
       </span>
-      <span className="font-serif text-[26px] font-semibold leading-8 text-[#3B2A12]">
+      <span
+        className={cn(
+          "font-serif font-semibold text-[#3B2A12]",
+          size === "default" && "text-[26px] leading-8",
+          size === "large" && "text-[34px] leading-10",
+          size === "display" && "text-[44px] leading-[50px]",
+        )}
+      >
         {title}
       </span>
+      {note ? (
+        <span
+          className="text-sm font-medium leading-[19px] text-[#3B2A12]/80"
+          id={noteId}
+        >
+          {note}
+        </span>
+      ) : null}
       {[
         "-left-[9px] -top-[9px]",
         "-right-[9px] -top-[9px]",
@@ -199,6 +269,8 @@ function LinkPageError({ children }: { children: ReactNode }) {
 }
 
 export {
+  LINK_PAGE_GOLD,
+  LINK_PAGE_LINK_CLASS,
   LINK_PAGE_NIGHT_TOKENS,
   LINK_PAGE_PILL_CLASS,
   LinkPageError,
@@ -208,4 +280,5 @@ export {
   LinkPageScreen,
   LinkPageSurface,
   LinkPageTicket,
+  linkPageHeadline,
 };

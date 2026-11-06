@@ -25,14 +25,11 @@ export function SettingsAuthRequiredStudy() {
       </div>
 
       <div
-        className="overflow-hidden rounded-2xl border border-border bg-background"
+        className="flex min-h-[46rem] max-w-[402px] flex-col overflow-hidden rounded-[2rem] bg-[#1C1915]"
         data-design-section="family-setup-auth-required"
         id="family-setup-auth-required-section"
         inert
       >
-        <p className="border-b border-border px-5 py-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          Opening Family setup without a session
-        </p>
         <FamilySetupAuthRequiredView />
       </div>
 

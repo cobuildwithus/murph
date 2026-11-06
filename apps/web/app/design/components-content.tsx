@@ -146,6 +146,7 @@ import { ApprovalPasskeyStudy } from "./approval-passkey-study";
 import { BetterAuthAdoptionStudy } from "./better-auth-adoption-study";
 import { DataExportControlStudy } from "./data-export-study";
 import { HealthDataConsentControlStudy } from "./health-data-consent-study";
+import { GroupJoinDrawerStudy } from "./group-join-study";
 import { SignupReferralComponentStudy } from "./signup-referral-study";
 import { DashboardSidebarStudy } from "./dashboard-sidebar-study";
 
@@ -1210,6 +1211,7 @@ export function ComponentsContent() {
               </LinkPageSurface>
             </div>
             <GroupSponsorshipManagementConfirmationStudy />
+            <GroupJoinDrawerStudy />
             <div
               className="rounded-3xl border border-border bg-card p-6"
               data-design-component="family-member-usage-top-up"

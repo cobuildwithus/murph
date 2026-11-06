@@ -4,7 +4,11 @@ import {
   HostedSignupReferralLanding,
   type HostedSignupReferralLandingState,
 } from "@/src/components/hosted-onboarding/hosted-signup-referral-landing";
-import { JoinInviteSignedInMismatchView } from "@/src/components/hosted-onboarding/join-invite-signed-in-mismatch-view";
+import { JoinInviteSignedInMismatchScreen } from "@/src/components/hosted-onboarding/join-invite-signed-in-mismatch-view";
+import {
+  LINK_PAGE_LINK_CLASS,
+  LinkPageSurface,
+} from "@/src/components/link-page/link-page-shell";
 import { HostedLoginMethodSettingsView } from "@/src/components/settings/hosted-login-method-settings";
 import {
   HostedSignupReferralLinkButtonView,
@@ -132,21 +136,25 @@ export function SignupReferralFlowStudy() {
         <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           Recipient landing states
         </p>
-        <div className="grid gap-5">
+        <div className="grid gap-5 lg:grid-cols-3">
           {LANDING_STATES.map(({ label, state }) => (
             <article
-              className="overflow-hidden rounded-3xl border border-border bg-background"
+              className="flex min-w-0 max-w-[402px] flex-col gap-3"
               data-design-state={state}
               inert
               key={state}
             >
-              <p className="border-b border-border px-5 py-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
                 {label}
               </p>
-              <HostedSignupReferralLanding
-                referralCode="design-referral"
-                state={state}
-              />
+              <div className="flex min-h-[46rem] flex-col overflow-hidden rounded-[2rem] bg-[#1C1915]">
+                <LinkPageSurface>
+                  <HostedSignupReferralLanding
+                    referralCode="design-referral"
+                    state={state}
+                  />
+                </LinkPageSurface>
+              </div>
             </article>
           ))}
         </div>
@@ -157,19 +165,26 @@ export function SignupReferralFlowStudy() {
           Signed-in invite recovery
         </p>
         <div
-          className="overflow-hidden rounded-3xl border border-border bg-background"
+          className="flex min-h-[46rem] max-w-[402px] flex-col overflow-hidden rounded-[2rem] bg-[#1C1915]"
           data-design-section="signup-referral-signed-in-recovery"
           data-design-state="signed-in-account-mismatch"
           id="signup-referral-signed-in-recovery"
           inert
         >
-          <JoinInviteSignedInMismatchView
-            signOutAction={
-              <Button size="lg" type="button" variant="outline">
-                Sign out and use invite
-              </Button>
-            }
-          />
+          <LinkPageSurface>
+            <JoinInviteSignedInMismatchScreen
+              signOutAction={
+                <Button
+                  className={LINK_PAGE_LINK_CLASS}
+                  size="unstyled"
+                  type="button"
+                  variant="unstyled"
+                >
+                  Sign out and use invite
+                </Button>
+              }
+            />
+          </LinkPageSurface>
         </div>
       </section>
     </div>

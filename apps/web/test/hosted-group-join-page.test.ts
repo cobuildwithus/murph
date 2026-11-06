@@ -1,4 +1,4 @@
-import { createElement } from "react";
+import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, test, vi } from "vitest";
 
@@ -19,6 +19,7 @@ vi.mock("@/src/components/hosted-groups/group-join-client", () => ({
     expectedMembershipId: string | null;
     groupName: string;
     inviteCode?: string | null;
+    leaveAction?: ReactNode;
     postJoinContactOption: { href: string } | null;
     postJoinDestination: string;
   }) {
@@ -32,6 +33,7 @@ vi.mock("@/src/components/hosted-groups/group-join-client", () => ({
         "data-post-join-destination": props.postJoinDestination,
       },
       "Accept group invite",
+      props.leaveAction,
     );
   },
   GroupJoinLeaveButton(props: {
@@ -52,6 +54,7 @@ vi.mock("@/src/components/hosted-groups/group-join-client", () => ({
       launchGranted: boolean;
       scopes: readonly { grant: unknown }[];
     } | null;
+    leaveAction?: ReactNode;
     notNowHref: string;
   }) {
     return createElement(
@@ -65,13 +68,19 @@ vi.mock("@/src/components/hosted-groups/group-join-client", () => ({
         "data-not-now-href": props.notNowHref,
       },
       "Legal consent gate",
+      props.leaveAction,
     );
   },
-  GroupJoinSignInButton(props: { inviteCode?: string | null }) {
+  GroupJoinSignIn(props: {
+    detail: string;
+    inviteCode?: string | null;
+    title: string;
+  }) {
     return createElement(
-      "button",
+      "section",
       { "data-invite-code": props.inviteCode ?? "" },
-      "Continue to join",
+      props.title,
+      props.detail,
     );
   },
 }));
@@ -142,12 +151,54 @@ test("renders the group display name on the join page when present", async () =>
     prisma: { prisma: true },
   });
   expect(mocks.readHostedConsentStatus).not.toHaveBeenCalled();
-  expect(markup).toContain("Join Sunday Sleep Crew");
-  expect(markup).toContain(
-    "Your chats and vault. Anything you don&#x27;t choose to share stays private.",
-  );
-  expect(markup).not.toContain("Your chats, health data, and vault. Always.");
+  expect(markup).toContain("Join Sunday Sleep Crew.");
+  expect(markup).toContain("1 person. You choose what you share.");
   expect(markup).not.toContain("Join this family");
+});
+
+test("falls back to the group kind when the group has no display name", async () => {
+  mocks.readHostedGroupJoinView.mockResolvedValueOnce({
+    ...createSignedOutJoinView(),
+    displayName: null,
+    kind: "family",
+    memberCount: 4,
+  });
+
+  const markup = await renderGroupJoinPage("JOIN123");
+
+  expect(markup).toContain("Join this family.");
+  expect(markup).toContain("4 people. You choose what you share.");
+});
+
+test("explains a dead group link and offers Murph", async () => {
+  mocks.readHostedGroupJoinView.mockResolvedValueOnce(null);
+
+  const markup = await renderGroupJoinPage("JOIN123");
+
+  expect(markup).toContain("This group link isn&#x27;t valid.");
+  expect(markup).toContain("Ask the person who shared it to send a new one.");
+  expect(markup).toContain('href="/home"');
+  expect(markup).not.toContain('data-invite-code');
+});
+
+test("holds only the sharing list to one screen", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+    authenticated: true,
+    authenticatedMember: { id: "member_123" },
+  });
+  mocks.readHostedConsentStatus.mockResolvedValueOnce(createConsentStatus({
+    launchGranted: true,
+  }));
+  expect(await renderGroupJoinPage("JOIN123")).toContain(" h-dvh ");
+
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+    authenticated: true,
+    authenticatedMember: { id: "member_123" },
+  });
+  mocks.readHostedConsentStatus.mockResolvedValueOnce(createConsentStatus({
+    launchGranted: false,
+  }));
+  expect(await renderGroupJoinPage("JOIN123")).not.toContain(" h-dvh ");
 });
 
 test("renders launch legal consent before the join form for authenticated viewers without current consent", async () => {
@@ -413,7 +464,7 @@ test("forwards an invite code from the join link into the sign-in action", async
   });
 
   expect(markup).toContain('data-invite-code="invite_opaque"');
-  expect(markup).toContain("Continue to join");
+  expect(markup).toContain("Join Sunday Sleep Crew.");
 });
 
 test("omits an invite code when the join link carries none", async () => {

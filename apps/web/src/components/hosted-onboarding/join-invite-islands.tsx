@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, type ComponentProps } from "react";
 import { useRouter } from "next/navigation";
 import { HostedLoginMethodEditor } from "../settings/hosted-login-method-dialog";
 import { HostedContactChannelChoice } from "./hosted-contact-channel-choice";
@@ -136,11 +136,17 @@ export function JoinInvitePhoneVerificationIsland({
 }
 
 export function JoinInviteSignOutButtonIsland({
+  className,
   idleLabel = "Use this invite instead",
   pendingLabel = "Signing out...",
+  size = "lg",
+  variant = "outline",
 }: {
+  className?: string;
   idleLabel?: string;
   pendingLabel?: string;
+  size?: ComponentProps<typeof Button>["size"];
+  variant?: ComponentProps<typeof Button>["variant"];
 } = {}) {
   const router = useRouter();
   const [signOutPending, setSignOutPending] = useState(false);
@@ -158,11 +164,12 @@ export function JoinInviteSignOutButtonIsland({
 
   return (
     <Button
+      className={className}
       type="button"
       onClick={handleSignOut}
       disabled={signOutPending}
-      variant="outline"
-      size="lg"
+      variant={variant}
+      size={size}
     >
       {signOutPending ? pendingLabel : idleLabel}
     </Button>
