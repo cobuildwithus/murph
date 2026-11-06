@@ -380,14 +380,14 @@ function buildWorkspaceRunnerResult() {
   };
 }
 
-function buildWorkspaceJobBody() {
+function buildWorkspaceJobBody(identity: { attemptId?: string; leaseGeneration?: string } = {}) {
   return {
     hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
     job: {
       kind: "workspace-invocation",
       request: {
-        attemptId: "attempt_container_workspace",
-        leaseGeneration: "8",
+        attemptId: identity.attemptId ?? "attempt_container_workspace",
+        leaseGeneration: identity.leaseGeneration ?? "8",
         userId: "u_container_workspace",
         workspaceVersion: "5",
       },
@@ -950,6 +950,276 @@ describe("startHostedContainerEntrypoint", () => {
     callbacks[0]?.resolve();
     await vi.waitFor(async () => expect(await health()).toMatchObject({ activeJobCount: 0, settlingCompletionCallbackCount: 0 }));
     expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(2);
+  });
+
+  it("an old completion callback settling after a successor is admitted leaves the successor's record alone", async () => {
+    const completionStarted = createDeferred();
+    const releaseCompletion = createDeferred();
+    mocks.recordHostedContainerRuntimeCompletionBestEffort.mockImplementationOnce(async () => {
+      completionStarted.resolve();
+      await releaseCompletion.promise;
+    });
+    const successorStarted = createDeferred<AbortSignal | undefined>();
+    const allowSuccessorReady = createDeferred();
+    const successorReady = createDeferred();
+    const releaseSuccessor = createDeferred();
+    const oldSend = vi.fn(() => true);
+    const successorSend = vi.fn(() => true);
+    const connect = vi.fn(async () => "v=0\r\nanswer");
+    vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation")
+      .mockImplementationOnce(async (_job, options) => {
+        options.onRuntimeWakeReady?.(oldSend);
+        return buildWorkspaceRunnerResult();
+      })
+      .mockImplementationOnce(async (_job, options) => {
+        successorStarted.resolve(options.signal);
+        await allowSuccessorReady.promise;
+        options.onRuntimeWakeReady?.(successorSend);
+        options.onVoiceReady?.({ connect, closeCall: vi.fn() });
+        successorReady.resolve();
+        await releaseSuccessor.promise;
+        return buildWorkspaceRunnerResult();
+      });
+    const server = await startHostedContainerEntrypoint({ port: 0 });
+    servers.push(server);
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("TCP listener missing.");
+    const post = (path: string, body?: unknown) => sendHostedContainerJsonRequest({
+      body: body === undefined ? "" : JSON.stringify(body), path, port: address.port,
+    });
+    const health = async () => (await sendHostedContainerGetRequest({ path: "/health", port: address.port })).json;
+    const oldIdentity = { attemptId: "attempt_container_workspace", leaseGeneration: "8", userId: "u_container_workspace" };
+    const successorIdentity = { ...oldIdentity, leaseGeneration: "9" };
+    let successor: ReturnType<typeof post> | undefined;
+    try {
+      expect((await post("/internal/workspace-invocation", buildWorkspaceJobBody(oldIdentity))).status).toBe(200);
+      await completionStarted.promise;
+      successor = post("/internal/workspace-invocation", buildWorkspaceJobBody(successorIdentity));
+      const signal = await successorStarted.promise;
+      expect(signal?.aborted).toBe(false);
+      expect(await health()).toMatchObject({ activeJobCount: 2, settlingCompletionCallbackCount: 1 });
+      const legacy = await post("/internal/runtime-wake");
+      expect(legacy.headers["x-runtime-wake-accepted"]).toBe("1");
+      expect(legacy.headers["x-runtime-wake-pending"]).toBe("1");
+      const firstIdentified = await post("/internal/runtime-wake", {
+        ...successorIdentity, mailboxWakeHighWater: { conversation: "4", system: "3" },
+        orchestration: { activeWakeStartedAtEpochMs: 1_777_009_999_950 }, requestedProcessingMode: "default",
+      });
+      expect(firstIdentified.headers["x-runtime-wake-accepted"]).toBe("1");
+      expect(firstIdentified.headers["x-runtime-wake-pending"]).toBe("1");
+      const stale = await post("/internal/runtime-wake", oldIdentity);
+      expect(stale.headers["x-runtime-wake-accepted"]).toBe("0");
+      expect(stale.headers["x-runtime-wake-mismatch"]).toBe("1");
+
+      releaseCompletion.resolve();
+      await vi.waitFor(async () => expect(await health()).toMatchObject({ activeJobCount: 1, settlingCompletionCallbackCount: 0 }));
+      const stillPending = await post("/internal/runtime-wake", {
+        ...successorIdentity, mailboxWakeHighWater: { conversation: "5", system: "2" },
+        orchestration: { activeWakeStartedAtEpochMs: 1_777_010_000_000 }, requestedProcessingMode: "system_mailbox",
+      });
+      expect(stillPending.headers["x-runtime-wake-accepted"]).toBe("1");
+      expect(stillPending.headers["x-runtime-wake-pending"]).toBe("1");
+      expect(stillPending.headers["x-runtime-wake-absent"]).toBeUndefined();
+      expect(successorSend).not.toHaveBeenCalled();
+      allowSuccessorReady.resolve();
+      await successorReady.promise;
+      expect(successorSend).toHaveBeenCalledExactlyOnceWith({
+        notifiedAtEpochMs: expect.any(Number),
+        orchestration: {
+          activeWakeAccepted: true,
+          activeWakeFinishedAtEpochMs: expect.any(Number),
+          activeWakeStartedAtEpochMs: 1_777_009_999_950,
+        },
+        requestedProcessingMode: "system_mailbox",
+      });
+      const direct = await post("/internal/runtime-wake", successorIdentity);
+      expect(direct.headers["x-runtime-wake-accepted"]).toBe("1");
+      expect(direct.headers["x-runtime-wake-pending"]).toBeUndefined();
+      expect(successorSend).toHaveBeenCalledTimes(2);
+      expect(oldSend).not.toHaveBeenCalled();
+      expect((await post("/internal/voice-control", {
+        ...successorIdentity, action: "connect", callId: "call-synthetic", sdp: "v=0\r\noffer",
+      })).json).toEqual({ kind: "connected", sdp: "v=0\r\nanswer" });
+      expect(connect).toHaveBeenCalledExactlyOnceWith("call-synthetic", "v=0\r\noffer");
+      expect((await post("/internal/workspace-invocation/abort", oldIdentity)).headers["x-workspace-invocation-abort-status"]).toBe("stale");
+      expect(signal?.aborted).toBe(false);
+      expect((await post("/internal/workspace-invocation/abort", successorIdentity)).headers["x-workspace-invocation-abort-status"]).toBe("accepted");
+      expect(signal?.aborted).toBe(true);
+    } finally {
+      releaseCompletion.resolve();
+      allowSuccessorReady.resolve();
+      releaseSuccessor.resolve();
+      await successor;
+    }
+  });
+
+  it("a settling job is already detached", async () => {
+    const completionStarted = createDeferred();
+    const releaseCompletion = createDeferred();
+    mocks.recordHostedContainerRuntimeCompletionBestEffort.mockImplementationOnce(async () => {
+      completionStarted.resolve();
+      await releaseCompletion.promise;
+    });
+    const oldSend = vi.fn(() => true);
+    const connect = vi.fn(async () => "v=0\r\nanswer");
+    vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementationOnce(async (_job, options) => {
+      options.onRuntimeWakeReady?.(oldSend);
+      options.onVoiceReady?.({ connect, closeCall: vi.fn() });
+      return buildWorkspaceRunnerResult();
+    });
+    const successorSignal = createDeferred<AbortSignal>();
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        async prepareWorkspaceRestore(input) {
+          if (input.job.request.leaseGeneration === "9") successorSignal.resolve(input.signal);
+          input.signal.throwIfAborted();
+          return createTestHostedWorkspaceRestorePreparation();
+        },
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("TCP listener missing.");
+    const post = (path: string, body: unknown) => sendHostedContainerJsonRequest({
+      body: JSON.stringify(body), path, port: address.port,
+    });
+    const oldIdentity = { attemptId: "attempt_container_workspace", leaseGeneration: "8", userId: "u_container_workspace" };
+    const successorIdentity = { ...oldIdentity, leaseGeneration: "9" };
+    try {
+      expect((await post("/internal/workspace-invocation", buildWorkspaceJobBody(oldIdentity))).status).toBe(200);
+      await completionStarted.promise;
+      const wake = await post("/internal/runtime-wake", oldIdentity);
+      expect(wake.headers["x-runtime-wake-accepted"]).toBe("0");
+      expect(wake.headers["x-runtime-wake-absent"]).toBe("1");
+      expect(oldSend).not.toHaveBeenCalled();
+      expect((await post("/internal/voice-control", {
+        ...oldIdentity, action: "connect", callId: "call-synthetic", sdp: "v=0\r\noffer",
+      })).json).toEqual({ kind: "unavailable" });
+      expect(connect).not.toHaveBeenCalled();
+      expect((await post("/internal/workspace-invocation/abort", successorIdentity)).headers["x-workspace-invocation-abort-status"]).toBe("queued");
+      expect((await post("/internal/workspace-invocation", buildWorkspaceJobBody(successorIdentity))).status).toBe(204);
+      expect((await successorSignal.promise).aborted).toBe(true);
+      expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(1);
+      await vi.waitFor(async () => expect((await sendHostedContainerGetRequest({ path: "/health", port: address.port })).json)
+        .toMatchObject({ activeJobCount: 1, settlingCompletionCallbackCount: 1 }));
+    } finally {
+      releaseCompletion.resolve();
+    }
+    await vi.waitFor(async () => expect((await sendHostedContainerGetRequest({ path: "/health", port: address.port })).json)
+      .toMatchObject({ activeJobCount: 0, settlingCompletionCallbackCount: 0 }));
+  });
+
+  it("a finished invocation's late readiness cannot replace its successor", async () => {
+    const finishedOptions = createDeferred<Parameters<typeof hostedInvocation.runHostedWorkspaceInvocation>[1]>();
+    const successorStarted = createDeferred();
+    const allowSuccessorReady = createDeferred();
+    const successorReady = createDeferred();
+    const releaseSuccessor = createDeferred();
+    const staleSend = vi.fn(() => true);
+    const successorSend = vi.fn(() => true);
+    vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation")
+      .mockImplementationOnce(async (_job, options) => {
+        finishedOptions.resolve(options);
+        return buildWorkspaceRunnerResult();
+      })
+      .mockImplementationOnce(async (_job, options) => {
+        successorStarted.resolve();
+        await allowSuccessorReady.promise;
+        options.onRuntimeWakeReady?.(successorSend);
+        successorReady.resolve();
+        await releaseSuccessor.promise;
+        return buildWorkspaceRunnerResult();
+      });
+    const server = await startHostedContainerEntrypoint({ port: 0 });
+    servers.push(server);
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("TCP listener missing.");
+    const invoke = (leaseGeneration: string) => sendHostedContainerJsonRequest({
+      body: JSON.stringify(buildWorkspaceJobBody({ leaseGeneration })),
+      path: "/internal/workspace-invocation", port: address.port,
+    });
+    const wake = () => sendHostedContainerJsonRequest({
+      body: JSON.stringify({ attemptId: "attempt_container_workspace", leaseGeneration: "9", userId: "u_container_workspace" }),
+      path: "/internal/runtime-wake", port: address.port,
+    });
+
+    expect((await invoke("8")).status).toBe(200);
+    await vi.waitFor(async () => expect((await sendHostedContainerGetRequest({ path: "/health", port: address.port })).json)
+      .toMatchObject({ activeJobCount: 0, settlingCompletionCallbackCount: 0 }));
+    const successor = invoke("9");
+    try {
+      await successorStarted.promise;
+      const pending = await wake();
+      expect(pending.headers["x-runtime-wake-accepted"]).toBe("1");
+      expect(pending.headers["x-runtime-wake-pending"]).toBe("1");
+
+      (await finishedOptions.promise).onRuntimeWakeReady?.(staleSend);
+      expect((await wake()).headers["x-runtime-wake-pending"]).toBe("1");
+      expect(staleSend).not.toHaveBeenCalled();
+      allowSuccessorReady.resolve();
+      await successorReady.promise;
+      expect(successorSend).toHaveBeenCalledExactlyOnceWith({ notifiedAtEpochMs: expect.any(Number) });
+      const direct = await wake();
+      expect(direct.headers["x-runtime-wake-accepted"]).toBe("1");
+      expect(direct.headers["x-runtime-wake-mismatch"]).toBeUndefined();
+      expect(successorSend).toHaveBeenCalledTimes(2);
+      expect(staleSend).not.toHaveBeenCalled();
+    } finally {
+      allowSuccessorReady.resolve();
+      releaseSuccessor.resolve();
+      await successor;
+    }
+  });
+
+  it("reserves voice wakes only for a ready matching invocation", async () => {
+    const started = createDeferred();
+    const allowReady = createDeferred();
+    const ready = createDeferred();
+    const release = createDeferred();
+    const sendWake = vi.fn(() => true);
+    vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementationOnce(async (_job, options) => {
+      started.resolve();
+      await allowReady.promise;
+      options.onRuntimeWakeReady?.(sendWake);
+      ready.resolve();
+      await release.promise;
+      return buildWorkspaceRunnerResult();
+    });
+    const server = await startHostedContainerEntrypoint({ port: 0 });
+    servers.push(server);
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("TCP listener missing.");
+    const voiceWake = (leaseGeneration: string) => sendHostedContainerJsonRequest({
+      body: JSON.stringify({ attemptId: "attempt_container_workspace", leaseGeneration, userId: "u_container_workspace", voiceCallId: "call-synthetic" }),
+      path: "/internal/runtime-wake", port: address.port,
+    });
+    const absent = await voiceWake("8");
+    expect(absent.headers["x-runtime-wake-accepted"]).toBe("0");
+    expect(absent.headers["x-runtime-wake-absent"]).toBe("1");
+    const invocation = sendHostedContainerJsonRequest({
+      body: JSON.stringify(buildWorkspaceJobBody()), path: "/internal/workspace-invocation", port: address.port,
+    });
+    try {
+      await started.promise;
+      for (const generation of ["8", "9"]) {
+        const pending = await voiceWake(generation);
+        expect(pending.headers["x-runtime-wake-accepted"]).toBe("0");
+        expect(pending.headers["x-runtime-wake-pending"]).toBeUndefined();
+        expect(pending.headers["x-runtime-wake-mismatch"]).toBeUndefined();
+        expect(pending.headers["x-runtime-wake-absent"]).toBeUndefined();
+      }
+      allowReady.resolve();
+      await ready.promise;
+      const stale = await voiceWake("9");
+      expect(stale.headers["x-runtime-wake-accepted"]).toBe("0");
+      expect(stale.headers["x-runtime-wake-mismatch"]).toBe("1");
+      expect(sendWake).not.toHaveBeenCalled();
+    } finally {
+      allowReady.resolve();
+      release.resolve();
+      await invocation;
+    }
   });
 
   it("rejects active runtime wakes after shutdown starts without advertising absence", async () => {

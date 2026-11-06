@@ -559,7 +559,6 @@ import {
   type HostedRuntimeDeviceSyncPort,
   type HostedRuntimeMailboxPort,
   type HostedRuntimePlatform,
-  type RuntimeLivenessPort,
   type HostedRuntimeWorkspacePort,
   type HostedRuntimeWorkspaceSnapshotPort,
 } from "../src/hosted-runtime-contracts.ts";
@@ -592,13 +591,6 @@ const HOSTED_UNSTABLE_PROCESS_ENV_KEYS = [
 const execFileAsync = promisify(execFile);
 
 process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS ??= "0";
-
-function continueRuntimeLiveness(): Awaited<ReturnType<RuntimeLivenessPort["touch"]>> {
-  return {
-    instruction: { kind: "continue" },
-    ok: true,
-  };
-}
 
 async function readCheckpointConversationWatermark(
   input: HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
@@ -949,9 +941,6 @@ function createPlatform(input: {
   issueExportPort?: HostedRuntimePlatform["issueExportPort"] | null;
   mailboxPort: HostedRuntimeMailboxPort | null;
   phoneCalls?: HostedRuntimePlatform["phoneCalls"] | null;
-  runtimeLivenessIntervalMs?: number | null;
-  runtimeLivenessPort?: RuntimeLivenessPort | null;
-  runtimeLivenessRequired?: boolean | null;
   snapshotFixtureVaultRelativePath?: "vault";
   stageSamples?: StageTimingSample[];
   vaultSharePort?: HostedRuntimePlatform["vaultSharePort"] | null;
@@ -1071,13 +1060,6 @@ function createPlatform(input: {
     ...(input.issueExportPort ? { issueExportPort: input.issueExportPort } : {}),
     ...(input.mailboxPort ? { mailboxPort: input.mailboxPort } : {}),
     ...(input.phoneCalls ? { phoneCalls: input.phoneCalls } : {}),
-    ...(input.runtimeLivenessIntervalMs
-      ? { runtimeLivenessIntervalMs: input.runtimeLivenessIntervalMs }
-      : {}),
-    ...(input.runtimeLivenessPort ? { runtimeLivenessPort: input.runtimeLivenessPort } : {}),
-    ...(input.runtimeLivenessRequired !== undefined
-      ? { runtimeLivenessRequired: input.runtimeLivenessRequired }
-      : {}),
     ...(input.vaultSharePort ? { vaultSharePort: input.vaultSharePort } : {}),
     ...(input.workspacePort ? { workspacePort: input.workspacePort } : {}),
     workspaceSnapshotPort: input.workspaceSnapshotPort === null ? null : input.workspaceSnapshotPort ?? {
@@ -2654,7 +2636,6 @@ export {
   TEST_NOW,
   TEST_USER_ID,
   assertPrivateDirectoryMode,
-  continueRuntimeLiveness,
   createAssistantAskRequestedWake,
   createAssistantProviderUsageDraft,
   createAssistantUsageRecord,
