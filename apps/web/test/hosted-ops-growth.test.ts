@@ -2805,31 +2805,31 @@ describe("hosted ops growth metrics", () => {
       {
         cashAmountMinor: 1_500,
         groupSponsorshipAuthorizationId: null,
-        groupSponsorshipMoment: { purchaseId: "purchase_group_gift" },
+        beneficiary: { threadContainer: { memberId: "member_group_runtime" } },
         paidAt: new Date("2026-07-27T09:00:00.000Z"),
       },
       {
         cashAmountMinor: 7_500,
         groupSponsorshipAuthorizationId: null,
-        groupSponsorshipMoment: null,
+        beneficiary: { threadContainer: null },
         paidAt: new Date("2026-07-04T10:00:00.000Z"),
       },
       {
         cashAmountMinor: 2_000,
         groupSponsorshipAuthorizationId: "auth_recurring",
-        groupSponsorshipMoment: null,
+        beneficiary: { threadContainer: { memberId: "member_group_runtime" } },
         paidAt: new Date("2026-08-01T00:00:00.000Z"),
       },
       {
         cashAmountMinor: 3_000,
         groupSponsorshipAuthorizationId: null,
-        groupSponsorshipMoment: null,
+        beneficiary: { threadContainer: null },
         paidAt: new Date("2026-08-05T15:00:00.000Z"),
       },
       {
         cashAmountMinor: 9_900,
         groupSponsorshipAuthorizationId: null,
-        groupSponsorshipMoment: null,
+        beneficiary: { threadContainer: null },
         paidAt: null,
       },
     ]);
@@ -2865,10 +2865,8 @@ describe("hosted ops growth metrics", () => {
       select: {
         cashAmountMinor: true,
         groupSponsorshipAuthorizationId: true,
-        groupSponsorshipMoment: {
-          select: {
-            purchaseId: true,
-          },
+        beneficiary: {
+          select: { threadContainer: { select: { memberId: true } } },
         },
         paidAt: true,
       },
@@ -2894,11 +2892,7 @@ describe("hosted ops growth metrics", () => {
     });
   });
 
-  it("moves a one-time group gift to usage top-ups when payer deletion removes its sponsorship moment", async () => {
-    // Payer-only account deletion retains the fulfilled cross-owner purchase
-    // but cascades away its HostedGroupSponsorshipMoment, so the same cash is
-    // classified as a plain top-up on the next read. The card copy discloses
-    // this; the total must not change.
+  it("keeps a historical one-time group gift classified after payer deletion with no moment row", async () => {
     const now = new Date("2026-08-07T12:00:00.000Z");
     const giftRow = {
       cashAmountMinor: 2_000,
@@ -2914,7 +2908,7 @@ describe("hosted ops growth metrics", () => {
     mocks.hostedUsageCreditPurchase.findMany.mockResolvedValueOnce([
       {
         ...giftRow,
-        groupSponsorshipMoment: { purchaseId: "purchase_group_gift" },
+        beneficiary: { threadContainer: { memberId: "member_group_runtime" } },
       },
     ]);
     mocks.hostedMemberBillingRef.count
@@ -2932,7 +2926,8 @@ describe("hosted ops growth metrics", () => {
     mocks.hostedUsageCreditPurchase.findMany.mockResolvedValueOnce([
       {
         ...giftRow,
-        groupSponsorshipMoment: null,
+        beneficiary: { threadContainer: { memberId: "member_group_runtime" } },
+        payerMemberId: null,
       },
     ]);
     mocks.hostedMemberBillingRef.count
@@ -2948,8 +2943,8 @@ describe("hosted ops growth metrics", () => {
       usageTopUpsUsdCents: 0,
     });
     expect(afterPoint).toMatchObject({
-      groupSponsorshipUsdCents: 0,
-      usageTopUpsUsdCents: 2_000,
+      groupSponsorshipUsdCents: 2_000,
+      usageTopUpsUsdCents: 0,
     });
     expect(afterPoint?.totalUsdCents).toEqual(beforePoint?.totalUsdCents);
   });

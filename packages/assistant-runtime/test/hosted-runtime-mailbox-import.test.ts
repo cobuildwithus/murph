@@ -50,19 +50,12 @@ describe("hosted mailbox import loop", () => {
     });
     const { mailboxPort } = createMailboxPort({
       conversationUsageStatus: "low",
-      groupRunningBit: {
-        expiresAt: "2026-04-27T00:00:00.000Z",
-        publicAlias: "Fiscal Department",
-        requestedBit: "Treat me like the exhausted CFO.",
-        schema: "murph.group-sponsorship-bit.v1",
-      },
       consumedSeqByLane: [
         { consumedSeq: "1", lane: "conversation" },
       ],
       items: [consumedConversation, freshConversation, system],
     });
     const imported: Array<{
-      groupRunningBit: boolean;
       id: string;
       usageRunningLow: boolean;
     }> = [];
@@ -71,8 +64,6 @@ describe("hosted mailbox import loop", () => {
       expectedUserId: TEST_USER_ID,
       async importItem(item) {
         imported.push({
-          groupRunningBit: item.groupRunningBit !== null &&
-            item.groupRunningBit !== undefined,
           id: item.item.id,
           usageRunningLow: item.usageRunningLow === true,
         });
@@ -86,14 +77,12 @@ describe("hosted mailbox import loop", () => {
     });
 
     assert.deepEqual(imported, [
-      { groupRunningBit: false, id: system.id, usageRunningLow: false },
+      { id: system.id, usageRunningLow: false },
       {
-        groupRunningBit: false,
         id: consumedConversation.id,
         usageRunningLow: false,
       },
       {
-        groupRunningBit: true,
         id: freshConversation.id,
         usageRunningLow: true,
       },
@@ -2320,7 +2309,6 @@ describe("hosted mailbox import loop", () => {
 function createMailboxPort(input: {
   conversationUsageStatus?: HostedMailboxFetchResponse["conversationUsageStatus"];
   consumedSeqByLane?: HostedMailboxFetchResponse["consumedSeqByLane"];
-  groupRunningBit?: HostedMailboxFetchResponse["groupRunningBit"];
   items: readonly HostedMailboxItem[];
   payloadResponse?: HostedMailboxPayloadFetchResponse;
   userId?: string;
@@ -2344,9 +2332,6 @@ function createMailboxPort(input: {
           ...(input.consumedSeqByLane === undefined
             ? {}
             : { consumedSeqByLane: input.consumedSeqByLane }),
-          ...(input.groupRunningBit === undefined
-            ? {}
-            : { groupRunningBit: input.groupRunningBit }),
           fetchedAt: TEST_NOW,
           items: input.items.filter((item) =>
             request.lanes.some((lane) =>

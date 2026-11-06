@@ -1,5 +1,6 @@
 import { isHostedRetiredMailboxKind } from "@murphai/hosted-execution/runtime-control";
 import {
+  isHostedRetiredAssistantNotificationProfile,
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
   type HostedExecutionConversationMessageWake,
@@ -252,6 +253,13 @@ async function importHostedWorkspaceBridgeMailboxItem(
   }
 
   if (
+    wake.kind === "assistant.notification.requested" &&
+    isHostedRetiredAssistantNotificationProfile(wake.notification.notificationPromptProfile)
+  ) {
+    return { reasonCode: "mailbox.notification_profile_retired", status: "skipped" };
+  }
+
+  if (
     input.context?.assistantAskRequestTargetKind &&
     wake.kind === "assistant.ask.requested" &&
     wake.ask.target.kind !== input.context.assistantAskRequestTargetKind
@@ -263,19 +271,8 @@ async function importHostedWorkspaceBridgeMailboxItem(
   }
 
   if (
-    input.item.route.action === "import-vault-share-delivery" ||
-    wake.kind === "vault-share.delivery"
-  ) {
-    return {
-      reasonCode: "payload.decode_mismatch",
-      retryable: false,
-      status: "blocked",
-    };
-  }
-
-  if (
-    input.item.route.action === "import-vault-share-revoke" ||
-    wake.kind === "vault-share.revoke"
+    ["import-vault-share-delivery", "import-vault-share-revoke"].includes(input.item.route.action) ||
+    ["vault-share.delivery", "vault-share.revoke"].includes(wake.kind)
   ) {
     return {
       reasonCode: "payload.decode_mismatch",

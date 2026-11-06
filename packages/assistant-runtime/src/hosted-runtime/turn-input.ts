@@ -874,9 +874,6 @@ async function createHostedAssistantInputCandidates(input: {
         ...(hostedMailboxItem?.groupReactionContext
           ? { groupReactionContext: hostedMailboxItem.groupReactionContext }
           : {}),
-        ...(hostedMailboxItem?.groupRunningBit
-          ? { groupRunningBit: hostedMailboxItem.groupRunningBit }
-          : {}),
         hostedMailboxItemId: hostedMailboxItem?.mailboxItemId ?? null,
         ...(hostedMailboxItem?.usageRunningLow === true
           ? { usageRunningLow: true as const }

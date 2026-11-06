@@ -225,23 +225,14 @@ A current canonically sent continuity
 obligation remains exempt from terminal outbox pruning until its journal is
 applied; applied intents return to ordinary terminal retention.
 
-The `creative-response` and `creative-response-text` notification prompt
-profiles are isolated system continuations for verified, explicitly requested
-social moments. Both prompts are built only from the engine-supplied task and
-bounded committed conversation history. Message and poem requests use an
-output-only turn profile with no tools. Song format projects only
-`generate_song`, the sole format-specific tool, and requires exactly one call
-with `durationSeconds: 15`. The application-owned song tool retains the bound
-provider transport plus the existing authority-free public transport required
-for a validated signed Linq upload; those transports are not native Codex
-browsing capabilities. The ordinary response-media and outbox owners remain
-unchanged. Named style references are reduced to broad musical traits rather
-than copied melody, lyrics, catchphrases, vocal identity, or signature
-arrangement. A creative provider failure settles the optional notification
-instead of starting another song attempt. A selected song without exactly one
-generated voice-memo attachment fails before receipt, transcript persistence,
-or delivery and is never replaced by a text-only response. A committed delivery
-intent retains the ordinary outbox retry and deduplication behavior.
+Sponsorship creative prompts, turn profiles, and song-media requirements are
+retired. Hosted readers still accept `creative-response` and
+`creative-response-text` solely to skip retained mailbox work and restored
+pending, sending, or recording items before active execution. Unknown profiles
+fail closed. Existing outbox delivery retains its continuation and deduplication
+ownership. Ordinary notifications, including private sponsorship recovery,
+keep their output-only behavior. Group running-bit context is no longer read,
+persisted, or added to prompts.
 
 Hosted invocation-scoped automation and device authority enters only the
 current root turn through narrow typed dynamic tools backed by existing domain

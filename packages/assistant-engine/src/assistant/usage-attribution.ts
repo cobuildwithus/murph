@@ -95,7 +95,6 @@ export function resolveAssistantUsageFeatureKey(input: {
   promptProfile:
     | 'assistant-ask-continuation'
     | 'conversation'
-    | 'creative-notification'
     | 'maintenance'
     | 'operator-message'
     | 'system-notification'

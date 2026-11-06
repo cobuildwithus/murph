@@ -34,7 +34,6 @@ import type {
   AssistantAcceptedMessageTargetAuthorizer,
 } from './message-target-selection.js'
 import type {
-  AssistantGenerateSongTurnPolicy,
   AssistantProviderServiceTier,
   AssistantProviderAttemptMetadata,
   AssistantProviderFinishWithoutReplyAcceptedEvent,
@@ -127,10 +126,6 @@ import { classifyAssistantReaction } from './reaction-routing.js'
 
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   'murph.assistant-provider-plan-diagnostics.v1'
-const ASSISTANT_CREATIVE_NOTIFICATION_SONG_POLICY = {
-  maxAttempts: 1,
-  requiredDurationSeconds: 15,
-} as const satisfies AssistantGenerateSongTurnPolicy
 const ASSISTANT_PROVIDER_PLAN_TRACE_TYPE = 'assistant.provider.plan'
 const ASSISTANT_PROVIDER_FLEX_TURN_DEADLINE_MS = 600_000
 const ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG = {
@@ -745,14 +740,9 @@ function resolveCodexAttemptCapabilities(
   const nativeCapabilitiesRestrictedTurn = [
     outputOnlyTurn,
     gameHostTurn,
-    executionPlan.profile.promptProfile === 'creative-notification',
   ].includes(true)
-  const creativeNotificationSongTurn =
-    executionPlan.profile.promptProfile === 'creative-notification' &&
-    executionPlan.profile.toolProfile === 'provider-turn'
   const systemNotificationTurn =
-    executionPlan.profile.promptProfile === 'system-notification' ||
-    executionPlan.profile.promptProfile === 'creative-notification'
+    executionPlan.profile.promptProfile === 'system-notification'
   const automationId =
     executionPlan.input.scheduledInvocationAuthority?.automationId
   const groupRoomModelMaintenanceTurn =
@@ -797,7 +787,6 @@ function resolveCodexAttemptCapabilities(
     gameHostTurn,
     readOnlyAutomationTurn,
     nativeCapabilitiesRestrictedTurn,
-    creativeNotificationSongTurn,
     systemNotificationTurn,
     groupRoomModelMaintenanceTurn,
     memberMemoryMaintenanceTurn,
@@ -855,7 +844,7 @@ function resolveCodexAttemptSandbox(
   attemptPlan: AssistantCodexAttemptPlan,
 ): AssistantSandbox | null {
   if (capabilities.outputOnlyTurn) return null
-  if ([capabilities.gameHostTurn, capabilities.creativeNotificationSongTurn,
+  if ([capabilities.gameHostTurn,
     capabilities.readOnlyAutomationTurn, capabilities.groupEmailTurn].includes(true)) return 'read-only'
   return attemptPlan.route.providerOptions.sandbox
 }
@@ -924,12 +913,6 @@ function buildCodexAttemptProviderInput(
         ? []
         : attemptPlan.routePlan.environments,
       env: attemptEnv,
-      ...(capabilities.creativeNotificationSongTurn
-        ? {
-            generateSongPolicy:
-              ASSISTANT_CREATIVE_NOTIFICATION_SONG_POLICY,
-          }
-        : {}),
       followUpAttachmentAllowed: attemptPlan.routePlan.followUpAttachmentAllowed,
       groupConversation: capabilities.groupConversation,
       groupRoomModelMaintenanceAuthorized:

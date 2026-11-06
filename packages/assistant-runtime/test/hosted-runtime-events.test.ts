@@ -1,3 +1,4 @@
+import { prepareHostedAssistantNotificationSystemMailboxWake } from "../src/hosted-runtime/events/assistant-notification.ts";
 import assert from "node:assert/strict";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -3785,7 +3786,7 @@ describe("executeHostedMailboxEvent", () => {
     "creative-response",
     "creative-response-text",
   ] as const)(
-    "settles a failed %s notification without replaying optional creative work",
+    "skips a retired %s notification without model work or delivery",
     async (notificationPromptProfile) => {
       const wake = buildHostedExecutionAssistantNotificationRequestedWake({
         eventId: `evt_notification_${notificationPromptProfile}_failure`,
@@ -3810,25 +3811,21 @@ describe("executeHostedMailboxEvent", () => {
         },
         occurredAt: "2026-04-08T00:00:00.000Z",
       });
-      mocks.sendAssistantNotification.mockRejectedValueOnce(
-        new Error("creative notification delivery failed"),
-      );
 
-      await expect(executeHostedMailboxEvent({
-        wake,
+      const assertAuthority = vi.fn();
+      await expect(prepareHostedAssistantNotificationSystemMailboxWake({
+        assertExternalThreadRouteAuthority: assertAuthority,
         executionContext,
-        runtime: createRuntime(),
-        runtimeEnv: {},
-        vaultRoot: "/tmp/assistant-runtime-events",
+        mailboxDedupeKey: wake.eventId,
+        signal: null,
+        wake,
       })).resolves.toMatchObject({
-        conversationMetrics: null,
-        mailboxLane: "assistant-notification",
+        kind: "terminal_no_send",
+        reason: "notification_profile_retired",
+        outcome: { conversationMetrics: null, mailboxLane: "assistant-notification" },
       });
-      expect(mocks.sendAssistantNotification).toHaveBeenCalledWith(
-        expect.objectContaining({
-          notificationPromptProfile,
-        }),
-      );
+      expect(assertAuthority).not.toHaveBeenCalled();
+      expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
     },
   );
 

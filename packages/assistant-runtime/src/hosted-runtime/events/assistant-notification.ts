@@ -1,3 +1,4 @@
+import { isHostedRetiredAssistantNotificationProfile } from "@murphai/hosted-execution/contracts";
 import { gameGroupMissedCheckInPolicySchema, parseGameRecapEventId } from "@murphai/hosted-execution/runtime-control";
 import { buildHostedGameChatBootstrapPolicy, isHostedGameBootstrapUnavailable } from "./game-chat-bootstrap.ts";
 import type { HostedRuntimeGroupToolPort } from "../platform.ts";
@@ -80,7 +81,7 @@ type HostedAssistantNotificationSystemMailboxPreparation =
   | {
       kind: "terminal_no_send";
       outcome: HostedMailboxOutcome;
-      reason: "external_route_authority_stale";
+      reason: "external_route_authority_stale" | "notification_profile_retired";
     };
 
 export type HostedLegacyUsageReferralAuthorityClassification =
@@ -107,6 +108,17 @@ export async function prepareHostedAssistantNotificationSystemMailboxWake(
     wake: HostedExecutionAssistantNotificationRequestedWake;
   },
 ): Promise<HostedAssistantNotificationSystemMailboxPreparation> {
+  if (isHostedRetiredAssistantNotificationProfile(input.wake.notification.notificationPromptProfile)) {
+    return {
+      kind: "terminal_no_send",
+      reason: "notification_profile_retired",
+      outcome: createNoopMailboxEffect({
+        conversationMetrics: null,
+        mailboxLane: "assistant-notification",
+        redactedLogEntries: [],
+      }),
+    };
+  }
   if (
     input.mailboxDedupeKey.startsWith(
       HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_EVENT_ID_PREFIX,
@@ -563,12 +575,7 @@ function shouldSkipFailedHostedAssistantNotification(
   return (
     !isHostedSignupWelcomeNotification(wake)
     && (
-      (
-        wake.notification.notificationPromptProfile === "creative-response"
-        || wake.notification.notificationPromptProfile ===
-          "creative-response-text"
-      )
-      || wake.notification.firstContact != null
+      wake.notification.firstContact != null
       || wake.notification.responsePolicy?.kind === "allow_send_or_skip"
     )
   );
@@ -841,6 +848,10 @@ function buildAssistantNotificationInput(
   recordLogEntry: (entry: HostedExecutionRedactedLogEntry) => void,
   groupToolPort: HostedRuntimeGroupToolPort | null | undefined,
 ): AssistantNotificationInput {
+  const notificationPromptProfile = wake.notification.notificationPromptProfile;
+  if (isHostedRetiredAssistantNotificationProfile(notificationPromptProfile)) {
+    throw new TypeError("Retired notification profiles cannot enter active execution.");
+  }
   const privateAssistantAskCompletion =
     wake.notification.privateAssistantAskCompletion ?? null;
   if (privateAssistantAskCompletion) {
@@ -913,12 +924,7 @@ function buildAssistantNotificationInput(
       : null,
     instructions: wake.notification.instructions,
     logDetails: buildHostedAssistantNotificationLogDetails(wake),
-    ...(wake.notification.notificationPromptProfile
-      ? {
-          notificationPromptProfile:
-            wake.notification.notificationPromptProfile,
-        }
-      : {}),
+    ...(notificationPromptProfile ? { notificationPromptProfile } : {}),
     recordLogEntry,
     responsePolicy: wake.notification.responsePolicy ?? null,
     ...(privateAssistantAskCompletion

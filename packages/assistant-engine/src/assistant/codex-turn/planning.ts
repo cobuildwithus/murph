@@ -96,7 +96,6 @@ import {
 } from '../hosted-tool-context.js'
 import {
   buildAssistantAskContinuationSystemPromptWithCacheMetadata,
-  buildAssistantCreativeNotificationPromptWithCacheMetadata,
   buildAssistantMaintenanceSystemPromptWithCacheMetadata,
   buildAssistantOperatorMessagePromptWithCacheMetadata,
   buildAssistantSystemNotificationPromptWithCacheMetadata,
@@ -262,7 +261,6 @@ export type AssistantCodexTurnPromptProfile =
   | 'maintenance'
   | 'assistant-ask-continuation'
   | 'system-notification'
-  | 'creative-notification'
   | 'operator-message'
 
 export type AssistantCodexTurnToolProfile =
@@ -957,7 +955,6 @@ export async function resolveAssistantRouteTurnPlan(
   const systemNotificationTurn =
     contextHandoffNotificationTurn ||
     input.profile.promptProfile === 'system-notification' ||
-    input.profile.promptProfile === 'creative-notification' ||
     operatorMessageNotificationTurn
   const conversationProviderTurn =
     input.profile.promptProfile === 'conversation' &&
@@ -998,7 +995,6 @@ export async function resolveAssistantRouteTurnPlan(
     input.profile.threadScope === 'session-thread' ||
     input.profile.promptProfile === 'assistant-ask-continuation' ||
     contextHandoffNotificationTurn ||
-    input.profile.promptProfile === 'creative-notification' ||
     operatorMessageNotificationTurn ||
     followUp.requiresExplicitHistory
   const resolveCommittedTranscriptHistoryMessages = async () =>
@@ -1213,14 +1209,6 @@ export async function resolveAssistantRouteTurnPlan(
       })
     }
 
-    if (input.profile.promptProfile === 'creative-notification') {
-      return buildAssistantCreativeNotificationPromptWithCacheMetadata({
-        channel: resolvedChannel,
-      }, {
-        toolSchemaHash,
-      })
-    }
-
     if (input.profile.promptProfile === 'operator-message') {
       return buildAssistantOperatorMessagePromptWithCacheMetadata({
         channel: resolvedChannel,
@@ -1345,7 +1333,7 @@ export async function resolveAssistantRouteTurnPlan(
     outputOnlyTurn,
     scheduledAutomationId: input.input.scheduledInvocationAuthority?.automationId,
   })
-  const availableDynamicTools = specializedDynamicTools ?? resolveMurphDynamicTools({
+  const dynamicTools = specializedDynamicTools ?? resolveMurphDynamicTools({
         gameReadAvailable: isConversationGameReadAvailable(input, userActionAcceptedInputIds, conversationScope, scheduledInvocationScope),
         gamesAvailable: areConversationGamesAvailable(input, userActionAcceptedInputIds, conversationScope),
         gameLoreAvailable: gameLoreGuidance !== null,
@@ -1402,12 +1390,6 @@ export async function resolveAssistantRouteTurnPlan(
         askGrokAvailable:
           resolveXaiApiKey(input.sharedPlan.cliAccess.env) !== null,
       })
-  const dynamicTools: readonly MurphDynamicTool[] =
-    input.profile.promptProfile === 'creative-notification'
-      ? availableDynamicTools.filter(
-          (tool) => tool.namespace === 'murph' && tool.name === 'generate_song',
-        )
-      : availableDynamicTools
   const messageTargetDynamicToolsAvailable =
     dynamicTools.some(
       (tool) => tool.namespace === 'murph' && tool.name === 'select_reply_target',

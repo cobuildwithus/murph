@@ -192,7 +192,6 @@ import type {
   AssistantAcceptedMessageTargetAuthorizer,
 } from './assistant/message-target-selection.js'
 import type {
-  AssistantGenerateSongTurnPolicy,
   AssistantNoReplyDisposition,
   AssistantProviderDynamicTool,
   AssistantProviderFinishWithoutReplyAcceptedEvent,
@@ -539,7 +538,6 @@ export interface CodexAppServerTurnInput {
   baseInstructions?: string | null
   developerInstructions?: string | null
   dynamicTools: readonly AssistantProviderDynamicTool[]
-  generateSongPolicy?: AssistantGenerateSongTurnPolicy | null
   model?: string | null
   modelProvider?: string | null
   onboardingFirstReadCompletionTransitionAvailable?: boolean | null
@@ -3353,12 +3351,6 @@ async function runCodexAppServerTurnOnProcess(
       ? { ...input.automationRelativeDateReferenceWindow }
       : null,
   ]
-  const generateSongTurnState = input.generateSongPolicy
-    ? {
-        attemptCount: 0,
-        policy: input.generateSongPolicy,
-      }
-    : null
   const subagentTokenUsageByTurn =
     new Map<string, CodexSubagentTurnTokenUsageSample>()
   let rolloutRelativePath: string | null = null
@@ -4908,7 +4900,6 @@ async function runCodexAppServerTurnOnProcess(
               ? input.askGrokRuntime ?? null
               : null,
           askGrokTurnState,
-          generateSongTurnState,
         })
         return result
       },

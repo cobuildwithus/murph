@@ -1652,10 +1652,8 @@ export async function readHostedGrowthDashboard(
       select: {
         cashAmountMinor: true,
         groupSponsorshipAuthorizationId: true,
-        groupSponsorshipMoment: {
-          select: {
-            purchaseId: true,
-          },
+        beneficiary: {
+          select: { threadContainer: { select: { memberId: true } } },
         },
         paidAt: true,
       },
@@ -1868,7 +1866,7 @@ export async function readHostedGrowthDashboard(
           cashAmountMinor: purchase.cashAmountMinor,
           isGroupSponsorship:
             purchase.groupSponsorshipAuthorizationId !== null
-            || purchase.groupSponsorshipMoment !== null,
+            || purchase.beneficiary.threadContainer !== null,
           paidAt: purchase.paidAt,
         }]
       ),

@@ -261,9 +261,6 @@ export async function executeCodexAssistantTurnAttempt(
     environments: input.environments ?? undefined,
     ephemeral: input.providerThreadEphemeral ?? undefined,
     fetchImpl: input.providerFetch ?? undefined,
-    ...(input.generateSongPolicy
-      ? { generateSongPolicy: input.generateSongPolicy }
-      : {}),
     followUpAttachmentAllowed: input.followUpAttachmentAllowed === true,
     groupConversation: input.groupConversation === true,
     groupRoomModelMaintenanceAuthorized:

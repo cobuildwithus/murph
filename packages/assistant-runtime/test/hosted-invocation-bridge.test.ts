@@ -1,3 +1,7 @@
+import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
+import { fetchAndProcessHostedMailboxPrefix } from "../src/hosted-runtime/mailbox-import.ts";
+import { createEmptyHostedMailboxImportState } from "../src/hosted-runtime/mailbox-state.ts";
+import { readHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
 import { createMealMediaStore, mediaFailure } from "./hosted-meal-media.harness.ts";
 import type {
   HostedExecutionAssistantAskCompletedWake,
@@ -43,6 +47,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionAssistantAskCompletedWake,
   buildHostedExecutionAssistantAskRequestedWake,
 } from "@murphai/hosted-execution";
@@ -2431,6 +2436,52 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       status: "skipped",
     });
     expect(mailboxPayloadDecoder.decode).not.toHaveBeenCalled();
+  });
+
+  it.each(["creative-response", "creative-response-text"] as const)("terminally consumes fresh %s from an old Web and imports the active successor", async (notificationPromptProfile) => {
+    const vaultRoot = await createVaultRoot();
+    const { platform } = createRuntimePlatform();
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "retired-creative", memberId: TEST_REQUEST.userId,
+      occurredAt: "2026-05-01T00:00:00.000Z",
+      notification: {
+        notificationPromptProfile, instructions: "Retired synthetic creative work.",
+        route: { actorId: null, channel: "telegram", delivery: { kind: "thread", target: "synthetic-group" }, identityId: "synthetic-group", threadId: "synthetic-group", threadIsDirect: false },
+      },
+    });
+    const retired = {
+      ...createSystemMailboxImportItem().item,
+      dedupeKey: wake.eventId, id: "retired-creative", kind: wake.kind,
+      payloadInlineCiphertext: "synthetic-retired-payload", payloadRef: null, payloadSchema: "murph.hosted-mailbox-item.v1",
+    };
+    const active = { ...createSystemMailboxImportItem().item, laneSeq: "2", payloadInlineCiphertext: "synthetic-active-payload", payloadRef: null, payloadSchema: "murph.hosted-mailbox-item.v1" };
+    const decoder = vi.fn(async (input: { payloadCiphertext: string }) => ({
+      status: "decoded" as const,
+      wake: parseHostedExecutionWake(input.payloadCiphertext === "synthetic-retired-payload" ? wake : createMemberChannelsWake()),
+    }));
+    const options = createBridgeOptions({ mailboxPayloadDecoder: { decode: decoder }, platform, vaultRoot });
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_REQUEST.userId,
+      importItem: options.importItem,
+      lanes: ["system"],
+      limitPerLane: 10,
+      mailboxPort: {
+        async fetch() { return { fetchedAt: wake.occurredAt, items: [retired, active], maxSeqByLane: [{ lane: "system", maxSeq: "2" }], userId: TEST_REQUEST.userId }; },
+        async fetchPayload() { throw new Error("Inline payloads must not fetch a sidecar."); },
+      },
+      now: () => wake.occurredAt,
+      requestId: "synthetic-retirement-import",
+      state: createEmptyHostedMailboxImportState(),
+    });
+    expect(decoder).toHaveBeenCalledTimes(2);
+    expect(result.blocked).toEqual([]);
+    expect(result.state.watermarks.system).toBe("2");
+    expect(result.importedCount).toBe(1);
+    expect(result.state.recentStatuses.map(({ seq, status, reasonCode }) => ({ seq, status, reasonCode }))).toEqual([
+      { seq: "1", status: "skipped", reasonCode: "mailbox.notification_profile_retired" },
+      { seq: "2", status: "imported", reasonCode: "system_mailbox.queued" },
+    ]);
+    expect((await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => item.itemId)).toEqual([active.id]);
   });
 
   it("rejects active rows mislabeled as retired without decoding them", async () => {

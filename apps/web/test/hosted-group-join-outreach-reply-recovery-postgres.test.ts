@@ -3216,9 +3216,7 @@ describe.skipIf(!runPostgresProof)(
         await expect(fixture.replyPrisma.hostedGroupSponsorshipAuthorization.count({
           where: { payerMemberId },
         })).resolves.toBe(0);
-        await expect(fixture.replyPrisma.hostedGroupSponsorshipMoment.count({
-          where: { creatorMemberId: payerMemberId },
-        })).resolves.toBe(0);
+
         await expectDeletionReplyRaceConverged(fixture);
       } finally {
         deletionGroupLockBarrier.release();
@@ -3356,9 +3354,7 @@ describe.skipIf(!runPostgresProof)(
               where: { payerMemberId: { in: payerMemberIds } },
             }),
           ).resolves.toBe(0);
-          await expect(fixture.replyPrisma.hostedGroupSponsorshipMoment.count({
-            where: { creatorMemberId: { in: payerMemberIds } },
-          })).resolves.toBe(2);
+
         } finally {
           fundingGroupLockBarrier.release();
           await Promise.allSettled(checkoutPromises);
@@ -5583,9 +5579,6 @@ async function cleanupGroupFundingPayer(input: {
   payerMemberId: string;
   prisma: PrismaClient;
 }): Promise<void> {
-  await input.prisma.hostedGroupSponsorshipMoment.deleteMany({
-    where: { creatorMemberId: input.payerMemberId },
-  });
   await input.prisma.hostedUsageCreditPurchase.deleteMany({
     where: { payerMemberId: input.payerMemberId },
   });
