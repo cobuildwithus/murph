@@ -69,7 +69,6 @@ import {
 } from "./hosted-runner-container-identity.js";
 import {
   assertHostedExecutionRunnerJobResult,
-  HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
   parseHostedExecutionRunnerJobInput,
   readHostedExecutionRunnerJobUserId,
   type HostedExecutionRunnerJobInput,
@@ -311,16 +310,6 @@ export interface RunnerContainerRuntimeCompletionRecordedInput {
   userId: string;
 }
 
-interface HostedExecutionContainerRunnerInput {
-  job: HostedExecutionRunnerJobInput;
-  orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
-  runnerContainerName?: string;
-  runnerContainerNamespace: HostedExecutionContainerNamespaceLike;
-  signal?: AbortSignal;
-  timeoutMs?: number | null;
-  userId: string;
-}
-
 export interface HostedExecutionContainerStubLike extends Partial<HostedRunnerSlotLifecycle> {
   controlVoice?(input: HostedVoiceControlRequest & { userId: string }): Promise<HostedVoiceControlResponse>;
 
@@ -476,6 +465,8 @@ interface RunnerContainerPendingCompletionCleanup
   extends RunnerContainerRuntimeCompletionRecordedInput {
   expectedInteractionGeneration: number;
 }
+
+type RunnerRetiredSlotNotice = { userId: string; runnerContainerName: string };
 
 interface RunnerContainerLifecycleEvaluationInput {
   expectedInteractionGeneration: number;
@@ -1312,19 +1303,15 @@ export class RunnerContainer extends Container {
       return createActiveRuntimeUserFence(abortInProgress);
     }
     if (!active) {
-      const status = await readRunnerContainerStatus(this);
-      if (
-        this.warmShellInvalidatedByUnsettledDestroy
-        && !isRunnerContainerStopped(status)
-      ) {
+      const stopped = this.statusProvesRunnerStopped(await readRunnerContainerStatus(this));
+      if (this.warmShellInvalidatedByUnsettledDestroy && !stopped) {
         throw new Error(
           "Hosted runner container has an unsettled fail-closed stop.",
         );
       }
-      if (isRunnerContainerStopped(status)) {
+      if (stopped) {
         this.warmShellInvalidatedByUnsettledDestroy = false;
-      }
-      if (!isRunnerContainerStopped(status)) {
+      } else {
         const activeInContainer = await this.readWorkspaceInvocationActiveFromHealth();
         if (activeInContainer) {
           throw new Error("Hosted runner container health still reports active workspace work.");
@@ -1341,7 +1328,7 @@ export class RunnerContainer extends Container {
       if (this.workspaceInvocationPriorityOwnerChanged(active)) {
         return this.finishInactiveRuntimeFenceRead();
       }
-      if (isRunnerContainerStopped(status)) {
+      if (this.statusProvesRunnerStopped(status)) {
         this.warmShellInvalidatedByUnsettledDestroy = false;
         this.clearPreservedWorkspaceInvocationActiveOperation(active);
         return this.finishInactiveRuntimeFenceRead();
@@ -1353,7 +1340,7 @@ export class RunnerContainer extends Container {
       if (this.workspaceInvocationPriorityOwnerChanged(active)) {
         return this.finishInactiveRuntimeFenceRead();
       }
-      if (isRunnerContainerStopped(status)) {
+      if (this.statusProvesRunnerStopped(status)) {
         this.warmShellInvalidatedByUnsettledDestroy = false;
         this.clearPreservedWorkspaceInvocationActiveOperation(active);
         return this.finishInactiveRuntimeFenceRead();
@@ -1751,7 +1738,7 @@ export class RunnerContainer extends Container {
       ) {
         return { kind: "unknown", reason: "active-child-rejected" };
       }
-      if (isRunnerContainerStopped(status)) {
+      if (this.statusProvesRunnerStopped(status)) {
         this.warmShellInvalidatedByUnsettledDestroy = false;
         this.clearPreservedWorkspaceInvocationActiveOperation(active);
         if (this.workspaceInvocationCoordinationChanged(null)) {
@@ -1772,7 +1759,7 @@ export class RunnerContainer extends Container {
       ) {
         return { kind: "unknown", reason: "active-child-rejected" };
       }
-      if (isRunnerContainerStopped(status)) {
+      if (this.statusProvesRunnerStopped(status)) {
         this.warmShellInvalidatedByUnsettledDestroy = false;
         this.clearPreservedWorkspaceInvocationActiveOperation(active);
         if (this.workspaceInvocationCoordinationChanged(null)) {
@@ -1990,6 +1977,11 @@ export class RunnerContainer extends Container {
     return this.ctx.container?.running === true;
   }
 
+  /** SDK status can lag the platform, which overrides a stale stopped status. */
+  private statusProvesRunnerStopped(status: string | null): boolean {
+    return isRunnerContainerStopped(status) && !this.isPlatformContainerDefinitelyRunning();
+  }
+
   async smokeHealth(input: HostedExecutionContainerSmokeHealthInput = {}): Promise<HostedExecutionContainerSmokeHealthResult> {
     this.noteContainerInteraction();
     return await this.withLifecycleLock(async () => {
@@ -2184,7 +2176,15 @@ export class RunnerContainer extends Container {
     };
   }
 
-  override async onActivityExpired(): Promise<void> {
+  override async onActivityExpired(notice?: RunnerRetiredSlotNotice | null): Promise<void> {
+    // Routing grants nothing: it only addresses this slot's own durable retirement.
+    // Old empty schedules, and notices for any other slot, run the ordinary check.
+    const binding = this.readRunnerSlotBindingOptional();
+    if (notice && binding?.state === "retired" && binding.slotName === notice.runnerContainerName) {
+      await this.scheduleLifecycleCheck(Date.now() + readRunnerContainerLifecycleReevaluationMs(this.environment), notice);
+      await this.notifyMemberSlotRetired(notice);
+      return;
+    }
     await this.evaluateWarmContainerLifecycle({
       expectedInteractionGeneration: this.containerInteractionGeneration,
       trigger: "activity-expired",
@@ -2208,6 +2208,8 @@ export class RunnerContainer extends Container {
     );
     const lifecycleObservedAtMs = Date.now();
     const lifecycleStagePrefix = input.trigger;
+    const preserved = this.readWorkspaceInvocationOperation();
+    if (preserved?.requiresFailClosedStopReason) await this.settlePreservedInvocation(preserved);
     const activeOperation = this.readWorkspaceInvocationOperation();
     if (activeOperation) {
       if (input.trigger === "activity-expired") {
@@ -2252,6 +2254,25 @@ export class RunnerContainer extends Container {
     );
   }
 
+  /** Preserved uncertainty clears only on a stop. An exact completed receipt
+   * leaves no outcome to preserve, so the alarm may perform that stop itself;
+   * otherwise it only observes one. Admission cannot overtake a child that ran. */
+  private async settlePreservedInvocation(preserved: RunnerWorkspaceInvocationOperation): Promise<void> {
+    try {
+      const receipt = this.readRunnerSlotBindingOptional()?.state === "bound"
+        ? this.requireInvocationReceiptStore().read() : null;
+      if (preserved.requiresFailClosedStopReason === "transport_uncertain"
+        && receipt?.state === "completed" && receipt.attemptId === preserved.attemptId
+        && receipt.generation === preserved.leaseGeneration) {
+        await this.settleExactWorkspaceInvocationForWake(preserved);
+      } else {
+        await this.readActiveRuntimeUserFence();
+      }
+    } catch (error) {
+      this.logLifecycleCleanupFailure("Hosted execution container could not settle its preserved invocation.", error, preserved.userId);
+    }
+  }
+
   private async evaluateWarmContainerLifecycleLocked(
     input: RunnerContainerLifecycleEvaluationInput,
   ): Promise<void> {
@@ -2294,11 +2315,10 @@ export class RunnerContainer extends Container {
     ) {
       return;
     }
-    this.deleteSchedules("onActivityExpired");
-    this.retireStoppedMemberSlot();
+    await this.retireStoppedMemberSlot();
   }
 
-  private async scheduleLifecycleCheck(atEpochMs: number): Promise<void> {
+  private async scheduleLifecycleCheck(atEpochMs: number, notice: RunnerRetiredSlotNotice | null = null): Promise<void> {
     this.deleteSchedules("onActivityExpired");
     // The SDK stores whole seconds. Round up so a receipt deadline cannot fire
     // early; generic RPC settlement only moves the SDK activity timeout, not
@@ -2306,13 +2326,19 @@ export class RunnerContainer extends Container {
     await this.schedule(
       new Date(Math.ceil(atEpochMs / 1_000) * 1_000),
       "onActivityExpired",
-      null,
+      notice,
     );
   }
 
-  private retireStoppedMemberSlot(): void {
+  private async retireStoppedMemberSlot(): Promise<void> {
     const binding = this.readRunnerSlotBindingOptional();
-    if (binding?.state !== "bound") return;
+    if (binding?.state !== "bound") {
+      this.deleteSchedules("onActivityExpired");
+      return;
+    }
+    // finishRetirement clears the member, so arm the only way to redeliver first.
+    const notice = { userId: binding.userId, runnerContainerName: binding.slotName };
+    await this.scheduleLifecycleCheck(Date.now() + readRunnerContainerLifecycleReevaluationMs(this.environment), notice);
     // The caller holds the lifecycle lock and has proved native destruction
     // without a newer interaction. Fence late admissions before notifying the
     // user owner; this immutable target can never be restarted or rebound.
@@ -2321,21 +2347,21 @@ export class RunnerContainer extends Container {
     store.finishRetirement();
     // Never await the user owner's consent lock from the slot lifecycle lock:
     // an arriving ensure may already hold it while reading this exact slot.
-    this.ctx.waitUntil(this.notifyMemberSlotRetired(binding));
+    this.ctx.waitUntil(this.notifyMemberSlotRetired(notice));
   }
 
-  private async notifyMemberSlotRetired(
-    binding: Extract<HostedStandbySlotBinding, { state: "bound" }>,
-  ): Promise<void> {
+  private async notifyMemberSlotRetired(notice: RunnerRetiredSlotNotice): Promise<void> {
     try {
-      await commandHostedRuntimeOwner({ source: this.environment, userId: binding.userId, command: { operation: "target_retired", runnerContainerName: binding.slotName } });
+      await commandHostedRuntimeOwner({ source: this.environment, userId: notice.userId, command: { operation: "target_retired", runnerContainerName: notice.runnerContainerName } });
+      // Updated settled the owner; stale proves its assignment already changed.
+      this.deleteSchedules("onActivityExpired");
     } catch {
       emitHostedExecutionStructuredLog({
         component: "container",
         level: "warn",
-        message: "Hosted runner retirement notification failed; preserving admission reconciliation fallback.",
+        message: "Hosted runner retirement notification failed; routed retry remains armed.",
         phase: "container.ready",
-        userId: binding.userId,
+        userId: notice.userId,
       });
     }
   }
@@ -2368,6 +2394,9 @@ export class RunnerContainer extends Container {
       return false;
     }
     if (this.isPlatformContainerDefinitelyStopped() || isRunnerContainerStopped(status)) {
+      // A registered receipt outlived its process, so its owner still needs this alarm.
+      if (this.readRunnerSlotBindingOptional()?.state === "bound"
+        && this.requireInvocationReceiptStore().read()?.state === "registered") return true;
       this.deleteSchedules("onActivityExpired");
       return false;
     }
@@ -2404,6 +2433,11 @@ export class RunnerContainer extends Container {
     return true;
   }
 
+  private async isRunnerProcessStopped(): Promise<boolean> {
+    return this.isPlatformContainerDefinitelyStopped()
+      || this.statusProvesRunnerStopped(await readRunnerContainerStatusWithTimeout(this, RUNNER_DESTROY_SETTLE_TIMEOUT_MS));
+  }
+
   private async runtimeOwnerAllowsIdleCleanup(): Promise<boolean> {
     const binding = this.readRunnerSlotBindingOptional();
     if (binding?.state !== "bound") return true;
@@ -2419,15 +2453,13 @@ export class RunnerContainer extends Container {
       });
       if (status !== "observed") return false;
       if (owner?.runnerContainerName !== binding.slotName || owner.phase === "idle") return true;
-      // A lost outer result can leave a completed owner retiring after its
-      // mailbox drains. The existing lifecycle alarm must recover it even when
-      // there is no new work for Temporal to dispatch. Receipt alone is not
-      // stoppedness: require the exact identity and an inactive native fence.
-      if (owner.phase !== "retiring" || owner.completedAt === null) return false;
       const receipt = this.requireInvocationReceiptStore().read();
-      if (receipt?.state === "completed" && receipt.attemptId === owner.attemptId
-        && receipt.generation === owner.generation
-        && !(await this.readActiveRuntimeUserFence()).active) {
+      if (!receipt || receipt.attemptId !== owner.attemptId || receipt.generation !== owner.generation) return false;
+      // A failed invocation never gets a completed receipt; only a positive stop can settle it.
+      if (receipt.state === "registered") return await this.isRunnerProcessStopped();
+      // Cold retirement belongs to its stop owner. Completion can no longer make it reusable.
+      if (owner.phase === "retiring" && owner.completedAt === null) return false;
+      if (!(await this.readActiveRuntimeUserFence()).active) {
         await recordHostedRuntimeOwnerCompletion({
           source: this.environment, userId: binding.userId,
           attemptId: receipt.attemptId, generation: receipt.generation,
@@ -3497,10 +3529,7 @@ export class RunnerContainer extends Container {
       if (ownershipAfterStatus !== "current") {
         return ownershipAfterStatus === "superseded";
       }
-      if (
-        isRunnerContainerStopped(statusBeforeDestroy)
-        && !this.isPlatformContainerDefinitelyRunning()
-      ) {
+      if (this.statusProvesRunnerStopped(statusBeforeDestroy)) {
         this.recordCurrentContainerStopped();
         return true;
       }
@@ -4161,75 +4190,6 @@ export function registerHostedRunnerContainerOutboundInterception(
   legacyContainerClass.outboundByHost = HOSTED_RUNNER_OUTBOUND_BY_HOST;
 }
 
-export async function invokeHostedExecutionContainerRunner(
-  input: HostedExecutionContainerRunnerInput,
-): Promise<HostedExecutionRunnerJobResult> {
-  const jobUserId = readHostedExecutionRunnerJobUserId(input.job);
-  if (input.userId !== jobUserId) {
-    throw new TypeError("Hosted runner container route userId must match workspace job userId.");
-  }
-
-  const container = input.runnerContainerNamespace.getByName(input.runnerContainerName ?? jobUserId);
-  const invokeRequest: HostedExecutionContainerInvokeRequest = {
-    job: input.job,
-    ...(input.orchestration ? { orchestration: input.orchestration } : {}),
-    ...(input.timeoutMs === undefined || input.timeoutMs === null
-      ? {}
-      : { timeoutMs: input.timeoutMs }),
-    userId: jobUserId,
-  };
-  const invocation = invokeRunnerContainerProcessing(container, invokeRequest);
-  return input.signal
-    ? await raceRunnerContainerOperationAbort(invocation, input.signal, async () => {
-        if (isRunnerContainerAbortHardTimeout(input.signal?.reason)) {
-          void container.destroyInstance().catch((error: unknown) => {
-            emitHostedExecutionStructuredLog({
-              component: "container",
-              error,
-              level: "warn",
-              message: "Hosted runner could not destroy a timed-out invocation container.",
-              phase: "failed",
-              userId: jobUserId,
-            });
-          });
-          return;
-        }
-
-        if (
-          input.job.kind === HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND
-          && container.abortWorkspaceInvocation
-        ) {
-          await container.abortWorkspaceInvocation({
-            attemptId: input.job.request.attemptId,
-            leaseGeneration: input.job.request.leaseGeneration,
-            userId: jobUserId,
-          }).catch((error: unknown) => {
-            emitHostedExecutionStructuredLog({
-              component: "container",
-              error,
-              level: "warn",
-              message: "Hosted runner could not abort a preempted invocation request.",
-              phase: "failed",
-              userId: jobUserId,
-            });
-          });
-          return;
-        }
-
-        emitHostedExecutionStructuredLog({
-          component: "container",
-          details: {
-            abortWorkspaceInvocationSupported: Boolean(container.abortWorkspaceInvocation),
-          },
-          level: "warn",
-          message: "Hosted runner left a preempted invocation request for lease fencing.",
-          phase: "failed",
-          userId: jobUserId,
-        });
-      })
-    : await invocation;
-}
-
 export async function refreshHostedExecutionContainerBrowserVaultReplica(_input?: unknown): Promise<never> {
   throw new Error("Hosted runner browser-vault refresh side path has been removed.");
 }
@@ -4782,43 +4742,6 @@ function emitRunnerContainerLifecycleFailure(input: {
     phase: "failed",
     userId: input.context?.userId,
   });
-}
-
-async function invokeRunnerContainerProcessing(
-  container: HostedExecutionContainerStubLike,
-  invokeRequest: HostedExecutionContainerInvokeRequest,
-): Promise<HostedExecutionRunnerJobResult> {
-  if (!container.ensureProcessing) {
-    return await container.invoke(invokeRequest);
-  }
-
-  const ensure = async () =>
-    await container.ensureProcessing!({
-      invoke: invokeRequest,
-      userId: invokeRequest.userId,
-    });
-
-  const ensured = await ensure();
-  if (ensured.kind === "accepted" && ensured.result) {
-    return ensured.result;
-  }
-  if (ensured.kind === "failed") {
-    throw createRunnerContainerProcessingFailureError(ensured.failure);
-  }
-  if (ensured.kind === "start-required" && ensured.reason === "no-active-child") {
-    const retried = await ensure();
-    if (retried.kind === "accepted" && retried.result) {
-      return retried.result;
-    }
-    if (retried.kind === "failed") {
-      throw createRunnerContainerProcessingFailureError(retried.failure);
-    }
-    throw new Error(
-      `Hosted runner container replacement retry returned ${retried.kind} without invoking work.`,
-    );
-  }
-
-  throw new Error(`Hosted runner container ensureProcessing returned ${ensured.kind} without invoking work.`);
 }
 
 export async function destroyHostedExecutionContainer(input: {
@@ -5549,53 +5472,6 @@ function buildRunnerContainerProcessingFailure(
     runtimeFailurePhaseCode,
     status: readHostedRunnerContainerDiagnosticStatus(diagnostics),
   };
-}
-
-function createRunnerContainerProcessingFailureError(
-  failure: RunnerContainerProcessingFailure,
-): Error {
-  const errorCodeDetail = readHostedRunnerContainerSafeCode(
-    failure.errorCodeDetail,
-  );
-  const runtimeFailurePhaseCode = isHostedRuntimeFailurePhaseCode(
-    failure.runtimeFailurePhaseCode,
-  )
-    ? failure.runtimeFailurePhaseCode
-    : null;
-  const status = typeof failure.status === "number"
-    && Number.isInteger(failure.status)
-    && failure.status >= 100
-    && failure.status <= 599
-    ? failure.status
-    : null;
-  const details = sanitizeHostedExecutionStructuredLogDetails({
-    ...(errorCodeDetail
-      ? { errorCodeDetail }
-      : {}),
-    ...(runtimeFailurePhaseCode
-      ? {
-          [HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY]:
-            runtimeFailurePhaseCode,
-        }
-      : {}),
-  });
-  const message = joinHostedRunnerContainerErrorFragments([
-    summarizeHostedExecutionErrorCode("runtime_error")
-      ?? "Hosted execution runtime failed.",
-    `Code: ${errorCodeDetail ?? "runtime_error"}`,
-    ...(status === null ? [] : [`Status: ${status}`]),
-  ]);
-  const error = Object.assign(new Error(message), {
-    code: "runtime_error",
-    ...(details ? { details } : {}),
-    ...(status === null
-      ? {}
-      : {
-          status,
-          statusCode: status,
-        }),
-  });
-  return error;
 }
 
 function buildRunnerContainerEnvVars(): Record<string, string> {

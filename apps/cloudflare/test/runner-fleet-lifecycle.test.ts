@@ -1,5 +1,6 @@
+import { Container } from "@cloudflare/containers";
 import assert from "node:assert/strict";
-import { beforeEach, describe, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, it, vi } from "vitest";
 import { RunnerContainer, destroyHostedExecutionContainer } from "../src/runner-container.js";
 import { StandbyRunnerContainer } from "../src/standby-runner-container.js";
 import { RunnerInvocationReceiptStore } from "../src/runner-invocation-receipt.ts";
@@ -12,12 +13,24 @@ import {
   resolveHostedRunnerReleaseId, resolveHostedStandbyCoordinatorName,
 } from "../src/standby-runner-contract.js";
 
-import type { DurableObjectStateLike } from "../src/user-runner/types.js";
 import { HOSTED_RUNTIME_ARCHITECTURE_VERSION } from "../src/hosted-runtime-architecture.js";
 
 import { createTestSqlStorage } from "./sql-storage.js";
 import { commandHostedRuntimeOwner } from "../src/runtime-owner-client.ts";
-import type { HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
+import type { HostedRuntimeOwnerCommand, HostedRuntimeOwnerResponse, HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
+
+// Use the installed SDK, including its SQLite schedules and JSON alarm dispatch.
+vi.mock("@cloudflare/containers", async () => {
+  const { createRequire } = await import("node:module");
+  return vi.importActual(createRequire(import.meta.url).resolve("@cloudflare/containers"));
+});
+vi.mock("cloudflare:workers", () => ({
+  DurableObject: class {
+    constructor(public ctx: unknown, public env: unknown) {}
+  },
+  WorkerEntrypoint: class {},
+}));
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 vi.mock("../src/runtime-owner-client.ts", () => ({ commandHostedRuntimeOwner: vi.fn() }));
 beforeEach(() => {
@@ -40,7 +53,7 @@ vi.mock("../src/runner-egress-intercept.ts", () => ({ HOSTED_RUNNER_OUTBOUND_BY_
 vi.mock("../src/runner-job-transport.ts", () => ({
   HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND: "workspace-invocation",
   assertHostedExecutionRunnerJobResult() { throw new Error("Unexpected job result parsing"); },
-  parseHostedExecutionRunnerJobInput() { throw new Error("Unexpected job parsing"); },
+  parseHostedExecutionRunnerJobInput(job: unknown) { return job; },
   readHostedExecutionRunnerJobUserId(job: { request: { userId: string } }) { return job.request.userId; },
 }));
 
@@ -59,25 +72,30 @@ const claimInput = (slotName = GLOBAL_SLOT, userId = MEMBER) => ({
 
 function durableState() {
   const sql = createTestSqlStorage();
-  const state: DurableObjectStateLike = {
+  const pending: Promise<unknown>[] = [];
+  const state = {
     storage: {
-      sql, transactionSync: callback => sql.transactionSync(callback),
+      sql, transactionSync: <T>(callback: () => T) => sql.transactionSync(callback),
+      kv: { get() { return undefined; } },
+      async sync() {}, async deleteAlarm() {},
       async delete() { return false; }, async get() { return undefined; },
       async put() {}, async getAlarm() { return null; }, async setAlarm() {},
     },
-    waitUntil(promise) { void promise.catch(() => undefined); },
+    blockConcurrencyWhile: async <T>(callback: () => Promise<T>) => callback(),
+    waitUntil(promise: Promise<unknown>) { pending.push(promise); void promise.catch(() => undefined); },
   };
-  return { state, sql };
+  return { state, sql, pending };
 }
 
 function runnerHarness(input: {
   legacy?: boolean; slotName?: string; running?: boolean; status?: string;
   health?: Record<string, unknown>; environment?: Record<string, unknown>;
   destroy?: () => Promise<void>; fetchHealth?: () => Promise<void>;
+  invoke?: () => Promise<Response>; abort?: () => void;
   durable?: ReturnType<typeof durableState>;
 } = {}) {
   const slotName = input.slotName ?? (input.legacy ? LEGACY_SLOT : GLOBAL_SLOT);
-  const { state, sql } = input.durable ?? durableState();
+  const { state, sql, pending } = input.durable ?? durableState();
   let running = input.running ?? false;
   let status = input.status ?? (running ? "running" : "stopped");
   const calls = { start: 0, destroy: 0, fetch: 0, renew: 0 };
@@ -85,6 +103,7 @@ function runnerHarness(input: {
   const container = new ContainerClass({
     ...state, id: { name: slotName }, container: {
       get running() { return running; },
+      monitor() { return new Promise<void>(() => {}); },
       getTcpPort() { return { fetch: (url: string) => container.containerFetch(url) }; },
     },
   }, {
@@ -94,12 +113,18 @@ function runnerHarness(input: {
     ...input.environment,
   });
   Object.assign(container, {
+    async applyOutboundInterception() {},
     async getState() { return { lastChange: Date.now(), status }; },
     async startAndWaitForPorts() { calls.start++; running = true; status = "running"; },
     async destroy() { calls.destroy++; await input.destroy?.(); running = false; status = "stopped"; },
-    renewActivityTimeout() { calls.renew++; },
+    renewActivityTimeout() { calls.renew++; Container.prototype.renewActivityTimeout.call(container); },
     async containerFetch(url: string) {
       calls.fetch++;
+      if (url.endsWith("/internal/workspace-invocation") && input.invoke) return input.invoke();
+      if (url.endsWith("/internal/workspace-invocation/abort")) {
+        input.abort?.();
+        return new Response(null, { status: 204, headers: { "x-workspace-invocation-abort-status": "accepted" } });
+      }
       assert.ok(url.endsWith("/health"), `Unexpected container fetch: ${url}`);
       await input.fetchHealth?.();
       return Response.json({
@@ -116,7 +141,7 @@ function runnerHarness(input: {
     },
   });
   return {
-    container, calls, slotName, state, sql,
+    container, calls, slotName, state, sql, pending,
     setNative(runningValue: boolean, statusValue = runningValue ? "running" : "stopped") {
       running = runningValue; status = statusValue;
     },
@@ -187,7 +212,7 @@ describe("unified runner identity and binding", () => {
     const { container, calls, sql } = runnerHarness();
     const input = claimInput();
     await container.bindStandbySlot(input);
-    assert.deepEqual(calls, { start: 0, destroy: 0, fetch: 0, renew: 0 });
+    assert.deepEqual(calls, { start: 0, destroy: 0, fetch: 0, renew: 1 });
     assert.deepEqual(await container.bindStandbySlot(input), { bound: true, ...input });
     for (const conflict of [
       { userId: "member-b" }, { claimId: createHostedStandbyClaimId() },
@@ -258,17 +283,82 @@ describe("unified runner identity and binding", () => {
   });
 });
 
-describe("bound runner idle cleanup respects canonical runtime ownership", () => {
-  function owner(phase: HostedRuntimeOwnerSnapshot["phase"], runnerContainerName = GLOBAL_SLOT): HostedRuntimeOwnerSnapshot {
-    return {
-      userId: MEMBER, attemptId: "attempt-starting", generation: "1", phase,
-      processingMode: "default", allocationId: "synthetic-allocation", runnerContainerName,
-      workspaceVersion: null, platformAiUsageAllowed: false,
-      startedAt: new Date().toISOString(), acceptedAt: null, completedAt: null,
-      failureCount: 0, lastErrorCode: null,
-    };
-  }
+function owner(phase: HostedRuntimeOwnerSnapshot["phase"], runnerContainerName = GLOBAL_SLOT): HostedRuntimeOwnerSnapshot {
+  return {
+    userId: MEMBER, attemptId: "attempt-starting", generation: "1", phase,
+    processingMode: "default", allocationId: "synthetic-allocation", runnerContainerName,
+    workspaceVersion: null, platformAiUsageAllowed: false,
+    startedAt: new Date().toISOString(), acceptedAt: null, completedAt: null,
+    failureCount: 0, lastErrorCode: null,
+  };
+}
 
+function webOwner(current: HostedRuntimeOwnerSnapshot) {
+  const commands: HostedRuntimeOwnerCommand[] = [];
+  const control = { current, commands, lostNotices: 0, lostCompletions: 0,
+    beforeRead: () => {}, beforeNotice: () => {} };
+  vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command, userId }) => {
+    assert.equal(userId, MEMBER);
+    commands.push(command);
+    const reply = (status: HostedRuntimeOwnerResponse["status"]): HostedRuntimeOwnerResponse =>
+      ({ cutover: "postgres", status, owner: { ...current } });
+    const idle = (clearTarget: boolean) => Object.assign(current, {
+      phase: "idle", attemptId: null, processingMode: null, workspaceVersion: null, platformAiUsageAllowed: false,
+      ...(clearTarget ? { runnerContainerName: null, allocationId: null } : {}),
+    });
+    if (command.operation === "reconcile") {
+      const snapshot = reply("observed");
+      control.beforeRead();
+      return snapshot;
+    }
+    if (command.operation === "target_retired") {
+      control.beforeNotice();
+      const exact = current.runnerContainerName === command.runnerContainerName;
+      if (exact) idle(true);
+      if (control.lostNotices-- > 0) throw new Error("synthetic lost retirement acknowledgement");
+      return reply(exact ? "updated" : "stale");
+    }
+    if (!("attemptId" in command) || command.attemptId !== current.attemptId
+      || command.generation !== current.generation) return reply("stale");
+    if (command.operation === "authorize_effect") return reply("authorized");
+    if (command.operation === "record_failure") return reply("updated");
+    if (command.operation === "complete") {
+      if (control.lostCompletions-- > 0) throw new Error("synthetic lost completion");
+      if (command.settledRunnerContainerName !== null && command.settledRunnerContainerName !== current.runnerContainerName
+        || current.phase === "idle" || current.phase === "retiring" && current.completedAt === null) return reply("stale");
+      current.phase = "retiring";
+      current.completedAt ??= new Date().toISOString();
+      if (command.settledRunnerContainerName !== null) idle(false);
+      return reply("updated");
+    }
+    if (command.operation === "retire" && current.phase !== "idle") {
+      current.phase = "retiring";
+      current.completedAt = command.completed ? new Date().toISOString() : null;
+      return reply("updated");
+    }
+    if (command.operation === "release" && current.phase === "retiring" && current.runnerContainerName === command.runnerContainerName) {
+      idle(true);
+      return reply("updated");
+    }
+    throw new Error(`Unexpected command: ${command.operation}`);
+  });
+  return control;
+}
+
+async function alarm(h: ReturnType<typeof runnerHarness>) {
+  const [schedule] = await h.container.listSchedules("onActivityExpired");
+  assert.ok(schedule, "Lifecycle retry must be durably armed");
+  // The installed SDK reads and consumes the SQL row, including JSON payload dispatch.
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+  vi.setSystemTime(schedule.time * 1_000);
+  const pass = h.container.alarm();
+  await vi.runAllTimersAsync();
+  await pass;
+  await Promise.all(h.pending);
+  vi.useFakeTimers({ toFake: ["Date"] });
+}
+
+describe("bound runner idle cleanup respects canonical runtime ownership", () => {
   it.each([false, true])("skips owner polls until the receipt deadline (reactivated=%s)", async (reactivated) => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
@@ -369,33 +459,32 @@ describe("bound runner idle cleanup respects canonical runtime ownership", () =>
     assert.equal(calls.destroy, 0);
   });
 
-  it.each([[false, false], [true, false], [false, true], [true, true]])(
-    "releases a completed lost outer result without another wake (reactivated=%s, warm=%s)", async (reactivated, warm) => {
-    const health = warm ? { conversationActivityReceivedAtEpochMs: Date.now() } : {};
-    const initial = runnerHarness({ running: true, health });
-    await initial.container.bindStandbySlot(claimInput());
-    const current = { ...owner("retiring"), completedAt: new Date().toISOString() };
-    const receipt = new RunnerInvocationReceiptStore(initial.sql);
-    const identity = { attemptId: current.attemptId!, generation: current.generation };
-    receipt.register(identity);
-    receipt.complete(identity, false);
-    vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => {
-      if (command.operation === "complete") {
-        assert.deepEqual(command, { operation: "complete", ...identity,
-          settledRunnerContainerName: GLOBAL_SLOT, immediateRecheckRequested: false });
-        current.phase = "idle";
-        return { cutover: "postgres", status: "updated", owner: null };
-      }
-      return { cutover: "postgres", status: "observed", owner: current };
-    });
-    const { container, calls } = reactivated ? runnerHarness({ running: true, durable: initial, health }) : initial;
-    await container.onActivityExpired();
-    assert.equal(current.phase, "idle");
-    assert.equal(calls.destroy, 0);
-    assert.equal((await container.listSchedules("onActivityExpired")).length, 1);
-    await container.onActivityExpired();
-    assert.equal(calls.destroy, warm ? 0 : 1);
-  });
+  it.each((["starting", "active", "retiring"] as const).flatMap(phase =>
+    [false, true].flatMap(reactivated => [false, true].map(warm => ({ phase, reactivated, warm }))))) (
+    "releases both lost completion acknowledgements without demand: $phase eviction=$reactivated warm=$warm", async ({ phase, reactivated, warm }) => {
+      const health = warm ? { conversationActivityReceivedAtEpochMs: Date.now() } : {};
+      const initial = runnerHarness({ running: true, health });
+      await initial.container.bindStandbySlot(claimInput());
+      await initial.container.ensureReadyForProcessing({ userId: MEMBER, timeoutMs: 1_000 });
+      const current = { ...owner(phase), completedAt: phase === "retiring" ? new Date().toISOString() : null };
+      const web = webOwner(current);
+      const receipt = new RunnerInvocationReceiptStore(initial.sql);
+      const identity = { attemptId: current.attemptId!, generation: current.generation };
+      receipt.register(identity);
+      receipt.complete(identity, false);
+      const h = reactivated ? runnerHarness({ running: true, durable: initial, health }) : initial;
+      await alarm(h);
+      assert.equal(current.phase, "idle");
+      assert.deepEqual(web.commands.filter(c => c.operation === "complete"), [
+        { operation: "complete", ...identity, settledRunnerContainerName: GLOBAL_SLOT, immediateRecheckRequested: false },
+      ]);
+      if (warm) {
+        assert.equal(h.calls.destroy, 0);
+        await h.container.onActivityExpired();
+      } else if ((await h.container.listSchedules("onActivityExpired")).length) await alarm(h);
+      assert.equal(h.calls.destroy, warm ? 0 : 1);
+    },
+  );
 
   it.each([false, true])("retries lost-result recovery before warmth expires (reactivated=%s)", async (reactivated) => {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -433,42 +522,48 @@ describe("bound runner idle cleanup respects canonical runtime ownership", () =>
     }
   });
 
-  it.each(["registered", "wrong-attempt", "wrong-generation", "active", "unknown", "failed-completion", "successor"] as const)(
-    "preserves native authority during lost-result recovery: %s", async (condition) => {
+  it.each((["starting", "active", "retiring"] as const).flatMap(phase =>
+    (["registered", "wrong-attempt", "wrong-generation", "wrong-target", "active", "unknown", "failed-completion", "successor"] as const)
+      .map(condition => ({ phase, condition }))))(
+    "preserves native authority during lost-result recovery: $phase $condition", async ({ phase, condition }) => {
       const h = runnerHarness({ running: true,
         health: condition === "active" ? { activeJobCount: 1 } : {},
         fetchHealth: condition === "unknown" ? async () => { throw new Error("synthetic unavailable health"); } : undefined,
       });
       await h.container.bindStandbySlot(claimInput());
-      const current = { ...owner("retiring"), completedAt: new Date().toISOString() };
+      const current = { ...owner(phase), completedAt: phase === "retiring" ? new Date().toISOString() : null };
+      const web = webOwner(current);
+      if (condition === "failed-completion") web.lostCompletions = 1;
+      if (condition === "successor" || condition === "wrong-target") web.beforeRead = () => {
+        if (condition === "wrong-target") current.runnerContainerName = createHostedRunnerSlotName(RELEASE);
+        else Object.assign(current, { attemptId: "successor-attempt", generation: "2", phase: "starting", completedAt: null });
+      };
       const receipt = new RunnerInvocationReceiptStore(h.sql);
       const identity = { attemptId: condition === "wrong-attempt" ? "other-attempt" : current.attemptId!,
         generation: condition === "wrong-generation" ? "2" : current.generation };
       receipt.register(identity);
       if (condition !== "registered") receipt.complete(identity, true);
-      let completionCalls = 0;
-      vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => {
-        if (command.operation === "complete") {
-          completionCalls++;
-          if (condition === "failed-completion") throw new Error("synthetic unavailable completion");
-          assert.equal(condition, "successor");
-          current.attemptId = "successor-attempt";
-          current.generation = "2";
-          current.phase = "starting";
-          return { cutover: "postgres", status: "stale", owner: null };
-        }
-        return { cutover: "postgres", status: "observed", owner: current };
-      });
       await h.container.onActivityExpired();
-      assert.equal(completionCalls, ["failed-completion", "successor"].includes(condition) ? 1 : 0);
-      if (condition === "successor") {
-        await h.container.onActivityExpired();
-        assert.equal(completionCalls, 1);
-      }
+      assert.equal(web.commands.filter(c => c.operation === "complete").length,
+        ["failed-completion", "successor", "wrong-target"].includes(condition) ? 1 : 0);
+      assert.notEqual(current.phase, "idle");
+      if (condition === "successor") await alarm(h);
       assert.equal(h.calls.destroy, 0);
       assert.equal((await h.container.listSchedules("onActivityExpired")).length, 1);
     },
   );
+
+  it("leaves a cold retirement to its stop owner despite a completed receipt", async () => {
+    const h = runnerHarness({ running: true });
+    await h.container.bindStandbySlot(claimInput());
+    const web = webOwner(owner("retiring"));
+    const receipts = new RunnerInvocationReceiptStore(h.sql);
+    receipts.register({ attemptId: web.current.attemptId!, generation: "1" });
+    receipts.complete({ attemptId: web.current.attemptId!, generation: "1" }, false);
+    await h.container.onActivityExpired();
+    assert.deepEqual(web.commands.map(c => c.operation), ["reconcile"]);
+    assert.equal(h.calls.destroy, 0);
+  });
 
   it("does not block arriving readiness on an idle owner read or apply its stale cleanup", async () => {
     const { container, calls } = runnerHarness({ running: true });
@@ -504,6 +599,194 @@ describe("bound runner idle cleanup respects canonical runtime ownership", () =>
   });
 });
 
+function invocation() {
+  return { userId: MEMBER, job: { kind: "workspace-invocation" as const, request: {
+    userId: MEMBER, attemptId: "attempt-starting", leaseGeneration: "1", workspaceVersion: "0",
+    workspace: null, runnerIdleTtlMs: 600_000,
+  } } };
+}
+
+async function failedInvocation(input: Parameters<typeof runnerHarness>[0] = {}) {
+  const h = runnerHarness({ running: true, invoke: async () => Response.json({ error: "synthetic job failure" }, { status: 500 }), ...input });
+  await h.container.bindStandbySlot(claimInput());
+  const web = webOwner({ ...owner("active"), workspaceVersion: "0" });
+  await h.container.startSupervisedInvocation(invocation());
+  await Promise.all(h.pending);
+  assert.equal(new RunnerInvocationReceiptStore(h.sql).read()?.state, "registered");
+  return { h, web };
+}
+
+describe("alarm recovery of native outcomes", () => {
+  it.each(["completed", "registered", "wrong-attempt", "wrong-generation", "stopped", "stale-stopped-status"] as const)(
+    "settles retained transport uncertainty only with completion or stoppedness: %s", async condition => {
+      let aborts = 0;
+      const { h, web } = await failedInvocation({
+        invoke: async () => { throw new Error("Network connection lost"); }, abort: () => { aborts++; },
+      });
+      assert.equal(h.calls.destroy, 0);
+      assert.equal((await h.container.readActiveRuntimeUserFence()).active, true);
+      const receipts = new RunnerInvocationReceiptStore(h.sql);
+      if (condition === "completed") receipts.complete({ attemptId: "attempt-starting", generation: "1" }, false);
+      if (condition === "wrong-attempt" || condition === "wrong-generation") {
+        receipts.complete({ attemptId: "attempt-starting", generation: "1" }, false);
+        receipts.register({ attemptId: condition === "wrong-attempt" ? "another-attempt" : "attempt-starting", generation: "2" });
+        receipts.complete({ attemptId: condition === "wrong-attempt" ? "another-attempt" : "attempt-starting", generation: "2" }, false);
+      }
+      if (condition === "stopped") h.setNative(false);
+      if (condition === "stale-stopped-status") h.setNative(true, "stopped");
+      await alarm(h);
+      await alarm(h);
+      if (condition === "completed" || condition === "stopped") {
+        assert.equal(web.current.phase, "idle");
+        assert.equal(h.calls.destroy, condition === "completed" ? 1 : 0);
+        assert.equal(aborts, condition === "completed" ? 1 : 0);
+        assert.equal(web.commands.filter(c => c.operation === "complete").length, condition === "completed" ? 1 : 0);
+      } else {
+        assert.equal((await h.container.readActiveRuntimeUserFence()).active, true);
+        assert.equal(h.calls.destroy, 0);
+        assert.equal(aborts, 0);
+        assert.equal((await h.container.readStandbySlotBinding()).state, "bound");
+      }
+    },
+  );
+
+  it.each(["acknowledged", "lost-ack", "evict-after-retirement", "evict-before-notify"] as const)(
+    "retires a stopped voice-only failure and durably routes notification: %s", async condition => {
+      const { h: initial, web } = await failedInvocation();
+      assert.equal(initial.calls.destroy, 1);
+      if (condition === "lost-ack" || condition === "evict-after-retirement") web.lostNotices = 1;
+      const finish = RunnerSlotBindingStore.prototype.finishRetirement;
+      const interruption = condition === "evict-before-notify"
+        ? vi.spyOn(RunnerSlotBindingStore.prototype, "finishRetirement").mockImplementation(function (this: RunnerSlotBindingStore) {
+          const row = initial.sql.exec("SELECT payload FROM container_schedules WHERE callback = ?", "onActivityExpired").one();
+          assert.deepEqual(JSON.parse(String(row.payload)), { userId: MEMBER, runnerContainerName: GLOBAL_SLOT });
+          finish.call(this);
+          throw new Error("synthetic eviction before notification");
+        }) : null;
+      await alarm(initial);
+      interruption?.mockRestore();
+      assert.equal((await initial.container.readStandbySlotBinding()).state, "retired");
+      const h = condition.startsWith("evict-") ? runnerHarness({ durable: initial }) : initial;
+      if (condition !== "acknowledged") {
+        assert.deepEqual((await h.container.listSchedules("onActivityExpired")).map(s => s.payload),
+          [{ userId: MEMBER, runnerContainerName: GLOBAL_SLOT }]);
+        await alarm(h);
+      }
+      assert.equal(web.current.phase, "idle");
+      assert.equal(web.current.runnerContainerName, null);
+      assert.equal(web.current.allocationId, null);
+      assert.equal((await h.container.resolveRetainedStandbySlot(retainedInput())).state, "retired");
+      assert.equal(new RunnerInvocationReceiptStore(h.sql).read()?.state, "registered");
+      assert.equal(web.commands.some(c => ["complete", "retire", "release"].includes(c.operation)), false);
+      assert.equal((await h.container.listSchedules("onActivityExpired")).length, 0);
+      const count = web.commands.length;
+      await h.container.alarm();
+      assert.equal(web.commands.length, count);
+    },
+  );
+
+  it.each(["missing", "running", "retained", "unreadable", "stale-stopped-status", "replacement"] as const)(
+    "refuses failed-invocation retirement without exact stopped proof: %s", async condition => {
+      const h = runnerHarness({ running: condition === "running" || condition === "stale-stopped-status",
+        status: condition === "stale-stopped-status" ? "stopped" : undefined });
+      await h.container.bindStandbySlot(claimInput());
+      const web = webOwner(owner(condition === "missing" ? "starting" : "active"));
+      if (condition !== "missing") new RunnerInvocationReceiptStore(h.sql).register({ attemptId: "attempt-starting", generation: "1" });
+      if (condition === "replacement") web.current.generation = "2";
+      if (condition === "unreadable") vi.spyOn(h.container, "getState").mockRejectedValue(new Error("synthetic unavailable status"));
+      if (condition === "retained") Object.assign(h.container, {
+        workspaceInvocationOperations: [{ ...invocation().job.request, abortController: new AbortController(),
+          abortResult: null, abortEndpointReady: false, result: new Promise(() => {}), requiresFailClosedStopReason: null }],
+      });
+      await h.container.schedule(new Date(Date.now() + 1_000), "onActivityExpired", null);
+      await alarm(h);
+      assert.equal((await h.container.readStandbySlotBinding()).state, "bound");
+      assert.equal(web.commands.some(c => c.operation === "target_retired"), false);
+      assert.equal(h.calls.destroy, 0);
+      if (condition === "missing") assert.equal((await h.container.listSchedules("onActivityExpired")).length, 0);
+    },
+  );
+
+  it("refuses retirement while an invocation is queued behind readiness", async () => {
+    const h = runnerHarness({ invoke: async () => Response.json({ error: "synthetic failure" }, { status: 500 }) });
+    await h.container.bindStandbySlot(claimInput());
+    const web = webOwner(owner("active"));
+    new RunnerInvocationReceiptStore(h.sql).register({ attemptId: "attempt-starting", generation: "1" });
+    const entered = deferred<void>();
+    const state = deferred<Awaited<ReturnType<RunnerContainer["getState"]>>>();
+    vi.spyOn(h.container, "getState").mockImplementationOnce(() => { entered.resolve(); return state.promise; });
+    const readiness = h.container.ensureReadyForProcessing({ userId: MEMBER, timeoutMs: 1_000 });
+    await entered.promise;
+    const queued = h.container.invoke(invocation());
+    const drained = Promise.allSettled([readiness, queued]);
+    try {
+      await alarm(h);
+      assert.equal(h.calls.start, 0);
+      assert.equal(h.calls.destroy, 0);
+      assert.equal((await h.container.readStandbySlotBinding()).state, "bound");
+      assert.equal(web.commands.some(c => c.operation === "target_retired"), false);
+    } finally {
+      state.resolve({ status: "stopped", lastChange: Date.now() });
+      await drained;
+    }
+  });
+
+  it("retries the identical routed payload through repeated request loss, then stops on success", async () => {
+    const { h, web } = await failedInvocation();
+    let failures = 2;
+    web.beforeNotice = () => { if (failures-- > 0) throw new Error("synthetic notification unavailable"); };
+    await alarm(h);
+    assert.equal(web.current.phase, "active");
+    await alarm(h);
+    assert.equal(web.current.phase, "active");
+    await alarm(h);
+    assert.equal(web.current.phase, "idle");
+    assert.deepEqual(web.commands.filter(c => c.operation === "target_retired"), Array.from({ length: 3 }, () =>
+      ({ operation: "target_retired", runnerContainerName: GLOBAL_SLOT })));
+    assert.equal((await h.container.listSchedules("onActivityExpired")).length, 0);
+    const count = web.commands.length;
+    await h.container.alarm();
+    assert.equal(web.commands.length, count);
+  });
+
+  it("ends a stale routed retry without touching the replacement assignment", async () => {
+    const { h, web } = await failedInvocation();
+    web.beforeNotice = () => { web.current.runnerContainerName = `runner--v-${RELEASE}--${"3".repeat(32)}`; };
+    await alarm(h);
+    assert.equal(web.current.phase, "active");
+    assert.equal((await h.container.listSchedules("onActivityExpired")).length, 0);
+  });
+
+  it.each([null, undefined, { userId: MEMBER, runnerContainerName: GLOBAL_SLOT }])(
+    "a payload grants no authority over a still-bound slot: %j", async payload => {
+      const h = runnerHarness();
+      await h.container.bindStandbySlot(claimInput());
+      const web = webOwner(owner("starting"));
+      await h.container.schedule(new Date(Date.now() + 1_000), "onActivityExpired", payload ?? null);
+      if (payload === undefined) await h.container.onActivityExpired();
+      else await alarm(h);
+      assert.equal((await h.container.readStandbySlotBinding()).state, "bound");
+      assert.deepEqual(web.commands, []);
+      assert.equal((await h.container.listSchedules("onActivityExpired")).length, 0);
+    },
+  );
+
+  it.each([null, undefined, { userId: MEMBER, runnerContainerName: "another-slot" }])(
+    "ignores empty legacy or wrong-target payloads on a retired slot: %j", async payload => {
+      const h = runnerHarness();
+      await h.container.bindStandbySlot(claimInput());
+      await h.container.retireStandbySlot({ target: { slotName: GLOBAL_SLOT, userId: MEMBER } });
+      const web = webOwner(owner("active"));
+      // A preexisting null schedule row must keep its old meaning.
+      await h.container.schedule(new Date(Date.now() + 1_000), "onActivityExpired", payload ?? null);
+      if (payload === undefined) await h.container.onActivityExpired();
+      else await alarm(h);
+      assert.deepEqual(web.commands, []);
+      assert.equal((await h.container.listSchedules("onActivityExpired")).length, 0);
+    },
+  );
+});
+
 describe("native warm retention and terminal retirement", () => {
   it("retains a natively warm current bound target without start or health fetch", async () => {
     const { container, calls } = runnerHarness({ running: true });
@@ -513,7 +796,7 @@ describe("native warm retention and terminal retirement", () => {
     assert.equal(calls.start, 0);
     assert.equal(calls.fetch, 0);
     assert.equal(calls.destroy, 0);
-    assert.equal(calls.renew, 1);
+    assert.equal(calls.renew, 2);
   });
 
   it("does not treat a provider binding or stale SDK running status as warmth", async () => {

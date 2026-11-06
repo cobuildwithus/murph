@@ -3585,9 +3585,11 @@ replaces that fence directly instead of asking web status to complete it first.
 While RunnerContainer still holds a transport-uncertain exact operation, a
 numeric zero child-health count is not inactive proof because that read can
 overtake child admission. Liveness retains the exact operation while the shell
-is running. An explicit absent wake response initiates the existing exact
-abort-and-stop path and becomes inactive only after that path settles; only a
-verified stopped shell may clear the local operation without the abort.
+is running. An explicit absent wake response, or an exact completed receipt
+observed by the lifecycle alarm, initiates the existing exact abort-and-stop path
+and becomes inactive only after that path settles; only a verified stopped shell
+may clear the local operation without the abort. A running platform container
+overrides a stale stopped status.
 For the active-wake probe, a verifiably stopped container shell
 (`ctx.container.running === false`) is the same explicit no-active-child proof.
 Committed-progress recovery stays in the transport-failure adapter, where the

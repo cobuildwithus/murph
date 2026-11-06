@@ -28,7 +28,6 @@ import {
   HostedExecutionConfigurationError,
   DeploySmokeRunnerContainer,
   type HostedExecutionContainerStubLike,
-  invokeHostedExecutionContainerRunner,
   resolveHostedExecutionRunnerContainerName,
   RUNNER_CONTAINER_STARTUP_FAILURE_ELAPSED_MAX_MS,
   RunnerContainer,
@@ -11121,48 +11120,22 @@ describe("RunnerContainer", () => {
     expect(stopped.destroy).not.toHaveBeenCalled();
   });
 
-  it("posts the invoke envelope with the member routing key to the named runner container instance", async () => {
-    const invoke = vi.fn(async () => createRunnerResult());
-    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
-      async destroyInstance() {},
-      invoke,
-      async smokeHealth() {
-        return {
-          ok: true,
-          runnerBundle: null,
-          service: "cloudflare-hosted-runner-node",
-          status: 200,
-        };
-      },
-    }));
 
-    await invokeHostedExecutionContainerRunner({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_namespace"),
-      },
-      runnerContainerNamespace: { getByName },
-      timeoutMs: 45_000,
-      userId: "member_123",
+  it("ensureProcessing returns the bounded failed response to an old Worker invoke arm", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => url.endsWith("/health")
+        ? Response.json(createRunnerHealthResult())
+        : Response.json({ code: "runtime_error", error: "Hosted execution runtime failed.",
+          details: { runtimeFailurePhaseCode: "runtime_phase:workspace.checkpoint.idle_compact" } }, { status: 500 })),
     });
-
-    expect(getByName).toHaveBeenCalledWith("member_123");
-    const firstCall = invoke.mock.calls[0];
-    if (!firstCall) {
-      throw new Error("Expected the runner container stub to be invoked.");
-    }
-    const body = requireObject(firstCall.at(0), "Runner container invoke payload");
-    expect(body).toMatchObject({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_namespace"),
-      },
-      timeoutMs: 45_000,
-      userId: "member_123",
-    });
+    await expect(container.ensureProcessing({ userId: "member_123", invoke: {
+      userId: "member_123", job: { kind: "workspace-invocation", request: createRunnerRequest("evt_failed_compatibility") },
+    } })).resolves.toEqual({ kind: "failed", failure: {
+      errorCodeDetail: null, runtimeFailurePhaseCode: "runtime_phase:workspace.checkpoint.idle_compact", status: 500,
+    } });
   });
 
-  it("retries a prepared invocation once when the warm runner is shutting down", async () => {
+  it("ensureProcessing exposes shutdown start-required and accepts replacement", async () => {
     let workspaceInvocationCount = 0;
     const { container, containerFetch, destroy, startAndWaitForPorts } =
       createContainerDouble({
@@ -11197,19 +11170,13 @@ describe("RunnerContainer", () => {
           });
         }),
       });
-    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => container);
+    const input = { invoke: {
+      job: { kind: "workspace-invocation" as const, request: createRunnerRequest("evt_shutdown_retry") },
+      timeoutMs: 45_000, userId: "member_123",
+    }, userId: "member_123" };
+    await expect(container.ensureProcessing(input)).resolves.toEqual({ kind: "start-required", reason: "no-active-child" });
+    await expect(container.ensureProcessing(input)).resolves.toEqual({ kind: "accepted", action: "started", result: createRunnerResult() });
 
-    await expect(invokeHostedExecutionContainerRunner({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_shutdown_retry"),
-      },
-      runnerContainerNamespace: { getByName },
-      timeoutMs: 45_000,
-      userId: "member_123",
-    })).resolves.toEqual(createRunnerResult());
-
-    expect(getByName).toHaveBeenCalledOnce();
     const executeCalls = containerFetch.mock.calls.filter(([url]) =>
       String(url).endsWith("/internal/workspace-invocation")
     );
@@ -11218,7 +11185,7 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps the shutdown replacement retry when warm cleanup rejects", async () => {
+  it("ensureProcessing exposes shutdown start-required and accepts replacement after rejected cleanup", async () => {
     let workspaceInvocationCount = 0;
     let stateReadCount = 0;
     const { container, containerFetch, destroy, startAndWaitForPorts } =
@@ -11265,17 +11232,12 @@ describe("RunnerContainer", () => {
           });
         }),
       });
-    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => container);
-
-    await expect(invokeHostedExecutionContainerRunner({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_shutdown_retry_cleanup_rejects"),
-      },
-      runnerContainerNamespace: { getByName },
-      timeoutMs: 45_000,
-      userId: "member_123",
-    })).resolves.toEqual(createRunnerResult());
+    const input = { invoke: {
+      job: { kind: "workspace-invocation" as const, request: createRunnerRequest("evt_shutdown_retry_cleanup_rejects") },
+      timeoutMs: 45_000, userId: "member_123",
+    }, userId: "member_123" };
+    await expect(container.ensureProcessing(input)).resolves.toEqual({ kind: "start-required", reason: "no-active-child" });
+    await expect(container.ensureProcessing(input)).resolves.toEqual({ kind: "accepted", action: "started", result: createRunnerResult() });
 
     const executeCalls = containerFetch.mock.calls.filter(([url]) =>
       String(url).endsWith("/internal/workspace-invocation")
@@ -11285,43 +11247,6 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
   });
 
-  it("uses an explicit runner container name without changing the job user identity", async () => {
-    const invoke = vi.fn(async () => createRunnerResult());
-    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
-      async destroyInstance() {},
-      invoke,
-      async smokeHealth() {
-        return {
-          ok: true,
-          runnerBundle: null,
-          service: "cloudflare-hosted-runner-node",
-          status: 200,
-        };
-      },
-    }));
-
-    await invokeHostedExecutionContainerRunner({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_namespace"),
-      },
-      runnerContainerName: "member_123--v-version-123",
-      runnerContainerNamespace: { getByName },
-      timeoutMs: 45_000,
-      userId: "member_123",
-    });
-
-    expect(getByName).toHaveBeenCalledWith("member_123--v-version-123");
-    const firstCall = invoke.mock.calls[0];
-    if (!firstCall) {
-      throw new Error("Expected the runner container stub to be invoked.");
-    }
-    const body = requireObject(firstCall.at(0), "Runner container invoke payload");
-    expect(body).toMatchObject({
-      timeoutMs: 45_000,
-      userId: "member_123",
-    });
-  });
 
   it("resolves runner container names from worker version metadata", () => {
     expect(resolveHostedExecutionRunnerContainerName({
@@ -11349,34 +11274,6 @@ describe("RunnerContainer", () => {
     })).toBe("member_123");
   });
 
-  it("rejects mismatched route and job identities before selecting a container", async () => {
-    const invoke = vi.fn(async () => createRunnerResult());
-    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
-      async destroyInstance() {},
-      invoke,
-      async smokeHealth() {
-        return {
-          ok: true,
-          runnerBundle: null,
-          service: "cloudflare-hosted-runner-node",
-          status: 200,
-        };
-      },
-    }));
-
-    await expect(invokeHostedExecutionContainerRunner({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_namespace_mismatch"),
-      },
-      runnerContainerNamespace: { getByName },
-      timeoutMs: 45_000,
-      userId: "member_other",
-    })).rejects.toThrow("route userId must match workspace job userId");
-
-    expect(getByName).not.toHaveBeenCalled();
-    expect(invoke).not.toHaveBeenCalled();
-  });
 
   it("rejects durable-object invoke payloads with mismatched route and job identities", async () => {
     const { container, startAndWaitForPorts } = createContainerDouble();
@@ -11393,34 +11290,6 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
   });
 
-  it("rejects workspace-invocation route mismatches against the workspace job userId", async () => {
-    const invoke = vi.fn(async () => ({
-      nextWakeAt: null,
-      status: "idle" as const,
-    }));
-    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
-      async destroyInstance() {},
-      invoke,
-      async smokeHealth() {
-        return {
-          ok: true,
-          runnerBundle: null,
-          service: "cloudflare-hosted-runner-node",
-          status: 200,
-        };
-      },
-    }));
-
-    await expect(invokeHostedExecutionContainerRunner({
-      job: createWorkspaceRunnerJob("member_workspace_job"),
-      runnerContainerNamespace: { getByName },
-      timeoutMs: 45_000,
-      userId: "member_other",
-    })).rejects.toThrow("route userId must match workspace job userId");
-
-    expect(getByName).not.toHaveBeenCalled();
-    expect(invoke).not.toHaveBeenCalled();
-  });
 
   it("forwards workspace-invocation jobs without run-drain fields to the container shell", async () => {
     const { container, containerFetch } = createContainerDouble({
@@ -11489,90 +11358,7 @@ describe("RunnerContainer", () => {
     expect(forwardedJob).not.toHaveProperty("runToken");
   });
 
-  it("aborts foreground workspace helpers without destroying the warm shell", async () => {
-    const abortController = new AbortController();
-    const abortWorkspaceInvocation = vi.fn<
-      NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
-    >(async () => "accepted");
-    const destroyInstance = vi.fn(async () => {});
-    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(
-      async () => new Promise<never>(() => {}),
-    );
-    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
-      abortWorkspaceInvocation,
-      destroyInstance,
-      invoke,
-      async smokeHealth() {
-        return {
-          ok: true,
-          runnerBundle: null,
-          service: "cloudflare-hosted-runner-node",
-          status: 200,
-        };
-      },
-    }));
 
-    const job = createWorkspaceRunnerJob("member_foreground_abort");
-    const invocation = invokeHostedExecutionContainerRunner({
-      job,
-      runnerContainerNamespace: { getByName },
-      signal: abortController.signal,
-      timeoutMs: 45_000,
-      userId: "member_foreground_abort",
-    });
-
-    abortController.abort(new Error("stale local active invocation"));
-
-    await expect(invocation).rejects.toThrow("stale local active invocation");
-    expect(abortWorkspaceInvocation).toHaveBeenCalledWith({
-      attemptId: job.request.attemptId,
-      leaseGeneration: job.request.leaseGeneration,
-      userId: "member_foreground_abort",
-    });
-    expect(destroyInstance).not.toHaveBeenCalled();
-  });
-
-  it("does not wait for timed-out container destroy cleanup before rejecting", async () => {
-    const abortController = new AbortController();
-    const abortWorkspaceInvocation = vi.fn<
-      NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
-    >(async () => "accepted");
-    const destroyInstance = vi.fn(async () => {
-      await new Promise<void>(() => undefined);
-    });
-    const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(
-      async () => new Promise<never>(() => {}),
-    );
-    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
-      abortWorkspaceInvocation,
-      destroyInstance,
-      invoke,
-      async smokeHealth() {
-        return {
-          ok: true,
-          runnerBundle: null,
-          service: "cloudflare-hosted-runner-node",
-          status: 200,
-        };
-      },
-    }));
-
-    const invocation = invokeHostedExecutionContainerRunner({
-      job: createWorkspaceRunnerJob("member_hard_timeout"),
-      runnerContainerNamespace: { getByName },
-      signal: abortController.signal,
-      timeoutMs: 45_000,
-      userId: "member_hard_timeout",
-    });
-
-    abortController.abort(new DOMException("The operation timed out.", "TimeoutError"));
-
-    await expect(invocation).rejects.toMatchObject({
-      name: "TimeoutError",
-    });
-    expect(destroyInstance).toHaveBeenCalledTimes(1);
-    expect(abortWorkspaceInvocation).not.toHaveBeenCalled();
-  });
 
   it("rejects explicit run-drain runner jobs at the container boundary", async () => {
     const { container, startAndWaitForPorts } = createContainerDouble();

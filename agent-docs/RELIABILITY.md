@@ -804,7 +804,9 @@ Current product admission, delivery and native runtime safety rules remain.
   cold. DO reactivation preserves the SDK task, while process replacement does
   not inherit a completed process's watermark.
   Activity expiry rearms and yields to an active invocation before acquiring the
-  lifecycle lock, which the invocation retains until its response settles.
+  lifecycle lock, which the invocation retains until its response settles. An
+  exact completed receipt instead starts abort-and-stop recovery for a retained
+  transport-uncertain invocation whose response was lost.
   Maintenance must not hold the SDK alarm open behind that long-running work.
   Destructive cleanup remains locked and rechecks interaction ownership after
   external reads; scheduling a future check grants no new conversation warmth.
