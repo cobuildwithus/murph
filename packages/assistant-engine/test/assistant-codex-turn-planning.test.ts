@@ -259,7 +259,7 @@ describe('assistant Codex turn planning', () => {
         session: createSession({ resumeState: {
           ...binding,
           ...(reason === 'route_mismatch' ? { routeFingerprint: 'synthetic-other-route' } : {}),
-          ...(reason === 'contract_mismatch' ? { assistantContractFingerprint: 'synthetic-other-contract' } : {}),
+          ...(reason === 'contract_mismatch' ? { assistantContractFingerprint: 'f'.repeat(64) } : {}),
         } }),
       })
       expect(plan.planningDiagnostics.threadRotationReason).toBe(reason)

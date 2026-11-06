@@ -278,6 +278,7 @@ const HOSTED_RUNTIME_ERROR_DESCRIPTION_KEY_PARTS = [
   "status",
 ] as const;
 const HOSTED_RUNTIME_ALLOWED_LOG_KEY_NAMES = new Set([
+  "automationPromptPreparationMs",
   "localPathPreview",
 ]);
 const HOSTED_ASSISTANT_AUTOMATION_DETAIL_MAX_KEYS = 40;
