@@ -8,6 +8,7 @@ import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { ConnectCallbackErrorNotice } from "@/src/components/device-sync/connect-callback-error-notice";
 import { Input } from "@/src/components/ui/input";
+import { releaseLinkPageVeil } from "@/src/components/link-page/link-page-veil";
 import { DeviceSyncSetupGuideDialog } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import type { DeviceSyncCompletionContactAction } from "@/src/lib/device-sync/connect-completion-types";
 import {
@@ -22,6 +23,10 @@ import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import {
   ConnectDisconnectDialog,
   ConnectIntentRecoveryDialog,
+  ConnectLinkFailedTakeover,
+  ConnectLinkReadyTakeover,
+  ConnectLinkSettledTakeover,
+  ConnectLinkSignInTakeover,
   ConnectRedirectDialog,
   ConnectSourceDialog,
   VitalConnectionDialog,
@@ -40,7 +45,7 @@ import {
   resolveConnectSourceIdFromHash,
   resolveCallbackSourceId,
   resolveConnectIntentRedirectSource,
-  resolveConnectIntentStartSource,
+  resolveConnectIntentSource,
   resolveInitialConnectIntentPresentation,
   stripConnectCallbackParams,
   stripConnectSourceHash,
@@ -75,6 +80,11 @@ type VitalConnectionRequest = {
   source: ConnectSource;
 };
 
+type ConnectIntentFailure = {
+  claim: string;
+  source: ConnectSource;
+};
+
 const FITBIT_MIGRATION_REFRESH_INTERVAL_MS = 15_000;
 
 export type {
@@ -92,6 +102,7 @@ export const CONNECT_NOTICE_PRESENTATION = {
 export function ConnectSourcesGrid({
   authenticated = true,
   appleHealthRelaySyncContactActions = {},
+  deviceConnectChatContactAction = null,
   deviceConnectRecoveryContactAction = null,
   garminHistoricalDataVoiceMemoSrc = null,
   initialCallback = null,
@@ -109,6 +120,7 @@ export function ConnectSourcesGrid({
       DeviceSyncCompletionContactAction | null
     >
   >;
+  deviceConnectChatContactAction?: MurphContactOption | null;
   deviceConnectRecoveryContactAction?: MurphContactOption | null;
   garminHistoricalDataVoiceMemoSrc?: string | null;
   initialCallback?: ConnectCallbackInput;
@@ -133,6 +145,8 @@ export function ConnectSourcesGrid({
   } | null>(null);
   const [connectIntentRecovery, setConnectIntentRecovery] =
     useState<ConnectIntentRecoveryRequest | null>(null);
+  const [connectIntentFailure, setConnectIntentFailure] =
+    useState<ConnectIntentFailure | null>(null);
   const [vitalConnectionRequest, setVitalConnectionRequest] =
     useState<VitalConnectionRequest | null>(null);
   const [showWhoopAppleHealthSetupDialog, setShowWhoopAppleHealthSetupDialog] =
@@ -158,7 +172,6 @@ export function ConnectSourcesGrid({
   );
   const [initialConnectIntentDismissed, setInitialConnectIntentDismissed] =
     useState(false);
-  const initialConnectIntentAuthOpenedRef = useRef(false);
   const initialConnectIntentAttemptedRef = useRef(false);
   const router = useRouter();
   const { openAuthDialog } = useAuth();
@@ -313,27 +326,6 @@ export function ConnectSourcesGrid({
     return () => window.clearInterval(intervalId);
   }, [hasActiveFitbitMigration, router]);
 
-  useEffect(() => {
-    if (
-      authenticated ||
-      initialConnectIntentAuthOpenedRef.current ||
-      !activeConnectIntent?.claim
-    ) {
-      return;
-    }
-
-    const source = resolveConnectIntentStartSource(
-      activeConnectIntent,
-      displaySources,
-    );
-    if (!source) {
-      return;
-    }
-
-    initialConnectIntentAuthOpenedRef.current = true;
-    openAuthDialog();
-  }, [activeConnectIntent, authenticated, displaySources, openAuthDialog]);
-
   const startConnection = useCallback(
     async (source: ConnectSource, options: ConnectStartOptions = {}) => {
       if (!authenticated || (!options.intentClaim && !source.connectTarget)) {
@@ -344,6 +336,7 @@ export function ConnectSourcesGrid({
       setActionError(null);
       setNotice(null);
       setConnectIntentRecovery(null);
+      setConnectIntentFailure(null);
       setShowWhoopAppleHealthSetupDialog(false);
       setActiveSetupGuideId(null);
 
@@ -410,6 +403,9 @@ export function ConnectSourcesGrid({
           message,
           sourceId: source.id,
         });
+        if (options.intentClaim) {
+          setConnectIntentFailure({ claim: options.intentClaim, source });
+        }
         setPendingSourceId(null);
       }
     },
@@ -501,12 +497,42 @@ export function ConnectSourcesGrid({
           message,
           sourceId: source.id,
         });
+        setConnectIntentFailure({ claim: activeConnectIntent.claim, source });
       });
 
     return () => {
       cancelled = true;
     };
   }, [activeConnectIntent, authenticated, displaySources]);
+
+  const connectIntentSource = resolveConnectIntentSource(
+    activeConnectIntent,
+    displaySources,
+  );
+  const connectLinkNeedsSignIn = !authenticated
+    && Boolean(activeConnectIntent?.claim && activeConnectIntent.connectSource);
+  const connectLinkIntentStarting = !initialConnectIntentDismissed
+    && Boolean(resolveConnectIntentRedirectSource(
+      activeConnectIntent,
+      displaySources,
+      authenticated,
+    ));
+  const connectLinkReadySource = vitalConnectionRequest?.intentClaim
+    ? vitalConnectionRequest.source
+    : null;
+  const connectLinkPageOpen = connectLinkNeedsSignIn
+    || connectLinkIntentStarting
+    || connectLinkReadySource !== null
+    || connectIntentRedirectName !== null
+    || connectIntentRecovery !== null
+    || connectIntentFailure !== null
+    || initialConnectIntentPresentation !== null;
+
+  useEffect(() => {
+    if (!connectLinkPageOpen) {
+      releaseLinkPageVeil();
+    }
+  }, [connectLinkPageOpen]);
 
   const disconnectConnection = useCallback(async (
     source: ConnectSource,
@@ -598,6 +624,25 @@ export function ConnectSourcesGrid({
       setPendingDisconnectSourceId(null);
     }
   }, [pendingDisconnectSourceId, pendingSourceId, router]);
+
+  const closeVitalConnectionRequest = (open: boolean) => {
+    if (!open) {
+      setVitalConnectionRequest(null);
+    }
+  };
+
+  const continueVitalConnectionRequest = () => {
+    const request = vitalConnectionRequest;
+    if (!request) {
+      return;
+    }
+
+    setVitalConnectionRequest(null);
+    void startConnection(request.source, {
+      vitalDisclosureConfirmed: true,
+      ...(request.intentClaim ? { intentClaim: request.intentClaim } : {}),
+    });
+  };
 
   const closeDeepLinkedSourceDialog = useCallback(() => {
     setDeepLinkedSourceId(null);
@@ -761,27 +806,17 @@ export function ConnectSourcesGrid({
       ) : null}
 
       <VitalConnectionDialog
-        source={vitalConnectionRequest?.source ?? null}
+        source={connectLinkReadySource ? null : vitalConnectionRequest?.source ?? null}
         voiceMemoSrc={garminHistoricalDataVoiceMemoSrc}
-        onOpenChange={(open) => {
-          if (!open) {
-            setVitalConnectionRequest(null);
-          }
-        }}
-        onContinue={() => {
-          const request = vitalConnectionRequest;
-          if (!request) {
-            return;
-          }
+        onOpenChange={closeVitalConnectionRequest}
+        onContinue={continueVitalConnectionRequest}
+      />
 
-          setVitalConnectionRequest(null);
-          void startConnection(request.source, {
-            vitalDisclosureConfirmed: true,
-            ...(request.intentClaim
-              ? { intentClaim: request.intentClaim }
-              : {}),
-          });
-        }}
+      <ConnectLinkReadyTakeover
+        source={connectLinkReadySource}
+        voiceMemoSrc={garminHistoricalDataVoiceMemoSrc}
+        onOpenChange={closeVitalConnectionRequest}
+        onContinue={continueVitalConnectionRequest}
       />
 
       <ConnectDisconnectDialog
@@ -803,6 +838,10 @@ export function ConnectSourcesGrid({
         }}
       />
 
+      {connectLinkNeedsSignIn ? (
+        <ConnectLinkSignInTakeover source={connectIntentSource} />
+      ) : null}
+
       <ConnectRedirectDialog sourceName={connectIntentRedirectName} />
 
       <ConnectIntentRecoveryDialog
@@ -814,6 +853,28 @@ export function ConnectSourcesGrid({
           }
         }}
       />
+
+      {connectIntentFailure ? (
+        <ConnectLinkFailedTakeover
+          contactAction={deviceConnectRecoveryContactAction}
+          source={connectIntentFailure.source}
+          onContinueExploring={() => setConnectIntentFailure(null)}
+          onRetry={() => void startConnection(connectIntentFailure.source, {
+            intentClaim: connectIntentFailure.claim,
+            vitalDisclosureConfirmed: true,
+          })}
+        />
+      ) : null}
+
+      {initialConnectIntentPresentation ? (
+        <ConnectLinkSettledTakeover
+          contactAction={deviceConnectChatContactAction}
+          source={initialConnectIntentPresentation.notice?.kind === "success"
+            ? connectIntentSource
+            : null}
+          onContinueExploring={() => setInitialConnectIntentDismissed(true)}
+        />
+      ) : null}
     </section>
   );
 }

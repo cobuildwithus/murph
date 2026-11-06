@@ -347,6 +347,7 @@ export default async function ConnectPage({
   let initialLoadError: ConnectPageInitialLoadError | null = null;
   const [
     recoveryContactAction,
+    chatContactAction,
     voiceMemoSources,
     whoopSyncContactAction,
     zeppSyncContactAction,
@@ -355,6 +356,7 @@ export default async function ConnectPage({
     resolveDeviceConnectRecoveryContactAction(
       Boolean(auth.authenticatedMember),
     ),
+    resolveDeviceConnectChatContactAction(Boolean(auth.authenticatedMember)),
     resolveDeviceSyncVoiceMemoSources(auth.authenticatedMember?.id ?? null),
     resolveWhoopSyncContactAction(Boolean(auth.authenticatedMember)),
     resolveZeppSyncContactAction(Boolean(auth.authenticatedMember)),
@@ -460,6 +462,7 @@ export default async function ConnectPage({
 
       <ConnectSourcesGrid
         authenticated={Boolean(auth.authenticatedMember)}
+        deviceConnectChatContactAction={chatContactAction}
         deviceConnectRecoveryContactAction={recoveryContactAction}
         garminHistoricalDataVoiceMemoSrc={voiceMemoSources.garminHistoricalData}
         initialCallback={resolveVerifiedInitialConnectCallback(
@@ -523,6 +526,18 @@ async function resolveDeviceConnectRecoveryContactAction(
         body: "Can you send me a fresh device connection link?",
       },
     });
+  } catch {
+    return null;
+  }
+}
+
+async function resolveDeviceConnectChatContactAction(authenticated: boolean) {
+  if (!authenticated) {
+    return null;
+  }
+
+  try {
+    return await resolveHostedMurphContactOption();
   } catch {
     return null;
   }

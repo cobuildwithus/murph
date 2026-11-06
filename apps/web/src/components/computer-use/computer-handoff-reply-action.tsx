@@ -3,9 +3,12 @@
 import { MessageCircle } from "lucide-react";
 import { useState } from "react";
 
+import { LinkPageContactPill } from "@/src/components/link-page/link-page-contact";
+import {
+  LINK_PAGE_NIGHT_TOKENS,
+  LinkPagePill,
+} from "@/src/components/link-page/link-page-shell";
 import { MurphContactChannelRows } from "@/src/components/murph/murph-contact-channel-rows";
-import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
-import { Button, buttonVariants } from "@/src/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -14,7 +17,6 @@ import {
   DialogTitle,
 } from "@/src/components/ui/dialog";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
-import { cn } from "@/src/lib/utils";
 
 const PRIMARY_LABEL = "Reply to Murph";
 
@@ -30,33 +32,17 @@ export function ComputerHandoffReplyAction({
   }
 
   if (options.length === 1) {
-    const option = options[0];
-    return (
-      <MurphContactLink
-        actionLabel={PRIMARY_LABEL}
-        option={option}
-        className={cn(buttonVariants({ size: "lg" }), "w-full sm:w-auto")}
-      >
-        <MessageCircle className="size-4 shrink-0" aria-hidden="true" />
-        {PRIMARY_LABEL}
-      </MurphContactLink>
-    );
+    return <LinkPageContactPill option={options[0]} />;
   }
 
   return (
     <>
-      <Button
-        type="button"
-        size="lg"
-        className="w-full sm:w-auto"
-        onClick={() => setOpen(true)}
-        aria-label={PRIMARY_LABEL}
-      >
-        <MessageCircle className="size-4 shrink-0" aria-hidden="true" />
+      <LinkPagePill aria-label={PRIMARY_LABEL} onClick={() => setOpen(true)}>
+        <MessageCircle className="size-5 shrink-0" aria-hidden="true" />
         {PRIMARY_LABEL}
-      </Button>
+      </LinkPagePill>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="p-6 sm:max-w-md md:p-7">
+        <DialogContent className="p-6 sm:max-w-md md:p-7" style={LINK_PAGE_NIGHT_TOKENS}>
           <DialogHeader className="pr-10">
             <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
               {PRIMARY_LABEL}

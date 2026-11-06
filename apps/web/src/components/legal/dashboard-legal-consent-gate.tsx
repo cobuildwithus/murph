@@ -61,7 +61,8 @@ export function DashboardLegalConsentGate({
   return (
     <Dialog open>
       <DialogContent
-        className="max-h-[calc(100dvh-2rem)] gap-6 overflow-y-auto rounded-2xl border border-border bg-popover p-6 sm:max-w-xl sm:p-8"
+        // Above a link page that covers the dashboard, so consent always shows.
+        className="z-[60] max-h-[calc(100dvh-2rem)] gap-6 overflow-y-auto rounded-2xl border border-border bg-popover p-6 sm:max-w-xl sm:p-8"
         data-dashboard-legal-consent-gate="true"
         showCloseButton={false}
       >

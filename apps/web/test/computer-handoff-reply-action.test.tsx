@@ -144,7 +144,7 @@ test("renders a single resolved channel as a direct link without a picker", asyn
     );
     const directLink = rendered.container.querySelector("a");
     assert.ok(directLink);
-    assert.match(directLink.textContent ?? "", /Reply to Murph/);
+    assert.match(directLink.textContent ?? "", /Open Messages/);
     assert.equal(
       directLink.getAttribute("href"),
       "sms:+15555550100?body=Done%20with%20the%20browser%20task.",

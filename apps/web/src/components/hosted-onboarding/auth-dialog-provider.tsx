@@ -86,7 +86,11 @@ export function AuthProvider({
 }) {
   const pathname = usePathname();
   const dashboardRoute = useSelectedLayoutSegment() === "(dashboard)";
-  const autoOpenPath = dashboardRoute && !authenticated && authenticationStatus === "ready"
+  // A wearable link signs in on its own page, so the dialog never opens over it.
+  const autoOpenPath = dashboardRoute
+    && !authenticated
+    && authenticationStatus === "ready"
+    && !isCurrentDeviceConnectIntentUrl()
     ? pathname
     : null;
   const [promptPath, setPromptPath] = useState(autoOpenPath);
@@ -420,10 +424,11 @@ function shouldResumeCurrentActionApprovalUrl(
 function shouldResumeCurrentDeviceConnectIntentUrl(
   payload: HostedAuthenticationCompletionPayload,
 ): boolean {
-  if (!isHostedOnboardingAccessibleStage(payload.stage)) {
-    return false;
-  }
+  return isHostedOnboardingAccessibleStage(payload.stage)
+    && isCurrentDeviceConnectIntentUrl();
+}
 
+function isCurrentDeviceConnectIntentUrl(): boolean {
   if (typeof window === "undefined" || window.location.pathname !== "/connect") {
     return false;
   }

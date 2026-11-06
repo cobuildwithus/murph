@@ -6,6 +6,7 @@ import { DashboardCriticalLoadError } from "@/src/components/dashboard/dashboard
 import { DashboardShell } from "@/src/components/dashboard/dashboard-shell";
 import { DevelopmentPersonaSwitcher } from "@/src/components/dashboard/development-persona-switcher";
 import { DashboardLegalConsentGate } from "@/src/components/legal/dashboard-legal-consent-gate";
+import { LinkPageVeil } from "@/src/components/link-page/link-page-veil";
 import { BrowserVaultProvider } from "@/src/lib/browser-vault/context";
 import {
   DEVELOPMENT_PERSONA_COOKIE,
@@ -63,6 +64,7 @@ export default async function DashboardLayout({
       initialMemberId={authenticatedMember?.id ?? null}
       loadEnabled={browserVaultLoadEnabled}
     >
+      <LinkPageVeil />
       <DashboardShell sidebarAuth={auth.sidebarAuth}>
         {children}
         {process.env.NODE_ENV === "development" ? (

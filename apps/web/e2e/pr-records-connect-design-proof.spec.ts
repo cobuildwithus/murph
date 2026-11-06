@@ -10,10 +10,9 @@ for (const width of [390, 1280]) {
     await page.goto("/screenshots/health#clinical-records", { waitUntil: "load", timeout: 120_000 });
     const study = page.locator("#clinical-records");
     await expect(study).toHaveAttribute("data-preview-ready", "true");
-    const search = study.locator("section").first();
+    const search = study.locator('[data-slot="link-page-screen"]').first();
     await search.scrollIntoViewIfNeeded();
     await expect(search.getByText("Cleveland Clinic", { exact: true })).toBeVisible();
-    await expect(search.locator("img").first()).toBeVisible();
     await page.evaluate(async () => {
       await document.fonts.ready;
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
@@ -22,7 +21,7 @@ for (const width of [390, 1280]) {
     expect(box!.x).toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width).toBeLessThanOrEqual(width);
     expect(await search.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
-    await study.evaluate((element) => {
+    await search.evaluate((element) => {
       let ancestor: Element | null = element;
       while (ancestor) { ancestor.removeAttribute("inert"); ancestor = ancestor.parentElement; }
     });
