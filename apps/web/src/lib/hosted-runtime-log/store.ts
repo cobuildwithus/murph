@@ -96,7 +96,7 @@ export interface HostedRuntimeLogSqlClient {
     text: string,
     values?: readonly unknown[],
   ): Promise<HostedRuntimeLogSqlResult<Row>>;
-  release(): void;
+  release(destroy?: boolean): void;
 }
 
 export interface HostedRuntimeLogSqlDatabase {
@@ -120,7 +120,7 @@ export async function recordHostedRuntimeLogs(input: {
 
   const userId = requireHostedRuntimeLogUserId(input.userId);
   const subjectKey = hostedRuntimeLogSubjectKey(userId);
-  const database = input.database ?? readDefaultHostedRuntimeLogDatabase();
+  const database = input.database ?? getHostedRuntimeLogPool();
   const isUserActive = input.isUserActive ?? readHostedRuntimeLogUserActive;
 
   return withHostedRuntimeLogTransaction(database, async (client) => {
@@ -158,7 +158,7 @@ export async function listHostedRuntimeLogs(input: {
   limit?: number;
   userId: string;
 }): Promise<HostedRuntimeLogRecord[]> {
-  const database = input.database ?? readDefaultHostedRuntimeLogDatabase();
+  const database = input.database ?? getHostedRuntimeLogPool();
   const limit = normalizeHostedRuntimeLogLimit(input.limit ?? 20);
   const userId = requireHostedRuntimeLogUserId(input.userId);
   const subjectKey = hostedRuntimeLogSubjectKey(userId);
@@ -220,7 +220,7 @@ export async function listHostedRuntimeTurnTimingLogs(input: {
     return [];
   }
   const limit = normalizePositiveInteger(input.limit, "Hosted runtime timing log limit");
-  const database = input.database ?? readDefaultHostedRuntimeLogDatabase();
+  const database = input.database ?? getHostedRuntimeLogPool();
   const result = await database.query<HostedRuntimeTimingRow>(`
     SELECT
       id,
@@ -282,7 +282,7 @@ export async function deleteHostedRuntimeLogDataForUsers(input: {
     return 0;
   }
 
-  const database = input.database ?? readDefaultHostedRuntimeLogDatabase();
+  const database = input.database ?? getHostedRuntimeLogPool();
   const timeoutMs = input.timeoutMs === undefined
     ? null
     : normalizePositiveInteger(
@@ -329,7 +329,7 @@ export async function deleteExpiredHostedRuntimeLogs(input: {
   retentionCutoff: Date;
   verboseCutoff: Date;
 }): Promise<number> {
-  const database = input.database ?? readDefaultHostedRuntimeLogDatabase();
+  const database = input.database ?? getHostedRuntimeLogPool();
   const batchSize = normalizePositiveInteger(
     input.batchSize,
     "Hosted runtime log retention batch size",
@@ -524,6 +524,7 @@ async function withHostedRuntimeLogTransaction<Result>(
   run: (client: HostedRuntimeLogSqlClient) => Promise<Result>,
 ): Promise<Result> {
   const client = await database.connect();
+  let destroy = false;
   try {
     await client.query<Record<string, never>>("BEGIN");
     const result = await run(client);
@@ -533,40 +534,13 @@ async function withHostedRuntimeLogTransaction<Result>(
     try {
       await client.query<Record<string, never>>("ROLLBACK");
     } catch {
-      // Preserve the original storage failure.
+      // A failed ROLLBACK may leave a transaction open; close the connection.
+      destroy = true;
     }
     throw error;
   } finally {
-    client.release();
+    client.release(destroy);
   }
-}
-
-function readDefaultHostedRuntimeLogDatabase(): HostedRuntimeLogSqlDatabase {
-  const pool = getHostedRuntimeLogPool();
-  return {
-    async connect() {
-      const client = await pool.connect();
-      return {
-        async query<Row extends Record<string, unknown>>(
-          text: string,
-          values?: readonly unknown[],
-        ): Promise<HostedRuntimeLogSqlResult<Row>> {
-          const result = await client.query<Row>(text, values ? [...values] : undefined);
-          return { rowCount: result.rowCount, rows: result.rows };
-        },
-        release() {
-          client.release();
-        },
-      };
-    },
-    async query<Row extends Record<string, unknown>>(
-      text: string,
-      values?: readonly unknown[],
-    ): Promise<HostedRuntimeLogSqlResult<Row>> {
-      const result = await pool.query<Row>(text, values ? [...values] : undefined);
-      return { rowCount: result.rowCount, rows: result.rows };
-    },
-  };
 }
 
 async function runHostedRuntimeLogBatches(
