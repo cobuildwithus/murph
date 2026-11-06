@@ -812,40 +812,6 @@ export function readHostedWorkspaceBrowserVaultSourceStateHash(
     ?? null;
 }
 
-/**
- * Claims the per-member cooldown that decides which accepted-attempt failure
- * triggers a runtime recheck. The claim lives in workspace control state, so
- * recovery never depends on a best-effort diagnostic row being written or read
- * back. Concurrent callbacks serialize on the workspace row, and exactly one
- * of them sees a claimed count.
- */
-export async function claimHostedAcceptedAttemptFailureRecheck(input: {
-  cooldownMs: number;
-  now?: Date | string;
-  prisma?: HostedWorkspaceStoreClient;
-  userId: string;
-}): Promise<boolean> {
-  const prisma = input.prisma ?? getPrisma();
-  const now = input.now === undefined
-    ? new Date()
-    : requireDate(input.now, "Hosted accepted-attempt recheck claim time");
-  const claimedAfter = new Date(now.getTime() - input.cooldownMs);
-  const result = await prisma.hostedWorkspace.updateMany({
-    data: {
-      acceptedAttemptFailureRecheckClaimedAt: now,
-    },
-    where: {
-      OR: [
-        { acceptedAttemptFailureRecheckClaimedAt: null },
-        { acceptedAttemptFailureRecheckClaimedAt: { lt: claimedAfter } },
-      ],
-      userId: requireNonEmptyString(input.userId, "Hosted workspace userId"),
-    },
-  });
-
-  return result.count > 0;
-}
-
 export function projectHostedWorkspace(record: HostedWorkspaceRow): HostedWorkspaceRecord {
   return {
     browserVaultReplicaRef: record.browserVaultReplicaRef,
