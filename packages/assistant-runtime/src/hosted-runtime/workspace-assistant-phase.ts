@@ -2671,6 +2671,9 @@ export async function runHostedWorkspaceAssistantPhase(
     }
 
     const result = mergeContinuingSystemMailboxResult({
+      // Inline delivery retains the same selected-input continuation as the
+      // former post-phase delivery work, without keeping a callback alive.
+      ...(postDelivery ? { afterCheckpointKeepsForegroundImportLoop: true as const } : {}),
       ...(!postDelivery && (hasCommittedUsageAudit || providerCleanupDue || providerCleanupStateQueued)
         ? {
             afterCheckpointKeepsForegroundImportLoop: true as const,
@@ -6695,71 +6698,78 @@ async function drainHostedPostCheckpointDelivery(input: {
     return await yieldHostedBackgroundPostCheckpointDrain(input);
   }
 
-  let backgroundDeliveryDrainYielded = false;
-  let backgroundDeliveryDrainYieldedCount = 0;
-  const outcomes = input.assistantDeliveryEffects.length > 0
-    ? await drainHostedPreparedAssistantDeliveries({
-        materializeWorkspaceArtifacts: input.input.materializeWorkspaceArtifacts,
-        deliveryTraceContext: {
-          foregroundDeliveryPhaseStartedAtMonotonicMs:
-            input.foregroundDeliveryPhaseStartedAtMonotonicMs,
-          memberChannelBarrierMs,
-          memberChannelBarrierTiming,
-          latencyTracePort: input.input.runtime.platform.latencyTracePort,
-          runtimeAttemptId: input.input.request.attemptId,
-          runnerIdleTtlMs: input.input.request.runnerIdleTtlMs,
-          commitTimeoutMs: input.input.runtime.commitTimeoutMs,
-        },
-        actionApprovalPort: input.input.runtime.platform.actionApprovalPort ?? null,
-        allowPreparedSending: true,
-        assistantDeliveryEffects: input.assistantDeliveryEffects,
-        assertLiveness: async () => {
-          assertHostedAssistantPhaseLiveness(input.input.signal);
-        },
-        effectsPort: input.input.platform.effectsPort,
-        forwardedEnv: input.input.runtime.forwardedEnv,
-        linqDeliveryContexts: input.linqDeliveryContexts ?? null,
-        onBackgroundDeliveryYield: ({ yieldedEffectCount }) => {
-          backgroundDeliveryDrainYielded = true;
-          backgroundDeliveryDrainYieldedCount = Math.max(
-            backgroundDeliveryDrainYieldedCount,
-            yieldedEffectCount,
-          );
-        },
-        platform: input.input.runtime.platform,
-        platformEnv: input.input.runtime.platformEnv,
-        preparedDispatches: input.assistantDeliveryPreparation?.preparedDispatches ?? null,
-        providerFetch: input.input.runtime.platform.providerFetch ?? null,
-        publicInternetFetch: input.input.runtime.platform.publicInternetFetch ?? null,
-        shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDrain ?? null,
-        signal: input.input.signal ?? null,
-        userEnv: input.input.runtime.userEnv,
-        vaultRoot: input.input.restored.vaultRoot,
-        wake: input.wake,
-      })
-    : [];
-  const sentCount = outcomes.filter((outcome) =>
-    outcome.deliveryStatus === "sent"
-  ).length;
-  const terminalizedSendingCount = outcomes.filter((outcome) =>
-    isHostedAssistantDeliveryOutcomeTerminalized(outcome)
-  ).length;
-  const deliveryRedactedStatus: HostedRuntimeRedactedJson =
-    input.assistantDeliveryEffects.length > 0
-      ? {
-          hostedOutboxDeliveryAttempted: outcomes.length,
-          hostedOutboxDeliverySent: sentCount,
-          hostedOutboxPendingDeliveryEffects: input.assistantDeliveryEffects.length - outcomes.length,
-          hostedOutboxTerminalizedSending: terminalizedSendingCount,
-        }
-      : {};
-
+  let deliveryRedactedStatus: HostedRuntimeRedactedJson = {};
   try {
+    let backgroundDeliveryDrainYielded = false;
+    let backgroundDeliveryDrainYieldedCount = 0;
+    const outcomes = input.assistantDeliveryEffects.length > 0
+      ? await drainHostedPreparedAssistantDeliveries({
+          materializeWorkspaceArtifacts: input.input.materializeWorkspaceArtifacts,
+          deliveryTraceContext: {
+            foregroundDeliveryPhaseStartedAtMonotonicMs:
+              input.foregroundDeliveryPhaseStartedAtMonotonicMs,
+            memberChannelBarrierMs,
+            memberChannelBarrierTiming,
+            latencyTracePort: input.input.runtime.platform.latencyTracePort,
+            runtimeAttemptId: input.input.request.attemptId,
+            runnerIdleTtlMs: input.input.request.runnerIdleTtlMs,
+            commitTimeoutMs: input.input.runtime.commitTimeoutMs,
+          },
+          actionApprovalPort: input.input.runtime.platform.actionApprovalPort ?? null,
+          allowPreparedSending: true,
+          assistantDeliveryEffects: input.assistantDeliveryEffects,
+          assertLiveness: async () => {
+            assertHostedAssistantPhaseLiveness(input.input.signal);
+          },
+          effectsPort: input.input.platform.effectsPort,
+          forwardedEnv: input.input.runtime.forwardedEnv,
+          linqDeliveryContexts: input.linqDeliveryContexts ?? null,
+          onBackgroundDeliveryYield: ({ yieldedEffectCount }) => {
+            backgroundDeliveryDrainYielded = true;
+            backgroundDeliveryDrainYieldedCount = Math.max(
+              backgroundDeliveryDrainYieldedCount,
+              yieldedEffectCount,
+            );
+          },
+          platform: input.input.runtime.platform,
+          platformEnv: input.input.runtime.platformEnv,
+          preparedDispatches: input.assistantDeliveryPreparation?.preparedDispatches ?? null,
+          providerFetch: input.input.runtime.platform.providerFetch ?? null,
+          publicInternetFetch: input.input.runtime.platform.publicInternetFetch ?? null,
+          shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDrain ?? null,
+          signal: input.input.signal ?? null,
+          userEnv: input.input.runtime.userEnv,
+          vaultRoot: input.input.restored.vaultRoot,
+          wake: input.wake,
+        })
+      : [];
+    const sentCount = outcomes.filter((outcome) =>
+      outcome.deliveryStatus === "sent"
+    ).length;
+    const terminalizedSendingCount = outcomes.filter((outcome) =>
+      isHostedAssistantDeliveryOutcomeTerminalized(outcome)
+    ).length;
+    deliveryRedactedStatus =
+      input.assistantDeliveryEffects.length > 0
+        ? {
+            hostedOutboxDeliveryAttempted: outcomes.length,
+            hostedOutboxDeliverySent: sentCount,
+            hostedOutboxPendingDeliveryEffects: input.assistantDeliveryEffects.length - outcomes.length,
+            hostedOutboxTerminalizedSending: terminalizedSendingCount,
+          }
+        : {};
+
     await recordHostedProductFeedbackAfterCommittedTurn({
       assistantMetrics: input.assistantMetrics,
       outcomes,
       port: input.input.runtime.platform.productFeedbackPort ?? null,
     });
+    const stagedTerminalFailureInputCount =
+      await stageHostedTerminalOutboxFailureInputs({
+        deliveryEffects: input.assistantDeliveryEffects,
+        outcomes,
+        vaultRoot: input.input.restored.vaultRoot,
+      });
     if (backgroundDeliveryDrainYielded) {
       await recordHostedProviderCleanupAfterDelivery({
         runnerIdleTtlMs: input.input.request.runnerIdleTtlMs,
@@ -6767,12 +6777,6 @@ async function drainHostedPostCheckpointDelivery(input: {
         outcomes,
         vaultRoot: input.input.restored.vaultRoot,
       });
-      const stagedTerminalFailureInputCount =
-        await stageHostedTerminalOutboxFailureInputs({
-          deliveryEffects: input.assistantDeliveryEffects,
-          outcomes,
-          vaultRoot: input.input.restored.vaultRoot,
-        });
       const yielded = await yieldHostedBackgroundPostCheckpointDrain(input, {
         resetPreparedDelivery: false,
         stagedTerminalFailureInputCount,
@@ -6787,12 +6791,6 @@ async function drainHostedPostCheckpointDelivery(input: {
       shouldYieldBackgroundDrain: input.shouldYieldBackgroundDrain ?? null,
       wake: input.wake,
     });
-    const stagedTerminalFailureInputCount =
-      await stageHostedTerminalOutboxFailureInputs({
-        deliveryEffects: input.assistantDeliveryEffects,
-        outcomes,
-        vaultRoot: input.input.restored.vaultRoot,
-      });
     const postNextWake = await resolveHostedPostDeliveryNextWake(input, outcomes, providerCleanup.wake);
     const postNextWakeAt = postNextWake.at;
     if (input.assistantDeliveryEffects.length > 0) {

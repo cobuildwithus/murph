@@ -7,7 +7,7 @@ import * as assistantEngine from "@murphai/assistant-engine";
 import type { HostedRuntimeLogRequest } from "@murphai/hosted-execution/runtime-control";
 import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
 import { runHostedWorkspaceUntilIdleOrBudget } from "../src/hosted-runtime/workspace-runner.ts";
-import { createHostedWorkspaceCheckpointRequestBuilder } from "../src/hosted-runtime.ts";
+import { createCoalescingRuntimeWakeSignal, createHostedWorkspaceCheckpointRequestBuilder } from "../src/hosted-runtime.ts";
 import { enqueueHostedPendingAssistantInputId } from "../src/hosted-runtime/pending-input-index.ts";
 import { createHash } from "node:crypto";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -17,7 +17,7 @@ import { initializeVault, readMemoryDocument, registerAutomationFollowUp, upsert
 import { listAutomations } from "@murphai/query";
 import {
   createAssistantOutboxIntent, listAssistantOutboxIntents, readAssistantOutboxIntent,
-  requestAssistantVaultFileSend,
+  requestAssistantVaultFileSend, resetAssistantOutboxPreparedDispatchById,
 } from "@murphai/assistant-engine/assistant-outbox";
 import { DAILY_NUTRITION_OPTIONAL_GOALS_INTRO } from "@murphai/operator-config/assistant-response-cards";
 import { buildHostedExecutionMemberActivatedWake, buildHostedExecutionRuntimeTimerWake } from "@murphai/hosted-execution";
@@ -31,6 +31,11 @@ import { createHostedRuntimeEffectsPortStub } from "./hosted-runtime-test-helper
 vi.mock("@murphai/core", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@murphai/core")>();
   return { ...actual, registerAutomationFollowUp: vi.fn(actual.registerAutomationFollowUp), upsertMemory: vi.fn(actual.upsertMemory) };
+});
+
+vi.mock("@murphai/assistant-engine/assistant-outbox", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@murphai/assistant-engine/assistant-outbox")>();
+  return { ...actual, resetAssistantOutboxPreparedDispatchById: vi.fn(actual.resetAssistantOutboxPreparedDispatchById) };
 });
 
 const roots: string[] = [];
@@ -277,14 +282,84 @@ describe("post-foreground maintenance publication", () => {
 });
 
 describe("post-send failure recovery", () => {
+  it("keeps the accepted receipt when resetting the remainder throws and retries the remaining effect", async () => {
+    const f = await fixture("linq");
+    const remaining = await createAssistantOutboxIntent({ ...f.base, dedupeToken: "reset-second", sessionId: "session_reset", turnId: "turn_reset" });
+    const effects = await f.collect([f.intent.intentId, remaining.intentId]);
+    expect(effects).toHaveLength(2);
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce(effects);
+    let yieldNow = false;
+    const providerFetch = f.providerFetch.getMockImplementation()!;
+    f.providerFetch.mockImplementation(async (...args) => {
+      const response = await providerFetch(...args);
+      if (!String(args[0]).includes("/typing")) yieldNow = true;
+      return response;
+    });
+    vi.mocked(resetAssistantOutboxPreparedDispatchById).mockRejectedValueOnce(new Error("Synthetic prepared reset unavailable"));
+
+    const { result } = await f.phase("general", [f.intent.intentId, remaining.intentId], () => yieldNow);
+    expect(f.sends()).toBe(1);
+    expect(await f.read()).toMatchObject({ status: "sent", preparedDispatchToken: null });
+    expect(await f.read(remaining.intentId)).toMatchObject({ status: "sending", preparedDispatchToken: expect.any(String) });
+    expect(result).toMatchObject({ progressed: true, checkpointReason: "outbox_receipt", nextWakeAt: new Date(Date.now() + 30_000).toISOString() });
+    expect(result.nextWakeReason ?? "assistant").toBe("assistant");
+    expect(f.logRequests.flatMap((request) => request.entries)
+      .filter((entry) => entry.errorCode === "assistant_after_checkpoint_failed")).toHaveLength(1);
+
+    f.providerFetch.mockImplementation(providerFetch);
+    const retryAt = await callbacks.resolveHostedAssistantOutboxNextWakeAt({ vaultRoot: f.vaultRoot });
+    expect(retryAt).not.toBeNull();
+    vi.setSystemTime(new Date(retryAt!));
+    await f.phase();
+    expect(f.sends()).toBe(2);
+    expect(await f.read()).toMatchObject({ status: "sent", attemptCount: 1 });
+    expect(await f.read(remaining.intentId)).toMatchObject({ status: "sent", preparedDispatchToken: null });
+    expect(f.visibleReplies.size).toBe(2);
+  });
+
+  it.each([false, true])("stages a mixed-batch failure exactly once before cleanup throws (yielded: %s)", async (yielded) => {
+    const f = await fixture("telegram");
+    const terminal = await createAssistantOutboxIntent({ ...f.base, dedupeToken: "cleanup-terminal", sessionId: "session_terminal", turnId: "turn_terminal" });
+    const remaining = yielded
+      ? await createAssistantOutboxIntent({ ...f.base, dedupeToken: "cleanup-remaining", sessionId: "session_remaining", turnId: "turn_remaining" })
+      : null;
+    const ids = [f.intent.intentId, terminal.intentId, ...(remaining ? [remaining.intentId] : [])];
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce(await f.collect(ids));
+    let yieldNow = false;
+    f.providerFetch.mockResolvedValueOnce(Response.json({ ok: true, result: { message_id: 7, chat: { id: 123 } } }))
+      .mockImplementationOnce(async () => {
+        yieldNow = yielded;
+        return Response.json({ ok: false, error_code: 400, description: "Synthetic terminal rejection" }, { status: 400 });
+      });
+    mocks.recordHostedProviderCleanupAfterDelivery.mockImplementationOnce(async () => {
+      expect((await assistantEngine.listAssistantInputEvents({ vault: f.vaultRoot })).events).toHaveLength(1);
+      throw new Error("Synthetic cleanup unavailable");
+    });
+
+    const { result } = await f.phase("general", ids, () => yieldNow);
+    expect(f.sends()).toBe(2);
+    expect(await f.read()).toMatchObject({ status: "sent" });
+    expect(await f.read(terminal.intentId)).toMatchObject({ status: "failed" });
+    expect(mocks.recordHostedProviderCleanupAfterDelivery).toHaveBeenCalledOnce();
+    const staged = (await assistantEngine.listAssistantInputEvents({ vault: f.vaultRoot })).events;
+    expect(staged).toHaveLength(1);
+    expect(staged[0]?.sourceRef).toMatchObject({ lane: "system", payloadSchema: "murph.outbox-delivery-failed.v1" });
+
+    vi.setSystemTime(new Date(result.nextWakeAt!));
+    await f.phase();
+    expect((await assistantEngine.listAssistantInputEvents({ vault: f.vaultRoot })).events).toEqual(staged);
+    expect(f.sends()).toBe(yielded ? 3 : 2);
+  });
+
   it("keeps an accepted receipt and recovery wake when mixed-batch terminal staging fails", async () => {
     const f = await fixture("telegram");
     const terminal = await createAssistantOutboxIntent({ ...f.base, dedupeToken: "terminal-second", sessionId: "session_terminal", turnId: "turn_terminal" });
     f.providerFetch.mockResolvedValueOnce(Response.json({ ok: true, result: { message_id: 7, chat: { id: 123 } } }))
       .mockResolvedValueOnce(Response.json({ ok: false, error_code: 400, description: "Synthetic terminal rejection" }, { status: 400 }));
-    mocks.recordHostedProviderCleanupAfterDelivery.mockImplementationOnce(async () => {
+    mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(async (input) => {
+      const outcomes = await callbacks.drainHostedPreparedAssistantDeliveries(input);
       mocks.readAssistantOutboxIntent.mockRejectedValueOnce(new Error("Synthetic terminal staging unavailable"));
-      return { nextWakeAt: null };
+      return outcomes;
     });
 
     const { result } = await f.phase("foreground", [f.intent.intentId, terminal.intentId]);
@@ -515,6 +590,7 @@ it("repairs a selected-input prefix after a general-path non-idempotent send", a
     autoReply: [{ channel: "telegram", eligibleAfter: null, enabledAt: NOW }], updatedAt: NOW, version: 1,
   });
   const input = createPhaseInput({ vaultRoot: f.vaultRoot, importedCount: 0, now: () => NOW });
+  const pendingLocalWork = new Set<Promise<void>>();
   const result = await runHostedWorkspaceUntilIdleOrBudget({
     checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
       attemptId: "attempt_selected_delivery", expectedWorkspaceVersion: "0", leaseGeneration: "1", nextWakeAt: null, nextWakeReason: null, snapshotRef: null,
@@ -522,6 +598,13 @@ it("repairs a selected-input prefix after a general-path non-idempotent send", a
     expectedUserId: "member_synthetic_phase", requestId: "request_selected_delivery",
     initialMailboxImport: input.initialMailboxImport,
     initialAssistantInputBatch: { assistantInputIds: events.map((event) => event.inputId), emailDeliveryContexts: [], linqDeliveryContexts: [] },
+    runtimeWakeSignal: createCoalescingRuntimeWakeSignal(),
+    trackLocalWorkspaceMutationCompletion(completion) {
+      if (completion) {
+        pendingLocalWork.add(completion);
+        void completion.then(() => { pendingLocalWork.delete(completion); });
+      }
+    },
     async importItem() { throw new Error("No new mailbox input expected"); },
     limitPerLane: 10, now: () => NOW, vaultRoot: f.vaultRoot, workspace: input.workspace,
     platform: {
@@ -533,6 +616,7 @@ it("repairs a selected-input prefix after a general-path non-idempotent send", a
       workspacePort: { async checkpoint() { throw new Error("No publication expected"); } },
     },
     async runAssistantPhase(selected) {
+      expect(pendingLocalWork.size).toBe(1);
       expect(selected.initialAssistantInputBatch?.assistantInputIds).toEqual(events.map((event) => event.inputId));
       // A general pass has no foreground reply result. Its inline delivery must
       // not prevent the runner from repairing a handled prefix of its selection.
@@ -542,12 +626,14 @@ it("repairs a selected-input prefix after a general-path non-idempotent send", a
       });
       const { result: delivered } = await f.phase("general", [f.intent.intentId]);
       expect(delivered.foregroundReplyFailed).toBeUndefined();
-      expect(delivered.afterCheckpointKeepsForegroundImportLoop).toBeUndefined();
+      expect(delivered.afterCheckpointKeepsForegroundImportLoop).toBe(true);
+      expect(delivered.afterCheckpoint).toBeUndefined();
       expect(delivered.nextWakeAt).toBeNull();
       return delivered;
     },
   });
   expect(f.sends()).toBe(1);
+  expect(pendingLocalWork.size).toBe(0);
   expect((await f.read()).status).toBe("sent");
   expect(result.latestAssistantInputBatch?.assistantInputIds).toEqual([events[1]!.inputId]);
 });

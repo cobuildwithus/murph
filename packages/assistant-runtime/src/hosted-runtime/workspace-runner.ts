@@ -2236,7 +2236,11 @@ async function rebuildHostedWorkspaceRunnerAssistantInputBatchAfterSelectedPrefi
   const foregroundReplyDeferredForLocalRerun =
     input.assistantPhaseResult.foregroundReplyFailed === undefined
     && (
-      input.latestAssistantInputBatch === null
+      (
+        input.latestAssistantInputBatch === null
+        && input.assistantPhaseResult
+          .afterCheckpointKeepsForegroundImportLoop === true
+      )
       || (
         input.assistantPhaseResult.nextWakeReason === "assistant"
         && typeof input.assistantPhaseResult.nextWakeAt === "string"
@@ -2273,8 +2277,9 @@ async function rebuildHostedWorkspaceRunnerAssistantInputBatchAfterSelectedPrefi
   const pendingSelectedInputIds = input.selectedInitialAssistantInputIds.filter(
     (inputId) => pendingInputIds.has(inputId),
   );
-  // A general or system pass can progress without running a foreground reply.
-  // With no distinct boundary tail, its still-pending selection remains local
+  // General delivery or foreground-causal system work can finish before the
+  // foreground reply. Only passes marked for that continuation retain their
+  // still-pending selection locally when there is no distinct boundary tail,
   // even when the next owner wake is for model-free work. Once a reply phase
   // has run, retain the narrower handled-prefix repair behavior below.
   if (

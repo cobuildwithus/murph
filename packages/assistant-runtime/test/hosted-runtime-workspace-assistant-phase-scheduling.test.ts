@@ -1725,18 +1725,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(result).toEqual(expect.objectContaining({
-      checkpointReason: "outbox_sending",
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: dueAt,
+      nextWakeReason: "mailbox",
       progressed: true,
     }));
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
-
-    const postCheckpoint = await result.afterCheckpoint?.();
-
     expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledTimes(1);
-    expect(postCheckpoint).toEqual(expect.objectContaining({
-      nextWakeAt: dueAt,
-      nextWakeReason: "mailbox",
-    }));
+    expect(result.afterCheckpoint).toBeUndefined();
   });
 
   it("keeps fresh conversation input ahead of a due model-free mailbox row", async () => {
