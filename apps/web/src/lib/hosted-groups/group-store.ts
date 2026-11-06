@@ -1,4 +1,5 @@
 import "server-only";
+import { createHash } from "node:crypto";
 import { HOSTED_GROUP_BOARD_SCOPES } from "./board-scopes";
 import { readSharedCompanionContact } from "./shared-companion-presence";
 
@@ -2328,6 +2329,7 @@ export async function readHostedGroupJoinOfferTargetTx(input: {
 }
 
 export async function acceptHostedGroupJoinOfferTx(input: {
+  affirmationEventId: string;
   channel: HostedGroupOfferChannel;
   confirmationPublicBaseUrl?: string | null;
   memberId: string;
@@ -2335,7 +2337,7 @@ export async function acceptHostedGroupJoinOfferTx(input: {
   now: Date;
   threadIdentityLookupKeyReadCandidates: readonly string[];
   tx: Prisma.TransactionClient;
-}): Promise<HostedGroupJoinOfferAcceptanceTxResult> {
+}): Promise<HostedGroupJoinOfferAcceptanceTxResult | null> {
   const offer = await readHostedGroupJoinOfferTargetTx({
     channel: input.channel,
     messageLookupKeyReadCandidates: input.messageLookupKeyReadCandidates,
@@ -2343,6 +2345,13 @@ export async function acceptHostedGroupJoinOfferTx(input: {
       input.threadIdentityLookupKeyReadCandidates,
     tx: input.tx,
   });
+  if (!await spendHostedGroupOfferGestureTx({
+    affirmationEventId: input.affirmationEventId,
+    groupId: offer.groupId,
+    tx: input.tx,
+  })) {
+    return null;
+  }
   const selectedVaultShareProjectionScopes = normalizeHostedVaultShareProjectionScopes(
     offer.projectionKindsJson,
   );
@@ -3304,6 +3313,29 @@ export async function lockHostedGroupRow(
   groupId: string,
 ): Promise<void> {
   await tx.$queryRaw`select 1 from "hosted_group" where "id" = ${groupId} for update`;
+}
+
+/**
+ * Spends one provider gesture in the transaction that decides it. Call only
+ * after validating the offer under its group row lock. The receipt is keyed to
+ * the group, so it survives leave, revocation, and relink, and a rollback leaves
+ * the gesture unseen. False means the gesture was already accepted.
+ */
+export async function spendHostedGroupOfferGestureTx(input: {
+  affirmationEventId: string;
+  groupId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const digest = createHash("sha256")
+    .update("murph.hosted-group-offer.gesture.v1", "utf8")
+    .update("\0", "utf8")
+    .update(input.affirmationEventId, "utf8")
+    .digest("hex");
+  const result = await input.tx.hostedGroupOfferGestureReceipt.createMany({
+    data: { id: `hgrpog_${digest}`, groupId: input.groupId },
+    skipDuplicates: true,
+  });
+  return result.count === 1;
 }
 
 async function lockHostedMemberRow(tx: Prisma.TransactionClient, memberId: string): Promise<void> {

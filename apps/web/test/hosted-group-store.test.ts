@@ -170,6 +170,7 @@ function buildTx(input?: {
   };
 } {
   return createPrismaStub({
+    hostedGroupOfferGestureReceipt: { createMany: vi.fn(async () => ({ count: 1 })) },
     $queryRaw: vi.fn(async () => []),
     hostedGroup: {
       findUnique: vi.fn(async (args: {
@@ -369,12 +370,14 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       mocks.grantHostedVaultShareTx.mockClear();
       mocks.revokeHostedVaultSharesTx.mockClear();
       const result = await acceptHostedGroupJoinOfferTx({
+        affirmationEventId: `gesture_event_${replay}`,
         channel: "linq", memberId: "member_grantor",
         messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
         threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
         now: new Date("2026-09-17T12:00:00Z"), tx,
       });
-      expect(result.grantedVaultShareProjectionScopes).toEqual([PROFILE_SCOPE, SLEEP_SCOPE]);
+      expect(result).not.toBeNull();
+      expect(result!.grantedVaultShareProjectionScopes).toEqual([PROFILE_SCOPE, SLEEP_SCOPE]);
       expect(tx.hostedGroup.update).not.toHaveBeenCalled();
       expect(mocks.revokeHostedVaultSharesTx).not.toHaveBeenCalled();
     }
@@ -1105,6 +1108,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     await acceptHostedGroupJoinOfferTx({
+      affirmationEventId: "gesture_event_1",
       channel: "telegram",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:telegram-message:v1:offer"],
@@ -1133,6 +1137,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     tx.hostedThreadRoute.findFirst.mockResolvedValue(null);
 
     await expect(acceptHostedGroupJoinOfferTx({
+      affirmationEventId: "gesture_event_1",
       channel: "telegram",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:telegram-message:v1:offer"],
@@ -1153,6 +1158,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     tx.hostedGroupJoinOffer.findFirst.mockResolvedValue(null);
 
     await expect(acceptHostedGroupJoinOfferTx({
+      affirmationEventId: "gesture_event_1",
       channel: "telegram",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:telegram-message:v1:other-message"],
@@ -1496,6 +1502,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const now = new Date("2026-07-01T00:00:00.000Z");
 
     await expect(acceptHostedGroupJoinOfferTx({
+      affirmationEventId: "gesture_event_1",
       channel: "linq",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
@@ -1544,6 +1551,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     mocks.revokeHostedVaultSharesTx.mockResolvedValueOnce(1);
 
     await expect(acceptHostedGroupJoinOfferTx({
+      affirmationEventId: "gesture_event_1",
       channel: "linq",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
@@ -1589,6 +1597,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     }));
 
     await expect(acceptHostedGroupJoinOfferTx({
+      affirmationEventId: "gesture_event_1",
       channel: "linq",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
@@ -1615,6 +1624,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     await expect(acceptHostedGroupJoinOfferTx({
+      affirmationEventId: "gesture_event_1",
       channel: "linq",
       confirmationPublicBaseUrl: "https://murph.example",
       memberId: "member_grantor",
@@ -1659,6 +1669,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const now = new Date("2026-07-01T00:00:00.000Z");
 
     await expect(acceptHostedGroupJoinOfferTx({
+      affirmationEventId: "gesture_event_1",
       channel: "linq",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
@@ -1717,6 +1728,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       });
 
     await expect(acceptHostedGroupJoinOfferTx({
+      affirmationEventId: "gesture_event_1",
       channel: "linq",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates,
@@ -1766,6 +1778,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     await expect(acceptHostedGroupJoinOfferTx({
+      affirmationEventId: "gesture_event_1",
       channel: "linq",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
@@ -1804,6 +1817,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     await expect(acceptHostedGroupJoinOfferTx({
+      affirmationEventId: "gesture_event_1",
       channel: "linq",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: [firstOffer.messageLookupKey],
@@ -2981,6 +2995,7 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
   }> = [];
 
   return createPrismaStub({
+    hostedGroupOfferGestureReceipt: { createMany: vi.fn(async () => ({ count: 1 })) },
     $queryRaw: vi.fn(async () => []),
     hostedGroup: {
       findUnique: vi.fn(async (args: {

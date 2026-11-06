@@ -9,6 +9,9 @@ The [backend execution record](exec-plans/completed/2026-11-04-vault-demographic
 
 Automatic removal and merging of inspected meal stubs is owned by [the iOS Meals contract](product-specs/ios-meals.md#removal) and the `automatic-meal-capture` skill.
 
+Redelivery identity for direct Telegram messages and group offer gestures is owned by [the invariants](../docs/contracts/00-invariants.md) and [Reliability](RELIABILITY.md).
+The [execution record](exec-plans/completed/2026-11-06-ingress-identity-replay.md) holds the design decisions.
+
 Pair health board API and scoped sharing are owned by [the iOS game contract](product-specs/ios-game.md#pair-health-board), [game rules](product-specs/weekly-game.md#pair-board-current-run), and [group sharing](product-specs/hosted-group-join-confirmation.md#app-board-sharing).
 Reported VO2 persistence, the additive no-readings reason and local verification
 are recorded in [the backend execution record](exec-plans/completed/2026-11-05-board-vo2-readings.md).

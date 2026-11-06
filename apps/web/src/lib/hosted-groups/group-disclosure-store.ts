@@ -27,7 +27,7 @@ import {
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import { getPrisma } from "../prisma";
-import { lockHostedGroupRow } from "./group-store";
+import { lockHostedGroupRow, spendHostedGroupOfferGestureTx } from "./group-store";
 
 export const HOSTED_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_LENGTH =
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS;
@@ -52,6 +52,7 @@ export type HostedGroupDisclosureReadClient = PrismaClient | Prisma.TransactionC
 
 export type HostedGroupDisclosurePermissionReactionTxResult =
   | { kind: "accepted" }
+  | { kind: "replayed" }
   | { kind: "not_found" | "not_group_member" | "wrong_thread" };
 
 export type HostedGroupDisclosurePermissionAppendTxResult = { kind: "accepted" };
@@ -427,6 +428,17 @@ export async function acceptHostedGroupDisclosurePermissionReactionTx(input: {
     return { kind: "not_found" };
   }
 
+  // Spent before the no-op check below: a tap that changes nothing is still an
+  // accepted decision, and its redelivery must not grant after a revocation.
+  if (!await spendHostedGroupOfferGestureTx({
+    affirmationEventId: input.reactionEventId,
+    groupId: permission.group.id,
+    tx: input.tx,
+  })) {
+    return { kind: "replayed" };
+  }
+
+  // Grants written before receipts existed carry the gesture in their own id.
   const grantId = createHostedGroupDisclosureReactionGrantId(
     input.reactionEventId,
   );
