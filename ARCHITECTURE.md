@@ -2604,11 +2604,15 @@ photo registration or PUT. Newly discovered IDs are denied to the warm uploader
 until the exact checkpoint is accepted; a rejected or ambiguous checkpoint does
 not release them. Cold restore derives eligibility from the committed catalogue.
 The accepted checkpoint retains an hourly idle retry while pending entries have
-fewer than five persisted `uploadAttempts`. The first selected entry increments
-that counter with the cursor before shared holder discovery; later entries are
-charged only when delivery reaches them. Exact-identity receipt replay preserves
-the counter. Exhausted entries remain pending and inline and can still run on
-ordinary idle passes, but do not arm dedicated retry wakes unless a canonical
+fewer than five persisted `uploadAttempts`. Only the first selected entry of a
+fresh delivery window increments that counter with the cursor up front. Other
+entries are charged and rotate the cursor only after a recorded media write
+failure; timeout or unexpected failure leaves them first for the next pass.
+Proven canonical tombstones settle before lazy shared holder discovery, with
+pointer removal still requiring DELETE acknowledgement. Measurement paths and
+identity read doubt still require discovery. Exact-identity receipt replay
+preserves the counter. Exhausted entries remain pending and inline and can still
+run on ordinary idle passes, but do not arm dedicated retry wakes unless a canonical
 privacy tombstone proves cleanup is owed. Media write and raw-manifest identity
 failures retain the bounded retry policy; other maintenance errors, including
 stale authority, propagate and stop the pass.

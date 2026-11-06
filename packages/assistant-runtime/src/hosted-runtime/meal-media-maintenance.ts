@@ -13,7 +13,7 @@ import { HostedRuntimeMediaWriteError, type HostedRuntimeMediaStore } from "./pl
 import {
   isHostedPendingMealMedia, readHostedMediaReferenceCatalogue, writeHostedMediaReferenceCatalogue,
   type HostedMediaReference,
-  hostedPhotoIntentIsCommitted, hostedPhotoNeedsRetry,
+  hostedPhotoIntentIsCommitted, hostedPhotoNeedsRetry, hostedPhotoReferenceMayBeLive,
 } from "./media-references.ts";
 
 export const HOSTED_MEAL_MEDIA_RETRY_MS = 60 * 60_000;
@@ -38,6 +38,7 @@ export async function runHostedMealMediaMaintenance(input: {
   vaultRoot: string;
 }): Promise<{ uploaded: number; retired: number; failed: number; pending: number; failure?: unknown }> {
   const result: { uploaded: number; retired: number; failed: number; pending: number; failure?: unknown } = { uploaded: 0, retired: 0, failed: 0, pending: input.budget.pending ?? 1 };
+  const freshWindow = input.budget.deadlineMs === null;
   const deliveryDeadlineMs = input.budget.deadlineMs ?? Date.now() + 2_000;
   const projectedDeadlineMs = input.projectedDeadlineMs ?? Infinity;
   const deadlineMs = projectedDeadlineMs > Date.now() ? Math.min(deliveryDeadlineMs, projectedDeadlineMs) : deliveryDeadlineMs;
@@ -59,22 +60,28 @@ export async function runHostedMealMediaMaintenance(input: {
     const selected = [...eligible.filter(entry => entry.mediaId > cursor), ...eligible.filter(entry => entry.mediaId <= cursor)]
       .slice(0, input.budget.remaining);
     if (!selected.length) return result;
-    // Charge discovery to its head; later entries pay only when delivery reaches them.
-    input.budget.remaining -= 1;
-    await step(() => updateCatalogue(input.vaultRoot, selected[0]!, signal, "attempt"));
+    // A fresh head pays for discovery or a stall; partial windows do not charge a new head.
+    const chargedHead = freshWindow ? selected[0] : undefined;
+    if (chargedHead) {
+      input.budget.remaining -= 1;
+      await step(() => updateCatalogue(input.vaultRoot, chargedHead, signal, "attempt"));
+    }
     if (pending.some(hostedPhotoNeedsRetry)) {
       await step(() => input.persistRetry(new Date(Date.now() + HOSTED_MEAL_MEDIA_RETRY_MS).toISOString(), signal));
     }
-    const holders = await step(() => readSelectedPhotoHolders(input.vaultRoot, selected, signal));
-    for (const entry of selected) {
-      if (entry !== selected[0]) {
-        input.budget.remaining -= 1;
-        await step(() => updateCatalogue(input.vaultRoot, entry, signal, "attempt"));
-      }
+    const proven = await readSelectedPhotoTombstones(input.vaultRoot, selected, step);
+    let holders: Map<string, EventRecord> | undefined;
+    const readHolder = async (entry: HostedMediaReference) => {
+      const owner = inferRawAssetOwnerFromDirectory(path.posix.dirname(entry.relativePath));
+      if (!owner) throw new Error("Invalid pending photo owner.");
+      if (proven.has(entry)) return undefined;
+      holders ??= await step(() => readSelectedPhotoHolders(input.vaultRoot, selected, signal));
+      return holders.get(owner.id);
+    };
+    for (const entry of [...selected.filter(entry => proven.has(entry)), ...selected.filter(entry => !proven.has(entry))]) {
+      if (entry !== chargedHead) input.budget.remaining -= 1;
       try {
-        const owner = inferRawAssetOwnerFromDirectory(path.posix.dirname(entry.relativePath));
-        if (!owner) throw new Error("Invalid pending photo owner.");
-        const action = await settleEntry(entry, holders.get(owner.id), input, signal, step);
+        const action = await settleEntry(entry, await readHolder(entry), input, signal, step);
         await step(() => updateCatalogue(input.vaultRoot, entry, signal, action));
         if (action === "delivered") result.uploaded += 1;
         else result.retired += 1;
@@ -85,6 +92,7 @@ export async function runHostedMealMediaMaintenance(input: {
         result.failure = error;
         // Owner loss is control flow, not a per-item media failure.
         if (!(error instanceof HostedRuntimeMediaWriteError)) throw error;
+        if (entry !== chargedHead) await step(() => updateCatalogue(input.vaultRoot, entry, signal, "attempt"));
       }
     }
   } catch (error) {
@@ -94,6 +102,17 @@ export async function runHostedMealMediaMaintenance(input: {
     result.pending = Math.max(1, result.pending);
   } finally { clearTimeout(timer); input.budget.uploaded += result.uploaded; input.budget.pending = result.pending; }
   return result;
+}
+
+async function readSelectedPhotoTombstones(
+  vaultRoot: string, selected: HostedMediaReference[],
+  step: <T>(work: () => Promise<T>) => Promise<T>,
+) {
+  const proven = new Set<HostedMediaReference>();
+  for (const entry of selected) {
+    if (!await step(() => hostedPhotoReferenceMayBeLive(vaultRoot, entry))) proven.add(entry);
+  }
+  return proven;
 }
 
 async function settleEntry(

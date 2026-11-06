@@ -168,7 +168,7 @@ test("owner loss after finite registration forbids retirement", async () => {
   expect(f.store.calls.map(call => call.operation)).toEqual(["record"]);
 });
 
-test("bounded discovery yields through unrelated history and never trusts a partial holder inventory", async () => {
+test("read doubt keeps bounded discovery from trusting a partial holder inventory", async () => {
   const f = await fixture(); await f.maintain();
   const cancel = new AbortController();
   const shard = path.join(f.vaultRoot, "ledger/events/2030/2030-12.jsonl");
@@ -189,6 +189,7 @@ test("bounded discovery yields through unrelated history and never trusts a part
   const later = path.join(f.vaultRoot, "ledger/events/2031/2031-01.jsonl");
   if (!deletedLine) throw new Error("Expected a canonical deletion revision.");
   await mkdir(path.dirname(later), { recursive: true }); await writeFile(later, deletedLine + "\n");
+  vi.spyOn(core, "canonicalRawArtifactIsPrivacyTombstone").mockRejectedValue(new Error("Synthetic identity read doubt"));
   const visit = core.visitEventLedgerShardRecordsInterruptible;
   vi.spyOn(core, "visitEventLedgerShardRecordsInterruptible").mockImplementation(async input => visit({ ...input, visit: async (row, line) => {
     if (line === 256) setImmediate(() => cancel.abort(new Error("Foreground during discovery")));
@@ -314,4 +315,40 @@ test("receipt replay preserves checkpointed upload attempts for an unchanged pen
   await f.restore(snapshot);
   expect((await f.catalogue()).entries[0]).toMatchObject({ pendingUpload: true, uploadAttempts: 5 });
   expect((await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot: f.vaultRoot, mediaStore: f.store.mediaStore })).hasRetryablePendingPhotos).toBe(false);
+});
+
+
+test.each(["media", "unexpected", "window"] as const)("a later entry is charged and rotated only for a recorded media error: %s", async failure => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const f = await fixture(3); await f.maintain();
+  const entries = (await f.catalogue()).entries.sort((a, b) => a.mediaId.localeCompare(b.mediaId));
+  const error = failure === "media" ? mediaFailure() : new Error("Synthetic unexpected failure");
+  f.store.hooks.before = async (op, id) => {
+    if (op !== "record" || id !== entries[1]!.mediaId) return;
+    if (failure === "window") vi.setSystemTime(Date.now() + 2_000);
+    throw error;
+  };
+  const budget = createHostedMealMediaBudget();
+  if (failure === "unexpected") await expect(f.pass({ budget })).rejects.toBe(error);
+  else expect(await f.pass({ budget })).toMatchObject({ uploaded: failure === "media" ? 2 : 1, failed: failure === "media" ? 1 : 0 });
+  const catalogue = await f.catalogue();
+  expect(catalogue.mealUploadCursor).toBe(entries[failure === "media" ? 1 : 0]!.mediaId);
+  expect(catalogue.entries.find(entry => entry.mediaId === entries[1]!.mediaId)?.uploadAttempts ?? 0).toBe(failure === "media" ? 1 : 0);
+  expect(budget.remaining).toBe(failure === "media" ? 7 : 8);
+  f.store.hooks.before = undefined;
+  f.store.calls.length = 0;
+  await f.pass();
+  expect(f.store.calls.find(call => call.operation === "record")?.mediaId).toBe(entries[1]!.mediaId);
+});
+
+test("a later slice of the same window does not charge a new head up front", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const f = await fixture(3); await f.maintain();
+  const budget = createHostedMealMediaBudget();
+  f.store.hooks.before = async op => { if (op === "record" || op === "put") vi.setSystemTime(Date.now() + 400); };
+  expect(await f.pass({ budget, projectedDeadlineMs: Date.now() + 1_000 })).toMatchObject({ uploaded: 1, pending: 2 });
+  f.store.hooks.before = undefined;
+  expect(await f.pass({ budget })).toMatchObject({ uploaded: 2, pending: 0 });
+  expect((await f.catalogue()).entries.map(entry => entry.uploadAttempts ?? 0).sort()).toEqual([0, 0, 1]);
+  expect(budget.remaining).toBe(6);
 });

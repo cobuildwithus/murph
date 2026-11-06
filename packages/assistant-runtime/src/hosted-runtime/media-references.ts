@@ -340,7 +340,7 @@ async function collectRetainedPhotoReferences(
 
 // Dropping an entry deletes its object, which may be the only copy. Prove a
 // reference obsolete before pruning, and let doubt keep the object.
-async function hostedPhotoReferenceMayBeLive(vaultRoot: string, entry: HostedMediaReference): Promise<boolean> {
+export async function hostedPhotoReferenceMayBeLive(vaultRoot: string, entry: HostedMediaReference): Promise<boolean> {
   if (entry.relativePath.startsWith("raw/measurements/")) return true;
   try {
     return !await canonicalRawArtifactIsPrivacyTombstone({ vaultRoot, relativePath: entry.relativePath });
