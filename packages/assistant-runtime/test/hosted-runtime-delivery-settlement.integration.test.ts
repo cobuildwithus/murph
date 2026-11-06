@@ -50,6 +50,8 @@ function rejectedTelegram() {
 
 async function fixture(channel: "email" | "telegram", options: {
   targetKind?: "explicit" | "thread"; message?: string; media?: AssistantResponseMedia[];
+  card?: Parameters<typeof createAssistantOutboxIntent>[0]["card"];
+  operation?: Parameters<typeof createAssistantOutboxIntent>[0]["operation"]; replyToMessageId?: string;
   followUp?: boolean; autoReply?: boolean;
 } = {}) {
   const root = await mkdtemp(path.join(process.env.MURPH_VITEST_TEMP_ROOT!, "delivery-settlement-"));
@@ -62,7 +64,8 @@ async function fixture(channel: "email" | "telegram", options: {
   const intent = await createAssistantOutboxIntent({
     bindingDelivery: { kind: "thread", target }, channel,
     ...(channel === "email" && options.targetKind !== "thread" ? { explicitTarget: target } : {}),
-    deliveryTransportIdempotent: false, dedupeToken: "settlement-proof", media: options.media,
+    deliveryTransportIdempotent: options.operation?.kind === "message-reaction", dedupeToken: "settlement-proof", media: options.media,
+    card: options.card, operation: options.operation, replyToMessageId: options.replyToMessageId,
     message: options.message ?? "Here is the requested reply.", sessionId: "session_settlement",
     threadId: target, threadIsDirect: true, turnId: "turn_settlement", vault: vaultRoot,
     ...(options.followUp ? { followUpRequest } : {}),
@@ -194,8 +197,8 @@ describe.sequential("hosted delivery settlement", () => {
     expect(f.providerFetch).toHaveBeenCalledTimes(calls);
   });
 
-  it.each(["voice transcript", "text"] as const)("preserves an accepted Telegram %s receipt when liveness is lost", async (kind) => {
-    const f = await fixture("telegram", kind === "voice transcript" ? { media: [voice], message: "" } : {});
+  it.each(["voice transcript", "text", "voice memo"] as const)("preserves an accepted Telegram %s receipt when liveness is lost", async (kind) => {
+    const f = await fixture("telegram", kind === "text" ? {} : { media: [voice], message: "" });
     let accepted = false;
     const assertLiveness = async () => {
       if (accepted) throw new Error("Synthetic liveness lost after Telegram acceptance");
@@ -203,8 +206,8 @@ describe.sequential("hosted delivery settlement", () => {
     f.providerFetch.mockImplementation(async (input) => {
       const url = String(input);
       if (url.startsWith("https://api.elevenlabs.io/")) return new Response(new Uint8Array(readFileSync(new URL("../../../fixtures/generated-audio/speech.mp3", import.meta.url))), { headers: { "content-type": "audio/mpeg" } });
-      if (url.endsWith("/sendVoice")) return rejectedTelegram();
-      expect(url).toContain("/sendMessage");
+      if (kind === "voice transcript" && url.endsWith("/sendVoice")) return rejectedTelegram();
+      expect(url).toContain(kind === "voice memo" ? "/sendVoice" : "/sendMessage");
       accepted = true;
       return acceptedTelegram();
     });
@@ -212,14 +215,56 @@ describe.sequential("hosted delivery settlement", () => {
     await f.drain({ assertLiveness });
     expect.soft(await f.read()).toMatchObject({
       status: "sent",
-      delivery: kind === "voice transcript" ? { providerMessageIds: ["7"] } : { providerMessageId: "7" },
+      delivery: kind === "text" ? { providerMessageId: "7" } : { providerMessageIds: ["7"] },
     });
-    expect(f.providerFetch.mock.calls.some(([input]) => String(input).endsWith("/sendVoice"))).toBe(kind === "voice transcript");
-    expect(f.providerFetch.mock.calls.filter(([input]) => String(input).endsWith("/sendMessage"))).toHaveLength(1);
+    expect(f.providerFetch.mock.calls.some(([input]) => String(input).endsWith("/sendVoice"))).toBe(kind !== "text");
+    expect(f.providerFetch.mock.calls.filter(([input]) => String(input).endsWith("/sendMessage"))).toHaveLength(kind === "voice memo" ? 0 : 1);
     const calls = f.providerFetch.mock.calls.length;
     await f.advance();
     await f.drain();
     expect(f.providerFetch).toHaveBeenCalledTimes(calls);
+  });
+
+  it.each(["rich card", "file", "image", "reaction"] as const)("preserves an accepted Telegram %s receipt when the runtime aborts after the response", async (kind) => {
+    const bytes = Buffer.from("%PDF-1.4\nSynthetic file\n%%EOF\n");
+    const file: AssistantResponseMedia = { kind: "vault_file", approvalGeneration, approvalId, ref: "documents/report.pdf", filename: "report.pdf", contentType: "application/pdf", sha256: createHash("sha256").update(bytes).digest("hex"), sizeBytes: bytes.length };
+    const f = await fixture("telegram", {
+      ...(kind === "rich card" ? { card: { kind: "telegram_rich_content", version: 1, html: "<h2>Card</h2>" } } : {}),
+      ...(kind === "file" ? { media: [file], message: "" } : {}),
+      ...(kind === "image" ? { media: [{ kind: "image", source: "test", url: "https://example.test/image.png", alt: "Synthetic image" }] } : {}),
+      ...(kind === "reaction" ? { operation: { kind: "message-reaction", reaction: "heart" }, replyToMessageId: "42", message: "" } : {}),
+    });
+    let actionApprovalPort: HostedRuntimeActionApprovalPort | undefined;
+    if (kind === "file") {
+      await mkdir(path.join(f.vaultRoot, "documents"), { recursive: true });
+      await writeFile(path.join(f.vaultRoot, file.ref), bytes);
+      actionApprovalPort = { consume: async () => ({ approvalGeneration, approvalId, status: "approved" }), read: async () => { throw new Error("Unexpected read"); }, request: async () => { throw new Error("Unexpected request"); } };
+    }
+    const controller = new AbortController();
+    const reason = new DOMException("The operation timed out.", "TimeoutError");
+    const operation = { "rich card": "/sendRichMessage", file: "/sendDocument", image: "/sendPhoto", reaction: "/setMessageReaction" }[kind];
+    // Abort after the sender parsed acceptance; an in-flight abort is unknown and stays ambiguous.
+    f.providerFetch.mockImplementation(async (input) => {
+      const url = String(input);
+      expect(url.endsWith(operation)).toBe(true);
+      const response = Response.json({ ok: true, result: kind === "reaction" ? true : { message_id: 7, chat: { id: 123 } } });
+      Object.defineProperty(response, "ok", { get: () => { controller.abort(reason); return true; } });
+      return response;
+    });
+
+    await expect(f.drain({ actionApprovalPort, signal: controller.signal })).rejects.toBe(reason);
+    expect(await f.read()).toMatchObject({
+      status: "sent",
+      delivery: kind === "reaction" ? { kind: "message-reaction", targetMessageId: "42" }
+        : { providerMessageId: "7" },
+    });
+    expect(f.providerFetch.mock.calls.filter(([input]) => String(input).endsWith(operation))).toHaveLength(1);
+    expect(f.providerFetch).toHaveBeenCalledOnce();
+    const calls = f.providerFetch.mock.calls.length;
+    await f.advance();
+    await f.drain({ actionApprovalPort });
+    expect(f.providerFetch).toHaveBeenCalledTimes(calls);
+    expect(await f.wake()).toBeNull();
   });
 
   describe.each(["telegram", "email"] as const)("accepted %s settlement", (channel) => {
