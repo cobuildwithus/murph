@@ -43,6 +43,7 @@ import {
   hasConflictingHostedLinqInstantFirstTurnForChatTx,
   HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
   HOSTED_LINQ_INSTANT_FIRST_TURN_PAYLOAD_SCHEMA,
+  HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE,
   recordHostedLinqInstantFirstTurnFirstDispatchRejectionTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
@@ -688,15 +689,18 @@ export async function completeHostedLinqInstantFirstTurn(input: {
     });
   } catch (error) {
     let rejected = false;
+    const definitive = isDefinitiveHostedLinqInstantFirstTurnSendFailure(error);
     try {
-      if (!resumed && isDefinitiveHostedLinqInstantFirstTurnSendFailure(error)) {
+      if (!resumed && definitive) {
         rejected = await recordHostedLinqInstantFirstTurnFirstDispatchRejectionTx({
           expectedAttemptedAt: dispatchAttemptedAt, idempotencyKey, prisma,
         });
       } else {
         await markHostedLinqDeliverySendFailedTx({
           expectedAttemptedAt: dispatchAttemptedAt,
-          failureCode: readHostedLinqInstantFirstTurnFailureCode(error),
+          failureCode: definitive
+            ? HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE
+            : readHostedLinqInstantFirstTurnFailureCode(error),
           idempotencyKey,
           linqChatId: input.wakeHandoff.linqChatId,
           prisma,

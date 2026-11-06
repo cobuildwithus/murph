@@ -61,6 +61,8 @@ export const HOSTED_LINQ_INSTANT_FIRST_TURN_PAYLOAD_SCHEMA =
   "murph.hosted-linq-delivery-payload.instant-first-turn.v1";
 export const HOSTED_LINQ_INSTANT_FIRST_TURN_REJECTED_FAILURE_CODE =
   "HOSTED_LINQ_INSTANT_FIRST_TURN_FIRST_DISPATCH_REJECTED";
+export const HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE =
+  "HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED";
 
 type HostedLinqInstantFirstTurnCanaryResetRow = {
   acceptedAt: Date | null;
@@ -917,13 +919,22 @@ export async function resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionT
       : "defer";
 }
 
-// Legacy held rows cannot be resolved here. Holding the whole chat before
-// mailbox append would lose later inbound messages; preserve these live checks.
+// Rejected retries and legacy held rows hold only their exact input. Nothing can
+// resolve them here, and blocking the chat before mailbox append would lose later
+// inbound messages. Callers exclude skipped rows themselves.
 const hostedLinqInstantFirstTurnUnresolvedWhere = {
   template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
   OR: [
     { failedAt: null, status: "attempted" },
-    { payloadCiphertext: { not: null }, status: { in: [HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS, "failed"] } },
+    { payloadCiphertext: { not: null }, status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS },
+    {
+      payloadCiphertext: { not: null },
+      status: "failed",
+      OR: [
+        { failureCode: null },
+        { failureCode: { not: HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE } },
+      ],
+    },
   ],
 } satisfies Prisma.HostedLinqDeliveryWhereInput;
 
@@ -3674,11 +3685,11 @@ async function releaseHostedLinqFailedDeliverySignupSuppressionTx(input: {
   if (!failedAttempt) return;
   // The caller holds the member lock: only the last live signup identity can
   // release the shared member/day projection, including concurrent failures.
-  const live = await readHostedLinqInviteSignupLiveAttemptsTx({
+  const live = await hasHostedLinqInviteSignupLiveDeliveryTx({
     dayUtc: failedAttempt.dayUtc, memberId: failedAttempt.memberId,
-    prisma: input.prisma, sourceEventDigest: failedAttempt.sourceEventDigest,
+    prisma: input.prisma,
   });
-  if (!live.sameIdentityStillLive && !live.anyIdentityLive) {
+  if (!live) {
     await applyHostedLinqSignupSuppressionMilestoneTx({
       memberId: failedAttempt.memberId, occurredAt: failedAttempt.dayUtc,
       milestone: "send_failed", prisma: input.prisma,
@@ -3686,15 +3697,11 @@ async function releaseHostedLinqFailedDeliverySignupSuppressionTx(input: {
   }
 }
 
-export async function readHostedLinqInviteSignupLiveAttemptsTx(input: {
+export async function hasHostedLinqInviteSignupLiveDeliveryTx(input: {
   dayUtc: string;
   memberId: string;
   prisma: HostedLinqDeliveryClient;
-  sourceEventDigest?: string | null;
-}): Promise<{
-  anyIdentityLive: boolean;
-  sameIdentityStillLive: boolean;
-}> {
+}): Promise<boolean> {
   const sourceRefPrefix = buildHostedLinqInviteSignupEffectId({
     memberId: input.memberId,
     occurredAt: input.dayUtc,
@@ -3702,17 +3709,6 @@ export async function readHostedLinqInviteSignupLiveAttemptsTx(input: {
   const sourceRefLikePattern = `${escapeHostedLinqSourceRefLikePrefix(
     sourceRefPrefix,
   )}%`;
-  const exactIdentitySourceRefs = input.sourceEventDigest === undefined
-    ? null
-    : Array.from(
-      { length: HOSTED_LINQ_INVITE_SIGNUP_MAX_ATTEMPTS_PER_IDENTITY },
-      (_, index) => buildHostedLinqInviteSignupEffectId({
-        attempt: index + 1,
-        memberId: input.memberId,
-        occurredAt: input.dayUtc,
-        sourceEventDigest: input.sourceEventDigest,
-      }),
-    );
   const liveInviteSignupDeliveryPredicateSql = Prisma.sql`
     "delivery"."source_ref" IS NOT NULL
       AND "delivery"."template" IN (
@@ -3726,25 +3722,10 @@ export async function readHostedLinqInviteSignupLiveAttemptsTx(input: {
         'delivered'
       )
   `;
-  const sameIdentityStillLiveSql = exactIdentitySourceRefs
-    ? Prisma.sql`
-        EXISTS (
-          SELECT 1
-          FROM "hosted_linq_delivery" AS "delivery"
-          WHERE ${liveInviteSignupDeliveryPredicateSql}
-            AND "delivery"."source_ref" IN (
-              ${Prisma.join(exactIdentitySourceRefs)}
-            )
-          LIMIT 1
-        )
-      `
-    : Prisma.sql`FALSE`;
   const rows = await input.prisma.$queryRaw<Array<{
     anyIdentityLive: boolean;
-    sameIdentityStillLive: boolean;
   }>>(Prisma.sql`
     SELECT
-      ${sameIdentityStillLiveSql} AS "sameIdentityStillLive",
       EXISTS (
         SELECT 1
         FROM "hosted_linq_delivery" AS "delivery"
@@ -3757,10 +3738,7 @@ export async function readHostedLinqInviteSignupLiveAttemptsTx(input: {
         LIMIT 1
       ) AS "anyIdentityLive"
   `);
-  return {
-    anyIdentityLive: rows[0]?.anyIdentityLive === true,
-    sameIdentityStillLive: rows[0]?.sameIdentityStillLive === true,
-  };
+  return rows[0]?.anyIdentityLive === true;
 }
 
 function escapeHostedLinqSourceRefLikePrefix(value: string): string {
@@ -3840,15 +3818,6 @@ export async function releaseHostedLinqSignupSuppressionAfterDeletionTx(input: {
       onboardingLinkSentAt: { not: null },
     },
   });
-}
-
-export async function hasHostedLinqInviteSignupLiveDeliveryTx(input: {
-  dayUtc: string;
-  memberId: string;
-  prisma: HostedLinqDeliveryClient;
-}): Promise<boolean> {
-  const liveAttemptFacts = await readHostedLinqInviteSignupLiveAttemptsTx(input);
-  return liveAttemptFacts.anyIdentityLive;
 }
 
 function readHostedLinqAcceptedMilestoneStatus(

@@ -17,6 +17,7 @@ import {
   hasConflictingHostedLinqInstantFirstTurnForChatTx,
   hasUnresolvedHostedLinqProviderDispatchForChatTx,
   HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+  HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE,
   markHostedAiUsageLimitNoticeDeliveryRetryableTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
@@ -506,7 +507,7 @@ describe("hosted Linq observability stores", () => {
       template: "invite_signup",
     });
     fixture.queryRaw.mockResolvedValue([
-      { anyIdentityLive: true, sameIdentityStillLive: false },
+      { anyIdentityLive: true },
     ]);
 
     await expect(ingestHostedLinqProviderEventTx({
@@ -1456,7 +1457,15 @@ describe("hosted Linq observability stores", () => {
           { failedAt: null, status: "attempted" },
           {
             payloadCiphertext: { not: null },
-            status: { in: ["provider_dispatch_started", "failed"] },
+            status: "provider_dispatch_started",
+          },
+          {
+            payloadCiphertext: { not: null },
+            status: "failed",
+            OR: [
+              { failureCode: null },
+              { failureCode: { not: HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE } },
+            ],
           },
         ],
       }),
@@ -5488,7 +5497,7 @@ describe("hosted Linq signup-link delivery attempts", () => {
       template: "invite_signup",
     });
     fixture.queryRaw.mockResolvedValue([
-      { anyIdentityLive: true, sameIdentityStillLive: false },
+      { anyIdentityLive: true },
     ]);
 
     await expect(markHostedLinqDeliveryAcceptedTx({
@@ -5616,7 +5625,7 @@ describe("hosted Linq signup-link delivery attempts", () => {
       });
   });
 
-  it("checks only the five exact digest attempts before suppressing stale failure reopen", async () => {
+  it("checks member/day liveness before suppressing stale failure reopen", async () => {
     const fixture = createObservabilityPrismaFixture();
     const repliedAt = "2026-03-26T12:01:00.000Z";
     const sourceEventDigest = "c".repeat(32);
@@ -5637,7 +5646,7 @@ describe("hosted Linq signup-link delivery attempts", () => {
       template: "invite_signup",
     });
     fixture.queryRaw.mockResolvedValue([
-      { anyIdentityLive: true, sameIdentityStillLive: true },
+      { anyIdentityLive: true },
     ]);
 
     await ingestHostedLinqProviderEventTx({
@@ -5659,9 +5668,9 @@ describe("hosted Linq signup-link delivery attempts", () => {
     expect(fixture.hostedGroupJoinOutreachUpdateMany).not.toHaveBeenCalled();
     const liveAttemptQuery = fixture.queryRaw.mock.calls
       .map(([query]) => query as { sql?: string; values?: unknown[] })
-      .find((query) => query.sql?.includes('AS "sameIdentityStillLive"'));
-    expect(liveAttemptQuery?.sql?.match(/EXISTS \(/gu)).toHaveLength(2);
-    expect(liveAttemptQuery?.sql?.match(/LIMIT 1/gu)).toHaveLength(2);
+      .find((query) => query.sql?.includes('AS "anyIdentityLive"'));
+    expect(liveAttemptQuery?.sql?.match(/EXISTS \(/gu)).toHaveLength(1);
+    expect(liveAttemptQuery?.sql?.match(/LIMIT 1/gu)).toHaveLength(1);
     expect(liveAttemptQuery?.sql).toContain(
       '"source_ref" LIKE ?::text ESCAPE \'!\'',
     );
@@ -5669,11 +5678,6 @@ describe("hosted Linq signup-link delivery attempts", () => {
       "'^(?::a[2-5]|:e[0-9a-f]{32}(?::a[2-5])?)?$'",
     );
     expect(liveAttemptQuery?.values).toEqual([
-      exactEffectId,
-      `${exactEffectId}:a2`,
-      `${exactEffectId}:a3`,
-      `${exactEffectId}:a4`,
-      `${exactEffectId}:a5`,
       "linq-invite-signup:member!_123:2026-03-26T00:00:00.000Z%",
       BASE_EFFECT_ID,
     ]);
@@ -5682,7 +5686,6 @@ describe("hosted Linq signup-link delivery attempts", () => {
   it("uses one escaped prefix existence probe when only member/day liveness is needed", async () => {
     const queryRaw = vi.fn().mockResolvedValue([{
       anyIdentityLive: true,
-      sameIdentityStillLive: false,
     }]);
 
     await expect(hasHostedLinqInviteSignupLiveDeliveryTx({
@@ -5697,7 +5700,6 @@ describe("hosted Linq signup-link delivery attempts", () => {
       values: unknown[];
     };
     expect(query.sql.match(/EXISTS \(/gu)).toHaveLength(1);
-    expect(query.sql).toContain('FALSE AS "sameIdentityStillLive"');
     expect(query.sql).toContain('"source_ref" LIKE ?::text ESCAPE \'!\'');
     expect(query.values).toEqual([
       "linq-invite-signup:member!!!_123!%:2026-03-26T00:00:00.000Z%",

@@ -13,7 +13,6 @@ import {
   markHostedLinqDeliveryAcceptedTx,
   releaseHostedLinqSignupSuppressionAfterDeletionTx,
   hasHostedLinqInviteSignupLiveDeliveryTx,
-  readHostedLinqInviteSignupLiveAttemptsTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
   buildHostedLinqInviteSignupEffectId,
@@ -176,64 +175,29 @@ describe.skipIf(!runPostgresProof)(
         });
         await planClient.query('ANALYZE "hosted_linq_delivery"');
 
-        const exactIdentityQuery = await captureLiveInviteFactsQuery({
-          dayUtc,
-          memberId,
-          sourceEventDigest: exactDigest,
-        });
         const memberDayQuery = await captureLiveInviteFactsQuery({
           dayUtc,
           memberId,
         });
-        expect(exactIdentityQuery.text.match(/EXISTS \(/gu)).toHaveLength(2);
         expect(memberDayQuery.text.match(/EXISTS \(/gu)).toHaveLength(1);
 
-        const exactFacts = await planClient.query<{
-          anyIdentityLive: boolean;
-          sameIdentityStillLive: boolean;
-        }>({
-          text: exactIdentityQuery.text,
-          values: exactIdentityQuery.values,
-        });
-        expect(exactFacts.rows).toEqual([{
-          anyIdentityLive: true,
-          sameIdentityStillLive: false,
-        }]);
         const memberDayFacts = await planClient.query<{
           anyIdentityLive: boolean;
-          sameIdentityStillLive: boolean;
         }>({
           text: memberDayQuery.text,
           values: memberDayQuery.values,
         });
         expect(memberDayFacts.rows).toEqual([{
           anyIdentityLive: true,
-          sameIdentityStillLive: false,
         }]);
 
-        const exactPlanResult = await planClient.query<{
-          "QUERY PLAN": unknown;
-        }>({
-          text:
-            `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${exactIdentityQuery.text}`,
-          values: exactIdentityQuery.values,
-        });
-        expectBoundedLiveInvitePlan({
-          expectedIndexNodeCount: 2,
-          plan: readPostgreSqlExplainRoot(exactPlanResult.rows),
-          requiresExactIdentityCondition: true,
-        });
         const memberDayPlanResult = await planClient.query<{
           "QUERY PLAN": unknown;
         }>({
           text: `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${memberDayQuery.text}`,
           values: memberDayQuery.values,
         });
-        expectBoundedLiveInvitePlan({
-          expectedIndexNodeCount: 1,
-          plan: readPostgreSqlExplainRoot(memberDayPlanResult.rows),
-          requiresExactIdentityCondition: false,
-        });
+        expectBoundedLiveInvitePlan(readPostgreSqlExplainRoot(memberDayPlanResult.rows));
 
         await expect(hasHostedLinqInviteSignupLiveDeliveryTx({
           dayUtc,
@@ -258,7 +222,7 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
-    it("serializes concurrent digest failures and releases daily suppression only after the last live identity", async () => {
+    it.each(["same", "different"])("serializes concurrent %s-identity failures and releases daily suppression only after the last live attempt", async (identity) => {
       const suffix = randomUUID();
       const firstClient = createPrismaClient({ databaseUrl, poolMax: 1 });
       const secondClient = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -272,9 +236,10 @@ describe.skipIf(!runPostgresProof)(
         sourceEventDigest: "c".repeat(32),
       });
       const secondEffectId = buildHostedLinqInviteSignupEffectId({
+        attempt: identity === "same" ? 2 : 1,
         memberId,
         occurredAt: dayUtc,
-        sourceEventDigest: "d".repeat(32),
+        sourceEventDigest: (identity === "same" ? "c" : "d").repeat(32),
       });
       const firstDeliveryId = `hld_live_invite_failure_${suffix}_first`;
       const secondDeliveryId = `hld_live_invite_failure_${suffix}_second`;
@@ -582,17 +547,15 @@ function buildReceipt(input: {
 async function captureLiveInviteFactsQuery(input: {
   dayUtc: string;
   memberId: string;
-  sourceEventDigest?: string;
 }): Promise<Prisma.Sql> {
   let capturedQuery: Prisma.Sql | null = null;
-  await readHostedLinqInviteSignupLiveAttemptsTx({
+  await hasHostedLinqInviteSignupLiveDeliveryTx({
     ...input,
     prisma: {
       $queryRaw: (query: Prisma.Sql) => {
         capturedQuery = query;
         return Promise.resolve([{
           anyIdentityLive: false,
-          sameIdentityStillLive: false,
         }]);
       },
     } as never,
@@ -603,16 +566,12 @@ async function captureLiveInviteFactsQuery(input: {
   return capturedQuery;
 }
 
-function expectBoundedLiveInvitePlan(input: {
-  expectedIndexNodeCount: number;
-  plan: PostgreSqlExplainPlanNode;
-  requiresExactIdentityCondition: boolean;
-}): void {
+function expectBoundedLiveInvitePlan(plan: PostgreSqlExplainPlanNode): void {
   const indexNodes = collectPostgreSqlPlanNodes(
-    input.plan,
+    plan,
     (node) => node["Index Name"] === LIVE_INVITE_SOURCE_REF_INDEX,
   );
-  expect(indexNodes).toHaveLength(input.expectedIndexNodeCount);
+  expect(indexNodes).toHaveLength(1);
   expect(indexNodes.every((node) =>
     (node["Actual Rows"] ?? 0) <= 2
   )).toBe(true);
@@ -620,11 +579,8 @@ function expectBoundedLiveInvitePlan(input: {
     node["Index Cond"]?.includes("~>=~") === true
     && node["Index Cond"]?.includes("~<~") === true
   )).toBe(true);
-  expect(indexNodes.some((node) =>
-    node["Index Cond"]?.includes("= ANY") === true
-  )).toBe(input.requiresExactIdentityCondition);
   expect(collectPostgreSqlPlanNodes(
-    input.plan,
+    plan,
     (node) => node["Node Type"] === "Seq Scan"
       && node["Relation Name"] === "hosted_linq_delivery",
   )).toHaveLength(0);

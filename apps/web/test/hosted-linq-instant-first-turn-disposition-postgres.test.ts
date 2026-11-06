@@ -11,6 +11,7 @@ import {
   hasConflictingHostedLinqInstantFirstTurnForChatTx,
   hasUnresolvedHostedLinqProviderDispatchForChatTx,
   HOSTED_LINQ_INSTANT_FIRST_TURN_REJECTED_FAILURE_CODE,
+  HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE,
   markHostedLinqDeliverySendFailedTx,
   recordHostedLinqInstantFirstTurnFirstDispatchRejectionTx,
   resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionTx,
@@ -22,6 +23,7 @@ import {
   type HostedLinqInstantFirstTurnGeneration,
 } from "@/src/lib/hosted-onboarding/linq-instant-first-turn";
 import { buildHostedMemberRoutingPrivateColumns } from "@/src/lib/hosted-onboarding/member-private-codecs";
+import { createHostedLinqDeliverySourceRefLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const provider = vi.hoisted(() => ({ send: vi.fn<typeof import("@/src/lib/hosted-onboarding/linq-client").sendHostedLinqChatMessage>() }));
@@ -72,7 +74,7 @@ async function seed() {
   const abandon = (expectedAttemptedAt: Date | null) => abandonHostedLinqInstantFirstTurn({
     expectedAttemptedAt, eventId, linqChatId: chatId, prisma, reason: "synthetic-fallback",
   });
-  const read = () => prisma.hostedLinqDelivery.findFirstOrThrow({ where: { linqChatLookupKey: chatKey } });
+  const read = () => prisma.hostedLinqDelivery.findFirstOrThrow({ where: { linqChatLookupKey: chatKey, sourceRef: createHostedLinqDeliverySourceRefLookupKey(eventId) } });
   const egress = () => resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionTx({ eventId, linqChatId: chatId, prisma });
   const message = "Start with a short walk after breakfast.";
   const completeInput = { prisma, inboundMessageId: `inbound-${nonce}`,
@@ -119,7 +121,10 @@ describe.skipIf(!enabled)("first-turn disposition with PostgreSQL", () => {
     expect(await f.egress()).toBe("already_answered");
   }));
 
-  it("N5: a resumed rejection preserves the earlier ambiguous obligation", async () => withFixture(async (f) => {
+  it("N5: a resumed rejection holds only its exact input and preserves replay", async () => withFixture(async (f) => {
+    const distinctEventId = `next-${f.eventId}`;
+    const conflictInput = { eventId: distinctEventId, linqChatId: f.chatId, prisma: f.prisma };
+    const unresolvedInput = { linqChatId: f.chatId, prisma: f.prisma };
     const initial = await claimHostedLinqInstantFirstTurn(f.claimInput);
     if (initial.kind !== "generate") throw new Error("Expected generation");
     provider.send.mockRejectedValueOnce(new Error("Synthetic response lost"));
@@ -127,14 +132,31 @@ describe.skipIf(!enabled)("first-turn disposition with PostgreSQL", () => {
     const before = await f.read();
     expect(before).toMatchObject({ status: "failed", acceptedAt: null });
     expect(before.payloadCiphertext).not.toBeNull();
+    expect(await hasConflictingHostedLinqInstantFirstTurnForChatTx(conflictInput)).toBe(true);
+    expect(await hasUnresolvedHostedLinqProviderDispatchForChatTx(unresolvedInput)).toBe(true);
     const a = await claimHostedLinqInstantFirstTurn(f.claimInput);
     if (a.kind !== "resume") throw new Error("Expected resume");
     provider.send.mockRejectedValueOnce(rejected());
     await expect(completeHostedLinqInstantFirstTurn({ ...f.completeInput, generation: a })).rejects.toMatchObject(retry);
-    expect((await f.read()).payloadCiphertext).toBe(before.payloadCiphertext);
+    expect(await f.read()).toMatchObject({
+      failureCode: HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE,
+      payloadCiphertext: before.payloadCiphertext,
+      status: "failed",
+    });
     expect(await f.egress()).toBe("defer");
+    expect(await hasConflictingHostedLinqInstantFirstTurnForChatTx(conflictInput)).toBe(false);
+    expect(await hasUnresolvedHostedLinqProviderDispatchForChatTx(unresolvedInput)).toBe(false);
+    const distinct = await claimHostedLinqInstantFirstTurn({
+      ...f.claimInput, request: { ...f.claimInput.request, eventId: distinctEventId },
+    });
+    expect(distinct.kind).toBe("generate");
+    if (distinct.kind !== "generate") throw new Error("Expected generation");
+    await abandonHostedLinqInstantFirstTurn({
+      ...conflictInput, expectedAttemptedAt: distinct.attemptedAt, reason: "synthetic-fallback",
+    });
     const next = await claimHostedLinqInstantFirstTurn(f.claimInput);
     if (next.kind !== "resume") throw new Error("Expected resume");
+    expect(await f.egress()).toBe("defer");
     await expect(completeHostedLinqInstantFirstTurn({ ...f.completeInput, generation: next })).resolves.toMatchObject({ kind: "accepted" });
     expect(await f.read()).toMatchObject({ status: "accepted", payloadCiphertext: null, payloadOwnerMemberId: null, payloadSchema: null });
     expect(provider.send).toHaveBeenCalledTimes(3);
@@ -147,6 +169,7 @@ describe.skipIf(!enabled)("first-turn disposition with PostgreSQL", () => {
     { label: "absent", status: null, egress: "available", conflict: false, unresolved: false, claim: "generate" },
     { label: "reserved", status: "attempted", egress: "defer", conflict: true, unresolved: true, claim: "generate" },
     ...["attempted", "provider_dispatch_started", "failed"].map(status => ({ label: `sealed ${status}`, status, sealed: true, egress: "defer", conflict: true, unresolved: true, claim: "resume" })),
+    { label: "sealed retry rejected", status: "failed", sealed: true, failureCode: HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY_REJECTED_FAILURE_CODE, egress: "defer", conflict: false, unresolved: false, claim: "resume" },
     ...["accepted", "delivered"].map(status => ({ label: status, status, egress: "already_answered", conflict: false, unresolved: false, claim: "completed" })),
     ...["acceptedAt", "deliveredAt", "lastReceiptAt", "messageLookupKey"].map(correlation => ({ label: `correlated failed ${correlation}`, status: "failed", correlation, sealed: true, egress: "already_answered", conflict: false, unresolved: false, claim: "completed" })),
     { label: "skipped empty", status: "skipped", egress: "available", conflict: false, unresolved: false, claim: "unavailable" },
@@ -164,7 +187,8 @@ describe.skipIf(!enabled)("first-turn disposition with PostgreSQL", () => {
       const data: Prisma.HostedLinqDeliveryUncheckedUpdateInput = {
         status: row.status, attemptedAt: old, failedAt: row.status === "failed" ? old : null,
         skippedAt: row.status === "skipped" ? old : null,
-        failureCode: "certified" in row ? HOSTED_LINQ_INSTANT_FIRST_TURN_REJECTED_FAILURE_CODE : null,
+        failureCode: "failureCode" in row ? row.failureCode
+          : "certified" in row ? HOSTED_LINQ_INSTANT_FIRST_TURN_REJECTED_FAILURE_CODE : null,
         ...("sealed" in row ? {} : { payloadCiphertext: null, payloadOwnerMemberId: null, payloadSchema: null }),
         ...("partial" in row ? { payloadOwnerMemberId: f.memberId } : {}),
       };
